@@ -1,9 +1,9 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
-import { ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2 } from 'lucide-react';
+import { BadgeCheck, ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkBlock } from '@/lib/cowork/contracts';
-import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkPanelBlock } from '@/lib/cowork/presentation';
+import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
   coworkBlockFilename, coworkBlockMeta, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv, coworkVersionMessage,
   coworkFigureNumber, coworkWordDiff, type CoworkEditedEmail,
@@ -106,9 +106,23 @@ function CardStatusLine({ status }: { status: CoworkCardStatus }) {
   </span>;
 }
 
-function CardShell({ artifact, active, onOpen, children, actions, status = null }: {
+/** What the Reviewer did with the card before you saw it: reviewed with nothing to fix, what it fixed,
+ * or what is still to look at (it could not fix it in time). */
+function ReviewLine({ review, live }: { review: CoworkDraftReview; live: boolean }) {
+  const pending = review.outcome === 'pending';
+  return <div className={cn('mt-2.5 flex items-start gap-1.5 text-[12.5px] leading-5', pending ? 'text-cw-warning' : 'text-cw-muted', live && 'cw-fade')}>
+    {pending ? <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : <BadgeCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cw-success" aria-hidden="true" />}
+    {pending
+      ? <span className="min-w-0"><span className="font-medium">Revísalo antes de usarlo</span>
+        {review.changes.slice(0, 2).map(change => <span key={change} className="block text-cw-muted">{change}</span>)}</span>
+      : <span className="min-w-0"><span className="font-medium text-cw-text">Revisado</span>
+        {' · '}{review.outcome === 'fixed' && review.changes.length ? review.changes.join(' · ') : 'sin ajustes'}</span>}
+  </div>;
+}
+
+function CardShell({ artifact, active, onOpen, children, actions, status = null, review = null, live = false }: {
   artifact: BlockArtifact; active: boolean; onOpen: (artifact: CoworkArtifact, opener: HTMLElement) => void;
-  children: ReactNode; actions: ReactNode; status?: CoworkCardStatus | null;
+  children: ReactNode; actions: ReactNode; status?: CoworkCardStatus | null; review?: CoworkDraftReview | null; live?: boolean;
 }) {
   return <section aria-label={artifact.title} className={cn('overflow-hidden rounded-2xl border bg-cw-elevated shadow-[var(--cw-shadow-sm)] transition-colors',
     active ? 'border-cw-accent' : 'border-cw-border')}>
@@ -124,7 +138,7 @@ function CardShell({ artifact, active, onOpen, children, actions, status = null 
       <span className="hidden shrink-0 items-center gap-1 text-[12.5px] font-medium text-cw-accent sm:flex">Abrir<ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /></span>
       <ChevronRight className="h-4 w-4 shrink-0 text-cw-faint sm:hidden" aria-hidden="true" />
     </button>
-    <div className="px-3.5 py-3">{children}</div>
+    <div className="px-3.5 py-3">{children}{review && <ReviewLine review={review} live={live} />}</div>
     <div className="flex flex-wrap items-center gap-1 border-t border-cw-border bg-cw-panel px-2.5 py-1.5">{actions}{status && <CardStatusLine status={status} />}</div>
   </section>;
 }
@@ -132,9 +146,11 @@ function CardShell({ artifact, active, onOpen, children, actions, status = null 
 /** A result the person will copy, review or export, shown as a card in the chat. Emails and
  * sequences say where they stand: `status` is what a later turn did with them (see
  * coworkCardStatuses); without one they are drafts nobody sent, or your edit of one. */
-export function BlockCard({ artifact, active, onOpen, live = false, status = null }: {
+export function BlockCard({ artifact, active, onOpen, live = false, status = null, review = null }: {
   artifact: BlockArtifact; active: boolean; onOpen: (artifact: CoworkArtifact, opener: HTMLElement) => void; live?: boolean;
   status?: CoworkCardStatus | null;
+  /** How the Reviewer left this turn's emails (coworkDraftReview); null when nobody reviewed them. */
+  review?: CoworkDraftReview | null;
 }) {
   const { block } = artifact;
   const editedHere = useEditedHere(`cowork:draft:${artifact.id}`);
@@ -142,12 +158,12 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
   const open = (event: MouseEvent<HTMLButtonElement>) => onOpen(artifact, event.currentTarget);
   const openButton = <CwButton size="xs" variant="ghost" onClick={open}><ChevronRight aria-hidden="true" />Abrir</CwButton>;
   return <div className={cn(live && 'cw-rise')}>
-    {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus}
+    {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
       actions={<><CopyButton text={coworkEmailText(block)} label="Copiar correo" />{openButton}</>}>
       <p className="text-[13.5px] font-semibold text-cw-text">{block.subject}</p>
       <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted">{block.body}</p>
     </CardShell>}
-    {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus}
+    {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
       actions={<><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia" />{openButton}</>}>
       <ol className="space-y-1.5">
         {block.steps.map((step, index) => <li key={`${step.day}-${index}`} className="flex items-center gap-2.5 text-[13.5px]">

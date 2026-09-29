@@ -6,9 +6,10 @@ import {
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
   coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
+  coworkAgentRows, coworkAgentLine, coworkDraftReview,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
-import { coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
+import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
 
 const at = (minute: number) => `2026-09-24T12:${String(minute).padStart(2, '0')}:00Z`;
 const run = (id: string, minute: number, extra: Partial<CoworkRun> = {}): CoworkRun =>
@@ -277,4 +278,29 @@ test('an approval says what happens and what does not, and where the proposal st
   assert.deepEqual(coworkProposalLink({ ...effect('campaign_create'), state: 'done' }), { href: '/campaigns', label: 'Ver campañas' });
   assert.equal(coworkProposalLink({ ...effect('campaign_create'), state: 'running' }), null);
   assert.equal(coworkProposalLink({ ...effect('code_execute'), state: 'done' }), null);
+});
+
+test('the Writer and the Reviewer read as one row each, at their latest step, and say how the review ended', () => {
+  const agent = (result: Record<string, unknown>) => event('tool.completed', { action: COWORK_AGENT_ACTION, input: '', result });
+  const read = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { scope: 'own_saved_contacts', items: [] } });
+  const writing = agent({ agent: 'writer', state: 'working', label: 'Escribiendo 3 correos' });
+  const written = agent({ agent: 'writer', state: 'done', label: 'Escribió 3 correos' });
+  const reviewing = agent({ agent: 'reviewer', state: 'working', label: 'Revisando 3 correos' });
+  const fixed = agent({ agent: 'reviewer', state: 'done', label: '1 ajuste', outcome: 'fixed', changes: ['sin «gratis»'] });
+  // What the agents did is not a read: it never counts as a query.
+  assert.deepEqual(coworkReadEvents([read, writing, written]), [read]);
+  assert.equal(coworkLiveActivity({ status: 'running' }, [read, writing]), 'Redactora · escribiendo 3 correos…');
+  assert.equal(coworkLiveActivity({ status: 'running' }, [read, writing, written, reviewing]), 'Revisora · revisando 3 correos…');
+  const rows = coworkAgentRows([read, writing, written, reviewing, fixed]);
+  assert.deepEqual(rows.map(row => `${row.name}:${row.state}:${row.label}`), ['Redactora:done:Escribió 3 correos', 'Revisora:done:1 ajuste']);
+  assert.equal(coworkAgentLine(rows[1]), 'Revisora · 1 ajuste');
+  assert.deepEqual(coworkDraftReview([writing, written, reviewing, fixed]), { outcome: 'fixed', changes: ['sin «gratis»'] });
+  assert.deepEqual(coworkDraftReview([written, agent({ agent: 'reviewer', state: 'done', label: 'Sin ajustes', outcome: 'clean', changes: [] })]),
+    { outcome: 'clean', changes: [] });
+  // Not reviewed: no time, a failed review, or a review still running.
+  assert.equal(coworkDraftReview([written]), null);
+  assert.equal(coworkDraftReview([written, agent({ agent: 'reviewer', state: 'done', label: 'No alcanzó a revisar', outcome: 'skipped', changes: [] })]), null);
+  assert.equal(coworkDraftReview([written, reviewing]), null);
+  // A malformed step is ignored.
+  assert.deepEqual(coworkAgentRows([agent({ agent: 'boss', state: 'working', label: 'x' }), agent({ agent: 'writer', state: 'done', label: ' ' })]), []);
 });

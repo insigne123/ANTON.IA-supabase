@@ -18,6 +18,7 @@ import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionContr
   type CoworkCrmAssign, type CoworkExceptionResolve, type CoworkMissionControl } from './team-proposals';
 import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
+import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -40,7 +41,7 @@ export const coworkDecisionSchema = z.object({
     'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs',
-    'answer', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
+    'answer', 'draft.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
   /** The steps the person sees while the turn works (rule 12); only the first consulting decision uses it. */
@@ -68,6 +69,8 @@ export const coworkDecisionSchema = z.object({
   snapshotId: z.string().uuid().nullable().optional(),
   note: z.string().trim().min(1).max(4000).nullable().optional(),
   searchCriteria: coworkSearchCriteriaSchema.nullable().optional(),
+  /** draft.write: the brief the Writer gets instead of the coordinator writing the emails itself (writer.ts). */
+  write: coworkWriteBriefSchema.nullable().optional(),
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
@@ -328,6 +331,12 @@ const VERSION_KEPT_ANSWER = {
   reply: 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.', document: null, question: '¿Creo la campaña pausada con ella?',
   suggestions: [{ label: 'Crear la campaña', message: 'Sí, crea la campaña pausada con esta versión' }],
 };
+/** The Writer failed on the turn's last decision: nothing is left to write it, so the turn says so
+ * and offers to try again in one click, instead of failing. */
+const writerFallback = (message: string) => ({
+  reply: 'No alcancé a escribir los correos en este turno. Lo que consulté quedó guardado.', document: null,
+  question: '¿Los escribo ahora?', suggestions: [{ label: 'Sí, escríbelos', message: message.slice(0, 500) }],
+});
 
 /** An answer closes with the next-step question and the quick replies that
  * answer it (rules 4 and 9). The model gets one correction per run, never on
@@ -377,7 +386,7 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
   return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Entrega de nuevo la respuesta completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
 }
 
-type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
+export type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
 
 /** When the model proposes a search without explaining it, the card still gets a
  * sentence built from the criteria, never a blank next to the approval. */
@@ -531,6 +540,8 @@ export async function runCoworkReadLoop(input: {
   proposeNote?: (leadId: string, note: string) => Promise<void>;
   proposeSearch?: (criteria: CoworkSearchCriteria) => Promise<void>;
   proposeEffect?: (proposal: CoworkEffectProposal) => Promise<void>;
+  /** The Writer: writes the emails of a `draft.write` decision and returns the turn's answer. */
+  write?: (brief: CoworkWriteBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
 }) {
   const observations: CoworkObservation[] = [...(input.resumedObservations || [])];
   if (observations.length) {
@@ -539,6 +550,7 @@ export async function runCoworkReadLoop(input: {
     input.signal.throwIfAborted(); await input.authorize();
     const decision = coworkDecisionSchema.parse(await input.decide(observations, true));
     input.signal.throwIfAborted(); await input.authorize();
+    if (decision.action === 'draft.write' && decision.write && input.write) return input.write(decision.write, observations);
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
     return decision.answer;
   }
@@ -598,6 +610,33 @@ export async function runCoworkReadLoop(input: {
     }
     input.signal.throwIfAborted();
     try {
+      if (decision.action === 'draft.write') {
+        // «Usar esta versión» keeps the person's text as it is: nobody rewrites it.
+        if (keepsVersionOnly) {
+          if (turn === last) return VERSION_KEPT_ANSWER;
+          throw rejected('Version kept, nothing to write', USE_VERSION_ONLY);
+        }
+        // On the last decision nobody is left to write it: the answer that got the closing
+        // correction, or a line that offers to try again, instead of a failed turn.
+        const lastResort = () => closingFallback ?? writerFallback(input.message);
+        if (!input.write) {
+          if (turn === last) return lastResort();
+          throw rejected('Writer unavailable', 'La redacción delegada no está disponible: entrega tú el texto en answer.blocks (regla 11).');
+        }
+        // The decision schema already checked the brief; it only has to be there.
+        if (!decision.write) {
+          if (turn === last) return lastResort();
+          throw rejected('Missing write brief', 'Elegiste draft.write sin encargo: incluye write {kind, recipients, objective, angle, tone, steps, notes, findings}.');
+        }
+        try {
+          return await input.write(decision.write, observations);
+        } catch (error) {
+          if (input.signal.aborted) throw error;
+          if (turn === last) return lastResort();
+          // A failed Writer does not end the turn: the coordinator writes it, as before.
+          throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11).');
+        }
+      }
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
         if (closingFallback) return completeFrom(closingFallback, decision.answer);

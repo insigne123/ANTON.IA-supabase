@@ -100,3 +100,17 @@ test('the coordinator reads what the loop has left of the turn, and a batch spen
   assert.match(instructions.systemPrompt, /Planifica las 3 lecturas/);
   assert.match(instructions.parallelReadCapability, /Máximo TOTAL de 3 lecturas por ejecución/);
 });
+
+test('with the Writer on, the coordinator reads how to hand it the emails, and that it may not on its last decision', () => {
+  const base = { history: { turns: [] }, request: 'Armame una secuencia', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  assert.equal('writerCapability' in off, false);
+  assert.equal('writerAvailable' in off, false);
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, writer: true });
+  assert.match(String(instructions.writerCapability), /draft\.write/);
+  const budget = (decisionsLeft: number) => ({ reads: 3, readsLeft: 3, decisionsLeft });
+  const early = coworkDecisionContext(instructions, { ...base, turnBudget: budget(2) });
+  assert.equal(early.writerCapability, instructions.writerCapability);
+  assert.equal(early.writerAvailable, true);
+  assert.equal(coworkDecisionContext(instructions, { ...base, mustAnswer: true, turnBudget: budget(0) }).writerAvailable, false);
+});

@@ -64,10 +64,38 @@ export function coworkPlanSteps(payload: unknown): CoworkPlanStep[] | null {
   return steps.length > 1 ? steps : null;
 }
 
-/** Tool events the assistant wrote about itself (its note, its plan), not data it read. */
+/** What the Writer or the Reviewer is doing in the turn (writer.ts), for the page. */
+export const COWORK_AGENT_ACTION = 'assistant.agent';
+
+const REVIEW_OUTCOMES = ['clean', 'fixed', 'pending', 'skipped'] as const;
+export type CoworkAgentEvent = {
+  agent: 'writer' | 'reviewer';
+  state: 'working' | 'done';
+  label: string;
+  /** The Reviewer's last step: how the review ended (writer.ts, CoworkReviewOutcome). */
+  outcome: typeof REVIEW_OUTCOMES[number] | null;
+  /** What was fixed, or what is still to look at when the outcome is pending. */
+  changes: string[];
+};
+
+export function coworkAgentEvent(payload: unknown): CoworkAgentEvent | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as { action?: unknown; result?: Record<string, unknown> | null };
+  if (record.action !== COWORK_AGENT_ACTION || !record.result || typeof record.result !== 'object') return null;
+  const { agent, state, label, outcome, changes } = record.result;
+  if ((agent !== 'writer' && agent !== 'reviewer') || (state !== 'working' && state !== 'done') || typeof label !== 'string' || !label.trim()) return null;
+  return {
+    agent, state, label: label.trim().slice(0, 120),
+    outcome: REVIEW_OUTCOMES.find(item => item === outcome) ?? null,
+    changes: Array.isArray(changes)
+      ? changes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map(item => item.trim().slice(0, 200)).slice(0, 4) : [],
+  };
+}
+
+/** Tool events the assistant wrote about itself (its note, its plan, its agents), not data it read. */
 export function coworkIsAssistantEvent(payload: unknown): boolean {
   const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : null;
-  return action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION;
+  return action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION || action === COWORK_AGENT_ACTION;
 }
 
 /** A quick reply the person can click to continue: `label` is what the button

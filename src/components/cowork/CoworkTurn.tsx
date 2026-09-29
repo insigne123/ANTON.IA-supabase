@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
-  coworkAnswerChanged, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
+  coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
   coworkTurnSuggestions, isCoworkActive, type CoworkArtifact, type CoworkCardStatus,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
@@ -27,6 +27,9 @@ export type CoworkTurnData = { run: CoworkRun; events: CoworkEvent[] };
  * whether it is being reviewed (the closing correction may still change it). */
 export type CoworkLiveAnswer = { text: string; cards: CoworkLiveDraft['cards']; reviewing: boolean };
 
+/** While the answer on screen is reviewed, its cards say so instead of «Armando…». */
+const REVIEW_CARD_COPY: Record<string, string> = { email_draft: 'Revisando el correo', sequence: 'Revisando la secuencia' };
+
 const LIVE_CARD_COPY: Record<string, (parts: number) => string> = {
   email_draft: () => 'Escribiendo el correo',
   sequence: parts => parts ? `Armando la secuencia · correo ${parts}` : 'Armando la secuencia',
@@ -35,7 +38,7 @@ const LIVE_CARD_COPY: Record<string, (parts: number) => string> = {
 };
 
 /** A card still being written: what it is and how far it got, until the real card takes its place. */
-function LiveCard({ card }: { card: CoworkLiveAnswer['cards'][number] }) {
+function LiveCard({ card, reviewing }: { card: CoworkLiveAnswer['cards'][number]; reviewing: boolean }) {
   return <m.div {...cwVariants(cwFadeRise)} className="rounded-2xl border border-cw-border bg-cw-elevated px-3.5 py-3 shadow-[var(--cw-shadow-sm)]">
     <div className="flex items-center gap-3">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cw-accent-soft text-cw-accent">
@@ -43,7 +46,8 @@ function LiveCard({ card }: { card: CoworkLiveAnswer['cards'][number] }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[14px] font-semibold text-cw-text">{card.title || 'Preparando…'}</span>
-        <span className="cw-shimmer block truncate text-[12.5px]">{(LIVE_CARD_COPY[card.type] || (() => 'Preparando…'))(card.parts)}</span>
+        <span className="cw-shimmer block truncate text-[12.5px]">{reviewing && REVIEW_CARD_COPY[card.type]
+          ? REVIEW_CARD_COPY[card.type] : (LIVE_CARD_COPY[card.type] || (() => 'Preparando…'))(card.parts)}</span>
       </span>
     </div>
     <div className="mt-3 space-y-2" aria-hidden="true">
@@ -59,7 +63,7 @@ function LiveCard({ card }: { card: CoworkLiveAnswer['cards'][number] }) {
 function LiveAnswerView({ answer }: { answer: CoworkLiveAnswer }) {
   return <div aria-busy="true" className="space-y-3.5">
     <div className={cn('cw-live-answer', answer.reviewing && 'cw-live-reviewing')}><CoworkMarkdown text={answer.text} /></div>
-    {answer.cards.map((card, index) => <LiveCard key={`${card.type}-${index}`} card={card} />)}
+    {answer.cards.map((card, index) => <LiveCard key={`${card.type}-${index}`} card={card} reviewing={answer.reviewing} />)}
     {answer.reviewing && <p className="cw-shimmer text-[12.5px]">Revisando la respuesta…</p>}
   </div>;
 }
@@ -202,6 +206,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const blockCards = artifacts.flatMap(artifact => artifact.kind === 'block' ? [artifact] : []);
   const otherArtifacts = artifacts.filter(artifact => artifact.kind !== 'block');
   const metrics = coworkTurnBlocks(events).flatMap(block => block.type === 'metrics' ? [block] : []);
+  // The Writer's emails carry what the Reviewer did with them.
+  const review = coworkDraftReview(events);
   const failure = events.slice().reverse().find(event => event.kind === 'run.failed')?.payload;
   const startedAt = events.find(event => event.kind === 'run.started')?.created_at || run.created_at;
   const waitingDecision = proposal?.state === 'pending';
@@ -242,7 +248,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         {working && !reply && !proposal && liveAnswer && <LiveAnswerView answer={liveAnswer} />}
         {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}
         {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live}
-          status={cardStatuses?.get(artifact.id) ?? null} />)}
+          status={cardStatuses?.get(artifact.id) ?? null} review={review} />)}
         {otherArtifacts.length > 0 && <div className="grid gap-2">
           {otherArtifacts.map(artifact => artifact.kind === 'contacts' && !artifact.external && artifact.count <= 2
             ? <ContactChips key={artifact.id} artifact={artifact} events={events} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />

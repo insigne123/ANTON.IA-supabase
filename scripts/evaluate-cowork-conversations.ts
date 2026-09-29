@@ -9,6 +9,10 @@
 // --stream asks the model to stream, as the worker does with COWORK_STREAMING_ENABLED, and
 // reports how long each answer took to show its first words against its whole call.
 //
+// --writer turns on the Writer and the Reviewer (writer.ts), as COWORK_WRITER_ENABLED does:
+// the coordinator hands writing to them. COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick
+// their models (COWORK_MODEL by default).
+//
 // To compare prompts, run it on the previous commit and on this one with the same flags.
 import { writeFileSync } from 'node:fs';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
@@ -16,9 +20,10 @@ import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
+import { runCoworkWriter } from '../src/lib/cowork/writer';
 import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusInstructions, runCorpusCase, type CorpusOutcome } from './fixtures/cowork-conversation-runner';
+import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn)
 // and every button on the Cowork home.
@@ -37,6 +42,9 @@ async function main() {
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 400) throw new Error('Explicit --max-calls=1..400 required');
 
   const stream = process.argv.includes('--stream');
+  const writerOn = process.argv.includes('--writer');
+  const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
+  const writerCalls = { writer: 0, reviewer: 0 };
   const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
   let calls = 0;
   const usage: unknown[] = [];
@@ -46,6 +54,20 @@ async function main() {
       const entry = CORPUS.find(item => item.id === id)!;
       const decisions: unknown[] = [];
       const started = Date.now();
+      // The Writer and the Reviewer, with their own models and the same call budget.
+      const write: CorpusWriter | undefined = writerOn ? (brief, observations, meta) => runCoworkWriter({
+        request: meta.request, brief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step,
+        generate: async ({ role, schema, systemPrompt, prompt }) => {
+          if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
+          calls++;
+          writerCalls[role]++;
+          const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: writerModels[role],
+            allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: 45000 });
+          usage.push(coworkModelUsage(response.telemetry));
+          decisions.push({ agent: role, output: response.data });
+          return response.data;
+        },
+      }) : undefined;
       const outcome = await runCorpusCase(entry, async context => {
         if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
         calls++;
@@ -62,7 +84,7 @@ async function main() {
         try {
           response = await generateStructuredWithTelemetry({
             schema,
-            systemPrompt: `${corpusInstructions.systemPrompt}\nspecialists.review está deshabilitado.`,
+            systemPrompt: `${(writerOn ? corpusWriterInstructions : corpusInstructions).systemPrompt}\nspecialists.review está deshabilitado.`,
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
             // First words of an answer as the page would get them: read at most every 50 ms.
@@ -83,7 +105,7 @@ async function main() {
           leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
           outline: response.data.outline ?? null });
         return response.data;
-      });
+      }, write);
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
       outcomes.push({ ...outcome, attempt, seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
         issues: coworkAnswerIssues(shown, { expectNextStep: !(outcome.result.proposal || outcome.result.search) }).map(issue => issue.detail) });
@@ -94,6 +116,10 @@ async function main() {
   const checks = outcomes.flatMap(outcome => outcome.checks);
   const summary = {
     model: process.env.COWORK_MODEL, calls, cases: outcomes.length,
+    // With --writer: how many answers the Writer wrote, and how many calls it and the Reviewer made.
+    ...(writerOn ? { writer: { models: writerModels, calls: writerCalls,
+      answers: outcomes.filter(outcome => outcome.result.writer).length,
+      corrected: outcomes.filter(outcome => (outcome.result.writer?.steps || []).some(step => step.agent === 'reviewer' && step.state === 'done' && (step.changes || []).length > 0)).length } } : {}),
     casesPassed: outcomes.filter(outcome => outcome.passed).length,
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,

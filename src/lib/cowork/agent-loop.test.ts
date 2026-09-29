@@ -745,6 +745,51 @@ test('«Usar esta versión» proposes nothing: a proposal comes back as a correc
   assert.equal(proposals, 0);
 });
 
+test('draft.write hands the emails to the Writer, whose answer ends the turn; without it the coordinator writes them', async () => {
+  const brief = { kind: 'email' as const, recipients: ['Felipe Muñoz'], objective: 'Una reunión sobre AXIS', angle: null, tone: null, steps: null, notes: null, findings: null };
+  const write = coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
+  const written = { reply: 'Te dejo el correo para Felipe.', document: null, question: '¿Lo dejo listo para enviar?',
+    blocks: [{ type: 'email_draft' as const, title: 'Correo a Felipe', to: ['Felipe Muñoz'], subject: 'AXIS', body: 'Hola Felipe,\n¿Lo vemos?\nNicolás' }],
+    suggestions: [{ label: 'Sí', message: 'Sí, déjalo listo' }] };
+  const closed = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Te dejo el correo que escribí.', document: null, question: '¿Lo dejo listo para enviar?' } };
+  const base = { message: 'Escríbele a Felipe', signal: new AbortController().signal, authorize: async () => {}, record: async () => {}, execute: async () => ({}) };
+  const briefs: unknown[] = [];
+  const result = await runCoworkReadLoop({ ...base, decide: async () => write, write: async given => { briefs.push(given); return written; } });
+  assert.deepEqual(result, written);
+  assert.deepEqual(briefs, [brief]);
+  // No Writer wired, a Writer that fails, or a decision without its brief: the coordinator hears why and writes them itself.
+  for (const [decision, writer, reason] of [
+    [write, undefined, /no está disponible/],
+    [write, async () => { throw new Error('timeout'); }, /no pudo escribir/],
+    [{ ...write, write: null }, async () => written, /sin encargo/],
+  ] as const) {
+    const reasons: string[] = [];
+    const fallback = await runCoworkReadLoop({ ...base, ...(writer ? { write: writer } : {}), decide: async (_observations, _mustAnswer, rejections = []) => {
+      reasons.push(...rejections.map(rejection => rejection.reason));
+      return rejections.length ? closed : decision;
+    } });
+    assert.equal(fallback.reply, 'Te dejo el correo que escribí.');
+    assert.match(reasons.join('|'), reason);
+  }
+  // On the last decision nobody is left to write it: the turn says so and offers to try again, instead of failing.
+  const late = await runCoworkReadLoop({ ...base, ceiling: { decisions: 2, reads: 3, softDeadlineMs: 50_000 },
+    decide: async (_observations, _mustAnswer, rejections = []) => rejections.length ? write : { ...write, write: null },
+    write: async () => { throw new Error('timeout'); } });
+  assert.match(late.reply, /No alcancé a escribir los correos/);
+  assert.deepEqual(late.suggestions, [{ label: 'Sí, escríbelos', message: 'Escríbele a Felipe' }]);
+  // A turn resumed after the specialists may hand the emails to the Writer too.
+  const resumed = await runCoworkReadLoop({ ...base, resumedObservations: [{ action: 'leads.search', input: 'Felipe', result: { items: [] } }],
+    decide: async () => write, write: async () => written });
+  assert.deepEqual(resumed, written);
+  // «Usar esta versión» keeps the person's text: it never goes to the Writer.
+  let rewritten = 0;
+  const kept = await runCoworkReadLoop({ ...base, message: 'Usa exactamente esta versión editada de «Correo a Felipe», sin cambiar el texto.\n\nAsunto: AXIS\n\nHola,\nNicolás',
+    ceiling: { decisions: 2, reads: 3, softDeadlineMs: 50_000 }, decide: async () => write, write: async () => { rewritten++; return written; } });
+  assert.equal(kept.reply, 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.');
+  assert.equal(rewritten, 0);
+});
+
 test('the coordinator sees what is left of the turn and may read past three when the ceiling is raised', async () => {
   const seen: Array<{ mustAnswer: boolean; budget?: CoworkTurnBudget }> = [];
   const batch = (inputs: string[]) => ({ action: 'reads.parallel' as const, query: null, leadId: null, answer: null,

@@ -97,6 +97,11 @@ test('history keeps three reads plus the assistant note and dates each turn', as
   const plan = { action: 'assistant.plan', input: '', result: { steps: [{ label: 'Reviso', read: 'leads.search' }, { label: 'Respondo', read: null }] } };
   const planned = await loadCoworkHistory(orderedClient([reads[1], reads[0], plan]), { userId: 'owner', organizationId: 'org' }, 'a');
   assert.deepEqual(planned.turns[0].observations, [reads[0], reads[1]]);
+  // Nor are the Writer's and the Reviewer's steps: a turn that wrote keeps its three reads.
+  const agent = (label: string) => ({ action: 'assistant.agent', input: '', result: { agent: 'writer', state: 'done', label } });
+  const wrote = await loadCoworkHistory(orderedClient([agent('4'), agent('3'), agent('2'), agent('1'), reads[2], reads[1], reads[0], plan]),
+    { userId: 'owner', organizationId: 'org' }, 'a');
+  assert.deepEqual(wrote.turns[0].observations, [reads[0], reads[1], reads[2]]);
 });
 
 test('history tells the model which approved actions already ran and how they ended', async () => {
