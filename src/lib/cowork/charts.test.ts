@@ -43,6 +43,8 @@ test('the chart goes right after the figures card it is about, and never past th
   assert.equal((forBatch[1] as Extract<CoworkBlock, { type: 'chart' }>).title, 'Envíos de «AXIS RR. HH.»');
   const forRates = coworkWithCharts({ blocks: [figures('240', '7', '2')] }, [batch, rates]).blocks as CoworkBlock[];
   assert.equal((forRates[1] as Extract<CoworkBlock, { type: 'chart' }>).title, 'Correos enviados y lo que volvió');
+  const unrelated = { blocks: [figures('853', '901')] };
+  assert.equal(coworkWithCharts(unrelated, [rates]), unrelated);
   // No figures card, no reads to draw, or no room: the answer is untouched.
   const plain = { reply: 'Ok', blocks: [table] };
   assert.equal(coworkWithCharts(plain, [rates]), plain);

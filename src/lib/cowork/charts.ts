@@ -83,6 +83,9 @@ export function coworkWithCharts<T extends object>(answer: T, observations: Obse
   const candidates = metrics.length && kept.length < limit ? coworkChartCandidates(observations) : [];
   if (!candidates.length && kept.length === blocks.length) return answer;
   const chart = candidates.slice().sort((a, b) => overlap(b, metrics) - overlap(a, metrics))[0];
+  // Never place an unrelated chart beneath a metrics card just because this turn also read chartable data.
+  if (chart && overlap(chart, metrics) === 0) return kept.length === blocks.length ? answer
+    : { ...answer, blocks: kept.length ? kept : given === undefined ? undefined : null };
   if (chart) kept.splice(kept.map(block => block.type).lastIndexOf('metrics') + 1, 0, chart);
   return { ...answer, blocks: kept.length ? kept : given === undefined ? undefined : null };
 }
