@@ -26,6 +26,8 @@ const nextConfig = {
     'genkit',
     '@genkit-ai/core',
     'apify-client', // evita que Webpack intente resolverlo para el cliente
+    'unpdf', // lectura de PDF (pdf.js): se carga desde node_modules, sin empaquetarlo
+    'mammoth', // lectura de Word
   ],
 
   async redirects() {

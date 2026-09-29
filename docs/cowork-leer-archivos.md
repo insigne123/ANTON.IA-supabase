@@ -19,6 +19,7 @@ Hasta ahora Cowork solo veía el nombre y el tamaño de los archivos subidos. Su
   - quita filas vacías y nombra las columnas sin encabezado;
   - lee con sus tildes las exportaciones de Excel en Windows-1252.
 - **Excel, todavía no:** la versión instalada de `xlsx` (0.18.5) tiene una vulnerabilidad conocida al *leer* archivos manipulados (CVE-2023-30533, corregida en 0.19.3). Cowork pide exportar la hoja a CSV y subirla. Leer Excel directo requiere actualizar esa dependencia.
+  - **Actualización (29 sep):** `xlsx` pasó a 0.20.3 y Cowork ya lee Excel, PDF y Word sin ejecutar código; ver `docs/cowork-office.md`.
   - Tampoco ofrece analizarlo con código: hoy el ejecutor solo toma archivos subidos en el mismo turno, y la subida siempre queda en el turno anterior (ver Límites).
 - **Seguridad:**
   - solo lee archivos bajo el prefijo del propio usuario, con el nombre tal como aparece en sus subidas;
@@ -85,6 +86,6 @@ El mismo día, con el corpus y el modelo real (gpt-6-luna, 3 repeticiones), cont
 
 - **Código con archivos de turnos anteriores** (C2, PR siguiente): arregla el ejecutor y vuelve a ofrecer el análisis con código para Excel.
 - **Subir en cualquier momento** (punto 3.1), también antes del primer mensaje del hilo.
-- **Excel**, después de actualizar `xlsx` a 0.19.3 o más, o con otra librería.
-- **PDF y DOCX:** requieren una dependencia nueva para extraer el texto.
+- ~~**Excel**, después de actualizar `xlsx` a 0.19.3 o más, o con otra librería.~~ Hecho: `docs/cowork-office.md`.
+- ~~**PDF y DOCX:** requieren una dependencia nueva para extraer el texto.~~ Hecho: `docs/cowork-office.md`.
 - **Importar contactos desde el archivo** (punto 3.3, con migración).

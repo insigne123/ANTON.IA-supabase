@@ -5,7 +5,7 @@
 // model guess surnames. No database, mailbox or provider is touched.
 import { coworkStarter } from '../../src/lib/cowork/starters';
 import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '../../src/lib/cowork/blocks';
-import { COWORK_FILE_NOTICE, COWORK_FILE_UNREADABLE, coworkFileMissing, coworkFilePreview, coworkFilesByWords } from '../../src/lib/cowork/file-read';
+import { COWORK_FILE_NOTICE, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTablePreview, coworkTextPreview } from '../../src/lib/cowork/file-read';
 import { coworkWithAttachments } from '../../src/lib/cowork/attachments';
 import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
@@ -315,8 +315,9 @@ export const EDIT_CORPUS: CorpusCase[] = [
       { label: 'solo Felipe y Camila (RR. HH., con correo y sin envíos)', test: onlyNewPeopleContacts }] },
 ];
 
-/** Files the person uploaded: the attendee list of an HR fair (8 people, 6 with an
- * email, Marcela and Camila already saved) and an Excel Cowork cannot read yet. */
+/** Files the person uploaded: the attendee list of an HR fair (8 people, 6 with an email, Marcela
+ * and Camila already saved), an Excel of prospects (two sheets) and a PDF brief. The Excel and the
+ * PDF arrive as the server opens them (file-binary.ts): the same shapes as a CSV and a text. */
 const UPLOAD_RUN = id(201);
 export const FAIR_CSV = [
   'Nombre;Empresa;Cargo;Correo',
@@ -329,9 +330,28 @@ export const FAIR_CSV = [
   'Andrés Pizarro;Sodimac;Jefe de Personas;apizarro@sodimac.cl',
   'Francisca Mella;Randstad;Analista de Talento;',
 ].join('\n');
+const PROSPECT_ROWS = [
+  ['Paula Herrera', 'Entel', 'Gerente de Personas', 'pherrera@entel.cl', 'Nuevo'],
+  ['Ricardo Salinas', 'Codelco', 'Jefe de Selección', 'rsalinas@codelco.cl', 'Nuevo'],
+  ['Javiera Bravo', 'BCI', 'Analista de Reclutamiento', 'jbravo@bci.cl', 'Nuevo'],
+  ['Matías Contreras', 'LATAM', 'Gerente de RR. HH.', '', 'Nuevo'],
+  ['Constanza Vidal', 'Enel', 'HR Business Partner', 'cvidal@enel.com', 'Nuevo'],
+  ['Sebastián Ortiz', 'Copec', 'Jefe de Personas', '', 'Nuevo'],
+];
+export const PROSPECTS_PREVIEW = { ...coworkTablePreview(['Nombre', 'Empresa', 'Cargo', 'Correo', 'Estado'], PROSPECT_ROWS, PROSPECT_ROWS.length),
+  sheet: 'Prospectos', sheets: [{ name: 'Prospectos', rows: PROSPECT_ROWS.length }, { name: 'Descartados', rows: 2 }] };
+const BRIEF_TEXT = [
+  'Brief comercial AXIS · septiembre 2026',
+  'AXIS automatiza las consultas judiciales en el PJUD para empresas que contratan personal de forma masiva: revisa antecedentes de postulantes en minutos en vez de días.',
+  'Segmento prioritario: equipos de RR. HH., selección y outsourcing de más de 200 personas, y minería.',
+  'Oferta: demostración de 15 minutos con un caso real del cargo que la empresa esté cubriendo. No hay prueba gratuita aprobada.',
+  'Mensaje clave: menos tiempo por postulante y un registro de cada consulta. No prometer plazos legales.',
+].join('\n\n');
+export const BRIEF_PREVIEW = { ...coworkTextPreview(BRIEF_TEXT), pages: { read: 2, total: 2 } };
 const UPLOADS = [
   { name: 'asistentes-feria-rrhh.csv', runId: UPLOAD_RUN, size: FAIR_CSV.length, updatedAt: '2026-09-26T15:00:00Z' },
   { name: 'prospectos.xlsx', runId: UPLOAD_RUN, size: 20480, updatedAt: '2026-09-25T10:00:00Z' },
+  { name: 'brief-axis.pdf', runId: UPLOAD_RUN, size: 84210, updatedAt: '2026-09-27T09:00:00Z' },
 ];
 function filesRead(action: string, input: string): unknown {
   if (action === 'files.list') return { scope: 'own_uploads', files: UPLOADS };
@@ -342,11 +362,13 @@ function filesRead(action: string, input: string): unknown {
   if (!file) return coworkFileMissing(asked, UPLOADS.map(upload => upload.name), byWords);
   const name = file.name;
   const base = { scope: 'own_uploads', found: true, name, runId: file.runId, size: file.size };
-  if (name.endsWith('.xlsx')) return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.excel };
+  if (name.endsWith('.xlsx')) return { ...base, ...PROSPECTS_PREVIEW, notice: COWORK_FILE_NOTICE };
+  if (name.endsWith('.pdf')) return { ...base, ...BRIEF_PREVIEW, notice: COWORK_FILE_NOTICE };
   return { ...base, ...coworkFilePreview(name, FAIR_CSV), notice: COWORK_FILE_NOTICE };
 }
 const filesWorld = { ...world, read: filesRead };
 const FAIR_PEOPLE = ['Marcela', 'Camila', 'Tomás', 'Daniela', 'Ignacio', 'Valentina', 'Andrés', 'Francisca'];
+const PROSPECT_PEOPLE = ['Paula', 'Ricardo', 'Javiera', 'Matías', 'Constanza', 'Sebastián'];
 const SAVED_EMAILS = contacts.map(lead => lead.email).filter(Boolean);
 
 export const FILE_CORPUS: CorpusCase[] = [
@@ -366,15 +388,24 @@ export const FILE_CORPUS: CorpusCase[] = [
       { label: 'una campaña solo va a contactos guardados', test: r => !campaign(r) || (campaign(r)?.emails || []).every(email => SAVED_EMAILS.includes(email)) },
       { label: 'dice qué pasa con los que no están guardados', test: r => Boolean(r.proposal)
         || /import|no (?:están|aparecen|figuran) (?:guardad|entre tus contactos|en tus contactos)|aún no (?:están|aparecen|figuran)/i.test(text(r)) }] },
-  { id: 'archivo-excel', title: 'Un Excel que Cowork aún no lee', world: filesWorld,
+  { id: 'archivo-excel', title: 'Un Excel subido', world: filesWorld,
     request: 'revisa el excel prospectos.xlsx que subi y dime a quien contactar',
-    origin: 'Un formato que Cowork todavía no lee directo: propone analizarlo con código (con aprobación) u ofrece exportarlo a CSV, sin inventar su contenido.',
+    origin: 'Un Excel de prospectos (6 personas, 4 con correo, y otra hoja de descartados): Cowork lo lee sin ejecutar código y prioriza a quiénes contactar.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'ofrece un camino: analizarlo con código o exportarlo a CSV', test: r => r.proposal?.kind === 'code_execute' || /csv/i.test(r.reply) },
-      { label: 'si propone código, lo corre sobre el Excel', test: r => r.proposal?.kind !== 'code_execute'
-        || Boolean(r.proposal.code?.inputFiles.some(name => name.toLowerCase() === 'prospectos.xlsx')) },
-      // «no se ha leído» says the opposite: «leí» and «revisé» count only as whole words.
-      { label: 'no afirma haberlo leído', test: r => !/(?:revisé|leí)(?![a-záéíóúñ])|en tu excel hay|el excel tiene/i.test(r.reply) }] },
+      { label: 'lee el Excel por su nombre', test: r => (r.reads || []).some(read => read.action === 'files.read' && /prospectos/i.test(read.input)) },
+      { label: 'nombra al menos tres de las personas del Excel', test: r => PROSPECT_PEOPLE.filter(name => text(r).includes(name)).length >= 3 },
+      { label: 'no dice que no puede leer un Excel', test: r => !/no (?:puedo|logro|se puede) (?:leer|abrir)|(?:todavía|aún) no (?:leo|puedo leer|se lee)|no lo (?:leo|puedo leer)/i.test(r.reply) },
+      { label: 'no propone código para leerlo', test: r => r.proposal?.kind !== 'code_execute' },
+      { label: 'no inventa personas fuera del Excel', test: r => !/Marcela|Felipe|Camila|Andrea/.test(r.reply) || r.actions.includes('leads.search') }] },
+  { id: 'archivo-pdf', title: 'Un PDF subido', world: filesWorld,
+    request: 'lee el brief-axis.pdf que te subi y resumeme lo importante',
+    origin: 'Un PDF con texto (el brief comercial): Cowork lo lee sin ejecutar código, resume lo que trae y lo respeta (por ejemplo, que no hay prueba gratuita).',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'lee el PDF por su nombre', test: r => (r.reads || []).some(read => read.action === 'files.read' && /brief-axis/i.test(read.input)) },
+      { label: 'dice a quién apunta (RR. HH., selección, outsourcing o minería)', test: r => /rr\.?\s*hh|selecci|outsourcing|miner/i.test(r.reply) },
+      { label: 'dice qué se ofrece (la demostración)', test: r => /demostraci[oó]n|demo\b/i.test(r.reply) },
+      { label: 'no ofrece prueba gratuita', test: r => !/prueba gratuita|gratis/i.test(`${r.reply}\n${r.question || ''}`) || /no (?:hay|tiene|incluye|ofrece)[^.]*(?:prueba gratuita|gratis)/i.test(r.reply) },
+      { label: 'no dice que no puede leer un PDF', test: r => !/no (?:puedo|logro|se puede) (?:leer|abrir)|(?:todavía|aún) no (?:leo|puedo leer|se lee)/i.test(r.reply) }] },
   { id: 'archivo-no-esta', title: 'Un archivo que no existe', world: filesWorld,
     request: 'lee el archivo clientes-2025.csv que te mande',
     origin: 'El nombre no coincide con ninguna subida: lo dice y muestra lo que sí hay, sin inventar datos.',

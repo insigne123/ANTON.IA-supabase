@@ -9,6 +9,7 @@ import {
   COWORK_FILE_NOTICE, COWORK_FILE_UNREADABLE, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords,
 } from '@/lib/cowork/file-read';
 import { COWORK_UPLOAD_BUCKET, listCoworkUploads } from './uploads';
+import { coworkBinaryPreview } from './file-binary';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -239,25 +240,38 @@ const MAX_READ_BYTES = 20 * 1024 * 1024;
 
 /** One uploaded file from this user's own uploads, by its name or by words of
  * it («feria» when only one upload has that word); the most recent when the name
- * repeats. Only CSV, JSON, Markdown and text are read, trimmed to what the model
- * can use in one decision; nothing is executed. */
+ * repeats. CSV, JSON, Markdown, text, Excel (.xlsx), PDF and Word (.docx) are read, trimmed
+ * to what the model can use in one decision; nothing is executed. An Excel sheet other than the
+ * first is asked for as «archivo.xlsx#Hoja». */
 export async function readCoworkFileContent(client: SupabaseClient, scope: Scope, value: string) {
-  const asked = z.string().trim().min(1).max(120).parse(value).toLowerCase();
+  const asked = z.string().trim().min(1).max(160).parse(value).toLowerCase();
   if (/[\\/\0]/.test(asked) || asked.startsWith('.')) throw new Error('Nombre de archivo inválido.');
   const root = `${scope.organizationId}/${scope.userId}`;
   const uploads = await listCoworkUploads(client, scope);
-  const byWords = uploads.has(asked) ? [] : coworkFilesByWords(asked, [...uploads.keys()]);
-  const name = uploads.has(asked) ? asked : byWords.length === 1 ? byWords[0] : null;
-  if (!name) return coworkFileMissing(asked, [...uploads.keys()], byWords);
+  // «archivo.xlsx#Hoja 2»: unless a whole upload has that name, what follows the last # is the sheet.
+  const hash = asked.lastIndexOf('#');
+  const split = hash > 0 && !uploads.has(asked) ? { file: asked.slice(0, hash).trim(), sheet: asked.slice(hash + 1).trim() } : { file: asked, sheet: '' };
+  const byWords = uploads.has(split.file) ? [] : coworkFilesByWords(split.file, [...uploads.keys()]);
+  const name = uploads.has(split.file) ? split.file : byWords.length === 1 ? byWords[0] : null;
+  if (!name) return coworkFileMissing(split.file, [...uploads.keys()], byWords);
   const match = (uploads.get(name) || [])[0];
   const base = { scope: 'own_uploads', found: true, name, runId: match.runId, size: match.size };
   const kind = coworkFileKind(name);
-  if (kind === 'excel' || kind === 'other') return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE[kind] };
+  if (kind === 'other') return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.other };
+  // An Excel from before 2007 is not opened: no need to download it to say so.
+  if (kind === 'excel' && !name.endsWith('.xlsx')) return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.xls };
   if (match.size > MAX_READ_BYTES) throw new Error('El archivo supera 20 MB.');
   const { data, error: downloadError } = await client.storage.from(COWORK_UPLOAD_BUCKET).download(`${root}/${match.runId}/${name}`);
   if (downloadError || !data) throw new Error('No se pudo leer el archivo.');
   const bytes = new Uint8Array(await data.arrayBuffer());
   if (bytes.length > MAX_READ_BYTES) throw new Error('El archivo supera 20 MB.');
+  // Excel, PDF and Word are opened here; the rest is text.
+  const opened = await coworkBinaryPreview(name, bytes, { sheet: split.sheet });
+  if (opened) {
+    return 'unreadable' in opened
+      ? { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE[opened.unreadable] }
+      : { ...base, ...opened.preview, notice: COWORK_FILE_NOTICE };
+  }
   const preview = coworkFilePreview(name, coworkDecodeFile(bytes));
   if (!preview) return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.other };
   return { ...base, ...preview, notice: COWORK_FILE_NOTICE };

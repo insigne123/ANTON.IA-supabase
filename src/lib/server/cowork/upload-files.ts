@@ -3,7 +3,7 @@ import { COWORK_UPLOAD_BUCKET } from './uploads';
 
 export const COWORK_UPLOAD_MAX_FILES = 8;
 export const COWORK_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
-const ALLOWED_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx']);
+const ALLOWED_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx', 'pdf', 'docx']);
 
 /** Where files attached from the message box wait, in the person's own prefix,
  * before the message that uses them creates its run. */
@@ -25,7 +25,7 @@ export function coworkUploadName(raw: string) {
   }
   const dot = name.lastIndexOf('.');
   if (dot < 1 || !ALLOWED_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())) {
-    throw new CoworkUploadRejected(`Extensión no permitida (csv, json, md, txt, xlsx): ${name.slice(0, 40)}`);
+    throw new CoworkUploadRejected(`Extensión no permitida (csv, json, md, txt, xlsx, pdf, docx): ${name.slice(0, 40)}`);
   }
   return name;
 }
