@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_FILE_READ_LIMITS, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords } from './file-read';
+import { COWORK_FILE_READ_LIMITS, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkHeaderRow, coworkRowText } from './file-read';
 
 test('a CSV keeps its columns and rows, with the delimiter detected and blank lines dropped', () => {
   const csv = '﻿Nombre;Empresa;Correo\n"Rojas, Marcela";Sodexo;mrojas@sodexo.cl\n\n;;\nFelipe Muñoz;Securitas;\n';
@@ -41,7 +41,7 @@ test('a JSON list reads as a table; anything else as text', () => {
   assert.equal(coworkFilePreview('roto.json', '{no es json')?.kind, 'text');
 });
 
-test('text is kept up to its limit, and Excel is not read yet', () => {
+test('text is kept up to its limit, and the formats opened on the server are not read here', () => {
   const long = coworkFilePreview('brief.md', `# Brief\n\n\n\n${'palabra '.repeat(3000)}`);
   assert.equal(long?.kind, 'text');
   if (long?.kind !== 'text') return;
@@ -49,7 +49,11 @@ test('text is kept up to its limit, and Excel is not read yet', () => {
   assert.ok(long.text.startsWith('# Brief\n\npalabra'));
   assert.ok(long.text.length <= COWORK_FILE_READ_LIMITS.textChars + 1);
   assert.equal(coworkFileKind('prospectos.xlsx'), 'excel');
-  assert.equal(coworkFilePreview('prospectos.xlsx', 'PK...'), null);
+  assert.equal(coworkFileKind('Brief.PDF'), 'pdf');
+  assert.equal(coworkFileKind('propuesta.docx'), 'docx');
+  assert.equal(coworkFileKind('foto.png'), 'other');
+  // Excel, PDF and Word are opened on the server (file-binary.ts), not from text.
+  for (const name of ['prospectos.xlsx', 'brief.pdf', 'propuesta.docx']) assert.equal(coworkFilePreview(name, 'PK...'), null);
   assert.equal(coworkFilePreview('foto.png', 'x'), null);
 });
 
@@ -80,4 +84,27 @@ test('a missing file asks for the upload; several matches ask which one', () => 
   const several = coworkFileMissing('feria', ['a-feria.csv', 'feria-2.csv'], ['a-feria.csv', 'feria-2.csv']);
   assert.deepEqual('candidates' in several && several.candidates, ['a-feria.csv', 'feria-2.csv']);
   assert.match(several.nextStep, /pregunta cuál es/);
+});
+
+test('the header is the first row, unless a title or a note stands above a wider table', () => {
+  const header = ['Nombre', 'Empresa', 'Correo', 'Cargo'];
+  const person = ['Ana', 'Entel', 'a@entel.cl', 'Gerente'];
+  // A table that starts with its columns, and one so narrow that nothing can be told apart.
+  assert.equal(coworkHeaderRow([header, person]), 0);
+  assert.equal(coworkHeaderRow([['Lista de correos', ''], ['a@b.cl', 'x'], ['c@d.cl', 'y']]), 0);
+  // One or two rows with a single cell, then the columns.
+  assert.equal(coworkHeaderRow([['Resumen de septiembre'], header, person]), 1);
+  assert.equal(coworkHeaderRow([['Reporte'], ['Septiembre 2026'], header, person]), 2);
+  assert.equal(coworkHeaderRow([['Fuente:', 'CRM'], ['', '', '', '', '', ''].map((_, index) => `Col${index}`), ['a', 'b', 'c', 'd', 'e', 'f']]), 1);
+  // A header with only a few of its columns named is still the header: the rows below it are wider.
+  assert.equal(coworkHeaderRow([['Nombre', 'Correo', 'Empresa', '', '', '', '', '', '', ''], ['Ana', 'a@b.cl', 'Entel', 1, 2, 3, 4, 5, 6, 7]]), 0);
+  // Never more than three rows above, and never the last row.
+  assert.equal(coworkHeaderRow([['a'], ['b'], ['c'], ['d'], header, person]), 3);
+  assert.equal(coworkHeaderRow([['Solo un título']]), 0);
+  assert.equal(coworkHeaderRow([]), 0);
+});
+
+test('a row of a sheet reads as one line of its filled cells', () => {
+  assert.equal(coworkRowText(['Fuente:', '', 'CRM', null, 4]), 'Fuente: · CRM · 4');
+  assert.equal(coworkRowText(['', '  ']), '');
 });

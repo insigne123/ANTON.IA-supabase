@@ -68,10 +68,10 @@ export function CoworkAttachments({ id, files, uploading, open, onUpload, onRemo
       <label htmlFor={id} className={cn('inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] font-medium text-cw-text hover:bg-cw-hover focus-within:ring-2 focus-within:ring-[color:var(--cw-accent-ring)]', uploading && 'pointer-events-none opacity-50')}>
         {uploading ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
         {uploading ? 'Subiendo…' : 'Elegir archivos'}
-        <input id={id} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx" disabled={uploading}
+        <input id={id} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx,.pdf,.docx" disabled={uploading}
           onChange={event => { onUpload(event.target.files); event.target.value = ''; }} className="sr-only" />
       </label>
-      <span className="text-[12px] text-cw-muted">o arrástralos al cuadro · Cowork lee CSV, JSON, MD y TXT de hasta 20 MB; un Excel lo analiza con código, con tu aprobación.</span>
+      <span className="text-[12px] text-cw-muted">o arrástralos al cuadro · Cowork lee CSV, Excel, PDF, Word, JSON, MD y TXT de hasta 20 MB.</span>
     </div>}
     <p role="status" className="sr-only">{uploading ? 'Subiendo…' : files.length ? `${files.length} ${files.length === 1 ? 'archivo adjunto' : 'archivos adjuntos'}` : ''}</p>
   </section>;

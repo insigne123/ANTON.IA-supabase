@@ -63,4 +63,4 @@ El mismo día, con el corpus y el modelo real (gpt-6-luna, 3 repeticiones), cont
 ## Límites
 
 - Cada propuesta con archivos de otro turno deja una copia en el bucket, dentro del prefijo del usuario. Por eso el archivo aparece también en la lista de archivos del turno nuevo.
-- Leer un Excel sin código sigue pendiente: requiere actualizar `xlsx` (CVE-2023-30533).
+- ~~Leer un Excel sin código sigue pendiente: requiere actualizar `xlsx` (CVE-2023-30533).~~ Resuelto el 29 sep con `xlsx` 0.20.3: `files.read` abre Excel, PDF y Word (`docs/cowork-office.md`). El análisis pesado sigue siendo con código.

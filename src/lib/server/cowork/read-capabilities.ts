@@ -195,8 +195,8 @@ export function coworkReadCapabilities(
     extended('files.list', 'Archivos subidos (nombre, trabajo, tamaño), sin contenido'),
     {
       name: 'files.read', version: 1, effect: 'read',
-      description: 'Contenido acotado de un archivo subido (CSV, JSON, Markdown o texto), por nombre; no ejecuta nada',
-      input: z.string().trim().min(1).max(120), output: z.unknown(),
+      description: 'Contenido acotado de un archivo subido (CSV, JSON, Excel, PDF, Word, Markdown o texto), por nombre y, en un Excel, «archivo.xlsx#Hoja»; no ejecuta nada',
+      input: z.string().trim().min(1).max(160), output: z.unknown(),
       execute: input => readCoworkFileContent(client, scope, input as string),
     },
   ];
