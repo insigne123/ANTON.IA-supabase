@@ -13,7 +13,7 @@ Primer PR de la Ola F del plan 2 de Cowork (puntos F1 y F2). Hasta hoy, Cowork l
   - las fórmulas dan el valor que el archivo guardó (nunca se ejecutan), y una celda con error de fórmula muestra su texto (`#DIV/0!`) en vez de quedar vacía.
 - **Un PDF o un Word** se leen como texto (hasta 12 000 caracteres):
   - del PDF se sabe cuántas páginas se leyeron de cuántas tiene;
-  - en un Word, los títulos y las listas quedan como párrafos y cada fila de una tabla en una línea, con las celdas separadas por « | » (`Piloto | 30 días | $450.000`).
+  - en un Word, los títulos y los párrafos quedan como párrafos, cada elemento de una lista (también los anidados) en su línea, y cada fila de una tabla en una línea, con las celdas separadas por « | » (`Piloto | 30 días | $450.000`).
 - **Lo que no se abre, lo dice y da el camino:**
   - un `.xls` antiguo: al adjuntarlo, la subida ya lo rechaza (solo acepta `.xlsx`); si estuviera subido de antes, Cowork dice «guárdalo como .xlsx (o exporta la hoja a CSV) y súbelo de nuevo»;
   - un PDF que es solo imagen (un escaneo): «pide el contenido pegado en el chat, o un PDF con texto»;
@@ -70,7 +70,8 @@ Lo que salió:
   - las fechas con formato propio salían como `03/04/2026`, ambiguas y distintas de las demás de la columna: ahora, año-mes-día;
   - una celda con error de fórmula salía vacía: ahora dice `#DIV/0!`;
   - una hoja con un título sobre las columnas lo tomaba por encabezado, y las columnas reales quedaban como la primera fila: ahora el título va aparte;
-  - las tablas de un Word salían con cada celda en su párrafo, sin filas: ahora, una fila por línea.
+  - las tablas de un Word salían con cada celda en su párrafo, sin filas: ahora, una fila por línea;
+  - las listas anidadas de un Word salían pegadas («Segundo• Anidado uno»), lo que se vio al leer de vuelta un Word con listas hecho por la rama siguiente: ahora, un elemento por línea.
 - **Ya funcionaba:**
   - los PDF de LibreOffice y de Chromium, con viñetas y filas de tabla;
   - un PDF de solo imagen se declara escaneo, y uno con clave se declara dañado o protegido;

@@ -142,8 +142,8 @@ const decode = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (
 });
 const flat = (html: string) => html.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 
-/** The text of the HTML mammoth writes, with each table row on one line («celda | celda»). Text for the model, never shown as HTML. */
-function htmlToText(html: string) {
+/** The text of the HTML mammoth writes, with each table row on one line («celda | celda») and each list item, nested or not, on its own. Text for the model, never shown as HTML. */
+export function coworkHtmlToText(html: string) {
   const withTables = html.replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, (_whole, table: string) => {
     const rows = [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)]
       .map(row => [...row[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(cell => flat(cell[1])).join(' | '));
@@ -152,8 +152,8 @@ function htmlToText(html: string) {
   return decode(withTables
     .replace(/<a href="#(?:footnote|endnote)-ref-\d+">[^<]*<\/a>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<li\b[^>]*>/gi, '• ')
-    .replace(/<\/li>/gi, '\n')
+    .replace(/<li\b[^>]*>/gi, '\n• ')
+    .replace(/<\/li>/gi, '')
     .replace(/<\/(?:p|h[1-6]|ul|ol|blockquote)>/gi, '\n\n')
     .replace(/<[^>]*>/g, ''))
     .replace(/[ \t]+\n/g, '\n');
@@ -169,7 +169,7 @@ async function docxPreview(bytes: Uint8Array): Promise<CoworkBinaryResult> {
   try {
     // Images are left out without being read: only the text is wanted.
     const { value } = await lib.convertToHtml({ buffer: Buffer.from(bytes) }, { convertImage: lib.images.imgElement(async () => ({ src: '' })) });
-    return { preview: coworkTextPreview(htmlToText(value)) };
+    return { preview: coworkTextPreview(coworkHtmlToText(value)) };
   } catch { return damaged; }
 }
 

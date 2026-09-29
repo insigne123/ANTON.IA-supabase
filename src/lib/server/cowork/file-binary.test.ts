@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { COWORK_FILE_READ_LIMITS } from '@/lib/cowork/file-read';
-import { COWORK_BINARY_LIMITS, coworkBinaryPreview } from './file-binary';
+import { COWORK_BINARY_LIMITS, coworkBinaryPreview, coworkHtmlToText } from './file-binary';
 import { makeDocx, makePdf, makeXlsx, zipDirectory } from './office-fixtures';
 
 const prospects = [
@@ -170,4 +170,11 @@ test('a Word table reads with one row per line and its cells apart, and what the
     'Fin.']));
   assert.ok(result && 'preview' in result && result.preview.kind === 'text');
   assert.equal(result.preview.text, 'Condiciones\n\nConcepto | Detalle | Valor\nPiloto | 30 días | $450.000\nLicencia | Consultas & más <ilimitadas> &lt; | $4.800.000\n\nFin.');
+});
+
+test('a list, nested or not, reads one item per line, and a table keeps its rows next to a list', () => {
+  const text = (html: string) => coworkHtmlToText(html).replace(/\n{3,}/g, '\n\n').trim();
+  assert.equal(text('<h2>Lista</h2><ul><li>Primero</li><li>Segundo<ul><li>Anidado uno</li><li>Anidado dos<ol><li>Muy anidado</li></ol></li></ul></li><li>Tercero</li></ul><p>Fin</p>'),
+    'Lista\n\n• Primero\n• Segundo\n• Anidado uno\n• Anidado dos\n• Muy anidado\n\n• Tercero\n\nFin');
+  assert.equal(text('<ul><li>Uno</li></ul><table><tr><th>A</th><th>B</th></tr><tr><td>1 &amp; 2</td><td>&lt;3&gt;</td></tr></table>'), '• Uno\n\nA | B\n1 & 2 | <3>');
 });
