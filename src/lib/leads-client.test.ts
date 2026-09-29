@@ -213,8 +213,84 @@ test('LinkedIn profile search fails loudly instead of rendering an empty failed 
         reveal_email: true,
         reveal_phone: true,
       }),
-      /No pudimos consultar este perfil/,
+      /APOLLO_PROFILE_NO_USABLE_DATA/,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+test('a terminal no-phone result without profile data retries professional-only before rejecting', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_input, init) => {
+    calls += 1;
+    const requested = JSON.parse(String(init?.body || '{}'));
+    if (calls === 1) {
+      assert.equal(requested.revealPhone, true);
+      return Response.json({
+        queued: false,
+        operationId: 'profile-match:no-phone',
+        operationStatus: 'completed',
+        enriched: [{ id: 'profile-target-1', enrichmentStatus: 'no_phone' }],
+        phone_enrichment: { requested: true, queued: false, status: 'failed' },
+      });
+    }
+    assert.equal(requested.revealEmail, false);
+    assert.equal(requested.revealPhone, false);
+    return Response.json({
+      queued: false,
+      operationId: 'profile-match:professional-only',
+      operationStatus: 'completed',
+      enriched: [{ id: 'profile-target-1', enrichmentStatus: 'no_phone' }],
+      phone_enrichment: { requested: false, queued: false, status: 'not_requested' },
+    });
+  };
+  try {
+    await assert.rejects(
+      () => searchLinkedInProfileLead({
+        search_mode: 'linkedin_profile',
+        linkedin_url: 'https://www.linkedin.com/in/example',
+        reveal_email: true,
+        reveal_phone: true,
+      }),
+      /APOLLO_PROFILE_NO_USABLE_DATA/,
+    );
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+test('professional-only retry shows the profile when Apollo has identity but no contact', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return calls === 1 ? Response.json({
+      queued: false,
+      operationId: 'profile-match:no-contact',
+      operationStatus: 'completed',
+      enriched: [{ id: 'profile-target-1', enrichmentStatus: 'no_phone' }],
+      phone_enrichment: { requested: true, queued: false, status: 'failed' },
+    }) : Response.json({
+      queued: false,
+      operationId: 'profile-match:professional-only',
+      operationStatus: 'completed',
+      enriched: [{ id: 'person-1', fullName: 'Ana Perez', title: 'HR Director', companyName: 'People Co',
+        linkedinUrl: 'https://www.linkedin.com/in/example', enrichmentStatus: 'completed' }],
+      phone_enrichment: { requested: false, queued: false, status: 'not_requested' },
+    });
+  };
+  try {
+    const result = await searchLinkedInProfileLead({
+      search_mode: 'linkedin_profile',
+      linkedin_url: 'https://www.linkedin.com/in/example',
+      reveal_email: true,
+      reveal_phone: true,
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.count, 1);
+    assert.equal(result.leads[0]?.name, 'Ana Perez');
+    assert.deepEqual(result.provider_warnings, ['APOLLO_PROFESSIONAL_ONLY']);
   } finally {
     globalThis.fetch = originalFetch;
   }
