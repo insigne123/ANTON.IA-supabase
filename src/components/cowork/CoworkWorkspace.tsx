@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, CornerDownRight, PanelLeft, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownRight, PanelLeft, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import type { CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
@@ -448,6 +448,30 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
   }
 
+  // A decision waiting on you, out of view: the floating button says so and takes you to it.
+  const [decisionAway, setDecisionAway] = useState<'up' | 'down' | null>(null);
+  useEffect(() => {
+    setDecisionAway(null);
+    if (!pendingDecision) return;
+    const node = document.getElementById('cowork-decision');
+    const root = scroller.current;
+    if (!node || !root || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setDecisionAway(null); return; }
+      setDecisionAway(entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0) ? 'up' : 'down');
+    }, { root, threshold: 0.15 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [pendingDecision, latest?.run.id]);
+  function goToDecision() {
+    const node = document.getElementById('cowork-decision');
+    if (!node) return;
+    stickToBottom.current = false;
+    const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    node.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+    node.focus({ preventScroll: true });
+  }
+
   async function post(text: string, parentRunId: string | null) {
     // A contact picked from a table travels as a reference the model can use,
     // without showing its ID in the composer or in your message bubble.
@@ -708,7 +732,12 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
             </div>
           </div>
           <AnimatePresence>
-            {showJump && <m.button key="jump" type="button" onClick={jumpToEnd} aria-label="Ir al final" {...cwVariants(cwPop)} style={{ x: '-50%' }}
+            {decisionAway && <m.button key="decision" type="button" onClick={goToDecision} {...cwVariants(cwPop)} style={{ x: '-50%' }}
+              className="absolute bottom-[132px] left-1/2 z-10 flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3 text-[12.5px] font-medium text-cw-text shadow-[var(--cw-shadow)] hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-cw-warning" aria-hidden="true" />Cowork espera tu decisión
+              {decisionAway === 'up' ? <ArrowUp className="h-3.5 w-3.5 text-cw-muted" aria-hidden="true" /> : <ArrowDown className="h-3.5 w-3.5 text-cw-muted" aria-hidden="true" />}
+            </m.button>}
+            {showJump && !decisionAway && <m.button key="jump" type="button" onClick={jumpToEnd} aria-label="Ir al final" {...cwVariants(cwPop)} style={{ x: '-50%' }}
               className="absolute bottom-[132px] left-1/2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-cw-border bg-cw-elevated text-cw-muted shadow-[var(--cw-shadow)] hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
               <ArrowDown className="h-4 w-4" aria-hidden="true" />
             </m.button>}

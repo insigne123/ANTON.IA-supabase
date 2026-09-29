@@ -5,7 +5,7 @@ import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
   coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
-  coworkCardStatuses, coworkTurnFindings,
+  coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -251,4 +251,30 @@ test('each email or sequence card knows what happened to it later in the thread'
   assert.equal(statuses.get('c:block:0')?.label, 'Preparando la campaña…');
   // A typed message that only quotes a title is not a use of the card.
   assert.equal(coworkCardStatuses([first, { run: run('b', 2, { message: 'Crea una campaña con «Secuencia AXIS»' }), events: [request] }]).size, 0);
+});
+
+test('an approval says what happens and what does not, and where the proposal stands', () => {
+  const effect = (kind: string) => ({ type: 'effect' as const, payload: { kind } });
+  assert.deepEqual(coworkProposalOutcome(effect('campaign_create')), { happens: 'Se crea la campaña con estos correos, pausada.', not: 'No se envía nada: activarla pide otra aprobación.' });
+  assert.match(coworkProposalOutcome({ type: 'search', payload: { criteria: { target: 'companies', limit: 10 } } }).happens, /hasta 10 empresas/);
+  assert.match(coworkProposalOutcome({ type: 'search', payload: { criteria: { limit: 5 } } }).happens, /hasta 5 contactos nuevos/);
+  assert.match(coworkProposalOutcome({ type: 'note', payload: { leadName: 'Ana Soto' } }).happens, /nota de Ana Soto/);
+  // Every kind of action has its own sentences; an unknown one still reads plainly.
+  for (const kind of ['save_contact', 'start_research', 'enrich_contact', 'request_draft', 'send_email', 'campaign_activate', 'campaign_pause', 'code_execute',
+    'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2', 'crm_update_record', 'campaign_prepare_draft_v2',
+    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message']) {
+    assert.notEqual(coworkProposalOutcome(effect(kind)).happens, 'Se ejecuta la acción propuesta.', kind);
+  }
+  assert.equal(coworkProposalOutcome(effect('otra_cosa')).not, 'No se hace nada más sin tu aprobación.');
+  const states = (state: Parameters<typeof coworkProposalTimeline>[0]) => coworkProposalTimeline(state).map(step => step.state).join(' ');
+  assert.deepEqual(coworkProposalTimeline('pending').map(step => step.label), ['Propuesta', 'Tu aprobación', 'Ejecución', 'Resultado']);
+  assert.equal(states('pending'), 'done current pending pending');
+  assert.equal(states('running'), 'done done current pending');
+  assert.equal(states('done'), 'done done done done');
+  assert.equal(states('discarded'), 'done skipped skipped skipped');
+  assert.equal(states('failed'), 'done done failed skipped');
+  // Only a finished action with a page of its own links there.
+  assert.deepEqual(coworkProposalLink({ ...effect('campaign_create'), state: 'done' }), { href: '/campaigns', label: 'Ver campañas' });
+  assert.equal(coworkProposalLink({ ...effect('campaign_create'), state: 'running' }), null);
+  assert.equal(coworkProposalLink({ ...effect('code_execute'), state: 'done' }), null);
 });

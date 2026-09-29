@@ -225,3 +225,13 @@
 @media (prefers-reduced-motion: reduce) {
   .cw-changed { animation: none; }
 }
+
+/* A decision that just arrived: it comes in and a ring goes out once around it (never loops). */
+@keyframes cw-attention {
+  0% { box-shadow: 0 0 0 0 var(--cw-accent-ring), var(--cw-shadow); }
+  100% { box-shadow: 0 0 0 10px transparent, var(--cw-shadow); }
+}
+.cw-rise-attention { animation: cw-rise 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both, cw-attention 1.2s ease-out 0.35s 1; }
+@media (prefers-reduced-motion: reduce) {
+  .cw-rise-attention { animation: none; }
+}
