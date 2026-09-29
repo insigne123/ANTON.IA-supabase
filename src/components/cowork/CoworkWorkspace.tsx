@@ -8,7 +8,7 @@ import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
-  coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+  coworkCardStatuses, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { CoworkArtifactPanel } from './CoworkArtifactPanel';
@@ -16,8 +16,9 @@ import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
 import { CoworkHome } from './CoworkHome';
 import { CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
-import { CoworkTurn, type CoworkTurnData } from './CoworkTurn';
+import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
+import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwSwap, cwVariants, m } from './motion';
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
 
 type ThreadState = CoworkTurnData & {
@@ -111,6 +112,12 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   // The worker should resume after an approved action; if it never does, offer the next step instead of a dead end.
   const [continuationMissing, setContinuationMissing] = useState(false);
   const [showJump, setShowJump] = useState(false);
+  /** The answer while it is being written, from the stream's `draft` frames (COWORK_STREAMING_ENABLED). */
+  const [liveAnswer, setLiveAnswer] = useState<(CoworkLiveAnswer & { runId: string }) | null>(null);
+  /** Turns whose answer was seen being written: the final one does not rise in again. */
+  const streamedRuns = useRef(new Set<string>());
+  /** The summary slides back in once a result it made way for closes; on load it is simply there. */
+  const [summaryReturns, setSummaryReturns] = useState(false);
 
   const isDesktop = useMedia('(min-width: 1024px)');
   const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
@@ -213,6 +220,22 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       stream = source;
       source.onopen = () => { streamLive = true; };
       source.addEventListener('change', () => { void poll(); });
+      // Only what changed travels: keep `from` characters of the text so far and add `text`.
+      source.addEventListener('draft', event => {
+        try {
+          const data = JSON.parse((event as MessageEvent<string>).data) as { from?: unknown; text?: unknown; cards?: unknown; reviewing?: unknown };
+          if (typeof data.from !== 'number' || typeof data.text !== 'string') return;
+          const from = data.from;
+          const text = data.text;
+          streamedRuns.current.add(selected);
+          setLiveAnswer(current => ({
+            runId: selected,
+            text: `${current?.runId === selected ? current.text.slice(0, from) : ''}${text}`,
+            cards: Array.isArray(data.cards) ? data.cards as CoworkLiveAnswer['cards'] : [],
+            reviewing: data.reviewing === true,
+          }));
+        } catch { /* A malformed frame only skips the preview. */ }
+      });
       source.addEventListener('end', () => { closeStream(); void poll(); });
       source.onerror = () => {
         streamLive = false;
@@ -301,7 +324,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const restore = () => {
       const id = new URL(window.location.href).searchParams.get('work');
       setSelected(id && UUID.test(id) ? id : null);
-      setState(null); setArtifactId(null); setError(''); setOptimistic(null); setQueued(null);
+      setState(null); setArtifactId(null); setError(''); setOptimistic(null); setQueued(null); setLiveAnswer(null);
       stickToBottom.current = true;
     };
     restore();
@@ -312,7 +335,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const choose = useCallback((id: string | null, options: { pin?: boolean } = {}) => {
     pinnedRun.current = options.pin ? id : null;
     setWorkUrl(id, 'push');
-    setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError('');
+    setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError(''); setLiveAnswer(null);
     // Attached files belong to the message being written in this conversation.
     setOptimistic(null); setQueued(null); setShowFiles(false); clearAttachments();
     stickToBottom.current = true;
@@ -325,6 +348,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const latest = turns[turns.length - 1] || null;
   const latestIsCurrent = Boolean(latest && latest.run.id === selected);
   const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events)), [turns]);
+  // What later turns did with each email or sequence card («Campaña creada · pausada»…).
+  const cardStatuses = useMemo(() => coworkCardStatuses(turns), [turns]);
   const openArtifact = artifactId ? artifacts.find(item => item.id === artifactId) || null : null;
   const proposal = latest ? coworkProposalView(latest.run, latest.events) : null;
   const pendingDecision = Boolean(latest && latest.run.status === 'waiting_approval' && proposal?.state === 'pending');
@@ -362,6 +387,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const closeArtifact = useCallback(() => {
     setArtifactId(null);
     setMaximized(false);
+    setSummaryReturns(true);
     requestAnimationFrame(() => {
       const opener = artifactOpener.current;
       if (opener && opener.isConnected) opener.focus(); else composer.current?.focus();
@@ -620,16 +646,18 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
-  return <section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
+  return <CoworkMotion><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
       <CoworkThreadList threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} />
     </div>
-    {drawerOpen && <div className="cw-fade absolute inset-0 z-40 flex">
-      <div className="w-[86%] max-w-[300px] border-r border-cw-border bg-cw-rail shadow-[var(--cw-shadow-lg)]">
-        <CoworkThreadList idPrefix="cowork-drawer" threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} />
-      </div>
-      <button type="button" aria-label="Cerrar lista de trabajos" className="flex-1 bg-black/25" onClick={() => setDrawerOpen(false)} />
-    </div>}
+    <AnimatePresence>
+      {drawerOpen && <m.div key="drawer" initial="hidden" animate="shown" exit="gone" className="absolute inset-0 z-40 flex">
+        <m.div custom={-1} variants={cwPanel} className="w-[86%] max-w-[300px] border-r border-cw-border bg-cw-rail shadow-[var(--cw-shadow-lg)]">
+          <CoworkThreadList idPrefix="cowork-drawer" threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} />
+        </m.div>
+        <m.button type="button" variants={cwSwap} aria-label="Cerrar lista de trabajos" className="flex-1 bg-black/25" onClick={() => setDrawerOpen(false)} />
+      </m.div>}
+    </AnimatePresence>
 
     <div className={cn('relative flex min-w-0 flex-1 flex-col', artifactOpen && 'hidden lg:flex', artifactOpen && maximized && 'lg:hidden')}>
       <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-cw-border px-2.5 sm:px-3">
@@ -646,11 +674,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       </header>
 
       <p className="sr-only" aria-live="polite">{inConversation && status ? status.label : ''}</p>
-      {error && <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-cw-border bg-cw-danger-soft px-4 py-2 text-[13px] text-cw-danger">
-        <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
-        <p className="min-w-0 flex-1">{error}</p>
-        <CwButton size="xs" variant="secondary" onClick={() => { setError(''); setListVersion(value => value + 1); setThreadVersion(value => value + 1); }}><RotateCcw aria-hidden="true" />Reintentar</CwButton>
-      </div>}
+      <CwCollapse show={Boolean(error)} className="shrink-0">
+        <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-cw-border bg-cw-danger-soft px-4 py-2 text-[13px] text-cw-danger">
+          <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <p className="min-w-0 flex-1">{error}</p>
+          <CwButton size="xs" variant="secondary" onClick={() => { setError(''); setListVersion(value => value + 1); setThreadVersion(value => value + 1); }}><RotateCcw aria-hidden="true" />Reintentar</CwButton>
+        </div>
+      </CwCollapse>
 
       {!inConversation
         ? <CoworkHome composer={homeComposer} threads={threads} ready={ready} loading={loading} onSuggestion={applySuggestion} onOpenThread={choose} />
@@ -661,7 +691,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
               {turns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === turns.length - 1}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
                 onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
-                budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)} />)}
+                budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
+                liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)}
+                cardStatuses={cardStatuses} />)}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
                   onClick={() => { setContinuationMissing(false); void post(CONTINUE_PROMPT, latest.run.id); }}>
@@ -675,10 +707,12 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
               </div>}
             </div>
           </div>
-          {showJump && <button type="button" onClick={jumpToEnd} aria-label="Ir al final"
-            className="absolute bottom-[132px] left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-cw-border bg-cw-elevated text-cw-muted shadow-[var(--cw-shadow)] hover:text-cw-text">
-            <ArrowDown className="h-4 w-4" aria-hidden="true" />
-          </button>}
+          <AnimatePresence>
+            {showJump && <m.button key="jump" type="button" onClick={jumpToEnd} aria-label="Ir al final" {...cwVariants(cwPop)} style={{ x: '-50%' }}
+              className="absolute bottom-[132px] left-1/2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-cw-border bg-cw-elevated text-cw-muted shadow-[var(--cw-shadow)] hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+              <ArrowDown className="h-4 w-4" aria-hidden="true" />
+            </m.button>}
+          </AnimatePresence>
           <div className="shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-4">
             <div className="mx-auto w-full max-w-[46rem]">
               <CoworkComposer ref={composer} id="cowork-followup" value={message} onChange={setMessage} onSubmit={() => void submit()}
@@ -701,19 +735,25 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
         </>}
     </div>
 
-    {openArtifact
-      ? <div className={cn('flex min-w-0 flex-1 flex-col lg:max-w-[min(56rem,52%)] lg:border-l lg:border-cw-border', maximized && 'lg:max-w-none')}>
+    {/* One panel at a time on the right: the open result or the summary. The result
+        slides in over the chat on phones and beside it on desktop; closing slides it out,
+        stepping out of the layout at once (popLayout) so the summary can take its place.
+        The summary has no exit of its own: it only slides back in after a result closes. */}
+    <AnimatePresence initial={false} mode="popLayout">
+      {openArtifact && <m.div key="artifact" {...cwVariants(cwPanel)} className={cn('flex min-w-0 flex-col bg-cw-elevated max-lg:absolute max-lg:inset-0 max-lg:z-30 lg:flex-1 lg:max-w-[min(56rem,52%)] lg:border-l lg:border-cw-border', maximized && 'lg:max-w-none')}>
         <CoworkArtifactPanel artifact={openArtifact} events={turns.find(turn => turn.run.id === openArtifact.runId)?.events || []}
           canResearch={Boolean(state?.canResearch) && latest?.run.status === 'completed'} canCreateDraft={Boolean(state?.canCreateDraft) && latest?.run.status === 'completed'}
           maximized={maximized} onToggleMaximize={() => setMaximized(value => !value)} onClose={closeArtifact} headingRef={artifactHeading}
           onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact} onSend={sendFromPanel} sendHint={panelSendHint}
           onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
-      </div>
-      : inConversation && latest && panelOpen && <div className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">
-        <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)} turnCount={turns.filter(turn => !turn.run.automatic).length}
-          artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
-          sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
-          budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
-      </div>}
-  </section>;
+      </m.div>}
+    </AnimatePresence>
+    {!openArtifact && inConversation && latest && panelOpen && <m.div key="summary" initial={summaryReturns ? 'hidden' : false} animate="shown" variants={cwPanel}
+      className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">
+      <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)} turnCount={turns.filter(turn => !turn.run.automatic).length}
+        artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
+        sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
+        budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
+    </m.div>}
+  </section></CoworkMotion>;
 }

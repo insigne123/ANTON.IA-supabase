@@ -507,3 +507,66 @@ for (const name of ['AbortError', 'TimeoutError']) {
     assert.equal(fetchMock.mock.callCount(), 1);
   });
 }
+
+function sseResponse(lines: string[]) {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Chunks split mid-line, as networks do.
+      const text = lines.map(line => `${line}\n\n`).join('');
+      for (let at = 0; at < text.length; at += 7) controller.enqueue(encoder.encode(text.slice(at, at + 7)));
+      controller.close();
+    },
+  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
+test('with onPartial, OpenAI streams: the text so far is reported and the result is the same validated JSON', async (t) => {
+  let body: RequestBody & { stream?: boolean; stream_options?: { include_usage?: boolean } } = {};
+  const usage = { prompt_tokens: 12, completion_tokens: 9 };
+  mockOpenAi(t, async (_input, init) => {
+    body = JSON.parse(String(init?.body));
+    return sseResponse([
+      'data: {"model":"gpt-6-luna-2026-09","choices":[{"delta":{"role":"assistant","content":""}}]}',
+      'data: {"model":"gpt-6-luna-2026-09","choices":[{"delta":{"content":"{\\"value\\":\\"Ho"}}]}',
+      ': keep-alive',
+      'data: not json',
+      'data: {"model":"gpt-6-luna-2026-09","choices":[{"delta":{"content":"la\\"}"}}]}',
+      `data: {"model":"gpt-6-luna-2026-09","choices":[],"usage":${JSON.stringify(usage)}}`,
+      'data: [DONE]',
+    ]);
+  });
+  const partials: string[] = [];
+  const result = await generateStructuredWithTelemetry({
+    prompt: 'Return a value.', schema: z.object({ value: z.string() }), provider: 'openai', openAiModel: 'gpt-6-luna',
+    onPartial: text => partials.push(text),
+  });
+  assert.equal(body.stream, true);
+  assert.equal(body.stream_options?.include_usage, true);
+  assert.deepEqual(partials, ['{"value":"Ho', '{"value":"Hola"}']);
+  assert.deepEqual(result.data, { value: 'Hola' });
+  assert.equal(result.telemetry.modelName, 'gpt-6-luna-2026-09');
+  assert.deepEqual(result.telemetry.usage, usage);
+});
+
+test('a failing preview never breaks the answer, and without onPartial nothing streams', async (t) => {
+  const bodies: Array<{ stream?: boolean }> = [];
+  mockOpenAi(t, async (_input, init) => {
+    const body = JSON.parse(String(init?.body));
+    bodies.push(body);
+    return body.stream
+      ? sseResponse(['data: {"choices":[{"delta":{"content":"{\\"value\\":\\"ok\\"}"}}]}', 'data: [DONE]'])
+      : Response.json({ choices: [{ message: { content: '{"value":"ok"}' } }] });
+  });
+  const options = { prompt: 'Return a value.', schema: z.object({ value: z.string() }), provider: 'openai' as const, openAiModel: 'gpt-6-luna' };
+  assert.deepEqual(await generateStructured({ ...options, onPartial: () => { throw new Error('preview broke'); } }), { value: 'ok' });
+  assert.deepEqual(await generateStructured(options), { value: 'ok' });
+  assert.deepEqual(bodies.map(body => body.stream), [true, undefined]);
+});
+
+test('an error inside the stream fails the attempt like an HTTP error', async (t) => {
+  mockOpenAi(t, async () => sseResponse(['data: {"error":{"message":"overloaded"}}']));
+  await assert.rejects(generateStructured({
+    prompt: 'Return a value.', schema: z.object({ value: z.string() }), provider: 'openai', openAiModel: 'gpt-6-luna',
+    allowDefaultModelFallback: false, maxAttempts: 1, onPartial: () => {},
+  }), /OPENAI_STREAM_ERROR:overloaded/);
+});

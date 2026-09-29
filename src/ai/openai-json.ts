@@ -16,6 +16,11 @@ type StructuredOptions<T extends z.ZodTypeAny> = {
   maxAttempts?: number;
   provider?: StructuredProvider;
   signal?: AbortSignal;
+  /**
+   * OpenAI only: the response streams and this receives the JSON text written
+   * so far, for a live preview. The result is the same validated JSON as without it.
+   */
+  onPartial?: (content: string) => void;
 };
 
 export type StructuredProvider = 'openai' | 'glm';
@@ -198,6 +203,50 @@ function parseJsonFromModelText(raw: string): unknown {
   }
 }
 
+/** Reads a chat completions event stream: the text written so far goes to onPartial, and the
+ * whole text, the effective model and the usage (last chunk, with include_usage) come back. */
+async function readChatStream(body: ReadableStream<Uint8Array>, onPartial: (content: string) => void, signal?: AbortSignal) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  let model: unknown = null;
+  let usage: unknown = null;
+  const handle = (line: string) => {
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let chunk: any;
+    try { chunk = JSON.parse(data); } catch { return; }
+    if (chunk?.error) throw new Error(`OPENAI_STREAM_ERROR:${String(chunk.error?.message || '').slice(0, 400)}`);
+    if (typeof chunk?.model === 'string') model = chunk.model;
+    if (chunk?.usage) usage = chunk.usage;
+    const piece = chunk?.choices?.[0]?.delta?.content;
+    if (typeof piece === 'string' && piece) {
+      content += piece;
+      // A live preview never breaks the answer.
+      try { onPartial(content); } catch { /* ignored */ }
+    }
+  };
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      for (let newline = buffer.indexOf('\n'); newline >= 0; newline = buffer.indexOf('\n')) {
+        handle(buffer.slice(0, newline).trim());
+        buffer = buffer.slice(newline + 1);
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) handle(buffer.trim());
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released by an abort */ }
+  }
+  return { content, model, usage };
+}
+
 async function tryChatCompletions<T extends z.ZodTypeAny>(
   opts: StructuredOptions<T>,
   config: StructuredProviderConfig
@@ -205,8 +254,10 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
   const model = opts.openAiModel || config.defaultModel;
   const temperature = opts.temperature ?? 0.3;
   const startedAt = Date.now();
+  const streaming = Boolean(opts.onPartial) && config.provider === 'openai';
   const requestBody = {
     model,
+    ...(streaming ? { stream: true, stream_options: { include_usage: true } } : {}),
     ...(isReasoningModel(model) ? {} : { temperature }),
     ...(config.provider === 'openai' && opts.maxOutputTokens !== undefined
       ? { max_completion_tokens: opts.maxOutputTokens } : {}),
@@ -252,16 +303,25 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
       throw new Error(`${config.displayName.toUpperCase()}_HTTP_${res.status}:${txt.slice(0, 400)}`);
     }
 
-    const payload = await res.json();
+    let content: string;
+    let responseModel: unknown;
+    let usage: unknown;
+    if (streaming && res.body && opts.onPartial) {
+      ({ content, model: responseModel, usage } = await readChatStream(res.body, opts.onPartial, signal));
+    } else {
+      const payload = await res.json();
+      content = normalizeContent(payload?.choices?.[0]?.message?.content);
+      responseModel = payload?.model;
+      usage = payload?.usage;
+    }
     signal?.throwIfAborted();
-    const content = normalizeContent(payload?.choices?.[0]?.message?.content);
     const parsed = parseJsonFromModelText(content);
     return {
       data: opts.schema.parse(parsed),
       telemetry: {
-        modelName: typeof payload?.model === 'string' && payload.model.trim() ? payload.model : model,
+        modelName: typeof responseModel === 'string' && responseModel.trim() ? responseModel : model,
         requestedModel: model,
-        usage: payload?.usage || null,
+        usage: (usage as Record<string, unknown> | null) || null,
         durationMs: Date.now() - startedAt,
       },
     };

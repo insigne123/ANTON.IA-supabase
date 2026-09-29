@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
-import { ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Megaphone, Pencil, RotateCcw, Send, Table2 } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2 } from 'lucide-react';
 import type { CoworkBlock } from '@/lib/cowork/contracts';
-import type { CoworkArtifact, CoworkPanelBlock } from '@/lib/cowork/presentation';
+import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
   coworkBlockFilename, coworkBlockMeta, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv, coworkVersionMessage,
-  type CoworkEditedEmail,
+  coworkFigureNumber, coworkWordDiff, type CoworkEditedEmail,
 } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
+import { AnimatePresence, CwCount, cwSwap, cwVariants, m } from './motion';
 import { CwButton } from './ui';
 
 type Metrics = Extract<CoworkBlock, { type: 'metrics' }>;
@@ -42,6 +43,13 @@ function downloadCsv(table: Table) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** A figure that counts up when it first appears while you watch; at rest it reads exactly as written. */
+function FigureValue({ value, live }: { value: string; live: boolean }) {
+  const figure = live ? coworkFigureNumber(value) : null;
+  if (!figure) return <>{value}</>;
+  return <>{figure.before}<CwCount value={figure.number} format={figure.format} />{figure.after}</>;
+}
+
 /** Figures read at a glance: value first, then what it is and over what base. */
 export function MetricsBlock({ block, live = false }: { block: Metrics; live?: boolean }) {
   return <section aria-label={block.title} className={cn('rounded-2xl border border-cw-border bg-cw-elevated p-4 shadow-[var(--cw-shadow-sm)]', live && 'cw-rise')}>
@@ -52,16 +60,55 @@ export function MetricsBlock({ block, live = false }: { block: Metrics; live?: b
     <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {block.items.map(item => <div key={`${item.label}-${item.value}`} className="flex flex-col rounded-xl bg-cw-panel px-3 py-2.5">
         <dt className="order-2 text-[12.5px] font-medium text-cw-muted">{item.label}</dt>
-        <dd className="order-1 text-[22px] font-semibold leading-7 tracking-tight text-cw-text tabular-nums">{item.value}</dd>
+        <dd className="order-1 text-[22px] font-semibold leading-7 tracking-tight text-cw-text tabular-nums"><FigureValue value={item.value} live={live} /></dd>
         {item.detail && <dd className="order-3 mt-0.5 text-[12px] leading-4 text-cw-faint">{item.detail}</dd>}
       </div>)}
     </dl>
   </section>;
 }
 
-function CardShell({ artifact, active, onOpen, children, actions }: {
+const STATUS_TONE: Record<CoworkCardTone, { text: string; dot: string }> = {
+  neutral: { text: 'text-cw-muted', dot: 'bg-cw-border-strong' },
+  accent: { text: 'text-cw-accent', dot: 'bg-cw-accent' },
+  attention: { text: 'text-cw-warning', dot: 'bg-cw-warning' },
+  success: { text: 'text-cw-success', dot: 'bg-cw-success' },
+  danger: { text: 'text-cw-danger', dot: 'bg-cw-danger' },
+};
+const DRAFT_STATUS: CoworkCardStatus = { label: 'Borrador · no se ha enviado', tone: 'neutral' };
+const EDITED_STATUS: CoworkCardStatus = { label: 'Editado por ti · no se ha enviado', tone: 'accent' };
+/** Fired in this tab when the panel saves or clears an edit of a card (detail: its key). */
+const DRAFT_EDIT_EVENT = 'cowork:draft-edit';
+
+/** Whether this card's text was edited in the panel; the edit lives in this tab only. */
+function useEditedHere(key: string) {
+  const [edited, setEdited] = useState(false);
+  useEffect(() => {
+    const read = () => { try { setEdited(sessionStorage.getItem(key) !== null); } catch { setEdited(false); } };
+    read();
+    const changed = (event: Event) => { if ((event as CustomEvent<string>).detail === key) read(); };
+    window.addEventListener(DRAFT_EDIT_EVENT, changed);
+    return () => window.removeEventListener(DRAFT_EDIT_EVENT, changed);
+  }, [key]);
+  return edited;
+}
+
+/** Where the card stands, at the end of its actions: a draft nobody sent, your edit, or what a
+ * later turn did with it. A change of status swaps in place. */
+function CardStatusLine({ status }: { status: CoworkCardStatus }) {
+  const tone = STATUS_TONE[status.tone];
+  return <span className="ml-auto flex min-w-0 max-w-full items-center px-1.5">
+    <AnimatePresence initial={false} mode="wait">
+      <m.span key={status.label} {...cwVariants(cwSwap)} className={cn('flex min-w-0 items-center gap-1.5 text-[12px] font-medium', tone.text)}>
+        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', tone.dot)} aria-hidden="true" />
+        <span className="truncate">{status.label}</span>
+      </m.span>
+    </AnimatePresence>
+  </span>;
+}
+
+function CardShell({ artifact, active, onOpen, children, actions, status = null }: {
   artifact: BlockArtifact; active: boolean; onOpen: (artifact: CoworkArtifact, opener: HTMLElement) => void;
-  children: ReactNode; actions: ReactNode;
+  children: ReactNode; actions: ReactNode; status?: CoworkCardStatus | null;
 }) {
   return <section aria-label={artifact.title} className={cn('overflow-hidden rounded-2xl border bg-cw-elevated shadow-[var(--cw-shadow-sm)] transition-colors',
     active ? 'border-cw-accent' : 'border-cw-border')}>
@@ -78,24 +125,29 @@ function CardShell({ artifact, active, onOpen, children, actions }: {
       <ChevronRight className="h-4 w-4 shrink-0 text-cw-faint sm:hidden" aria-hidden="true" />
     </button>
     <div className="px-3.5 py-3">{children}</div>
-    <div className="flex flex-wrap items-center gap-1 border-t border-cw-border bg-cw-panel px-2.5 py-1.5">{actions}</div>
+    <div className="flex flex-wrap items-center gap-1 border-t border-cw-border bg-cw-panel px-2.5 py-1.5">{actions}{status && <CardStatusLine status={status} />}</div>
   </section>;
 }
 
-/** A result the person will copy, review or export, shown as a card in the chat. */
-export function BlockCard({ artifact, active, onOpen, live = false }: {
+/** A result the person will copy, review or export, shown as a card in the chat. Emails and
+ * sequences say where they stand: `status` is what a later turn did with them (see
+ * coworkCardStatuses); without one they are drafts nobody sent, or your edit of one. */
+export function BlockCard({ artifact, active, onOpen, live = false, status = null }: {
   artifact: BlockArtifact; active: boolean; onOpen: (artifact: CoworkArtifact, opener: HTMLElement) => void; live?: boolean;
+  status?: CoworkCardStatus | null;
 }) {
   const { block } = artifact;
+  const editedHere = useEditedHere(`cowork:draft:${artifact.id}`);
+  const draftStatus = status || (editedHere ? EDITED_STATUS : DRAFT_STATUS);
   const open = (event: MouseEvent<HTMLButtonElement>) => onOpen(artifact, event.currentTarget);
   const openButton = <CwButton size="xs" variant="ghost" onClick={open}><ChevronRight aria-hidden="true" />Abrir</CwButton>;
   return <div className={cn(live && 'cw-rise')}>
-    {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
+    {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus}
       actions={<><CopyButton text={coworkEmailText(block)} label="Copiar correo" />{openButton}</>}>
       <p className="text-[13.5px] font-semibold text-cw-text">{block.subject}</p>
       <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted">{block.body}</p>
     </CardShell>}
-    {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
+    {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus}
       actions={<><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia" />{openButton}</>}>
       <ol className="space-y-1.5">
         {block.steps.map((step, index) => <li key={`${step.day}-${index}`} className="flex items-center gap-2.5 text-[13.5px]">
@@ -109,13 +161,35 @@ export function BlockCard({ artifact, active, onOpen, live = false }: {
         <CwButton size="xs" variant="ghost" onClick={() => downloadCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>
         <CopyButton text={coworkTableTsv(block)} label="Copiar tabla" />{openButton}
       </>}>
-      <TableGrid block={block} limit={5} />
+      <TableGrid block={block} limit={5} live={live} />
     </CardShell>}
   </div>;
 }
 
-function TableGrid({ block, limit }: { block: Table; limit?: number }) {
+const YES = new Set(['sí', 'si', 'yes']);
+const NO = new Set(['no']);
+/** Columns whose cells are all «Sí» or «No» (at least one): they read as icons. */
+function yesNoColumns(block: Table) {
+  return block.columns.map((_, column) => {
+    const cells = block.rows.map(row => (row[column] || '').trim().toLocaleLowerCase('es')).filter(Boolean);
+    return cells.length > 0 && cells.every(cell => YES.has(cell) || NO.has(cell));
+  });
+}
+
+function Cell({ value, yesNo }: { value: string; yesNo: boolean }) {
+  if (!value) return <span className="text-cw-faint">—</span>;
+  if (!yesNo) return <>{value}</>;
+  const yes = YES.has(value.trim().toLocaleLowerCase('es'));
+  return <span className={cn('inline-flex items-center', yes ? 'text-cw-success' : 'text-cw-faint')}>
+    {yes ? <Check className="h-4 w-4" aria-hidden="true" /> : <Minus className="h-4 w-4" aria-hidden="true" />}
+    <span className="sr-only">{yes ? 'Sí' : 'No'}</span>
+  </span>;
+}
+
+/** The rows of a table; in a card that appears while you watch, they come in one after another. */
+function TableGrid({ block, limit, live = false }: { block: Table; limit?: number; live?: boolean }) {
   const rows = limit ? block.rows.slice(0, limit) : block.rows;
+  const yesNo = useMemo(() => yesNoColumns(block), [block]);
   return <div className="cw-scroll -mx-1 overflow-x-auto px-1">
     <table className="w-full min-w-[28rem] border-collapse text-left text-[13px]">
       <caption className="sr-only">{block.title}</caption>
@@ -123,8 +197,9 @@ function TableGrid({ block, limit }: { block: Table; limit?: number }) {
         <tr>{block.columns.map(column => <th key={column} scope="col" className="whitespace-nowrap border-b border-cw-border px-2 py-1.5 text-[12px] font-semibold text-cw-muted">{column}</th>)}</tr>
       </thead>
       <tbody>
-        {rows.map((row, index) => <tr key={index} className="border-b border-cw-border last:border-0">
-          {row.map((cell, column) => <td key={column} className={cn('px-2 py-1.5 align-top text-cw-text', column === 0 && 'font-medium')}>{cell || <span className="text-cw-faint">—</span>}</td>)}
+        {rows.map((row, index) => <tr key={index} className={cn('border-b border-cw-border last:border-0', live && 'cw-rise')}
+          style={live ? { animationDelay: `${120 + index * 45}ms` } : undefined}>
+          {row.map((cell, column) => <td key={column} className={cn('px-2 py-1.5 align-top text-cw-text', column === 0 && 'font-medium')}><Cell value={cell} yesNo={yesNo[column]} /></td>)}
         </tr>)}
       </tbody>
     </table>
@@ -132,7 +207,15 @@ function TableGrid({ block, limit }: { block: Table; limit?: number }) {
   </div>;
 }
 
-function EmailBody({ subject, body, to }: { subject: string; body: string; to?: string[] | null }) {
+/** Text with the words an edit changed marked for a moment (.cw-changed fades them out). */
+function Marked({ text, before }: { text: string; before: string | null }) {
+  const parts = useMemo(() => before === null || before === text ? null : coworkWordDiff(before, text), [before, text]);
+  if (!parts) return <>{text}</>;
+  return <>{parts.map((part, index) => part.changed ? <mark key={index} className="cw-changed">{part.text}</mark> : <Fragment key={index}>{part.text}</Fragment>)}</>;
+}
+
+/** One email to read and copy. `before`: the original, whose changed words get marked for a moment. */
+function EmailBody({ subject, body, to, before = null }: { subject: string; body: string; to?: string[] | null; before?: { subject: string; body: string } | null }) {
   return <div className="space-y-4">
     {to && to.length > 0 && <div>
       <p className="mb-1.5 text-[12px] font-medium text-cw-muted">Para</p>
@@ -143,14 +226,14 @@ function EmailBody({ subject, body, to }: { subject: string; body: string; to?: 
         <p className="text-[12px] font-medium text-cw-muted">Asunto</p>
         <CopyButton text={subject} label="Copiar asunto" />
       </div>
-      <p className="text-[15px] font-semibold text-cw-text">{subject}</p>
+      <p className="text-[15px] font-semibold text-cw-text"><Marked text={subject} before={before?.subject ?? null} /></p>
     </div>
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
         <p className="text-[12px] font-medium text-cw-muted">Cuerpo</p>
         <CopyButton text={body} label="Copiar cuerpo" />
       </div>
-      <p className="whitespace-pre-line rounded-xl border border-cw-border bg-cw-panel px-4 py-3.5 text-[14.5px] leading-[1.65] text-cw-text">{body}</p>
+      <p className="whitespace-pre-line rounded-xl border border-cw-border bg-cw-panel px-4 py-3.5 text-[14.5px] leading-[1.65] text-cw-text"><Marked text={body} before={before?.body ?? null} /></p>
     </div>
   </div>;
 }
@@ -175,6 +258,8 @@ function useSessionSteps(key: string, original: CoworkEditedEmail[]) {
       if (JSON.stringify(next) === JSON.stringify(original)) sessionStorage.removeItem(key);
       else sessionStorage.setItem(key, JSON.stringify(next));
     } catch { /* The edit still works for as long as the panel is open. */ }
+    // The card in the chat says «Editado por ti» while the edit is kept.
+    window.dispatchEvent(new CustomEvent(DRAFT_EDIT_EVENT, { detail: key }));
   };
   return [steps, save] as const;
 }
@@ -211,6 +296,13 @@ function DraftView({ block, draftKey, onSend, sendHint }: {
   const original = useMemo(() => JSON.parse(originalText) as CoworkEditedEmail[], [originalText]);
   const [steps, setSteps] = useSessionSteps(draftKey, original);
   const [editing, setEditing] = useState(false);
+  // Right after «Listo», the words that differ from the original are marked for a moment.
+  const [marking, setMarking] = useState(false);
+  useEffect(() => {
+    if (!marking) return;
+    const timer = setTimeout(() => setMarking(false), 3200);
+    return () => clearTimeout(timer);
+  }, [marking]);
   const edited = JSON.stringify(steps) !== JSON.stringify(original);
   const complete = steps.every(step => step.subject.trim() && step.body.trim());
   const text = block.type === 'email_draft' ? coworkEmailText(steps[0]) : coworkSequenceText({ ...block, steps: steps.map((step, index) => ({ ...step, day: step.day ?? index + 1 })) });
@@ -221,8 +313,8 @@ function DraftView({ block, draftKey, onSend, sendHint }: {
   return <div className="space-y-5">
     <div className="flex flex-wrap items-center gap-2">
       {editing
-        ? <CwButton key="done" size="sm" variant="primary" onClick={() => setEditing(false)} disabled={!complete}><Check aria-hidden="true" />Listo</CwButton>
-        : <CwButton key="edit" size="sm" variant="secondary" onClick={() => setEditing(true)}><Pencil aria-hidden="true" />Editar</CwButton>}
+        ? <CwButton key="done" size="sm" variant="primary" onClick={() => { setEditing(false); setMarking(edited); }} disabled={!complete}><Check aria-hidden="true" />Listo</CwButton>
+        : <CwButton key="edit" size="sm" variant="secondary" onClick={() => { setEditing(true); setMarking(false); }}><Pencil aria-hidden="true" />Editar</CwButton>}
       {!editing && <CopyButton text={text} label={sequence ? 'Copiar secuencia completa' : 'Copiar correo completo'} size="sm" variant="secondary" />}
       {edited && <CwButton size="sm" variant="ghost" onClick={() => setSteps(original)}><RotateCcw aria-hidden="true" />Volver al original</CwButton>}
       {edited && <span className="rounded-full bg-cw-accent-soft px-2.5 py-0.5 text-[12px] font-medium text-cw-accent">Editado por ti</span>}
@@ -241,11 +333,13 @@ function DraftView({ block, draftKey, onSend, sendHint }: {
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent-soft text-[12px] font-semibold text-cw-accent">{index + 1}</span>
               Día {day}{previous === null ? ' · primer envío' : ` · ${day - previous} ${day - previous === 1 ? 'día' : 'días'} después`}
             </p>
-            {editing ? <CoworkEmailFields step={step} index={index} total={steps.length} idPrefix="cw-draft" onChange={next => update(index, next)} /> : <EmailBody subject={step.subject} body={step.body} />}
+            {editing ? <CoworkEmailFields step={step} index={index} total={steps.length} idPrefix="cw-draft" onChange={next => update(index, next)} />
+              : <EmailBody subject={step.subject} body={step.body} before={marking ? original[index] : null} />}
           </li>;
         })}
       </ol>
-      : editing ? <CoworkEmailFields step={steps[0]} index={0} total={1} idPrefix="cw-draft" onChange={next => update(0, next)} /> : <EmailBody subject={steps[0].subject} body={steps[0].body} />}
+      : editing ? <CoworkEmailFields step={steps[0]} index={0} total={1} idPrefix="cw-draft" onChange={next => update(0, next)} />
+        : <EmailBody subject={steps[0].subject} body={steps[0].body} before={marking ? original[0] : null} />}
     {!complete && <p role="alert" className="text-[12.5px] text-cw-danger">Cada correo necesita asunto y cuerpo.</p>}
     <section aria-label="Qué hago con esta versión" className="rounded-2xl border border-cw-border bg-cw-panel p-4">
       <p className="text-[13.5px] font-semibold text-cw-text">¿Qué hago con {edited ? 'tu versión' : sequence ? 'esta secuencia' : 'este correo'}?</p>

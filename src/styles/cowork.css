@@ -190,3 +190,38 @@
   .cw-shimmer { animation: none; color: var(--cw-muted); background: none; }
   .cw-breathe, .cw-orbit, .cw-rise, .cw-fade, .cw-slide-in { animation: none; }
 }
+
+/* The answer while it is being written: each new paragraph or list fades in, and a still
+   cursor marks where the text grows (the working indicator already loops; this does not).
+   While the answer is reviewed the cursor goes away. */
+.cw-live-answer .cw-prose > * { animation: cw-fade 0.18s ease-out both; }
+.cw-live-answer:not(.cw-live-reviewing) .cw-prose > :last-child:is(p, h3, h4, h5, h6)::after,
+.cw-live-answer:not(.cw-live-reviewing) .cw-prose > :last-child:is(ul, ol) > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background: var(--cw-accent);
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-live-answer .cw-prose > * { animation: none; }
+}
+
+/* Words an edit changed: marked right after «Listo», then plain text again. With less motion the
+   mark does not fade; it simply goes away with the rest (DraftView clears it after 3 s). */
+@keyframes cw-changed { from { background-color: var(--cw-accent-soft); } to { background-color: transparent; } }
+.cw-changed {
+  color: inherit;
+  background-color: var(--cw-accent-soft);
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  animation: cw-changed 2.4s ease-out 0.5s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-changed { animation: none; }
+}

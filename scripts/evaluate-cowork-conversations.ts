@@ -4,7 +4,10 @@
 // Explicit opt-in only. Never loads env files, touches the database or calls providers.
 //
 //   OPENAI_API_KEY=... COWORK_MODEL=gpt-6-luna \
-//   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-conversations.ts --live --max-calls=80 [--cases=a,b] [--repeat=2] [--output=file.json]
+//   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-conversations.ts --live --max-calls=80 [--cases=a,b] [--repeat=2] [--output=file.json] [--stream]
+//
+// --stream asks the model to stream, as the worker does with COWORK_STREAMING_ENABLED, and
+// reports how long each answer took to show its first words against its whole call.
 //
 // To compare prompts, run it on the previous commit and on this one with the same flags.
 import { writeFileSync } from 'node:fs';
@@ -12,6 +15,7 @@ import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
+import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { corpusInstructions, runCorpusCase, type CorpusOutcome } from './fixtures/cowork-conversation-runner';
@@ -32,6 +36,8 @@ async function main() {
   const maxCalls = Number(arg('max-calls'));
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 400) throw new Error('Explicit --max-calls=1..400 required');
 
+  const stream = process.argv.includes('--stream');
+  const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
   let calls = 0;
   const usage: unknown[] = [];
   const outcomes: Array<CorpusOutcome & { attempt: number; seconds: number; decisions: unknown[]; issues: string[] }> = [];
@@ -50,12 +56,21 @@ async function main() {
           parse: (value: unknown) => { raw = value; return coworkDecisionSchema.parse(value); },
         }) as typeof coworkDecisionSchema;
         let response: Awaited<ReturnType<typeof generateStructuredWithTelemetry<typeof coworkDecisionSchema>>>;
+        const callStarted = Date.now();
+        let firstTextMs: number | null = null;
+        let lastPeek = 0;
         try {
           response = await generateStructuredWithTelemetry({
             schema,
             systemPrompt: `${corpusInstructions.systemPrompt}\nspecialists.review está deshabilitado.`,
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
+            // First words of an answer as the page would get them: read at most every 50 ms.
+            ...(stream ? { onPartial: (text: string) => {
+              if (firstTextMs !== null || Date.now() - lastPeek < 50) return;
+              lastPeek = Date.now();
+              if (coworkLiveDraft(text)) firstTextMs = Date.now() - callStarted;
+            } } : {}),
           });
         } catch (error) {
           const issues = (error as { issues?: Array<{ path?: unknown[]; message?: string }> }).issues;
@@ -63,6 +78,7 @@ async function main() {
           throw error;
         }
         usage.push(coworkModelUsage(response.telemetry));
+        if (stream && response.data.action === 'answer') answerTimings.push({ firstTextMs, totalMs: Date.now() - callStarted });
         decisions.push({ action: response.data.action, reads: response.data.reads ?? null, query: response.data.query,
           leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
           outline: response.data.outline ?? null });
@@ -92,6 +108,14 @@ async function main() {
     // The plan belongs to the first consulting decision: any later one is wasted output.
     laterOutlines: outcomes.reduce((sum, outcome) => sum + outcome.decisions.slice(1)
       .filter(decision => Array.isArray((decision as { outline?: unknown }).outline)).length, 0),
+    // With --stream: when an answering call showed its first words, against its whole length (ms).
+    ...(stream ? { answerTimings: (() => {
+      const pick = (values: number[], at: number) => values.length ? values.sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * at))] : null;
+      const first = answerTimings.flatMap(item => item.firstTextMs === null ? [] : [item.firstTextMs]);
+      const total = answerTimings.map(item => item.totalMs);
+      return { answers: answerTimings.length, withEarlyText: first.length, firstTextP50: pick([...first], 0.5), firstTextP90: pick([...first], 0.9),
+        totalP50: pick([...total], 0.5), totalP90: pick([...total], 0.9) };
+    })() } : {}),
     plannedReadsRun: (() => {
       const planned = outcomes.flatMap(outcome => (outcome.result.plan || []).filter(step => step.read).map(step => outcome.result.actions.includes(String(step.read))));
       return `${planned.filter(Boolean).length}/${planned.length}`;

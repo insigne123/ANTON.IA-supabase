@@ -4,8 +4,10 @@ import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
-  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents,
+  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
+  coworkCardStatuses, coworkTurnFindings,
 } from './presentation';
+import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
 
 const at = (minute: number) => `2026-09-24T12:${String(minute).padStart(2, '0')}:00Z`;
@@ -150,9 +152,29 @@ test('the plan of a turn checks off each step as its read completes, and the las
   // The line above the plan never says it is still understanding the request.
   assert.equal(coworkLiveActivity({ status: 'running' }, [plan]), 'Plan listo. Empezando…');
   assert.equal(coworkLiveActivity({ status: 'running' }, []), 'Entendiendo tu solicitud…');
+  // Each done step says what its read found; the others found nothing yet.
+  const counted = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { items: [{}, {}, {}, {}] } });
+  assert.deepEqual(coworkPlanProgress({ status: 'running' }, [plan, counted])?.map(step => step.found), [{ count: 4, label: 'contactos' }, null, null]);
   // The side panel names the step in progress.
   assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Veo qué correos ya enviaste');
   assert.equal(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).find(step => step.key === 'work')?.detail, '2 consultas');
+});
+
+test('what a read found reads as a count and what it counts, or a short phrase', () => {
+  const found = (action: string, result: unknown) => coworkReadFinding({ action, result });
+  assert.deepEqual(found('leads.search', { items: [{}] }), { count: 1, label: 'contacto' });
+  assert.deepEqual(found('contacted.search', { items: [] }), { count: null, label: 'sin envíos' });
+  assert.deepEqual(found('campaigns.list', { campaigns: [{}, {}] }), { count: 2, label: 'campañas' });
+  assert.deepEqual(found('crm.get_lead', { records: [{}, {}, {}] }), { count: 3, label: 'resultados' });
+  assert.deepEqual(found('files.read', { found: true, kind: 'table', totalRows: 8 }), { count: 8, label: 'filas' });
+  assert.deepEqual(found('files.read', { found: false }), { count: null, label: 'no lo encontró' });
+  assert.deepEqual(found('files.read', { found: true, kind: 'unreadable' }), { count: null, label: 'no se pudo leer' });
+  assert.deepEqual(found('research.get_existing', { availability: 'available', research: { sources: [{}, {}] } }), { count: 2, label: 'fuentes' });
+  assert.deepEqual(found('research.get_existing', { availability: 'missing' }), { count: null, label: 'sin informe' });
+  // Figures without a list (metrics, quotas) have nothing to count.
+  assert.equal(found('metrics.overview', { sent: 12, replies: 1 }), null);
+  assert.equal(coworkFindingText({ count: 4, label: 'contactos' }), '4 contactos');
+  assert.equal(coworkFindingText({ count: null, label: 'sin envíos' }), 'sin envíos');
 });
 
 test('a stored plan is read only in the shape the worker writes', () => {
@@ -170,4 +192,63 @@ test('a stored plan is read only in the shape the worker writes', () => {
   assert.equal(coworkIsAssistantEvent({ action: 'assistant.note' }), true);
   assert.equal(coworkIsAssistantEvent({ action: 'leads.search' }), false);
   assert.equal(coworkIsAssistantEvent(null), false);
+});
+
+test('the final answer counts as adjusted only when a word shown changed or went away', () => {
+  const shown = 'Tus 3 contactos de RR. HH. tienen correo.';
+  assert.equal(coworkAnswerChanged(shown, shown), false);
+  // Spacing, case, punctuation and the closing question added at the end do not count.
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos de RR.HH. tienen  correo:\n\n¿Creo la campaña?'), false);
+  assert.equal(coworkAnswerChanged('TUS 3 contactos', 'tus 3 contactos'), false);
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos de RR. HH. tienen correo verificado.'), false);
+  // A changed or dropped word does.
+  assert.equal(coworkAnswerChanged(shown, 'Tus 4 contactos de RR. HH. tienen correo.'), true);
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos tienen correo.'), true);
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos'), true);
+});
+
+test('a turn names what its reads found, once each and in order', () => {
+  const events = [
+    event('tool.completed', { action: 'assistant.plan', input: '', result: { steps: [{ label: 'Reviso', read: 'leads.search' }] } }),
+    event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { items: [{ lead_id: 'a' }, { lead_id: 'b' }, { lead_id: 'c' }] } }),
+    event('tool.completed', { action: 'contacted.search', input: '', result: { items: [] } }),
+    event('tool.completed', { action: 'leads.search', input: 'Otra', result: { items: [{ lead_id: 'x' }, { lead_id: 'y' }, { lead_id: 'z' }] } }),
+    event('tool.completed', { action: 'metrics.overview', input: '', result: { sent: 4 } }),
+  ];
+  assert.deepEqual(coworkTurnFindings(events).map(coworkFindingText), ['3 contactos', 'sin envíos']);
+  assert.deepEqual(coworkTurnFindings([]), []);
+});
+
+test('each email or sequence card knows what happened to it later in the thread', () => {
+  const secuencia = { type: 'sequence' as const, title: 'Secuencia AXIS', steps: [{ day: 1, subject: 'Hola', body: 'Uno' }, { day: 4, subject: 'Sigo', body: 'Dos' }] };
+  const correo = { type: 'email_draft' as const, title: 'Correo a Felipe', to: ['Felipe'], subject: 'Hola', body: 'Hola Felipe' };
+  const answer = (blocks: unknown[]) => [event('run.completed', { reply: 'Listo.', document: null, blocks })];
+  const first = { run: run('a', 1), events: answer([secuencia, correo]) };
+  const campaign = coworkVersionMessage(secuencia, coworkDraftSteps(secuencia), 'campaign', false);
+  const request = event('approval.requested', { action: 'cowork.effect', kind: 'campaign_create', label: 'Crear campaña' });
+  // Nobody used them yet: no status, the card reads as a draft nobody sent.
+  assert.equal(coworkCardStatuses([first]).size, 0);
+  // Asked for a campaign: preparing, then waiting for approval, then created.
+  assert.deepEqual(coworkCardStatuses([first, { run: run('b', 2, { message: campaign, status: 'running' }), events: [] }]).get('a:block:0'),
+    { label: 'Preparando la campaña…', tone: 'accent' });
+  assert.deepEqual(coworkCardStatuses([first, { run: run('b', 2, { message: campaign, status: 'waiting_approval' }), events: [request] }]).get('a:block:0'),
+    { label: 'Campaña propuesta · espera tu aprobación', tone: 'attention' });
+  const created = coworkCardStatuses([first, { run: run('b', 2, { message: campaign }), events: [request, event('effect.approved'), event('effect.started'), event('effect.completed')] }]);
+  assert.deepEqual(created.get('a:block:0'), { label: 'Campaña creada · pausada', tone: 'success' });
+  assert.equal(created.has('a:block:1'), false);
+  assert.deepEqual(coworkCardStatuses([first, { run: run('b', 2, { message: campaign }), events: [request, event('run.completed', { reply: 'Descartada.', document: null })] }]).get('a:block:0'),
+    { label: 'Campaña descartada · no se creó', tone: 'neutral' });
+  // A finished turn that proposed nothing leaves the card as it was.
+  assert.equal(coworkCardStatuses([first, { run: run('b', 2, { message: campaign }), events: answer([]) }]).size, 0);
+  // «Usar esta versión» keeps the text; an edited one says so.
+  const edited = coworkDraftSteps(correo).map(step => ({ ...step, body: 'Hola Felipe, corto.' }));
+  assert.deepEqual(coworkCardStatuses([first, { run: run('b', 2, { message: coworkVersionMessage(correo, edited, 'use', true) }), events: answer([]) }]).get('a:block:1'),
+    { label: 'Tu versión, elegida · no se ha enviado', tone: 'accent' });
+  // Two cards with the same title: the later one is the one used.
+  const again = { run: run('c', 3), events: answer([secuencia]) };
+  const statuses = coworkCardStatuses([first, again, { run: run('d', 4, { message: campaign, status: 'running' }), events: [] }]);
+  assert.equal(statuses.has('a:block:0'), false);
+  assert.equal(statuses.get('c:block:0')?.label, 'Preparando la campaña…');
+  // A typed message that only quotes a title is not a use of the card.
+  assert.equal(coworkCardStatuses([first, { run: run('b', 2, { message: 'Crea una campaña con «Secuencia AXIS»' }), events: [request] }]).size, 0);
 });
