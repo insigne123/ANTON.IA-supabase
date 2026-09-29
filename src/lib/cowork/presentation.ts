@@ -471,8 +471,8 @@ export function coworkTurnSuggestions(events: CoworkEvent[]): CoworkSuggestion[]
   return coworkStoredSuggestions(completed?.suggestions);
 }
 
-/** Cards that also open in the side panel; figures stay inline in the chat. */
-export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' }>;
+/** Cards that also open in the side panel; figures and charts stay inline in the chat. */
+export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' | 'chart' }>;
 
 export type CoworkArtifact =
   | { kind: 'block'; id: string; runId: string; title: string; block: CoworkPanelBlock; createdAt: string }
@@ -499,7 +499,7 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
   const completedAt = events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || run.created_at;
   const output = coworkTurnOutput(events);
   coworkTurnBlocks(events).forEach((block, index) => {
-    if (block.type === 'metrics') return;
+    if (block.type === 'metrics' || block.type === 'chart') return;
     artifacts.push({ kind: 'block', id: `${run.id}:block:${index}`, runId: run.id, title: block.title, block, createdAt: completedAt });
   });
   if (output?.document) {
