@@ -23,6 +23,12 @@ export function coworkDraftSteps(block: Draftable): CoworkEditedEmail[] {
     : block.steps.map(step => ({ subject: step.subject, body: step.body, day: step.day }));
 }
 
+/** The card with the emails the person has now (their edit of the subject and body of each step); everything else as it was. */
+export function coworkBlockWithSteps(block: Draftable, steps: CoworkEditedEmail[]): Draftable {
+  if (block.type === 'email_draft') return { ...block, subject: steps[0]?.subject ?? block.subject, body: steps[0]?.body ?? block.body };
+  return { ...block, steps: block.steps.map((step, index) => ({ ...step, subject: steps[index]?.subject ?? step.subject, body: steps[index]?.body ?? step.body })) };
+}
+
 const USE_LEAD = 'Usa exactamente esta versión';
 const CAMPAIGN_LEAD = 'Crea una campaña pausada con esta versión';
 
@@ -156,6 +162,17 @@ export function coworkChartCsv(block: Chart) {
     .map(row => row.map(csvCell).join(',')).join('\r\n');
 }
 
+type Metrics = Extract<CoworkBlock, { type: 'metrics' }>;
+
+/** The figures of a card as rows, one per figure and each with its period, so they read as a table. */
+export function coworkMetricsRows(block: Metrics) {
+  return [['Cifra', 'Valor', 'Detalle', 'Período'], ...block.items.map(item => [item.label, item.value, item.detail ?? '', block.period ?? ''])];
+}
+
+export function coworkMetricsCsv(block: Metrics) {
+  return '\uFEFF' + coworkMetricsRows(block).map(row => row.map(csvCell).join(',')).join('\r\n');
+}
+
 /** What a screen reader hears before the data table: the chart in one sentence. */
 export function coworkChartSummary(block: Chart) {
   const top = block.series.map(series => {
@@ -163,11 +180,6 @@ export function coworkChartSummary(block: Chart) {
     return `${series.name}: mayor en ${block.labels[at]} (${coworkChartValue(block, series.values[at])})`;
   }).join('; ');
   return `${block.title}${block.period ? `, ${block.period}` : ''}. ${block.labels.length} puntos y ${block.series.length} ${block.series.length === 1 ? 'serie' : 'series'}. ${top}.`;
-}
-
-export function coworkBlockFilename(title: string, extension: string) {
-  const base = title.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
-  return `${base || 'cowork'}.${extension}`;
 }
 
 function people(to: string[] | null) {
