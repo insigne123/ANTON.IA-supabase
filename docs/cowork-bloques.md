@@ -10,7 +10,7 @@ Lo que se copia, se revisa o se compara ya no llega enterrado en el texto: llega
 |---|---|---|---|
 | **Correo** | Un correo listo para enviar o mejorar | Asunto, primeras líneas y a quién va; «Copiar correo» | Para, asunto y cuerpo, cada uno con su botón de copiar |
 | **Secuencia** | 2 a 7 correos con su día de envío | Un paso por línea («Día 1», «Día 4»…); «Copiar secuencia» | Cada correo con su día y cuántos días después del anterior |
-| **Tabla** | 4 o más elementos comparables (a quién escribir, segmentos) | Las primeras 5 filas; «Descargar CSV» y «Copiar tabla» | La tabla completa |
+| **Tabla** | 4 o más elementos comparables (a quién escribir, segmentos) | Las primeras 5 filas; «Descargar CSV» (desde F3, «Descargar» en Excel o CSV: ver `cowork-crear-archivos.md`) y «Copiar tabla» | La tabla completa |
 | **Cifras** | Números con su período («¿cómo voy?») | Siempre abierta, sin panel: valor grande, qué es y sobre cuántos | — |
 
 - El texto de la respuesta presenta las tarjetas en 1 a 3 frases, sin repetirlas.

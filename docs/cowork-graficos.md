@@ -10,7 +10,7 @@ Tercer PR de la Ola G del plan 2 de Cowork (punto G3). Cuando Cowork responde co
   - cómo le fue a una campaña (`campaigns.batch_report`): enviados, pendientes, fallidos y por confirmar.
 - **Se entiende sin explicación:** título y período arriba, leyenda con la serie de cada color, el valor sobre cada barra y el nombre debajo. Los colores son los de la app (el acento y dos grises que conservan su contraste sobre la tarjeta), en claro y oscuro.
 - **Se ve aparecer:** las barras crecen desde la base, una tras otra, y los números cuentan hacia arriba, solo la primera vez que el gráfico aparece mientras miras. Un turno guardado, o con «reducir movimiento», ya trae todo dibujado.
-- **Se puede llevar:** «Copiar datos» (pega como tabla en una hoja de cálculo) y «Descargar CSV».
+- **Se puede llevar:** «Copiar datos» (pega como tabla en una hoja de cálculo) y «Descargar CSV» (desde F3, «Descargar» ofrece Excel o CSV: ver `cowork-crear-archivos.md`).
 - **Sin gráfico si no hay nada que mostrar:** sin envíos, o si la consulta no trajo todas las cifras, la respuesta sale solo con su tarjeta de cifras.
 - **Accesible:** el dibujo se oculta a los lectores de pantalla, que reciben una frase («Correos enviados y lo que volvió, Últimos 7 y 30 días. 4 puntos y 2 series. Últimos 7 días: mayor en Enviados (40)…») y la tabla de valores.
 
