@@ -30,7 +30,7 @@ test('an Excel reads as a table: the first sheet with data, its columns, its row
   assert.equal(preview.capped, undefined);
 });
 
-test('another sheet is asked for by its name, in any case or by its start, and a wrong name keeps the first', async () => {
+test('another sheet is asked for by its name or its start; an unknown sheet does not silently open the first', async () => {
   const bytes = makeXlsx({ Prospectos: prospects, Descartados: [['Nombre', 'Motivo'], ['Ana', 'Sin correo'], ['Luis', 'Ya cliente']] });
   const sheetOf = async (asked: string) => {
     const result = await coworkBinaryPreview('prospectos.xlsx', bytes, { sheet: asked });
@@ -40,7 +40,7 @@ test('another sheet is asked for by its name, in any case or by its start, and a
   assert.equal(byName?.sheet, 'Descartados');
   assert.deepEqual(byName?.rows, [['Ana', 'Sin correo'], ['Luis', 'Ya cliente']]);
   assert.equal((await sheetOf('desc'))?.sheet, 'Descartados');
-  assert.equal((await sheetOf('Hoja inexistente'))?.sheet, 'Prospectos');
+  assert.deepEqual(await coworkBinaryPreview('prospectos.xlsx', bytes, { sheet: 'Hoja inexistente' }), { unreadable: 'sheet' });
 });
 
 test('a wide or long sheet keeps to the limits of a CSV, and formulas give their value, never run', async () => {

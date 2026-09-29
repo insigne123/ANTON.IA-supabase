@@ -18,6 +18,7 @@ export const COWORK_FILE_UNREADABLE = {
   xls: 'Un Excel .xls antiguo no se lee: guárdalo como .xlsx (o exporta la hoja a CSV) y súbelo de nuevo.',
   /** A PDF that is only images (a scan): there is no text to read. */
   scan: 'Este PDF no trae texto (parece un escaneo): pide el contenido pegado en el chat, o un PDF con texto.',
+  sheet: 'No encontré esa hoja en el Excel. Abre el archivo sin «#Hoja» para ver las hojas disponibles y consulta la correcta.',
   /** A file that is not what its extension says, is protected, or cannot be read as a whole. */
   damaged: 'No se pudo abrir este archivo: puede estar dañado o protegido con clave. Pide subirlo de nuevo, o el contenido en CSV o texto.',
   /** A file that opens into far more than can be read here (a huge Excel or Word). */

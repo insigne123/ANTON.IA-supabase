@@ -32,12 +32,12 @@ export const COWORK_BINARY_LIMITS = {
 const damaged = { unreadable: 'damaged' } as const;
 const large = { unreadable: 'large' } as const;
 
-/** The sheet asked for by name (any case, or the start of its name), else the first with something in it. */
+/** The sheet asked for by name (any case, or the start of its name); without a request, the first with data. */
 function pickSheet(names: string[], rowsOf: (name: string) => number, asked: string) {
   const wanted = asked.trim().toLocaleLowerCase('es');
   const exact = wanted ? names.find(name => name.toLocaleLowerCase('es') === wanted) : undefined;
   const start = wanted && !exact ? names.find(name => name.toLocaleLowerCase('es').startsWith(wanted)) : undefined;
-  return exact ?? start ?? names.find(name => rowsOf(name) > 0) ?? names[0];
+  return wanted ? exact ?? start : names.find(name => rowsOf(name) > 0) ?? names[0];
 }
 
 /**
@@ -93,6 +93,7 @@ async function excelPreview(bytes: Uint8Array, sheetAsked: string, cells: number
     return ref ? XLSX.utils.decode_range(ref).e.r : 0;
   };
   const chosen = pickSheet(names, dataRows, sheetAsked);
+  if (!chosen) return { unreadable: 'sheet' };
   showCells(XLSX, book.Sheets[chosen]);
   const rows = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[chosen], { header: 1, raw: false, blankrows: false, defval: '' })
     .filter(values => Array.isArray(values) && !coworkBlankRow(values));
