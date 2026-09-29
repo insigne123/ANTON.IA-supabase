@@ -69,16 +69,18 @@ function Finding({ finding, live }: { finding: CoworkReadFinding; live: boolean 
 
 const AGENT_ICONS = { writer: PenLine, reviewer: SearchCheck } as const;
 
-/** Where an agent stands: working, done, or done with something left to look at. It swaps in place;
- * it never loops (the plan's marker and the headline already say the turn is working). */
+/** Where an agent stands: working, done, done with something left to look at, or given up (the
+ * coordinator took over). It swaps in place; it never loops (the plan's marker and the headline
+ * already say the turn is working). */
 function AgentMarker({ row, live }: { row: CoworkAgentRow; live: boolean }) {
-  const state = row.state === 'working' ? 'working' : row.outcome === 'pending' ? 'pending' : 'done';
+  const state = row.state === 'working' ? 'working' : row.outcome === 'pending' ? 'pending' : row.outcome === 'skipped' ? 'skipped' : 'done';
   return <span className="relative block h-3.5 w-3.5" aria-hidden="true">
     <AnimatePresence initial={false}>
       <m.span key={state} className="absolute inset-0 flex items-center justify-center" {...cwVariants(cwPop, live)}>
         {state === 'working' ? <span className="block h-3.5 w-3.5 rounded-full border-[1.5px] border-cw-accent" />
           : state === 'pending' ? <TriangleAlert className="h-3.5 w-3.5 text-cw-warning" />
-            : <DoneMark live={live} size={14} />}
+            : state === 'skipped' ? <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-cw-border text-cw-faint"><Minus className="h-2.5 w-2.5" /></span>
+              : <DoneMark live={live} size={14} />}
       </m.span>
     </AnimatePresence>
   </span>;
@@ -211,8 +213,8 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
   const icons = [...new Set(steps.map(step => step.icon))].slice(0, 3);
   const reads = coworkReadEvents(events).length;
   const files = steps.length - reads;
-  // «Escribió 3 correos»: the Writer's last step says what it wrote.
-  const wrote = agents.find(row => row.agent === 'writer' && row.state === 'done')?.label || '';
+  // «Escribió 3 correos»: the Writer's last step says what it wrote (nothing when it gave up).
+  const wrote = agents.find(row => row.agent === 'writer' && row.state === 'done' && row.outcome !== 'skipped')?.label || '';
   const parts = [
     plan ? `Siguió un plan de ${plan.length} pasos` : '',
     reads ? `hizo ${reads} ${reads === 1 ? 'consulta' : 'consultas'}` : '',

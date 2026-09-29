@@ -53,7 +53,7 @@ Primer PR de la Ola G del plan 2 de Cowork (punto G1). Cuando un turno tiene que
 - **Lo que no cambia:**
   - los mensajes de LinkedIn siguen con `linkedin.message`;
   - «Usa exactamente esta versión…» nunca pasa por la Redactora: si el coordinador lo intentara, el bucle se lo devuelve, igual que las propuestas.
-- **Si la Redactora falla**, el coordinador recibe el motivo y escribe los correos él mismo, como antes. Por eso la Redactora solo está disponible mientras quede una decisión de reserva (`writerAvailable`). Si igual falla en la última decisión, el turno no falla: dice que no alcanzó a escribir los correos y ofrece «Sí, escríbelos», que repite el pedido.
+- **Si la Redactora falla**, su fila se cierra con «No alcanzó a escribir» (con una raya, sin check), y el coordinador recibe el motivo y escribe los correos él mismo, como antes. Por eso la Redactora solo está disponible mientras quede una decisión de reserva (`writerAvailable`). Si igual falla en la última decisión, el turno no falla: dice que no alcanzó a escribir los correos y ofrece «Sí, escríbelos», que repite el pedido.
 
 ### Tiempo y presupuesto
 

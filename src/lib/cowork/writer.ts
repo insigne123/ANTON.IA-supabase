@@ -189,9 +189,16 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   const hasTime = () => input.canReview?.() ?? true;
   await input.step({ agent: 'writer', state: 'working', label: `Escribiendo ${what}` });
   const systemPrompt = COWORK_WRITER_RULES.join('\n');
-  const first = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt, stream: true,
-    prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations }) });
-  if (!coworkWriterBlocks(first).length) throw new Error('Writer returned no email');
+  let first: CoworkWriterOutput;
+  try {
+    first = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt, stream: true,
+      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations }) });
+    if (!coworkWriterBlocks(first).length) throw new Error('Writer returned no email');
+  } catch (error) {
+    // The row never stays «writing» after the Writer gave up: the coordinator takes over and says so.
+    await input.step({ agent: 'writer', state: 'done', label: 'No alcanzó a escribir', outcome: 'skipped', changes: [] }).catch(() => {});
+    throw error;
+  }
   await input.step({ agent: 'writer', state: 'done', label: `Escribió ${what}` });
 
   const context = coworkWriterContext(input.userContext, input.observations);

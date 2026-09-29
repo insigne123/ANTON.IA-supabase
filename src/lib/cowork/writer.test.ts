@@ -130,9 +130,13 @@ test('a correction that breaks more than it fixes is not kept', async () => {
   assert.deepEqual(h.steps.at(-1)?.changes, ['«Secuencia AXIS», correo 1: Ofrece algo «gratis» sin una oferta de prueba aprobada']);
 });
 
-test('a Writer answer without an email is refused', async () => {
+test('a Writer answer without an email is refused, and a Writer that gives up closes its row', async () => {
   const h = harness([{ ...output([signed]), blocks: [{ type: 'table', title: 'x', columns: ['a'], rows: [['b']] }] }]);
   await assert.rejects(h.run(), /Writer returned no email/);
+  assert.deepEqual(h.steps.at(-1), { agent: 'writer', state: 'done', label: 'No alcanzó a escribir', outcome: 'skipped', changes: [] });
+  const failed = harness([new Error('timeout')]);
+  await assert.rejects(failed.run(), /timeout/);
+  assert.deepEqual(failed.steps.map(step => `${step.agent}:${step.state}:${step.label}`), ['writer:working:Escribiendo 3 correos', 'writer:done:No alcanzó a escribir']);
 });
 
 test('the Writer gets what the coordinator found, to tell the person along with the emails', () => {
