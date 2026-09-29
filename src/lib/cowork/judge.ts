@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { coworkBlocksText } from './blocks';
-import type { CoworkBlock, CoworkSuggestion } from './contracts';
+import { coworkChoices } from './answer-quality';
+import type { CoworkBlock, CoworkChoices, CoworkSuggestion } from './contracts';
 
 /**
  * LLM-as-judge for Cowork answers (plan 2.2). A model other than the one that
@@ -34,6 +35,7 @@ export const COWORK_JUDGE_INSTRUCTIONS = [
   '- friccion: 5 el usuario no tiene que hacer nada extra (no le pide datos que Cowork ya tiene o puede consultar, no lo obliga a pasos innecesarios, no le pregunta lo obvio); 3 una pregunta o paso evitable; 1 lo hace trabajar o esperar para nada. Pedir un dato que Cowork podía deducir o consultar, una decisión que podía tomar con un valor razonable y dejar editable, o detalles de algo que Cowork no puede hacer, es 2 o menos.',
   'Reglas del producto que Cowork debe respetar (no son fricción ni falta de utilidad): crear campañas, enviar correos, buscar prospectos nuevos con el proveedor, buscar el correo de un contacto (gasta un crédito), investigar, guardar contactos, ejecutar código y mensajes o invitaciones de LinkedIn siempre se proponen con una tarjeta de aprobación y no se ejecutan sin ella; las campañas solo van a contactos guardados con correo; Cowork no tiene calendario. Cowork sí entrega archivos de lo que muestra: cada tarjeta trae su botón «Descargar» (tabla, cifras y gráfico en Excel o CSV; correo y secuencia en Word o PDF; el documento del panel en Word, PDF o Markdown), así que ante «pásamelo a Excel» o «dámelo en Word» lo correcto es la tarjeta y una frase que diga cómo bajarla; proponer código para armar ese archivo, o decir que no puede hacer archivos, sí es fricción y una respuesta que no sirve. Un correo nuevo a contactos sale por una campaña: se crea pausada con una aprobación y se activa con otra; no hay envío directo de un texto escrito en el chat. Cowork no crea contactos a partir de un correo: solo guarda personas encontradas con el proveedor, y un correo que no está guardado lo importa el usuario. Cowork lee los archivos que subió el usuario si son CSV, JSON, Excel (.xlsx), PDF con texto, Word (.docx), Markdown o texto; un .xls antiguo, un PDF escaneado sin texto, un archivo protegido con clave o uno demasiado grande no se leen: lo correcto es decirlo y pedir el contenido pegado o en otro formato. Para cruces o cálculos sobre miles de filas, proponer código con su tarjeta de aprobación también es correcto. Un mensaje que empieza con «Usa exactamente esta versión» viene del botón «Usar esta versión» de una tarjeta de correo: pide fijar ese texto sin cambiarlo y no crear nada todavía (para eso está el botón «Crear campaña con esta versión»); ofrecer crear la campaña como siguiente paso es correcto. La tarjeta que aparece en tarjetaDeAprobacion es visible para el usuario con sus botones Aprobar y Descartar: evalúa si es la acción correcta y si la nota la explica. En cambio, ofrecer como siguiente paso una consulta gratuita que Cowork podía hacer antes de responder sí es fricción.',
   'Los datos de turnos anteriores (datosDelHistorial) cuentan como datos consultados. Si un nombre aparece enmascarado en los datos (por ejemplo «Carlos Ah***a») y la respuesta lo completa como un hecho, es un dato sin respaldo.',
+  'Una pregunta final con opciones (opciones) se responde tocando una o varias, o escribiendo otra respuesta: pedir así un dato que solo el usuario sabe (a qué segmentos va una campaña, en qué industria buscar) no es fricción; pedir con opciones algo que Cowork podía decidir con un valor razonable o consultar sí lo es, igual que ofrecer como opciones un sí y un no.',
   'problemas: hasta 5 problemas concretos que el usuario notaría, en una frase cada uno; vacío si no hay. veredicto: buena si todas las dimensiones son 4 o más; mala si alguna es 2 o menos; si no, mejorable.',
 ].join('\n');
 
@@ -53,6 +55,8 @@ export type CoworkShownAnswer = {
   cards?: string | null;
   question?: string | null;
   quickReplies?: string[];
+  /** The options that answer the closing question (V5), when it came with them. */
+  choices?: CoworkChoices | null;
   proposal?: { kind: string; label: string; note: string | null; detail?: unknown } | null;
   search?: unknown;
   document?: { title: string; content: string } | null;
@@ -89,6 +93,7 @@ export function coworkJudgePrompt(input: {
       tarjetas: input.shown.cards ? clip(input.shown.cards, 5000) : null,
       preguntaFinal: input.shown.question ?? null,
       botones: input.shown.quickReplies || [],
+      ...(input.shown.choices ? { opciones: { variasALaVez: input.shown.choices.multiple, opciones: input.shown.choices.options, puedeEscribirOtra: true } } : {}),
       tarjetaDeAprobacion: card,
     },
   });
@@ -123,13 +128,16 @@ export function coworkJudgeAgreement(pairs: Array<{ human: Partial<Record<Cowork
 /** What the person would see of a coordinator answer, for the judge in the turn. */
 export function coworkShownFromAnswer(answer: {
   reply: string; document?: { title: string; content: string } | null; question?: string | null;
-  blocks?: CoworkBlock[] | null; suggestions?: CoworkSuggestion[] | null;
+  blocks?: CoworkBlock[] | null; suggestions?: CoworkSuggestion[] | null; choices?: unknown;
 }): CoworkShownAnswer {
+  // Options only answer a closing question, as the chat shows them; with them, no quick replies show.
+  const choices = answer.question ? coworkChoices(answer.choices) : null;
   return {
     reply: answer.reply,
     cards: answer.blocks?.length ? coworkBlocksText(answer.blocks) : null,
     question: answer.question ?? null,
-    quickReplies: (answer.suggestions || []).map(chip => chip.message),
+    quickReplies: choices ? [] : (answer.suggestions || []).map(chip => chip.message),
+    ...(choices ? { choices } : {}),
     document: answer.document ?? null,
   };
 }

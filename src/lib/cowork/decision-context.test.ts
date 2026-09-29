@@ -114,3 +114,11 @@ test('with the Writer on, the coordinator reads how to hand it the emails, and t
   assert.equal(early.writerAvailable, true);
   assert.equal(coworkDecisionContext(instructions, { ...base, mustAnswer: true, turnBudget: budget(0) }).writerAvailable, false);
 });
+
+test('a datum only the person knows is asked with options, never a yes or a no or what Cowork can decide', () => {
+  const { systemPrompt } = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  assert.match(systemPrompt, /Si para seguir falta un dato que solo el usuario sabe \(regla 5\), la pregunta es por ese dato, con sus opciones \(regla 9\)/);
+  assert.match(systemPrompt, /pon sus respuestas en answer\.choices \{multiple, options\}: 2 a 5 opciones/);
+  assert.match(systemPrompt, /Con choices, suggestions es null\. No uses choices para un sí o un no/);
+  assert.match(systemPrompt, /question \(regla 4\), suggestions y choices \(regla 9\)/);
+});

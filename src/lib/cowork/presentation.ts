@@ -1,7 +1,7 @@
 import { collectCoworkLeadRows } from './lead-export';
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
-import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
+import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
   coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent } from './contracts';
 
 /**
@@ -469,6 +469,12 @@ export function coworkTurnBlocks(events: CoworkEvent[]): CoworkBlock[] {
 export function coworkTurnSuggestions(events: CoworkEvent[]): CoworkSuggestion[] {
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
   return coworkStoredSuggestions(completed?.suggestions);
+}
+
+/** The options that answer the closing question of a turn (V5), or null. */
+export function coworkTurnChoices(events: CoworkEvent[]): CoworkChoices | null {
+  const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
+  return coworkStoredChoices(completed?.choices);
 }
 
 /** Cards that also open in the side panel; figures and charts stay inline in the chat. */

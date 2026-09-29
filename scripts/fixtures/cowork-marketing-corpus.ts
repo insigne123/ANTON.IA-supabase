@@ -104,6 +104,8 @@ const campaign = (result: CorpusTurnResult) => result.proposal?.campaign as { em
 const PLACEHOLDER = /\[(?:tu |su )?(?:nombre|empresa|cargo|firma|name)[^\]]*\]/i;
 const PEOPLE_EMAILS = ['mrojas@sodexo.cl', 'fmunoz@securitas.cl', 'cfuentes@adecco.cl'];
 const lastLine = (reply: string) => reply.split('\n').filter(line => line.trim()).pop() || '';
+/** Industries a buyer of AXIS may be in. */
+const INDUSTRY = /miner|retail|comercio|construc|seguridad|log[íi]stica|transporte|salud|cl[íi]nica|outsourcing|servicios|manufactur|industria|agr[íi]col|agro|energ|banca|financ|educaci|call center|contact center|alimentos|miner[íi]a/i;
 /** Drops sentences that deny something («No agregué prueba gratuita»): a denial is not an offer. */
 const withoutDenials = (content: string) => content.split(/(?<=[.!?\n])/).filter(sentence => !/\bno\b|\bni\b|\bsin\b(?! costo)/i.test(sentence)).join('');
 
@@ -206,6 +208,14 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'no reprocha el silencio ni anuncia cierre', test: r => !/no (?:me )?respondiste|última vez|ultimo mensaje|último mensaje|cierro (?:el|este) hilo/i.test(text(r)) },
       { label: 'firma con el nombre del perfil', test: r => r.proposal?.kind === 'linkedin_message' || /Nicol[aá]s/.test(text(r)) },
       { label: 'el seguimiento va como tarjeta', test: r => Boolean(r.proposal) || (r.blocks || []).some(block => block.type === 'email_draft') }] },
+  // A datum only the person knows, with few possible answers (V5): Cowork asks with options instead of guessing or making them type.
+  { id: 'opciones-industria', title: 'Prospectar en otra industria sin decir cuál', world,
+    request: 'quiero buscar prospectos nuevos en otra industria para axis, ayudame',
+    origin: 'La industria nueva la decide el usuario: Cowork no la adivina ni busca a ciegas; pregunta cuál, con opciones que encajan con lo que vende.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'pregunta con opciones', test: r => (r.choices?.options.length ?? 0) >= 2 },
+      { label: 'las opciones son industrias', test: r => (r.choices?.options || []).filter(option => INDUSTRY.test(option)).length >= 2 },
+      { label: 'no busca sin saber la industria', test: r => !r.search && !r.proposal }] },
 ];
 
 /** Contacts with an email who never received anything: Marcela already got one. */

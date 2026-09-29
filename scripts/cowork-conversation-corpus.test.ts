@@ -12,7 +12,7 @@ const parallel = (reads: Array<{ action: string; input: string }>) =>
   coworkDecisionSchema.parse({ action: 'reads.parallel', query: null, leadId: null, answer: null, reads });
 const answer = (reply: string, document: { title: string; content: string } | null = null,
   suggestions: Array<{ label: string; message: string }> = [{ label: 'Sí, adelante', message: 'Sí, adelante con lo que propones' }],
-  extra: { blocks?: unknown[]; question?: string } = {}) =>
+  extra: { blocks?: unknown[]; question?: string; choices?: { multiple: boolean; options: string[] } } = {}) =>
   coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document, suggestions, ...extra } });
 
 /** What a good turn looks like for each case, played through the real loop. */
@@ -135,6 +135,11 @@ Object.assign(IDEAL, {
         question: '¿Lo dejo listo para enviar desde tu correo?',
         blocks: [{ type: 'email_draft', title: 'Seguimiento a Marcela', to: ['Marcela Rojas'], subject: '¿Cómo lo resuelven hoy?',
           body: 'Hola Marcela,\nMe quedé pensando en cómo revisan hoy los antecedentes en Sodexo. Si te sirve, te muestro en 15 minutos cómo lo hace AXIS.\nNicolás' }] }),
+  // A datum only the person knows (V5): asked with options, no quick replies.
+  'opciones-industria': async context => context.observations.length === 0 ? read('app.context', '')
+    : answer('AXIS le sirve a quien contrata mucho personal. Elige la industria y preparo la búsqueda de gerentes de personas y de reclutamiento para que la apruebes.',
+      null, [], { question: '¿En qué industria buscamos?',
+        choices: { multiple: false, options: ['Minería', 'Construcción', 'Retail', 'Seguridad privada', 'Logística'] } }),
 } satisfies Record<string, CorpusDecider>);
 
 /** Home starters: what a good first turn looks like for each button. */

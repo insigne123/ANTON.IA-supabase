@@ -99,3 +99,19 @@ test('the judge in the turn keeps the rubric and is stricter with offering what 
   assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /No es fricción ofrecer una acción que necesita aprobación/);
   assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /Sé estricto con la fricción/);
 });
+
+test('the judge sees the options of a closing question as the chat shows them, and reads when asking with them is right', () => {
+  const choices = { multiple: true, options: ['RR. HH.', 'Retail'] };
+  const shown = coworkShownFromAnswer({ reply: 'Marca los segmentos.', question: '¿A qué segmentos va la campaña?', document: null,
+    suggestions: [{ label: 'Sí', message: 'Sí, adelante' }], choices });
+  assert.deepEqual(shown.choices, choices);
+  assert.deepEqual(shown.quickReplies, []);
+  const prompt = JSON.parse(coworkJudgePrompt({ request: 'arma una campaña', shown }));
+  assert.deepEqual(prompt.loQueVioElUsuario.opciones, { variasALaVez: true, opciones: ['RR. HH.', 'Retail'], puedeEscribirOtra: true });
+  // Without options, what the judge reads does not change.
+  const plain = JSON.parse(coworkJudgePrompt({ request: 'hola', shown: coworkShownFromAnswer({ reply: 'Hola.', question: '¿Seguimos?', document: null }) }));
+  assert.equal('opciones' in plain.loQueVioElUsuario, false);
+  // Options without a question are not shown, as in the chat.
+  assert.equal(coworkShownFromAnswer({ reply: 'Listo.', document: null, choices }).choices, undefined);
+  assert.match(COWORK_JUDGE_INSTRUCTIONS, /pregunta final con opciones .* no es fricción; pedir con opciones algo que Cowork podía decidir/);
+});

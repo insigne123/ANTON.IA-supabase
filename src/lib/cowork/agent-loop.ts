@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
-import { coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
+import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
@@ -452,7 +452,7 @@ function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
   ].join('');
 }
 
-/** The retry only has to fix the closing. Quick replies, a closing question or a
+/** The retry only has to fix the closing. Quick replies, options, a closing question or a
  * document the first answer had and the retry dropped come back, unless the
  * retry now carries the emails in the chat itself (then that document would
  * repeat them). */
@@ -466,6 +466,7 @@ function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
       : emailsInChat || coworkBlocks(first.blocks).some(hasFiller) ? null : first.blocks ?? null,
     question: closingQuestion(retry) ? retry.question ?? null : closingQuestion(first),
     suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
+    choices: coworkChoices(retry.choices) ? retry.choices : first.choices ?? null,
   };
 }
 

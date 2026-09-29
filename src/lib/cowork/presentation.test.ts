@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
-  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
+  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions, coworkTurnChoices,
   coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview,
@@ -105,6 +105,10 @@ test('quick replies come only from the finished answer and only in shapes that f
   // Turns saved before quick replies existed, and failed turns, have none.
   assert.deepEqual(coworkTurnSuggestions(completed({ reply: 'Listo.', document: null })), []);
   assert.deepEqual(coworkTurnSuggestions([{ sequence: 1, kind: 'run.failed', payload: { suggestions: [{ label: 'Sí', message: 'Sí' }] }, created_at: '2026-09-26T12:00:00Z' }]), []);
+  // The options of a closing question come from the finished answer too; turns saved before them have none.
+  assert.deepEqual(coworkTurnChoices(completed({ reply: '¿Qué segmentos?', document: null, question: '¿Qué segmentos?',
+    choices: { multiple: true, options: ['RR. HH.', 'Retail'] } })), { multiple: true, options: ['RR. HH.', 'Retail'] });
+  assert.equal(coworkTurnChoices(completed({ reply: 'Listo.', document: null })), null);
 });
 
 test('the closing question of a finished turn reads apart; older turns keep it in the reply', () => {

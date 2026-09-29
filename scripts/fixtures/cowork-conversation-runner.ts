@@ -103,6 +103,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
     result.suggestions = polished.suggestions || [];
     result.blocks = polished.blocks || [];
     result.question = polished.question;
+    result.choices = polished.choices;
   } catch (error) {
     result.failed = coworkFailureMessage(error);
   }
@@ -121,6 +122,7 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
     cards: result.blocks?.length ? coworkBlocksText(result.blocks) : null,
     question: result.question ?? null,
     quickReplies: (result.suggestions || []).map(chip => chip.message),
+    ...(result.choices ? { choices: result.choices } : {}),
     proposal: result.proposal ? { kind: result.proposal.kind, label: result.proposal.label, note: result.note,
       // The review card shows the campaign's name and objective above its recipients and emails.
       ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: campaign.messages } }
