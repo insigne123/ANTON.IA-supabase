@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -282,4 +282,30 @@ test('with the Writer on, a drafting turn hands the emails over and still passes
   assert.equal((outcome.result.writer?.brief as { kind: string }).kind, 'sequence');
   assert.deepEqual(outcome.result.writer?.steps.map(step => `${step.agent}:${step.state}:${step.label}`),
     ['writer:working:Escribiendo 3 correos', 'writer:done:Escribió 3 correos', 'reviewer:working:Aplicando 1 ajuste', 'reviewer:done:1 ajuste']);
+});
+
+test('with the judge on, an answer that offers a read it could do is fixed in the turn and passes its checks', async () => {
+  const entry = CORPUS.find(item => item.id === 'metricas-semana')!;
+  // The first answer asks before looking and leaves the figures out of the card; the judge asks for
+  // a fix, and the correction reads the campaigns and answers like the ideal turn.
+  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?' });
+  const decide: CorpusDecider = async context => {
+    const fixing = ((context.rejectedDecisions || []) as Array<{ reason: string }>).some(rejection => /una revisión de tu respuesta/.test(rejection.reason));
+    if (context.observations.length === 0) return parallel([{ action: 'metrics.rates', input: '' }]);
+    if (!fixing) return offered;
+    return context.observations.length === 1 ? read('campaigns.list', '') : IDEAL['metricas-semana'](context, { caseId: entry.id, turn: 3 });
+  };
+  const seen: string[] = [];
+  const judge: CorpusJudge = async shown => {
+    seen.push(shown.reply);
+    return { scores: { comprension: 5, veracidad: 5, utilidad: 3, claridad: 5, friccion: 2 }, veredicto: 'mala',
+      problemas: ['Pregunta si revisa las campañas, aunque podía consultarlas antes de responder.'] };
+  };
+  const outcome = await runCorpusCase(entry, decide, undefined, judge);
+  const failing = outcome.checks.filter(check => !check.passed).map(check => check.label);
+  assert.deepEqual(failing, [], `${failing.join(', ')} · ${outcome.result.failed || outcome.result.reply}`);
+  assert.deepEqual(seen, [offered.answer!.reply], 'the judge reads once');
+  assert.deepEqual(outcome.result.actions, ['metrics.rates', 'campaigns.list']);
+  assert.deepEqual({ ...outcome.result.judgeInTurn, scores: undefined, problemas: undefined },
+    { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true });
 });

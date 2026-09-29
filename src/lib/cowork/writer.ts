@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { coworkBlockSchema, coworkSuggestionSchema, type CoworkBlock } from './contracts';
+import { coworkBlockSchema, coworkSuggestionSchema, type CoworkAgentEvent, type CoworkBlock } from './contracts';
 
 /**
  * The Writer and the Reviewer (plan 2, G1). When a turn has to write emails,
@@ -154,8 +154,8 @@ export function coworkWriterBlocks(output: CoworkWriterOutput): CoworkBlock[] {
  * (skipped: no time left, or the Reviewer failed).
  */
 export type CoworkReviewOutcome = 'clean' | 'fixed' | 'pending' | 'skipped';
-/** What the Writer or the Reviewer is doing, for the page; the Reviewer's last step carries the outcome. */
-export type CoworkAgentStep = { agent: 'writer' | 'reviewer'; state: 'working' | 'done'; label: string; outcome?: CoworkReviewOutcome; changes?: string[] };
+/** What the Writer, the Reviewer or the judge is doing, for the page; a review's last step carries the outcome. */
+export type CoworkAgentStep = { agent: CoworkAgentEvent['agent']; state: 'working' | 'done'; label: string; outcome?: CoworkReviewOutcome; changes?: string[] };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 const shortList = (issues: CoworkDraftIssue[]) => [...new Set(issues.map(issue => issue.short.replace(/[.\s]+$/, '')))].slice(0, 4);

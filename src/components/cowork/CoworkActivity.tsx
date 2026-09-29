@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, LoaderCircle, Minus, PenLine, SearchCheck, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import {
-  coworkAgentLine, coworkAgentRows, coworkElapsed, coworkFindingText, coworkReadEvents, coworkTurnFindings, describeCoworkObservation, type CoworkAgentRow,
+  coworkAgentLine, coworkAgentRows, coworkAnswerReview, coworkElapsed, coworkFindingText, coworkReadEvents, coworkTurnFindings, describeCoworkObservation, type CoworkAgentRow,
   type CoworkIconKey, type CoworkPlanProgress, type CoworkPlanState, type CoworkReadFinding,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
@@ -67,7 +67,7 @@ function Finding({ finding, live }: { finding: CoworkReadFinding; live: boolean 
   </m.span>;
 }
 
-const AGENT_ICONS = { writer: PenLine, reviewer: SearchCheck } as const;
+const AGENT_ICONS = { writer: PenLine, reviewer: SearchCheck, judge: SearchCheck } as const;
 
 /** Where an agent stands: working, done, done with something left to look at, or given up (the
  * coordinator took over). It swaps in place; it never loops (the plan's marker and the headline
@@ -87,7 +87,8 @@ function AgentMarker({ row, live }: { row: CoworkAgentRow; live: boolean }) {
 }
 
 /** The Writer and the Reviewer: who is writing or reviewing now, and what the review changed
- * («Revisora · 1 ajuste» with «sin "gratis"»), or what is still to look at. */
+ * («Revisora · 1 ajuste» with «sin "gratis"»), or what is still to look at. The judge shows as
+ * the Reviewer of the answer («Revisora · Sin ajustes»). */
 function AgentRows({ rows, live, className }: { rows: CoworkAgentRow[]; live: boolean; className?: string }) {
   return <ul aria-label="Quién escribe y quién revisa" className={cn('space-y-1.5', className)}>
     {rows.map(row => {
@@ -215,11 +216,15 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
   const files = steps.length - reads;
   // «Escribió 3 correos»: the Writer's last step says what it wrote (nothing when it gave up).
   const wrote = agents.find(row => row.agent === 'writer' && row.state === 'done' && row.outcome !== 'skipped')?.label || '';
+  // «Revisó la respuesta»: the judge read it before it was shown (nothing when it could not). Whether
+  // it changed is told by the Reviewer's row and, with the live text, by the notice under the answer.
+  const reviewed = coworkAnswerReview(agents) !== null;
   const parts = [
     plan ? `Siguió un plan de ${plan.length} pasos` : '',
     reads ? `hizo ${reads} ${reads === 1 ? 'consulta' : 'consultas'}` : '',
     files ? `generó ${files} ${files === 1 ? 'archivo' : 'archivos'}` : '',
     wrote ? wrote.charAt(0).toLocaleLowerCase('es') + wrote.slice(1) : '',
+    reviewed ? 'revisó la respuesta' : '',
   ].filter(Boolean);
   const joined = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}` : parts[0] || '';
   const summary = active ? liveLabel : joined.charAt(0).toUpperCase() + joined.slice(1);

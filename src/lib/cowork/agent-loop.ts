@@ -542,6 +542,10 @@ export async function runCoworkReadLoop(input: {
   proposeEffect?: (proposal: CoworkEffectProposal) => Promise<void>;
   /** The Writer: writes the emails of a `draft.write` decision and returns the turn's answer. */
   write?: (brief: CoworkWriteBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
+  /** The judge (plan 2, G2): reads the coordinator's final answer before it is shown and returns
+   * what to fix, or null when it stands. At most once per turn, and only with a decision to spare;
+   * `canRead` says whether its correction may still make a read (a decision for it and one to answer). */
+  judge?: (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => Promise<string | null>;
 }) {
   const observations: CoworkObservation[] = [...(input.resumedObservations || [])];
   if (observations.length) {
@@ -589,6 +593,15 @@ export async function runCoworkReadLoop(input: {
   // The answer that got the closing correction. From then on the loop never ends
   // worse than that answer: no more reads, and a failed retry returns it.
   let closingFallback: CoworkAnswer | null = null;
+  // The answer the judge asked to fix: it stands if the correction fails or runs out of time. The
+  // correction may make one more read (typically the one the answer offered), then answers.
+  let judged = false;
+  let judgedFallback: CoworkAnswer | null = null;
+  let judgeReadsAt = 0;
+  let judgeCanRead = false;
+  const judgeReadDone = () => judgedFallback !== null && readsUsed > judgeReadsAt;
+  // That read may go past the ceiling: it is the one the answer offered instead of making it.
+  const readLimit = () => judgedFallback && judgeCanRead && !judgeReadDone() ? Math.max(ceiling.reads, judgeReadsAt + 1) : ceiling.reads;
   let campaignsListed = false;
   let filesListed = false;
   const keepsVersionOnly = coworkOnlyUsesVersion(input.message);
@@ -596,14 +609,15 @@ export async function runCoworkReadLoop(input: {
     input.signal.throwIfAborted();
     await input.authorize();
     const overdue = late();
-    const budget: CoworkTurnBudget = { reads: ceiling.reads, readsLeft: Math.max(0, ceiling.reads - readsUsed), decisionsLeft: last - turn };
+    const budget: CoworkTurnBudget = { reads: readLimit(), readsLeft: Math.max(0, readLimit() - readsUsed), decisionsLeft: last - turn };
     let decision: Decision;
     try {
       decision = coworkDecisionSchema.parse(await input.decide(observations,
-        turn === last || readsUsed >= ceiling.reads || closingFallback !== null || overdue, rejections.slice(), budget));
+        turn === last || readsUsed >= readLimit() || closingFallback !== null || overdue || judgeReadDone(), rejections.slice(), budget));
     } catch (error) {
       const reason = invalidDecisionReason(error);
-      if (closingFallback && !input.signal.aborted) return closingFallback;
+      const standing = closingFallback ?? judgedFallback;
+      if (standing && !input.signal.aborted) return standing;
       if (reason === null || turn === last || input.signal.aborted) throw error;
       rejections.push({ action: 'decision', reason });
       continue;
@@ -618,7 +632,7 @@ export async function runCoworkReadLoop(input: {
         }
         // On the last decision nobody is left to write it: the answer that got the closing
         // correction, or a line that offers to try again, instead of a failed turn.
-        const lastResort = () => closingFallback ?? writerFallback(input.message);
+        const lastResort = () => closingFallback ?? judgedFallback ?? writerFallback(input.message);
         if (!input.write) {
           if (turn === last) return lastResort();
           throw rejected('Writer unavailable', 'La redacción delegada no está disponible: entrega tú el texto en answer.blocks (regla 11).');
@@ -648,9 +662,28 @@ export async function runCoworkReadLoop(input: {
           rejections.push({ action: 'answer', reason: closing });
           continue;
         }
+        // The judge reads the answer once, with a decision to spare and time for it; its
+        // correction is the next decision, and the judged answer stands if that one fails. Keeping
+        // a version only confirms it: there is nothing for a correction to do.
+        if (input.judge && !judged && !judgedFallback && !keepsVersionOnly && turn < last && !late()) {
+          judged = true;
+          const canRead = turn + 2 <= last;
+          const fix = await input.judge(decision.answer, observations, { canRead }).catch(error => {
+            if (input.signal.aborted) throw error;
+            return null;
+          });
+          input.signal.throwIfAborted();
+          if (fix) {
+            judgedFallback = decision.answer;
+            judgeReadsAt = readsUsed;
+            judgeCanRead = canRead;
+            rejections.push({ action: 'answer', reason: fix });
+            continue;
+          }
+        }
         return decision.answer;
       }
-      if (decision.action === 'specialists.review' && closingFallback) return closingFallback;
+      if (decision.action === 'specialists.review' && (closingFallback ?? judgedFallback)) return (closingFallback ?? judgedFallback)!;
       if (decision.action === 'specialists.review') {
         if (reviewed || turn === last || !input.review || !decision.specialists || !observations.length) {
           throw rejected('Specialist review unavailable or budget exhausted', 'La revisión de especialistas no está disponible ahora: continúa con lecturas o responde.');
@@ -857,12 +890,15 @@ export async function runCoworkReadLoop(input: {
       }
       // Only reads remain below: after a closing correction the first answer stands instead.
       if (closingFallback) return closingFallback;
+      // After the judge's correction one read decision is allowed; after it, on the last decision
+      // or without time, the judged answer stands.
+      if (judgedFallback && (judgeReadDone() || turn === last || late())) return judgedFallback;
       if (turn === last) throw new Error('Cowork tool budget exhausted');
       // Checked again here: the decision itself may have run past the soft deadline.
       if (late()) throw rejected('Cowork turn time exhausted', 'Se acabó el tiempo de este turno: responde con lo observado y di en una línea qué queda para el siguiente paso.');
       await recordPlan(decision);
       if (decision.action === 'reads.plan') {
-        if (!decision.plan || readsUsed + decision.plan.length > ceiling.reads) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, ceiling.reads));
+        if (!decision.plan || readsUsed + decision.plan.length > readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
         readsUsed += decision.plan.length;
         const results = await executeCoworkReadPlan(decision.plan, {
           signal: input.signal, authorize: input.authorize,
@@ -879,7 +915,7 @@ export async function runCoworkReadLoop(input: {
         // A fixed read asked twice (for example, with two periods) is one read.
         const reads = decision.reads?.filter((task, index, all) =>
           all.findIndex(other => other.action === task.action && other.input === task.input) === index);
-        if (!reads || readsUsed + reads.length > ceiling.reads) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, ceiling.reads));
+        if (!reads || readsUsed + reads.length > readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
         readsUsed += reads.length;
         const results = await executeCoworkParallelReads(reads, {
           signal: input.signal, authorize: input.authorize,
@@ -904,7 +940,7 @@ export async function runCoworkReadLoop(input: {
         observations.push(observation);
         continue;
       }
-      if (readsUsed >= ceiling.reads) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, ceiling.reads));
+      if (readsUsed >= readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
       const value = COWORK_DOMAIN_FIXED_READS.some(action => action === decision.action) ? ''
         : decision.action === 'leads.search' || decision.action === 'crm.search' || decision.action === 'contacted.search' || decision.action === 'deliverability.check' || decision.action === 'compliance.obligation'
           || decision.action === 'files.read'
@@ -939,7 +975,8 @@ export async function runCoworkReadLoop(input: {
       observations.push(observation);
     } catch (error) {
       // Correctable refusals go back to the model; the last decision must stand on its own.
-      if (closingFallback && error instanceof CoworkDecisionRejected && !input.signal.aborted) return closingFallback;
+      const standing = closingFallback ?? judgedFallback;
+      if (standing && error instanceof CoworkDecisionRejected && !input.signal.aborted) return standing;
       if (!(error instanceof CoworkDecisionRejected) || turn === last || input.signal.aborted) throw error;
       rejections.push({ action: decision.action, reason: error.feedback });
     }

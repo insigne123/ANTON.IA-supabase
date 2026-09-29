@@ -3,13 +3,13 @@
 // the configured model for `scripts/evaluate-cowork-conversations.ts --live`.
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
-import { runCoworkReadLoop, type CoworkObservation, type CoworkRejection, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
+import { runCoworkReadLoop, type CoworkAnswer, type CoworkObservation, type CoworkRejection, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps } from '../../src/lib/cowork/contracts';
 import { coworkFailureMessage } from '../../src/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 import { coworkTurnCeiling } from '../../src/lib/cowork/turn-budget';
-import type { CoworkShownAnswer } from '../../src/lib/cowork/judge';
+import { coworkJudgeFix, type CoworkJudgement, type CoworkShownAnswer } from '../../src/lib/cowork/judge';
 import { coworkWriterBlocks, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput } from '../../src/lib/cowork/writer';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
@@ -20,6 +20,9 @@ export type CorpusDecider = (context: CorpusContext, meta: { caseId: string; tur
 /** The Writer for a corpus case: the real pipeline (writer.ts) with the configured models, or a scripted one. */
 export type CorpusWriter = (brief: CoworkWriteBrief, observations: CoworkObservation[], meta: { caseId: string; request: string; userContext: unknown;
   step: (step: CoworkAgentStep) => Promise<void> }) => Promise<CoworkWriterOutput>;
+/** The judge in the turn for a corpus case (G2): the real prompt with the configured model, or a scripted judgement. */
+export type CorpusJudge = (answer: CoworkAnswer, observations: CoworkObservation[], meta: { caseId: string; request: string; userContext: unknown;
+  history: Array<{ request: string; reply: string; observations?: unknown[] }> }) => Promise<CoworkJudgement | null>;
 
 /** The same ceiling the worker reads from the environment (defaults when unset). */
 export const corpusCeiling = coworkTurnCeiling();
@@ -45,7 +48,7 @@ export function scoreCorpusCase(entry: CorpusCase, result: CorpusTurnResult): Co
   return { id: entry.id, result, checks, passed: checks.every(check => check.passed) };
 }
 
-export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter): Promise<CorpusOutcome> {
+export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter, judge?: CorpusJudge): Promise<CorpusOutcome> {
   const turns = (entry.history || []).map((turn, index) => ({
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
     reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
@@ -57,6 +60,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   let decision = 0;
   const instructions = write ? corpusWriterInstructions : corpusInstructions;
   const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
+  let judgedAnswer: CoworkAnswer | null = null;
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
@@ -76,12 +80,23 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         const output = await write(brief, observations, { caseId: entry.id, request: entry.request, userContext, step: async step => { steps.push(step); } });
         return { ...output, document: null, blocks: coworkWriterBlocks(output) };
       } } : {}),
+      ...(judge ? { judge: async (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => {
+        const judgement = await judge(answer, observations, { caseId: entry.id, request: entry.request, userContext,
+          history: turns.map(turn => ({ request: turn.request, reply: turn.reply, observations: turn.observations })) });
+        if (!judgement) return null;
+        const fix = coworkJudgeFix(judgement, { canRead: turn.canRead, question: answer.question });
+        judgedAnswer = fix ? answer : null;
+        result.judgeInTurn = { veredicto: judgement.veredicto, scores: judgement.scores, problemas: judgement.problemas, canRead: turn.canRead,
+          asked: Boolean(fix), fixed: false };
+        return fix;
+      } } : {}),
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
         result.proposal = { kind: proposal.kind, label: proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}) };
       },
     });
+    if (result.judgeInTurn?.asked) result.judgeInTurn.fixed = answer !== judgedAnswer;
     const polished = polishCoworkAnswer(answer);
     result.reply = polished.reply;
     result.document = polished.document;

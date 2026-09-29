@@ -790,6 +790,98 @@ test('draft.write hands the emails to the Writer, whose answer ends the turn; wi
   assert.equal(rewritten, 0);
 });
 
+test('the judge reads the final answer once; its correction may read once, and the judged answer stands if it fails', async () => {
+  const ask = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres que revise a quiénes ya les escribiste?',
+      suggestions: [{ label: 'Sí, revísalo', message: 'Sí, revisa a quiénes ya les escribí' }] } };
+  const fixed = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados; a Marcela ya le escribiste, así que partiría por Felipe y Camila.', document: null,
+      question: '¿Les preparo el correo?', suggestions: [{ label: 'Sí, prepáralo', message: 'Sí, prepara el correo para Felipe y Camila' }] } };
+  const readSent = { action: 'contacted.search' as const, query: '', leadId: null, answer: null };
+  const base = { message: '¿A quién le escribo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {} };
+  const feedback = 'Antes de mostrarla, una revisión de tu respuesta encontró:\n- Pide permiso para una consulta que podía hacer.';
+
+  // A clean answer: judged once, shown as it is.
+  const judgedClean: string[] = [];
+  const clean = await runCoworkReadLoop({ ...base, execute: async () => ({}), decide: async () => fixed,
+    judge: async answer => { judgedClean.push(answer.reply); return null; } });
+  assert.equal(clean.reply, fixed.answer.reply);
+  assert.deepEqual(judgedClean, [fixed.answer.reply]);
+
+  // The judge asks for a fix: the correction reads what the answer offered, then answers with it.
+  const seen: Array<{ mustAnswer: boolean; reasons: string[] }> = [];
+  const executed: string[] = [];
+  let judgements = 0;
+  const corrected = await runCoworkReadLoop({ ...base,
+    execute: async action => { executed.push(action); return { items: [{ name: 'Marcela Rojas' }] }; },
+    decide: async (_observations, mustAnswer, rejections = []) => {
+      seen.push({ mustAnswer, reasons: rejections.map(rejection => rejection.reason) });
+      return seen.length === 1 ? ask : seen.length === 2 ? readSent : fixed;
+    },
+    judge: async () => { judgements++; return feedback; } });
+  assert.equal(corrected.reply, fixed.answer.reply);
+  assert.equal(judgements, 1, 'one judgement per turn');
+  assert.deepEqual(executed, ['contacted.search']);
+  assert.deepEqual(seen.map(item => item.mustAnswer), [false, false, true], 'after its one read the correction must answer');
+  assert.match(seen[1].reasons.join('|'), /una revisión de tu respuesta/);
+
+  // A correction that reads twice, or fails, leaves the judged answer.
+  let second = 0;
+  const readsTwice = await runCoworkReadLoop({ ...base, execute: async () => ({ items: [] }),
+    decide: async () => (second++ === 0 ? ask : readSent), judge: async () => feedback });
+  assert.equal(readsTwice.reply, ask.answer.reply);
+  let broken = 0;
+  const invalid = await runCoworkReadLoop({ ...base, execute: async () => ({}),
+    decide: async () => (broken++ === 0 ? ask : { action: 'answer', query: null, leadId: null, answer: null }) as never, judge: async () => feedback });
+  assert.equal(invalid.reply, ask.answer.reply);
+
+  // A judge that fails never blocks the answer.
+  const failing = await runCoworkReadLoop({ ...base, execute: async () => ({}), decide: async () => ask, judge: async () => { throw new Error('timeout'); } });
+  assert.equal(failing.reply, ask.answer.reply);
+
+  // The judge knows whether its correction may still read: a decision for the read and one to answer.
+  const reads = (count: number) => ({ action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
+    reads: Array.from({ length: count }, (_, index) => ({ action: 'leads.search' as const, input: `q${index}` })) });
+  const canRead: boolean[] = [];
+  let sequential = 0;
+  await runCoworkReadLoop({ ...base, execute: async () => ({ items: [] }),
+    decide: async () => [readSent, { ...readSent, query: 'x' }, ask][sequential++] ?? fixed,
+    judge: async (_answer, _observations, turn) => { canRead.push(turn.canRead); return null; } });
+  await runCoworkReadLoop({ ...base, execute: async () => ({ items: [] }), decide: async () => ask,
+    judge: async (_answer, _observations, turn) => { canRead.push(turn.canRead); return null; } });
+  assert.deepEqual(canRead, [false, true], 'an answer on the third decision leaves no read for the correction');
+  // After three reads the correction may still make the one read the answer offered, past the ceiling.
+  const afterThree: string[] = [];
+  let step = 0;
+  const past = await runCoworkReadLoop({ ...base, execute: async action => { afterThree.push(action); return { items: [] }; },
+    decide: async (_observations, mustAnswer) => [reads(3), ask, readSent][step++] ?? (mustAnswer ? fixed : readSent),
+    judge: async () => feedback });
+  assert.equal(past.reply, fixed.answer.reply);
+  assert.deepEqual(afterThree, ['leads.search', 'leads.search', 'leads.search', 'contacted.search']);
+
+  // No decision to spare, or an answer from the Writer: nothing is judged.
+  let judgedLast = 0;
+  const last = await runCoworkReadLoop({ ...base, execute: async () => ({}), ceiling: { decisions: 2, reads: 3, softDeadlineMs: 50_000 },
+    decide: async (_observations, _mustAnswer, rejections = []) => rejections.length ? ask : { action: 'answer', query: null, leadId: null, answer: { reply: 'Hola', document: null } } as never,
+    judge: async () => { judgedLast++; return feedback; } });
+  assert.equal(last.reply, ask.answer.reply);
+  assert.equal(judgedLast, 0, 'the closing correction used the last decision');
+  const brief = { kind: 'email' as const, recipients: null, objective: 'Una reunión', angle: null, tone: null, steps: null, notes: null, findings: null };
+  const written = { reply: 'Te dejo el correo.', document: null, question: '¿Lo dejo listo?', blocks: null, suggestions: null };
+  let judgedWriter = 0;
+  const viaWriter = await runCoworkReadLoop({ ...base, execute: async () => ({}),
+    decide: async () => coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief }),
+    write: async () => written, judge: async () => { judgedWriter++; return feedback; } });
+  assert.equal(viaWriter, written);
+  assert.equal(judgedWriter, 0);
+  // «Usa exactamente esta versión» only confirms the version: nothing to judge.
+  let judgedVersion = 0;
+  const version = await runCoworkReadLoop({ ...base, message: 'Usa exactamente esta versión editada de «Correo a Felipe», sin cambiar el texto.\n\nAsunto: AXIS\n\nHola,\nNicolás',
+    execute: async () => ({}), decide: async () => fixed, judge: async () => { judgedVersion++; return feedback; } });
+  assert.equal(version.reply, fixed.answer.reply);
+  assert.equal(judgedVersion, 0);
+});
+
 test('the coordinator sees what is left of the turn and may read past three when the ceiling is raised', async () => {
   const seen: Array<{ mustAnswer: boolean; budget?: CoworkTurnBudget }> = [];
   const batch = (inputs: string[]) => ({ action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
