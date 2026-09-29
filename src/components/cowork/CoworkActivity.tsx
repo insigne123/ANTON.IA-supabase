@@ -34,11 +34,11 @@ function stepsFrom(events: CoworkEvent[]): Step[] {
 const STATE_TEXT: Record<CoworkPlanState, string> = { done: 'hecho', current: 'en curso', pending: 'pendiente', skipped: 'no hizo falta' };
 
 /** The check of a finished step draws itself when it finishes while you watch. */
-function DoneMark({ live }: { live: boolean }) {
+export function DoneMark({ live, size = 18 }: { live: boolean; size?: number }) {
   const reduce = useReducedMotion();
   const draw = live && !reduce;
-  return <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-cw-accent text-cw-on-accent">
-    <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" aria-hidden="true">
+  return <span className="flex items-center justify-center rounded-full bg-cw-accent text-cw-on-accent" style={{ width: size, height: size }}>
+    <svg viewBox="0 0 12 12" style={{ width: size * 0.66, height: size * 0.66 }} fill="none" aria-hidden="true">
       <m.path d="M2.6 6.3l2.3 2.3 4.6-4.8" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"
         initial={draw ? { pathLength: 0 } : false} animate={{ pathLength: 1 }} transition={{ duration: 0.26, ease: CW_EASE, delay: 0.08 }} />
     </svg>

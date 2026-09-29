@@ -261,6 +261,76 @@ export function coworkProposalView(run: Pick<CoworkRun, 'status'>, events: Cowor
   return { type: 'effect', payload, state, icon: copy.icon, title: copy.title, label: String(payload.label || copy.title) };
 }
 
+export type CoworkOutcome = { happens: string; not: string };
+
+/** What approving does, and what it does not, in one sentence each. */
+const OUTCOMES: Record<string, CoworkOutcome> = {
+  save_contact: { happens: 'Se guarda el contacto en tus contactos.', not: 'No se le escribe ni se gasta crédito.' },
+  start_research: { happens: 'Se investiga el contacto con tu cuota.', not: 'No se le escribe.' },
+  enrich_contact: { happens: 'Se busca su correo en el proveedor (1 crédito).', not: 'No se le escribe ni se inventan datos.' },
+  request_draft: { happens: 'Se prepara un borrador en segundo plano.', not: 'No se envía nada.' },
+  send_email: { happens: 'Se envía este correo, tal cual, desde tu cuenta.', not: 'No se envía a nadie más ni se cambia el texto.' },
+  campaign_create: { happens: 'Se crea la campaña con estos correos, pausada.', not: 'No se envía nada: activarla pide otra aprobación.' },
+  campaign_activate: { happens: 'Se activa la campaña y empieza a enviar según su calendario.', not: 'No cambian los correos ni los destinatarios.' },
+  campaign_pause: { happens: 'Se pausa la campaña.', not: 'Lo que ya se envió no se revierte.' },
+  code_execute: { happens: 'Se ejecuta este código en un entorno aislado.', not: 'No toca tus contactos ni envía nada.' },
+  profile_update: { happens: 'Se actualiza tu perfil comercial con estos valores.', not: 'No cambian tus contactos ni tus campañas.' },
+  saved_search_create: { happens: 'Se guarda la búsqueda.', not: 'No se ejecuta ni gasta créditos.' },
+  saved_search_update: { happens: 'Se actualiza la búsqueda guardada.', not: 'No se ejecuta ni gasta créditos.' },
+  saved_search_delete: { happens: 'Se elimina la búsqueda guardada.', not: 'No afecta contactos ni campañas.' },
+  campaign_stop_v2: { happens: 'Se detienen los pasos pendientes de ese destinatario.', not: 'Lo que ya se envió no se revierte.' },
+  crm_update_record: { happens: 'Se actualiza la ficha comercial mostrada.', not: 'No se reasignan responsables del equipo.' },
+  campaign_prepare_draft_v2: { happens: 'Se prepara el borrador de ese paso.', not: 'No se envía nada.' },
+  crm_assign_lead: { happens: 'Se asigna o reserva el contacto, con la regla del equipo.', not: 'No se le escribe.' },
+  exception_resolve: { happens: 'Se registra el resultado revisado de la incidencia.', not: 'No se envía nada.' },
+  mission_control: { happens: 'Se pausa o reactiva la misión, como dice la propuesta.', not: 'No se envía nada en este paso.' },
+  message_context_update: { happens: 'Se actualiza el contexto de redacción de tu organización.', not: 'No se reescriben los borradores que ya existen.' },
+  enrich_batch: { happens: 'Se busca el correo de cada contacto del lote.', not: 'No se les escribe; los ya enriquecidos no gastan de nuevo.' },
+  campaign_schedule_batch: { happens: 'Se reserva un día por empresa y un espaciado entre envíos.', not: 'No se crea ni se activa la campaña, ni se envía nada.' },
+  linkedin_invite: { happens: 'Se deja en cola una invitación sin nota.', not: 'No sale hasta que la ejecutes desde la extensión.' },
+  linkedin_message: { happens: 'Se deja en cola el mensaje aprobado.', not: 'No sale hasta que lo ejecutes desde la extensión.' },
+};
+
+export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' | 'payload'>): CoworkOutcome {
+  if (proposal.type === 'search') {
+    const criteria = (proposal.payload.criteria || {}) as { target?: string; limit?: number };
+    const companies = criteria.target === 'companies';
+    return { happens: `Se buscan hasta ${criteria.limit ?? 25} ${companies ? 'empresas' : 'contactos nuevos'} en el proveedor (1 búsqueda de tu cuota).`,
+      not: 'No se revelan correos ni se guardan contactos, y no se envía nada.' };
+  }
+  if (proposal.type === 'note') {
+    return { happens: `Se reemplaza la nota de ${String(proposal.payload.leadName || 'este contacto')} en el CRM.`, not: 'No cambia nada más del contacto.' };
+  }
+  return OUTCOMES[String(proposal.payload.kind || '')] || { happens: 'Se ejecuta la acción propuesta.', not: 'No se hace nada más sin tu aprobación.' };
+}
+
+export type CoworkTimelineState = 'done' | 'current' | 'pending' | 'skipped' | 'failed';
+export type CoworkTimelineStep = { label: string; state: CoworkTimelineState };
+
+/** Proposal → your approval → execution → result, with where the proposal is. */
+export function coworkProposalTimeline(state: CoworkProposalState): CoworkTimelineStep[] {
+  const steps: Record<CoworkProposalState, CoworkTimelineState[]> = {
+    pending: ['done', 'current', 'pending', 'pending'],
+    approved: ['done', 'done', 'current', 'pending'],
+    running: ['done', 'done', 'current', 'pending'],
+    done: ['done', 'done', 'done', 'done'],
+    discarded: ['done', 'skipped', 'skipped', 'skipped'],
+    failed: ['done', 'done', 'failed', 'skipped'],
+  };
+  return ['Propuesta', 'Tu aprobación', 'Ejecución', 'Resultado'].map((label, index) => ({ label, state: steps[state][index] }));
+}
+
+/** Where a finished action can be seen, when it has a page of its own. */
+export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | 'payload' | 'state'>): { href: string; label: string } | null {
+  if (proposal.state !== 'done' || proposal.type !== 'effect') return null;
+  const kind = String(proposal.payload.kind || '');
+  if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch') return { href: '/campaigns', label: 'Ver campañas' };
+  if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch') return { href: '/saved/leads', label: 'Ver tus contactos' };
+  if (kind === 'send_email') return { href: '/contacted', label: 'Ver en Contactados' };
+  if (kind === 'profile_update') return { href: '/profile', label: 'Ver tu perfil' };
+  return null;
+}
+
 /** Continuations are admitted by the worker right after an effect or search finishes. */
 export function coworkExpectsContinuation(events: CoworkEvent[]): boolean {
   if (events.some(event => event.kind === 'thread.budget_exhausted')) return false;
