@@ -49,6 +49,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
@@ -121,6 +122,10 @@ function getFriendlySearchErrorMessage(message?: string) {
 
   if (!raw) {
     return 'No pudimos completar la busqueda. Revisa los filtros y vuelve a intentarlo.';
+  }
+
+  if (raw.includes('APOLLO_PROFILE_NO_USABLE_DATA')) {
+    return 'No se encontraron datos en las bases de datos para esta URL (nombre, cargo o empresa). Puedes reintentar solo los datos profesionales, verificar la URL o buscar por cargo y empresa.';
   }
 
   if (lower.includes('perfil distinto') || lower.includes('otra persona') || lower.includes('corresponda a la url')) {
@@ -408,6 +413,7 @@ export default function SearchPage() {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [contactedIds, setContactedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
+  const [profileOnlyRetry, setProfileOnlyRetry] = useState(false);
   const { toast } = useToast();
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DEFAULT);
@@ -855,6 +861,7 @@ export default function SearchPage() {
     companyRun.current += 1;
     companyPeopleAbortRef.current?.abort();
     setError('');
+    setProfileOnlyRetry(false);
     if (field === 'searchMode') {
       setAdvancedFiltersOpen(value === 'linkedin_profile');
     }
@@ -979,7 +986,9 @@ export default function SearchPage() {
     }
   };
 
-  const applySearchResult = (result: LeadSearchResponse, mode: SearchMode) => {
+  const applySearchResult = (result: LeadSearchResponse, mode: SearchMode, reveal?: { revealEmail: boolean; revealPhone: boolean }) => {
+    const emailRequested = reveal?.revealEmail ?? filters.revealEmail;
+    const phoneRequested = reveal?.revealPhone ?? filters.revealPhone;
     if (mode === 'company_name') {
       const candidates = Array.isArray(result.organization_candidates) ? result.organization_candidates : [];
       const requiresSelection = Boolean(result.requires_organization_selection && candidates.length > 0);
@@ -1024,20 +1033,20 @@ export default function SearchPage() {
     setLastProfilePhoneStatus(phoneStatus);
     setLeads(result.leads.map((raw) => normalizeLeadForUI(raw, {
       phoneStatus: phoneStatus || undefined,
-      revealEmail: filters.revealEmail,
-      revealPhone: filters.revealPhone,
+      revealEmail: emailRequested,
+      revealPhone: phoneRequested,
     })));
 
     if (mode === 'linkedin_profile') {
       const warnings = Array.isArray(result.provider_warnings) ? result.provider_warnings.filter(Boolean) : [];
-      const emailState: ProfileContactState = !filters.revealEmail
+      const emailState: ProfileContactState = !emailRequested
         ? 'not_requested'
         : result.leads.some((lead) => hasVisibleLeadEmail(lead))
           ? 'ready'
           : phoneStatus === 'queued'
             ? 'queued'
             : 'missing';
-      const phoneState: ProfileContactState = !filters.revealPhone
+      const phoneState: ProfileContactState = !phoneRequested
         ? 'not_requested'
         : phoneStatus === 'queued'
           ? 'queued'
@@ -1045,7 +1054,7 @@ export default function SearchPage() {
             ? 'ready'
             : 'missing';
 
-      if (result.leads.length === 0 && phoneStatus !== 'queued') {
+      if (result.leads.length === 0 && phoneStatus !== 'queued' && !result.profile_pending) {
         setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice({
           tone: 'warning',
@@ -1057,7 +1066,7 @@ export default function SearchPage() {
         return;
       }
 
-      if (phoneStatus === 'queued') {
+      if (phoneStatus === 'queued' || result.profile_pending) {
         const pollingIds = Array.from(new Set([
           ...(result.profile_tracking_ids || []),
           ...result.leads.map((raw) => raw.id),
@@ -1067,8 +1076,8 @@ export default function SearchPage() {
           setLastProfilePhoneStatus('failed');
           setProfilePhonePollingStartedAt(null);
           setProfileSearchNotice(buildLinkedInProfileNotice({
-            emailRequested: filters.revealEmail,
-            phoneRequested: filters.revealPhone,
+            emailRequested,
+            phoneRequested,
             emailState,
             phoneState: 'missing',
           }));
@@ -1086,8 +1095,8 @@ export default function SearchPage() {
               phoneState,
             }
           : buildLinkedInProfileNotice({
-              emailRequested: filters.revealEmail,
-              phoneRequested: filters.revealPhone,
+              emailRequested,
+              phoneRequested,
               emailState,
               phoneState,
             }));
@@ -1103,24 +1112,33 @@ export default function SearchPage() {
       } else if (phoneStatus === 'skipped' || phoneStatus === 'failed') {
         setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice(buildLinkedInProfileNotice({
-          emailRequested: filters.revealEmail,
-          phoneRequested: filters.revealPhone,
+          emailRequested,
+          phoneRequested,
           emailState,
           phoneState,
         }));
+      } else if ((result.provider_warnings || []).includes('APOLLO_PROFESSIONAL_ONLY')) {
+        setProfilePhonePollingStartedAt(null);
+        setProfileSearchNotice({
+          tone: 'warning',
+          title: 'Perfil sin datos de contacto',
+          description: 'Se encontraron los datos profesionales, pero no hay correo ni teléfono disponibles para esta URL en las bases de datos. Puedes guardar el perfil o completar los datos manualmente.',
+          emailState: 'missing',
+          phoneState: 'missing',
+        });
       } else if (warnings.length > 0) {
         setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice(buildLinkedInProfileNotice({
-          emailRequested: filters.revealEmail,
-          phoneRequested: filters.revealPhone,
+          emailRequested,
+          phoneRequested,
           emailState,
           phoneState,
         }));
-      } else if (filters.revealEmail || filters.revealPhone) {
+      } else if (emailRequested || phoneRequested) {
         setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice(buildLinkedInProfileNotice({
-          emailRequested: filters.revealEmail,
-          phoneRequested: filters.revealPhone,
+          emailRequested,
+          phoneRequested,
           emailState,
           phoneState,
         }));
@@ -1133,11 +1151,15 @@ export default function SearchPage() {
   const executeSearch = async ({
     countQuota = true,
     selectedOrg = null,
+    revealOverride,
   }: {
     countQuota?: boolean;
     selectedOrg?: CompanySearchOrganization | null;
+    revealOverride?: { revealEmail: boolean; revealPhone: boolean };
   } = {}) => {
     const organization = selectedOrg || selectedOrganization;
+    const activeRevealEmail = revealOverride?.revealEmail ?? filters.revealEmail;
+    const activeRevealPhone = revealOverride?.revealPhone ?? filters.revealPhone;
     let validationMessage = '';
     if (filters.searchMode === 'linkedin_profile' && !normalizeLinkedinProfileUrl(filters.linkedinUrl)) {
       validationMessage = 'La URL de LinkedIn no es valida.';
@@ -1178,6 +1200,7 @@ export default function SearchPage() {
     setSelectedLeads(new Set());
     setPageIndex(0);
     setError('');
+    setProfileOnlyRetry(false);
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
     setProfilePhonePollingIds([]);
@@ -1194,8 +1217,8 @@ export default function SearchPage() {
         result = await searchLinkedInProfileLead({
           search_mode: 'linkedin_profile',
           linkedin_url: linkedinUrl,
-          reveal_email: filters.revealEmail,
-          reveal_phone: filters.revealPhone,
+          reveal_email: activeRevealEmail,
+          reveal_phone: activeRevealPhone,
         }, abortRef.current.signal);
       } else if (filters.searchMode === 'company_name') {
         const companyName = filters.companyName.trim();
@@ -1241,12 +1264,17 @@ export default function SearchPage() {
 
       if (searchRunIdRef.current !== searchRunId) return;
       if (countQuota) incClientQuota('leadSearch');
-      applySearchResult(result, filters.searchMode);
+      applySearchResult(result, filters.searchMode, { revealEmail: activeRevealEmail, revealPhone: activeRevealPhone });
     } catch (error: any) {
       if (searchRunIdRef.current !== searchRunId) return;
       if (error.name !== 'AbortError') {
         const friendlyMessage = getFriendlySearchErrorMessage(error.message);
         setError(friendlyMessage);
+        setProfileOnlyRetry(
+          filters.searchMode === 'linkedin_profile'
+          && String(error?.message || '').includes('APOLLO_PROFILE_NO_USABLE_DATA')
+          && (filters.revealEmail || filters.revealPhone),
+        );
         toast({
           title: 'No se pudo completar la busqueda',
           description: friendlyMessage,
@@ -1276,6 +1304,13 @@ export default function SearchPage() {
       return;
     }
     await executeSearch();
+  };
+
+  const handleProfileOnlyRetry = async () => {
+    const override = { revealEmail: false, revealPhone: false };
+    setFilters(prev => ({ ...prev, ...override }));
+    setProfileOnlyRetry(false);
+    await executeSearch({ revealOverride: override });
   };
 
   const handleAbort = () => {
@@ -1452,7 +1487,16 @@ export default function SearchPage() {
               };
               return nextLead;
             });
-            return updated;
+            // Tracking rows are not leads. Add a result only after polling
+            // returns usable profile data; previously an empty initial result
+            // could never become visible because this only mapped prev.
+            const knownIds = new Set(updated.map((lead) => String(lead.id)));
+            const discovered = items.filter((item) => !knownIds.has(String(item.id)) && hasUsableLinkedInProfileData(item as Partial<Lead>))
+              .map((item) => normalizeLeadForUI(item as Lead, {
+                revealEmail: filters.revealEmail,
+                revealPhone: filters.revealPhone,
+              }));
+            return [...updated, ...discovered];
           });
 
           if (resolvedWithRequestedData.length > 0) {
@@ -1483,7 +1527,17 @@ export default function SearchPage() {
           }
 
           if (!stillPending) {
-            finishWithoutContact('Encontramos el perfil, pero el proveedor no devolvió todos los datos de contacto solicitados.', items);
+            const hasProfile = items.some((item) => hasUsableLinkedInProfileData(item as Partial<Lead>));
+            finishWithoutContact(hasProfile
+              ? 'El perfil está disponible, pero no se encontraron todos los datos de contacto solicitados en las bases de datos.'
+              : 'No pudimos confirmar este perfil en las bases de datos. Revisa la URL antes de volver a buscar.', items);
+            if (!hasProfile) {
+              setLeads([]);
+              setProfileSearchNotice({ tone: 'warning', title: 'Perfil no confirmado',
+                description: 'No se encontró información suficiente en las bases de datos para confirmar este perfil. Revisa la URL antes de volver a buscar.',
+                emailState: filters.revealEmail ? 'missing' : 'not_requested',
+                phoneState: filters.revealPhone ? 'missing' : 'not_requested' });
+            }
             return;
           }
         }
@@ -2308,6 +2362,11 @@ export default function SearchPage() {
                   <Button size="sm" variant="outline" className="border-amber-300 bg-background/80 text-foreground hover:bg-background dark:border-amber-500/40" onClick={handleSearch} disabled={isLoading}>
                     Intentar de nuevo
                   </Button>
+                  {filters.searchMode === 'linkedin_profile' && profileOnlyRetry && (filters.revealEmail || filters.revealPhone) ? (
+                    <Button size="sm" variant="outline" className="border-amber-300 bg-background/80 text-foreground hover:bg-background dark:border-amber-500/40" onClick={handleProfileOnlyRetry} disabled={isLoading}>
+                      Buscar solo datos profesionales
+                    </Button>
+                  ) : null}
                   <Button size="sm" variant="ghost" className="text-amber-900 hover:bg-amber-100 dark:text-amber-100 dark:hover:bg-amber-500/10" onClick={() => setError('')}>
                     Ocultar aviso
                   </Button>
