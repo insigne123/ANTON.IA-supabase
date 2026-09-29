@@ -67,6 +67,13 @@ env:
   - variable: COWORK_MODEL_USAGE_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Borrador en vivo y Redactora/Revisora: M1 y M2 verificadas en producción.
+  - variable: COWORK_STREAMING_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_WRITER_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # OpenAI Standard, short-context (<272K input), USD per million tokens.
   # Checked against https://platform.openai.com/docs/pricing on 2026-09-23.
   - variable: COWORK_MODEL_PRICING_JSON
