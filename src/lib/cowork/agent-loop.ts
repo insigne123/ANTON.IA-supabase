@@ -19,6 +19,7 @@ import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionContr
 import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
 import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
+import { coworkWithCharts } from './charts';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -519,8 +520,15 @@ export function coworkOutline(value: Decision['outline']): CoworkPlanStep[] | nu
   return steps.length > 1 ? steps : null;
 }
 
+/** The turn's answer with the chart its reads allow (charts.ts); the loop below is what produces it. */
+export async function runCoworkReadLoop(input: Parameters<typeof runCoworkLoop>[0]): Promise<Awaited<ReturnType<typeof runCoworkLoop>>> {
+  const observations: CoworkObservation[] = [...(input.resumedObservations || [])];
+  const answer = await runCoworkLoop(input, observations);
+  return coworkWithCharts<typeof answer>(answer, observations);
+}
+
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
-export async function runCoworkReadLoop(input: {
+async function runCoworkLoop(input: {
   message: string;
   runId?: string;
   history?: CoworkHistoryTurn[];
@@ -546,8 +554,7 @@ export async function runCoworkReadLoop(input: {
    * what to fix, or null when it stands. At most once per turn, and only with a decision to spare;
    * `canRead` says whether its correction may still make a read (a decision for it and one to answer). */
   judge?: (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => Promise<string | null>;
-}) {
-  const observations: CoworkObservation[] = [...(input.resumedObservations || [])];
+}, observations: CoworkObservation[]) {
   if (observations.length) {
     // The pre-queue phase already spent reads/model decisions. Resume only
     // synthesis, never a second tool or specialist budget in the same run.

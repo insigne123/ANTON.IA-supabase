@@ -92,6 +92,14 @@ export function coworkBlocks(value: unknown): CoworkBlock[] {
         .filter(row => row.some(Boolean)).slice(0, COWORK_BLOCK_DISPLAY.rows);
       if (!columns.length || !rows.length) continue;
       blocks.push({ type: 'table', title: visible(block.title, 120) || 'Tabla', columns, rows });
+    } else if (block.type === 'chart') {
+      // Every series has one value per label; a chart with fewer than two points or no series says nothing.
+      const labels = block.labels.map((label, index) => visible(label, 40) || `Punto ${index + 1}`);
+      const series = block.series.filter(item => item.values.length === labels.length)
+        .map(item => ({ name: visible(item.name, 60) || 'Serie', values: item.values.map(value => Math.round(value * 100) / 100) }));
+      if (labels.length < 2 || !series.length) continue;
+      blocks.push({ type: 'chart', title: visible(block.title, 120) || 'Gráfico', kind: block.kind, period: block.period ? visible(block.period, 80) || null : null,
+        unit: block.unit ? visible(block.unit, 20) || null : null, labels, series });
     } else {
       const items = block.items.map(item => ({ label: visible(item.label, 60), value: visible(item.value, 40), detail: item.detail ? visible(item.detail, 140) || null : null }))
         .filter(item => item.label && item.value).slice(0, COWORK_BLOCK_DISPLAY.metrics);

@@ -6,14 +6,15 @@ import type { CoworkBlock } from '@/lib/cowork/contracts';
 import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
   coworkBlockFilename, coworkBlockMeta, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv, coworkVersionMessage,
-  coworkFigureNumber, coworkWordDiff, type CoworkEditedEmail,
+  coworkFigureNumber, coworkWordDiff, coworkChartCsv, coworkChartRows, coworkChartSummary, coworkChartValue, type CoworkEditedEmail,
 } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
-import { AnimatePresence, CwCount, cwSwap, cwVariants, m } from './motion';
+import { AnimatePresence, CW_EASE, CwCount, cwSwap, cwVariants, m, useReducedMotion } from './motion';
 import { CwButton } from './ui';
 
 type Metrics = Extract<CoworkBlock, { type: 'metrics' }>;
 type Table = Extract<CoworkBlock, { type: 'table' }>;
+type Chart = Extract<CoworkBlock, { type: 'chart' }>;
 type BlockArtifact = Extract<CoworkArtifact, { kind: 'block' }>;
 
 export function CoworkBlockIcon({ block, className }: { block: Pick<CoworkBlock, 'type'>; className?: string }) {
@@ -64,6 +65,89 @@ export function MetricsBlock({ block, live = false }: { block: Metrics; live?: b
         {item.detail && <dd className="order-3 mt-0.5 text-[12px] leading-4 text-cw-faint">{item.detail}</dd>}
       </div>)}
     </dl>
+  </section>;
+}
+
+/** One color per series, from the app's own tokens: the accent and two greys that keep their contrast on the card, light and dark. */
+const SERIES_FILL = ['var(--cw-accent)', 'var(--cw-muted)', 'var(--cw-faint)'] as const;
+const PLOT_HEIGHT = 128;
+
+function downloadChartCsv(chart: Chart) {
+  const url = URL.createObjectURL(new Blob([coworkChartCsv(chart)], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = coworkBlockFilename(chart.title, 'csv');
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** The chart's figures as text that pastes as a table. */
+function chartTsv(chart: Chart) {
+  return [['', ...chart.series.map(series => series.name)], ...coworkChartRows(chart).map(row => row.map(String))].map(row => row.join('\t')).join('\n');
+}
+
+/**
+ * Figures drawn from the reads of the turn (charts.ts). Bars grow from the base and a line draws itself
+ * the first time the card appears while you watch; at rest, and with reduced motion, it is already drawn.
+ * The drawing is hidden from screen readers, which get a sentence and the table of values instead.
+ */
+export function ChartBlock({ block, live = false }: { block: Chart; live?: boolean }) {
+  const reduce = useReducedMotion();
+  const animate = live && !reduce;
+  const max = Math.max(1, ...block.series.flatMap(series => series.values));
+  // With few points every bar says its value; with many, the table and the export do.
+  const showValues = block.labels.length <= 6;
+  const slot = (value: number) => Math.max(value > 0 ? 3 : 0, Math.round(value / max * PLOT_HEIGHT));
+  return <section aria-label={block.title} className={cn('rounded-2xl border border-cw-border bg-cw-elevated p-4 shadow-[var(--cw-shadow-sm)]', live && 'cw-rise')}>
+    <header className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+      <h3 className="text-[14px] font-semibold tracking-tight text-cw-text">{block.title}</h3>
+      {block.period && <p className="text-[12.5px] text-cw-muted">{block.period}</p>}
+    </header>
+    {block.series.length > 1 && <ul aria-hidden="true" className="mb-3 flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px] text-cw-muted">
+      {block.series.map((series, index) => <li key={series.name} className="flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full" style={{ background: SERIES_FILL[index] }} />{series.name}
+      </li>)}
+    </ul>}
+    <div role="img" aria-label={coworkChartSummary(block)}>
+      {block.kind === 'bar'
+        ? <div aria-hidden="true" className="flex items-end gap-3 border-b border-cw-border" style={{ height: PLOT_HEIGHT + (showValues ? 22 : 0) }}>
+          {block.labels.map((label, index) => <div key={`${label}-${index}`} className="flex min-w-0 flex-1 items-end justify-center gap-1">
+            {block.series.map((series, at) => {
+              const value = series.values[index];
+              return <div key={series.name} className="flex min-w-0 max-w-10 flex-1 flex-col items-center justify-end">
+                {showValues && <span className="mb-1 text-[12px] font-medium leading-4 tabular-nums text-cw-muted">
+                  {live && Number.isInteger(value) && !block.unit ? <CwCount value={value} announce={false} /> : coworkChartValue(block, value)}
+                </span>}
+                <m.div className="w-full rounded-t-md" title={`${series.name} · ${label}: ${coworkChartValue(block, value)}`}
+                  style={{ height: slot(value), background: SERIES_FILL[at], transformOrigin: 'bottom' }}
+                  initial={animate ? { scaleY: 0 } : false} animate={{ scaleY: 1 }}
+                  transition={{ duration: 0.5, ease: CW_EASE, delay: 0.08 + (index * block.series.length + at) * 0.04 }} />
+              </div>;
+            })}
+          </div>)}
+        </div>
+        : <svg aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full border-b border-cw-border" style={{ height: PLOT_HEIGHT }}>
+          {block.series.map((series, at) => <m.path key={series.name} fill="none" stroke={SERIES_FILL[at]} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke" pathLength={1}
+            d={series.values.map((value, index) => `${index ? 'L' : 'M'}${(index / (block.labels.length - 1) * 100).toFixed(2)} ${(100 - value / max * 96 - 2).toFixed(2)}`).join(' ')}
+            initial={animate ? { pathLength: 0 } : false} animate={{ pathLength: 1 }} transition={{ duration: 0.7, ease: CW_EASE, delay: 0.08 + at * 0.12 }} />)}
+        </svg>}
+      <div aria-hidden="true" className="mt-1.5 flex justify-between gap-3 text-[12.5px] text-cw-muted">
+        {block.kind === 'bar'
+          ? block.labels.map((label, index) => <span key={`${label}-${index}`} className="min-w-0 flex-1 truncate text-center">{label}</span>)
+          : <><span>{block.labels[0]}</span><span>{block.labels[block.labels.length - 1]}</span></>}
+      </div>
+    </div>
+    <table className="sr-only">
+      <caption>{block.title}{block.period ? `, ${block.period}` : ''}</caption>
+      <thead><tr><th scope="col">{block.kind === 'bar' ? 'Categoría' : 'Punto'}</th>{block.series.map(series => <th key={series.name} scope="col">{series.name}</th>)}</tr></thead>
+      <tbody>{block.labels.map((label, index) => <tr key={`${label}-${index}`}><th scope="row">{label}</th>
+        {block.series.map(series => <td key={series.name}>{coworkChartValue(block, series.values[index])}</td>)}</tr>)}</tbody>
+    </table>
+    <div className="-mb-1 -ml-1.5 mt-2.5 flex flex-wrap items-center gap-1">
+      <CopyButton text={chartTsv(block)} label="Copiar datos" />
+      <CwButton size="xs" variant="ghost" onClick={() => downloadChartCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>
+    </div>
   </section>;
 }
 

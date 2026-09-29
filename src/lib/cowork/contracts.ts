@@ -177,8 +177,21 @@ export const coworkMetricsBlockSchema = z.object({
   period: z.string().max(120).nullable(),
   items: z.array(z.object({ label: z.string().max(120), value: z.string().max(80), detail: z.string().max(300).nullable() }).strict()).max(12),
 }).strict();
+/** A chart of figures Cowork read (charts.ts): drawn by the app from the reads, never written by the
+ * model. Up to 3 series over up to 24 points; every series has one value per label. */
+export const coworkChartBlockSchema = z.object({
+  type: z.literal('chart'),
+  title: z.string().max(200),
+  kind: z.enum(['bar', 'line']),
+  /** «Últimos 7 y 30 días»: every figure is read with its period. */
+  period: z.string().max(120).nullable(),
+  /** What the values count («envíos», «%»); null when the labels already say it. */
+  unit: z.string().max(24).nullable(),
+  labels: z.array(z.string().max(60)).min(2).max(24),
+  series: z.array(z.object({ name: z.string().max(80), values: z.array(z.number().finite()).min(2).max(24) }).strict()).min(1).max(3),
+}).strict();
 export const coworkBlockSchema = z.discriminatedUnion('type', [
-  coworkEmailDraftBlockSchema, coworkSequenceBlockSchema, coworkTableBlockSchema, coworkMetricsBlockSchema,
+  coworkEmailDraftBlockSchema, coworkSequenceBlockSchema, coworkTableBlockSchema, coworkMetricsBlockSchema, coworkChartBlockSchema,
 ]);
 export type CoworkBlock = z.infer<typeof coworkBlockSchema>;
 export const COWORK_BLOCK_LIMIT = 4;

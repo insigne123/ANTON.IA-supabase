@@ -137,6 +137,34 @@ export function coworkTableTsv(block: Extract<CoworkBlock, { type: 'table' }>) {
   return [block.columns, ...block.rows].map(row => row.map(cell => cell.replace(/[\t\n]+/g, ' ')).join('\t')).join('\n');
 }
 
+type Chart = Extract<CoworkBlock, { type: 'chart' }>;
+
+/** A chart's figures as a table: one row per point, one column per series. */
+export function coworkChartRows(block: Chart) {
+  return block.labels.map((label, index) => [label, ...block.series.map(series => series.values[index])]);
+}
+
+/** «12 %» or «240 envíos»: a value with its unit, the way the card and the export write it. */
+export function coworkChartValue(block: Pick<Chart, 'unit'>, value: number) {
+  const text = Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100).replace('.', ',');
+  return block.unit ? (block.unit === '%' ? `${text} %` : `${text} ${block.unit}`) : text;
+}
+
+/** CSV with a BOM for spreadsheets, like the table's. */
+export function coworkChartCsv(block: Chart) {
+  return '﻿' + [[block.period ? `${block.title} (${block.period})` : block.title, ...block.series.map(series => series.name)], ...coworkChartRows(block).map(row => row.map(String))]
+    .map(row => row.map(csvCell).join(',')).join('\r\n');
+}
+
+/** What a screen reader hears before the data table: the chart in one sentence. */
+export function coworkChartSummary(block: Chart) {
+  const top = block.series.map(series => {
+    const at = series.values.indexOf(Math.max(...series.values));
+    return `${series.name}: mayor en ${block.labels[at]} (${coworkChartValue(block, series.values[at])})`;
+  }).join('; ');
+  return `${block.title}${block.period ? `, ${block.period}` : ''}. ${block.labels.length} puntos y ${block.series.length} ${block.series.length === 1 ? 'serie' : 'series'}. ${top}.`;
+}
+
 export function coworkBlockFilename(title: string, extension: string) {
   const base = title.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   return `${base || 'cowork'}.${extension}`;
@@ -155,6 +183,7 @@ export function coworkBlockMeta(block: CoworkBlock) {
     return `Secuencia · ${block.steps.length} correos en ${span} ${span === 1 ? 'día' : 'días'}`;
   }
   if (block.type === 'table') return `Tabla · ${block.rows.length} ${block.rows.length === 1 ? 'fila' : 'filas'}`;
+  if (block.type === 'chart') return `Gráfico${block.period ? ` · ${block.period}` : ''}`;
   return `Cifras${block.period ? ` · ${block.period}` : ''}`;
 }
 
@@ -164,6 +193,8 @@ export function coworkBlocksText(blocks: CoworkBlock[]) {
     if (block.type === 'email_draft') return [block.title, block.to?.join(', ') || '', coworkEmailText(block)].join('\n');
     if (block.type === 'sequence') return [block.title, coworkSequenceText(block)].join('\n');
     if (block.type === 'table') return [block.title, coworkTableTsv(block)].join('\n');
+    if (block.type === 'chart') return [block.title, block.period || '', block.series.map(series => series.name).join(' · '),
+      ...coworkChartRows(block).map(row => `${row[0]}: ${row.slice(1).map(value => coworkChartValue(block, Number(value))).join(' · ')}`)].join('\n');
     return [block.title, block.period || '', ...block.items.map(item => `${item.label}: ${item.value}${item.detail ? ` (${item.detail})` : ''}`)].join('\n');
   }).join('\n\n');
 }
