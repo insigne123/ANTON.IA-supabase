@@ -35,7 +35,7 @@ export function normalizeLinkedinProfileUrl(input?: string | null): string {
 }
 
 const SLUG_ROLE_STOPWORDS = new Set([
-  'it', 'hr', 'rh', 'ceo', 'cto', 'cfo', 'coo', 'vp', 'svp', 'evp',
+  'it', 'hr', 'rh', 'rrhh', 'ceo', 'cto', 'cfo', 'coo', 'vp', 'svp', 'evp',
   'recruiter', 'recruiters', 'recruiting', 'recruitment', 'talent', 'talents',
   'hiring', 'hired', 'jobs', 'job', 'careers', 'career', 'empleos', 'empleo',
   'tech', 'sales', 'marketing', 'engineer', 'engineering', 'developer', 'dev',
@@ -65,7 +65,13 @@ export function linkedinSlugConflictsWithName(profileUrl?: string | null, person
   const slugTokens = slugNameTokens(profileUrl);
   const nameTokens = personNameTokens(personName);
   if (slugTokens.length < 2 || nameTokens.length < 2) return false;
-  return !nameTokens.some((token) => slugTokens.includes(token));
+  // Custom slugs often join given names without a hyphen (luisruben),
+  // while the provider returns separate name tokens (Luis Rubén).
+  const nameCandidates = new Set(nameTokens);
+  for (let i = 0; i + 1 < nameTokens.length; i++) {
+    nameCandidates.add(nameTokens[i] + nameTokens[i + 1]);
+  }
+  return !slugTokens.some((token) => nameCandidates.has(token));
 }
 
 export function getLinkedinProfileDisplayName(input?: string | null): string {

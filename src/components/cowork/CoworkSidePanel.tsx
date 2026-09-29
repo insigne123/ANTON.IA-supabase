@@ -5,15 +5,25 @@ import { Check, CircleSlash, LoaderCircle, PanelRightClose, ShieldCheck, Triangl
 import type { CoworkArtifact, CoworkProgressStep } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { CoworkArtifactIcon, coworkArtifactMeta } from './CoworkTurn';
+import { AnimatePresence, cwPop, cwVariants, m } from './motion';
 import { CwButton } from './ui';
 
-function StepIcon({ state }: { state: CoworkProgressStep['state'] }) {
+function StepGlyph({ state }: { state: CoworkProgressStep['state'] }) {
   if (state === 'done') return <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-cw-success text-cw-bg"><Check className="h-3 w-3" strokeWidth={3} aria-hidden="true" /></span>;
   if (state === 'active') return <LoaderCircle className="h-[18px] w-[18px] text-cw-accent motion-safe:animate-spin" aria-hidden="true" />;
   if (state === 'attention') return <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-cw-warning-soft ring-2 ring-cw-warning"><span className="h-1.5 w-1.5 rounded-full bg-cw-warning" /></span>;
   if (state === 'error') return <TriangleAlert className="h-[18px] w-[18px] text-cw-danger" aria-hidden="true" />;
   if (state === 'skipped') return <CircleSlash className="h-[18px] w-[18px] text-cw-faint" aria-hidden="true" />;
   return <span className="block h-[18px] w-[18px] rounded-full border-2 border-dashed border-cw-border-strong" aria-hidden="true" />;
+}
+
+/** A step that changes state swaps its icon in place, so the change is seen, not just found. */
+function StepIcon({ state }: { state: CoworkProgressStep['state'] }) {
+  return <span className="relative block h-[18px] w-[18px]" aria-hidden="true">
+    <AnimatePresence initial={false}>
+      <m.span key={state} className="absolute inset-0 flex items-center justify-center" {...cwVariants(cwPop)}><StepGlyph state={state} /></m.span>
+    </AnimatePresence>
+  </span>;
 }
 
 const STATE_TEXT: Record<CoworkProgressStep['state'], string> = {

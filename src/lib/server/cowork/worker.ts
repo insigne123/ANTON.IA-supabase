@@ -27,6 +27,7 @@ import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
 import { coworkDecisionContext } from '@/lib/cowork/decision-context';
 import { loadCoworkUserContext } from './user-context';
 import { reserveCoworkModelCall } from './model-budget';
+import { coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
 import { stageCoworkSavedSearchCreate, stageCoworkSavedSearchUpdate, stageCoworkSavedSearchDelete } from './saved-search-ops';
@@ -138,6 +139,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const operationScope = { userId: scope.userId, organizationId: scope.organizationId, runId: run.id };
     // How much this turn may spend; the coordinator decides within it.
     const turnCeiling = coworkTurnCeiling();
+    // The answer shows while it is being written (cowork_run_drafts); off, or without the
+    // table, the turn works as before.
+    const liveDraft = coworkStreamingEnabled() ? coworkDraftWriter(async (text, progress) => {
+      const written = await client.rpc('cowork_write_run_draft', { p_run_id: run.id, p_token: run.lease_token, p_text: text, p_progress: progress });
+      if (written.error) throw written.error;
+      return written.data === true;
+    }, { onDisabled: reason => console.warn('[cowork] live draft off for this run:', reason instanceof Error ? reason.message : reason) }) : null;
     const instructions = coworkAgentInstructions({
       turnCeiling,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
@@ -153,6 +161,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       } : undefined,
       decide: async (observations, mustAnswer, rejections = [], turnBudget) => {
         const reservationId = await reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator');
+        // The closing correction rewrites an answer already on screen: the page says it is
+        // being reviewed and keeps it, instead of erasing it to write it again.
+        const correcting = rejections.some(rejection => rejection.action === 'answer');
+        if (correcting) liveDraft?.review();
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
           systemPrompt: `${instructions.systemPrompt}\n${coworkSpecialistQueueEnabled()
@@ -168,7 +180,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           provider: 'openai',
           maxAttempts: 1, timeoutMs: 30000, maxOutputTokens: 6000,
           signal: controller.signal,
+          onPartial: liveDraft && !correcting ? text => liveDraft.push(text) : undefined,
         });
+        await liveDraft?.flush();
         await recordCoworkModelUsage(client, reservationId, run.lease_token, turn.telemetry);
         telemetry.push({ model: turn.telemetry.modelName, durationMs: turn.telemetry.durationMs });
         return turn.data;
