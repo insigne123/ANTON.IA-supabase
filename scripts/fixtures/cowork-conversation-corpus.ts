@@ -130,7 +130,7 @@ export type CorpusTurnResult = {
   reply: string;
   document: { title: string; content: string } | null;
   proposal: { kind: string; label: string; targetId?: string; campaign?: unknown; linkedinMessage?: string;
-    code?: { language: string; code: string; inputFiles: string[] } } | null;
+    code?: { language: string; code: string; inputFiles: string[] }; contactsImport?: { file: string; columns?: unknown; card?: unknown } } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;
@@ -168,6 +168,8 @@ export type CorpusCase = {
   origin?: string;
   /** Tool results and saved emails of this case's account; the production workspace by default. */
   world?: CorpusWorld;
+  /** Runs with contacts.import available (COWORK_CONTACTS_IMPORT_ENABLED). */
+  contactsImport?: boolean;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
 };
 

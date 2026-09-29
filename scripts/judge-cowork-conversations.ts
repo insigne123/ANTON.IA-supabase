@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import {
-  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
+  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgeInstructions, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
   type CoworkJudgement,
 } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_USER_CONTEXT, corpusRead, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
@@ -39,11 +39,11 @@ async function main() {
   const maxCalls = Number(arg('max-calls'));
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 400) throw new Error('Explicit --max-calls=1..400 required');
   let calls = 0;
-  const judge = async (prompt: string): Promise<CoworkJudgement | null> => {
+  const judge = async (prompt: string, systemPrompt = COWORK_JUDGE_INSTRUCTIONS): Promise<CoworkJudgement | null> => {
     if (calls >= maxCalls) return null;
     calls++;
     try {
-      const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: COWORK_JUDGE_INSTRUCTIONS, prompt,
+      const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt, prompt,
         openAiModel: judgeModel, allowDefaultModelFallback: false, provider: 'openai', maxAttempts: 2, timeoutMs: 60000, maxOutputTokens: 1200 });
       return response.data;
     } catch (error) {
@@ -68,20 +68,22 @@ async function main() {
   } else {
     const input = arg('input');
     if (!input) throw new Error('Requires --input=report.json (an evaluate-cowork-conversations output) or --calibrate.');
-    const source = JSON.parse(readFileSync(input, 'utf8')) as { outcomes: Array<{ id: string; attempt: number; passed: boolean; result: CorpusTurnResult }> };
+    const source = JSON.parse(readFileSync(input, 'utf8')) as { outcomes: Array<{ id: string; attempt: number; passed: boolean; result: CorpusTurnResult; contactsImport?: boolean }> };
     const selected = arg('cases')?.split(',').filter(Boolean);
     const rows: Array<{ id: string; attempt: number; passedChecks: boolean; judgement: CoworkJudgement | null }> = [];
     for (const outcome of source.outcomes) {
       if (selected && !selected.includes(outcome.id)) continue;
       const entry = CORPUS.find(item => item.id === outcome.id);
       if (!entry) continue;
+      // The rules of the turn as it ran: contacts.import on or off (in older reports, as the case says).
+      const rules = coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport) });
       const judgement = await judge(coworkJudgePrompt({
         request: entry.request,
         history: (entry.history || []).map(turn => ({ request: turn.request, reply: turn.reply, observations: turn.observations })),
         userContext: entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext,
         observations: observationsFor(entry, outcome.result),
         shown: corpusShownAnswer(outcome.result),
-      }));
+      }), rules);
       rows.push({ id: outcome.id, attempt: outcome.attempt, passedChecks: outcome.passed, judgement });
       if (judgement) console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id} #${outcome.attempt} · ${COWORK_JUDGE_DIMENSIONS.map(dimension => judgement.scores[dimension]).join('/')} · ${judgement.veredicto}${judgement.problemas.length ? ` · ${judgement.problemas.join(' | ')}` : ''}`);
     }
