@@ -220,6 +220,23 @@ test('standard enrichment uses query params, disables waterfall, and keeps phone
   }
 });
 
+test('Apollo URL and ID echoes without profile data are not successful matches', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ request_id: '123', person: {
+    id: 'person-1', linkedin_url: 'https://www.linkedin.com/in/example', match_confidence: 'none',
+  } });
+  try {
+    const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/example' },
+      reveal_email: true, reveal_phone: false, enrichment_level: 'basic' });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    const result = await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig());
+    assert.equal(result.success, false);
+    assert.equal(result.enrichment_status, 'not_found');
+    assert.equal(result.extracted_data, null);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('standard enrichment preserves Apollo request IDs larger than JavaScript safe integers', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(
@@ -614,6 +631,31 @@ test('LinkedIn match refuses another person or unverified URL before exposing co
     assert.equal(result.success, true);
     globalThis.fetch = async () => Response.json({ person: { id: 'stale-person', name: 'Marco Psenda',
       linkedin_url: 'https://www.linkedin.com/in/it-recruiter-janet-montero/' } });
+    await assert.rejects(() => executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig()),
+      (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('LinkedIn match accepts Apollo short name for luisruben-rrhh only when the returned URL agrees', async () => {
+  const originalFetch = globalThis.fetch;
+  const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/luisruben-rrhh/' },
+    reveal_email: true, reveal_phone: false, enrichment_level: 'basic' });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  try {
+    // Sanitized identifying fields from a real /people/match response: Apollo
+    // omitted the second given name but returned the exact normalized URL.
+    globalThis.fetch = async () => Response.json({ person: { id: '63d916d4c3c2a40001ef20ed',
+      name: 'Luis Mines Ayuqui', title: 'Jefe de Gestion de Recursos Humanos',
+      linkedin_url: 'http://www.linkedin.com/in/luisruben-rrhh',
+      organization: { name: 'White Lion Foods' } } });
+    const result = await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig());
+    assert.equal(result.success, true);
+    assert.equal(result.extracted_data?.full_name, 'Luis Mines Ayuqui');
+    assert.equal(result.extracted_data?.organization_name, 'White Lion Foods');
+
+    globalThis.fetch = async () => Response.json({ person: { id: 'other-person',
+      name: 'Luis Rubén Mines Ayuqui', linkedin_url: 'https://www.linkedin.com/in/otra-persona' } });
     await assert.rejects(() => executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig()),
       (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
   } finally { globalThis.fetch = originalFetch; }

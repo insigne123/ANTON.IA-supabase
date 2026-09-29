@@ -382,17 +382,19 @@ async function prepareTargets(input: {
       boundPersonId = text((existing as any)?.apollo_person_id || (existing as any)?.source_provider_id, 255) || undefined;
 
       const values = {
-        name: name.fullName || null,
-        first_name: name.firstName || null,
-        last_name: name.lastName || null,
-        linkedin_url: linkedinUrl || null,
-        title: text(lead.title, 160) || null,
-        organization_name: text(lead.companyName, 200) || null,
-        organization_domain: cleanDomain(lead.companyDomain) || null,
+        // A URL-only retry must not erase an already resolved profile or its
+        // first-seen Apollo identity while the next request is in flight.
+        name: name.fullName || undefined,
+        first_name: name.firstName || undefined,
+        last_name: name.lastName || undefined,
+        linkedin_url: linkedinUrl || undefined,
+        title: text(lead.title, 160) || undefined,
+        organization_name: text(lead.companyName, 200) || undefined,
+        organization_domain: cleanDomain(lead.companyDomain) || undefined,
         ...(inputEmail ? { email: inputEmail } : {}),
-        apollo_person_id: providerId || null,
+        apollo_person_id: providerId || boundPersonId || undefined,
         source_provider: 'apollo',
-        source_provider_id: providerId || null,
+        source_provider_id: providerId || boundPersonId || undefined,
         enrichment_status: status,
         updated_at: now,
       };
@@ -1016,7 +1018,7 @@ export async function POST(request: NextRequest) {
           255,
         );
         if (target.sourceProviderId && resultPersonId && target.sourceProviderId !== resultPersonId) {
-          throw new Error('APOLLO_PERSON_IDENTITY_MISMATCH');
+          throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false);
         }
         if (target.boundPersonId && resultPersonId && target.boundPersonId !== resultPersonId) {
           throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false);
