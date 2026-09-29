@@ -3,8 +3,15 @@ import { coworkDocumentSchema, type CoworkEvent } from '@/lib/cowork/contracts';
 import { buildCoworkLeadCsv, collectCoworkLeadRows, coworkLeadColumns } from '@/lib/cowork/lead-export';
 import { markdownInlineText, parseMarkdown, type MdBlock, type MdInline } from '@/lib/cowork/markdown';
 
-export const coworkExportFormat = z.enum(['csv', 'xlsx', 'pdf', 'md']);
+export const coworkExportFormat = z.enum(['csv', 'xlsx', 'pdf', 'md', 'docx']);
 export type CoworkExportFormat = z.infer<typeof coworkExportFormat>;
+export const COWORK_MIME: Record<CoworkExportFormat, string> = {
+  csv: 'text/csv; charset=utf-8',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pdf: 'application/pdf',
+  md: 'text/markdown; charset=utf-8',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
 export class CoworkExportError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
@@ -16,23 +23,35 @@ function getDocument(events: CoworkEvent[]) {
   return parsed.data.document;
 }
 
-/** Core PDF fonts support Western European text. Fail explicitly on unsupported glyphs. */
-export function normalizeCoworkPdfText(text: string) {
+/** Core PDF fonts support Western European text. Fail explicitly on unsupported glyphs; `keepIn` names the formats that keep them. */
+export function normalizeCoworkPdfText(text: string, keepIn = 'Word o en Markdown') {
   const normalized = text.normalize('NFC').replace(/[‘’′]/g, "'").replace(/[“”″]/g, '"')
     .replace(/[–—−‑]/g, '-').replace(/…/g, '...').replace(/•/g, '-').replace(/\t/g, '    ')
     .replace(/[→⇒➜]/g, '->').replace(/←/g, '<-').replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/≠/g, '!=')
     .replace(/≈/g, '~').replace(/€/g, 'EUR').replace(/[✓✔]/g, '-').replace(/[✗✘]/g, 'x').replace(/​|﻿/g, '');
   if (/[^\x20-\x7e\xa0-\xff\n\r]/.test(normalized)) {
-    throw new CoworkExportError('Este documento contiene caracteres que todavía no admite el PDF. Descárgalo en Markdown para conservarlos.', 422);
+    throw new CoworkExportError(`Este documento contiene caracteres que todavía no admite el PDF. Descárgalo en ${keepIn} para conservarlos.`, 422);
   }
   return normalized;
 }
 
 /** Download name from the document title: «Informe de métricas» -> informe-de-metricas. */
-export function coworkExportFilename(title: string, extension: string) {
+export function coworkExportFilename(title: string, extension: string, fallback = 'cowork-documento') {
   const slug = String(title || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/g, '');
-  return `${slug || 'cowork-documento'}.${extension}`;
+  return `${slug || fallback}.${extension}`;
+}
+
+/** The same tree with `change` applied to every text in it (the PDF fixes its glyphs before drawing). */
+export function mapCoworkMarkdownText(blocks: MdBlock[], change: (text: string) => string): MdBlock[] {
+  const inline = (nodes: MdInline[]): MdInline[] => nodes.map(node => node.type === 'text' || node.type === 'code' ? { ...node, value: change(node.value) }
+    : node.type === 'br' ? node : { ...node, children: inline(node.children) });
+  const block = (item: MdBlock): MdBlock => item.type === 'heading' || item.type === 'paragraph' ? { ...item, children: inline(item.children) }
+    : item.type === 'list' ? { ...item, items: item.items.map(entry => ({ ...entry, children: entry.children.map(block) })) }
+      : item.type === 'blockquote' ? { ...item, children: item.children.map(block) }
+        : item.type === 'code' ? { ...item, value: change(item.value) }
+          : item.type === 'table' ? { ...item, header: item.header.map(inline), rows: item.rows.map(row => row.map(inline)) } : item;
+  return blocks.map(block);
 }
 
 type PdfRun = { text: string; bold?: boolean; italic?: boolean; code?: boolean; strike?: boolean; href?: string };
@@ -275,12 +294,21 @@ function renderCoworkPdf(pdf: JsPdf, title: string, blocks: MdBlock[]) {
   }
 }
 
+/** A PDF of `title` and the blocks under it, as bytes. */
+export async function coworkPdfBytes(title: string, blocks: MdBlock[]) {
+  const { jsPDF } = await import('jspdf');
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  pdf.setProperties({ title, creator: 'ANTON.IA Cowork' });
+  renderCoworkPdf(pdf, title, blocks);
+  return new Uint8Array(pdf.output('arraybuffer'));
+}
+
 export async function buildCoworkFile(events: CoworkEvent[], format: CoworkExportFormat) {
   const observations = events.filter(event => event.kind === 'tool.completed').map(event => event.payload);
   if (format === 'csv') {
     const csv = buildCoworkLeadCsv(observations);
     if (!csv) throw new CoworkExportError('Este trabajo no tiene contactos para exportar.', 404);
-    return { bytes: new TextEncoder().encode(csv), mime: 'text/csv; charset=utf-8', filename: 'cowork-contactos.csv' };
+    return { bytes: new TextEncoder().encode(csv), mime: COWORK_MIME.csv, filename: 'cowork-contactos.csv' };
   }
   if (format === 'xlsx') {
     const rows = collectCoworkLeadRows(observations);
@@ -294,16 +322,17 @@ export async function buildCoworkFile(events: CoworkEvent[], format: CoworkExpor
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, 'Contactos');
     return { bytes: new Uint8Array(XLSX.write(book, { type: 'buffer', bookType: 'xlsx', compression: true })),
-      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename: 'cowork-contactos.xlsx' };
+      mime: COWORK_MIME.xlsx, filename: 'cowork-contactos.xlsx' };
   }
 
   const document = getDocument(events);
-  if (format === 'md') return { bytes: new TextEncoder().encode(document.content), mime: 'text/markdown; charset=utf-8', filename: coworkExportFilename(document.title, 'md') };
+  if (format === 'md') return { bytes: new TextEncoder().encode(document.content), mime: COWORK_MIME.md, filename: coworkExportFilename(document.title, 'md') };
+  if (format === 'docx') {
+    const { renderCoworkDocx } = await import('./docx-render');
+    return { bytes: await renderCoworkDocx(document.title, parseMarkdown(document.content.replace(/\r\n?/g, '\n'))), mime: COWORK_MIME.docx,
+      filename: coworkExportFilename(document.title, 'docx') };
+  }
   const title = normalizeCoworkPdfText(document.title);
   const content = normalizeCoworkPdfText(document.content).replace(/\r\n?/g, '\n');
-  const { jsPDF } = await import('jspdf');
-  const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-  pdf.setProperties({ title, creator: 'ANTON.IA Cowork' });
-  renderCoworkPdf(pdf, title, parseMarkdown(content));
-  return { bytes: new Uint8Array(pdf.output('arraybuffer')), mime: 'application/pdf', filename: coworkExportFilename(document.title, 'pdf') };
+  return { bytes: await coworkPdfBytes(title, parseMarkdown(content)), mime: COWORK_MIME.pdf, filename: coworkExportFilename(document.title, 'pdf') };
 }

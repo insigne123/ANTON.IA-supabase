@@ -16,6 +16,7 @@ import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
 import { CoworkHome } from './CoworkHome';
 import { CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
+import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
 import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwSwap, cwVariants, m } from './motion';
@@ -138,6 +139,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const clearPrivateResults = useCallback(() => {
     setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); setQueued(null);
   }, []);
+  // A failed download or a lost session is told the same way from every card that can be downloaded.
+  const exportHandlers = useMemo(() => ({ onError: setError, onAccessDenied: clearPrivateResults }), [clearPrivateResults]);
   const attach = useCoworkAttachments({ onError: setError, onAccessDenied: clearPrivateResults });
   const clearAttachments = attach.clear;
   /** The files of a queued message, back in the box if the person edits it. */
@@ -638,7 +641,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
 
   useEffect(() => {
     if (!openArtifact) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') closeArtifact(); };
+    // A menu open inside the panel («Descargar») closes first and marks the key as handled: the panel stays.
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) closeArtifact(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [openArtifact, closeArtifact]);
@@ -670,7 +674,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
-  return <CoworkMotion><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
+  return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
       <CoworkThreadList threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} />
     </div>
@@ -784,5 +788,5 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
         sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
         budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
     </m.div>}
-  </section></CoworkMotion>;
+  </section></CoworkExportProvider></CoworkMotion>;
 }
