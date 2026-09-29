@@ -146,6 +146,8 @@ export type CorpusTurnResult = {
   reads?: Array<{ action: string; input: string }>;
   /** When the Writer wrote the answer (writer.ts): the coordinator's brief and what each agent did. */
   writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }> };
+  /** The judge in the turn (G2): its judgement of the first answer, whether it asked for a fix and whether the answer changed. */
+  judgeInTurn?: { veredicto: string; scores: Record<string, number>; problemas: string[]; canRead?: boolean; asked: boolean; fixed: boolean };
 };
 
 /** What the person reads in the chat: the reply plus every card. */

@@ -6,7 +6,7 @@ import {
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
   coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
-  coworkAgentRows, coworkAgentLine, coworkDraftReview,
+  coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -303,4 +303,26 @@ test('the Writer and the Reviewer read as one row each, at their latest step, an
   assert.equal(coworkDraftReview([written, reviewing]), null);
   // A malformed step is ignored.
   assert.deepEqual(coworkAgentRows([agent({ agent: 'boss', state: 'working', label: 'x' }), agent({ agent: 'writer', state: 'done', label: ' ' })]), []);
+});
+
+test('the judge reads the answer as the Reviewer, and says whether it stood or was fixed', () => {
+  const agent = (result: Record<string, unknown>) => event('tool.completed', { action: COWORK_AGENT_ACTION, input: '', result });
+  const read = event('tool.completed', { action: 'contacted.search', input: '', result: { items: [] } });
+  const reviewing = agent({ agent: 'judge', state: 'working', label: 'Revisando la respuesta' });
+  const adjusting = agent({ agent: 'judge', state: 'working', label: 'Ajustando la respuesta' });
+  assert.equal(coworkLiveActivity({ status: 'running' }, [read, reviewing]), 'Revisora · revisando la respuesta…');
+  // The correction's read shows as a read; the row stays at its latest step.
+  const reread = event('tool.completed', { action: 'contacted.search', input: '', result: { items: [] } });
+  assert.equal(coworkLiveActivity({ status: 'running' }, [read, reviewing, adjusting, reread]), 'Revisó el historial de envíos. Analizando…');
+  const done = (outcome: string, label: string) => agent({ agent: 'judge', state: 'done', label, outcome, changes: [] });
+  assert.deepEqual(coworkAgentRows([reviewing, adjusting, done('fixed', 'Ajustó la respuesta')]).map(row => `${row.name}:${row.state}:${row.label}`),
+    ['Revisora:done:Ajustó la respuesta']);
+  assert.equal(coworkAnswerReview(coworkAgentRows([reviewing, done('clean', 'Sin ajustes')])), 'clean');
+  assert.equal(coworkAnswerReview(coworkAgentRows([reviewing, adjusting, done('fixed', 'Ajustó la respuesta')])), 'fixed');
+  // Not reviewed: still at work, no time, or the call failed. A review of the emails is not a review of the answer.
+  assert.equal(coworkAnswerReview(coworkAgentRows([reviewing])), null);
+  assert.equal(coworkAnswerReview(coworkAgentRows([reviewing, done('skipped', 'No alcanzó a revisar')])), null);
+  assert.equal(coworkAnswerReview(coworkAgentRows([agent({ agent: 'reviewer', state: 'done', label: 'Sin ajustes', outcome: 'clean', changes: [] })])), null);
+  // The judge does not change what the cards say about their review.
+  assert.equal(coworkDraftReview([reviewing, done('clean', 'Sin ajustes')]), null);
 });

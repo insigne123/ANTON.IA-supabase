@@ -13,6 +13,11 @@
 // the coordinator hands writing to them. COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick
 // their models (COWORK_MODEL by default).
 //
+// --judge-in-turn turns on the judge in the turn (judge.ts, G2), as COWORK_JUDGE_ENABLED does:
+// it reads the coordinator's final answer and asks for one correction when it is worth it.
+// COWORK_JUDGE_MODEL picks its model (COWORK_MODEL by default); grade the result with
+// judge-cowork-conversations.ts and a different --judge-model.
+//
 // To compare prompts, run it on the previous commit and on this one with the same flags.
 import { writeFileSync } from 'node:fs';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
@@ -21,9 +26,10 @@ import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
+import { COWORK_JUDGE_TURN_INSTRUCTIONS, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn)
 // and every button on the Cowork home.
@@ -45,6 +51,9 @@ async function main() {
   const writerOn = process.argv.includes('--writer');
   const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
   const writerCalls = { writer: 0, reviewer: 0 };
+  const judgeOn = process.argv.includes('--judge-in-turn');
+  const judgeModel = process.env.COWORK_JUDGE_MODEL || process.env.COWORK_MODEL;
+  let judgeCalls = 0;
   const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
   let calls = 0;
   const usage: unknown[] = [];
@@ -68,6 +77,23 @@ async function main() {
           return response.data;
         },
       }) : undefined;
+      // The judge in the turn, with its own model and the same call budget.
+      const judgeInTurn: CorpusJudge | undefined = judgeOn ? async (answer, observations, meta) => {
+        if (calls >= maxCalls) return null;
+        calls++;
+        judgeCalls++;
+        try {
+          const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: COWORK_JUDGE_TURN_INSTRUCTIONS,
+            prompt: coworkJudgeTurnPrompt({ request: meta.request, history: meta.history, userContext: meta.userContext, observations, answer }),
+            provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 45000 });
+          usage.push(coworkModelUsage(response.telemetry));
+          decisions.push({ agent: 'judge', output: response.data });
+          return response.data;
+        } catch (error) {
+          console.warn('[judge-in-turn] failed:', error instanceof Error ? error.message : error);
+          return null;
+        }
+      } : undefined;
       const outcome = await runCorpusCase(entry, async context => {
         if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
         calls++;
@@ -105,7 +131,7 @@ async function main() {
           leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
           outline: response.data.outline ?? null });
         return response.data;
-      }, write);
+      }, write, judgeInTurn);
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
       outcomes.push({ ...outcome, attempt, seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
         issues: coworkAnswerIssues(shown, { expectNextStep: !(outcome.result.proposal || outcome.result.search) }).map(issue => issue.detail) });
@@ -120,6 +146,11 @@ async function main() {
     ...(writerOn ? { writer: { models: writerModels, calls: writerCalls,
       answers: outcomes.filter(outcome => outcome.result.writer).length,
       corrected: outcomes.filter(outcome => (outcome.result.writer?.steps || []).some(step => step.agent === 'reviewer' && step.state === 'done' && (step.changes || []).length > 0)).length } } : {}),
+    // With --judge-in-turn: how many answers it read, how many it asked to fix and how many changed.
+    ...(judgeOn ? { judgeInTurn: { model: judgeModel, calls: judgeCalls,
+      judged: outcomes.filter(outcome => outcome.result.judgeInTurn).length,
+      asked: outcomes.filter(outcome => outcome.result.judgeInTurn?.asked).length,
+      fixed: outcomes.filter(outcome => outcome.result.judgeInTurn?.fixed).length } } : {}),
     casesPassed: outcomes.filter(outcome => outcome.passed).length,
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,

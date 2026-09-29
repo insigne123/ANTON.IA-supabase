@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
-  type CoworkJudgement,
+  coworkJudgeFix, coworkShownFromAnswer, COWORK_JUDGE_TURN_INSTRUCTIONS, type CoworkJudgement,
 } from './judge';
 
 const judgement = (scores: number[], veredicto: CoworkJudgement['veredicto'] = 'mejorable'): CoworkJudgement => ({
@@ -62,4 +62,40 @@ test('summaries and agreement with people are plain numbers', () => {
   assert.deepEqual(agreement.comprension, { n: 2, mae: 1, withinOne: 0.5 });
   assert.deepEqual(agreement.veracidad, { n: 2, mae: 1, withinOne: 0.5 });
   assert.equal(agreement.utilidad, null);
+});
+
+test('in the turn, the judge asks for one correction only when it is worth it, and reads what the person would see', () => {
+  const judgement = (scores: Partial<CoworkJudgement['scores']>, veredicto: CoworkJudgement['veredicto'], problemas: string[]): CoworkJudgement => ({
+    scores: { comprension: 5, veracidad: 5, utilidad: 4, claridad: 5, friccion: 5, ...scores }, veredicto, problemas });
+  // A good answer, or one only a little improvable, stands.
+  assert.equal(coworkJudgeFix(judgement({}, 'buena', [])), null);
+  assert.equal(coworkJudgeFix(judgement({ utilidad: 3 }, 'mejorable', ['Podría ser más breve.'])), null);
+  // A free read offered instead of done, a claim without support, or a bad answer get one correction.
+  const deferral = coworkJudgeFix(judgement({ friccion: 2 }, 'mala', ['Pide permiso para revisar los envíos, una consulta que podía hacer.']));
+  assert.match(String(deferral), /una revisión de tu respuesta encontró:\n- Pide permiso para revisar los envíos/);
+  assert.match(String(deferral), /hazla en esta decisión/);
+  assert.ok(coworkJudgeFix(judgement({ veracidad: 3 }, 'mejorable', ['Dice «1 envío registrado» sin respaldo.'])));
+  assert.equal(coworkJudgeFix(judgement({ friccion: 2 }, 'mala', [])), null, 'nothing concrete to fix');
+  // The correction knows what the answer offered: its closing question, quoted.
+  const quoted = coworkJudgeFix(judgement({ friccion: 2 }, 'mala', ['Pide permiso para revisar los envíos.']),
+    { canRead: true, question: '¿Quieres que revise tus envíos?' });
+  assert.match(String(quoted), /Tu respuesta terminaba con «¿Quieres que revise tus envíos\?»/);
+  assert.match(String(quoted), /no con algo que puedas hacer tú/);
+  // Without a read left, only what a rewrite can fix: a claim without support, or a misunderstood request.
+  const noRead = { canRead: false, question: '¿Quieres que revise tus envíos?' };
+  assert.equal(coworkJudgeFix(judgement({ friccion: 2 }, 'mala', ['Pide permiso para revisar los envíos.']), noRead), null);
+  const rewrite = coworkJudgeFix(judgement({ veracidad: 3 }, 'mejorable', ['Dice «1 envío registrado» sin respaldo.']), noRead);
+  assert.match(String(rewrite), /ya no quedan consultas: corrígela con lo que ya tienes/);
+  assert.doesNotMatch(String(rewrite), /hazla en esta decisión/);
+  assert.ok(coworkJudgeFix(judgement({ comprension: 2 }, 'mala', ['Responde otra cosa.']), noRead));
+  assert.deepEqual(coworkShownFromAnswer({ reply: 'Te dejo la tabla.', question: '¿La exporto?', document: null,
+    blocks: [{ type: 'table', title: 'Contactos', columns: ['Nombre'], rows: [['Felipe']] }], suggestions: [{ label: 'Sí', message: 'Sí, expórtala' }] }),
+  { reply: 'Te dejo la tabla.', cards: 'Contactos\nNombre\nFelipe', question: '¿La exporto?', quickReplies: ['Sí, expórtala'], document: null });
+});
+
+test('the judge in the turn keeps the rubric and is stricter with offering what Cowork could do now; the offline judge does not change', () => {
+  assert.ok(COWORK_JUDGE_TURN_INSTRUCTIONS.startsWith(COWORK_JUDGE_INSTRUCTIONS));
+  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /Sé estricto con la fricción/);
+  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /No es fricción ofrecer una acción que necesita aprobación/);
+  assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /Sé estricto con la fricción/);
 });
