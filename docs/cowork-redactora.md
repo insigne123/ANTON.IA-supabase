@@ -138,6 +138,28 @@ Primer PR de la Ola G del plan 2 de Cowork (punto G1). Cuando un turno tiene que
   - un correo por persona que dejaba a alguien fuera.
 - **Latencia:** la mediana sube unos 5 s por la Redactora y la Revisora. Con `COWORK_STREAMING_ENABLED`, el texto de la Redactora aparece mientras se escribe.
 
+**Corpus completo** (40 casos × 3 = 120 respuestas: producción, marketing, botones de inicio, edición y archivos; mismo día y misma rama, sin y con el flag):
+
+| | Sin Redactora | Con Redactora |
+|---|---|---|
+| Casos que pasan todas sus verificaciones | 119/120 | 118/120 |
+| Verificaciones | 1067/1068 | 1066/1068 |
+| Juez: buenas / mejorables / malas | 55 / 33 / 32 | 63 / 37 / 20 |
+| Fricción | 3,99 | 4,18 |
+| Utilidad | 3,92 | 4,02 |
+| Veracidad | 4,68 | 4,62 |
+| Claridad | 4,68 | 4,63 |
+| Llamadas por caso | 2,21 | 2,68 |
+| Mediana por caso | 10,6 s | 12,7 s |
+
+- **Dónde se usó la Redactora:** en 29 respuestas de 12 casos (10 con una corrección). En esos casos, el juez sube en conjunto 11 puntos (buena = 2, mejorable = 1, mala = 0).
+- **Los demás casos no la usan.** Sus diferencias (+9 en total, con subidas y bajas de hasta 3 puntos por caso) repiten las mismas lecturas y los mismos errores que la base (por ejemplo, «1 envío registrado» cuando solo hay un contacto marcado como contactado): son variación del modelo y del juez, no efecto de la regla nueva.
+- **Las verificaciones que fallan** (una en la base, dos con Redactora) son de casos donde no se usó la Redactora.
+- **Metas de G1:**
+  - la fricción de 4,3 o más se cumple en los casos de redacción (4,31) y no en el corpus completo (4,18);
+  - las buenas llegan al 52 %, contra el 59 % buscado.
+  - Lo que falta es, sobre todo, el coordinador que pide permiso para una consulta que podía hacer. Es lo que ataca G2 (juez dentro del turno).
+
 **Navegador:** Playwright contra el build de producción local, con un Supabase simulado solo en local (`fake-supabase-g1.mjs`). El simulado reproduce los eventos y el borrador en vivo de un turno con plan: dos lecturas, la Redactora, la Revisora con un ajuste y la respuesta final. Se probó en claro y oscuro a 1440 px, en claro a 390 px y con `reducedMotion: 'reduce'`, y también sin plan (claro a 1440 px y oscuro a 390 px).
 - **Mientras la Redactora escribe:**
   - «Ahora: Redactora · escribiendo 3 correos…»;
