@@ -3,6 +3,7 @@ import test from 'node:test';
 import { inflateSync } from 'node:zlib';
 import * as XLSX from 'xlsx';
 import { buildCoworkFile, normalizeCoworkPdfText } from './file-exports';
+import { coworkBinaryPreview } from './file-binary';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 
 const id = '00000000-0000-4000-8000-000000000001';
@@ -54,4 +55,19 @@ test('missing or fabricated results cannot become exports', async () => {
   await assert.rejects(buildCoworkFile([], 'xlsx'), /contactos/);
   await assert.rejects(buildCoworkFile([event('run.completed', { reply: 'Texto', document: null })], 'pdf'), /documento/);
   await assert.rejects(buildCoworkFile([event('run.completed', { action: 'leads.search', result: { scope: 'own_saved_contacts', items: [{ id }] } })], 'csv'), /contactos/);
+});
+
+test('the document of a turn also downloads as Word, with its headings, list and table, and keeps the characters the PDF cannot', async () => {
+  const content = '# Resumen\n\nInvestigación **comercial** en Chile 🌍.\n\n- Uno\n- Dos\n\n| Empresa | Estado |\n|---|---|\n| Entel | Nuevo |';
+  const events = [event('run.completed', { reply: 'Listo', document: { title: 'Informe de investigación', content } })];
+  const file = await buildCoworkFile(events, 'docx');
+  assert.equal(file.filename, 'informe-de-investigacion.docx');
+  assert.equal(file.mime, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  const result = await coworkBinaryPreview(file.filename, file.bytes);
+  assert.ok(result && 'preview' in result && result.preview.kind === 'text');
+  const { text } = result.preview as Extract<typeof result.preview, { kind: 'text' }>;
+  assert.match(text, /^Informe de investigación\n\nResumen\n\nInvestigación comercial en Chile 🌍\./);
+  assert.match(text, /• Uno\n• Dos/);
+  assert.match(text, /Empresa \| Estado\nEntel \| Nuevo/);
+  await assert.rejects(buildCoworkFile([event('run.completed', { reply: 'Texto', document: null })], 'docx'), /documento/);
 });

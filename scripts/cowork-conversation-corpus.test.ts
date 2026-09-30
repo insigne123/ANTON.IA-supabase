@@ -215,6 +215,23 @@ Object.assign(IDEAL, {
       null, undefined, { question: '¿Te redacto el correo para Camila?' }),
 } satisfies Record<string, CorpusDecider>);
 
+/** A file from what is already on screen (F3): every card carries its own «Descargar», so no code is proposed for it. */
+Object.assign(IDEAL, {
+  'descargar-tabla': async context => context.observations.length === 0 ? read('leads.search', 'RR. HH.')
+    : answer('Te dejé tus 4 contactos de RR. HH. en una tabla, con su empresa y si tienen correo. Con «Descargar», en la tarjeta, la bajas en Excel (o en CSV). Andrea, de Falabella, es la única sin correo.',
+      null, chip('Solo con correo', 'Déjame la tabla solo con los que tienen correo'), {
+        question: '¿Te la dejo solo con los 3 que tienen correo?',
+        blocks: [{ type: 'table', title: 'Contactos de RR. HH.', columns: ['Nombre', 'Empresa', 'Correo'], rows: [
+          ['Marcela Rojas', 'Sodexo Chile', 'Sí'], ['Felipe Muñoz', 'Securitas Chile', 'Sí'], ['Andrea Vega', 'Falabella', 'No'], ['Camila Fuentes', 'Adecco', 'Sí']] }] }),
+  'descargar-correo': async context => context.observations.length === 0
+    ? parallel([{ action: 'leads.search', input: 'Felipe Securitas' }, { action: 'profile.get', input: '' }])
+    : answer('Te dejé el correo para Felipe (Jefe de Reclutamiento en Securitas). En la tarjeta, «Descargar» te lo baja en Word o en PDF.',
+      null, chip('Hazlo más corto', 'Hazlo más corto, en tres frases'), {
+        question: '¿Lo dejo más corto antes de que lo bajes?',
+        blocks: [{ type: 'email_draft', title: 'Correo para Felipe', to: ['Felipe Muñoz'], subject: 'Antecedentes laborales sin trámites manuales',
+          body: 'Hola Felipe,\nEn Yago revisamos antecedentes laborales de postulantes en el Poder Judicial de forma automática con AXIS. Para un equipo de reclutamiento como el tuyo, son horas menos por candidato.\n¿Te sirve que te lo muestre en 15 minutos esta semana?\nSaludos,\nNicolás' }] }),
+} satisfies Record<string, CorpusDecider>);
+
 const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
 
 test('every corpus case has an ideal turn that passes all its checks through the real loop', async () => {

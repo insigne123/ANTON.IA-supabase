@@ -1,14 +1,15 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
-import { BadgeCheck, ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2, TriangleAlert } from 'lucide-react';
+import { BadgeCheck, ChartColumn, Check, ChevronRight, Copy, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkBlock } from '@/lib/cowork/contracts';
 import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
-  coworkBlockFilename, coworkBlockMeta, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv, coworkVersionMessage,
-  coworkFigureNumber, coworkWordDiff, coworkChartCsv, coworkChartRows, coworkChartSummary, coworkChartValue, type CoworkEditedEmail,
+  coworkBlockMeta, coworkBlockWithSteps, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableTsv, coworkVersionMessage,
+  coworkFigureNumber, coworkWordDiff, coworkChartRows, coworkChartSummary, coworkChartValue, type CoworkEditedEmail,
 } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
+import { ExportMenu } from './ExportMenu';
 import { AnimatePresence, CW_EASE, CwCount, cwSwap, cwVariants, m, useReducedMotion } from './motion';
 import { CwButton } from './ui';
 
@@ -35,15 +36,6 @@ export function CopyButton({ text, label, copiedLabel = 'Copiado', size = 'xs', 
   </CwButton>;
 }
 
-function downloadCsv(table: Table) {
-  const url = URL.createObjectURL(new Blob([coworkTableCsv(table)], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = coworkBlockFilename(table.title, 'csv');
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 /** A figure that counts up when it first appears while you watch; at rest it reads exactly as written. */
 function FigureValue({ value, live }: { value: string; live: boolean }) {
   const figure = live ? coworkFigureNumber(value) : null;
@@ -65,21 +57,15 @@ export function MetricsBlock({ block, live = false }: { block: Metrics; live?: b
         {item.detail && <dd className="order-3 mt-0.5 text-[12px] leading-4 text-cw-faint">{item.detail}</dd>}
       </div>)}
     </dl>
+    <div className="-mb-1 -ml-1.5 mt-2.5 flex flex-wrap items-center gap-1">
+      <ExportMenu kind="metrics" block={() => block} size="xs" variant="ghost" />
+    </div>
   </section>;
 }
 
 /** One color per series, from the app's own tokens: the accent and two greys that keep their contrast on the card, light and dark. */
 const SERIES_FILL = ['var(--cw-accent)', 'var(--cw-muted)', 'var(--cw-faint)'] as const;
 const PLOT_HEIGHT = 128;
-
-function downloadChartCsv(chart: Chart) {
-  const url = URL.createObjectURL(new Blob([coworkChartCsv(chart)], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = coworkBlockFilename(chart.title, 'csv');
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 /** The chart's figures as text that pastes as a table. */
 function chartTsv(chart: Chart) {
@@ -146,7 +132,7 @@ export function ChartBlock({ block, live = false }: { block: Chart; live?: boole
     </table>
     <div className="-mb-1 -ml-1.5 mt-2.5 flex flex-wrap items-center gap-1">
       <CopyButton text={chartTsv(block)} label="Copiar datos" />
-      <CwButton size="xs" variant="ghost" onClick={() => downloadChartCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>
+      <ExportMenu kind="chart" block={() => block} size="xs" variant="ghost" />
     </div>
   </section>;
 }
@@ -243,12 +229,14 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
   const openButton = <CwButton size="xs" variant="ghost" onClick={open}><ChevronRight aria-hidden="true" />Abrir</CwButton>;
   return <div className={cn(live && 'cw-rise')}>
     {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
-      actions={<><CopyButton text={coworkEmailText(block)} label="Copiar correo" />{openButton}</>}>
+      actions={<><CopyButton text={coworkEmailText(block)} label="Copiar correo" />
+        <ExportMenu kind="email_draft" block={() => savedDraft(block, artifact.id)} size="xs" variant="ghost" />{openButton}</>}>
       <p className="text-[13.5px] font-semibold text-cw-text">{block.subject}</p>
       <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted">{block.body}</p>
     </CardShell>}
     {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
-      actions={<><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia" />{openButton}</>}>
+      actions={<><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia" />
+        <ExportMenu kind="sequence" block={() => savedDraft(block, artifact.id)} size="xs" variant="ghost" />{openButton}</>}>
       <ol className="space-y-1.5">
         {block.steps.map((step, index) => <li key={`${step.day}-${index}`} className="flex items-center gap-2.5 text-[13.5px]">
           <span className="w-14 shrink-0 rounded-md bg-cw-panel px-1.5 py-0.5 text-center text-[12px] font-medium tabular-nums text-cw-muted">Día {step.day}</span>
@@ -258,7 +246,7 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
     </CardShell>}
     {block.type === 'table' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
       actions={<>
-        <CwButton size="xs" variant="ghost" onClick={() => downloadCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>
+        <ExportMenu kind="table" block={() => block} size="xs" variant="ghost" />
         <CopyButton text={coworkTableTsv(block)} label="Copiar tabla" />{openButton}
       </>}>
       <TableGrid block={block} limit={5} live={live} />
@@ -364,6 +352,18 @@ function useSessionSteps(key: string, original: CoworkEditedEmail[]) {
   return [steps, save] as const;
 }
 
+/** The card as the person has it now: their edit of it, if they made one in the panel, else as Cowork wrote it. */
+function savedDraft(block: Extract<CoworkBlock, { type: 'email_draft' | 'sequence' }>, artifactId: string) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`cowork:draft:${artifactId}`) || 'null');
+    const original = coworkDraftSteps(block);
+    if (Array.isArray(saved) && saved.length === original.length && saved.every(step => step && typeof step.subject === 'string' && typeof step.body === 'string')) {
+      return coworkBlockWithSteps(block, saved.map((step, index) => ({ ...original[index], subject: step.subject, body: step.body })));
+    }
+  } catch { /* As Cowork wrote it. */ }
+  return block;
+}
+
 const FIELD = 'w-full rounded-[10px] border border-cw-border bg-cw-elevated px-3 text-cw-text placeholder:text-cw-faint focus-visible:border-cw-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]';
 
 /** Subject and body of one email, editable; shared by the panel and the campaign review. */
@@ -416,6 +416,7 @@ function DraftView({ block, draftKey, onSend, sendHint }: {
         ? <CwButton key="done" size="sm" variant="primary" onClick={() => { setEditing(false); setMarking(edited); }} disabled={!complete}><Check aria-hidden="true" />Listo</CwButton>
         : <CwButton key="edit" size="sm" variant="secondary" onClick={() => { setEditing(true); setMarking(false); }}><Pencil aria-hidden="true" />Editar</CwButton>}
       {!editing && <CopyButton text={text} label={sequence ? 'Copiar secuencia completa' : 'Copiar correo completo'} size="sm" variant="secondary" />}
+      {!editing && <ExportMenu kind={block.type} block={() => coworkBlockWithSteps(block, steps)} />}
       {edited && <CwButton size="sm" variant="ghost" onClick={() => setSteps(original)}><RotateCcw aria-hidden="true" />Volver al original</CwButton>}
       {edited && <span className="rounded-full bg-cw-accent-soft px-2.5 py-0.5 text-[12px] font-medium text-cw-accent">Editado por ti</span>}
     </div>
@@ -461,7 +462,7 @@ export function CoworkBlockView({ block, draftKey, onSend = null, sendHint = 'Di
   if (block.type === 'email_draft' || block.type === 'sequence') return <DraftView block={block} draftKey={draftKey} onSend={onSend} sendHint={sendHint} />;
   return <div className="space-y-4">
     <div className="flex flex-wrap gap-2">
-      <CwButton size="sm" onClick={() => downloadCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>
+      <ExportMenu kind="table" block={() => block} />
       <CopyButton text={coworkTableTsv(block)} label="Copiar tabla" size="sm" variant="secondary" />
     </div>
     <TableGrid block={block} />

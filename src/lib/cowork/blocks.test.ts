@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  coworkBlockFilename, coworkBlockMeta, coworkBlocksText, coworkDraftSteps, coworkEditedEmails, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv,
+  coworkBlockMeta, coworkBlocksText, coworkDraftSteps, coworkEditedEmails, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv,
   coworkOnlyUsesVersion, coworkVersionMessage, coworkVersionSource, coworkWantsCampaignFromVersion, coworkWordDiff, coworkFigureNumber,
 } from './blocks';
 
@@ -24,9 +24,7 @@ test('the CSV opens in a spreadsheet with accents and no formulas', () => {
   assert.equal(csv.slice(1), '"Contacto","Nota"\r\n"Felipe Muñoz","Dijo ""sí"""\r\n"\'=HYPERLINK(""x"")","con\ttab"');
 });
 
-test('file names and card lines are plain', () => {
-  assert.equal(coworkBlockFilename('¿A quién le escribo?', 'csv'), 'a-quien-le-escribo.csv');
-  assert.equal(coworkBlockFilename('¿?', 'csv'), 'cowork.csv');
+test('card lines are plain', () => {
   assert.equal(coworkBlockMeta({ type: 'email_draft', title: 'x', to: ['Felipe', 'Camila', 'Rodrigo'], subject: 's', body: 'b' }), 'Correo · para Felipe y 2 más');
   assert.equal(coworkBlockMeta({ type: 'email_draft', title: 'x', to: null, subject: 's', body: 'b' }), 'Correo');
   assert.equal(coworkBlockMeta(sequence), 'Secuencia · 2 correos en 4 días');
