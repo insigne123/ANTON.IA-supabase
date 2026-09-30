@@ -30,10 +30,14 @@ import { COWORK_JUDGE_TURN_INSTRUCTIONS, coworkJudgeSchema, coworkJudgeTurnPromp
 import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn)
 // and every button on the Cowork home.
 const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
+
+// «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
+CORPUS.push(...AGENDA_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {

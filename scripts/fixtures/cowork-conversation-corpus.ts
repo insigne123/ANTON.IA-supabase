@@ -7,6 +7,7 @@ import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
 import type { CoworkBlock } from '../../src/lib/cowork/contracts';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
+import { buildCoworkAgenda } from '../../src/lib/cowork/agenda';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
 
@@ -49,6 +50,11 @@ export function corpusRead(action: string, input: string): unknown {
         limitation: 'Lo registrado en ANTON.IA; si el correo está sincronizado por completo se indica aparte.' };
     case 'campaigns.inbox':
       return { scope: 'own', items: [], truncated: false };
+    case 'agenda.today':
+      return buildCoworkAgenda({ interested: [], unclassified: [], autoReplies: 0, bounces: [], approvals: { count: 0, oldestDays: null, examples: [] },
+        campaignSteps: { count: 0, examples: [] }, followups: [], linkedinAccepted: [], mailboxSynced: null,
+        sources: { replies: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'none', linkedin: 'sync_incomplete' },
+        timing: { timeZone: 'America/Santiago', day: '2026-09-25', weekday: 'viernes' } });
     case 'exceptions.list':
       return { scope: 'team', truncated: false, items: [
         { id: id(41), type: 'sync_error', summary: 'La sincronización de Outlook falló el 24 sep', status: 'open' },
@@ -199,7 +205,7 @@ export const CORPUS: CorpusCase[] = [
   { id: 'pendientes-vacio', title: 'Pendientes de hoy sin conversaciones activas', request: 'hola, que tengo pendiente para hoy?',
     production: { run: '3e143ba7', latencySeconds: 27, scores: { comprension: 4, veracidad: 4, utilidad: 2, claridad: 3, friccion: 2 }, problem: 'Callejón sin salida con jerga de «cobertura»; no mira campañas ni incidencias.' },
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'consulta pendientes antes de responder', test: r => r.actions.some(a => ['contacted.search', 'replies.attention', 'campaigns.inbox'].includes(a)) },
+      { label: 'consulta pendientes antes de responder', test: r => r.actions.some(a => ['agenda.today', 'contacted.search', 'replies.attention', 'campaigns.inbox'].includes(a)) },
       { label: 'propone algo concreto (incidencias, campañas o contactos)', test: r => /incidenc|campañ|contacto/i.test(r.reply) }] },
   { id: 'recomendacion-hoy', title: 'Qué hacer hoy, dos minutos después', request: 'ok y entonces que me recomiendas hacer hoy para avanzar?',
     history: [{ request: 'hola, que tengo pendiente para hoy?', at: recentAt,

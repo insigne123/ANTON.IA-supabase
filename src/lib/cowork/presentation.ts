@@ -72,6 +72,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'missions.list': { label: 'Revisó tus misiones', source: 'Misiones', icon: 'target' },
   'exceptions.list': { label: 'Revisó incidencias abiertas', source: 'Incidencias', icon: 'alert' },
   'audience.analyze': { label: 'Analizó tu audiencia', source: 'Audiencia', icon: 'audience' },
+  'agenda.today': { label: 'Armó tu lista de hoy', source: 'Agenda', icon: 'calendar' },
   'gmail.contact_history': { label: 'Revisó correos en tu Gmail', source: 'Gmail', icon: 'mail' },
   'prospecting.search': { label: 'Buscó nuevos contactos en el proveedor', source: 'Búsqueda externa', icon: 'globe' },
 };
@@ -134,6 +135,7 @@ const FINDING_NOUNS: Record<string, [string, string]> = {
   'linkedin.inbox': ['conversación', 'conversaciones'],
   'missions.list': ['misión', 'misiones'],
   'exceptions.list': ['incidencia', 'incidencias'],
+  'agenda.today': ['pendiente de hoy', 'pendientes de hoy'],
   'prospecting.search': ['contacto nuevo', 'contactos nuevos'],
 };
 
