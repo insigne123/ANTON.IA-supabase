@@ -121,15 +121,108 @@ La fricción del juez tiene un ruido de unos ±0,4: conviene repetir 3 veces ant
 
 ## Línea base
 
-Pendiente. Se corre sobre `main` como está en producción (Jueza apagada, [#48](https://github.com/insigne123/ANTON.IA-supabase/pull/48)), 3 veces cada operación y juzgada por gpt-6-sol con los comandos de arriba, en varios informes. Sus números entran aquí, por operación y por bloque, y se repiten tras cada PR que cambie a Cowork.
+Medida el 30 de septiembre de 2026 con el modelo real: las 44 operaciones por 3 ejecuciones (132), en ocho informes de 5 o 6 operaciones, con `--stream --writer` (texto en vivo y Redactora encendidos, como en producción). Coordinador gpt-6-luna; juez gpt-6-sol con la rúbrica de siempre y la referencia de la IA anterior. El código es el de `main` con la Jueza apagada ([#48](https://github.com/insigne123/ANTON.IA-supabase/pull/48)); este banco solo agrega scripts, fixtures y documentos. Las cifras sirven para compararlas con otra corrida hecha igual, no como una tasa absoluta.
+
+| | Operaciones | Verificaciones que pasan | Juez: buena / mejorable / mala | Frente a la IA anterior: supera / iguala / por debajo / fuera de alcance | Medias del juez: comprensión · veracidad · utilidad · claridad · fricción |
+|---|---|---|---|---|---|
+| **Las 44** | 44 | 1259 de 1881 (66,9 %) | 16 / 36 / 80 | 1 / 2 / 109 / 20 | 4,00 · 3,81 · 2,79 · 4,67 · 3,03 |
+| Las 20 ★ | 20 | 538 de 786 (68,4 %) | 6 / 23 / 31 | 0 / 0 / 49 / 11 | 4,08 · 4,05 · 2,83 · 4,63 · 3,22 |
+| Las otras 24 | 24 | 721 de 1095 (65,8 %) | 10 / 13 / 49 | 1 / 2 / 60 / 9 | 3,93 · 3,61 · 2,76 · 4,70 · 2,87 |
+
+**Por bloque:**
+
+| | Operaciones | Verificaciones que pasan | Juez: buena / mejorable / mala | Frente a la IA anterior: supera / iguala / por debajo / fuera de alcance | Medias del juez: comprensión · veracidad · utilidad · claridad · fricción |
+|---|---|---|---|---|---|
+| A · Investigar y armar audiencia | 8 | 216 de 336 (64,3 %) | 5 / 8 / 11 | 0 / 0 / 21 / 3 | 4,33 · 4,25 · 3,08 · 4,92 · 3,75 |
+| B · Estrategia y planificación | 6 | 160 de 270 (59,3 %) | 1 / 6 / 11 | 0 / 1 / 16 / 1 | 4,00 · 3,56 · 2,89 · 4,39 · 3,17 |
+| C · Redactar | 5 | 156 de 213 (73,2 %) | 3 / 7 / 5 | 0 / 0 / 13 / 2 | 3,93 · 4,20 · 3,00 · 4,40 · 3,33 |
+| D · Ejecutar por correo | 6 | 175 de 264 (66,3 %) | 3 / 1 / 14 | 0 / 0 / 12 / 6 | 3,72 · 3,67 · 2,33 · 4,78 · 2,33 |
+| E · Ejecutar por LinkedIn | 6 | 175 de 258 (67,8 %) | 2 / 5 / 11 | 0 / 0 / 15 / 3 | 4,17 · 3,83 · 2,89 · 4,55 · 2,94 |
+| F · Otros canales | 1 | 28 de 42 (66,7 %) | 0 / 0 / 3 | 0 / 0 / 2 / 1 | 2,67 · 4,67 · 2,00 · 4,67 · 2,67 |
+| G · Seguimiento | 7 | 183 de 282 (64,9 %) | 2 / 7 / 12 | 0 / 0 / 17 / 4 | 4,24 · 4,05 · 2,86 · 4,72 · 2,81 |
+| H · Control y reportes | 5 | 166 de 216 (76,9 %) | 0 / 2 / 13 | 1 / 1 / 13 / 0 | 3,60 · 2,67 · 2,53 · 4,80 · 2,73 |
+
+**Por lo que la app hace hoy:**
+
+| | Operaciones | Verificaciones que pasan | Juez: buena / mejorable / mala | Frente a la IA anterior: supera / iguala / por debajo / fuera de alcance | Medias del juez: comprensión · veracidad · utilidad · claridad · fricción |
+|---|---|---|---|---|---|
+| La app la hace | 13 | 402 de 594 (67,7 %) | 9 / 10 / 20 | 1 / 1 / 37 / 0 | 4,10 · 3,92 · 3,28 · 4,72 · 3,41 |
+| La app parte | 27 | 745 de 1131 (65,9 %) | 7 / 25 / 49 | 0 / 1 / 64 / 16 | 3,94 · 3,70 · 2,64 · 4,64 · 2,93 |
+| La app no puede | 4 | 112 de 156 (71,8 %) | 0 / 1 / 11 | 0 / 0 / 8 / 4 | 4,08 · 4,17 · 2,25 · 4,67 · 2,50 |
+
+**Por operación** (3 ejecuciones cada una; el juez en una escala de 1 a 5; «IA ant.» es el veredicto frente a lo que logró la IA anterior, en las 3 ejecuciones):
+
+| Op | | La app | Verificaciones | Juez (b / m / M) | IA ant. (S / I / D / F) | Comp. | Ver. | Util. | Clar. | Fricc. | Mediana |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| A1 |  | parte | 29/45 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 5,0 | 3,7 | 3,3 | 5,0 | 2,3 | 7 s |
+| A2 | ★ | parte | 24/39 | 0 / 3 / 0 | 0 / 0 / 3 / 0 | 3,7 | 5,0 | 3,0 | 5,0 | 5,0 | 9 s |
+| A3 |  | parte | 24/48 | 3 / 0 / 0 | 0 / 0 / 3 / 0 | 5,0 | 5,0 | 5,0 | 5,0 | 5,0 | 6 s |
+| A4 | ★ | parte | 21/39 | 1 / 2 / 0 | 0 / 0 / 3 / 0 | 4,0 | 5,0 | 3,3 | 5,0 | 5,0 | 9 s |
+| A5 | ★ | parte | 29/39 | 0 / 2 / 1 | 0 / 0 / 3 / 0 | 4,0 | 5,0 | 2,7 | 5,0 | 4,7 | 5 s |
+| A6 |  | parte | 30/48 | 0 / 0 / 3 | 0 / 0 / 1 / 2 | 3,3 | 2,7 | 2,0 | 4,7 | 2,0 | 12 s |
+| A7 | ★ | parte | 26/36 | 1 / 1 / 1 | 0 / 0 / 3 / 0 | 5,0 | 4,7 | 3,3 | 5,0 | 3,0 | 4 s |
+| A8 |  | no puede | 33/42 | 0 / 0 / 3 | 0 / 0 / 2 / 1 | 4,7 | 3,0 | 2,0 | 4,7 | 3,0 | 14 s |
+| B1 | ★ | la hace | 24/39 | 0 / 3 / 0 | 0 / 0 / 3 / 0 | 3,3 | 5,0 | 3,3 | 4,3 | 4,3 | 11 s |
+| B2 |  | la hace | 24/48 | 1 / 0 / 2 | 0 / 0 / 3 / 0 | 4,7 | 2,7 | 4,3 | 4,7 | 5,0 | 7 s |
+| B3 |  | la hace | 28/51 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 4,3 | 4,3 | 3,0 | 5,0 | 2,0 | 10 s |
+| B4 | ★ | parte | 29/42 | 0 / 1 / 2 | 0 / 0 / 3 / 0 | 3,7 | 3,0 | 2,3 | 4,7 | 2,7 | 24 s |
+| B5 |  | parte | 29/45 | 0 / 1 / 2 | 0 / 0 / 2 / 1 | 5,0 | 2,3 | 2,3 | 3,0 | 2,3 | 11 s |
+| B6 |  | parte | 26/45 | 0 / 1 / 2 | 0 / 1 / 2 / 0 | 3,0 | 4,0 | 2,0 | 4,7 | 2,7 | 14 s |
+| C1 | ★ | la hace | 39/45 | 1 / 2 / 0 | 0 / 0 / 3 / 0 | 3,7 | 5,0 | 3,7 | 4,3 | 4,7 | 17 s |
+| C2 | ★ | la hace | 27/39 | 2 / 1 / 0 | 0 / 0 / 3 / 0 | 5,0 | 5,0 | 4,0 | 4,0 | 4,7 | 14 s |
+| C3 | ★ | parte | 26/39 | 0 / 3 / 0 | 0 / 0 / 3 / 0 | 5,0 | 3,7 | 3,3 | 3,7 | 3,0 | 11 s |
+| C4 |  | parte | 40/51 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 3,7 | 3,0 | 2,0 | 5,0 | 2,3 | 24 s |
+| C5 |  | parte | 24/39 | 0 / 1 / 2 | 0 / 0 / 1 / 2 | 2,3 | 4,3 | 2,0 | 5,0 | 2,0 | 22 s |
+| D1 | ★ | parte | 28/39 | 0 / 0 / 3 | 0 / 0 / 2 / 1 | 4,0 | 2,3 | 2,0 | 4,7 | 2,0 | 12 s |
+| D2 | ★ | parte | 30/42 | 0 / 1 / 2 | 0 / 0 / 3 / 0 | 4,3 | 4,0 | 3,0 | 5,0 | 2,3 | 15 s |
+| D3 |  | la hace | 27/48 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 2,3 | 4,3 | 1,7 | 5,0 | 1,7 | 38 s |
+| D4 |  | parte | 35/48 | 0 / 0 / 3 | 0 / 0 / 0 / 3 | 2,7 | 1,3 | 1,3 | 4,0 | 1,3 | 12 s |
+| D5 | ★ | no puede | 27/33 | 0 / 0 / 3 | 0 / 0 / 1 / 2 | 4,0 | 5,0 | 2,0 | 5,0 | 2,0 | 12 s |
+| D6 |  | la hace | 28/54 | 3 / 0 / 0 | 0 / 0 / 3 / 0 | 5,0 | 5,0 | 4,0 | 5,0 | 4,7 | 5 s |
+| E1 |  | la hace | 33/45 | 0 / 1 / 2 | 0 / 0 / 3 / 0 | 4,0 | 3,7 | 3,3 | 5,0 | 2,3 | 18 s |
+| E2 |  | parte | 27/42 | 0 / 3 / 0 | 0 / 0 / 3 / 0 | 4,3 | 4,3 | 3,0 | 4,3 | 4,7 | 16 s |
+| E3 | ★ | parte | 23/39 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 4,0 | 2,0 | 2,3 | 4,0 | 2,0 | 13 s |
+| E4 | ★ | parte | 29/39 | 0 / 0 / 3 | 0 / 0 / 0 / 3 | 3,7 | 3,3 | 2,0 | 4,7 | 2,0 | 10 s |
+| E5 |  | la hace | 31/51 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 4,0 | 4,7 | 2,3 | 5,0 | 2,0 | 8 s |
+| E6 |  | la hace | 32/42 | 2 / 1 / 0 | 0 / 0 / 3 / 0 | 5,0 | 5,0 | 4,3 | 4,3 | 4,7 | 30 s |
+| F1 | ★ | no puede | 28/42 | 0 / 0 / 3 | 0 / 0 / 2 / 1 | 2,7 | 4,7 | 2,0 | 4,7 | 2,7 | 14 s |
+| G1 | ★ | parte | 24/39 | 0 / 1 / 2 | 0 / 0 / 3 / 0 | 4,7 | 5,0 | 3,0 | 4,7 | 3,0 | 12 s |
+| G2 | ★ | parte | 32/39 | 1 / 0 / 2 | 0 / 0 / 2 / 1 | 4,3 | 3,3 | 3,3 | 5,0 | 3,7 | 22 s |
+| G3 | ★ | no puede | 24/39 | 0 / 1 / 2 | 0 / 0 / 3 / 0 | 5,0 | 4,0 | 3,0 | 4,3 | 2,3 | 10 s |
+| G4 | ★ | parte | 24/39 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 3,0 | 2,7 | 2,0 | 5,0 | 2,0 | 21 s |
+| G5 |  | parte | 32/45 | 1 / 1 / 1 | 0 / 0 / 3 / 0 | 4,3 | 5,0 | 3,3 | 4,7 | 3,0 | 22 s |
+| G6 | ★ | parte | 24/39 | 0 / 2 / 1 | 0 / 0 / 0 / 3 | 4,7 | 3,3 | 3,0 | 4,7 | 3,3 | 16 s |
+| G7 |  | parte | 23/42 | 0 / 2 / 1 | 0 / 0 / 3 / 0 | 3,7 | 5,0 | 2,3 | 4,7 | 2,3 | 16 s |
+| H1 |  | la hace | 42/48 | 0 / 2 / 1 | 1 / 1 / 1 / 0 | 4,7 | 3,0 | 3,7 | 5,0 | 3,3 | 12 s |
+| H2 |  | la hace | 32/42 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 3,7 | 1,0 | 2,0 | 4,7 | 2,3 | 17 s |
+| H3 |  | parte | 24/39 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 2,0 | 4,7 | 2,0 | 5,0 | 3,3 | 6 s |
+| H4 |  | la hace | 35/42 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 3,7 | 2,3 | 3,0 | 5,0 | 2,7 | 10 s |
+| H5 |  | parte | 33/45 | 0 / 0 / 3 | 0 / 0 / 3 / 0 | 4,0 | 2,3 | 2,0 | 4,3 | 2,0 | 6 s |
+
+**Cómo leerla**
+
+- **Ninguna de las 132 ejecuciones cumple todas sus verificaciones** (cada operación tiene entre 11 y 18, sobre lo que el usuario lee: cifra exacta, nombre, advertencia, no fingir un envío). En promedio pasan 66,9 %.
+- **El juez las calificó «mala» en 80 (61 %), «mejorable» en 36 y «buena» en 16.** Frente a la IA anterior: «por debajo» en 109, «fuera de alcance» en 20 (operaciones que la app todavía no puede y lo dijo bien), «supera» en 1 (H1) e «iguala» en 2.
+- **Lo mejor** (el juez dijo «buena» en 2 o 3 de 3): A3, C2, D6 y E6. Las verificaciones y el juez miden cosas distintas: A3 y D6 tienen los mejores veredictos y las verificaciones más bajas (50 % y 52 %), porque el juez lee la respuesta entera y las verificaciones piden el dato exacto.
+- **Lo peor** («mala» en las 3 ejecuciones): A1, A6, A8, B3, C4, D1, D3, D4, D5, E3, E4, E5, F1, G4, H2, H3, H4 y H5. En 11 de esas 18 el juez da fricción de 2 o menos (A6, B3, D1, D3, D4, D5, E3, E4, E5, G4 y H5); contando también C5, son 12 operaciones con fricción de 2 o menos y 15 con utilidad de 2 o menos. Lo que el juez anota en ellas es, sobre todo, devolver el trabajo al usuario: ofrecer una consulta que podía hacer («¿reviso…?»), pedir un dato que ya tenía o dejar la preparación en sus manos.
+- **Veracidad baja** (2,4 o menos): B5, D1, D4, E3, H2, H4 y H5: cifras o fechas que no salen de los datos, o un hecho supuesto (por ejemplo, Gmail conectado cuando la cobertura figura sin confirmar).
+- **El juez todavía toma la fecha real por la del mundo** en 8 de las 132 evaluaciones (H2 en las 3, D4 en 2, G6, E1 y H4 en 1), aunque recibe «ahora» con la del mundo (25 de septiembre): dice que «hoy es 30» y marca un cálculo correcto como error. La veracidad de H2 y D4 no es confiable hasta corregirlo.
+- **Tiempo:** mediana de 12 segundos por respuesta, hasta 38 (D3).
+- **Ruido:** la fricción del juez varía unos ±0,4 entre repeticiones; tres ejecuciones por operación bastan para ver diferencias grandes, no pequeñas.
+
+**Qué mover primero, según esto**
+
+1. **La fricción y la utilidad**: lo que más pesa es devolver el trabajo. Una sola regla de cierre y la revisión antes de mostrar ([#51](https://github.com/insigne123/ANTON.IA-supabase/pull/51)) apuntan ahí; la medida se repite con ella.
+2. **La veracidad en cifras y fechas** (bloque H y D4): usar la hora del mundo y no suponer conexiones que la cobertura no confirma.
+3. **Las brechas de capacidad de la sección siguiente** siguen como estaban: responder en el hilo, aprobar en lote, el tope de una empresa por día sumando correo y LinkedIn.
 
 ## Lo que ya se sabe sin el modelo
 
 - **Cada operación tiene una respuesta buena que pasa todas sus verificaciones, y dos turnos vacíos que no:** el que responde sin mirar y devuelve el trabajo al usuario, y el que mira lo correcto y no dice nada. Cada uno falla al menos 3 verificaciones en cada operación.
 - **Cada verificación importante se vio fallar.** Un turno bueno con una sola cosa peor (una cifra inventada, el nombre de otra empresa en un correo de corrección, un precio equivocado en el asunto, un «ya activé la cuenta», un enlace de invitación directa, una empresa excluida que vuelve al plan, las buenas noticias antes que las malas…) hace fallar la verificación que debe notarlo: 34 casos de ese tipo, 28 en las otras 24 y 6 en las 20 ★. Al armarlos, dos resultaron demasiado suaves y se reforzaron.
 - **Todo eso son 173 pruebas sin red** (`scripts/cowork-axis-paquete.test.ts` y `scripts/cowork-axis-resto.test.ts`, que también prueba la selección de `--cases`). Es lo que hace que un fallo del banco signifique algo.
-- **Brechas que el banco deja a la vista** (este PR no resuelve ninguna):
-  1. **Si alguien de la misma empresa responde desde otro correo, la secuencia sigue.** `inboundCandidates` (`src/lib/server/reply-sync.ts`) solo cuenta como respuesta al remitente exacto de la dirección a la que se escribió. Es la causa de G3 y afecta a toda la app, no solo a Cowork.
+- **Brechas que el banco deja a la vista** (este documento no resuelve ninguna; la 1 la resuelve #53):
+  1. **Si alguien de la misma empresa responde desde otro correo, la secuencia seguía** (la línea base de arriba se midió antes de que lo resolviera [#53](https://github.com/insigne123/ANTON.IA-supabase/pull/53), `docs/cowork-parar-empresa.md`). `inboundCandidates` (`src/lib/server/reply-sync.ts`) solo cuenta como respuesta al remitente exacto de la dirección a la que se escribió. Es la causa de G3 y afecta a toda la app, no solo a Cowork.
   2. **Una aprobación por persona:** en A4 serían unas 150 tarjetas.
   3. **Cowork no responde dentro del hilo** (`email.send` siempre abre un correo nuevo) **ni lee el cuerpo de los correos:** C3, C5, D5, G2 y G7.
   4. **No hay tope de una empresa por día sumando correo y LinkedIn:** B4, D1, E3 y E4.
