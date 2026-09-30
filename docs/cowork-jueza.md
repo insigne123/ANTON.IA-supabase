@@ -59,6 +59,7 @@ Segundo PR de la Ola G del plan 2 de Cowork (punto G2, juez dentro del turno). A
 ### Flags y dependencias
 
 - `COWORK_JUDGE_ENABLED=true` prende el juez (apagado por defecto). `COWORK_JUDGE_MODEL` es opcional.
+- `COWORK_REVIEW_ENGINE` (`llm`, `jev`, `jev-llm` u `off`) decide quién lee la respuesta: sin valor sigue a `COWORK_JUDGE_ENABLED`, y con `llm` es este juez. `COWORK_JEV_SHADOW=true` agrega a Jev en sombra. Ver `docs/cowork-jev.md`.
 - Se puede prender con o sin `COWORK_WRITER_ENABLED`: el juez no lee las respuestas de la Redactora.
 - **Fuera de este PR:**
   - **G1 (PR #31):** este PR va apilado sobre la Redactora y usa sus eventos `assistant.agent` y sus filas.

@@ -45,13 +45,20 @@ export type CoworkJevThresholds = Partial<Record<CoworkJevQuestionId, number>>;
  * on these answers, so by default they never fire: they are asked only to keep measuring them.
  */
 export const COWORK_JEV_DEFAULT_THRESHOLDS: CoworkJevThresholds = { offers_free_read: 0.88 };
+/**
+ * The high-coverage side of the same calibration, for jev-llm: at 0.74 the question catches 96% of what the offline judge
+ * names as a read Cowork could have made (precision 0.28 on the held-out 30%), so the model reads only the answers Jev
+ * does not clear, about a third of them, instead of all.
+ */
+export const COWORK_JEV_DEFAULT_SCREEN: CoworkJevThresholds = { offers_free_read: 0.74 };
+
+type JudgePromptJson = {
+  pedido: string; historial: unknown[]; datosDelHistorial: unknown[]; usuario: unknown; datosConsultados: unknown[];
+  loQueVioElUsuario: { respuesta: string; documento: unknown; tarjetas: unknown; preguntaFinal: unknown; botones: unknown; tarjetaDeAprobacion: unknown };
+};
 
 /** The judge's material, with English keys so Jev reads the structure. */
-export function coworkJevState(input: Parameters<typeof coworkJudgePrompt>[0]) {
-  const judge = JSON.parse(coworkJudgePrompt(input)) as {
-    pedido: string; historial: unknown[]; datosDelHistorial: unknown[]; usuario: unknown; datosConsultados: unknown[];
-    loQueVioElUsuario: { respuesta: string; documento: unknown; tarjetas: unknown; preguntaFinal: unknown; botones: unknown; tarjetaDeAprobacion: unknown };
-  };
+function jevStateOf(judge: JudgePromptJson) {
   const shown = judge.loQueVioElUsuario;
   return {
     request: judge.pedido,
@@ -64,12 +71,31 @@ export function coworkJevState(input: Parameters<typeof coworkJudgePrompt>[0]) {
   };
 }
 
+export function coworkJevState(input: Parameters<typeof coworkJudgePrompt>[0]) {
+  return jevStateOf(JSON.parse(coworkJudgePrompt(input)) as JudgePromptJson);
+}
+
+/** The same state from the prompt the judge in the turn already built (coworkJudgeTurnPrompt): Jev reads exactly what the model would. */
+export function coworkJevStateFromPrompt(prompt: string) {
+  return jevStateOf(JSON.parse(prompt) as JudgePromptJson);
+}
+
 /** Probability of each check; null when Jev did not answer it. */
 export function coworkJevProbabilities(answers: Record<string, JevAnswer> | null) {
   return Object.fromEntries(COWORK_JEV_CHECKS.map(id => {
     const answer = answers?.[id];
     return [id, answer?.type === 'noul' ? answer.noul : null];
   })) as Record<CoworkJevQuestionId, number | null>;
+}
+
+/** The questions at or above their screening threshold: what makes jev-llm hand the answer to the model. */
+export function coworkJevSeen(answers: Record<string, JevAnswer> | null, thresholds: CoworkJevThresholds = COWORK_JEV_DEFAULT_SCREEN): CoworkJevQuestionId[] {
+  const probabilities = coworkJevProbabilities(answers);
+  return COWORK_JEV_CHECKS.filter(id => {
+    const value = probabilities[id];
+    const threshold = thresholds[id];
+    return value !== null && threshold !== undefined && value >= threshold;
+  });
 }
 
 /**

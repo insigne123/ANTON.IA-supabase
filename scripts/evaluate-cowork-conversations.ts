@@ -18,6 +18,11 @@
 // COWORK_JUDGE_MODEL picks its model (COWORK_MODEL by default); grade the result with
 // judge-cowork-conversations.ts and a different --judge-model.
 //
+// --review-engine=jev|jev-llm|llm picks who reads the answer with --judge-in-turn, as COWORK_REVIEW_ENGINE does in the app (review-engine.ts):
+// jev asks Jev (TypeSafe, TYPESAFE_API_KEY in the environment, never loaded from a file) the calibrated question alone; jev-llm asks Jev first and
+// hands the answer to the judge's model only when Jev sees something or does not answer; llm (the default) is the model alone. The report
+// says how many answers Jev read, how many it handed to the model, its latency and what it cost.
+//
 // --contacts-import turns on contacts.import in every case (F4), as COWORK_CONTACTS_IMPORT_ENABLED
 // does; the cases marked contactsImport have it on anyway. The judges read the same flag.
 // With --stream the report also says how many answers the person would have seen replaced on screen
@@ -43,6 +48,8 @@ import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fi
 import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
 import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { selectCases } from './cowork-case-selection';
+import { askJev, type JevResult } from '../src/lib/server/jev';
+import { COWORK_JEV_DEFAULT_SCREEN, COWORK_JEV_DEFAULT_THRESHOLDS, COWORK_JEV_QUESTIONS, coworkJevJudgement, coworkJevProbabilities, coworkJevSeen, coworkJevStateFromPrompt } from '../src/lib/cowork/jev-review';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
@@ -80,7 +87,12 @@ async function main() {
   const writerOn = process.argv.includes('--writer');
   const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
   const writerCalls = { writer: 0, reviewer: 0 };
-  const judgeOn = process.argv.includes('--judge-in-turn');
+  const reviewEngine = arg('review-engine') ?? 'llm';
+  if (!['llm', 'jev', 'jev-llm'].includes(reviewEngine)) throw new Error('--review-engine must be llm, jev or jev-llm');
+  // Jev decides with --review-engine=jev|jev-llm, which turns the judge in the turn on.
+  const judgeOn = process.argv.includes('--judge-in-turn') || reviewEngine !== 'llm';
+  const percentile = (values: number[], fraction: number) => values.length ? [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * fraction))] : null;
+  const jevStats = { asked: 0, ok: 0, failed: 0, handedToModel: 0, cleared: 0, durations: [] as number[], costUsd: 0, inputTokens: 0 };
   const importOn = process.argv.includes('--contacts-import');
   const judgeModel = process.env.COWORK_JUDGE_MODEL || process.env.COWORK_MODEL;
   let judgeCalls = 0;
@@ -111,11 +123,27 @@ async function main() {
       // The judge in the turn, with its own model and the same call budget.
       const judgeInTurn: CorpusJudge | undefined = judgeOn ? async (answer, observations, meta) => {
         if (calls >= maxCalls) return null;
+        const prompt = coworkJudgeTurnPrompt({ request: meta.request, history: meta.history, userContext: meta.userContext, observations, answer, now: CORPUS_NOW });
+        if (reviewEngine !== 'llm') {
+          jevStats.asked++;
+          const jev: JevResult = await askJev({ state: coworkJevStateFromPrompt(prompt), questions: COWORK_JEV_QUESTIONS, timeoutMs: 3000 });
+          jevStats.durations.push(jev.durationMs);
+          jevStats.costUsd += jev.costUsd;
+          jevStats.inputTokens += jev.inputTokens;
+          decisions.push({ agent: 'jev', status: jev.status, durationMs: jev.durationMs, probabilities: jev.answers ? coworkJevProbabilities(jev.answers) : null });
+          if (jev.status === 'ok') jevStats.ok++; else jevStats.failed++;
+          if (reviewEngine === 'jev') return jev.status === 'ok' ? coworkJevJudgement(jev.answers, COWORK_JEV_DEFAULT_THRESHOLDS) : null;
+          if (jev.status === 'ok' && !coworkJevSeen(jev.answers, COWORK_JEV_DEFAULT_SCREEN).length) {
+            jevStats.cleared++;
+            return { scores: { comprension: 5, veracidad: 5, utilidad: 5, claridad: 5, friccion: 5 }, problemas: [], veredicto: 'buena' as const };
+          }
+          jevStats.handedToModel++;
+        }
         calls++;
         judgeCalls++;
         try {
           const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: coworkJudgeInstructions({ contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), inTurn: true }),
-            prompt: coworkJudgeTurnPrompt({ request: meta.request, history: meta.history, userContext: meta.userContext, observations, answer, now: CORPUS_NOW }),
+            prompt,
             provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 45000 });
           usage.push(coworkModelUsage(response.telemetry));
           decisions.push({ agent: 'judge', output: response.data });
@@ -179,6 +207,9 @@ async function main() {
       answers: outcomes.filter(outcome => outcome.result.writer).length,
       corrected: outcomes.filter(outcome => (outcome.result.writer?.steps || []).some(step => step.agent === 'reviewer' && step.state === 'done' && (step.changes || []).length > 0)).length } } : {}),
     // With --judge-in-turn: how many answers it read, how many it asked to fix and how many changed.
+    ...(reviewEngine !== 'llm' ? { jev: { engine: reviewEngine, asked: jevStats.asked, answered: jevStats.ok, failed: jevStats.failed,
+      ...(reviewEngine === 'jev-llm' ? { clearedWithoutTheModel: jevStats.cleared, handedToModel: jevStats.handedToModel } : {}),
+      latencyMs: { p50: percentile(jevStats.durations, 0.5), p95: percentile(jevStats.durations, 0.95) }, inputTokens: jevStats.inputTokens, costUsd: Math.round(jevStats.costUsd * 1e6) / 1e6 } } : {}),
     ...(judgeOn ? { judgeInTurn: { model: judgeModel, calls: judgeCalls,
       judged: outcomes.filter(outcome => outcome.result.judgeInTurn).length,
       asked: outcomes.filter(outcome => outcome.result.judgeInTurn?.asked).length,

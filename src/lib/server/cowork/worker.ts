@@ -29,7 +29,9 @@ import { loadCoworkUserContext } from './user-context';
 import { reserveCoworkModelCall } from './model-budget';
 import { coworkAnswerHoldEnabled, coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
 import { coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
-import { COWORK_JUDGE_HELD_TIMEOUT_MS, coworkJudgeEnabled, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
+import { COWORK_JUDGE_HELD_TIMEOUT_MS, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
+import { coworkJevShadow, coworkReviewEngine } from '@/lib/cowork/review-engine';
+import { askJev } from '@/lib/server/jev';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
 import { stageCoworkSavedSearchCreate, stageCoworkSavedSearchUpdate, stageCoworkSavedSearchDelete } from './saved-search-ops';
@@ -179,8 +181,11 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       });
       if (recorded.error || recorded.data !== true) throw new Error('Cowork run is no longer writable');
     };
-    // The judge reads the coordinator's final answer and asks for one correction when it is worth it.
-    judgeTurn = coworkJudgeEnabled() ? coworkJudgeTurn({
+    // The judge reads the coordinator's final answer and asks for one correction when it is worth it. Who reads it is
+    // COWORK_REVIEW_ENGINE (the model, Jev, both or nobody); COWORK_JEV_SHADOW lets Jev answer next to it and only record.
+    const reviewEngine = coworkReviewEngine();
+    const jevShadow = coworkJevShadow();
+    judgeTurn = reviewEngine !== 'off' || jevShadow ? coworkJudgeTurn({
       request: run.message, history: history.turns, userContext, signal: controller.signal, authorize,
       reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'judge'),
       generate: generateStructuredWithTelemetry,
@@ -192,6 +197,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       // Held, the person waits for the review before reading anything.
       ...(liveDraft?.held ? { callTimeoutMs: COWORK_JUDGE_HELD_TIMEOUT_MS } : {}),
       onCall: call => telemetry.push(call),
+      engine: reviewEngine, jev: askJev, jevShadow,
     }) : null;
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,

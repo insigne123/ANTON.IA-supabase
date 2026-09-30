@@ -6,13 +6,16 @@ import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const keys = ['COWORK_ENABLED', 'COWORK_STREAMING_ENABLED', 'COWORK_JUDGE_ENABLED', 'COWORK_WRITER_ENABLED', 'COWORK_CONTACTS_IMPORT_ENABLED', 'COWORK_MODEL_BUDGET_ENABLED', 'COWORK_JUDGE_MODEL', 'COWORK_MODEL',
-  'COWORK_ANSWER_HOLD_ENABLED'];
+  'COWORK_ANSWER_HOLD_ENABLED', 'COWORK_REVIEW_ENGINE', 'COWORK_JEV_SHADOW', 'TYPESAFE_API_KEY'];
 const environment = Object.fromEntries(keys.map(key => [key, process.env[key]]));
 Object.assign(process.env, { COWORK_ENABLED: 'true', COWORK_STREAMING_ENABLED: 'true', COWORK_MODEL_BUDGET_ENABLED: 'true', COWORK_MODEL: 'coordinator-model',
   COWORK_JUDGE_MODEL: 'judge-model' });
 delete process.env.COWORK_WRITER_ENABLED;
 delete process.env.COWORK_CONTACTS_IMPORT_ENABLED;
 delete process.env.COWORK_ANSWER_HOLD_ENABLED;
+delete process.env.COWORK_REVIEW_ENGINE;
+delete process.env.COWORK_JEV_SHADOW;
+delete process.env.TYPESAFE_API_KEY;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const chips = message => [{ label: 'Sí', message }];
@@ -203,7 +206,96 @@ try {
   assert.deepEqual(off.who, ['coordinator:streamed']);
   assert.deepEqual(off.steps, []);
   assert.ok(off.finished.p_payload.reply.startsWith(offered.answer.reply));
-  console.log('PASS: the judge reads the coordinator\'s answer, its correction may read once and replaces it, a failed correction, a correction with an unsupported figure or a failed call lets the answer stand, each step is recorded with what the judge found, held the page only gets phases, the ledger falls back to the coordinator\'s role, the Writer\'s answers are not judged, it reads whether importing is on, and off nothing changes.');
+  // Jev in the review (COWORK_REVIEW_ENGINE, COWORK_JEV_SHADOW): TypeSafe is a fake fetch, and the key is a fake one that must never be recorded anywhere.
+  const realFetch = globalThis.fetch;
+  const jev = { calls: [], probability: 0.95, fail: false };
+  globalThis.fetch = async (url, init) => {
+    jev.calls.push({ url: String(url), authorization: init.headers.authorization, body: JSON.parse(init.body) });
+    if (jev.fail) return new Response('nope', { status: 500 });
+    return Response.json({ model: 'jev-fake', usage: { input_tokens: 4000 }, answers: { offers_free_read: { type: 'noul', noul: jev.probability },
+      verdict: { type: 'choice', choice: 'good', confidence: 0.9, probabilities: { good: 0.9, improvable: 0.08, bad: 0.02 } } } });
+  };
+  const SECRET = 'tsk-fake-key-never-recorded';
+  try {
+    process.env.TYPESAFE_API_KEY = SECRET;
+    process.env.COWORK_REVIEW_ENGINE = 'jev';
+    // Jev alone: a fired question asks for the same correction and the model of the judge is never called or reserved.
+    jev.calls = [];
+    const byJev = await run([offered, readCampaigns, complete]);
+    assert.deepEqual(byJev.who, ['coordinator:streamed', 'coordinator', 'coordinator']);
+    assert.deepEqual(byJev.roles, ['coordinator', 'coordinator', 'coordinator']);
+    assert.deepEqual(byJev.steps.map(line), ['judge:working:Revisando la respuesta', 'judge:working:Ajustando la respuesta', 'judge:done:Ajustó la respuesta']);
+    assert.equal(jev.calls.length, 1);
+    assert.equal(jev.calls[0].authorization, `Bearer ${SECRET}`);
+    assert.equal(jev.calls[0].body.state.shownToUser.reply, offered.answer.reply);
+    assert.ok(byJev.finished.p_payload.reply.startsWith(complete.answer.reply));
+    assert.equal(byJev.steps[1].detail.engine, 'jev');
+    assert.equal(byJev.steps[1].detail.jev.probabilities.offers_free_read, 0.95);
+    assert.equal(byJev.steps[1].detail.jev.costUsd, 0.000168);
+    // Nothing the run records or shows carries the key.
+    assert.ok(!JSON.stringify([byJev.steps, byJev.drafts, byJev.finished]).includes(SECRET));
+    // Jev clears it: the answer goes out as it was, with no model in the review.
+    jev.probability = 0.2;
+    const cleared = await run([offered]);
+    assert.deepEqual(cleared.who, ['coordinator:streamed']);
+    assert.deepEqual(cleared.steps.map(line), ['judge:working:Revisando la respuesta', 'judge:done:Sin ajustes']);
+    assert.ok(cleared.finished.p_payload.reply.startsWith(offered.answer.reply));
+    // Jev fails (HTTP error): the answer goes out as it was, and nobody else reads it.
+    jev.fail = true;
+    const failedJev = await run([offered]);
+    assert.deepEqual(failedJev.who, ['coordinator:streamed']);
+    assert.deepEqual(failedJev.steps.map(line), ['judge:working:Revisando la respuesta', 'judge:done:No alcanzó a revisar']);
+    assert.equal(failedJev.steps.at(-1).detail.jev.status, 'http_error');
+    jev.fail = false;
+    // Without a key: the same, and TypeSafe is never reached.
+    delete process.env.TYPESAFE_API_KEY;
+    jev.calls = [];
+    const keyless = await run([offered]);
+    assert.deepEqual(keyless.steps.map(line), ['judge:working:Revisando la respuesta', 'judge:done:No alcanzó a revisar']);
+    assert.equal(jev.calls.length, 0);
+    process.env.TYPESAFE_API_KEY = SECRET;
+    // Jev first, the model only when Jev sees something: cleared, it does not read; seen, it does.
+    process.env.COWORK_REVIEW_ENGINE = 'jev-llm';
+    jev.probability = 0.2;
+    const screened = await run([offered]);
+    assert.deepEqual(screened.who, ['coordinator:streamed']);
+    assert.deepEqual(screened.steps.map(line), ['judge:working:Revisando la respuesta', 'judge:done:Sin ajustes']);
+    jev.probability = 0.8;
+    const handed = await run([offered, clean]);
+    assert.deepEqual(handed.who, ['coordinator:streamed', 'judge']);
+    assert.equal(handed.steps.at(-1).detail.engine, 'jev-llm');
+    assert.equal(handed.steps.at(-1).detail.jev.probabilities.offers_free_read, 0.8);
+    // The shadow with the judge off (the state of production): Jev answers, records in a step the page ignores, and nothing else moves.
+    delete process.env.COWORK_REVIEW_ENGINE;
+    process.env.COWORK_JEV_SHADOW = 'true';
+    jev.probability = 0.97;
+    jev.calls = [];
+    const watched = await run([offered]);
+    assert.deepEqual(watched.who, ['coordinator:streamed']);
+    assert.deepEqual(watched.roles, ['coordinator']);
+    assert.deepEqual(watched.steps.map(line), ['jev:done:Jev en sombra']);
+    assert.equal(watched.steps[0].detail.shadow, true);
+    assert.deepEqual(watched.steps[0].detail.fired, ['offers_free_read']);
+    assert.ok(watched.finished.p_payload.reply.startsWith(offered.answer.reply), 'the shadow changes nothing in the answer');
+    assert.equal(jev.calls.length, 1);
+    assert.ok(!JSON.stringify([watched.steps, watched.drafts, watched.finished]).includes(SECRET));
+    // The shadow next to the model's judge: Jev cannot turn a clean review into a correction.
+    process.env.COWORK_JUDGE_ENABLED = 'true';
+    const beside = await run([offered, clean]);
+    assert.deepEqual(beside.who, ['coordinator:streamed', 'judge']);
+    assert.deepEqual(beside.steps.map(line), ['judge:working:Revisando la respuesta', 'jev:done:Jev en sombra', 'judge:done:Sin ajustes']);
+    assert.ok(beside.finished.p_payload.reply.startsWith(offered.answer.reply));
+    // Without the shadow Jev is never asked while the model judges.
+    delete process.env.COWORK_JEV_SHADOW;
+    jev.calls = [];
+    await run([offered, clean]);
+    assert.equal(jev.calls.length, 0);
+    delete process.env.COWORK_JUDGE_ENABLED;
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  console.log('PASS: the judge reads the coordinator\'s answer, its correction may read once and replaces it, a failed correction, a correction with an unsupported figure or a failed call lets the answer stand, each step is recorded with what the judge found, held the page only gets phases, the ledger falls back to the coordinator\'s role, the Writer\'s answers are not judged, it reads whether importing is on, and off nothing changes.; with COWORK_REVIEW_ENGINE Jev alone decides, screens for the model or only watches in the shadow, and fails open, and the key is never recorded');
 } finally {
   delete globalThis.__coworkJudge;
   for (const [key, value] of Object.entries(environment)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }

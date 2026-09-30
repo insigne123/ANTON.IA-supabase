@@ -330,6 +330,19 @@ test('the Writer and the Reviewer read as one row each, at their latest step, an
   assert.deepEqual(coworkAgentRows([agent({ agent: 'boss', state: 'working', label: 'x' }), agent({ agent: 'writer', state: 'done', label: ' ' })]), []);
 });
 
+test('Jev watching in the shadow leaves a step the page does not know: no row, no activity line, no read, and the judge\'s rows stay as they were', () => {
+  const agent = (result: Record<string, unknown>) => event('tool.completed', { action: COWORK_AGENT_ACTION, input: '', result });
+  const read = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { scope: 'own_saved_contacts', items: [] } });
+  const judging = agent({ agent: 'judge', state: 'working', label: 'Revisando la respuesta' });
+  const shadow = agent({ agent: 'jev', state: 'done', label: 'Jev en sombra', changes: [], detail: { engine: 'jev', shadow: true, status: 'ok', fired: ['offers_free_read'] } });
+  const clean = agent({ agent: 'judge', state: 'done', label: 'Sin ajustes', outcome: 'clean', changes: [] });
+  assert.deepEqual(coworkAgentRows([read, judging, shadow, clean]).map(row => `${row.name}:${row.state}:${row.label}`), ['Revisora:done:Sin ajustes']);
+  assert.deepEqual(coworkAgentRows([read, shadow]), []);
+  assert.deepEqual(coworkReadEvents([read, shadow]), [read], 'the shadow is not a query');
+  // Alone (the judge off), it is not what Cowork is doing: the line stays on the last thing the person can see.
+  assert.equal(coworkLiveActivity({ status: 'running' }, [read, shadow]), coworkLiveActivity({ status: 'running' }, [read]));
+});
+
 test('the judge reads the answer as the Reviewer, and says whether it stood or was fixed', () => {
   const agent = (result: Record<string, unknown>) => event('tool.completed', { action: COWORK_AGENT_ACTION, input: '', result });
   const read = event('tool.completed', { action: 'contacted.search', input: '', result: { items: [] } });

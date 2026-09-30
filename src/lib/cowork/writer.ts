@@ -156,8 +156,9 @@ export function coworkWriterBlocks(output: CoworkWriterOutput): CoworkBlock[] {
  */
 export type CoworkReviewOutcome = 'clean' | 'fixed' | 'pending' | 'skipped';
 /** What the Writer, the Reviewer or the judge is doing, for the page; a review's last step carries the outcome.
- * detail keeps what the judge found (scores, problems, verdict) for whoever reviews a turn later; the page ignores it. */
-export type CoworkAgentStep = { agent: CoworkAgentEvent['agent']; state: 'working' | 'done'; label: string; outcome?: CoworkReviewOutcome; changes?: string[];
+ * detail keeps what the judge found (scores, problems, verdict) for whoever reviews a turn later; the page ignores it. Jev, when it only
+ * watches next to the review (COWORK_JEV_SHADOW), leaves one step that the page does not know and ignores: it is for whoever reviews the turn. */
+export type CoworkAgentStep = { agent: CoworkAgentEvent['agent'] | 'jev'; state: 'working' | 'done'; label: string; outcome?: CoworkReviewOutcome; changes?: string[];
   detail?: Record<string, unknown> };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
