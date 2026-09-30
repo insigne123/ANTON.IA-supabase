@@ -53,12 +53,13 @@ export type CoworkReplyThread = {
 };
 
 const DAY_MS = 86_400_000;
+const OTHERS = 'Si en la conversación quedaron otras personas esperando, nombra a la primera (la de mayor valor) y ofrece prepararle la respuesta; no ofrezcas «revisar» lo que ya sabes.';
 const NEXT: Record<ThreadAdvice, (answeredAt: string | null) => string> = {
-  reply: () => 'Entrega el borrador en blocks como un email_draft: el correo final para la persona (asunto «Re: » y el asunto del envío; to con solo su correo), sin notas para el usuario dentro; lo que el usuario debe decidir va en reply. Responde solo a lo que dice reply.text: si ofreció horarios, usa exactamente esos; no inventes días, horas, precios ni plazos. Cowork todavía no envía dentro del hilo: di en reply que se envía desde Contactados (Respuestas), donde sale en el hilo original. No propongas crear una campaña ni email.send ni otra búsqueda; cierra con «¿Lo ajusto antes de que lo envíes desde Contactados?» o una pregunta parecida sobre el texto.',
-  already_answered: answeredAt => `Ya se le respondió${answeredAt ? ` el ${answeredAt.slice(0, 10)}` : ''}, después de su mensaje: dilo con esa fecha y no redactes otra respuesta ni propongas una campaña.`,
-  no_reply_yet: () => 'Esta persona todavía no ha respondido: no hay nada que contestar. Dilo y no redactes nada.',
-  auto_reply_no_answer: () => 'Es un aviso automático (fuera de oficina o similar), no una persona: no lo respondas ni redactes nada; dilo.',
-  unsubscribe_do_not_write: () => 'Pidió no recibir más mensajes (o se dio de baja): no redactes nada, dilo y no propongas seguimientos ni campañas.',
+  reply: () => 'Entrega el borrador en blocks como un email_draft: el correo final para la persona (asunto «Re: » y el asunto del envío; to con solo su correo), sin notas para el usuario dentro; lo que el usuario debe decidir va en reply. Responde solo a lo que dice reply.text: si ofreció horarios, usa exactamente esos; usa los datos de tu oferta (userContext) para lo que sí consta y deja lo que no esté ahí (precio, plazos) para que lo decida el usuario; no inventes días, horas, precios ni plazos. Cowork todavía no envía dentro del hilo: di en reply que se envía desde Contactados (Respuestas), donde sale en el hilo original. No propongas crear una campaña ni email.send ni otra búsqueda; cierra con «¿Lo ajusto antes de que lo envíes desde Contactados?» o una pregunta parecida sobre el texto.',
+  already_answered: answeredAt => `Ya se le respondió${answeredAt ? ` el ${answeredAt.slice(0, 10)}` : ''}, después de su mensaje: dilo con esa fecha y no redactes otra respuesta ni propongas una campaña. ${OTHERS}`,
+  no_reply_yet: () => `Esta persona todavía no ha respondido: no hay nada que contestar. Dilo y no redactes nada. ${OTHERS}`,
+  auto_reply_no_answer: () => `Es un aviso automático (fuera de oficina o similar), no una persona: no lo respondas ni redactes nada; dilo. ${OTHERS}`,
+  unsubscribe_do_not_write: () => `Pidió no recibir más mensajes (o se dio de baja): no redactes nada, dilo y no propongas seguimientos ni campañas. ${OTHERS}`,
   closed_politely: () => 'Dijo claramente que no: a lo más un agradecimiento de una línea como borrador en un email_draft; no insistas ni propongas seguimientos. El envío es desde Contactados.',
 };
 const RISK_LABELS: Array<[keyof ReplyRiskFlags, string]> = [
