@@ -4,7 +4,7 @@ import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
-  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
+  coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview,
 } from './presentation';
@@ -156,8 +156,15 @@ test('the plan of a turn checks off each step as its read completes, and the las
   // Each done step says what its read found; the others found nothing yet.
   const counted = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { items: [{}, {}, {}, {}] } });
   assert.deepEqual(coworkPlanProgress({ status: 'running' }, [plan, counted])?.map(step => step.found), [{ count: 4, label: 'contactos' }, null, null]);
+  // Who does each step (G4): the sent emails are the Researcher's; finding the contacts and answering are Cowork's own.
+  const progress = coworkPlanProgress({ status: 'running' }, [plan, leads])!;
+  assert.deepEqual(progress.map(step => step.agent?.name ?? null), [null, 'Investigadora', null]);
+  assert.equal(coworkPlanStepLine(progress[1]), 'Investigadora · veo qué correos ya enviaste');
+  assert.equal(coworkPlanStepLine(progress[0]), 'Reviso tus contactos');
+  assert.equal(describeCoworkObservation({ action: 'metrics.rates', input: '', result: {} }).agent?.name, 'Analista');
+  assert.equal(describeCoworkObservation({ action: 'leads.search', input: '', result: {} }).agent, null);
   // The side panel names the step in progress.
-  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Veo qué correos ya enviaste');
+  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Investigadora · veo qué correos ya enviaste');
   assert.equal(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).find(step => step.key === 'work')?.detail, '2 consultas');
 });
 
