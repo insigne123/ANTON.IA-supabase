@@ -6,7 +6,7 @@
 import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
 import { coworkUserContextFromProfile } from '../../src/lib/server/cowork/user-context';
-import type { CoworkBlock } from '../../src/lib/cowork/contracts';
+import type { CoworkBlock, CoworkChoices } from '../../src/lib/cowork/contracts';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
@@ -158,6 +158,8 @@ export type CorpusTurnResult = {
   blocks?: CoworkBlock[];
   /** The closing question, when it traveled apart (it also ends the reply). */
   question?: string | null;
+  /** The options that answer it (V5), when it asks for something only the person knows. */
+  choices?: CoworkChoices | null;
   /** The plan shown while it worked, when the turn consulted something. */
   plan?: Array<{ label: string; read: string | null }> | null;
   /** Each read with its input, so the judge can see the same data the model saw. */
@@ -169,7 +171,7 @@ export type CorpusTurnResult = {
 };
 
 /** What the person reads in the chat: the reply plus every card. */
-export const corpusShown = (result: CorpusTurnResult) => [result.reply, coworkBlocksText(result.blocks || [])].filter(Boolean).join('\n\n');
+export const corpusShown = (result: CorpusTurnResult) => [result.reply, result.choices?.options.join(' · ') || '', coworkBlocksText(result.blocks || [])].filter(Boolean).join('\n\n');
 
 export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[]; userContext?: CoworkUserContext | null };
 
@@ -198,8 +200,8 @@ const noJargon = (result: CorpusTurnResult) => coworkAnswerIssues(shownText(resu
 const nextStep = (result: CorpusTurnResult) => Boolean(result.proposal || result.search)
   || !coworkAnswerIssues(result.reply).some(issue => issue.code === 'next_step');
 const explained = (result: CorpusTurnResult) => !(result.proposal || result.search) || Boolean(result.note && result.note.length > 20);
-// A plain answer offers at least one quick reply; a proposal already has its card.
-const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search) || (result.suggestions?.length ?? 0) > 0;
+// A plain answer offers at least one quick reply, or the options that answer its question (V5); a proposal already has its card.
+const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search || result.choices) || (result.suggestions?.length ?? 0) > 0;
 // Each quick reply asks for something Cowork does on click, never a promise the person makes.
 // The sanitizer drops these; the check guards it on the chips the person would see.
 const actionable = (result: CorpusTurnResult) => (result.suggestions || []).every(chip => !COWORK_DEFERRAL.test(chip.message));
@@ -209,7 +211,7 @@ export const CORPUS_COMMON_CHECKS = [
   { label: 'sin jerga, códigos, IDs ni horas UTC', test: noJargon },
   { label: 'cierra con un siguiente paso o una propuesta', test: nextStep },
   { label: 'si propone, explica la propuesta', test: explained },
-  { label: 'ofrece respuestas sugeridas para seguir', test: suggested },
+  { label: 'ofrece respuestas sugeridas u opciones para seguir', test: suggested },
   { label: 'las sugerencias piden algo que Cowork hace al tocarlas', test: actionable },
 ];
 

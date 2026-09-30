@@ -1023,3 +1023,15 @@ test('an uploaded file is read by its name, alone or next to other reads', async
   assert.equal(result.reply, 'Un contacto encontrado.');
   assert.deepEqual(calls, ['files.read:leads-feria.csv', 'files.read:notas.md', 'leads.search:']);
 });
+
+test('options the first answer had come back when the closing correction drops them', async () => {
+  const choices = { multiple: true, options: ['RR. HH.', 'Retail'] };
+  const first = { ...answer, answer: { reply: 'Tus contactos están en dos segmentos. Marca los que van en la campaña.', document: null, suggestions: null, choices } };
+  const fixed = await runCoworkReadLoop({ message: 'Arma una campaña para algunos', signal: new AbortController().signal, authorize: async () => {},
+    record: async () => {}, execute: async () => ({}),
+    decide: async (_observations, _mustAnswer, rejections = []) => rejections.length
+      ? { ...answer, answer: { reply: 'Tus contactos están en dos segmentos.', document: null, question: '¿A qué segmentos va la campaña?', suggestions: null, choices: null } }
+      : first });
+  assert.equal(fixed.question, '¿A qué segmentos va la campaña?');
+  assert.deepEqual('choices' in fixed ? fixed.choices : undefined, choices);
+});

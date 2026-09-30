@@ -141,3 +141,11 @@ test('importing contacts is described only when it is on, and says what it leave
   assert.match(String(on.contactsImportCapability), /Si solo pregunta qué trae el archivo o a quién escribir primero, o solo lo adjuntó, responde eso \(con el orden, si lo pidió\) y deja la importación/);
   assert.match(String(on.contactsImportCapability), /o una campaña o un correo para personas de un archivo que aún no están guardadas, propón contacts\.import/);
 });
+
+test('a datum only the person knows is asked with options, never a yes or a no or what Cowork can decide', () => {
+  const { systemPrompt } = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  assert.match(systemPrompt, /Si para seguir falta un dato que solo el usuario sabe \(regla 5\), la pregunta es por ese dato, con sus opciones \(regla 9\)/);
+  assert.match(systemPrompt, /pon sus respuestas en answer\.choices \{multiple, options\}: 2 a 5 opciones/);
+  assert.match(systemPrompt, /Con choices, suggestions es null\. No uses choices para un sí o un no/);
+  assert.match(systemPrompt, /question \(regla 4\), suggestions y choices \(regla 9\)/);
+});
