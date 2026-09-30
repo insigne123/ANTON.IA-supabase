@@ -30,6 +30,10 @@ export async function queryCoworkDomainRead(client: SupabaseClient, scope: Scope
     const { readCoworkAudience } = await import('./audience-read');
     return readCoworkAudience(client, scope.organizationId);
   }
+  if (action === 'replies.thread') {
+    const { readCoworkReplyThread } = await import('./thread-read');
+    return readCoworkReplyThread(client, scope, value, email => dependencies.suppressed(email, scope));
+  }
   if (action === 'gmail.contact_history') {
     const { readCoworkGmailContact } = await import('./gmail-contact');
     return readCoworkGmailContact(client, scope, value);

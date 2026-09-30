@@ -9,6 +9,7 @@
 //   node --loader ./scripts/ts-test-loader.mjs scripts/judge-cowork-conversations.ts --live --judge-model=gpt-6-sol \
 //     (--calibrate [--repeat=2] | --input=report.json [--cases=a,b]) --max-calls=120 [--output=judged.json]
 import { readFileSync, writeFileSync } from 'node:fs';
+import { THREAD_CORPUS } from './fixtures/cowork-thread-corpus';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import {
   COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
@@ -31,6 +32,8 @@ function observationsFor(entry: CorpusCase, result: CorpusTurnResult) {
 }
 
 async function main() {
+  // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
+  CORPUS.push(...THREAD_CORPUS);
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY) throw new Error('Requires --live and an explicit OPENAI_API_KEY.');
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
   const judgeModel = arg('judge-model') || process.env.COWORK_JUDGE_MODEL || '';
