@@ -223,6 +223,8 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   linkedin_invite: { title: 'Invitar en LinkedIn', icon: 'linkedin', help: 'Se encolará una invitación sin nota. La ejecutarás desde la extensión ante ese perfil.' },
   linkedin_message: { title: 'Mensaje de LinkedIn', icon: 'linkedin', help: 'Se encolará el mensaje aprobado. La ejecutarás desde la extensión ante ese perfil; solo lo confirmado cuenta como enviado.' },
   contacts_import: { title: 'Importar contactos', icon: 'user-plus', help: 'Se guardarán en tus contactos las personas del archivo que aún no están. Los que ya estaban no se tocan.' },
+  linkedin_invite_batch: { title: 'Invitar en LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará una invitación sin nota por cada persona que dejes en la lista. La ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
+  linkedin_message_batch: { title: 'Mensajes de LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará el mensaje de cada persona que dejes en la lista, con el texto que ves. Los ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
   reply_thread: { title: 'Responder en el hilo', icon: 'mail', help: 'Si la apruebas, esta respuesta sale tal cual dentro de la conversación de esa persona, desde tu correo. Revisa el texto antes.' },
 };
 
@@ -302,6 +304,8 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   linkedin_invite: { happens: 'Se deja en cola una invitación sin nota.', not: 'No sale hasta que la ejecutes desde la extensión.' },
   linkedin_message: { happens: 'Se deja en cola el mensaje aprobado.', not: 'No sale hasta que lo ejecutes desde la extensión.' },
   contacts_import: { happens: 'Se guardan en tus contactos las personas nuevas del archivo.', not: 'No se les escribe, no se buscan correos y no cambian los contactos que ya tenías.' },
+  linkedin_invite_batch: { happens: 'Se deja en cola una invitación sin nota por cada persona que dejes en la lista.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o espera otro día, no se le toca.' },
+  linkedin_message_batch: { happens: 'Se deja en cola el mensaje de cada persona que dejes en la lista, con el texto que ves.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o espera otro día, no se le toca.' },
   reply_thread: { happens: 'La respuesta sale en el hilo de esa conversación, con el texto que ves, desde tu correo.', not: 'No se envía nada más ni a nadie más, y no sale hasta que la apruebes.' },
 };
 

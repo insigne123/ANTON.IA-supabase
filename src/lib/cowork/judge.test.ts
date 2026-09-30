@@ -208,6 +208,23 @@ test('the judge reads replying in a thread as the turn ran it: a proposal with a
   assert.ok(both.indexOf('Cómo debe cerrar una respuesta') > both.indexOf('dentro del hilo original'));
 });
 
+test('the judge reads a LinkedIn batch as the turn ran it: one card for several people, a queue and never a send', () => {
+  assert.equal(coworkJudgeInstructions({ linkedinBatch: false }), COWORK_JUDGE_INSTRUCTIONS);
+  assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /un lote con una sola tarjeta/);
+  const on = coworkJudgeInstructions({ linkedinBatch: true });
+  assert.match(on, /Cowork propone un lote con una sola tarjeta de aprobación \(invitaciones sin nota o mensajes, cada uno con su propio texto\)/);
+  assert.match(on, /pedir aprobar una por una es fricción/);
+  assert.match(on, /una empresa por día entre correo y LinkedIn, el cupo semanal/);
+  assert.match(on, /cuántas salen lo fija el servidor y lo muestra la tarjeta/);
+  assert.match(on, /decir que ya se enviaron es un dato falso/);
+  // Beside the other flags it keeps theirs, and the turn rules still come last.
+  const all = coworkJudgeInstructions({ contactsImport: true, replyThread: true, linkedinBatch: true, inTurn: true });
+  assert.match(all, /importa a las personas de un archivo subido/);
+  assert.match(all, /dentro del hilo original/);
+  assert.match(all, /un lote con una sola tarjeta/);
+  assert.ok(all.indexOf('Cómo debe cerrar una respuesta') > all.indexOf('un lote con una sola tarjeta'));
+});
+
 test('the judge sees the options of a closing question as the chat shows them, and reads when asking with them is right', () => {
   const choices = { multiple: true, options: ['RR. HH.', 'Retail'] };
   const shown = coworkShownFromAnswer({ reply: 'Marca los segmentos.', question: '¿A qué segmentos va la campaña?', document: null,

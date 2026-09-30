@@ -274,7 +274,7 @@ test('an approval says what happens and what does not, and where the proposal st
   // Every kind of action has its own sentences; an unknown one still reads plainly.
   for (const kind of ['save_contact', 'start_research', 'enrich_contact', 'request_draft', 'send_email', 'campaign_activate', 'campaign_pause', 'code_execute',
     'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2', 'crm_update_record', 'campaign_prepare_draft_v2',
-    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread']) {
+    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch']) {
     assert.notEqual(coworkProposalOutcome(effect(kind)).happens, 'Se ejecuta la acción propuesta.', kind);
   }
   assert.equal(coworkProposalOutcome(effect('otra_cosa')).not, 'No se hace nada más sin tu aprobación.');
@@ -294,6 +294,14 @@ test('an approval says what happens and what does not, and where the proposal st
   assert.deepEqual(coworkProposalLink({ ...effect('reply_thread'), state: 'done' }), { href: '/contacted', label: 'Ver en Contactados' });
   assert.equal(coworkProposalLink({ ...effect('reply_thread'), state: 'pending' }), null);
   assert.equal(coworkEffectCopy('reply_thread').title, 'Responder en el hilo');
+  // A batch says it queues for those left on the list and that nothing goes until the extension runs it.
+  for (const kind of ['linkedin_invite_batch', 'linkedin_message_batch']) {
+    assert.match(coworkProposalOutcome(effect(kind)).happens, /cada persona que dejes en la lista/);
+    assert.match(coworkProposalOutcome(effect(kind)).not, /No sale nada hasta que lo ejecutes desde la extensión; a quien quites/);
+    assert.equal(coworkEffectCopy(kind).icon, 'linkedin');
+    assert.match(coworkEffectCopy(kind).help, /quita a quien no quieras antes de aprobar/);
+    assert.equal(coworkProposalLink({ ...effect(kind), state: 'done' }), null);
+  }
   assert.match(coworkProposalOutcome(effect('reply_thread')).not, /no sale hasta que la apruebes/);
 });
 

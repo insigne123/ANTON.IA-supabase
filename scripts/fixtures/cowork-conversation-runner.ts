@@ -17,6 +17,11 @@ import {
 } from '../../src/lib/cowork/contacts-import';
 import { coworkReplyRefusal, type CoworkReplyThread } from '../../src/lib/cowork/reply-thread';
 import { coworkReplyBody, coworkReplySubject, type CoworkReplyThreadInput } from '../../src/lib/cowork/reply-proposal';
+import {
+  coworkBatchCompanyKeys, coworkLinkedinBatchLabel, coworkLinkedinBatchLeads, planLinkedinBatch, type CoworkLinkedinBatchInput,
+  type CoworkLinkedinBatchKind,
+} from '../../src/lib/cowork/linkedin-batch';
+import { normalizeLinkedinProfileUrl } from '../../src/lib/linkedin-url';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
 
@@ -43,11 +48,11 @@ export const corpusWriterInstructions = coworkAgentInstructions({
   threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
 });
 
-/** Instructions for a case: with the Writer, and with contacts.import or email.reply_thread when the case turns them on. */
-function instructionsFor(writer: boolean, contactsImport: boolean, replyThread = false) {
-  if (!contactsImport && !replyThread) return writer ? corpusWriterInstructions : corpusInstructions;
+/** Instructions for a case: with the Writer, and with contacts.import, email.reply_thread or the LinkedIn batches when the case turns them on. */
+function instructionsFor(writer: boolean, contactsImport: boolean, replyThread = false, linkedinBatch = false) {
+  if (!contactsImport && !replyThread && !linkedinBatch) return writer ? corpusWriterInstructions : corpusInstructions;
   return coworkAgentInstructions({
-    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport, replyThread,
+    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport, replyThread, linkedinBatch,
     threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
   });
 }
@@ -103,6 +108,31 @@ export function corpusStageReply(input: CoworkReplyThreadInput, read: (action: s
   return { label: `Responder a ${who} en su hilo`, to, subject: coworkReplySubject(input.subject), body: coworkReplyBody(input.body) };
 }
 
+/**
+ * The batch as the server stages it (server/cowork/linkedin-batch.ts), from the saved contacts of the case: each person must exist, the
+ * guards of a single action stop whoever has no usable profile, and who goes today and who waits is planned with the same function
+ * (planLinkedinBatch), so the model reads the same refusals and the checks see what the card would list.
+ */
+export function corpusStageLinkedinBatch(kind: CoworkLinkedinBatchKind, input: CoworkLinkedinBatchInput, read: (action: string, input: string) => unknown) {
+  const wanted = coworkLinkedinBatchLeads(kind, input);
+  const saved = ((read('leads.search', '') as { items?: Array<{ id: string; name?: string | null; email?: string | null; title?: string | null; company?: string | null; linkedin_url?: string | null }> } | null)?.items || []);
+  const byId = new Map(saved.map(lead => [lead.id, lead]));
+  if (wanted.some(person => !byId.has(person.leadId))) throw new Error('Todas las personas del lote deben ser contactos guardados de tu organización.');
+  const quota = kind === 'invite' ? read('linkedin.quota', '') as { pending?: number; sent7d?: number; sent?: number; limit?: number } | null : null;
+  const quotaLeft = quota ? Math.max(0, Number(quota.limit ?? 100) - Number(quota.pending ?? 0) - Number(quota.sent7d ?? quota.sent ?? 0)) : null;
+  const candidates = wanted.map(({ leadId, message }) => {
+    const lead = byId.get(leadId)!;
+    const canonical = normalizeLinkedinProfileUrl(lead.linkedin_url);
+    return { id: lead.id, name: lead.name ?? null, company: lead.company ?? null, title: lead.title ?? null, canonicalUrl: canonical || '',
+      ...(message ? { message } : {}), keys: coworkBatchCompanyKeys(lead),
+      blocked: canonical ? null : 'El contacto no tiene una URL de perfil LinkedIn válida.' };
+  });
+  const plan = planLinkedinBatch(kind, candidates, { quotaLeft });
+  if (!plan.items.length) throw new Error(`Nadie del lote puede salir hoy. ${[...new Set(plan.deferred.map(person => person.reason))].slice(0, 3).join(' · ')}`);
+  return { label: coworkLinkedinBatchLabel(kind, plan.items.length), kind, items: plan.items.map(item => ({ id: item.id, name: item.name, company: item.company, ...(item.message ? { message: item.message } : {}) })),
+    deferred: plan.deferred.map(person => ({ id: person.id, name: person.name, reason: person.reason })) };
+}
+
 export type CorpusOutcome = { id: string; result: CorpusTurnResult; checks: Array<{ label: string; passed: boolean }>; passed: boolean };
 
 export function scoreCorpusCase(entry: CorpusCase, result: CorpusTurnResult): CorpusOutcome {
@@ -124,13 +154,13 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const recorded: CoworkObservation[] = [];
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
-  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport), Boolean(entry.replyThread));
+  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport), Boolean(entry.replyThread), Boolean(entry.linkedinBatch));
   const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
-      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread),
+      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch),
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
       onCorrection: verdict => {
@@ -171,7 +201,10 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         corpusStageEffect(proposal, entry.world?.savedEmails);
         const staged = proposal.contactsImport ? corpusStageImport(proposal.contactsImport, entry.world?.read ?? corpusRead) : null;
         const reply = proposal.replyThread ? corpusStageReply(proposal.replyThread, entry.world?.read ?? corpusRead) : null;
-        result.proposal = { kind: proposal.kind, label: staged?.label ?? reply?.label ?? proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
+        const batch = proposal.linkedinBatch
+          ? corpusStageLinkedinBatch(proposal.kind === 'linkedin_invite_batch' ? 'invite' : 'message', proposal.linkedinBatch, entry.world?.read ?? corpusRead) : null;
+        result.proposal = { kind: proposal.kind, label: staged?.label ?? reply?.label ?? batch?.label ?? proposal.label,
+          ...(batch ? { linkedinBatch: { kind: batch.kind, items: batch.items, deferred: batch.deferred } } : {}), targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
           ...(proposal.replyThread && reply ? { replyThread: { contactedId: proposal.replyThread.contactedId, to: reply.to, subject: reply.subject, body: reply.body } } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),
           ...(proposal.contactsImport ? { contactsImport: { ...proposal.contactsImport, card: staged?.card } } : {}),
@@ -224,6 +257,9 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
         : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }
         // The import card shows who comes in, who stays out and the columns (older reports: only the file).
         : result.proposal.contactsImport ? { detail: result.proposal.contactsImport.card ?? { archivo: result.proposal.contactsImport.file } }
+        // The batch card lists who goes (with the text of each message), who waits and why.
+        : result.proposal.linkedinBatch ? { detail: { personas: result.proposal.linkedinBatch.items.map(item => [item.name, item.company, item.message].filter(Boolean).join(' · ')),
+          esperan: result.proposal.linkedinBatch.deferred.map(person => `${person.name || 'Sin nombre'}: ${person.reason}`) } }
         // The reply card shows to whom it goes, the subject and the exact text.
         : result.proposal.replyThread ? { detail: { para: result.proposal.replyThread.to, asunto: result.proposal.replyThread.subject, respuesta: result.proposal.replyThread.body } }
         // The profile card shows the fields it saves.

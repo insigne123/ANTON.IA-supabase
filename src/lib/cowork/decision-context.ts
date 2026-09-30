@@ -192,6 +192,7 @@ export function coworkDecisionContext(
     // The Writer needs a decision in reserve in case it fails: on the last one the coordinator writes.
     ...(instructions.writerCapability ? { writerCapability: instructions.writerCapability, writerAvailable: (turnBudget?.decisionsLeft ?? 1) > 0 } : {}),
     ...(instructions.contactsImportCapability ? { contactsImportCapability: instructions.contactsImportCapability } : {}),
+    ...(instructions.linkedinBatchCapability ? { linkedinBatchCapability: instructions.linkedinBatchCapability } : {}),
     threadBudgetCapability: instructions.threadBudgetCapability,
   };
 }

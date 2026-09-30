@@ -22,6 +22,7 @@ import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
 import { coworkWithCharts } from './charts';
 import { coworkContactsImportSchema, type CoworkContactsImportInput } from './contacts-import';
 import { coworkReplyThreadSchema, type CoworkReplyThreadInput } from './reply-proposal';
+import { coworkLinkedinBatchLeads, coworkLinkedinBatchSchema, type CoworkLinkedinBatchInput } from './linkedin-batch';
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
@@ -29,7 +30,7 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
-  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread']);
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
@@ -42,7 +43,7 @@ export const coworkDecisionSchema = z.object({
     'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
     'crm.update_record', 'campaign.prepare_draft_v2',
     'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
-    'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'contacts.import',
+    'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'linkedin.invite_batch', 'linkedin.message_batch', 'contacts.import',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs',
     'answer', 'draft.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
@@ -79,6 +80,8 @@ export const coworkDecisionSchema = z.object({
   contactsImport: coworkContactsImportSchema.nullable().optional(),
   /** email.reply_thread: the conversation read with replies.thread and the final text of the reply to propose sending in its thread (reply-proposal.ts). */
   replyThread: coworkReplyThreadSchema.nullable().optional(),
+  /** linkedin.invite_batch / linkedin.message_batch: the saved contacts observed in this thread (and, for messages, the text of each) to approve with one decision (linkedin-batch.ts). */
+  linkedinBatch: coworkLinkedinBatchSchema.nullable().optional(),
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
@@ -90,7 +93,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'profile.update' | 'saved_search.create' | 'saved_search.update' | 'saved_search.delete' | 'campaign.stop_v2'
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
-  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'contacts.import' | 'email.reply_thread';
+  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread';
 export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
@@ -106,6 +109,7 @@ export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; l
   linkedinJob?: { leadId: string; message?: string };
   contactsImport?: CoworkContactsImportInput;
   replyThread?: CoworkReplyThreadInput;
+  linkedinBatch?: CoworkLinkedinBatchInput;
   campaignId?: string; enrollmentId?: string; stepId?: string };
 
 function observationRunId(
@@ -213,7 +217,7 @@ function effectTargetRun(
       && (payload.result as { contactedId?: string } | null)?.contactedId === targetId
       && (payload.result as { advice?: string } | null)?.advice === 'reply');
   }
-  if (action === 'linkedin.invite' || action === 'linkedin.message') {
+  if (action === 'linkedin.invite' || action === 'linkedin.message' || action === 'linkedin.invite_batch' || action === 'linkedin.message_batch') {
     return observationRunId(observations, history, currentRunId, payload =>
       (payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'
         || payload.action === 'leads.search' || payload.action === 'leads.get'
@@ -324,6 +328,8 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'campaign.schedule_batch') return 'Programar lote de envíos';
   if (action === 'linkedin.invite') return 'Proponer invitación LinkedIn';
   if (action === 'linkedin.message') return 'Proponer mensaje LinkedIn';
+  if (action === 'linkedin.invite_batch') return 'Proponer invitaciones en LinkedIn para varias personas';
+  if (action === 'linkedin.message_batch') return 'Proponer mensajes en LinkedIn para varias personas';
   if (action === 'contacts.import') return 'Importar contactos de un archivo';
   if (action === 'email.reply_thread') return targetName ? `Responder a ${targetName} en su hilo` : 'Responder en el hilo de una conversación';
   return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
@@ -345,7 +351,7 @@ export class CoworkDecisionRejected extends Error {
  * fixes what was pointed out and keeps the rest instead of writing it again from scratch. */
 export type CoworkRejection = { action: string; reason: string; previous?: CoworkAnswer };
 
-const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, campaignId o contactsImport).';
+const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, linkedinBatch, campaignId o contactsImport).';
 
 function budgetFeedback(readsUsed: number, maximum: number) {
   const left = Math.max(0, maximum - readsUsed);
@@ -373,7 +379,7 @@ const PROPOSAL_ACTIONS = new Set<string>(['crm.propose_note', 'prospecting.propo
   'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
   'crm.update_record', 'campaign.prepare_draft_v2',
   'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
-  'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'contacts.import', 'email.reply_thread']);
+  'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'linkedin.invite_batch', 'linkedin.message_batch', 'contacts.import', 'email.reply_thread']);
 const USE_VERSION_ONLY = 'El usuario tocó «Usar esta versión»: solo fija su texto y todavía no quiere crear nada. No propongas acciones: responde en una frase que usarás su versión tal cual (sin reescribirla) y pregunta el siguiente paso, por ejemplo crear la campaña pausada con ella.';
 const VERSION_KEPT_ANSWER = {
   reply: 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.', document: null, question: '¿Creo la campaña pausada con ella?',
@@ -451,6 +457,8 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   const who = person || 'este contacto';
   if (action === 'linkedin.message') return `Preparé un mensaje de LinkedIn para ${who}. Revisa el texto en la tarjeta antes de aprobarlo.`;
   if (action === 'linkedin.invite') return `Propongo invitar a ${who} en LinkedIn. Revisa la invitación en la tarjeta antes de aprobarla.`;
+  if (action === 'linkedin.invite_batch') return 'Preparé un lote de invitaciones de LinkedIn. En la tarjeta ves a quién va y puedes quitar a quien no quieras antes de aprobarlo.';
+  if (action === 'linkedin.message_batch') return 'Preparé un lote de mensajes de LinkedIn, cada uno con su texto. En la tarjeta los lees, puedes quitar a quien no quieras y recién ahí los apruebas.';
   if (action === 'lead.enrich') return `Propongo buscar el correo de ${who} con el proveedor; usa un crédito. Revísalo antes de aprobar.`;
   if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
   if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
@@ -604,6 +612,8 @@ async function runCoworkLoop(input: {
   contactsImport?: boolean;
   /** email.reply_thread may be proposed (COWORK_REPLY_THREAD_ENABLED; its reply_thread migration is applied in production). */
   replyThread?: boolean;
+  /** linkedin.invite_batch / linkedin.message_batch may be proposed (COWORK_LINKEDIN_BATCH_ENABLED; its migration is applied in production). */
+  linkedinBatch?: boolean;
   /** The judge (plan 2, G2): reads the coordinator's final answer before it is shown and returns
    * what to fix, or null when it stands. At most once per turn, and only with a decision to spare;
    * `canRead` says whether its correction may still make a read (a decision for it and one to answer). */
@@ -815,6 +825,7 @@ async function runCoworkLoop(input: {
         || decision.action === 'message_context.update' || decision.action === 'lead.enrich_batch'
         || decision.action === 'campaign.schedule_batch'
         || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message'
+        || decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch'
         || decision.action === 'contacts.import' || decision.action === 'email.reply_thread') {
         if (!input.proposeEffect) throw rejected('Effect proposals unavailable', 'En este contexto no puedes proponer acciones: responde con lo observado.');
         const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
@@ -840,6 +851,8 @@ async function runCoworkLoop(input: {
           : decision.action === 'campaign.schedule_batch' ? 'campaign_schedule_batch'
           : decision.action === 'linkedin.invite' ? 'linkedin_invite'
           : decision.action === 'linkedin.message' ? 'linkedin_message'
+          : decision.action === 'linkedin.invite_batch' ? 'linkedin_invite_batch'
+          : decision.action === 'linkedin.message_batch' ? 'linkedin_message_batch'
           : decision.action === 'contacts.import' ? 'contacts_import'
           : decision.action === 'email.reply_thread' ? 'reply_thread' : 'request_draft';
         const targetId = decision.action === 'leads.save_contact' ? decision.providerId
@@ -862,6 +875,7 @@ async function runCoworkLoop(input: {
           : decision.action === 'lead.enrich_batch' ? 'new-enrich-batch'
           : decision.action === 'campaign.schedule_batch' ? decision.campaignId
           : decision.action === 'linkedin.invite' || decision.action === 'linkedin.message' ? 'new-linkedin-job'
+          : decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch' ? 'new-linkedin-batch'
           : decision.action === 'contacts.import' ? 'new-contacts-import'
           : decision.action === 'email.reply_thread' ? decision.replyThread?.contactedId ?? null
           : decision.leadId;
@@ -902,6 +916,17 @@ async function runCoworkLoop(input: {
             ? { leadId: decision.leadId, message: decision.linkedinMessage } : undefined;
         if (decision.action === 'linkedin.invite' && !linkedinJob) throw rejected('Missing invite target', MISSING_PROPOSAL_FIELDS);
         if (decision.action === 'linkedin.message' && !linkedinJob) throw rejected('Missing message target and text', MISSING_PROPOSAL_FIELDS);
+        if ((decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch') && !input.linkedinBatch) {
+          throw rejected('LinkedIn batch unavailable', 'Proponer un lote de LinkedIn desde Cowork todavía no está disponible: propón a una persona por vez con linkedin.invite o linkedin.message, o deja la lista lista para que la revise el usuario.');
+        }
+        let linkedinBatch: CoworkLinkedinBatchInput | undefined;
+        if (decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch') {
+          if (!decision.linkedinBatch) throw rejected('Missing batch people', MISSING_PROPOSAL_FIELDS);
+          try {
+            coworkLinkedinBatchLeads(decision.action === 'linkedin.invite_batch' ? 'invite' : 'message', decision.linkedinBatch);
+          } catch (error) { throw rejected('Invalid LinkedIn batch', error instanceof Error ? error.message : MISSING_PROPOSAL_FIELDS); }
+          linkedinBatch = decision.linkedinBatch;
+        }
         const scheduleBatch = decision.action === 'campaign.schedule_batch' && decision.campaignId
           ? { campaignId: decision.campaignId, ...(decision.spacingMinutes == null ? {} : { spacingMinutes: decision.spacingMinutes }) }
           : undefined;
@@ -981,7 +1006,8 @@ async function runCoworkLoop(input: {
           ...(scheduleBatch === undefined ? {} : { scheduleBatch }),
           ...(linkedinJob === undefined ? {} : { linkedinJob }),
           ...(contactsImport === undefined ? {} : { contactsImport }),
-          ...(replyThread === undefined ? {} : { replyThread }) });
+          ...(replyThread === undefined ? {} : { replyThread }),
+          ...(linkedinBatch === undefined ? {} : { linkedinBatch }) });
         } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
       }
