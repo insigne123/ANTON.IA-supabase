@@ -44,19 +44,24 @@ type JevReplyIntent = 'meeting_request' | 'positive' | 'negative' | 'unsubscribe
 /** What each answer means for the campaign, with the same rules the model is given (classify-reply.ts): interest or a request stops
  * the automatic follow-ups for a person to take over, a refusal stops them, and an automatic or neutral reply lets them go on.
  * Jev writes no text, so the summary is one fixed sentence per intent. */
-const MEANING: Record<JevReplyIntent, Pick<ReplyClassification, 'sentiment' | 'shouldContinue' | 'summary'>> = {
+const MEANING: Record<Exclude<JevReplyIntent, 'delivery_failure'>, Pick<ReplyClassification, 'sentiment' | 'shouldContinue' | 'summary'>> = {
   meeting_request: { sentiment: 'positive', shouldContinue: false, summary: 'Pidió o aceptó una reunión' },
   positive: { sentiment: 'positive', shouldContinue: false, summary: 'Mostró interés' },
   negative: { sentiment: 'negative', shouldContinue: false, summary: 'No está interesado' },
   unsubscribe: { sentiment: 'negative', shouldContinue: false, summary: 'Pidió no recibir más correos' },
   auto_reply: { sentiment: 'neutral', shouldContinue: true, summary: 'Respuesta automática' },
   neutral: { sentiment: 'neutral', shouldContinue: true, summary: 'Respuesta sin interés ni rechazo claro' },
-  delivery_failure: { sentiment: 'neutral', shouldContinue: false, summary: 'El correo no se entregó' },
 };
+
+/** A bounce is never decided by reading a reply: detectDeliveryFailure finds them from the mail system's own message, and taking
+ * a real reply for a bounce would hide it (a bounce clears the reply). Jev keeps the option so a bounce text has somewhere to go,
+ * and the shadow mode logs it, but the app does not act on it. */
+const NEVER_DECIDES = new Set<JevReplyIntent>(['delivery_failure']);
 
 /** What Jev picked and how sure it was, for any answer it gave: what the shadow mode compares. */
 export function jevReplyRead(answer: JevAnswer | undefined): { intent: JevReplyIntent | null; confidence: number | null } {
-  if (answer?.type !== 'choice' || !Object.prototype.hasOwnProperty.call(MEANING, answer.choice)) return { intent: null, confidence: null };
+  const known = Object.prototype.hasOwnProperty.call(MEANING, answer?.type === 'choice' ? answer.choice : '') || (answer?.type === 'choice' && NEVER_DECIDES.has(answer.choice as JevReplyIntent));
+  if (answer?.type !== 'choice' || !known) return { intent: null, confidence: null };
   return { intent: answer.choice as JevReplyIntent, confidence: answer.confidence };
 }
 
@@ -64,6 +69,6 @@ export function jevReplyRead(answer: JevAnswer | undefined): { intent: JevReplyI
  * exist, or less certainty than `minConfidence`. */
 export function jevReplyClassification(answer: JevAnswer | undefined, minConfidence = JEV_REPLY_MIN_CONFIDENCE): ReplyClassification | null {
   const { intent, confidence } = jevReplyRead(answer);
-  if (!intent || confidence === null || confidence < minConfidence) return null;
-  return { intent, confidence, reason: 'jev', ...MEANING[intent] };
+  if (!intent || NEVER_DECIDES.has(intent) || confidence === null || confidence < minConfidence) return null;
+  return { intent, confidence, reason: 'jev', ...MEANING[intent as keyof typeof MEANING] };
 }

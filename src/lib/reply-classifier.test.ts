@@ -39,14 +39,18 @@ test('an answer of Jev is taken only when it is a choice the app knows and Jev i
   assert.equal(jevReplyClassification({ type: 'noul', noul: 0.99 }), null);
   assert.equal(jevReplyClassification(undefined), null);
   // The rules of the campaign: interest and refusals stop the automatic follow-ups, automatic and neutral replies let them go on.
-  const meaning = Object.fromEntries(Object.keys(REPLY_JEV_QUESTION.type === 'choice' ? REPLY_JEV_QUESTION.criteria : {}).map(intent => {
+  const decided = Object.keys(REPLY_JEV_QUESTION.type === 'choice' ? REPLY_JEV_QUESTION.criteria : {}).filter(intent => intent !== 'delivery_failure');
+  const meaning = Object.fromEntries(decided.map(intent => {
     const classification = jevReplyClassification(answer(intent, 1))!;
     return [intent, [classification.sentiment, classification.shouldContinue]];
   }));
   assert.deepEqual(meaning, {
     meeting_request: ['positive', false], positive: ['positive', false], negative: ['negative', false], unsubscribe: ['negative', false],
-    auto_reply: ['neutral', true], neutral: ['neutral', true], delivery_failure: ['neutral', false],
+    auto_reply: ['neutral', true], neutral: ['neutral', true],
   });
+  // A bounce is never decided by reading a reply (a real reply taken for a bounce would be hidden): Jev may say it, the app does not act on it.
+  assert.equal(jevReplyClassification(answer('delivery_failure', 1)), null);
+  assert.deepEqual(jevReplyRead(answer('delivery_failure', 0.97)), { intent: 'delivery_failure', confidence: 0.97 });
   assert.deepEqual(jevReplyRead(answer('positive', 0.42)), { intent: 'positive', confidence: 0.42 });
   assert.deepEqual(jevReplyRead(undefined), { intent: null, confidence: null });
 });
@@ -86,7 +90,7 @@ test('with jev-first Jev decides when it is sure, and the model reads the reply 
   assert.deepEqual([sure.classification.intent, sure.classification.reason, sure.classification.shouldContinue], ['meeting_request', 'jev', false]);
   assert.equal(sure.modelCalls.length, 0, 'a reply Jev is sure about does not reach the model');
 
-  for (const unsure of [jev('positive', 0.64), jev('invented', 1), jevDown('disabled'), jevDown('timeout'), jevDown('http_error'), jevDown('invalid'), new Error('boom')]) {
+  for (const unsure of [jev('positive', 0.64), jev('invented', 1), jev('delivery_failure', 0.99), jevDown('disabled'), jevDown('timeout'), jevDown('http_error'), jevDown('invalid'), new Error('boom')]) {
     const outcome = await run('Lo vemos con el equipo', 'jev-first', unsure);
     assert.equal(outcome.classification.reason, 'modelo', JSON.stringify(unsure));
     assert.equal(outcome.modelCalls.length, 1);

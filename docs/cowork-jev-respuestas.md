@@ -43,7 +43,8 @@ Las mismas reglas que se le dan al modelo (`src/ai/flows/classify-reply.ts`): in
 | `unsubscribe` | negativo | no | Pidió no recibir más correos |
 | `auto_reply` | neutral | sí | Respuesta automática |
 | `neutral` | neutral | sí | Respuesta sin interés ni rechazo claro |
-| `delivery_failure` | neutral | no | El correo no se entregó |
+
+**Un rebote nunca lo decide Jev.** La pregunta conserva la opción `delivery_failure` para que un texto de rebote tenga dónde caer, y el modo sombra la registra, pero la app no actúa sobre ella: los rebotes los detecta `detectDeliveryFailure` desde el mensaje del sistema de correo, y tomar una respuesta real por un rebote la ocultaría (un rebote borra la respuesta). Si Jev dice «rebote», lee el modelo.
 
 **La seguridad de 0,9:** en la calibración Jev acertó el 97 % de las veces desde 0,9, y sus errores estaban entre 0,54 y 0,64, salvo una muestra ambigua. Bajo 0,9 lee el modelo.
 
