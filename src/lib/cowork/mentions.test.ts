@@ -39,6 +39,12 @@ test('the message carries one reference per mentioned person still in the text, 
   // Sending twice adds nothing, and a mention deleted from the text travels no more.
   assert.equal(coworkWithMentions(sent, [MARCELA, FELIPE]), sent);
   assert.equal(coworkWithMentions('escríbele a Marcela', [MARCELA]), 'escríbele a Marcela');
+  const editedName = 'escríbele a @Marcela RojasX';
+  assert.equal(coworkWithMentions(editedName, [MARCELA]), editedName, 'a partial name cannot silently carry another person’s ID');
+  assert.deepEqual(coworkMentionSegments(editedName, [MARCELA]), [{ text: editedName, mention: null }]);
+  assert.equal(coworkWithMentions('mrojas@Marcela Rojas', [MARCELA]), 'mrojas@Marcela Rojas');
+  const punctuated = 'escríbele a @Marcela Rojas, por favor';
+  assert.equal(coworkWithMentions(punctuated, [MARCELA]), `${punctuated}\n\n(ID de Marcela Rojas: ${MARCELA.id})`);
   assert.deepEqual(coworkMessageMentions(sent), [MARCELA, FELIPE]);
   // The bubble shows the text without the references, with each mention apart.
   const shown = coworkDisplayMessage(sent);

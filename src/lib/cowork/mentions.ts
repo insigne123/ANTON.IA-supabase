@@ -15,6 +15,18 @@ export type CoworkComposerToken = { kind: 'mention' | 'template'; start: number;
 const UUID = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}';
 /** «(ID de Marcela Rojas: 3f…)», one per mentioned person, at the end of a message. */
 const REFERENCE = new RegExp(`\\(ID de ([^():\\n]{1,80}): (${UUID})\\)`, 'gi');
+const PART_OF_NAME = /[\p{L}\p{M}\p{N}_'-]/u;
+const PART_OF_ADDRESS = /[\p{L}\p{M}\p{N}_@]/u;
+
+/** A complete mention, not a prefix of a name the person kept editing or part of an email address. */
+function mentionIndex(text: string, tag: string) {
+  let index = text.indexOf(tag);
+  while (index >= 0) {
+    if (!PART_OF_ADDRESS.test(text[index - 1] || '') && !PART_OF_NAME.test(text[index + tag.length] || '')) return index;
+    index = text.indexOf(tag, index + tag.length);
+  }
+  return -1;
+}
 
 /** A name as it travels in a mention: one line, without the signs a reference uses. */
 export function coworkMentionName(name: string) {
@@ -46,7 +58,7 @@ export function coworkWithMentions(text: string, mentions: CoworkMention[]) {
   const seen = new Set<string>();
   const references = mentions.flatMap(mention => {
     const name = coworkMentionName(mention.name);
-    if (!name || seen.has(mention.id) || !text.includes(`@${name}`)) return [];
+    if (!name || seen.has(mention.id) || mentionIndex(text, `@${name}`) < 0) return [];
     seen.add(mention.id);
     const reference = `(ID de ${name}: ${mention.id})`;
     return text.includes(reference) ? [] : [reference];
@@ -71,7 +83,7 @@ export function coworkMentionSegments(text: string, mentions: CoworkMention[]): 
   while (rest) {
     let first: { index: number; tag: string; mention: CoworkMention } | null = null;
     for (const { mention, tag } of names) {
-      const index = rest.indexOf(tag);
+      const index = mentionIndex(rest, tag);
       if (index >= 0 && (!first || index < first.index)) first = { index, tag, mention };
     }
     if (!first) { segments.push({ text: rest, mention: null }); break; }
