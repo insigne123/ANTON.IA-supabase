@@ -40,6 +40,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'metrics.channels': { label: 'Comparó email y LinkedIn', source: 'Métricas', icon: 'chart' },
   'metrics.incidents': { label: 'Revisó incidencias del sistema', source: 'Métricas', icon: 'alert' },
   'deliverability.check': { label: 'Verificó los registros DNS del dominio', source: 'Entregabilidad', icon: 'shield' },
+  'site.read': { label: 'Leyó tu sitio web', source: 'Sitio web', icon: 'globe' },
   'deliverability.bounces': { label: 'Analizó los rebotes', source: 'Entregabilidad', icon: 'shield' },
   'deliverability.sender': { label: 'Contrastó tu remitente con envíos reales', source: 'Entregabilidad', icon: 'shield' },
   'compliance.check': { label: 'Revisó la política de contacto', source: 'Cumplimiento', icon: 'scale' },
@@ -99,7 +100,7 @@ export function describeCoworkObservation(payload: Record<string, unknown>): { l
   const info = coworkActionInfo(action);
   const input = typeof payload.input === 'string' ? payload.input.trim() : '';
   const parts: string[] = [];
-  const showsQuery = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'compliance.obligation'].includes(action);
+  const showsQuery = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'site.read', 'compliance.obligation'].includes(action);
   if (showsQuery && input) parts.push(`«${input.length > 48 ? `${input.slice(0, 47)}…` : input}»`);
   if (action === 'prospecting.search' && payload.input && typeof payload.input === 'object') {
     const criteria = payload.input as { titles?: unknown; target?: unknown };
