@@ -160,6 +160,15 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'el mensaje es breve y sin relleno', test: r => !r.proposal?.linkedinMessage
         || (r.proposal.linkedinMessage.length <= 600 && !PLACEHOLDER.test(r.proposal.linkedinMessage)) },
       { label: 'el mensaje lleva el nombre real del usuario', test: r => !r.proposal?.linkedinMessage || /Nicol[aá]s/.test(r.proposal.linkedinMessage) }] },
+  // A contact picked with «@» in the composer (V6): its ID travels at the end, so Cowork reads it without searching by name.
+  { id: 'mencion-linkedin', title: 'Mensaje de LinkedIn a un contacto elegido con @', world,
+    request: `escribele a @Marcela Rojas por linkedin, algo corto presentandome\n\n(ID de Marcela Rojas: ${MARKETING_LEAD.marcela})`,
+    origin: 'La mención ya dice quién es: Cowork la lee por su ID (sin buscar por nombre ni preguntar cuál Marcela) y deja el mensaje para aprobar.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'lee el contacto por su ID', test: r => (r.reads || []).some(item => item.action === 'leads.get' && item.input === MARKETING_LEAD.marcela) },
+      { label: 'no lo busca por nombre', test: r => !(r.reads || []).some(item => item.action === 'leads.search' && /marcela/i.test(item.input)) },
+      { label: 'propone el mensaje de LinkedIn a Marcela', test: r => r.proposal?.kind === 'linkedin_message' && /Marcela/.test(r.proposal.linkedinMessage || '') },
+      { label: 'el ID no aparece en la respuesta', test: r => !(r.note || r.reply).includes(MARKETING_LEAD.marcela) }] },
   { id: 'mkt-linkedin-invitar', title: 'Invitar a un contacto en LinkedIn', request: 'invita a felipe de securitas a mi red de linkedin', world,
     origin: 'La invitación exige revisar el cupo semanal antes de proponerla.',
     checks: [...CORPUS_COMMON_CHECKS,

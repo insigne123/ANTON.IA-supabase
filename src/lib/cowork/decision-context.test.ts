@@ -149,3 +149,9 @@ test('a datum only the person knows is asked with options, never a yes or a no o
   assert.match(systemPrompt, /Con choices, suggestions es null\. No uses choices para un sí o un no/);
   assert.match(systemPrompt, /question \(regla 4\), suggestions y choices \(regla 9\)/);
 });
+
+test('a contact picked with «@» is read by its ID, never searched by name or asked about', () => {
+  const { systemPrompt } = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  assert.match(systemPrompt, /Si el mensaje nombra a alguien con «@Nombre» y termina con «\(ID de Nombre: …\)», el usuario eligió ese contacto guardado de su lista: léelo con leads\.get y ese ID/);
+  assert.match(systemPrompt, /sin buscarlo por nombre ni preguntar cuál es; el ID nunca va en tu respuesta/);
+});

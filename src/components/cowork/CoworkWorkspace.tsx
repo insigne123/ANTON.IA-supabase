@@ -6,6 +6,7 @@ import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import type { CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
+import { coworkWithMentions, type CoworkMention } from '@/lib/cowork/mentions';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
   coworkCardStatuses, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
@@ -13,6 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { CoworkArtifactPanel } from './CoworkArtifactPanel';
 import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
+import type { CoworkContactOption } from './ComposerShortcuts';
 import { CoworkHome } from './CoworkHome';
 import { CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
@@ -37,18 +39,24 @@ const CONTINUE_PROMPT = 'Sigue con el resultado de la acción anterior: dime qu�
 const DRAFT_KEY = 'cowork:draft';
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
-/** The unsent message of this tab. A draft written before the session resolved
- * has no owner yet; one saved by another account is never shown. */
-function readDraft(userId: string | null) {
+/** The unsent message of this tab, with the contacts it names with «@» (V6). A draft written
+ * before the session resolved has no owner yet; one saved by another account is never shown. */
+function readDraft(userId: string | null): { text: string; mentions: CoworkMention[] } {
   try {
-    const saved = JSON.parse(window.sessionStorage.getItem(DRAFT_KEY) || 'null') as { userId?: string | null; text?: unknown } | null;
-    return typeof saved?.text === 'string' && (!saved.userId || saved.userId === userId) ? saved.text : '';
-  } catch { return ''; }
+    const saved = JSON.parse(window.sessionStorage.getItem(DRAFT_KEY) || 'null') as { userId?: string | null; text?: unknown; mentions?: unknown } | null;
+    if (typeof saved?.text !== 'string' || (saved.userId && saved.userId !== userId)) return { text: '', mentions: [] };
+    const mentions = (Array.isArray(saved.mentions) ? saved.mentions as Array<Partial<CoworkMention> | null> : [])
+      .filter((item): item is CoworkMention => typeof item?.id === 'string' && UUID.test(item.id) && typeof item.name === 'string' && Boolean(item.name.trim()))
+      .slice(0, 20).map(item => ({ id: item.id, name: item.name }));
+    return { text: saved.text, mentions };
+  } catch { return { text: '', mentions: [] }; }
 }
 
-function writeDraft(userId: string | null, text: string) {
+function writeDraft(userId: string | null, text: string, mentions: CoworkMention[] = []) {
   try {
-    if (text.trim()) window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ userId, text }));
+    // Only the mentions still in the text, so a reload keeps who each one is.
+    const named = mentions.filter(mention => text.includes(`@${mention.name}`));
+    if (text.trim()) window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ userId, text, ...(named.length ? { mentions: named } : {}) }));
     else window.sessionStorage.removeItem(DRAFT_KEY);
   } catch { /* Storage unavailable: the draft only lives in memory. */ }
 }
@@ -124,6 +132,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
   const composer = useRef<CoworkComposerHandle>(null);
   const contactRef = useRef<string | null>(null);
+  // Contacts picked with «@» in the composer, sent as references with the next message (V6).
+  const mentions = useRef<CoworkMention[]>([]);
   const scroller = useRef<HTMLDivElement>(null);
   const conversation = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -154,6 +164,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     return data;
   }, [clearPrivateResults]);
 
+  /** Your saved contacts for the composer's «@». */
+  const searchContacts = useCallback(async (query: string): Promise<CoworkContactOption[]> =>
+    (await request(`/api/cowork/contacts?q=${encodeURIComponent(query)}`)).contacts || [], [request]);
+  const addMention = useCallback((mention: CoworkMention) => {
+    mentions.current = [...mentions.current.filter(item => item.id !== mention.id), mention];
+  }, []);
+
   /** Asks the worker to take the next step now instead of waiting for the scheduler. */
   const wake = useCallback((force = false) => {
     const now = Date.now();
@@ -183,8 +200,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   // session resolves (AuthContext keys its tree by user and workspace), even mid-sentence.
   const draftWatched = useRef(false);
   useEffect(() => {
-    const saved = readDraft(userId);
+    const { text: saved, mentions: named } = readDraft(userId);
     if (!saved) return;
+    mentions.current = [...mentions.current.filter(item => !named.some(mention => mention.id === item.id)), ...named];
     setMessage(current => !current || saved.startsWith(current) ? saved : current.startsWith(saved) ? current : `${saved}${current}`);
     // The remount drops focus: keep writing where you were, at the end of the text.
     requestAnimationFrame(() => {
@@ -197,7 +215,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   useEffect(() => {
     // Mounting never clears a saved draft; later changes (including a send) do.
     if (!draftWatched.current) { draftWatched.current = true; return; }
-    writeDraft(userId, message);
+    writeDraft(userId, message, mentions.current);
   }, [message, userId]);
 
   // Selected conversation: refresh while work is in flight and follow continuations.
@@ -477,14 +495,20 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
 
   async function post(text: string, parentRunId: string | null) {
     // A contact picked from a table travels as a reference the model can use,
-    // without showing its ID in the composer or in your message bubble.
+    // without showing its ID in the composer or in your message bubble. Contacts
+    // picked with «@» travel the same way (V6). References go before the files,
+    // which stay the message's last lines (attachments.ts).
+    const { text: body, files } = coworkMessageAttachments(text);
     const reference = contactRef.current;
-    const outgoing = reference && !text.includes(reference) ? `${text}\n\n(ID del contacto: ${reference})` : text;
+    const mentioned = coworkWithMentions(body, mentions.current);
+    const referenced = reference && !mentioned.includes(reference) ? `${mentioned}\n\n(ID del contacto: ${reference})` : mentioned;
+    const outgoing = files.length ? coworkWithAttachments(referenced, files) : referenced;
     if (pending.current?.message !== outgoing || pending.current?.parentRunId !== parentRunId || pending.current?.mode !== mode) {
       pending.current = { message: outgoing, requestId: crypto.randomUUID(), parentRunId, mode };
     }
     setSending(true); setError('');
-    setOptimistic({ text, runId: null });
+    // The bubble shows what is sent: mentions as chips, references out of sight.
+    setOptimistic({ text: outgoing, runId: null });
     stickToBottom.current = true;
     try {
       const data = await request('/api/cowork/runs', {
@@ -493,7 +517,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       });
       pending.current = null;
       contactRef.current = null;
-      setOptimistic({ text, runId: data.id });
+      // Mentions picked for a message written meanwhile (a queued one went first) still travel with it.
+      mentions.current = mentions.current.filter(mention => !outgoing.includes(mention.id));
+      setOptimistic({ text: outgoing, runId: data.id });
       liveRuns.current.add(data.id);
       if (parentRunId && selected) {
         setWorkUrl(data.id, 'replace');
@@ -672,6 +698,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
     placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
+    searchContacts={ready ? searchContacts : null} onMention={addMention} templates
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
   return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
@@ -750,6 +777,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
             <div className="mx-auto w-full max-w-[46rem]">
               <CoworkComposer ref={composer} id="cowork-followup" value={message} onChange={setMessage} onSubmit={() => void submit()}
                 placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"
+                searchContacts={ready ? searchContacts : null} onMention={addMention} templates
                 onStop={active && !pendingDecision && latestIsCurrent ? () => void cancel() : null} stopping={cancelling}
                 canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
                 {...fileProps('cowork-followup')}

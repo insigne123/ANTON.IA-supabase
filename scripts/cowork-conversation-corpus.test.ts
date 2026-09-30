@@ -108,6 +108,11 @@ Object.assign(IDEAL, {
     : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
       linkedinMessage: 'Hola Marcela, soy Nicolás de Yago. Ayudamos a equipos de personas a revisar antecedentes laborales en minutos con AXIS. ¿Te interesa conversarlo?',
       answer: { reply: 'Encontré a Marcela, Gerente de Personas en Sodexo. Te dejo un mensaje corto firmado con tu nombre; se envía desde tu extensión cuando lo apruebes.', document: null } }),
+  'mencion-linkedin': async context => context.observations.length === 0
+    ? read('leads.get', null, { leadId: MARKETING_LEAD.marcela })
+    : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
+      linkedinMessage: 'Hola Marcela, soy Nicolás de Yago. Ayudamos a equipos de personas a revisar antecedentes laborales en minutos con AXIS. ¿Te interesa conversarlo?',
+      answer: { reply: 'Te dejo un mensaje corto para Marcela, Gerente de Personas en Sodexo, firmado con tu nombre; se envía desde tu extensión cuando lo apruebes.', document: null } }),
   'mkt-linkedin-invitar': async context => context.observations.length === 0
     ? parallel([{ action: 'leads.search', input: 'Felipe Securitas' }, { action: 'linkedin.quota', input: '' }])
     : coworkDecisionSchema.parse({ action: 'linkedin.invite', query: null, leadId: MARKETING_LEAD.felipe,

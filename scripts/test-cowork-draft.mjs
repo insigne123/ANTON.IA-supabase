@@ -55,5 +55,18 @@ try {
   await waitFor(() => composer(), 'composer after remount');
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(composer().value, '');
-  console.log('PASS: the unsent message survives a remount, is cleared when sent and never crosses accounts.');
+
+  // 4. A contact picked with «@» (V6) is still that contact after a reload: the message carries its reference.
+  // An entry that is not a contact ID is dropped.
+  const MARCELA = '00000000-0000-4000-8000-000000000101';
+  window.history.replaceState(null, '', '/cowork');
+  window.sessionStorage.setItem('cowork:draft', JSON.stringify({ userId: OWNER, text: 'escríbele a @Marcela Rojas',
+    mentions: [{ id: MARCELA, name: 'Marcela Rojas' }, { id: 'no-es-un-id', name: 'Otra' }, null] }));
+  window.mountWorkspace(`${OWNER}:org:2`);
+  await waitFor(() => box()?.value === 'escríbele a @Marcela Rojas', 'draft with a mention restored');
+  await waitFor(() => !window.document.querySelector('[aria-label="Crear trabajo"]').disabled, 'send enabled again');
+  window.document.querySelector('[aria-label="Crear trabajo"]').click();
+  await waitFor(() => posts.length === 2, 'message with a mention sent');
+  assert.equal(posts[1].message, `escríbele a @Marcela Rojas\n\n(ID de Marcela Rojas: ${MARCELA})`);
+  console.log('PASS: the unsent message survives a remount with the contacts it names, is cleared when sent and never crosses accounts.');
 } finally { window.close(); }

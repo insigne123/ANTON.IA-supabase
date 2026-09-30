@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { FileText, LoaderCircle, Upload, X } from 'lucide-react';
 import { coworkMessageAttachments } from '@/lib/cowork/attachments';
+import { coworkMentionSegments, coworkMessageMentions } from '@/lib/cowork/mentions';
 import { coworkDisplayMessage, coworkFileSize } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, cwPop, cwVariants, m } from './motion';
@@ -81,8 +82,14 @@ export function CoworkAttachments({ id, files, uploading, open, onUpload, onRemo
 export function CoworkUserMessage({ message }: { message: string }) {
   const { text, files } = coworkMessageAttachments(message);
   const shown = coworkDisplayMessage(text);
+  // Contacts named with «@» read as chips; their IDs stay out of sight (V6).
+  const mentions = coworkMessageMentions(text);
   return <div className="flex max-w-[85%] flex-col items-end gap-1.5">
-    {shown && <p className="whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">{shown}</p>}
+    {shown && <p className="whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">
+      {mentions.length ? coworkMentionSegments(shown, mentions).map((segment, index) => segment.mention
+        ? <span key={index} className="rounded-md bg-cw-accent-soft px-1 font-semibold text-cw-text">{segment.text}</span>
+        : segment.text) : shown}
+    </p>}
     {files.length > 0 && <ul aria-label="Archivos adjuntos" className="flex flex-wrap justify-end gap-1.5">
       {files.map(name => <li key={name} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-cw-border bg-cw-elevated px-2 py-1 text-[12.5px] text-cw-text">
         <FileText className="h-3.5 w-3.5 shrink-0 text-cw-muted" aria-hidden="true" /><span className="truncate">{name}</span>
