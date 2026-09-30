@@ -170,6 +170,13 @@ test('agenda-toca-hoy: «no conté» says the automatic replies were kept apart 
   assert.deepEqual(missed, []);
 });
 
+test('agenda-fuente-caida: «el dato de seguimientos no está disponible y la lista no incluye esa parte» says it could not look', async () => {
+  const missed = await failing('agenda-fuente-caida', degrade(IDEAL['agenda-fuente-caida'], { reply: swap(
+    'No pude revisar los seguimientos de tus campañas, así que no sé cuántos salen hoy y no los doy por cero.',
+    'El dato de seguimientos no está disponible, así que esta lista no incluye esa parte.') }));
+  assert.deepEqual(missed, []);
+});
+
 const COUPLE_REPLY = 'Hoy hay 3 personas interesadas en 2 empresas que esperan respuesta. En Servicios Norte, Gerardo Paz pidió una reunión; Marcela Rojas también espera respuesta. Héctor Vidal espera respuesta en Casino Central.';
 const COUPLE_QUESTION = '¿Preparo respuestas para las tres personas, atendiendo primero la solicitud de reunión de Gerardo?';
 test('agenda-dos-personas-una-empresa: one row naming each colleague with their own wait and who asked is not a misattribution', async () => {
