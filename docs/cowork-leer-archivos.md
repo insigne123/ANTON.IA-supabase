@@ -44,7 +44,7 @@ Hasta ahora Cowork solo veía el nombre y el tamaño de los archivos subidos. Su
 - **Antes del primer mensaje** de un hilo todavía no se puede subir nada: el botón aparece después del primer turno (punto 3.1, pendiente).
 - **Alcance de la búsqueda:** revisa hasta 100 carpetas de subidas con 50 archivos cada una.
 - **Sin reintento:** si la lectura se corta a mitad, no se reintenta. La bitácora de operaciones solo reintenta las consultas de su lista, y sumarla ahí sería una migración.
-- **Importar contactos:** pasar las personas del archivo a ANTON.IA sigue siendo manual (Importar Leads). Hacerlo desde Cowork requiere un efecto nuevo, es decir, una migración (punto 3.3).
+- **Importar contactos:** pasar las personas del archivo a ANTON.IA sigue siendo manual (Importar Leads). Hacerlo desde Cowork requiere un efecto nuevo, es decir, una migración (punto 3.3). *Actualización:* F4 lo hace con una tarjeta de aprobación, detrás de `COWORK_CONTACTS_IMPORT_ENABLED` y con la migración M3 aplicada; ver `cowork-importar-contactos.md`.
 - **Código con archivos subidos (falla previa a este PR):** el ejecutor solo acepta archivos del prefijo del turno que propone el código (`stageCoworkCode`).
   - Cada mensaje crea un turno nuevo (`cowork_admit_followup`), y «Adjuntar archivos» sube al turno anterior, ya terminado.
   - Resultado: desde la interfaz, una propuesta de código con archivos nunca los encuentra.

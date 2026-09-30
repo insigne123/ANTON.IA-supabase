@@ -294,6 +294,39 @@ test('code execution also takes a file that files.read found, here or in an earl
   assert.equal(proposals.length, 2);
 });
 
+test('importing contacts is proposed only when it is on, for a file seen in the thread, with its sheet and columns', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const proposals: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
+  const reads: string[] = [];
+  const found = { scope: 'own_uploads', found: true, name: 'prospectos.xlsx', runId: parentId, size: 900, kind: 'table', columns: ['Quién'], rows: [] };
+  const base = { message: 'Guarda en mis contactos a los del excel', runId, signal: new AbortController().signal, authorize: async () => {},
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: Record<string, unknown>) => { proposals.push(proposal); } };
+  const readFile = { action: 'files.read' as const, query: 'prospectos.xlsx', leadId: null, answer: null };
+  const importing = { action: 'contacts.import' as const, query: null, leadId: null, answer: null,
+    contactsImport: { file: 'prospectos.xlsx#Prospectos', columns: { name: 'Quién' } } };
+  // Off (the default, until its migration is applied): refused, never proposed.
+  await assert.rejects(runCoworkReadLoop({ ...base, execute: async () => found,
+    decide: async observations => observations.length ? importing : readFile }), /Contacts import unavailable/);
+  assert.equal(proposals.length, 0);
+  // On: the file files.read found (a sheet of it) anchors the proposal to the run that read it.
+  await runCoworkReadLoop({ ...base, contactsImport: true, execute: async () => found,
+    decide: async observations => observations.length ? importing : readFile });
+  assert.deepEqual(proposals[0], { kind: 'contacts_import', targetId: 'new-contacts-import', label: 'Importar contactos de un archivo',
+    originRunId: runId, contactsImport: { file: 'prospectos.xlsx#Prospectos', columns: { name: 'Quién' } } });
+  assert.match(notes[0], /Propongo guardar en tus contactos a las personas del archivo que aún no están/);
+  // Proposed before reading anything: the loop lists the uploads once, and a file that is not there is refused.
+  await assert.rejects(runCoworkReadLoop({ ...base, contactsImport: true,
+    execute: async action => { reads.push(action); return { scope: 'own_uploads', files: [{ name: 'otra.csv', runId, size: 3 }] }; },
+    decide: async () => importing }), /observed first/);
+  assert.deepEqual(reads, ['files.list']);
+  assert.equal(proposals.length, 1);
+});
+
 test('a proposal carries the model explanation as a persisted note, recorded before the approval card', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const leadId = '00000000-0000-4000-8000-000000000021';
