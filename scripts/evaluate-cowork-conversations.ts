@@ -20,6 +20,13 @@
 //
 // --contacts-import turns on contacts.import in every case (F4), as COWORK_CONTACTS_IMPORT_ENABLED
 // does; the cases marked contactsImport have it on anyway. The judges read the same flag.
+// With --stream the report also says how many answers the person would have seen replaced on screen
+// (the first answer streamed, then corrected: replacedOnScreen) and how long a turn takes until its
+// answer is final, apart for clean and corrected ones (revealSeconds): with COWORK_ANSWER_HOLD_ENABLED
+// nobody sees the first answer, and the answer shows once, at that time.
+// --cases=axis-* runs the 44 operations of the AXIS package: the 20 ★ (scripts/fixtures/cowork-axis-paquete.ts) and the other 24
+// (cowork-axis-resto.ts). axis:star runs only the 20 ★ and axis:rest only the other 24. Grade them with
+// judge-cowork-conversations.ts, which also compares each answer with what the previous AI achieved.
 //
 // To compare prompts, run it on the previous commit and on this one with the same flags.
 import { writeFileSync } from 'node:fs';
@@ -27,23 +34,33 @@ import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
+import { coworkAnswerChanged } from '../src/lib/cowork/presentation';
 import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 import { coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
-import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
+import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
+import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
+import { selectCases } from './cowork-case-selection';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 
-// Production conversations first, then the marketing use cases (email and LinkedIn)
-// and every button on the Cowork home.
-const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
+// Production conversations first, then the marketing use cases (email and LinkedIn),
+// every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
+const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS, ...AXIS_REST_CORPUS];
+
+// «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
+CORPUS.push(...AGENDA_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
     throw new Error('Requires --live and explicit OPENAI_API_KEY/COWORK_MODEL. The offline check is scripts/cowork-conversation-corpus.test.ts.');
   }
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const selected = arg('cases')?.split(',').filter(Boolean) || CORPUS.map(entry => entry.id);
+  // `--cases=axis-*` takes every case whose id starts with «axis-»; `axis:star` and `axis:rest` take the 20 ★ and the other 24.
+  // Without --cases, the corpus as it always was: the AXIS operations are asked for by name.
+  const selected = selectCases(CORPUS, arg('cases')) || CORPUS.filter(entry => !entry.axis).map(entry => entry.id);
   const unknown = selected.filter(id => !CORPUS.some(entry => entry.id === id));
   if (unknown.length) throw new Error(`Unknown cases: ${unknown.join(', ')}`);
   const repeat = Math.max(1, Math.min(5, Number(arg('repeat') || 1)));
@@ -89,7 +106,7 @@ async function main() {
         judgeCalls++;
         try {
           const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: coworkJudgeInstructions({ contactsImport: Boolean(entry.contactsImport), inTurn: true }),
-            prompt: coworkJudgeTurnPrompt({ request: meta.request, history: meta.history, userContext: meta.userContext, observations, answer }),
+            prompt: coworkJudgeTurnPrompt({ request: meta.request, history: meta.history, userContext: meta.userContext, observations, answer, now: CORPUS_NOW }),
             provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 45000 });
           usage.push(coworkModelUsage(response.telemetry));
           decisions.push({ agent: 'judge', output: response.data });
@@ -156,7 +173,10 @@ async function main() {
     ...(judgeOn ? { judgeInTurn: { model: judgeModel, calls: judgeCalls,
       judged: outcomes.filter(outcome => outcome.result.judgeInTurn).length,
       asked: outcomes.filter(outcome => outcome.result.judgeInTurn?.asked).length,
-      fixed: outcomes.filter(outcome => outcome.result.judgeInTurn?.fixed).length } } : {}),
+      fixed: outcomes.filter(outcome => outcome.result.judgeInTurn?.fixed).length,
+      // A correction that was not one (empty, the same words, a figure without support): the first answer stood.
+      keptFirst: outcomes.filter(outcome => outcome.result.judgeInTurn?.kept === 'first').length,
+      keptFirstReasons: outcomes.flatMap(outcome => outcome.result.judgeInTurn?.kept === 'first' ? [String(outcome.result.judgeInTurn.keptReason)] : []) } } : {}),
     casesPassed: outcomes.filter(outcome => outcome.passed).length,
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,
@@ -178,6 +198,24 @@ async function main() {
       const total = answerTimings.map(item => item.totalMs);
       return { answers: answerTimings.length, withEarlyText: first.length, firstTextP50: pick([...first], 0.5), firstTextP90: pick([...first], 0.9),
         totalP50: pick([...total], 0.5), totalP90: pick([...total], 0.9) };
+    })() } : {}),
+    // With --stream: what the person would see happen to an answer without COWORK_ANSWER_HOLD_ENABLED, and
+    // how long a turn takes until its answer is final (with the hold, when it shows), clean against corrected.
+    ...(stream ? { replacedOnScreen: (() => {
+      const answered = outcomes.filter(outcome => !outcome.result.failed && outcome.result.answers?.length);
+      const corrected = answered.filter(outcome => (outcome.result.answers?.length ?? 0) > 1 || outcome.result.judgeInTurn?.fixed);
+      const seconds = (list: typeof outcomes) => {
+        const sorted = list.map(outcome => outcome.seconds).sort((a, b) => a - b);
+        const at = (fraction: number) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] : null;
+        return { n: sorted.length, p50: at(0.5), p90: at(0.9) };
+      };
+      return {
+        answers: answered.length,
+        corrected: corrected.length,
+        // The first answer streamed and a correction gave a different final one: the text changed under the reader.
+        replacedOnScreen: answered.filter(outcome => (outcome.result.answers?.length ?? 0) > 1 && coworkAnswerChanged(outcome.result.answers![0], outcome.result.reply)).length,
+        revealSeconds: { clean: seconds(answered.filter(outcome => !corrected.includes(outcome))), corrected: seconds(corrected) },
+      };
     })() } : {}),
     plannedReadsRun: (() => {
       const planned = outcomes.flatMap(outcome => (outcome.result.plan || []).filter(step => step.read).map(step => outcome.result.actions.includes(String(step.read))));

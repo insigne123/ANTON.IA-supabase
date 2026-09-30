@@ -4,10 +4,10 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
-  coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
+  coworkAgentRows, coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkHeldAnswerCopy, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
   coworkTurnChoices, coworkTurnSuggestions, isCoworkActive, type CoworkArtifact, type CoworkCardStatus,
 } from '@/lib/cowork/presentation';
-import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
+import { coworkReplyBody, type CoworkDraftPhase, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkBlockMeta, coworkEditedEmails, type CoworkEditedEmail } from '@/lib/cowork/blocks';
@@ -19,17 +19,26 @@ import { CoworkApproval } from './CoworkApproval';
 import { CoworkChoicesCard } from './CoworkChoices';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
-import { AnimatePresence, cwFadeRise, cwVariants, m } from './motion';
+import { AnimatePresence, cwFadeRise, cwSwap, cwVariants, m } from './motion';
 import type { CoworkLiveDraft } from '@/lib/cowork/partial-json';
 import { CoworkMark, CwButton } from './ui';
 
 export type CoworkTurnData = { run: CoworkRun; events: CoworkEvent[] };
 /** The answer while it is being written: its text so far, how far each card got, and
- * whether it is being reviewed (the closing correction may still change it). */
-export type CoworkLiveAnswer = { text: string; cards: CoworkLiveDraft['cards']; reviewing: boolean };
+ * whether it is being reviewed (the closing correction may still change it). Held
+ * (COWORK_ANSWER_HOLD_ENABLED), no text travels: only the phase it is in. */
+export type CoworkLiveAnswer = { text: string; cards: CoworkLiveDraft['cards']; reviewing: boolean; phase?: CoworkDraftPhase | null };
 
 /** While the answer on screen is reviewed, its cards say so instead of «Armando…». */
 const REVIEW_CARD_COPY: Record<string, string> = { email_draft: 'Revisando el correo', sequence: 'Revisando la secuencia' };
+
+/** A held card has no title yet (a correction may still change it): what it is and how far it got. */
+const HELD_CARD_COPY: Record<string, (parts: number) => string> = {
+  email_draft: () => 'Correo',
+  sequence: parts => parts ? `Secuencia · ${parts} ${parts === 1 ? 'correo' : 'correos'}` : 'Secuencia',
+  table: parts => parts ? `Tabla · ${parts} ${parts === 1 ? 'fila' : 'filas'}` : 'Tabla',
+  metrics: parts => parts ? `Cifras · ${parts}` : 'Cifras',
+};
 
 const LIVE_CARD_COPY: Record<string, (parts: number) => string> = {
   email_draft: () => 'Escribiendo el correo',
@@ -38,24 +47,50 @@ const LIVE_CARD_COPY: Record<string, (parts: number) => string> = {
   metrics: parts => parts ? `Calculando cifras · ${parts}` : 'Calculando cifras',
 };
 
-/** A card still being written: what it is and how far it got, until the real card takes its place. */
-function LiveCard({ card, reviewing }: { card: CoworkLiveAnswer['cards'][number]; reviewing: boolean }) {
+/** A card still being written: what it is and how far it got, until the real card takes its place.
+ * Held, it only says what it is and stays still: the answer's line says which phase it is in. */
+function LiveCard({ card, reviewing, held = false }: { card: CoworkLiveAnswer['cards'][number]; reviewing: boolean; held?: boolean }) {
   return <m.div {...cwVariants(cwFadeRise)} className="rounded-2xl border border-cw-border bg-cw-elevated px-3.5 py-3 shadow-[var(--cw-shadow-sm)]">
     <div className="flex items-center gap-3">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cw-accent-soft text-cw-accent">
         <CoworkBlockIcon block={{ type: card.type as 'email_draft' }} className="h-[18px] w-[18px]" />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] font-semibold text-cw-text">{card.title || 'Preparando…'}</span>
-        <span className="cw-shimmer block truncate text-[12.5px]">{reviewing && REVIEW_CARD_COPY[card.type]
-          ? REVIEW_CARD_COPY[card.type] : (LIVE_CARD_COPY[card.type] || (() => 'Preparando…'))(card.parts)}</span>
-      </span>
+      {held
+        ? <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-cw-text">{(HELD_CARD_COPY[card.type] || (() => 'Tarjeta'))(card.parts)}</span>
+        : <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14px] font-semibold text-cw-text">{card.title || 'Preparando…'}</span>
+          <span className="cw-shimmer block truncate text-[12.5px]">{reviewing && REVIEW_CARD_COPY[card.type]
+            ? REVIEW_CARD_COPY[card.type] : (LIVE_CARD_COPY[card.type] || (() => 'Preparando…'))(card.parts)}</span>
+        </span>}
     </div>
     <div className="mt-3 space-y-2" aria-hidden="true">
-      <span className="block h-2.5 w-3/4 rounded-full bg-cw-hover motion-safe:animate-pulse" />
-      <span className="block h-2.5 w-1/2 rounded-full bg-cw-hover motion-safe:animate-pulse" />
+      <span className={cn('block h-2.5 w-3/4 rounded-full bg-cw-hover', !held && 'motion-safe:animate-pulse')} />
+      <span className={cn('block h-2.5 w-1/2 rounded-full bg-cw-hover', !held && 'motion-safe:animate-pulse')} />
     </div>
   </m.div>;
+}
+
+/** A held answer (COWORK_ANSWER_HOLD_ENABLED) shows once, when it is final: nobody reads a text
+ * that its review then replaces. Until then, where it will appear and which phase it is in, over
+ * still placeholders. The line changes with a quick cross-fade and nothing loops: the working mark
+ * already does. Not a live region: the page announces its status once the answer is ready. */
+function HeldAnswerView({ answer }: { answer: CoworkLiveAnswer }) {
+  const line = coworkHeldAnswerCopy(answer.phase ?? 'writing', answer.cards);
+  return <div aria-busy="true" className="cw-rise space-y-3.5">
+    <div className="space-y-2.5">
+      <p className="text-[13px] text-cw-muted">
+        <AnimatePresence initial={false} mode="wait">
+          <m.span key={line} {...cwVariants(cwSwap)} className="block truncate">{line}…</m.span>
+        </AnimatePresence>
+      </p>
+      <div className="space-y-2" aria-hidden="true">
+        <span className="block h-2.5 w-11/12 rounded-full bg-cw-hover" />
+        <span className="block h-2.5 w-3/4 rounded-full bg-cw-hover" />
+        {!answer.cards.length && <span className="block h-2.5 w-1/2 rounded-full bg-cw-hover" />}
+      </div>
+    </div>
+    {answer.cards.map((card, index) => <LiveCard key={`${card.type}-${index}`} card={card} reviewing={false} held />)}
+  </div>;
 }
 
 /** The answer as it is being written: the text so far with a cursor, then the cards on their way.
@@ -226,8 +261,12 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const answerable = Boolean(latest && onSuggestion && run.status === 'completed' && !proposal);
   const choices = answerable && question ? coworkTurnChoices(events) : null;
   const suggestions = answerable && !choices ? coworkTurnSuggestions(events) : [];
-  // The answer was reviewed after it was shown and came back different: it fades in and says so.
-  const adjusted = streamed && !active && Boolean(reply) && Boolean(liveAnswer?.reviewing) && coworkAnswerChanged(liveAnswer?.text || '', reply);
+  // The answer was reviewed after it was shown and came back different: it fades in and says so. With
+  // the judge's verdict only a correction it kept counts; polishing the final text is not one. A held
+  // answer is never streamed: it shows once, already reviewed.
+  const judged = coworkAgentRows(events).find(row => row.agent === 'judge' && row.state === 'done');
+  const adjusted = streamed && !active && Boolean(reply) && Boolean(liveAnswer?.reviewing)
+    && (judged ? judged.outcome === 'fixed' : coworkAnswerChanged(liveAnswer?.text || '', reply));
   const replyBlock = reply ? <div className={cn('group/reply', live && !streamed && 'cw-rise', adjusted && 'cw-fade')}>
     {body && <CoworkMarkdown text={body} />}
     {adjusted && <p className="cw-fade mt-2 flex items-center gap-1.5 text-[12.5px] text-cw-muted">
@@ -249,7 +288,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         <CoworkActivity events={events} active={working} liveLabel={coworkLiveActivity(run, events)} startedAt={startedAt} plan={coworkPlanProgress(run, events)} />
         {note && <div className={cn(live && 'cw-rise')}><CoworkMarkdown text={note} /></div>}
         {!proposal && replyBlock}
-        {working && !reply && !proposal && liveAnswer && <LiveAnswerView answer={liveAnswer} />}
+        {working && !reply && !proposal && liveAnswer && (liveAnswer.phase ? <HeldAnswerView answer={liveAnswer} /> : <LiveAnswerView answer={liveAnswer} />)}
         {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}
         {!proposal && charts.map((block, index) => <ChartBlock key={`chart-${index}`} block={block} live={live} />)}
         {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live}

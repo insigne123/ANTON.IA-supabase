@@ -18,8 +18,10 @@ const answer = (reply: string, document: { title: string; content: string } | nu
 /** What a good turn looks like for each case, played through the real loop. */
 const IDEAL: Record<string, CorpusDecider> = {
   'pendientes-vacio': async context => context.observations.length === 0
-    ? parallel([{ action: 'contacted.search', input: '' }, { action: 'replies.attention', input: '' }, { action: 'campaigns.inbox', input: '' }])
-    : answer('Hoy no tienes respuestas ni seguimientos pendientes en ANTON.IA.\nPara avanzar:\n- Hay 2 incidencias abiertas del equipo.\n- 3 de tus 4 contactos recientes no tienen correo.\n¿Reviso las incidencias primero?'),
+    ? read('agenda.today')
+    : context.observations.length === 1
+      ? parallel([{ action: 'leads.search', input: '' }, { action: 'campaigns.list', input: '' }])
+      : answer('Hoy no tienes respuestas ni seguimientos pendientes en ANTON.IA.\nPara avanzar:\n- 3 de tus 4 contactos guardados no tienen correo.\n- Tu campaña «Campaña de prueba» sigue en borrador.\n¿Busco el correo de esos 3 contactos?'),
   'recomendacion-hoy': async context => context.observations.length === 0
     ? parallel([{ action: 'app.context', input: '' }, { action: 'exceptions.list', input: '' }])
     : answer('Con 0 envíos este mes, lo que más mueve la aguja hoy es activar contactos.\n- Tienes 256 contactos guardados y 19 campañas, ninguna con envíos.\n- Hay 2 incidencias abiertas (una es la sincronización de Outlook).\n¿Busco el correo de tus 3 contactos más recientes para armar la primera campaña?'),
@@ -276,6 +278,17 @@ test('every corpus case has an ideal turn that passes all its checks through the
   }
 });
 
+test('pendientes-vacio: reading only the agenda and offering to look at the contacts fails; looking at them passes', async () => {
+  const entry = CORPUS.find(item => item.id === 'pendientes-vacio')!;
+  const lazy: CorpusDecider = async context => context.observations.length === 0 ? read('agenda.today')
+    : coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply: 'Hoy no aparecen pendientes registrados en ANTON.IA.\n¿Reviso tus contactos con correo y tus campañas en borrador?',
+      document: null, suggestions: [{ label: 'Sí, revísalos', message: 'Sí, revisa mis contactos' }] } });
+  const lazyFailing = (await runCorpusCase(entry, lazy)).checks.filter(check => !check.passed).map(check => check.label);
+  assert.deepEqual(lazyFailing, ['con el día vacío lee sus contactos y campañas para proponer con datos']);
+  const good = (await runCorpusCase(entry, IDEAL['pendientes-vacio'])).checks.filter(check => !check.passed);
+  assert.deepEqual(good, []);
+});
+
 test('the production baseline answers fail the checks the corpus was written for', () => {
   const baseline = (id: string, result: Partial<Parameters<typeof scoreCorpusCase>[1]>) => scoreCorpusCase(CORPUS.find(entry => entry.id === id)!,
     { actions: [], reply: '', document: null, proposal: null, search: null, note: null, failed: null, suggestions: [], ...result });
@@ -359,7 +372,30 @@ test('with the judge on, an answer that offers a read it could do is fixed in th
   assert.deepEqual(seen, [offered.answer!.reply], 'the judge reads once');
   assert.deepEqual(outcome.result.actions, ['metrics.rates', 'campaigns.list']);
   assert.deepEqual({ ...outcome.result.judgeInTurn, scores: undefined, problemas: undefined },
-    { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true });
+    { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true, kept: 'correction', keptReason: 'improved' });
+  // Every answer decision is kept in order: the first one is the answer the correction edited.
+  assert.equal(outcome.result.answers?.length, 2);
+  assert.equal(outcome.result.answers?.[0], offered.answer!.reply);
+});
+
+test('with the judge on, a correction with a figure nothing supports leaves the first answer, and the report says why', async () => {
+  const entry = CORPUS.find(item => item.id === 'metricas-semana')!;
+  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?' });
+  // The correction invents a rate: neither the reads nor the first answer say 73 %.
+  const invented = answer('Esta semana no enviaste correos desde ANTON.IA; tus campañas abren el 73 % de lo que envían.', null, undefined, { question: '¿Armamos una campaña corta?' });
+  const decide: CorpusDecider = async context => {
+    const fixing = ((context.rejectedDecisions || []) as Array<{ reason: string }>).some(rejection => /una revisión de tu respuesta/.test(rejection.reason));
+    if (context.observations.length === 0) return parallel([{ action: 'metrics.rates', input: '' }]);
+    if (!fixing) return offered;
+    return context.observations.length === 1 ? read('campaigns.list', '') : invented;
+  };
+  const judge: CorpusJudge = async () => ({ scores: { comprension: 5, veracidad: 5, utilidad: 3, claridad: 5, friccion: 2 }, veredicto: 'mala',
+    problemas: ['Pregunta si revisa las campañas, aunque podía consultarlas antes de responder.'] });
+  const outcome = await runCorpusCase(entry, decide, undefined, judge);
+  assert.equal(outcome.result.reply.startsWith(offered.answer!.reply), true, outcome.result.reply);
+  assert.equal(outcome.result.reply.includes('73'), false);
+  assert.deepEqual({ asked: outcome.result.judgeInTurn?.asked, fixed: outcome.result.judgeInTurn?.fixed, kept: outcome.result.judgeInTurn?.kept, why: outcome.result.judgeInTurn?.keptReason },
+    { asked: true, fixed: false, kept: 'first', why: 'new_figures' });
 });
 
 test('an import is staged as the server stages it: the judge sees the card, the model reads the same refusals', async () => {

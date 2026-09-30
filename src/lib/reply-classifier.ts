@@ -1,6 +1,8 @@
 import { classifyReplyFlow } from '@/ai/flows/classify-reply';
 import { isHardNegativeReply } from '@/lib/reply-intent-rules';
 import { isExplicitOptOut, newReplyText } from '@/lib/reply-text';
+import { askJev, type JevResult } from '@/lib/server/jev';
+import { jevReplyClassification, jevReplyRead, replyEngine, REPLY_JEV_QUESTION, type ReplyEngine } from '@/lib/reply-jev';
 
 export type ReplyClassification = {
   intent: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown' | 'delivery_failure';
@@ -51,7 +53,59 @@ function heuristicClassify(text: string): ReplyClassification {
   return { intent: 'neutral', sentiment: 'neutral', shouldContinue: true, confidence: 0.4, summary: 'Neutral reply', reason: 'neutral' };
 }
 
-export async function classifyReply(raw: string): Promise<ReplyClassification> {
+/** Guard-rail: si la respuesta trae rechazo explícito, nunca continuar (vale para quien la lea, el modelo o Jev). */
+function withHardNegativeGuard(cleaned: string, result: ReplyClassification): ReplyClassification {
+  if (isHardNegativeReply(cleaned) && result.intent !== 'unsubscribe' && result.intent !== 'negative') {
+    return {
+      intent: 'negative',
+      sentiment: 'negative',
+      shouldContinue: false,
+      confidence: Math.max(0.85, Number(result.confidence || 0)),
+      summary: 'Not interested',
+      reason: 'hard_negative_override',
+    };
+  }
+  return result;
+}
+
+export type ClassifyReplyOptions = {
+  /** Who reads the reply (docs/cowork-jev.md); REPLY_CLASSIFIER_ENGINE by default, and the model when it is not set. */
+  engine?: ReplyEngine;
+  env?: Record<string, string | undefined>;
+  /** Replaceable for tests. */
+  llm?: (input: { text: string; language: string }) => Promise<unknown>;
+  askJev?: typeof askJev;
+};
+
+async function classifyWithModel(cleaned: string, options: ClassifyReplyOptions): Promise<ReplyClassification> {
+  try {
+    const out = await (options.llm ?? classifyReplyFlow)({ text: cleaned, language: 'es' });
+    return withHardNegativeGuard(cleaned, out as ReplyClassification);
+  } catch (e) {
+    return heuristicClassify(cleaned);
+  }
+}
+
+/** Jev's answer to the reply, or null if asking failed in a way the client did not already absorb. */
+async function askJevAboutReply(cleaned: string, options: ClassifyReplyOptions): Promise<JevResult | null> {
+  try {
+    return await (options.askJev ?? askJev)({ state: { reply: cleaned }, questions: { intent: REPLY_JEV_QUESTION }, env: options.env });
+  } catch {
+    return null;
+  }
+}
+
+/** The shadow mode leaves one line per reply with whether Jev and the model agree. Never the reply, its summary or the key. */
+function logJevShadow(model: ReplyClassification, jev: JevResult | null) {
+  const answer = jev?.answers?.intent;
+  const read = jevReplyRead(answer);
+  console.info('[reply-classifier] jev shadow', JSON.stringify({
+    model: model.intent, jev: read.intent, agree: read.intent === model.intent, trusted: jevReplyClassification(answer) !== null,
+    confidence: read.confidence, status: jev?.status ?? 'error', ms: jev?.durationMs ?? null, costUsd: jev?.costUsd ?? null,
+  }));
+}
+
+export async function classifyReply(raw: string, options: ClassifyReplyOptions = {}): Promise<ReplyClassification> {
   const cleaned = newReplyText(raw).slice(0, 3000);
   if (isExplicitOptOut(cleaned)) {
     return { intent: 'unsubscribe', sentiment: 'negative', shouldContinue: false, confidence: 1, summary: 'Solicitó no recibir más correos comerciales', reason: 'explicit_opt_out' };
@@ -60,26 +114,16 @@ export async function classifyReply(raw: string): Promise<ReplyClassification> {
     return { intent: 'unknown', sentiment: 'neutral', shouldContinue: false, confidence: 0.2, summary: 'Empty reply', reason: 'empty' };
   }
 
-  try {
-    const out = await classifyReplyFlow({ text: cleaned, language: 'es' });
-    const ai = out as ReplyClassification;
-
-    // Guard-rail: si la respuesta trae rechazo explícito, nunca continuar.
-    if (isHardNegativeReply(cleaned) && ai.intent !== 'unsubscribe' && ai.intent !== 'negative') {
-      return {
-        intent: 'negative',
-        sentiment: 'negative',
-        shouldContinue: false,
-        confidence: Math.max(0.85, Number(ai.confidence || 0)),
-        summary: 'Not interested',
-        reason: 'hard_negative_override',
-      };
-    }
-
-    return ai;
-  } catch (e) {
-    return heuristicClassify(cleaned);
+  const engine = options.engine ?? replyEngine(options.env);
+  if (engine === 'jev-first') {
+    // Jev decides when it is sure; without a key, on a timeout, an error or less certainty, the model reads the reply as always.
+    const decided = jevReplyClassification((await askJevAboutReply(cleaned, options))?.answers?.intent);
+    if (decided) return withHardNegativeGuard(cleaned, decided);
   }
+  const shadow = engine === 'shadow' ? askJevAboutReply(cleaned, options) : null;
+  const result = await classifyWithModel(cleaned, options);
+  if (shadow) logJevShadow(result, await shadow);
+  return result;
 }
 
 export function extractReplyPreview(raw: string) {

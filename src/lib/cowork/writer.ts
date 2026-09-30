@@ -154,8 +154,10 @@ export function coworkWriterBlocks(output: CoworkWriterOutput): CoworkBlock[] {
  * (skipped: no time left, or the Reviewer failed).
  */
 export type CoworkReviewOutcome = 'clean' | 'fixed' | 'pending' | 'skipped';
-/** What the Writer, the Reviewer or the judge is doing, for the page; a review's last step carries the outcome. */
-export type CoworkAgentStep = { agent: CoworkAgentEvent['agent']; state: 'working' | 'done'; label: string; outcome?: CoworkReviewOutcome; changes?: string[] };
+/** What the Writer, the Reviewer or the judge is doing, for the page; a review's last step carries the outcome.
+ * detail keeps what the judge found (scores, problems, verdict) for whoever reviews a turn later; the page ignores it. */
+export type CoworkAgentStep = { agent: CoworkAgentEvent['agent']; state: 'working' | 'done'; label: string; outcome?: CoworkReviewOutcome; changes?: string[];
+  detail?: Record<string, unknown> };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 const shortList = (issues: CoworkDraftIssue[]) => [...new Set(issues.map(issue => issue.short.replace(/[.\s]+$/, '')))].slice(0, 4);
@@ -170,6 +172,8 @@ type WriterInput = {
   step: (step: CoworkAgentStep) => Promise<void>;
   /** The draft on screen is being reviewed and may still change. */
   onReview?: () => void;
+  /** A correction of the draft is being written (a held draft says so until it is final). */
+  onAdjust?: () => void;
   /** Whether there is still time for a review and a correction in the turn. */
   canReview?: () => boolean;
 };
@@ -229,6 +233,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
     return first;
   }
   await input.step({ agent: 'reviewer', state: 'working', label: `Aplicando ${plural(issues.length, 'ajuste', 'ajustes')}` });
+  input.onAdjust?.();
   let corrected: CoworkWriterOutput | null = null;
   try {
     const output = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt,

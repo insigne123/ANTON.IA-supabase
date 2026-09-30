@@ -3,7 +3,7 @@ import { collectCoworkLeadRows } from './lead-export';
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
-  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent } from './contracts';
+  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent, type CoworkDraftPhase } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -73,6 +73,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'missions.list': { label: 'Revisó tus misiones', source: 'Misiones', icon: 'target' },
   'exceptions.list': { label: 'Revisó incidencias abiertas', source: 'Incidencias', icon: 'alert' },
   'audience.analyze': { label: 'Analizó tu audiencia', source: 'Audiencia', icon: 'audience' },
+  'agenda.today': { label: 'Armó tu lista de hoy', source: 'Agenda', icon: 'calendar' },
   'gmail.contact_history': { label: 'Revisó correos en tu Gmail', source: 'Gmail', icon: 'mail' },
   'prospecting.search': { label: 'Buscó nuevos contactos en el proveedor', source: 'Búsqueda externa', icon: 'globe' },
 };
@@ -135,6 +136,7 @@ const FINDING_NOUNS: Record<string, [string, string]> = {
   'linkedin.inbox': ['conversación', 'conversaciones'],
   'missions.list': ['misión', 'misiones'],
   'exceptions.list': ['incidencia', 'incidencias'],
+  'agenda.today': ['pendiente de hoy', 'pendientes de hoy'],
   'prospecting.search': ['contacto nuevo', 'contactos nuevos'],
 };
 
@@ -720,6 +722,19 @@ export function coworkDraftReview(events: CoworkEvent[]): CoworkDraftReview | nu
   const reviewer = coworkAgentRows(events).find(row => row.agent === 'reviewer');
   if (!reviewer || reviewer.state !== 'done' || !reviewer.outcome || reviewer.outcome === 'skipped') return null;
   return { outcome: reviewer.outcome, changes: reviewer.changes };
+}
+
+/**
+ * The line a held answer shows until it is final (COWORK_ANSWER_HOLD_ENABLED): which phase it is in,
+ * about the emails when it carries them. While it is reviewed the line says why no text shows yet.
+ */
+export function coworkHeldAnswerCopy(phase: CoworkDraftPhase | null, cards: Array<{ type: string }>): string {
+  const emails = cards.filter(card => card.type === 'email_draft' || card.type === 'sequence');
+  const [noun, pronoun] = !emails.length ? ['la respuesta', 'la']
+    : emails.length === 1 && emails[0].type === 'email_draft' ? ['el correo', 'lo'] : ['los correos', 'los'];
+  if (phase === 'reviewing') return `Revisando ${noun} antes de mostrárte${pronoun}`;
+  if (phase === 'adjusting') return `Ajustando ${noun} tras revisar${pronoun}`;
+  return `Escribiendo ${noun}`;
 }
 
 /** How the judge left the turn's answer (G2): read with nothing to fix, or fixed after its review.

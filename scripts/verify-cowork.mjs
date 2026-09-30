@@ -4,15 +4,19 @@ import { readdirSync } from 'node:fs';
 const suites = ['src/lib/cowork', 'src/lib/server/cowork'].flatMap(directory =>
   readdirSync(directory).filter(name => name.endsWith('.test.ts')).map(name => `${directory}/${name}`));
 const checks = [
+  ['--test', 'scripts/compare-cowork-evals.test.mjs'],
   ['scripts/test-cowork-company-results.mjs'],
+  ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-agenda-corpus.test.ts'],
   ['scripts/test-cowork-message-context.mjs'],
   ['scripts/test-cowork-enrich-batch.mjs'],
   ['scripts/test-cowork-send-batch.mjs'],
   ['scripts/test-cowork-linkedin-jobs.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', ...suites, 'scripts/cowork-axis-replay.test.ts', 'scripts/cowork-conversation-corpus.test.ts'],
-  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','block-export-route','overview-route','contacts-import','campaign-edit','search-queue-ui','workspace','conversation-flow','draft','wake','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3','live-draft','writer','judge','contacts-route']
+  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','block-export-route','overview-route','contacts-import','campaign-edit','search-queue-ui','workspace','conversation-flow','draft','wake','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3','live-draft','writer','judge','contacts-route','held-answer']
     .map(name => [`scripts/test-cowork-${name}.mjs`]),
   ['--loader', './scripts/ts-test-loader.mjs', 'scripts/test-cowork-send-email.mjs'],
+  ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-axis-paquete.test.ts'],
+  ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-axis-resto.test.ts'],
 ];
 for (const args of checks) {
   const result = spawnSync(process.execPath, args, { stdio: 'inherit', env: { ...process.env, NODE_ENV: 'test' } });

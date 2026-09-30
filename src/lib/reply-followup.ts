@@ -20,7 +20,7 @@ export type ContactedFollowupRow = {
 };
 
 export type StalledItem = {
-  contactedId: string; leadId: string | null; name: string | null; email: string | null;
+  contactedId: string; leadId: string | null; name: string | null; email: string | null; company: string | null;
   replyIntent: string; repliedAt: string; daysWaiting: number;
 };
 
@@ -29,20 +29,21 @@ function hasOpenCommitment(row: ContactedFollowupRow) {
   return Boolean(commitment?.id && !commitment.completedAt);
 }
 
-/** Interested replies with no outbound after the reply and no open commitment. */
-export function selectStalledInterested(rows: ContactedFollowupRow[], nowMs = Date.now()): StalledItem[] {
+/** Interested replies with no outbound after the reply and no open commitment. `afterMs` is how long a reply must have waited:
+ * 48 hours for «stalled», 0 for the day's agenda, where an answer that came in this morning is already today's first task. */
+export function selectStalledInterested(rows: ContactedFollowupRow[], nowMs = Date.now(), afterMs = STALLED_AFTER_MS): StalledItem[] {
   const items: StalledItem[] = [];
   for (const row of rows) {
     const repliedAtMs = row.replied_at ? Date.parse(row.replied_at) : NaN;
     if (!row.replied_at || Number.isNaN(repliedAtMs)) continue;
     if (!(HUMAN_REPLY_INTENTS as readonly string[]).includes(String(row.reply_intent || ''))) continue;
-    if (nowMs - repliedAtMs < STALLED_AFTER_MS) continue;
+    if (nowMs - repliedAtMs < afterMs) continue;
     const outboundAtMs = row.conversation_outbound_at ? Date.parse(row.conversation_outbound_at) : NaN;
     if (Number.isFinite(outboundAtMs) && outboundAtMs > repliedAtMs) continue;
     if (hasOpenCommitment(row)) continue;
     items.push({
       contactedId: row.id, leadId: row.lead_id || null, name: row.name || null, email: row.email || null,
-      replyIntent: String(row.reply_intent), repliedAt: row.replied_at,
+      company: row.company || null, replyIntent: String(row.reply_intent), repliedAt: row.replied_at,
       daysWaiting: Math.floor((nowMs - repliedAtMs) / (24 * 60 * 60 * 1000)),
     });
   }

@@ -64,6 +64,11 @@ export function coworkPlanSteps(payload: unknown): CoworkPlanStep[] | null {
   return steps.length > 1 ? steps : null;
 }
 
+/** What a held answer goes through, in order (COWORK_ANSWER_HOLD_ENABLED, live-draft.ts): it is
+ * written, reviewed and, when the review asks for it, adjusted. Only then does its text show. */
+export const COWORK_DRAFT_PHASES = ['writing', 'reviewing', 'adjusting'] as const;
+export type CoworkDraftPhase = typeof COWORK_DRAFT_PHASES[number];
+
 /** What the Writer, the Reviewer or the judge is doing in the turn (writer.ts, judge-run.ts), for the page. */
 export const COWORK_AGENT_ACTION = 'assistant.agent';
 

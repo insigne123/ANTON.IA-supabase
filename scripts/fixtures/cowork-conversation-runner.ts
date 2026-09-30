@@ -114,11 +114,22 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport),
+      // Figures from what the person saved in their profile are not new when a correction uses them.
+      userContext,
+      onCorrection: verdict => {
+        if (!result.judgeInTurn) return;
+        result.judgeInTurn.kept = verdict.keep;
+        result.judgeInTurn.keptReason = verdict.reason;
+        result.judgeInTurn.fixed = verdict.keep === 'correction';
+      },
       decide: (observations, mustAnswer, rejections: CoworkRejection[] = [], turnBudget) => decide(coworkDecisionContext(instructions, {
         history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer, turnBudget,
         executionPolicy: { mode: 'approval' }, userContext,
         ...(rejections.length ? { rejectedDecisions: rejections } : {}),
-      }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }),
+      }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }).then(chosen => {
+        if (chosen.action === 'answer' && chosen.answer) (result.answers ||= []).push(chosen.answer.reply);
+        return chosen;
+      }),
       execute: async (action, value) => { actions.push(action); reads.push({ action, input: value }); return (entry.world?.read ?? corpusRead)(action, value); },
       record: async observation => { recorded.push(observation); },
       proposeSearch: async criteria => { result.search = criteria as unknown as Record<string, unknown>; },
@@ -148,7 +159,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
           ...(proposal.profile ? { profile: proposal.profile } : {}) };
       },
     });
-    if (result.judgeInTurn?.asked) result.judgeInTurn.fixed = answer !== judgedAnswer;
+    // Without the loop's verdict (the correction became the Writer's emails), a different reply is the correction:
+    // comparing objects would count the charts step's new copy of the same answer as one.
+    if (result.judgeInTurn?.asked && result.judgeInTurn.kept === undefined) result.judgeInTurn.fixed = answer.reply !== (judgedAnswer as CoworkAnswer | null)?.reply;
     const polished = polishCoworkAnswer(answer);
     result.reply = polished.reply;
     result.document = polished.document;
@@ -164,6 +177,15 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const plan = recorded.find(observation => observation.action === COWORK_PLAN_ACTION);
   result.plan = plan ? coworkPlanSteps(plan) : null;
   return scoreCorpusCase(entry, result);
+}
+
+/** The data the model saw in a corpus turn, replayed from the fixture with the same inputs. */
+export function corpusObservations(entry: CorpusCase, result: CorpusTurnResult) {
+  const read = entry.world?.read ?? corpusRead;
+  const reads = result.reads?.length ? result.reads : result.actions.map(action => ({ action, input: '' }));
+  return reads.map(({ action, input }) => {
+    try { return { action, input, result: read(action, input) }; } catch { return { action, input, result: null }; }
+  });
 }
 
 /** What the person saw in a corpus turn. */

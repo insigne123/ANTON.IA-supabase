@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { nextCampaignMessage, type CampaignRecipient, type CampaignDelivery } from '../bulk-campaigns';
 import {
   SEVEN_TOUCH_DELAY_DAYS, isSevenTouchCadence, describeCadence, NEGOTIATION_HOLD_STAGES,
-  normalizeCompanyKey, emailDomain, companyKeysFor, planCompanyDays, classifySendRetry,
+  normalizeCompanyKey, emailDomain, isFreeMailDomain, companyKeysFor, planCompanyDays, classifySendRetry,
   santiagoDayBounds, msUntilNextSantiagoDay,
 } from './send-cadence';
 
@@ -30,6 +30,16 @@ test('company keys retain domain across missing or variant names and avoid free-
   const free = companyKeysFor('ana@gmail.com', null);
   assert.equal(free.basis, 'email');
   assert.equal(emailDomain('bad-address'), null);
+});
+
+test('shared providers never identify a company, the big Chilean ones included', () => {
+  for (const domain of ['gmail.com', 'outlook.cl', 'yahoo.cl', 'vtr.net', 'movistar.cl', 'entelchile.net', 'terra.cl']) {
+    assert.equal(isFreeMailDomain(domain), true, domain);
+    assert.equal(companyKeysFor(`ana@${domain}`, null).basis, 'email', domain);
+  }
+  assert.equal(isFreeMailDomain(' GMAIL.com '), true);
+  assert.equal(isFreeMailDomain('grupoexpro.cl'), false);
+  assert.equal(isFreeMailDomain(null), false);
 });
 
 test('real legacy scheduler lands on days 1/3/7/11/16/23/38 and never earlier', () => {

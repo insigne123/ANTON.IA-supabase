@@ -169,3 +169,36 @@ test('approved memories travel with the user context and say how to use them; wi
   // The recipe for the home's «Cuéntame qué vendes» card.
   assert.match(instructions.systemPrompt, /«Guarda en mi perfil lo que vendo: …»[^']*profile\.update con valueProposition/);
 });
+
+test('a correction edits the answer it fixes: it travels once, trimmed, apart from the reasons', () => {
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  const previous = {
+    reply: 'Tienes 4 contactos de RR. HH.; a 2 ya les escribiste.', document: null, question: '¿Reviso a quién le escribiste?',
+    suggestions: [{ label: 'Sí', message: 'Sí, revisa' }], blocks: [{ type: 'table', title: 'A quién', columns: ['Nombre'], rows: [['Felipe']] }],
+  };
+  const base = { history: { turns: [] }, request: '¿a quién le escribo?', observations: [], mustAnswer: true, executionPolicy: {} };
+  const context = coworkDecisionContext(instructions, { ...base, rejectedDecisions: [
+    { action: 'decision', reason: 'formato' },
+    { action: 'answer', reason: 'Una revisión de tu respuesta encontró: …', previous },
+  ] }) as ReturnType<typeof coworkDecisionContext> & { answerToCorrect?: Record<string, unknown>; rejectedDecisions?: unknown[] };
+  // The reasons stay where they were, without the answer inside them.
+  assert.deepEqual(context.rejectedDecisions, [
+    { action: 'decision', reason: 'formato' },
+    { action: 'answer', reason: 'Una revisión de tu respuesta encontró: …' },
+  ]);
+  assert.match(String(context.answerToCorrect?.instruction), /Edítala: cambia solo lo que señala rejectedDecisions y conserva el resto/);
+  assert.match(String(context.answerToCorrect?.instruction), /No menciones la corrección/);
+  assert.equal(context.answerToCorrect?.reply, previous.reply);
+  assert.equal(context.answerToCorrect?.question, previous.question);
+  assert.deepEqual(context.answerToCorrect?.blocks, previous.blocks);
+  assert.deepEqual(context.answerToCorrect?.suggestions, previous.suggestions);
+  // Long cards travel as their titles; a long reply is cut.
+  const long = coworkDecisionContext(instructions, { ...base, rejectedDecisions: [{ action: 'answer', reason: 'x', previous: {
+    ...previous, reply: 'a'.repeat(7000), blocks: [{ type: 'table', title: 'Grande', columns: ['N'], rows: Array.from({ length: 900 }, (_, index) => [`Fila ${index}`]) }],
+  } }] }) as { answerToCorrect?: { reply: string; blocks: unknown } };
+  assert.match(String(long.answerToCorrect?.reply), /… \[recortado\]$/);
+  assert.deepEqual(long.answerToCorrect?.blocks, [{ type: 'table', title: 'Grande' }]);
+  // Without a correction there is nothing to edit.
+  assert.equal('answerToCorrect' in coworkDecisionContext(instructions, base), false);
+  assert.equal('answerToCorrect' in coworkDecisionContext(instructions, { ...base, rejectedDecisions: [{ action: 'decision', reason: 'formato' }] }), false);
+});
