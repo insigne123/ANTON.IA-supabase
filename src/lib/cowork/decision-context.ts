@@ -86,9 +86,14 @@ export type CoworkUserContext = {
   companyDomain: string | null;
   offer: string | null;
   offerSource: 'profile' | 'organization' | null;
+  /** From «Perfil», only when the person filled them in: products and services, results they
+   * can show (usable as written) and their sector. */
+  services?: string[];
+  proofPoints?: string[];
+  sector?: string;
 };
 
-const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer, sin consultar profile.get ni app.context para eso. Un valor null no se inventa.';
+const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer y services, sin consultar profile.get ni app.context para eso. proofPoints son resultados que el usuario cargó en su perfil: se pueden citar tal cual. Un valor null o ausente no se inventa.';
 
 /** Shared by the worker and AXIS replay. Time comes from the server, not the model. */
 export function coworkDecisionContext(
