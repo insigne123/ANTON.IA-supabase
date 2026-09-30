@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCoworkMemories, loadCoworkUserContext } from './user-context';
+import { buildProfileUpdate, createEmptyProfileForm } from '@/lib/profile/profile-mappings';
+import { coworkUserContextFromProfile, loadCoworkMemories, loadCoworkUserContext } from './user-context';
 
 const userId = '00000000-0000-4000-8000-000000000001';
 const scope = { userId, organizationId: '00000000-0000-4000-8000-000000000002' };
@@ -26,13 +27,58 @@ test('user context signs with the own profile and keeps email, signatures and to
   assert.doesNotMatch(JSON.stringify(context), /ventas@|privada|secret/);
 });
 
-test('an offer in the own profile wins over the organization settings, as in app.context', async () => {
-  const { client: db, calls } = client({ id: userId, full_name: 'Ana', value_proposition: 'Verificación de antecedentes en minutos' },
+/** A profiles row exactly as the «Perfil» page saves it, next to an email signature. */
+function perfilRow(fields: Partial<ReturnType<typeof createEmptyProfileForm>>) {
+  const update = buildProfileUpdate({ ...createEmptyProfileForm(), name: 'Nicolás Y.', role: 'Gerente Comercial', companyName: 'Yago SpA',
+    website: 'yago.cl', ...fields }, { signatures: { gmail: { enabled: true, html: '<p>Nicolás · +56 9 1234 5678</p>' } } });
+  return { id: userId, email: 'ventas@yago.cl', ...update };
+}
+
+test('the offer saved in «Perfil» reaches Cowork, with its services, proof points and sector', async () => {
+  const row = perfilRow({ sector: 'Software B2B', description: 'Desarrollamos AXIS para empresas que contratan mucho personal.',
+    services: 'AXIS: consultas judiciales en el PJUD, Carga por archivo o por correo',
+    valueProposition: 'AXIS consulta en el PJUD por persona o por lote y entrega evidencia auditable.',
+    proofPoints: 'Procesa 1.000 personas en unos 30 minutos.\nSin costo de implementación.' });
+  const { client: db, calls } = client(row, { user_company_profile: 'Otra oferta' });
+  const context = await loadCoworkUserContext(db as never, scope);
+  assert.deepEqual(context, {
+    fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl',
+    offer: 'AXIS consulta en el PJUD por persona o por lote y entrega evidencia auditable. Desarrollamos AXIS para empresas que contratan mucho personal. Productos y servicios: AXIS: consultas judiciales en el PJUD; Carga por archivo o por correo.',
+    offerSource: 'profile',
+    services: ['AXIS: consultas judiciales en el PJUD', 'Carga por archivo o por correo'],
+    proofPoints: ['Procesa 1.000 personas en unos 30 minutos.', 'Sin costo de implementación.'],
+    sector: 'Software B2B',
+  });
+  assert.ok(!calls.some(call => call.table === 'antonia_workflow_settings'), 'no second read when «Perfil» has an offer');
+  assert.doesNotMatch(JSON.stringify(context), /ventas@|\+56|<p>/, 'no email or signature reaches the model');
+});
+
+test('services alone are an offer; a company name is not', () => {
+  assert.equal(coworkUserContextFromProfile(perfilRow({ services: 'AXIS, SADT' })).offer, 'Productos y servicios: AXIS; SADT.');
+  const onlyName = coworkUserContextFromProfile(perfilRow({ sector: 'Software' }));
+  assert.equal(onlyName.offer, null);
+  assert.equal(onlyName.offerSource, null);
+  assert.equal(onlyName.sector, 'Software');
+  assert.equal(coworkUserContextFromProfile({ id: userId, company_name: 'Yago SpA', companyName: 'Yago SpA' }).offer, null);
+});
+
+test('long «Perfil» fields never break the context: they are clipped', () => {
+  const long = 'palabra '.repeat(700);
+  const context = coworkUserContextFromProfile(perfilRow({ description: long, valueProposition: long, services: long, proofPoints: long,
+    companyName: 'Y'.repeat(400), role: 'R'.repeat(3000) }));
+  assert.ok(context.offer && context.offer.length <= 600, 'offer up to 600 characters');
+  assert.equal(context.offerSource, 'profile');
+  assert.ok((context.services || []).every(service => service.length <= 120));
+  assert.ok((context.proofPoints || []).every(point => point.length <= 200));
+  assert.equal(context.companyName?.length, 120);
+});
+
+test('an older top-level offer field still counts when «Perfil» is empty', async () => {
+  const { client: db } = client({ id: userId, full_name: 'Ana', value_proposition: 'Verificación de antecedentes en minutos' },
     { user_company_profile: 'Otra oferta' });
   const context = await loadCoworkUserContext(db as never, scope);
   assert.equal(context?.offer, 'Verificación de antecedentes en minutos');
   assert.equal(context?.offerSource, 'profile');
-  assert.ok(!calls.some(call => call.table === 'antonia_workflow_settings'), 'no second read when the profile has an offer');
 });
 
 test('missing values stay null and failures fall back to the reads', async () => {

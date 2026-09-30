@@ -1,4 +1,6 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AuthContext } from '@/lib/server/auth-utils';
+import { normalizeSellerProfile } from '@/lib/server/seller-profile';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export type SupliaAppContext = {
@@ -73,14 +75,100 @@ export function offerText(value: unknown): string {
   return [name, products.length ? `Productos: ${products.join('; ')}` : ''].filter(Boolean).join('. ').slice(0, 600);
 }
 
+/** What «Perfil» stores about the offer, trimmed for a prompt. */
+export type ProfileOfferDetails = {
+  offer: string | null;
+  role: string | null;
+  sector: string | null;
+  services: string[];
+  proofPoints: string[];
+};
+
+const OFFER_LENGTH = 600;
+// The shared seller normalizer rejects fields over 2,000 characters (company names over 300),
+// and «Perfil» has no limit: everything is clipped before it gets there.
+const SELLER_FIELD_LENGTH = 1_900;
+const SELLER_NAME_LENGTH = 300;
+
+function clipped(value: string, max: number) {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+function sellerInput(value: unknown, max: number): unknown {
+  if (typeof value === 'string') return value.slice(0, max);
+  if (Array.isArray(value)) return value.slice(0, 50).map(item => typeof item === 'string' ? item.slice(0, max) : item);
+  return value;
+}
+
+/**
+ * The offer as «Perfil» saves it: `signatures.profile_extended` (description, services, value
+ * proposition, proof points, sector and role), read with the same normalizer as drafts and
+ * research. Never the email signatures stored next to it.
+ */
+export function profileOfferDetails(profile: Record<string, unknown> | null): ProfileOfferDetails {
+  const none: ProfileOfferDetails = { offer: null, role: null, sector: null, services: [], proofPoints: [] };
+  const signatures = profile?.signatures;
+  const extended = signatures && typeof signatures === 'object' && !Array.isArray(signatures)
+    ? (signatures as Record<string, unknown>).profile_extended : null;
+  if (!extended || typeof extended !== 'object' || Array.isArray(extended)) return none;
+  try {
+    const seller = normalizeSellerProfile({
+      full_name: sellerInput(profile?.full_name, SELLER_FIELD_LENGTH),
+      job_title: sellerInput(profile?.job_title, SELLER_FIELD_LENGTH),
+      company_name: sellerInput(profile?.company_name, SELLER_NAME_LENGTH),
+      company_domain: sellerInput(profile?.company_domain, SELLER_FIELD_LENGTH),
+      signatures: { profile_extended: Object.fromEntries(Object.entries(extended as Record<string, unknown>)
+        .map(([key, value]) => [key, sellerInput(value, SELLER_FIELD_LENGTH)])) },
+    });
+    const parts: string[] = [];
+    const add = (part: string | null | undefined) => {
+      const text = safeText(part);
+      if (!text) return;
+      if (!parts.length) parts.push(clipped(text, OFFER_LENGTH));
+      else if (parts.join(' ').length + 1 + text.length <= OFFER_LENGTH) parts.push(text);
+    };
+    add(seller.valueProposition);
+    add(seller.description);
+    if (seller.services.length) add(`Productos y servicios: ${seller.services.slice(0, 6).join('; ')}.`);
+    return {
+      offer: parts.length ? parts.join(' ') : null,
+      role: seller.jobTitle,
+      sector: seller.sector,
+      services: seller.services,
+      proofPoints: seller.proofPoints,
+    };
+  } catch {
+    return none;
+  }
+}
+
+/** The person's own offer: «Perfil» first, then the older profile fields some workspaces still
+ * have. A company name is not an offer. */
 export function profileOffer(profile: Record<string, unknown> | null) {
   if (!profile) return null;
-  for (const candidate of [profile.company_profile, profile.value_proposition, profile.offer,
-    profile.companyName, profile.company, profile.businessDescription]) {
+  const own = profileOfferDetails(profile).offer;
+  if (own) return own;
+  for (const candidate of [profile.company_profile, profile.value_proposition, profile.offer, profile.businessDescription]) {
     const text = offerText(candidate);
     if (text) return text;
   }
   return null;
+}
+
+/** What the organization sells, as configured for research (products). */
+export async function readOrganizationOffer(client: SupabaseClient | undefined, organizationId: string) {
+  if (!client) return null;
+  try {
+    const { data, error } = await client.from('antonia_workflow_settings')
+      .select('user_company_profile').eq('organization_id', organizationId).maybeSingle();
+    if (error || !data) return null;
+    return offerText((data as { user_company_profile?: unknown }).user_company_profile) || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function buildSupliaContext(auth: AuthContext): Promise<SupliaAppContext> {

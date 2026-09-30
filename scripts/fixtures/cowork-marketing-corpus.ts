@@ -8,7 +8,7 @@ import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '
 import { COWORK_FILE_NOTICE, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTablePreview, coworkTextPreview } from '../../src/lib/cowork/file-read';
 import { coworkWithAttachments } from '../../src/lib/cowork/attachments';
 import { coworkOfferMessage } from '../../src/lib/cowork/overview';
-import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { CORPUS_COMMON_CHECKS, CORPUS_USER_CONTEXT, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const MARKETING_LEAD = { marcela: id(101), felipe: id(102), andrea: id(103), rodrigo: id(104), camila: id(105) };
@@ -47,7 +47,7 @@ function read(action: string, input: string): unknown {
     case 'app.context':
       return { scope: 'organization_context', emailConnections: { google: true, outlook: false },
         counts: { leads: 5, contacted: 1, campaigns: 0, activeMissions: 0, openExceptions: 0 }, performance: null,
-        offer: 'Yago SpA. Productos: AXIS: consultas judiciales automáticas en el Poder Judicial (PJUD) para revisar antecedentes laborales de postulantes', offerSource: 'organization' };
+        offer: CORPUS_USER_CONTEXT.offer, offerSource: 'profile' };
     case 'profile.get':
       return { scope: 'own_profile', profile: { fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl', email: 'ventas@yago.cl' }, signatures: [] };
     case 'message.context':
@@ -130,7 +130,9 @@ export const MARKETING_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'menciona correos o campañas y LinkedIn', test: r => /correo|campa/i.test(r.reply) && /linkedin/i.test(r.reply) },
       { label: 'breve: 12 líneas como máximo', test: r => r.reply.split('\n').filter(line => line.trim()).length <= 12 },
-      { label: 'no pregunta qué vende el usuario', test: r => !/qué (?:producto|servicio|vendes|ofreces)/i.test(r.reply) }] },
+      { label: 'no pregunta qué vende el usuario', test: r => !/qué (?:producto|servicio|vendes|ofreces?)/i.test(r.reply) },
+      { label: 'nombra su oferta (AXIS)', test: r => /axis/i.test(r.reply) },
+      { label: 'no dice lo que no ve', test: r => !/\bno (?:veo|tengo a la vista|aparece)/i.test(r.reply) }] },
   // The home's «Cuéntame qué vendes» card (V7) sends this message: Cowork proposes saving it in the profile.
   { id: 'guardar-oferta', title: 'Guardar lo que vende desde la tarjeta del inicio', world,
     request: coworkOfferMessage('revisión de antecedentes laborales en minutos, para equipos de RR. HH. en Chile', 'https://yago.cl'),
