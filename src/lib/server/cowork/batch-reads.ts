@@ -53,8 +53,48 @@ type BatchContext = {
   now: number;
 };
 
+/** The stages that hold an account, for every recipient of a campaign at once: two lookups instead of three per recipient. The
+ * rule is findNegotiationHold's (same corporate domain or company name, CRM stage in negotiation or meeting); null means it
+ * could not be checked. */
+async function negotiationStagesByRecipient(
+  client: SupabaseClient, scope: Scope, recipients: BulkCampaign['recipients'],
+): Promise<Map<string, string[] | null>> {
+  const result = new Map<string, string[] | null>();
+  const unknown = () => { for (const person of recipients) result.set(person.email, null); return result; };
+  const crm = await client.from('unified_crm_data').select('id,stage').eq('organization_id', scope.organizationId)
+    .in('stage', [...NEGOTIATION_HOLD_STAGES]).limit(501);
+  if (crm.error || (crm.data || []).length > 500) return unknown();
+  const stageByLead = new Map<string, string[]>();
+  for (const row of ((crm.data || []) as Array<{ id: string; stage?: unknown }>)) {
+    const leadRef = String(row.id).split('|')[1];
+    if (!leadRef || typeof row.stage !== 'string') continue;
+    stageByLead.set(leadRef, [...(stageByLead.get(leadRef) || []), row.stage]);
+  }
+  const leadRefs = [...stageByLead.keys()];
+  const leads: Array<{ id: string; email?: string | null; company?: string | null }> = [];
+  for (let at = 0; at < leadRefs.length; at += 50) {
+    const page = await client.from('leads').select('id,email,company')
+      .eq('organization_id', scope.organizationId).in('id', leadRefs.slice(at, at + 50)).limit(50);
+    if (page.error) return unknown();
+    leads.push(...((page.data || []) as typeof leads));
+  }
+  const stagesByKey = new Map<string, Set<string>>();
+  for (const lead of leads) {
+    for (const key of companyKeysFor(String(lead.email || ''), lead.company).keys) {
+      stagesByKey.set(key, new Set([...(stagesByKey.get(key) || []), ...(stageByLead.get(lead.id) || [])]));
+    }
+  }
+  for (const person of recipients) {
+    const stages = new Set<string>();
+    for (const key of companyKeysFor(person.email, person.company).keys) for (const stage of stagesByKey.get(key) || []) stages.add(stage);
+    result.set(person.email, [...stages]);
+  }
+  return result;
+}
+
 async function loadBatchContext(
   client: SupabaseClient, scope: Scope, campaign: BulkCampaign, now?: number,
+  options: { negotiation?: 'each' | 'batched' } = {},
 ): Promise<BatchContext> {
   const current = now ?? Date.now();
   const draftIds = campaign.recipients.flatMap(person => person.messages.map(message => message.draftId));
@@ -90,8 +130,9 @@ async function loadBatchContext(
   if ((dispatches.data || []).length >= 1000 || (attempts.data || []).length >= 1000
     || (contacted.data || []).length >= 500 || (stages.data || []).length >= 200
     || (reservations.data || []).length >= 500) throw new Error('Estado del lote incompleto; reduce el alcance.');
-  const accountStages = new Map<string, string[] | null>();
-  for (const person of campaign.recipients) {
+  let accountStages = new Map<string, string[] | null>();
+  if (options.negotiation === 'batched') accountStages = await negotiationStagesByRecipient(client, scope, campaign.recipients);
+  else for (const person of campaign.recipients) {
     try { accountStages.set(person.email, (await findNegotiationHold(client, scope, person.email, person.company)).stages); }
     catch { accountStages.set(person.email, null); }
   }
@@ -210,11 +251,9 @@ export async function readCoworkBatchReport(client: SupabaseClient, scope: Scope
 /** 4.5: elegibilidad del siguiente toque por destinatario, con zona horaria
  * America/Santiago y frenos (respuesta de la empresa, negociacion, fallos
  * terminales, cadencia cambiada). */
-export async function readCoworkNextTouch(client: SupabaseClient, scope: Scope, value: string) {
-  const campaign = await loadOwnCampaign(client, scope, value);
-  const context = await loadBatchContext(client, scope, campaign);
+function nextTouchItems(campaign: BulkCampaign, context: BatchContext) {
   const cadenceChanged = campaign.status !== 'approved' || !campaign.approved_at;
-  const items = campaign.recipients.map(person => {
+  return campaign.recipients.map(person => {
     const next = nextCampaignMessage(person, context.deliveries, campaign.approved_at || new Date(context.now).toISOString(), context.now);
     const flags = accountFlags(context, person);
     const blockedBy: string[] = [];
@@ -242,10 +281,62 @@ export async function readCoworkNextTouch(client: SupabaseClient, scope: Scope, 
       blockedBy,
     };
   });
+}
+
+export async function readCoworkNextTouch(client: SupabaseClient, scope: Scope, value: string) {
+  const campaign = await loadOwnCampaign(client, scope, value);
+  const context = await loadBatchContext(client, scope, campaign);
+  const items = nextTouchItems(campaign, context);
   return { scope: 'own_campaign_next_touch', campaignId: campaign.id,
     campaignStatus: campaign.status, timeZone: 'America/Santiago',
     todaySantiago: santiagoDayBounds(new Date(context.now)).day,
     items, limitation: 'Elegibilidad calculada sobre registros de la app; el preflight final ocurre antes del proveedor.' };
+}
+
+export type FollowupBucket = 'done' | 'heldCompanyReplied' | 'heldNegotiation' | 'historyIncomplete' | 'terminal'
+  | 'needsReconcile' | 'retryWait' | 'scheduledLater' | 'waiting' | 'ready';
+
+/** Where one recipient's next touch stands today, from the blockers campaigns.next_touch reports. The first reason that
+ * applies wins; the spacing between sends only delays a send within the day, so it does not hold anyone back. */
+export function followupBucket(item: { done: boolean; blockedBy: string[] }): FollowupBucket {
+  if (item.done) return 'done';
+  const blocked = item.blockedBy;
+  if (blocked.includes('company_replied')) return 'heldCompanyReplied';
+  if (blocked.some(reason => reason.startsWith('negotiation:'))) return 'heldNegotiation';
+  if (blocked.includes('reply_history_incomplete') || blocked.includes('negotiation_history_incomplete')) return 'historyIncomplete';
+  if (blocked.some(reason => reason.startsWith('terminal:'))) return 'terminal';
+  if (blocked.includes('reconcile_first')) return 'needsReconcile';
+  if (blocked.includes('retry_wait')) return 'retryWait';
+  if (blocked.includes('reserved_day')) return 'scheduledLater';
+  return blocked.some(reason => reason !== 'batch_spacing') ? 'waiting' : 'ready';
+}
+
+/** The agenda looks at this many approved campaigns; with more, the list says it is partial. */
+export const AGENDA_MAX_CAMPAIGNS = 8;
+
+/** What each approved campaign of the person sends today, what moves to another day and what a company's reply or a
+ * negotiation holds: the same verdict as campaigns.next_touch for every recipient, with the negotiation check done for
+ * all of them at once. */
+export async function readCoworkFollowupsToday(client: SupabaseClient, scope: Scope, nowMs = Date.now()) {
+  const { data, error } = await client.from('bulk_campaigns').select('*')
+    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).eq('status', 'approved')
+    .order('updated_at', { ascending: false }).limit(AGENDA_MAX_CAMPAIGNS + 1);
+  if (error) throw new Error('No se pudieron consultar las campañas activas.');
+  const rows = (data || []) as BulkCampaign[];
+  const campaigns = [];
+  let failed = 0;
+  for (const campaign of rows.slice(0, AGENDA_MAX_CAMPAIGNS)) {
+    try {
+      const context = await loadBatchContext(client, scope, campaign, nowMs, { negotiation: 'batched' });
+      const counts: Record<FollowupBucket, number> = { done: 0, heldCompanyReplied: 0, heldNegotiation: 0, historyIncomplete: 0,
+        terminal: 0, needsReconcile: 0, retryWait: 0, scheduledLater: 0, waiting: 0, ready: 0 };
+      for (const item of nextTouchItems(campaign, context)) counts[followupBucket(item)]++;
+      campaigns.push({ campaignId: campaign.id, name: campaign.definition.name, recipients: campaign.recipients.length,
+        ...counts, spacingMinutes: context.batch?.spacing_minutes ?? null });
+    } catch { failed++; }
+  }
+  return { campaigns, failed, truncated: rows.length > AGENDA_MAX_CAMPAIGNS,
+    todaySantiago: santiagoDayBounds(new Date(nowMs)).day };
 }
 
 /** 4.6: que se puede reintentar, que es terminal y que debe conciliarse en

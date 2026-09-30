@@ -50,15 +50,17 @@ function attentionAction(row: { delivery_status?: string | null; bounce_category
 }
 
 /** 6.1 + 6.2 Bounces, blocks and unclassified replies with a recommended action.
- * Auto replies ride along as information only so they never inflate the count. */
-export async function readRepliesAttention(client: SupabaseClient, scope: Scope) {
+ * Auto replies ride along as information only so they never inflate the count. `own` keeps only what this person sent: the
+ * team's replies are shared, but a reply to someone else's email is not this person's to answer (the day's agenda asks for it). */
+export async function readRepliesAttention(client: SupabaseClient, scope: Scope, options: { own?: boolean } = {}) {
   const base = 'id,lead_id,name,email,company,provider,sent_at,replied_at,reply_intent,delivery_status,bounce_category,bounce_reason,evaluation_status';
+  const scoped = (query: any) => options.own ? query.eq('user_id', scope.userId) : query;
   const [failures, unclassified, automatic] = await Promise.all([
-    client.from('contacted_leads').select(base).eq('organization_id', scope.organizationId)
+    scoped(client.from('contacted_leads').select(base).eq('organization_id', scope.organizationId))
       .in('delivery_status', ['bounced', 'soft_bounced']).order('last_event_at', { ascending: false }).limit(20),
-    client.from('contacted_leads').select(base).eq('organization_id', scope.organizationId)
+    scoped(client.from('contacted_leads').select(base).eq('organization_id', scope.organizationId))
       .not('replied_at', 'is', null).is('reply_intent', null).order('replied_at', { ascending: false }).limit(20),
-    client.from('contacted_leads').select(base).eq('organization_id', scope.organizationId)
+    scoped(client.from('contacted_leads').select(base).eq('organization_id', scope.organizationId))
       .eq('reply_intent', 'auto_reply').order('replied_at', { ascending: false }).limit(10),
   ]);
   const failed = [failures, unclassified, automatic].find((result) => result.error)?.error;
@@ -92,6 +94,24 @@ export async function readRepliesStalled(client: SupabaseClient, scope: Scope) {
     total: stalled.length, truncated: stalled.length > 20, coverage,
     rule: 'Interés humano sin envío posterior ni compromiso abierto tras 48 horas.',
   };
+}
+
+/** The newest interested replies the agenda looks at; with more, it says the list is partial. */
+export const INTERESTED_WAITING_LIMIT = 300;
+
+/** Interested people nobody has answered yet, however recent the reply: the first job of the day's agenda, where an answer that
+ * came in this morning matters more than one that has waited for a week (replies.stalled only starts counting at 48 hours).
+ * Only the person's own sends. Newest first, so a long history of answered replies can never push today's off the page. */
+export async function readInterestedWaiting(client: SupabaseClient, scope: Scope, nowMs = Date.now()) {
+  const { data, error } = await client.from('contacted_leads')
+    .select('id,lead_id,name,email,company,replied_at,reply_intent,conversation_outbound_at,data')
+    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+    .in('reply_intent', ['positive', 'meeting_request'])
+    .not('replied_at', 'is', null)
+    .order('replied_at', { ascending: false }).limit(INTERESTED_WAITING_LIMIT);
+  if (error) throw new Error('No se pudieron consultar los interesados sin respuesta.');
+  const rows = (data as AccountMemberRow[]) || [];
+  return { items: selectStalledInterested(rows, nowMs, 0), truncated: rows.length >= INTERESTED_WAITING_LIMIT };
 }
 
 /** 6.5 From one contact to every thread and person at the same company. */

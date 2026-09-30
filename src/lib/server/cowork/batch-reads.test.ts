@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readCoworkBatchReport, readCoworkNextTouch, readCoworkRetryReview, readCoworkCompanyPlan } from './batch-reads';
+import {
+  AGENDA_MAX_CAMPAIGNS, followupBucket, readCoworkBatchReport, readCoworkCompanyPlan, readCoworkFollowupsToday,
+  readCoworkNextTouch, readCoworkRetryReview,
+} from './batch-reads';
 import { santiagoDayBounds } from '@/lib/cowork/send-cadence';
 
 const CAMPAIGN = '00000000-0000-4000-8000-000000000010';
@@ -41,8 +44,11 @@ const rows: Record<string, unknown[]> = {
   cowork_company_send_days: [],
 };
 
-function mockClient() {
+function mockClient(options: { rows?: Record<string, unknown[]>; failing?: string[]; calls?: string[]; campaign?: typeof campaign } = {}) {
+  const source = { ...rows, ...options.rows };
   return { from(table: string) {
+    options.calls?.push(table);
+    let failedQuery = false;
     const filters: Array<(row: any) => boolean> = [];
     const chain: Record<string, (...args: any[]) => any> = {
       select() { return chain; },
@@ -56,16 +62,24 @@ function mockClient() {
         if (key === 'organization_id') assert.equal(value, 'org');
         return chain;
       },
-      in(key: string, values: unknown[]) { filters.push(row => values.includes(row[key])); return chain; },
+      in(key: string, values: unknown[]) {
+        if (options.failing?.includes(`${table}:${key}`)) failedQuery = true;
+        filters.push(row => values.includes(row[key]));
+        return chain;
+      },
       not(key: string) { filters.push(row => row[key] != null); return chain; },
       gte() { return chain; },
       order() { return chain; },
       limit() { return chain; },
       async maybeSingle() {
-        if (table === 'bulk_campaigns') return { data: campaign, error: null };
+        if (options.failing?.includes(table)) return { data: null, error: { message: 'down' } };
+        if (table === 'bulk_campaigns') return { data: options.campaign ?? campaign, error: null };
         return { data: null, error: null };
       },
-      then(resolve: (value: unknown) => void) { resolve({ data: (rows[table] || []).filter(row => filters.every(filter => filter(row))), error: null }); },
+      then(resolve: (value: unknown) => void) {
+        resolve(failedQuery || options.failing?.includes(table) ? { data: null, error: { message: 'down' } }
+          : { data: (source[table] || []).filter(row => filters.every(filter => filter(row))), error: null });
+      },
     };
     return chain;
   } };
@@ -136,4 +150,116 @@ test('reads refuse other organizations campaigns', async () => {
     return chain;
   } };
   await assert.rejects(readCoworkBatchReport(empty as never, scope, CAMPAIGN));
+});
+
+test('followupBucket: the first reason that applies decides where a touch stands today', () => {
+  const at = (blockedBy: string[], done = false) => followupBucket({ done, blockedBy });
+  assert.equal(at([], true), 'done');
+  assert.equal(at([]), 'ready');
+  assert.equal(at(['batch_spacing']), 'ready', 'the spacing between sends delays a send within the day; it holds no one back');
+  assert.equal(at(['company_replied', 'reserved_day']), 'heldCompanyReplied');
+  assert.equal(at(['negotiation:negotiation,meeting']), 'heldNegotiation');
+  assert.equal(at(['reply_history_incomplete']), 'historyIncomplete');
+  assert.equal(at(['negotiation_history_incomplete', 'waiting']), 'historyIncomplete');
+  assert.equal(at(['terminal:recipient_suppressed', 'failed']), 'terminal');
+  assert.equal(at(['reconcile_first']), 'needsReconcile');
+  assert.equal(at(['retry_wait']), 'retryWait');
+  assert.equal(at(['reserved_day', 'waiting']), 'scheduledLater');
+  assert.equal(at(['waiting']), 'waiting');
+});
+
+test('today\'s follow-ups give every recipient the verdict of campaigns.next_touch, with the negotiation check done once', async () => {
+  const calls: string[] = [];
+  const today = await readCoworkFollowupsToday(mockClient({ rows: { bulk_campaigns: [campaign] }, calls }) as never, scope);
+  const nextTouch = await readCoworkNextTouch(mockClient() as never, scope, CAMPAIGN) as any;
+  const expected: Record<string, number> = {};
+  for (const item of nextTouch.items) expected[followupBucket(item)] = (expected[followupBucket(item)] || 0) + 1;
+  assert.equal(today.campaigns.length, 1);
+  const summary = today.campaigns[0] as Record<string, unknown>;
+  assert.equal(summary.name, 'Lote 7');
+  assert.equal(summary.recipients, 3);
+  for (const bucket of ['done', 'heldCompanyReplied', 'heldNegotiation', 'historyIncomplete', 'terminal', 'needsReconcile', 'retryWait', 'scheduledLater', 'waiting', 'ready']) {
+    assert.equal(summary[bucket], expected[bucket] || 0, bucket);
+  }
+  assert.equal(summary.heldCompanyReplied, 2, 'Ana and Luis: someone at Acme already answered');
+  assert.equal(summary.ready, 1, 'Mia is the one touch that goes out today');
+  assert.equal(calls.filter(table => table === 'leads').length, 1, 'one lookup of the leads in negotiation, not two per recipient');
+  assert.equal(today.failed, 0);
+  assert.equal(today.truncated, false);
+  assert.match(today.todaySantiago, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('today\'s follow-ups hold back whoever they cannot check for a negotiation, never count them as ready', async () => {
+  const today = await readCoworkFollowupsToday(mockClient({ rows: { bulk_campaigns: [campaign] }, failing: ['unified_crm_data:stage'] }) as never, scope);
+  const summary = today.campaigns[0] as Record<string, unknown>;
+  assert.equal(summary.ready, 0, 'Mia would go out, but her account\'s stage could not be read');
+  assert.equal(summary.historyIncomplete, 1);
+  assert.equal(summary.heldCompanyReplied, 2, 'a reply of the company still wins over an unreadable stage');
+  assert.equal(today.failed, 0, 'the campaign itself was read');
+});
+
+test('today\'s follow-ups report a campaign whose state cannot be read as failed', async () => {
+  const today = await readCoworkFollowupsToday(mockClient({ rows: { bulk_campaigns: [campaign] }, failing: ['outbound_dispatches'] }) as never, scope);
+  assert.equal(today.failed, 1);
+  assert.equal(today.campaigns.length, 0);
+});
+
+test('a campaign that cannot be read is counted as failed and does not hide the others', async () => {
+  const ok = { ...campaign, id: '00000000-0000-4000-8000-000000000011', definition: { ...campaign.definition, name: 'Lote sano' }, recipients: campaign.recipients.slice(2) };
+  const broken = { ...campaign, id: '00000000-0000-4000-8000-000000000012', recipients: [{ ...campaign.recipients[2], messages: undefined }] };
+  const today = await readCoworkFollowupsToday(mockClient({ rows: { bulk_campaigns: [ok, broken] } }) as never, scope);
+  assert.equal(today.failed, 1);
+  assert.deepEqual(today.campaigns.map(item => item.name), ['Lote sano']);
+});
+
+test('more approved campaigns than the agenda reads is reported as truncated', async () => {
+  const many = Array.from({ length: AGENDA_MAX_CAMPAIGNS + 2 }, (_, index) => ({ ...campaign, id: `00000000-0000-4000-8000-0000000001${String(index).padStart(2, '0')}` }));
+  const today = await readCoworkFollowupsToday(mockClient({ rows: { bulk_campaigns: many } }) as never, scope);
+  assert.equal(today.truncated, true);
+  assert.equal(today.campaigns.length, AGENDA_MAX_CAMPAIGNS);
+});
+
+// A negotiation held only at the company (no reply from anyone there): Zoe's account is in a meeting, her colleague Ivo has no record of his own.
+const gamma = {
+  ...campaign, id: '00000000-0000-4000-8000-000000000013',
+  recipients: [
+    { email: 'zoe@gamma.cl', name: 'Zoe', company: 'Gamma', leadRef: 'lead-d', messages: messages('z') },
+    { email: 'ivo@gamma.cl', name: 'Ivo', company: 'Gamma SpA', leadRef: 'lead-e', messages: messages('i') },
+    { email: 'mia@beta.cl', name: 'Mia', company: 'Beta', leadRef: 'lead-c', messages: messages('c') },
+  ],
+};
+const gammaRows = {
+  bulk_campaigns: [gamma],
+  leads: [{ id: 'lead-d', email: 'zoe@gamma.cl', company: 'Gamma' }, { id: 'lead-e', email: 'ivo@gamma.cl', company: 'Gamma SpA' }, { id: 'lead-c', email: 'mia@beta.cl', company: 'Beta' }],
+  unified_crm_data: [{ id: 'lead_saved|lead-d', stage: 'meeting' }],
+  outbound_dispatches: [], bulk_campaign_attempts: [], contacted_leads: [],
+};
+
+test('a company in a meeting holds every recipient of that company, for the agenda and for campaigns.next_touch alike', async () => {
+  const today = await readCoworkFollowupsToday(mockClient({ rows: gammaRows, campaign: gamma }) as never, scope);
+  const summary = today.campaigns[0] as Record<string, unknown>;
+  assert.equal(summary.heldNegotiation, 2, 'Zoe, and Ivo through the same domain');
+  assert.equal(summary.ready, 1, 'Mia');
+  const nextTouch = await readCoworkNextTouch(mockClient({ rows: gammaRows, campaign: gamma }) as never, scope, gamma.id) as any;
+  const bucketOf = Object.fromEntries(nextTouch.items.map((item: any) => [item.email, followupBucket(item)]));
+  assert.deepEqual(bucketOf, { 'zoe@gamma.cl': 'heldNegotiation', 'ivo@gamma.cl': 'heldNegotiation', 'mia@beta.cl': 'ready' });
+});
+
+test('with more than 500 accounts in negotiation the check is incomplete and nobody counts as ready', async () => {
+  const crowded = Array.from({ length: 501 }, (_, index) => ({ id: `lead_saved|other-${index}`, stage: 'negotiation' }));
+  const today = await readCoworkFollowupsToday(mockClient({ rows: { ...gammaRows, unified_crm_data: crowded }, campaign: gamma }) as never, scope);
+  const summary = today.campaigns[0] as Record<string, unknown>;
+  assert.equal(summary.historyIncomplete, 3);
+  assert.equal(summary.ready, 0);
+});
+
+test('the leads in negotiation are looked up fifty at a time', async () => {
+  const held = Array.from({ length: 120 }, (_, index) => ({ id: `lead_saved|held-${index}`, stage: 'negotiation' }));
+  const calls: string[] = [];
+  const today = await readCoworkFollowupsToday(mockClient({
+    rows: { ...gammaRows, unified_crm_data: [...gammaRows.unified_crm_data, ...held],
+      leads: [...gammaRows.leads, ...held.map((row, index) => ({ id: String(row.id).split('|')[1], email: `p${index}@otra${index}.cl`, company: `Otra ${index}` }))] },
+    campaign: gamma, calls }) as never, scope);
+  assert.equal(calls.filter(table => table === 'leads').length, 3, '121 leads in negotiation: 50 + 50 + 21');
+  assert.equal((today.campaigns[0] as Record<string, unknown>).heldNegotiation, 2);
 });
