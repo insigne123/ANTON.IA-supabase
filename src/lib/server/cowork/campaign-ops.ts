@@ -70,7 +70,7 @@ export async function stageCoworkCampaignDefinition(
  * the approval, and an edit over a version another tab changed is refused.
  */
 export async function editCoworkCampaignMessages(
-  auth: AuthContext, runId: string, edits: CoworkCampaignEdit,
+  auth: AuthContext, runId: string, edits: CoworkCampaignEdit, expectedHash?: string,
 ): Promise<{ changed: number[] }> {
   requireBulkEnabled();
   const state = await getCoworkRun(auth, runId);
@@ -84,6 +84,10 @@ export async function editCoworkCampaignMessages(
   const row = await admin.from('cowork_campaign_definitions').select('definition')
     .eq('run_id', runId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
   if (row.error || !row.data) throw new CoworkCampaignEditRefused('La definición de la campaña ya no está disponible.', 409);
+  // The version in the browser may already be stale before this server request starts.
+  if (!expectedHash || canonicalSha256(row.data.definition) !== expectedHash) {
+    throw new CoworkCampaignEditRefused('La campaña cambió mientras la editabas: vuelve a abrirla y repite el cambio.', 409);
+  }
   const { next, changed } = coworkEditedCampaignDefinition(row.data.definition, edits);
   if (!changed.length) return { changed };
   // One transaction with the approval (M4, cowork_edit_campaign_definition): the edit lands only while the

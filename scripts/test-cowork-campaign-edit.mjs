@@ -14,7 +14,7 @@ const stored = {
   emails: ['marcela@sodexo.cl', 'felipe@securitas.cl'], provider: 'google', overrides: [],
   messages: [{ subject: 'AXIS en minutos', body: 'Hola,\nte escribo por AXIS.', delayDays: 0 }, { subject: 'Seguimiento', body: 'Hola,\n¿lo pudiste ver?', delayDays: 3 }],
 };
-const state = { rpc: null, calls: [], writes: [] };
+const state = { rpc: null, calls: [], writes: [], definition: structuredClone(stored) };
 globalThis.__campaignEdit = state;
 globalThis.__campaignEditAdmin = {
   rpc: async (name, args) => { state.calls.push([name, args]); return state.rpc; },
@@ -26,14 +26,15 @@ globalThis.__campaignEditAdmin = {
       insert: async values => { state.writes.push({ table, op: 'insert', values }); return { error: null }; },
       maybeSingle: async () => {
         if (query.op === 'update') { state.writes.push({ table, op: 'update', values: query.values }); return { data: { run_id: RUN }, error: null }; }
-        return { data: { definition: structuredClone(stored) }, error: null };
+        return { data: { definition: structuredClone(state.definition) }, error: null };
       },
     };
     return builder;
   },
 };
 const result = await build({
-  entryPoints: ['src/lib/server/cowork/campaign-ops.ts'],
+  stdin: { contents: 'export { editCoworkCampaignMessages } from "./src/lib/server/cowork/campaign-ops"; export { canonicalSha256 } from "./src/lib/messaging-contracts";',
+    resolveDir: process.cwd(), sourcefile: 'campaign-edit-test.ts', loader: 'ts' },
   bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
   plugins: [{ name: 'isolated-dependencies', setup(build) {
     build.onResolve({ filter: /^(\.\/runs|\.\/access|@\/lib\/server\/supabase-admin|@\/lib\/server\/bulk-campaign-audience|@\/lib\/server\/bulk-campaigns)$/ },
@@ -49,16 +50,17 @@ const result = await build({
 });
 const loaded = { exports: {} };
 new Function('require', 'module', 'exports', result.outputFiles[0].text)(require, loaded, loaded.exports);
-const { editCoworkCampaignMessages } = loaded.exports;
+const { editCoworkCampaignMessages, canonicalSha256 } = loaded.exports;
+const expectedHash = canonicalSha256(stored);
 const auth = { user: { id: USER }, organizationId: ORG };
 const edits = [{ subject: 'AXIS: antecedentes en minutos', body: stored.messages[0].body }, { subject: stored.messages[1].subject, body: stored.messages[1].body }];
-const reset = rpc => { state.rpc = rpc; state.calls.length = 0; state.writes.length = 0; };
-const refused = async () => { try { await editCoworkCampaignMessages(auth, RUN, edits); return null; } catch (error) { return { name: error.constructor.name, status: error.status, message: error.message }; } };
+const reset = rpc => { state.rpc = rpc; state.calls.length = 0; state.writes.length = 0; state.definition = structuredClone(stored); };
+const refused = async () => { try { await editCoworkCampaignMessages(auth, RUN, edits, expectedHash); return null; } catch (error) { return { name: error.constructor.name, status: error.status, message: error.message }; } };
 process.env.BULK_CAMPAIGNS_ENABLED = 'true';
 try {
   // With M4 applied: one call, with the version read and only the changed email; the page writes nothing itself.
   reset({ data: 'edited', error: null });
-  assert.deepEqual(await editCoworkCampaignMessages(auth, RUN, edits), { changed: [0] });
+  assert.deepEqual(await editCoworkCampaignMessages(auth, RUN, edits, expectedHash), { changed: [0] });
   assert.equal(state.calls.length, 1);
   const [name, args] = state.calls[0];
   assert.equal(name, 'cowork_edit_campaign_definition');
@@ -75,9 +77,17 @@ try {
   assert.equal((await refused())?.status, 409);
   assert.equal(state.writes.length, 0);
 
+  // A tab that saw the original version cannot overwrite an edit saved before its request starts.
+  reset({ data: 'edited', error: null });
+  state.definition.messages[1].subject = 'Guardado desde otra pestaña';
+  assert.equal((await refused())?.status, 409);
+  assert.equal(state.calls.length, 0, 'a stale browser preview is refused before calling the RPC');
+  assert.equal(state.writes.length, 0);
+  await assert.rejects(editCoworkCampaignMessages(auth, RUN, edits), error => error.status === 409);
+
   // Without M4 applied: the two steps of before, with the event.
   reset({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } });
-  assert.deepEqual(await editCoworkCampaignMessages(auth, RUN, edits), { changed: [0] });
+  assert.deepEqual(await editCoworkCampaignMessages(auth, RUN, edits, expectedHash), { changed: [0] });
   assert.deepEqual(state.writes.map(write => [write.table, write.op]), [['cowork_campaign_definitions', 'update'], ['cowork_run_events', 'insert']]);
   assert.deepEqual(state.writes[1].values.payload, { kind: 'campaign_create', emails: [1] });
 
@@ -88,7 +98,7 @@ try {
 
   // Nothing changed: no call at all.
   reset({ data: 'edited', error: null });
-  assert.deepEqual(await editCoworkCampaignMessages(auth, RUN, stored.messages.map(({ subject, body }) => ({ subject, body }))), { changed: [] });
+  assert.deepEqual(await editCoworkCampaignMessages(auth, RUN, stored.messages.map(({ subject, body }) => ({ subject, body })), expectedHash), { changed: [] });
   assert.equal(state.calls.length, 0);
   console.log('PASS: a campaign edit is one atomic call with the version read (stale or no longer pending: refused, nothing written); without M4, the two steps of before; any other failure writes nothing.');
 } finally {
