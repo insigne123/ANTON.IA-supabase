@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { contactRecordEvidence } from '@/lib/cowork/contact-evidence';
 import { readMailboxCoverage } from './reply-reads';
-import { buildSupliaContext, offerText } from '@/lib/server/suplia-context';
+import { buildSupliaContext, readOrganizationOffer } from '@/lib/server/suplia-context';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 import {
@@ -155,18 +155,7 @@ async function readCoworkMetrics(client: SupabaseClient, scope: Scope) {
   };
 }
 
-/** What the organization sells, as configured for research (products). */
-export async function readOrganizationOffer(client: SupabaseClient | undefined, organizationId: string) {
-  if (!client) return null;
-  try {
-    const { data, error } = await client.from('antonia_workflow_settings')
-      .select('user_company_profile').eq('organization_id', organizationId).maybeSingle();
-    if (error || !data) return null;
-    return offerText((data as { user_company_profile?: unknown }).user_company_profile) || null;
-  } catch {
-    return null;
-  }
-}
+export { readOrganizationOffer };
 
 export async function readCoworkAppContext(scope: Scope, builder = buildSupliaContext, client?: SupabaseClient) {  // Reuses the shared context builder (connections, counts, offer): Cowork needs
   // the same verified connection state before discussing sends. No tokens included.
