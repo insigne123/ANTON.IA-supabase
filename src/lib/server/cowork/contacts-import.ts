@@ -181,7 +181,7 @@ export async function executeCoworkContactsImport(auth: AuthContext, runId: stri
       linkedin_url: contact.linkedinUrl, location: contact.location, status: 'saved', source_provider: 'cowork_import',
     }));
     const result = await client.from('leads').upsert(rows, { onConflict: 'id', ignoreDuplicates: true }).select('id');
-    if (result.error) throw new Error(imported ? `Se guardaron ${imported} contactos y el resto falló; vuelve a aprobar para completar.` : 'No se pudieron guardar los contactos.');
+    if (result.error) throw new Error(imported ? `Se guardaron ${imported} contactos y el resto falló; revisa tus contactos antes de proponer otra importación para los pendientes.` : 'No se pudieron guardar los contactos.');
     imported += (result.data || []).length;
   }
   const alreadySaved = contacts.length - imported;
