@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_JEV_CHECKS, COWORK_JEV_QUESTIONS, coworkJevJudgement, coworkJevProbabilities, coworkJevState } from './jev-review';
+import { COWORK_JEV_CHECKS, COWORK_JEV_DEFAULT_SCREEN, COWORK_JEV_DEFAULT_THRESHOLDS, COWORK_JEV_QUESTIONS, coworkJevJudgement, coworkJevProbabilities, coworkJevSeen, coworkJevState, coworkJevStateFromPrompt } from './jev-review';
+import { coworkJudgePrompt, coworkJudgeTurnPrompt } from './judge';
 
 test('Jev reads the same material as the judge, with English keys', () => {
   const state = coworkJevState({
@@ -55,4 +56,37 @@ test('thresholds decide what fires; nothing fired leaves Jev\'s own verdict', ()
 test('by default only the calibrated check fires; the others are only measured', () => {
   const all = Object.fromEntries(COWORK_JEV_CHECKS.map(id => [id, { type: 'noul' as const, noul: 0.95 }]));
   assert.deepEqual(coworkJevJudgement(all)?.fired, ['offers_free_read']);
+});
+
+test('the state from the prompt the judge in the turn already built is the state of the same material', () => {
+  const input = {
+    request: '¿qué puedes hacer?', userContext: { fullName: 'Nicolás Y.' }, history: [{ request: 'hola', reply: 'Hola' }],
+    observations: [{ action: 'leads.search', input: '', result: { items: [{ name: 'Marcela Rojas' }] } }],
+    shown: { reply: 'Puedo buscar contactos.', question: '¿Busco a tu equipo?', quickReplies: ['Sí'] },
+  };
+  assert.deepEqual(coworkJevStateFromPrompt(coworkJudgePrompt(input)), coworkJevState(input));
+  // The turn's prompt carries the answer as the person sees it: Jev reads exactly what the model would.
+  const turn = coworkJevStateFromPrompt(coworkJudgeTurnPrompt({
+    request: input.request, history: input.history, userContext: input.userContext, observations: input.observations,
+    answer: { reply: 'Puedo buscar contactos.', document: null, question: '¿Busco a tu equipo?', suggestions: [{ label: 'Sí', message: 'Sí' }] },
+  }));
+  assert.equal(turn.request, '¿qué puedes hacer?');
+  assert.equal(turn.shownToUser.reply, 'Puedo buscar contactos.');
+  assert.equal(turn.shownToUser.finalQuestion, '¿Busco a tu equipo?');
+  assert.deepEqual(turn.shownToUser.buttons, ['Sí']);
+  assert.match(JSON.stringify(turn.consultedData[0]), /Marcela Rojas/);
+});
+
+test('the screening asks for coverage and the firing one for precision: 0.74 hands the answer to the model, 0.88 asks for a correction', () => {
+  assert.equal(COWORK_JEV_DEFAULT_SCREEN.offers_free_read, 0.74);
+  assert.equal(COWORK_JEV_DEFAULT_THRESHOLDS.offers_free_read, 0.88);
+  assert.ok(COWORK_JEV_DEFAULT_SCREEN.offers_free_read! < COWORK_JEV_DEFAULT_THRESHOLDS.offers_free_read!);
+  const at = (noul: number) => ({ offers_free_read: { type: 'noul' as const, noul }, unsupported_figure: { type: 'noul' as const, noul: 0.99 } });
+  assert.deepEqual(coworkJevSeen(at(0.73)), []);
+  assert.deepEqual(coworkJevSeen(at(0.74)), ['offers_free_read'], 'only the calibrated question screens; the figure check never does');
+  assert.deepEqual(coworkJevJudgement(at(0.8))?.fired, [], 'seen is not fired');
+  assert.deepEqual(coworkJevJudgement(at(0.88))?.fired, ['offers_free_read']);
+  assert.deepEqual(coworkJevSeen(at(0.3), { offers_free_read: 0.2 }), ['offers_free_read']);
+  assert.deepEqual(coworkJevSeen(null), []);
+  assert.deepEqual(coworkJevSeen({}), []);
 });
