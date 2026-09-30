@@ -87,9 +87,14 @@ export type CoworkUserContext = {
   companyDomain: string | null;
   offer: string | null;
   offerSource: 'profile' | 'organization' | null;
+  /** From «Perfil», only when the person filled them in: products and services, results they
+   * can show (usable as written) and their sector. */
+  services?: string[];
+  proofPoints?: string[];
+  sector?: string;
 };
 
-const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer, sin consultar profile.get ni app.context para eso. Un valor null no se inventa.';
+const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer y services, sin consultar profile.get ni app.context para eso. proofPoints son resultados que el usuario cargó en su perfil: se pueden citar tal cual. Un valor null o ausente no se inventa.';
 
 const ANSWER_TO_CORRECT_INSTRUCTION = 'Esta es tu respuesta anterior. Edítala: cambia solo lo que señala rejectedDecisions y conserva el resto (lo que hiciste bien, sus cifras, nombres, tarjetas y tono). Si un bloque o el documento no cambian, puedes dejarlos en null: se conservan. No menciones la corrección ni que hubo una versión anterior.';
 const clipText = (value: unknown, max: number) => typeof value === 'string' ? (value.length > max ? `${value.slice(0, max)}… [recortado]` : value) : null;

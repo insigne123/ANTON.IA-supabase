@@ -42,6 +42,8 @@ test('the judge sees the request, the data and exactly what was shown, trimmed t
   assert.equal(later.loQueVioElUsuario.tarjetaDeAprobacion.tipo, 'búsqueda de prospectos con el proveedor');
   assert.deepEqual(later.loQueVioElUsuario.documento, { titulo: 'Informe', contenido: 'Resumen' });
   assert.match(COWORK_JUDGE_INSTRUCTIONS, /siempre se proponen con una tarjeta de aprobación/);
+  // What the person saved in «Perfil» is evidence: saying it is missing is a veracity failure.
+  assert.match(COWORK_JUDGE_INSTRUCTIONS, /Lo que trae usuario \(oferta, servicios, pruebas y rubro\) también cuenta como dato consultado/);
   // Product facts the judge cannot guess: sending goes through a campaign, and the «use» button fixes a text.
   assert.match(COWORK_JUDGE_INSTRUCTIONS, /no hay envío directo/);
   assert.match(COWORK_JUDGE_INSTRUCTIONS, /«Usar esta versión».*no crear nada/);

@@ -69,6 +69,10 @@ const IDEAL: Record<string, CorpusDecider> = {
   'ley-chile': async context => context.observations.length === 0
     ? read('compliance.law')
     : answer('En Chile no conviene escribir sin una base legal: la Ley 19.628 exige consentimiento o autorización, aunque admite datos de fuentes públicas y da derecho a oponerse a la publicidad. Desde el 1 dic 2026 rige la Ley 21.719, más estricta. Esto es información general, no asesoría legal.\n¿Reviso si tus contactos tienen bajas o bloqueos antes de tu próxima campaña?'),
+  'que-puedes-hacer-tu': async context => context.observations.length === 0
+    ? parallel([{ action: 'app.context', input: '' }, { action: 'leads.search', input: '' }])
+    : answer('Te ayudo a conseguir reuniones para AXIS con empresas que incorporan mucho personal, desde este chat:\n- Correos y campañas: redacto los correos sobre AXIS y te dejo la campaña pausada para aprobar. José, de GrupoExpro, ya tiene correo.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos de RR. HH. y operaciones, e informes de cómo van tus envíos.\n¿Te dejo una campaña pausada con un primer correo sobre AXIS para José?',
+      null, [{ label: 'Sí, déjala pausada', message: 'Sí, deja una campaña pausada con un primer correo sobre AXIS para José' }]),
 };
 
 const chip = (label: string, message: string) => [{ label, message }];
@@ -78,8 +82,8 @@ const seen = (context: Parameters<CorpusDecider>[0], action: string) => context.
 Object.assign(IDEAL, {
   'mkt-que-puedes-hacer': async context => context.observations.length === 0
     ? parallel([{ action: 'app.context', input: '' }, { action: 'leads.search', input: '' }])
-    : answer('Te ayudo a conseguir reuniones con tus contactos, sin salir del chat:\n- Correos y campañas: redacto la secuencia y la dejo lista para aprobar. Tus 5 contactos guardados son el punto de partida; 4 tienen correo.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos, informes y revisión de tu dominio.\n¿Te preparo un primer correo para Marcela, Felipe y Camila, tus contactos de RR. HH. con correo?',
-      null, chip('Sí, prepara el correo', 'Sí, prepara un primer correo sobre AXIS para Marcela, Felipe y Camila')),
+    : answer('Te ayudo a conseguir reuniones para AXIS con empresas que contratan mucho personal, sin salir del chat:\n- Correos y campañas: redacto la secuencia sobre AXIS y la dejo lista para aprobar. De tus 5 contactos guardados, 4 tienen correo.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos de RR. HH. y operaciones, e informes de cómo van tus envíos.\n¿Te dejo una campaña pausada con un primer correo para Marcela, Felipe y Camila, tus contactos de RR. HH. con correo?',
+      null, chip('Sí, déjala pausada', 'Sí, deja una campaña pausada con un primer correo sobre AXIS para Marcela, Felipe y Camila')),
   'mkt-campana-rrhh': async context => {
     if (context.observations.length === 0) return parallel([{ action: 'leads.search', input: 'RR. HH.' }, { action: 'message.context', input: '' }]);
     if (!seen(context, 'campaigns.list')) return read('campaigns.list');
