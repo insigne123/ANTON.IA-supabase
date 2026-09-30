@@ -87,7 +87,7 @@ Pendiente. Se corre sobre `main` como está en producción (Jueza apagada, [#48]
 
 - **Cada operación tiene una respuesta buena que pasa todas sus verificaciones,** y una respuesta que no mira los datos y devuelve el trabajo al usuario falla al menos 3 en cada una (`scripts/cowork-axis-paquete.test.ts`, 42 pruebas sin red). Es lo que hace que un fallo del banco signifique algo.
 - **Brechas que el banco deja a la vista** (este PR no resuelve ninguna):
-  1. **Una colega que responde desde otro correo no detiene la secuencia.** `inboundCandidates` (`src/lib/server/reply-sync.ts`) solo cuenta como respuesta al remitente exacto de la dirección a la que se escribió. Es la causa de G3 y afecta a toda la app, no solo a Cowork.
+  1. **Si alguien de la misma empresa responde desde otro correo, la secuencia sigue.** `inboundCandidates` (`src/lib/server/reply-sync.ts`) solo cuenta como respuesta al remitente exacto de la dirección a la que se escribió. Es la causa de G3 y afecta a toda la app, no solo a Cowork.
   2. **Una aprobación por persona:** en A4 serían unas 150 tarjetas.
   3. **Cowork no responde dentro del hilo** (`email.send` siempre abre un correo nuevo) **ni lee el cuerpo de los correos:** C3, D5 y G2.
   4. **No hay tope de una empresa por día sumando correo y LinkedIn:** B4, D1, E3 y E4.
