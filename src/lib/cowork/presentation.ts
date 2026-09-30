@@ -223,6 +223,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   linkedin_invite: { title: 'Invitar en LinkedIn', icon: 'linkedin', help: 'Se encolará una invitación sin nota. La ejecutarás desde la extensión ante ese perfil.' },
   linkedin_message: { title: 'Mensaje de LinkedIn', icon: 'linkedin', help: 'Se encolará el mensaje aprobado. La ejecutarás desde la extensión ante ese perfil; solo lo confirmado cuenta como enviado.' },
   contacts_import: { title: 'Importar contactos', icon: 'user-plus', help: 'Se guardarán en tus contactos las personas del archivo que aún no están. Los que ya estaban no se tocan.' },
+  reply_thread: { title: 'Responder en el hilo', icon: 'mail', help: 'Si la apruebas, esta respuesta sale tal cual dentro de la conversación de esa persona, desde tu correo. Revisa el texto antes.' },
 };
 
 export function coworkEffectCopy(kind: unknown): CoworkEffectCopy {
@@ -301,6 +302,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   linkedin_invite: { happens: 'Se deja en cola una invitación sin nota.', not: 'No sale hasta que la ejecutes desde la extensión.' },
   linkedin_message: { happens: 'Se deja en cola el mensaje aprobado.', not: 'No sale hasta que lo ejecutes desde la extensión.' },
   contacts_import: { happens: 'Se guardan en tus contactos las personas nuevas del archivo.', not: 'No se les escribe, no se buscan correos y no cambian los contactos que ya tenías.' },
+  reply_thread: { happens: 'La respuesta sale en el hilo de esa conversación, con el texto que ves, desde tu correo.', not: 'No se envía nada más ni a nadie más, y no sale hasta que la apruebes.' },
 };
 
 export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' | 'payload'>): CoworkOutcome {
@@ -338,7 +340,7 @@ export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | '
   const kind = String(proposal.payload.kind || '');
   if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch') return { href: '/campaigns', label: 'Ver campañas' };
   if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch' || kind === 'contacts_import') return { href: '/saved/leads', label: 'Ver tus contactos' };
-  if (kind === 'send_email') return { href: '/contacted', label: 'Ver en Contactados' };
+  if (kind === 'send_email' || kind === 'reply_thread') return { href: '/contacted', label: 'Ver en Contactados' };
   if (kind === 'profile_update') return { href: '/profile', label: 'Ver tu perfil' };
   return null;
 }

@@ -15,6 +15,8 @@ import {
   COWORK_IMPORT_FIELDS, COWORK_IMPORT_FIELD_LABEL, COWORK_IMPORT_LIMIT, COWORK_IMPORT_SHOWN, coworkContactKeys, coworkImportColumns, coworkImportPlan,
   coworkImportLabel, coworkImportSummary, type CoworkContactsImportInput,
 } from '../../src/lib/cowork/contacts-import';
+import { coworkReplyRefusal, type CoworkReplyThread } from '../../src/lib/cowork/reply-thread';
+import { coworkReplyBody, coworkReplySubject, type CoworkReplyThreadInput } from '../../src/lib/cowork/reply-proposal';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
 
@@ -41,11 +43,11 @@ export const corpusWriterInstructions = coworkAgentInstructions({
   threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
 });
 
-/** Instructions for a case: with the Writer, and with contacts.import when the case turns it on. */
-function instructionsFor(writer: boolean, contactsImport: boolean) {
-  if (!contactsImport) return writer ? corpusWriterInstructions : corpusInstructions;
+/** Instructions for a case: with the Writer, and with contacts.import or email.reply_thread when the case turns them on. */
+function instructionsFor(writer: boolean, contactsImport: boolean, replyThread = false) {
+  if (!contactsImport && !replyThread) return writer ? corpusWriterInstructions : corpusInstructions;
   return coworkAgentInstructions({
-    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport: true,
+    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport, replyThread,
     threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
   });
 }
@@ -86,6 +88,21 @@ export function corpusStageImport(input: CoworkContactsImportInput, read: (actio
   } };
 }
 
+/**
+ * The reply as the server stages it (server/cowork/reply-thread-effect.ts), from the conversation of the case: it must be one that takes a
+ * reply, the recipient is the person of that conversation, and the subject and text are written as they would be sent. The refusals are the
+ * server's own sentences (coworkReplyRefusal), so the model reads the same ones.
+ */
+export function corpusStageReply(input: CoworkReplyThreadInput, read: (action: string, input: string) => unknown) {
+  const thread = read('replies.thread', input.contactedId) as (Partial<CoworkReplyThread> & { available?: boolean }) | null;
+  if (!thread?.available) throw new Error('Esa conversación no es tuya o ya no existe: solo se responde a tus envíos.');
+  const refusal = coworkReplyRefusal(thread as CoworkReplyThread);
+  if (refusal) throw new Error(refusal);
+  const to = String(thread.email).trim().toLowerCase();
+  const who = [String(thread.name || '').trim(), String(thread.company || '').trim() ? `(${String(thread.company).trim()})` : ''].filter(Boolean).join(' ') || to;
+  return { label: `Responder a ${who} en su hilo`, to, subject: coworkReplySubject(input.subject), body: coworkReplyBody(input.body) };
+}
+
 export type CorpusOutcome = { id: string; result: CorpusTurnResult; checks: Array<{ label: string; passed: boolean }>; passed: boolean };
 
 export function scoreCorpusCase(entry: CorpusCase, result: CorpusTurnResult): CorpusOutcome {
@@ -107,13 +124,13 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const recorded: CoworkObservation[] = [];
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
-  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport));
+  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport), Boolean(entry.replyThread));
   const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
-      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport),
+      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread),
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
       onCorrection: verdict => {
@@ -153,7 +170,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
         const staged = proposal.contactsImport ? corpusStageImport(proposal.contactsImport, entry.world?.read ?? corpusRead) : null;
-        result.proposal = { kind: proposal.kind, label: staged?.label ?? proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
+        const reply = proposal.replyThread ? corpusStageReply(proposal.replyThread, entry.world?.read ?? corpusRead) : null;
+        result.proposal = { kind: proposal.kind, label: staged?.label ?? reply?.label ?? proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
+          ...(proposal.replyThread && reply ? { replyThread: { contactedId: proposal.replyThread.contactedId, to: reply.to, subject: reply.subject, body: reply.body } } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),
           ...(proposal.contactsImport ? { contactsImport: { ...proposal.contactsImport, card: staged?.card } } : {}),
           ...(proposal.profile ? { profile: proposal.profile } : {}) };
@@ -205,6 +224,8 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
         : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }
         // The import card shows who comes in, who stays out and the columns (older reports: only the file).
         : result.proposal.contactsImport ? { detail: result.proposal.contactsImport.card ?? { archivo: result.proposal.contactsImport.file } }
+        // The reply card shows to whom it goes, the subject and the exact text.
+        : result.proposal.replyThread ? { detail: { para: result.proposal.replyThread.to, asunto: result.proposal.replyThread.subject, respuesta: result.proposal.replyThread.body } }
         // The profile card shows the fields it saves.
         : result.proposal.profile ? { detail: result.proposal.profile } : {}) } : null,
     search: result.search,
