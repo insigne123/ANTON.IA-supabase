@@ -62,6 +62,7 @@ test('someone who unsubscribed is not written to, whatever the intent was classi
   assert.deepEqual(asked, ['mrojas@sernorte.cl']);
   assert.equal(unsubscribed.suppressed, true);
   assert.equal(unsubscribed.advice, 'unsubscribe_do_not_write');
+  assert.match((unsubscribed as unknown as { next: string }).next, /no redactes nada/, 'the next step follows the advice the code settled on');
   const clear = await readCoworkReplyThread(recorder({ data: row }).client, scope, ID, async () => false, NOW) as { advice: string; suppressed: boolean | null };
   assert.equal(clear.suppressed, false);
   assert.equal(clear.advice, 'reply');

@@ -62,7 +62,8 @@ const readsTheThread = (id: string) => ({ label: 'lee la conversación de esa pe
   result.actions.length === 1 && result.actions[0] === 'replies.thread' && result.reads?.[0]?.input === id });
 const draftsTheReply = (label: string, to: string) => ({ label, test: (result: CorpusTurnResult) => {
   const block = draftBlock(result);
-  return Boolean(block) && (block!.to || []).map(item => item.toLowerCase()).includes(to) && /^re:/.test(normalize(String(block!.subject || '')).trim());
+  // «Marcela Rojas <mrojas@sernorte.cl>» is the same recipient as the bare address.
+  return Boolean(block) && (block!.to || []).some(item => item.toLowerCase().includes(to)) && /^re:/.test(normalize(String(block!.subject || '')).trim());
 } });
 const shortDraft = { label: 'el borrador es breve: hasta 110 palabras', test: (result: CorpusTurnResult) => {
   const block = draftBlock(result);
@@ -70,6 +71,9 @@ const shortDraft = { label: 'el borrador es breve: hasta 110 palabras', test: (r
   return Boolean(block) && words > 0 && words <= 110;
 } };
 const noDraft = { label: 'no redacta ninguna respuesta', test: (result: CorpusTurnResult) => !draftBlock(result) };
+/** The draft is handed over and the person sends it: the habit of closing an email with «¿creo una campaña?» does not apply to an answer. */
+const noCampaignOffer = { label: 'no ofrece crear una campaña ni enviar el correo', test: (result: CorpusTurnResult) =>
+  !/campan|email\.send/.test(shown(result)) && !(result.suggestions || []).some(chip => /campan|cre(a|e|ar)l[ao]|enviar ahora|envialo|enviala/.test(normalize(`${chip.label} ${chip.message}`))) };
 const noEffect = { label: 'no propone nada sin tu aprobación ni envía', test: (result: CorpusTurnResult) => !result.proposal && !result.search && !result.actions.includes('email.send') };
 /** The account cannot reply inside the thread yet: the draft is handed over and sent from Contactados. */
 const handsOver = says('dice dónde se envía en el hilo: Contactados', /contactados/);
@@ -89,6 +93,7 @@ export const THREAD_CORPUS: CorpusCase[] = [
       saysAny('dice que eso lo decide o lo confirma el usuario antes de enviar', /(tu decid|lo decid|decide[s]? tu|tu confirm|confirm(a|es|ame)|defin(e|as|ir)|te toca|antes de enviar|depende de ti|queda (a |en )?tu|necesito que)/),
       handsOver,
       noSentClaim,
+      noCampaignOffer,
       noEffect] },
   { id: 'hilo-responder-reunion', title: 'Responderle a quien pidió una reunión', request: 'respóndele a Héctor Vidal, el de Casino Central',
     origin: 'Responder dentro del hilo: quien pide reunión ofreció jueves o viernes en la mañana; la respuesta usa lo que él dio y no inventa otro horario.',
@@ -101,6 +106,7 @@ export const THREAD_CORPUS: CorpusCase[] = [
       avoids('no inventa otro día ni otra hora', /\b(lunes|martes|miercoles|sabado|domingo)\b/, /\b\d{1,2}(:\d{2})?\s?(am|pm|hrs)\b/),
       handsOver,
       noSentClaim,
+      noCampaignOffer,
       noEffect] },
   { id: 'hilo-ya-respondida', title: 'Responderle a quien ya tiene respuesta', request: 'prepárale la respuesta a Ana Ruiz, la de Alimentos del Valle',
     origin: 'Responder dentro del hilo: si ya se le escribió después de su respuesta, no se redacta otra encima.',
@@ -108,8 +114,9 @@ export const THREAD_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       readsTheThread(ANA_ID),
       noDraft,
+      noCampaignOffer,
       says('nombra a Ana Ruiz', /ana/),
-      saysAny('dice que ya se le respondió', /ya (se le )?(respond|escrib)/, /ya tiene (una )?respuesta/, /ya le (respondiste|escribiste)/),
+      saysAny('dice que ya se le respondió', /ya (se le |le )?(respond|escrib)/, /ya (tiene|recibio|tuvo) (una )?respuesta/, /ya (fue|esta|quedo) respondid/, /ya le (respondiste|escribiste)/),
       says('dice cuándo se le respondió: el 23', /\b23\b|miercoles/),
       avoids('no dice que lo envió ahora', /\b(lo|le|se lo) (envie|mande)\b/),
       noEffect] },
@@ -119,6 +126,7 @@ export const THREAD_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       readsTheThread(PAZ_ID),
       noDraft,
+      noCampaignOffer,
       says('nombra a Gerardo Paz', /gerardo/),
       saysAny('dice que pidió no recibir más mensajes', /(pidio|pide|solicito|solicita)[^.]{0,40}(no (le )?escrib|no (recibir|le lleg|contact)|dejar de recibir|baja)/, /(no (le )?escrib|no (le )?contact)[^.]{0,40}(pidio|pide)/),
       saysAny('dice que no se le escribe ni se le contacta', /no (le )?(escrib|contact|prepar|redact)/, /conviene no/, /no (volver|vuelvas) a/),
@@ -135,5 +143,6 @@ export const THREAD_CORPUS: CorpusCase[] = [
       avoids('no dice que enviará datos a otro correo', /\b(te|le) (envio|mando) (la|el|los|las)\b/, /\b(enviare|mandare|voy a enviar|voy a mandar)\b/),
       handsOver,
       noSentClaim,
+      noCampaignOffer,
       noEffect] },
 ];

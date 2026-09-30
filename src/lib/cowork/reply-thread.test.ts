@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { coworkReplyText, coworkReplyThread, THREAD_REPLY_TEXT_MAX, type ThreadRow } from './reply-thread';
+import { coworkReplyText, coworkReplyThread, coworkThreadNext, THREAD_REPLY_TEXT_MAX, type ThreadRow } from './reply-thread';
 
 const NOW = Date.parse('2026-09-30T15:00:00Z');
 const base = (overrides: Partial<ThreadRow> = {}): ThreadRow => ({
@@ -46,6 +46,22 @@ test('if the account already wrote after their reply, the advice is that it was 
   assert.equal(thread.advice, 'already_answered');
   // Writing before their reply does not answer it.
   assert.equal(coworkReplyThread(replied({ conversation_outbound_at: '2026-09-25T10:00:00Z' }), NOW).advice, 'reply');
+});
+
+test('when the account answered is given, and what to do with each advice is said next to the data', () => {
+  const answered = coworkReplyThread(replied({ conversation_outbound_at: '2026-09-29T10:00:00Z' }), NOW);
+  assert.equal(answered.answeredAt, '2026-09-29T10:00:00.000Z');
+  assert.match(answered.next, /Ya se le respondió el 2026-09-29/);
+  assert.equal(coworkReplyThread(replied(), NOW).answeredAt, null);
+  assert.equal(coworkReplyThread(replied({ conversation_outbound_at: '2026-09-25T10:00:00Z' }), NOW).answeredAt, null, 'writing before their reply does not answer it');
+  assert.match(coworkReplyThread(replied(), NOW).next, /email_draft/);
+  assert.match(coworkReplyThread(replied(), NOW).next, /Contactados/);
+  assert.match(coworkReplyThread(replied(), NOW).next, /No propongas crear una campaña/);
+  assert.match(coworkReplyThread(base(), NOW).next, /todavía no ha respondido/);
+  assert.match(coworkReplyThread(replied({ reply_intent: 'auto_reply' }), NOW).next, /aviso automático/);
+  assert.match(coworkReplyThread(replied({ reply_intent: 'unsubscribe' }), NOW).next, /no redactes nada/);
+  assert.match(coworkReplyThread(replied({ reply_intent: 'negative' }), NOW).next, /no insistas/);
+  assert.match(coworkThreadNext('already_answered', null), /Ya se le respondió, después de su mensaje/);
 });
 
 test('automatic replies, unsubscribes and clear refusals are not answered like an interested person', () => {

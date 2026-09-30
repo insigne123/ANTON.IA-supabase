@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { coworkReplyThread, type ThreadRow } from '@/lib/cowork/reply-thread';
+import { coworkReplyThread, coworkThreadNext, type ThreadRow } from '@/lib/cowork/reply-thread';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -26,5 +26,5 @@ export async function readCoworkReplyThread(client: SupabaseClient, scope: Scope
     try { suppressedNow = await suppressed(thread.email); } catch { suppressedNow = null; }
   }
   return { ...thread, available: true as const, suppressed: suppressedNow,
-    ...(suppressedNow ? { advice: 'unsubscribe_do_not_write' as const } : {}) };
+    ...(suppressedNow ? { advice: 'unsubscribe_do_not_write' as const, next: coworkThreadNext('unsubscribe_do_not_write', null) } : {}) };
 }
