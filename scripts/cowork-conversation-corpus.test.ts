@@ -249,6 +249,17 @@ test('every corpus case has an ideal turn that passes all its checks through the
   }
 });
 
+test('pendientes-vacio: reading only the agenda and offering to look at the contacts fails; looking at them passes', async () => {
+  const entry = CORPUS.find(item => item.id === 'pendientes-vacio')!;
+  const lazy: CorpusDecider = async context => context.observations.length === 0 ? read('agenda.today')
+    : coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply: 'Hoy no aparecen pendientes registrados en ANTON.IA.\n¿Reviso tus contactos con correo y tus campañas en borrador?',
+      document: null, suggestions: [{ label: 'Sí, revísalos', message: 'Sí, revisa mis contactos' }] } });
+  const lazyFailing = (await runCorpusCase(entry, lazy)).checks.filter(check => !check.passed).map(check => check.label);
+  assert.deepEqual(lazyFailing, ['con el día vacío lee sus contactos y campañas para proponer con datos']);
+  const good = (await runCorpusCase(entry, IDEAL['pendientes-vacio'])).checks.filter(check => !check.passed);
+  assert.deepEqual(good, []);
+});
+
 test('the production baseline answers fail the checks the corpus was written for', () => {
   const baseline = (id: string, result: Partial<Parameters<typeof scoreCorpusCase>[1]>) => scoreCorpusCase(CORPUS.find(entry => entry.id === id)!,
     { actions: [], reply: '', document: null, proposal: null, search: null, note: null, failed: null, suggestions: [], ...result });

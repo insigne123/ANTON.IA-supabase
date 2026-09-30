@@ -224,6 +224,8 @@ export const CORPUS: CorpusCase[] = [
     production: { run: '3e143ba7', latencySeconds: 27, scores: { comprension: 4, veracidad: 4, utilidad: 2, claridad: 3, friccion: 2 }, problem: 'Callejón sin salida con jerga de «cobertura»; no mira campañas ni incidencias.' },
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'consulta pendientes antes de responder', test: r => r.actions.some(a => ['agenda.today', 'contacted.search', 'replies.attention', 'campaigns.inbox'].includes(a)) },
+      // With an empty day the agenda has nothing to rank: the proposal comes from the contacts and campaigns, read, not offered to read.
+      { label: 'con el día vacío lee sus contactos y campañas para proponer con datos', test: r => !r.actions.includes('agenda.today') || (r.actions.includes('leads.search') && r.actions.includes('campaigns.list')) },
       { label: 'propone algo concreto (incidencias, campañas o contactos)', test: r => /incidenc|campañ|contacto/i.test(r.reply) }] },
   { id: 'recomendacion-hoy', title: 'Qué hacer hoy, dos minutos después', request: 'ok y entonces que me recomiendas hacer hoy para avanzar?',
     history: [{ request: 'hola, que tengo pendiente para hoy?', at: recentAt,
