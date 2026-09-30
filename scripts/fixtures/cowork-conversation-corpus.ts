@@ -5,6 +5,7 @@
 // production outcome it replaces. No database, mailbox or provider is touched.
 import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
+import { coworkUserContextFromProfile } from '../../src/lib/server/cowork/user-context';
 import type { CoworkBlock, CoworkChoices } from '../../src/lib/cowork/contracts';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 
@@ -23,12 +24,29 @@ const ownLeads = [
 
 const unknownCoverage = { gmail: null, outlook: null };
 
-const OFFER = 'Yago SpA. Productos: AXIS: consultas judiciales automáticas en el Poder Judicial (PJUD) para revisar antecedentes laborales de postulantes';
 const PROFILE = { fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl' };
 
-/** What the worker reads once per run (loadCoworkUserContext): the same person
- * and offer that profile.get and app.context return in this workspace. */
-export const CORPUS_USER_CONTEXT: CoworkUserContext = { ...PROFILE, offer: OFFER, offerSource: 'organization' };
+/** The profiles row as «Perfil» saves it (buildProfileUpdate): the offer lives in
+ * signatures.profile_extended, next to an email signature that must never reach the model. */
+export const CORPUS_PROFILE_ROW = {
+  id: '00000000-0000-4000-8000-000000000001', full_name: PROFILE.fullName, job_title: PROFILE.jobTitle,
+  company_name: PROFILE.companyName, company_domain: PROFILE.companyDomain, email: 'ventas@yago.cl',
+  signatures: {
+    gmail: { enabled: true, html: '<p>Nicolás Y. · Yago SpA · +56 9 1234 5678</p>' },
+    profile_extended: {
+      role: PROFILE.jobTitle, sector: 'Software B2B para RR. HH. y cumplimiento',
+      description: 'Yago SpA desarrolla AXIS para empresas que incorporan personal de forma masiva.',
+      services: 'AXIS: consultas judiciales automáticas en el Poder Judicial (PJUD), Carga por archivo o por correo, Evidencia auditable de cada consulta',
+      valueProposition: 'AXIS consulta en el PJUD por persona o por lote y entrega resultados consolidados para revisar antecedentes laborales de postulantes, sin trabajo manual.',
+      proofPoints: ['Procesa 1.000 personas en unos 30 minutos.'],
+    },
+  },
+};
+
+/** What the worker reads once per run (loadCoworkUserContext), built from that row by the
+ * same function: the person, the offer and what completes it. */
+export const CORPUS_USER_CONTEXT: CoworkUserContext = coworkUserContextFromProfile(CORPUS_PROFILE_ROW);
+const OFFER = CORPUS_USER_CONTEXT.offer;
 
 /** Compact copies of production results, keyed by action (and input when it matters). */
 export function corpusRead(action: string, input: string): unknown {
@@ -59,7 +77,7 @@ export function corpusRead(action: string, input: string): unknown {
     case 'app.context':
       return { scope: 'organization_context', emailConnections: { google: true, outlook: true },
         counts: { leads: 256, contacted: 0, campaigns: 19, activeMissions: 0, openExceptions: 2 }, performance: null,
-        offer: OFFER, offerSource: 'organization' };
+        offer: OFFER, offerSource: 'profile' };
     case 'profile.get':
       return { scope: 'own_profile', profile: { ...PROFILE, email: 'ventas@yago.cl' }, signatures: [] };
     case 'metrics.overview':
@@ -270,4 +288,11 @@ export const CORPUS: CorpusCase[] = [
     production: { run: '2b56981d', latencySeconds: 97, scores: { comprension: 5, veracidad: 4, utilidad: 4, claridad: 4, friccion: 4 }, problem: 'Buena, pero filtra «do_not_contact» y no ofrece revisar bajas antes de una campaña.' },
     checks: [...CORPUS_COMMON_CHECKS, { label: 'consulta el marco legal', test: r => r.actions.includes('compliance.law') },
       { label: 'aclara que no es asesoría legal', test: r => /asesor[ií]a legal/i.test(r.reply) }] },
+  { id: 'que-puedes-hacer-tu', title: '¿Qué puedes hacer tú?', request: 'que puedes hacer tu ?',
+    origin: 'Turno de producción del 30 sep (captura del usuario): con la oferta cargada en Perfil, respondió «No veo … qué ofrece Yago» y preguntó por la oferta; la Jueza reemplazó la primera respuesta a la vista.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'nombra su oferta (AXIS)', test: r => /axis/i.test(r.reply) },
+      { label: 'no pregunta qué vende el usuario', test: r => !/qué (?:producto|servicio|vendes|ofreces?|ofrece)/i.test(r.reply + (r.question || '')) },
+      { label: 'no dice lo que no ve', test: r => !/\bno (?:veo|tengo a la vista|aparece)/i.test(r.reply) },
+      { label: 'menciona correos o campañas y LinkedIn', test: r => /correo|campa/i.test(r.reply) && /linkedin/i.test(r.reply) }] },
 ];
