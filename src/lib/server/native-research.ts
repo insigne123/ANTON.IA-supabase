@@ -163,7 +163,7 @@ type OfficialSiteSegment = {
   locator: string;
 };
 
-type OfficialSiteResult = OfficialSitePage & {
+export type OfficialSiteResult = OfficialSitePage & {
   pages?: OfficialSitePage[];
 };
 
@@ -717,7 +717,7 @@ async function fetchOfficialPage(input: {
   return { page: null, html: '', warning: 'official_site_redirect_limit' };
 }
 
-async function fetchOfficialSite(input: {
+export async function fetchOfficialSite(input: {
   domain: string;
   country?: string | null;
   maxPages?: number;
