@@ -55,10 +55,12 @@ export const COWORK_JUDGE_INSTRUCTIONS = judgeRules(false);
  * the same rubric, stricter with offering what Cowork could do right away. The offline judge
  * keeps COWORK_JUDGE_INSTRUCTIONS as it is, so the evaluation does not move with it.
  */
+/** The work's date is the clock of the conversation, not the day the judge runs: the judge counts days from it. */
+export const COWORK_JUDGE_NOW_RULE = 'ahora es la fecha y hora del trabajo: cuenta los días desde ella, no desde la fecha de hoy.';
 const TURN_RULE = [
   `Esta revisión ocurre antes de mostrar la respuesta, y Cowork todavía puede corregirla. Cómo debe cerrar una respuesta: ${COWORK_NEXT_STEP_RULE}`,
   'Si la pregunta final ofrece algo que Cowork podía hacer ahora sin aprobación y que el pedido necesitaba, la fricción es 2 o menos, y el problema dice qué debió hacer. No es fricción ofrecer una acción que necesita aprobación ni preguntar una decisión que solo el usuario puede tomar, y los botones pueden ofrecer otros pedidos. Ante una pregunta general («¿qué puedes hacer?», una explicación), presentar las capacidades y ofrecer un primer paso con aprobación no es fricción: no le exijas consultas que el pedido no necesita.',
-  'ahora es la fecha y hora del trabajo: cuenta los días desde ella, no desde la fecha de hoy.',
+  COWORK_JUDGE_NOW_RULE,
 ].join('\n');
 export const COWORK_JUDGE_TURN_INSTRUCTIONS = [COWORK_JUDGE_INSTRUCTIONS, TURN_RULE].join('\n');
 
@@ -130,6 +132,9 @@ export function coworkJudgePrompt(input: {
   /** The judge in the turn reads every read within a budget (coworkJudgeEvidence) and the work's
    * date; offline it keeps the first six reads, cut at 2,500 characters, as it was calibrated. */
   evidence?: { now: Date; timeZone?: string };
+  /** The work's date alone, for the offline judge: its reads keep the calibrated budget, but «hoy» is the conversation's day and not the
+   * day the judge runs (a world dated the 25th read on the 30th made every «today» list look stale). Pair it with COWORK_JUDGE_NOW_RULE. */
+  now?: Date;
 }) {
   const recent = (input.history || []).slice(-3);
   const card = input.shown.proposal
@@ -141,7 +146,8 @@ export function coworkJudgePrompt(input: {
     historial: recent.map(turn => ({ pedido: clip(turn.request, 600), respuesta: clip(turn.reply, 800) })),
     datosDelHistorial: recent.flatMap(turn => turn.observations || []).slice(-4).map(observation => clip(observation, 2000)),
     usuario: input.userContext ?? null,
-    ...(input.evidence ? { ahora: coworkLocalStamp(input.evidence.now, input.evidence.timeZone ?? coworkTimeZone()) } : {}),
+    ...(input.evidence ? { ahora: coworkLocalStamp(input.evidence.now, input.evidence.timeZone ?? coworkTimeZone()) }
+      : input.now ? { ahora: coworkLocalStamp(input.now, coworkTimeZone()) } : {}),
     datosConsultados: input.evidence
       ? coworkJudgeEvidence(input.observations || [], { timeZone: input.evidence.timeZone })
       : (input.observations || []).slice(0, 6).map(observation => clip(observation, 2500)),
