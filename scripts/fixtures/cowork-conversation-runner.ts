@@ -113,6 +113,15 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   return scoreCorpusCase(entry, result);
 }
 
+/** The data the model saw in a corpus turn, replayed from the fixture with the same inputs. */
+export function corpusObservations(entry: CorpusCase, result: CorpusTurnResult) {
+  const read = entry.world?.read ?? corpusRead;
+  const reads = result.reads?.length ? result.reads : result.actions.map(action => ({ action, input: '' }));
+  return reads.map(({ action, input }) => {
+    try { return { action, input, result: read(action, input) }; } catch { return { action, input, result: null }; }
+  });
+}
+
 /** What the person saw in a corpus turn. */
 export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
   const campaign = result.proposal?.campaign as { name?: unknown; objective?: unknown; messages?: unknown; emails?: unknown } | undefined;
