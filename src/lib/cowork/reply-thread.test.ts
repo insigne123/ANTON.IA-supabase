@@ -57,6 +57,11 @@ test('when the account answered is given, and what to do with each advice is sai
   assert.match(coworkReplyThread(replied(), NOW).next, /email_draft/);
   assert.match(coworkReplyThread(replied(), NOW).next, /Contactados/);
   assert.match(coworkReplyThread(replied(), NOW).next, /No propongas crear una campaña/);
+  // What the user decides is asked of the person or left to a conversation, never said to be «pendiente de definición».
+  assert.match(coworkReplyThread(replied(), NOW).next, /ni le dice a la persona que está «pendiente de definición»/);
+  // The others who wait are offered as the next step, not read or drafted now.
+  assert.match(coworkReplyThread(base(), NOW).next, /no leas su conversación ni redactes nada ahora/);
+  assert.match(coworkReplyThread(replied({ conversation_outbound_at: '2026-09-29T10:00:00Z' }), NOW).next, /no leas su conversación ni redactes nada ahora/);
   assert.match(coworkReplyThread(base(), NOW).next, /todavía no ha respondido/);
   assert.match(coworkReplyThread(replied({ reply_intent: 'auto_reply' }), NOW).next, /aviso automático/);
   assert.match(coworkReplyThread(replied({ reply_intent: 'unsubscribe' }), NOW).next, /no redactes nada/);
