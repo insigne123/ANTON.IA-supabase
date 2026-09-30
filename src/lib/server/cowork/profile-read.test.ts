@@ -16,3 +16,16 @@ test('profile rejects foreign rows and database errors', async()=>{
     await assert.rejects(readCoworkProfile({from:()=>chain} as never,{userId:id,organizationId:id},''));
   }
 });
+test('profile.get shows what «Perfil» saved, never the email signature html', async()=>{
+  const signatures={gmail:{enabled:true,html:'<p>Ana · +56 9 1111 2222</p>'},profile_extended:{role:'Gerente',sector:'Software',description:'Hacemos AXIS',
+    services:'AXIS, SADT',valueProposition:'Consultas PJUD por lote',proofPoints:['1.000 personas en 30 minutos']}};
+  const read=async(row:unknown)=>{
+    const chain={select:()=>chain,eq:()=>chain,maybeSingle:async()=>({data:row,error:null})};
+    return await readCoworkProfile({from:()=>chain} as never,{userId:id,organizationId:id},'') as {commercial:Record<string,string|null>|null};
+  };
+  const result=await read({id,full_name:'Ana',job_title:'Gerente Comercial',signatures});
+  assert.deepEqual(result.commercial,{role:'Gerente Comercial',sector:'Software',description:'Hacemos AXIS',services:'AXIS, SADT',
+    valueProposition:'Consultas PJUD por lote',proofPoints:'1.000 personas en 30 minutos'});
+  assert.equal(JSON.stringify(result.commercial).includes('+56'),false);
+  assert.equal((await read({id,full_name:'Ana'})).commercial,null,'nothing saved, nothing shown');
+});
