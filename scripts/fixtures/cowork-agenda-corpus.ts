@@ -42,6 +42,10 @@ const world = (input: AgendaInput): NonNullable<CorpusCase['world']> => {
 const normalize = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const shown = (result: CorpusTurnResult) => normalize(corpusShown(result));
 const says = (label: string, ...patterns: RegExp[]) => ({ label, test: (result: CorpusTurnResult) => patterns.every(pattern => pattern.test(shown(result))) });
+/** Any one of the ways the coordinator may put it. */
+const saysAny = (label: string, ...patterns: RegExp[]) => ({ label, test: (result: CorpusTurnResult) => patterns.some(pattern => pattern.test(shown(result))) });
+/** The people who wait, however it is worded: «3 interesados», «3 personas esperando respuesta», «3 respuestas de interés». */
+const WAITING = '(?:interesad|personas? (?:que )?(?:esperan|esperando)|esperan (?:una )?respuesta|esperando (?:una )?respuesta|por responder|sin respuesta|de interes)';
 const avoids = (label: string, ...patterns: RegExp[]) => ({ label, test: (result: CorpusTurnResult) => patterns.every(pattern => !pattern.test(shown(result))) });
 const before = (label: string, first: RegExp, second: RegExp) => ({ label, test: (result: CorpusTurnResult) => {
   const text = shown(result); const at = text.search(first); const later = text.search(second);
@@ -49,6 +53,8 @@ const before = (label: string, first: RegExp, second: RegExp) => ({ label, test:
 } });
 /** The whole day in one read: the list comes counted and ranked, so nothing else is worth reading. */
 const onlyTheAgenda = { label: 'consulta la lista del día en una sola lectura', test: (result: CorpusTurnResult) => result.actions.length === 1 && result.actions[0] === 'agenda.today' };
+const tableOfExactly = (label: string, rows: number) => ({ label, test: (result: CorpusTurnResult) =>
+  (result.blocks || []).some(block => block.type === 'table' && (block as { rows: unknown[] }).rows.length === rows) });
 const noEffect = { label: 'no propone nada sin tu aprobación ni envía', test: (result: CorpusTurnResult) => !result.proposal && !result.search };
 const asksTheFirstStep = (label: string, pattern: RegExp) => ({ label, test: (result: CorpusTurnResult) => {
   const last = normalize(result.question || result.reply).split(/(?<=[.!?])\s+/).filter(Boolean).pop() || '';
@@ -63,9 +69,9 @@ export const AGENDA_CORPUS: CorpusCase[] = [
     world: world(fullDay()),
     checks: [...CORPUS_COMMON_CHECKS,
       onlyTheAgenda,
-      says('da las cifras exactas: 3 interesados, 47 seguimientos y 1 rebote', /\b3\b[^.]{0,40}interesad/, /\b47\b/, /\b1\b[^.]{0,30}rebot|rebot[^.]{0,30}\b1\b/),
+      says('da las cifras exactas: 3 interesados, 47 seguimientos y 1 rebote', new RegExp(`\\b3\\b[^.]{0,40}${WAITING}`), /\b47\b/, /\b1\b[^.]{0,30}rebot|rebot[^.]{0,30}\b1\b/),
       says('nombra al que pidió reunión y dice cuánto lleva esperando', /marcela rojas/, /(\b4\b|cuatro) dias/),
-      before('las personas que respondieron van antes que los seguimientos que salen solos', /interesad/, /seguimiento/),
+      before('las personas que respondieron van antes que los seguimientos que salen solos', new RegExp(`${WAITING}|marcela`), /seguimiento/),
       says('las autorrespuestas van aparte y no cuentan como respuestas', /(autorrespuesta|(respuesta|mensaje|correo)s? automatic)/, /(no cuent|no estan contad|no las cont|no se cuent|aparte|no son respuesta)/),
       avoids('no suma la reunión pedida a los interesados: son 3, no 4', /\b(4|cuatro) (personas|interesad|empresas|cuentas)/),
       says('el que se enfrió se retoma, no solo se responde', /ivan herrera/, /(retom|enfri|reviv)/),
@@ -80,8 +86,10 @@ export const AGENDA_CORPUS: CorpusCase[] = [
     world: world({ ...fullDay(), followups: [], sources: { interested: 'ok', attention: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'unavailable', linkedin: 'ok' } }),
     checks: [...CORPUS_COMMON_CHECKS,
       onlyTheAgenda,
-      says('sigue con lo que sí pudo ver: los 3 interesados', /\b3\b[^.]{0,40}(interesad|de interes)/),
-      says('dice que no pudo revisar los seguimientos de las campañas', /no (se )?(pude|pudo|alcance a|logre|logro|consegui)[^.]{0,60}(revisar|ver|consultar|calcular)[^.]{0,60}(seguimiento|campan)/),
+      says('sigue con lo que sí pudo ver: los 3 interesados', new RegExp(`\\b3\\b[^.]{0,40}${WAITING}`)),
+      saysAny('dice que no pudo revisar los seguimientos de las campañas',
+        /no (se )?(pude|pudo|pudieron|alcance a|logre|logro|consegui)[^.]{0,60}(revisar|ver|consultar|calcular)[^.]{0,60}(seguimiento|campan)/,
+        /(seguimiento|campan)[^.]{0,60}no (se )?(pude|pudo|pudieron|pueden|alcanz|logr|consegui)/),
       avoids('no da los seguimientos por cero ni por revisados', /no (hay|tienes|salen|quedan) (ningun )?seguimiento/, /\b(0|cero) seguimientos/,
         /seguimientos?[^.]{0,50}\b(son|es|hay|salen|quedan|listos?)\b[^.]{0,12}\b(0|cero)\b/, /47 seguimientos/),
       asksTheFirstStep('cierra con una sola pregunta sobre el siguiente paso', /(respuesta|responde|interesad|revis|seguimiento)/),
@@ -92,8 +100,11 @@ export const AGENDA_CORPUS: CorpusCase[] = [
       { ...HECTOR, daysWaiting: 3, intent: 'positive' }] }),
     checks: [...CORPUS_COMMON_CHECKS,
       onlyTheAgenda,
-      says('cuenta a Servicios Norte una sola vez: 2 empresas y 3 personas', /\b(2|dos) empresas/, /\b(3|tres) personas/),
+      says('cuenta a las 3 personas', /\b(3|tres) personas/),
       avoids('no cuenta 3 empresas', /\b(3|tres) (empresas|cuentas)/),
+      tableOfExactly('Servicios Norte va en una sola fila: 2 filas para 3 personas', 2),
+      saysAny('atribuye la reunión a quien la pidió: Gerardo, no los dos', /gerardo[^.]{0,50}(pidio|solicit|quiere)[^.]{0,30}reunion/, /reunion[^.]{0,50}(pidio|solicit|de) gerardo/, /gerardo pidio/),
+      avoids('no dice que los dos pidieron la reunión', /(marcela y gerardo|gerardo y marcela|los dos|ambos)[^.]{0,50}(pidi|solicit)[^.]{0,30}reunion/),
       says('nombra a las dos personas de Servicios Norte', /marcela/, /gerardo/),
       before('la empresa que pidió reunión va antes', /servicios norte/, /casino central/),
       asksTheFirstStep('cierra con el primer paso: responderles', /(respuesta|responde|interesad|servicios norte)/),

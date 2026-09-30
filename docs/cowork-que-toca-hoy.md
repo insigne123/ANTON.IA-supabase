@@ -42,7 +42,7 @@ Un extracto de lo que lee el coordinador (el día completo del caso `agenda-toca
 
 ### Reglas que fija el código
 
-- **Una empresa cuenta una vez.** Se agrupa por dominio corporativo (o por el nombre de la empresa cuando escriben desde una casilla compartida como Gmail), con la misma clave que usa el envío (`companyKeysFor`). Si escribieron dos colegas, es una empresa y `people` dice cuántos.
+- **Una empresa cuenta una vez.** Se agrupa por dominio corporativo (o por el nombre de la empresa cuando escriben desde una casilla compartida como Gmail), con la misma clave que usa el envío (`companyKeysFor`). Si escribieron dos colegas, es una empresa, `people` dice cuántos y `askedForMeeting` quién pidió la reunión (en una prueba con el modelo real, sin ese dato, atribuyó la reunión a los dos colegas cuando la pidió uno).
 - **Una respuesta de esta mañana ya es de hoy.** `replies.stalled` empieza a contar a las 48 horas; la agenda no espera (`selectStalledInterested(rows, now, 0)`). Descarta los que ya recibieron una respuesta nuestra y los que tienen un compromiso abierto.
 - **Las respuestas automáticas son información.** Se cuentan aparte (`autoReplies`, solo las de los últimos 7 días) y nunca se suman a las respuestas ni generan un ítem.
 - **Un rebote es noticia por dos semanas.** Los más antiguos son direcciones muertas que el motor ya evita. Una falla temporal (casilla llena, un error pasajero: `retry_later`) no pide corregir ninguna dirección, solo volver a intentar más tarde: se cuenta aparte en `softBounces` y no genera un ítem.

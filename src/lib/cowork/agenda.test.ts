@@ -55,6 +55,8 @@ test('the list goes by commercial value: people who answered, then decisions, th
   assert.deepEqual(agenda.items.map(item => item.rank), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   assert.equal(agenda.items[0].who, 'Marcela Rojas');
   assert.equal(agenda.items[0].action, 'reply');
+  assert.deepEqual(agenda.items[0].askedForMeeting, ['Marcela Rojas']);
+  assert.equal(agenda.items[1].askedForMeeting, undefined, 'only an account that asked for a meeting says who did');
   assert.equal(agenda.items[5].action, 'revive');
   assert.equal(agenda.items[7].action, 'let_run');
   assert.equal(agenda.items[8].action, 'fix_email');
@@ -114,6 +116,7 @@ test('colleagues of one company are one account, found by the corporate domain a
   assert.equal(account!.kind, 'meeting_request', 'one colleague asking for a meeting makes the account a meeting request');
   assert.equal(account!.people, 2);
   assert.deepEqual(account!.names, ['Marcela Rojas', 'Gerardo Paz']);
+  assert.deepEqual(account!.askedForMeeting, ['Gerardo Paz'], 'the meeting was asked for by Gerardo, not by Marcela');
   assert.equal(account!.who, 'Marcela Rojas', 'the one who has waited longest');
   assert.equal(account!.daysWaiting, 5);
 });

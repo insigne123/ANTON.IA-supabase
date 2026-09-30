@@ -63,8 +63,9 @@ export type AgendaItem = {
   rank: number; kind: AgendaKind; action: AgendaAction;
   /** The person who has waited longest at this account, and the company; null on aggregate items. */
   who: string | null; company: string | null;
-  /** Accounts: how many people of the company wrote (colleagues count once per person) and up to three of their names. */
-  people?: number; names?: string[];
+  /** Accounts: how many people of the company wrote (colleagues count once per person) and up to three of their names, and
+   * which of them asked for the meeting: the request belongs to them, not to the colleagues who only showed interest. */
+  people?: number; names?: string[]; askedForMeeting?: string[];
   daysWaiting?: number;
   /** Aggregate items (approvals, campaign steps, LinkedIn, bounces): how many things they stand for and a few examples. */
   count?: number; examples?: string[];
@@ -107,7 +108,7 @@ const ORDER: Record<AgendaKind, number> = {
   cooled_lead: 6, linkedin_accepted: 7, followups_due: 8, bounce: 9,
 };
 
-type Account = { who: string | null; company: string | null; people: number; names: string[]; oldest: number; freshest: number; intents: string[] };
+type Account = { who: string | null; company: string | null; people: number; names: string[]; askedForMeeting: string[]; oldest: number; freshest: number; intents: string[] };
 
 /** One account per corporate domain (or company name for shared mailboxes): two colleagues who wrote count as one company. */
 function groupAccounts(rows: Array<AgendaReplyInput & { intent?: string }>): Account[] {
@@ -132,6 +133,8 @@ function groupAccounts(rows: Array<AgendaReplyInput & { intent?: string }>): Acc
       company: members.map(member => member.company).find(company => company && company.trim()) || null,
       people: people.length,
       names: people.map(person => person.name).filter((name): name is string => Boolean(name)).slice(0, 3),
+      askedForMeeting: [...new Set(people.filter(person => person.intent === 'meeting_request')
+        .map(person => person.name || person.email).filter((name): name is string => Boolean(name)))].slice(0, 3),
       oldest: Math.max(...members.map(member => member.daysWaiting)),
       freshest: Math.min(...members.map(member => member.daysWaiting)),
       intents: members.map(member => String(member.intent || '')),
@@ -151,6 +154,7 @@ export function buildCoworkAgenda(input: AgendaInput): CoworkAgenda {
   for (const account of live) {
     unranked.push({ kind: asks(account) ? 'meeting_request' : 'interested_reply', action: 'reply',
       who: account.who, company: account.company, people: account.people, names: account.names,
+      ...(asks(account) ? { askedForMeeting: account.askedForMeeting } : {}),
       daysWaiting: account.oldest, sort: -account.oldest });
   }
   for (const account of cooled) {
