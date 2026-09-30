@@ -51,9 +51,10 @@ export function axisReferencePrompt(entry: CorpusCase, input: { shown: Parameter
 }
 
 /** Counts of verdicts, in the order of the scale. */
-export function axisReferenceSummary(rows: Array<{ reference?: AxisReference | null; op?: string; block?: string; capability?: string }>) {
+export function axisReferenceSummary(rows: Array<{ reference?: AxisReference | null; op?: string; block?: string; capability?: string; star?: boolean }>) {
   const count = (list: typeof rows) => Object.fromEntries(AXIS_REFERENCE_VERDICTS.map(verdict => [verdict, list.filter(row => row.reference?.veredicto === verdict).length]));
   const judged = rows.filter(row => row.reference);
   const groupBy = (key: 'block' | 'capability') => Object.fromEntries([...new Set(judged.map(row => String(row[key])))].map(name => [name, count(judged.filter(row => row[key] === name))]));
-  return { judged: judged.length, verdicts: count(judged), byBlock: groupBy('block'), byCapability: groupBy('capability') };
+  return { judged: judged.length, verdicts: count(judged), byBlock: groupBy('block'), byCapability: groupBy('capability'),
+    byStar: { star: count(judged.filter(row => row.star)), rest: count(judged.filter(row => !row.star)) } };
 }

@@ -14,6 +14,7 @@ const checks = [
     .map(name => [`scripts/test-cowork-${name}.mjs`]),
   ['--loader', './scripts/ts-test-loader.mjs', 'scripts/test-cowork-send-email.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-axis-paquete.test.ts'],
+  ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-axis-resto.test.ts'],
 ];
 for (const args of checks) {
   const result = spawnSync(process.execPath, args, { stdio: 'inherit', env: { ...process.env, NODE_ENV: 'test' } });

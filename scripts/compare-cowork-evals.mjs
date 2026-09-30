@@ -49,7 +49,7 @@ function summarize({ label, files }) {
   for (const outcome of outcomes) {
     const row = judged.get(`${outcome.id}#${outcome.attempt}`);
     const op = row?.op || outcome.id;
-    const entry = perOp.get(op) || { id: outcome.id, op, block: row?.block || null, capability: row?.capability || null, runs: 0, passed: 0, checks: [0, 0], reference: [], verdicts: [] };
+    const entry = perOp.get(op) || { id: outcome.id, op, block: row?.block || null, capability: row?.capability || null, star: Boolean(row?.star), runs: 0, passed: 0, checks: [0, 0], reference: [], verdicts: [] };
     entry.runs++;
     if (outcome.passed) entry.passed++;
     entry.checks[0] += outcome.checks.filter(check => check.passed).length;
@@ -89,7 +89,7 @@ if (flags.has('--markdown')) {
     const ops = [...new Set(results.flatMap(result => result.perOp.map(entry => entry.op)))].sort();
     for (const op of ops) {
       const first = results.flatMap(result => result.perOp).find(entry => entry.op === op);
-      console.log(`| ${op}${first?.capability ? ` (${first.capability})` : ''} | ${results.map(result => {
+      console.log(`| ${op}${first?.star ? ' ★' : ''}${first?.capability ? ` (${first.capability})` : ''} | ${results.map(result => {
         const entry = result.perOp.find(item => item.op === op);
         return entry ? `${entry.checks[0]}/${entry.checks[1]} · ${entry.reference.length ? [...new Set(entry.reference)].join(', ') : '—'}` : '—';
       }).join(' | ')} |`);

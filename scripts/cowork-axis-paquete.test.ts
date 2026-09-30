@@ -3,31 +3,11 @@
 // or without saying what it cannot do must not. That is what makes a run with the real model mean something.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { AXIS_CASE_IDS, AXIS_CORPUS, AXIS_LEAD, AXIS_PROFILE_ROW, axisUserContext } from './fixtures/cowork-axis-paquete';
-import { runCorpusCase, type CorpusDecider } from './fixtures/cowork-conversation-runner';
+import { degrade, draft, ideal, naive, read, vacuous, yes, type IdealDecider } from './fixtures/cowork-axis-ideal';
+import { runCorpusCase } from './fixtures/cowork-conversation-runner';
 
-type Read = { action: string; input: string };
-type Chip = { label: string; message: string };
-type Block = Record<string, unknown>;
-const parallel = (reads: Read[]) => coworkDecisionSchema.parse({ action: 'reads.parallel', query: null, leadId: null, answer: null, reads });
-const answer = (reply: string, suggestions: Chip[], blocks?: Block[]) =>
-  coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document: null, suggestions, ...(blocks ? { blocks } : {}) } });
-const yes = (message: string): Chip[] => [{ label: 'Sí, adelante', message }];
-const draft = (title: string, to: string, subject: string, body: string) => ({ type: 'email_draft', title, to: [to], subject, body });
-
-/** Reads in rounds (up to three at once, as the loop allows), then the answer. */
-const ideal = (rounds: Read[][], reply: string, suggestions: Chip[], blocks?: Block[]): CorpusDecider => async context => {
-  let seen = 0;
-  for (const round of rounds) {
-    if (context.observations.length <= seen) return parallel(round);
-    seen += round.length;
-  }
-  return answer(reply, suggestions, blocks);
-};
-const read = (action: string, input = ''): Read => ({ action, input });
-
-const IDEAL: Record<string, CorpusDecider> = {
+const IDEAL: Record<string, IdealDecider> = {
   'axis-a2-mercado': ideal([[read('audience.analyze'), read('metrics.rates')]],
     'Miré tu propia base antes de armar el plan y la hipótesis cambia.\n- Construcción: 557 contactos y solo el 47 % trabajado (53 % sin contactar): el terreno más fresco de los que nombraste.\n- Aseo y outsourcing: 186 contactos y 81 % ya trabajado, casi agotado.\n- Seguridad: 84 contactos y 62 % ya trabajado, poco margen.\n- Minería, logística, retail, salud y hotelería: 1.619 contactos y solo 13 % trabajado; no los nombraste y es el pool más grande.\nPlan: parto por construcción y ese grupo. Busco personas en Chile (por la ubicación de la persona, no de la casa matriz) con cargos en español e inglés (jefe de reclutamiento, gestión de personas, administración, recruitment manager), cruzo con tu historial antes de enriquecer y mido a las 72 horas contra la línea base de 1,2 % de respuesta por persona: si no la supera, cambiamos de vertical.\nNo sé cuántas personas nuevas hay en el proveedor hasta buscarlas; la búsqueda no gasta créditos, pero necesita tu aprobación.\n¿Preparo la búsqueda de construcción con esos cargos?',
     yes('Sí, prepara la búsqueda de construcción')),
@@ -114,9 +94,6 @@ const IDEAL: Record<string, CorpusDecider> = {
     yes('Sí, prepara la minuta')),
 };
 
-/** A turn that does not look, does not say what it cannot do and hands the work back. */
-const naive: CorpusDecider = async () => answer('Puedo ayudarte con eso.\n¿Qué quieres hacer primero?', yes('Sí, adelante'));
-
 test('the benchmark has the 20 ★ operations of the package, each with what the previous AI had to do, achieved and failed at', () => {
   assert.deepEqual(AXIS_CORPUS.map(entry => entry.id), AXIS_CASE_IDS);
   assert.deepEqual(Object.keys(IDEAL).sort(), [...AXIS_CASE_IDS].sort());
@@ -151,5 +128,40 @@ for (const entry of AXIS_CORPUS) {
     const outcome = await runCorpusCase(entry, naive);
     assert.equal(outcome.passed, false, 'the checks of this operation must tell a good turn from an empty one');
     assert.ok(outcome.checks.filter(check => !check.passed).length >= 3, `${entry.id}: only ${outcome.checks.filter(check => !check.passed).length} checks noticed`);
+  });
+
+  test(`${entry.axis?.op} · ${entry.title}: reading the right data and saying nothing does not either`, async () => {
+    const outcome = await runCorpusCase(entry, vacuous(IDEAL[entry.id]));
+    assert.equal(outcome.passed, false);
+    assert.ok(outcome.checks.filter(check => !check.passed).length >= 3, `${entry.id}: only ${outcome.checks.filter(check => !check.passed).length} checks noticed`);
+  });
+}
+
+// A check that nobody ever saw fail proves nothing: each of these makes one thing worse in a good turn, and the check that has to
+// notice it is named.
+const swap = (from: string, to: string) => (text: string) => {
+  assert.ok(text.includes(from), `the good turn no longer says: ${from}`);
+  return text.replace(from, to);
+};
+const MUTATIONS: Array<{ id: string; what: string; change: Parameters<typeof degrade>[1]; notices: string }> = [
+  { id: 'axis-a2-mercado', what: 'leaves out the baseline and the decision at 72 hours', notices: 'deja la línea base y la decisión a las 72 horas',
+    change: { reply: swap('mido a las 72 horas contra la línea base de 1,2 % de respuesta por persona: si no la supera, cambiamos de vertical', 'mido después y vemos') } },
+  { id: 'axis-d2-que-toca-hoy', what: 'counts the out-of-office replies as replies', notices: 'no cuenta las autorrespuestas como respuestas: las nombra aparte',
+    change: { reply: swap('Hay 2 autorrespuestas de vacaciones (Retail Sur y Minera Norte): no cuentan como respuestas.', 'Tienes 5 respuestas nuevas.') } },
+  { id: 'axis-e3-invitaciones', what: 'does not count the pending invitations', notices: 'cuenta el cupo: 86 pendientes de unas 100, quedan 14',
+    change: { reply: swap('Cupo: tienes 86 invitaciones pendientes de 100, así que caben 14 (las pendientes son las que ocupan el cupo).', 'Cupo: hay espacio.') } },
+  { id: 'axis-f1-telefono', what: 'invents a phone number', notices: 'no inventa números de teléfono',
+    change: { reply: swap('No invento ningún número.', 'Llama al +56 9 1234 5678.') } },
+  { id: 'axis-g3-automatizacion', what: 'does not find the cause', notices: 'explica la causa: respondieron desde otra dirección de la misma empresa',
+    change: { reply: text => swap(', a otra dirección de la misma empresa', '')(swap('Causa: el detector de respuestas mira solo la dirección exacta a la que se escribió; quien responde desde otro correo de la misma empresa es invisible y la secuencia sigue.', 'Causa: mala suerte.')(text)) } },
+  { id: 'axis-c1-correo-corto', what: 'writes a long email', notices: 'es corto: el cuerpo del correo cabe en 90 palabras',
+    change: { blocks: blocks => blocks.map(card => ({ ...card, body: `${card.body}${'\nAdemás, llevamos años ayudando a empresas de todos los rubros a ordenar sus procesos de selección, con un equipo dedicado, soporte permanente, capacitación a sus equipos y reportes mensuales de cada consulta realizada durante el período.'.repeat(2)}` })) } },
+];
+for (const mutation of MUTATIONS) {
+  test(`${mutation.id}: ${mutation.what}, and a check notices`, async () => {
+    const entry = AXIS_CORPUS.find(item => item.id === mutation.id)!;
+    const outcome = await runCorpusCase(entry, degrade(IDEAL[mutation.id], mutation.change));
+    const failing = outcome.checks.filter(check => !check.passed).map(check => check.label);
+    assert.ok(failing.includes(mutation.notices), `«${mutation.notices}» did not fail; failing: ${failing.join(' | ') || 'none'}`);
   });
 }

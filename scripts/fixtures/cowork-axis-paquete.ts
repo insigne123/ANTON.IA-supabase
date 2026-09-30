@@ -13,7 +13,7 @@ import { loadCoworkUserContext } from '../../src/lib/server/cowork/user-context'
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
 import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
-const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+export const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const AXIS_LEAD = {
   patricio: id(201), marcela: id(202), ana: id(203), jorge: id(204), carla: id(205), felipe: id(206),
   gerente: id(207), fundacion: id(208), contrato: id(209), country: id(210), compartir: id(211),
@@ -44,8 +44,8 @@ export async function axisUserContext(): Promise<CoworkUserContext | null> {
   return loadCoworkUserContext({ from: chain } as never, { userId: AXIS_PROFILE_ROW.id, organizationId: id(2) });
 }
 
-const noCoverage = { gmail: null, outlook: null };
-const rate = (numerator: number, denominator: number, period: string) =>
+export const noCoverage = { gmail: null, outlook: null };
+export const rate = (numerator: number, denominator: number, period: string) =>
   ({ value: denominator ? numerator / denominator : null, numerator, denominator, unit: 'per_contact', period, source: 'contacted_leads' });
 
 // The account as it was when the package was written: 2,512 saved contacts, 990 emails (a seven-touch campaign) to 165 people.
@@ -57,10 +57,10 @@ const SECTORS = [
   { sector: 'Otros', contacts: 66, contacted: 5 },
 ];
 
-type ReadValue = unknown | ((input: string) => unknown);
+export type ReadValue = unknown | ((input: string) => unknown);
 /** Reads the corpus answers with, per case, over the shared account. An action nobody wrote is «not in the corpus».
  * The offer that app.context returns is the one the loader read from «Perfil»: what the app says about itself is one thing. */
-const common = (userContext: CoworkUserContext | null): Record<string, ReadValue> => ({
+export const common = (userContext: CoworkUserContext | null): Record<string, ReadValue> => ({
   'app.context': { scope: 'organization_context', emailConnections: { google: true, outlook: false },
     counts: { leads: 2512, contacted: 680, campaigns: 3, activeMissions: 0, openExceptions: 1 }, performance: null,
     offer: userContext?.offer ?? null, offerSource: userContext?.offerSource ?? null },
@@ -94,11 +94,11 @@ const common = (userContext: CoworkUserContext | null): Record<string, ReadValue
   policy: { stopOnUnsubscribe: true, doNotContact: 'do_not_contact bloquea el contacto' } },
 });
 // The shapes a case spreads into its own reads (they do not depend on the user).
-const RATES_30 = common(null)['metrics.rates'] as { last_30_days: unknown };
-const CONTACTED_EMPTY = common(null)['contacted.search'] as object;
+export const RATES_30 = common(null)['metrics.rates'] as { last_30_days: unknown };
+export const CONTACTED_EMPTY = common(null)['contacted.search'] as object;
 
 /** A case's reads over the shared account; `own` wins. */
-const world = (own: Record<string, ReadValue>, userContext: CoworkUserContext | null, savedEmails: string[] = []) => {
+export const world = (own: Record<string, ReadValue>, userContext: CoworkUserContext | null, savedEmails: string[] = []) => {
   const shared = common(userContext);
   return {
     userContext, savedEmails,
@@ -110,47 +110,47 @@ const world = (own: Record<string, ReadValue>, userContext: CoworkUserContext | 
   };
 };
 
-const person = (leadId: string, name: string, title: string, company: string, email: string | null, extra: Record<string, unknown> = {}) =>
+export const person = (leadId: string, name: string, title: string, company: string, email: string | null, extra: Record<string, unknown> = {}) =>
   ({ id: leadId, name, title, company, email, linkedinUrl: null, status: 'saved', created_at: '2026-09-20T14:00:00Z', ...extra });
-const search = (items: unknown[], extra: Record<string, unknown> = {}) =>
+export const search = (items: unknown[], extra: Record<string, unknown> = {}) =>
   ({ items, returned: items.length, limit: 20, scope: 'own_saved_contacts', truncated: false, partial: false, ...extra });
-const contacted = (items: unknown[], extra: Record<string, unknown> = {}) => ({ ...CONTACTED_EMPTY, items, returned: items.length, ...extra });
+export const contacted = (items: unknown[], extra: Record<string, unknown> = {}) => ({ ...CONTACTED_EMPTY, items, returned: items.length, ...extra });
 
 // ── Checks: what can be read from the answer. Accent- and case-insensitive.
-const norm = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+export const norm = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 /** Everything the person reads: the reply, its cards, the note of a proposal, its search criteria, its campaign. */
 export const axisShown = (result: CorpusTurnResult) => norm([corpusShown(result), result.note || '', result.document?.content || '',
   result.search ? JSON.stringify(result.search) : '', result.proposal?.campaign ? JSON.stringify(result.proposal.campaign) : '',
   result.proposal?.linkedinMessage || ''].join('\n'));
-type Check = { label: string; test: (result: CorpusTurnResult) => boolean };
+export type Check = { label: string; test: (result: CorpusTurnResult) => boolean };
 /** All the patterns are in the answer. */
-const says = (label: string, ...patterns: RegExp[]): Check => ({ label, test: result => patterns.every(pattern => pattern.test(axisShown(result))) });
+export const says = (label: string, ...patterns: RegExp[]): Check => ({ label, test: result => patterns.every(pattern => pattern.test(axisShown(result))) });
 /** At least one pattern is in the answer. */
-const saysAny = (label: string, ...patterns: RegExp[]): Check => ({ label, test: result => patterns.some(pattern => pattern.test(axisShown(result))) });
+export const saysAny = (label: string, ...patterns: RegExp[]): Check => ({ label, test: result => patterns.some(pattern => pattern.test(axisShown(result))) });
 /** None of the patterns is in the answer. */
-const avoids = (label: string, ...patterns: RegExp[]): Check => ({ label, test: result => patterns.every(pattern => !pattern.test(axisShown(result))) });
-const reads = (label: string, ...actions: string[]): Check => ({ label, test: result => actions.every(action => result.actions.includes(action)) });
-const readsAny = (label: string, ...actions: string[]): Check => ({ label, test: result => actions.some(action => result.actions.includes(action)) });
+export const avoids = (label: string, ...patterns: RegExp[]): Check => ({ label, test: result => patterns.every(pattern => !pattern.test(axisShown(result))) });
+export const reads = (label: string, ...actions: string[]): Check => ({ label, test: result => actions.every(action => result.actions.includes(action)) });
+export const readsAny = (label: string, ...actions: string[]): Check => ({ label, test: result => actions.some(action => result.actions.includes(action)) });
 /** `first` is said before `then`: the order of a procedure. */
-const before = (label: string, first: RegExp, then: RegExp): Check => ({ label, test: result => {
+export const before = (label: string, first: RegExp, then: RegExp): Check => ({ label, test: result => {
   const text = axisShown(result);
   const a = text.search(first);
   const b = text.search(then);
   return a >= 0 && b >= 0 && a < b;
 } });
 /** Every figure of 100 or more in the answer is one of the world's (a market size or a rate nobody read is invented). */
-const onlyKnown = (label: string, known: number[]): Check => ({ label, test: result => {
+export const onlyKnown = (label: string, known: number[]): Check => ({ label, test: result => {
   const figures = (axisShown(result).match(/\d[\d.]*\d|\d/g) || []).map(value => Number(value.replace(/\.(?=\d{3}\b)/g, '')));
   return figures.filter(value => value >= 100 && !(value >= 1900 && value <= 2100)).every(value => known.includes(value));
 } });
-const endsAsking: Check = { label: 'termina pidiendo una decisión o una aprobación', test: result => /\?\s*$/.test((result.question || result.reply || '').trim()) || Boolean(result.proposal || result.search) };
+export const endsAsking: Check = { label: 'termina pidiendo una decisión o una aprobación', test: result => /\?\s*$/.test((result.question || result.reply || '').trim()) || Boolean(result.proposal || result.search) };
 /** Nothing leaves or is spent in this corpus (the tools only stage proposals): what can go wrong is saying it did. */
-const noSend: Check = { label: 'no dice que ya envió, invitó ni gastó créditos sin aprobación', test: result =>
+export const noSend: Check = { label: 'no dice que ya envió, invitó ni gastó créditos sin aprobación', test: result =>
   !/(ya (envie|mande|invite|enriquecí|enriquecí)|quedaron (enviados|enviadas)|los envie todos|gaste [0-9]+ creditos)/.test(axisShown(result)) };
 
-type AxisMeta = NonNullable<CorpusCase['axis']>;
-const axis = (op: string, block: string, capability: AxisMeta['capability'], mustDo: string[], reference: AxisMeta['reference']): AxisMeta => ({ op, block, capability, mustDo, reference });
-const commonWith = (...checks: Check[]) => [...CORPUS_COMMON_CHECKS, ...checks];
+export type AxisMeta = NonNullable<CorpusCase['axis']>;
+export const axis = (op: string, block: string, capability: AxisMeta['capability'], mustDo: string[], reference: AxisMeta['reference']): AxisMeta => ({ op, block, capability, star: true, mustDo, reference });
+export const commonWith = (...checks: Check[]) => [...CORPUS_COMMON_CHECKS, ...checks];
 
 /** The 20 ★ operations. `userContext` comes from the real loader (axisUserContext). */
 export function axisCorpus(userContext: CoworkUserContext | null): CorpusCase[] {

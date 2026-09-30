@@ -17,11 +17,12 @@ import {
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_USER_CONTEXT, corpusRead, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
+import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { AXIS_REFERENCE_INSTRUCTIONS, axisReferencePrompt, axisReferenceSchema, axisReferenceSummary, type AxisReference } from './fixtures/cowork-axis-judge';
 import { JUDGE_CALIBRATION } from './fixtures/cowork-judge-calibration';
 import { corpusShownAnswer } from './fixtures/cowork-conversation-runner';
 
-const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS];
+const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS, ...AXIS_REST_CORPUS];
 
 /** The data the model saw, replayed from the fixture with the same inputs. */
 function observationsFor(entry: CorpusCase, result: CorpusTurnResult) {
@@ -87,7 +88,7 @@ async function main() {
     const source = JSON.parse(readFileSync(input, 'utf8')) as { outcomes: Array<{ id: string; attempt: number; passed: boolean; result: CorpusTurnResult }> };
     const selected = arg('cases')?.split(',').filter(Boolean);
     const rows: Array<{ id: string; attempt: number; passedChecks: boolean; judgement: CoworkJudgement | null;
-      reference?: AxisReference | null; op?: string; block?: string; capability?: string }> = [];
+      reference?: AxisReference | null; op?: string; block?: string; capability?: string; star?: boolean }> = [];
     for (const outcome of source.outcomes) {
       if (selected && !selected.includes(outcome.id)) continue;
       const entry = CORPUS.find(item => item.id === outcome.id);
@@ -102,7 +103,7 @@ async function main() {
       }));
       const compared = entry.axis ? await reference(axisReferencePrompt(entry, { shown, observations, userContext })) : undefined;
       rows.push({ id: outcome.id, attempt: outcome.attempt, passedChecks: outcome.passed, judgement,
-        ...(entry.axis ? { reference: compared ?? null, op: entry.axis.op, block: entry.axis.block, capability: entry.axis.capability } : {}) });
+        ...(entry.axis ? { reference: compared ?? null, op: entry.axis.op, block: entry.axis.block, capability: entry.axis.capability, star: Boolean(entry.axis.star) } : {}) });
       if (judgement) console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id} #${outcome.attempt} · ${COWORK_JUDGE_DIMENSIONS.map(dimension => judgement.scores[dimension]).join('/')} · ${judgement.veredicto}${judgement.problemas.length ? ` · ${judgement.problemas.join(' | ')}` : ''}${compared ? ` · frente a la IA anterior: ${compared.veredicto} (${compared.motivo})` : ''}`);
     }
     const judged = rows.flatMap(row => row.judgement ? [row] : []);
