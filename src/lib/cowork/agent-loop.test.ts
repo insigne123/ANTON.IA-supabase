@@ -327,6 +327,48 @@ test('importing contacts is proposed only when it is on, for a file seen in the 
   assert.equal(proposals.length, 1);
 });
 
+test('replying in a thread is proposed only when it is on, for a conversation read with replies.thread whose advice is reply', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const contactedId = '00000000-0000-4000-8000-000000000021';
+  const otherId = '00000000-0000-4000-8000-000000000022';
+  const proposals: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
+  const thread = (overrides: Record<string, unknown> = {}) => ({ scope: 'own_reply_thread', available: true, contactedId, name: 'Marcela Rojas', company: 'Servicios Norte',
+    advice: 'reply', canReplyInThread: true, ...overrides });
+  const base = { message: 'Respóndele a Marcela', runId, signal: new AbortController().signal, authorize: async () => {},
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: Record<string, unknown>) => { proposals.push(proposal); } };
+  const read = { action: 'replies.thread' as const, query: null, leadId: contactedId, answer: null };
+  const replyThread = { contactedId, subject: 'Re: Antecedentes laborales en minutos', body: 'Hola Marcela,\n\nGracias por responder. ¿Cuántas personas necesitas revisar?' };
+  const reply = { action: 'email.reply_thread' as const, query: null, leadId: null, answer: null, replyThread };
+  const flow = (result: unknown, decision: unknown = reply) => ({ execute: async () => result,
+    decide: async (observations: unknown[]) => (observations.length ? decision : read) as never });
+  // Off (the default): refused with the way out, never proposed.
+  await assert.rejects(runCoworkReadLoop({ ...base, ...flow(thread()) }), /Reply in thread unavailable/);
+  assert.equal(proposals.length, 0);
+  // On: the conversation read in this turn anchors the proposal to the run that read it, and the card is named after the person.
+  await runCoworkReadLoop({ ...base, replyThread: true, ...flow(thread()) });
+  assert.deepEqual(proposals[0], { kind: 'reply_thread', targetId: contactedId, label: 'Responder a Marcela Rojas (Servicios Norte) en su hilo', originRunId: runId, replyThread });
+  assert.match(notes[0], /Preparé la respuesta para Marcela Rojas \(Servicios Norte\) y la propongo enviar en su hilo/);
+  assert.match(notes[0], /si la apruebas, sale tal cual/);
+  // Read in the previous turn: that turn is the origin.
+  const history = [{ runId: parentId, observations: [{ action: 'replies.thread', input: contactedId, result: thread() }] }];
+  await runCoworkReadLoop({ ...base, replyThread: true, history, execute: async () => thread(), decide: async () => reply });
+  assert.equal(proposals[1].originRunId, parentId);
+  // Only what the code's advice says takes a reply: another advice, a conversation that is not the person's, or another conversation is refused.
+  for (const result of [thread({ advice: 'already_answered' }), thread({ advice: 'unsubscribe_do_not_write' }), thread({ advice: 'closed_politely' }),
+    thread({ advice: 'no_reply_yet' }), { scope: 'own_reply_thread', available: false, reason: 'Esa conversación no es tuya o ya no existe.' }, thread({ contactedId: otherId })]) {
+    await assert.rejects(runCoworkReadLoop({ ...base, replyThread: true, ...flow(result) }), /Reply conversation must be read first/);
+  }
+  // Proposed without reading anything first, or without the text of the reply.
+  await assert.rejects(runCoworkReadLoop({ ...base, replyThread: true, execute: async () => ({}), decide: async () => reply }), /Reply conversation must be read first/);
+  await assert.rejects(runCoworkReadLoop({ ...base, replyThread: true, ...flow(thread(), { ...reply, replyThread: null }) }), /Missing effect target/);
+  assert.equal(proposals.length, 2);
+});
+
 test('a proposal carries the model explanation as a persisted note, recorded before the approval card', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const leadId = '00000000-0000-4000-8000-000000000021';

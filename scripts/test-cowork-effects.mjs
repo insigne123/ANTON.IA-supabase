@@ -51,6 +51,7 @@ const sources = {
   './saved-search-ops': 'export const executeCoworkSavedSearchCreate=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};export const executeCoworkSavedSearchUpdate=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};export const executeCoworkSavedSearchDelete=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};',
   './campaign-stop': 'export const executeCoworkCampaignStop=async()=>{globalThis.__coworkEffects.executed.push("campaign-stop");return {reply:"ok",result:{}};};',
   './contacts-import': 'export const executeCoworkContactsImport=async()=>{throw new Error("Se guardaron 100 contactos y el resto falló; revisa tus contactos antes de proponer otra importación para los pendientes.");};',
+  './reply-thread-effect': 'export const executeCoworkReplyThread=async()=>{throw new Error("No pudimos confirmar si la respuesta salió. Revisa en Contactados antes de reintentar: no se reenviará sola.");};',
 };
 globalThis.__coworkEffects = { client, executed: state.executed, failCode: false, failResearch: false };
 const bundle = await build({ entryPoints: ['src/lib/server/cowork/effects.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
@@ -116,12 +117,24 @@ try {
   assert.match(state.admissions[3].p_message, /Se guardaron 100 contactos/);
   assert.doesNotMatch(state.admissions[3].p_message, /y no cambi[oó] nada/);
   assert.equal(state.admissions[3].p_reset_depth, false);
+  // A reply whose send was not confirmed may have gone out: the thread never says that nothing was sent, and does not repeat it.
+  state.kind = 'reply_thread';
+  state.takes = 0;
+  assert.deepEqual(await module.exports.processCoworkEffectQueue(), { processed: 0, claimed: true });
+  assert.equal(state.finishes.at(-1).p_success, false);
+  assert.equal(state.admissions.length, 5);
+  assert.match(state.admissions[4].p_message, /La respuesta aprobada no terminó de enviarse como se esperaba/);
+  assert.match(state.admissions[4].p_message, /No pudimos confirmar si la respuesta salió/);
+  assert.match(state.admissions[4].p_message, /pide revisar en Contactados antes de proponer otra y no afirmes que no salió/);
+  assert.match(state.admissions[4].p_message, /No la repitas automáticamente/);
+  assert.doesNotMatch(state.admissions[4].p_message, /no cambió nada/);
+  assert.equal(state.admissions[4].p_reset_depth, false);
   // Thread budget: at max depth the chain stops gracefully with an observed event.
   state.depth = 5;
   const refused = await module.exports.admitCoworkContinuation(client,
     { userId: 'owner', organizationId: 'org' }, 'run-effect', 'Continúa');
   assert.equal(refused, null);
-  assert.equal(state.admissions.length, 4);
+  assert.equal(state.admissions.length, 5);
   assert.equal(state.events.length, 1);
   assert.equal(state.events[0].kind, 'thread.budget_exhausted');
   console.log('PASS: effect propose, approval, single execution, finish, continuation (also after a failed action) and thread budget.');
