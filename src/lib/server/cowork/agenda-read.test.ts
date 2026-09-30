@@ -43,7 +43,7 @@ const attention = {
     { name: 'Dirección vieja', email: 'vieja@antigua.cl', company: 'Antigua', sent_at: daysAgo(40), group: 'bounce_or_block', action: 'do_not_contact_fix_email' },
     { name: 'Casilla llena', email: 'llena@retail.cl', company: 'Retail', sent_at: daysAgo(2), group: 'bounce_or_block', action: 'retry_later' },
   ],
-  unclassified: [{ name: 'Sofía Lira', email: 'slira@minanorte.cl', company: 'Minera Norte', replied_at: daysAgo(1), group: 'unclassified', action: 'classify_reply' }],
+  unclassified: [{ id: 'c9', name: 'Sofía Lira', email: 'slira@minanorte.cl', company: 'Minera Norte', replied_at: daysAgo(1), group: 'unclassified', action: 'classify_reply' }],
   automatic: [
     { name: 'Verónica Paz', email: 'vpaz@retailsur.cl', replied_at: daysAgo(1), group: 'auto_reply_info', action: 'info_only' },
     { name: 'Luis Mena', email: 'lmena@minanorte.cl', replied_at: daysAgo(2), group: 'auto_reply_info', action: 'info_only' },
@@ -80,6 +80,12 @@ test('the agenda puts every source in one ranked list with exact counts', async 
     'meeting_request', 'interested_reply', 'interested_reply', 'approval', 'unclassified_reply', 'linkedin_accepted', 'followups_due', 'bounce']);
   assert.equal(agenda.items[0].who, 'Marcela Rojas');
   assert.deepEqual(agenda.sources, { interested: 'ok', attention: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'ok', linkedin: 'ok' });
+});
+
+test('each person comes with the conversation to read to answer them, from the send that was answered', async () => {
+  const agenda = await readCoworkAgenda(tables({}), scope, dependencies(), NOW);
+  const members = Object.fromEntries(agenda.items.flatMap(item => (item.members || []).map(member => [member.name, member.contactedId])));
+  assert.deepEqual(members, { 'Marcela Rojas': 'c1', 'Héctor Vidal': 'c2', 'Ana Ruiz': 'c3', 'Sofía Lira': 'c9' });
 });
 
 test('automatic replies of the last week are news and older ones history; they are never pending work', async () => {

@@ -33,6 +33,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'replies.meeting_chain': { label: 'Trazó envío, respuesta y reunión', source: 'Respuestas', icon: 'reply' },
   'replies.attention': { label: 'Revisó respuestas que requieren atención', source: 'Respuestas', icon: 'reply' },
   'replies.stalled': { label: 'Buscó interesados sin seguimiento', source: 'Respuestas', icon: 'reply' },
+  'replies.thread': { label: 'Leyó la conversación con un contacto', source: 'Respuestas', icon: 'reply' },
   'metrics.overview': { label: 'Consultó el resumen de métricas', source: 'Métricas', icon: 'chart' },
   'metrics.rates': { label: 'Calculó tasas de 7 y 30 días', source: 'Métricas', icon: 'chart' },
   'metrics.diagnose': { label: 'Contrastó hipótesis con tus datos', source: 'Métricas', icon: 'chart' },
@@ -159,6 +160,12 @@ export function coworkReadFinding(payload: Record<string, unknown> | null | unde
       return { count: sources, label: sources === 1 ? 'fuente' : 'fuentes' };
     }
     return research?.availability ? { count: null, label: 'sin informe' } : null;
+  }
+  if (action === 'replies.thread') {
+    const thread = (result && typeof result === 'object' ? result : null) as { available?: unknown; reply?: unknown } | null;
+    if (!thread) return null;
+    if (thread.available === false) return { count: null, label: 'no es tuya' };
+    return thread.reply ? { count: null, label: 'con su respuesta' } : { count: null, label: 'sin respuesta aún' };
   }
   const count = countOf(result);
   if (count === null) return null;

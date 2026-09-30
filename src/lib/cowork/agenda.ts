@@ -25,7 +25,8 @@ export type AgendaSourceStatus = 'ok' | 'none' | 'partial' | 'sync_incomplete' |
 export type AgendaSourceKey = 'interested' | 'attention' | 'approvals' | 'campaignSteps' | 'followups' | 'linkedin';
 
 type Person = { name: string | null; email: string | null; company: string | null };
-export type AgendaReplyInput = Person & { daysWaiting: number };
+/** contactedId: the conversation (the send that was answered), so «prepárale la respuesta» reads it with replies.thread without looking it up. */
+export type AgendaReplyInput = Person & { daysWaiting: number; contactedId?: string | null };
 export type AgendaInterestedInput = AgendaReplyInput & { intent: 'positive' | 'meeting_request' };
 /** fix_email: the address is wrong or blocked. review: needs a look (a block by policy, an unknown cause). temporary: a soft failure
  * (a full mailbox, a passing error) that asks for no fix, only another try later. */
@@ -115,7 +116,8 @@ const ORDER: Record<AgendaKind, number> = {
   cooled_lead: 6, linkedin_accepted: 7, followups_due: 8, bounce: 9,
 };
 
-export type AgendaMember = { name: string | null; daysWaiting: number; askedForMeeting: boolean };
+/** contactedId is the conversation that has waited longest, the one replies.thread reads to answer this person; it is left out when the row had none. */
+export type AgendaMember = { name: string | null; daysWaiting: number; askedForMeeting: boolean; contactedId?: string };
 type Account = { who: string | null; company: string | null; people: number; members: AgendaMember[]; oldest: number; freshest: number; asked: boolean };
 
 /** One account per corporate domain (or company name for shared mailboxes): two colleagues who wrote count as one company, and
@@ -133,15 +135,18 @@ function groupAccounts(rows: Array<AgendaReplyInput & { intent?: string }>): Acc
       const identity = String(row.email || row.name || '').trim().toLowerCase() || `unnamed:${index}`;
       const current = byPerson.get(identity);
       const asked = row.intent === 'meeting_request';
-      if (!current) byPerson.set(identity, { name: row.name || row.email || null, email: row.email, daysWaiting: row.daysWaiting, askedForMeeting: asked });
-      else byPerson.set(identity, { ...current, daysWaiting: Math.max(current.daysWaiting, row.daysWaiting), askedForMeeting: current.askedForMeeting || asked });
+      if (!current) byPerson.set(identity, { name: row.name || row.email || null, email: row.email, daysWaiting: row.daysWaiting, askedForMeeting: asked,
+        ...(row.contactedId ? { contactedId: row.contactedId } : {}) });
+      else byPerson.set(identity, { ...current, daysWaiting: Math.max(current.daysWaiting, row.daysWaiting), askedForMeeting: current.askedForMeeting || asked,
+        // The id travels with the longest wait: the row that set the days is the one to read.
+        ...(row.contactedId && (row.daysWaiting > current.daysWaiting || !current.contactedId) ? { contactedId: row.contactedId } : {}) });
     });
     const people = [...byPerson.values()].sort((a, b) => b.daysWaiting - a.daysWaiting);
     return {
       who: people[0].name,
       company: rows.map(row => row.company).find(company => company && company.trim()) || null,
       people: people.length,
-      members: people.slice(0, 3).map(({ name, daysWaiting, askedForMeeting }) => ({ name, daysWaiting, askedForMeeting })),
+      members: people.slice(0, 3).map(({ name, daysWaiting, askedForMeeting, contactedId }) => ({ name, daysWaiting, askedForMeeting, ...(contactedId ? { contactedId } : {}) })),
       oldest: Math.max(...rows.map(row => row.daysWaiting)),
       freshest: Math.min(...rows.map(row => row.daysWaiting)),
       asked: people.some(person => person.askedForMeeting),
