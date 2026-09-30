@@ -42,6 +42,7 @@ import { stageCoworkMissionControl } from './mission-control';
 import { stageCoworkMessageContextUpdate } from './message-context';
 import { stageCoworkEnrichBatch } from './enrich-batch';
 import { stageCoworkSendBatch } from './send-batch';
+import { coworkContactsImportEnabled, stageCoworkContactsImport } from './contacts-import';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -152,9 +153,12 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       return written.data === true;
     }, { onDisabled: reason => console.warn('[cowork] live draft off for this run:', reason instanceof Error ? reason.message : reason) }) : null;
     const writerEnabled = coworkWriterEnabled();
+    // Importing contacts needs its staging table (M3): off until the migration is applied.
+    const contactsImportEnabled = coworkContactsImportEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
+      contactsImport: contactsImportEnabled,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
@@ -175,6 +179,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       record: recordEvent, liveDraft,
       timeLeft: () => 100000 - (Date.now() - claimedAt),
       model: coworkJudgeModel(),
+      contactsImport: contactsImportEnabled,
       onCall: call => telemetry.push(call),
     }) : null;
     const result = await runCoworkReadLoop({
@@ -230,6 +235,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         onCall: call => telemetry.push(call),
       }) : undefined,
       judge: judgeTurn?.review,
+      contactsImport: contactsImportEnabled,
       proposeNote: async (leadId, note) => {
         const proposed = await client.rpc('cowork_propose_note', {
           p_run_id: run.id, p_token: run.lease_token, p_lead_id: leadId, p_note: note,
@@ -383,6 +389,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
             { leadId: proposal.linkedinJob.leadId, message: proposal.linkedinJob.message });
           targetId = `linkedinjob:${staged.hash}`;
           label = `Mensaje LinkedIn en cola · ${staged.canonicalUrl} · se ejecuta en tu navegador`;
+        }
+        if (proposal.kind === 'contacts_import') {
+          if (!contactsImportEnabled) throw new Error('La importación de contactos no está disponible.');
+          if (!proposal.contactsImport) throw new Error('Missing import file');
+          const staged = await stageCoworkContactsImport(scope, run.id, proposal.contactsImport);
+          targetId = `contactsimport:${staged.hash}`;
+          label = staged.label;
         }
         const proposed = await client.rpc('cowork_propose_effect', {
           p_run_id: run.id, p_token: run.lease_token, p_kind: proposal.kind,

@@ -212,6 +212,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   campaign_schedule_batch: { title: 'Programar lote', icon: 'calendar', help: 'Se reservará un día por empresa y un espaciado entre envíos. No crea ni activa la campaña ni envía nada.' },
   linkedin_invite: { title: 'Invitar en LinkedIn', icon: 'linkedin', help: 'Se encolará una invitación sin nota. La ejecutarás desde la extensión ante ese perfil.' },
   linkedin_message: { title: 'Mensaje de LinkedIn', icon: 'linkedin', help: 'Se encolará el mensaje aprobado. La ejecutarás desde la extensión ante ese perfil; solo lo confirmado cuenta como enviado.' },
+  contacts_import: { title: 'Importar contactos', icon: 'user-plus', help: 'Se guardarán en tus contactos las personas del archivo que aún no están. Los que ya estaban no se tocan.' },
 };
 
 export function coworkEffectCopy(kind: unknown): CoworkEffectCopy {
@@ -289,6 +290,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   campaign_schedule_batch: { happens: 'Se reserva un día por empresa y un espaciado entre envíos.', not: 'No se crea ni se activa la campaña, ni se envía nada.' },
   linkedin_invite: { happens: 'Se deja en cola una invitación sin nota.', not: 'No sale hasta que la ejecutes desde la extensión.' },
   linkedin_message: { happens: 'Se deja en cola el mensaje aprobado.', not: 'No sale hasta que lo ejecutes desde la extensión.' },
+  contacts_import: { happens: 'Se guardan en tus contactos las personas nuevas del archivo.', not: 'No se les escribe, no se buscan correos y no cambian los contactos que ya tenías.' },
 };
 
 export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' | 'payload'>): CoworkOutcome {
@@ -325,7 +327,7 @@ export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | '
   if (proposal.state !== 'done' || proposal.type !== 'effect') return null;
   const kind = String(proposal.payload.kind || '');
   if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch') return { href: '/campaigns', label: 'Ver campañas' };
-  if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch') return { href: '/saved/leads', label: 'Ver tus contactos' };
+  if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch' || kind === 'contacts_import') return { href: '/saved/leads', label: 'Ver tus contactos' };
   if (kind === 'send_email') return { href: '/contacted', label: 'Ver en Contactados' };
   if (kind === 'profile_update') return { href: '/profile', label: 'Ver tu perfil' };
   return null;
