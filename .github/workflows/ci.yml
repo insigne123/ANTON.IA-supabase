@@ -20,3 +20,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run build
+        env:
+          # Build-only placeholders: no production credentials or remote database.
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-build-placeholder-not-a-credential
