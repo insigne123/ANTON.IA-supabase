@@ -10,7 +10,7 @@ import { coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } fro
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
-import { coworkProfilePatchSchema, type CoworkProfilePatch } from './profile-proposal';
+import { coworkProfileDecisionSchema, coworkProfilePatchFromDecision, type CoworkProfilePatch } from './profile-proposal';
 import { coworkSavedSearchCreateSchema, coworkSavedSearchUpdateSchema, coworkSavedSearchDeleteSchema,
   type CoworkSavedSearchCreate, type CoworkSavedSearchUpdate, type CoworkSavedSearchDelete } from './saved-search-proposal';
 import { coworkCrmRecordPatchSchema, type CoworkCrmRecordPatch } from './crm-record-proposal';
@@ -54,7 +54,7 @@ export const coworkDecisionSchema = z.object({
   leadIds: z.array(z.string().uuid()).min(1).max(5).nullable().optional(),
   stepId: z.string().uuid().nullable().optional(),
   enrollmentId: z.string().uuid().nullable().optional(),
-  profile: coworkProfilePatchSchema.nullable().optional(),
+  profile: coworkProfileDecisionSchema.nullable().optional(),
   savedSearch: z.union([coworkSavedSearchCreateSchema, coworkSavedSearchUpdateSchema, coworkSavedSearchDeleteSchema]).nullable().optional(),
   crmRecord: coworkCrmRecordPatchSchema.nullable().optional(),
   crmAssign: coworkCrmAssignSchema.nullable().optional(),
@@ -821,7 +821,8 @@ async function runCoworkLoop(input: {
         const campaign = decision.action === 'campaign.create' && decision.campaign
           ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
-        const profile = decision.action === 'profile.update' ? decision.profile ?? undefined : undefined;
+        // Only what changes: a field sent as null keeps its value.
+        const profile = decision.action === 'profile.update' ? coworkProfilePatchFromDecision(decision.profile) ?? undefined : undefined;
         const savedSearch = decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete'
           ? decision.savedSearch ?? undefined : undefined;
         const campaignId = decision.action === 'campaign.stop_v2' ? decision.campaignId ?? undefined : undefined;

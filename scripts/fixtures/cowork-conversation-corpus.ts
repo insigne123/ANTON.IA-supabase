@@ -148,7 +148,9 @@ export type CorpusTurnResult = {
   reply: string;
   document: { title: string; content: string } | null;
   proposal: { kind: string; label: string; targetId?: string; campaign?: unknown; linkedinMessage?: string;
-    code?: { language: string; code: string; inputFiles: string[] }; contactsImport?: { file: string; columns?: unknown; card?: unknown } } | null;
+    code?: { language: string; code: string; inputFiles: string[] }; contactsImport?: { file: string; columns?: unknown; card?: unknown };
+    /** A profile update's fields, as the approval card shows them. */
+    profile?: Record<string, unknown> } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;

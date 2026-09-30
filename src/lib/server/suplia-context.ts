@@ -42,7 +42,7 @@ function safeText(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function memoryValueText(value: unknown) {
+export function memoryValueText(value: unknown) {
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     return safeText(record.text || record.summary || JSON.stringify(record));

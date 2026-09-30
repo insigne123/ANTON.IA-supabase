@@ -84,6 +84,13 @@ Object.assign(IDEAL, {
     ? parallel([{ action: 'app.context', input: '' }, { action: 'leads.search', input: '' }])
     : answer('Te ayudo a conseguir reuniones para AXIS con empresas que contratan mucho personal, sin salir del chat:\n- Correos y campañas: redacto la secuencia sobre AXIS y la dejo lista para aprobar. De tus 5 contactos guardados, 4 tienen correo.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos de RR. HH. y operaciones, e informes de cómo van tus envíos.\n¿Te dejo una campaña pausada con un primer correo para Marcela, Felipe y Camila, tus contactos de RR. HH. con correo?',
       null, chip('Sí, déjala pausada', 'Sí, deja una campaña pausada con un primer correo sobre AXIS para Marcela, Felipe y Camila')),
+  'guardar-oferta': async context => context.observations.length === 0
+    ? read('profile.get', '')
+    : coworkDecisionSchema.parse({ action: 'profile.update', query: null, leadId: null,
+      // As strict structured output sends it: every field, null where nothing changes.
+      profile: { name: null, role: null, companyName: null, sector: null, website: 'https://yago.cl', description: null, services: null,
+        valueProposition: 'Revisión de antecedentes laborales en minutos para equipos de RR. HH. en Chile.', proofPoints: null, signature: null },
+      answer: { reply: 'Guardo en tu perfil lo que vendes y tu sitio. Desde ahí escribo tus correos con esa oferta.', document: null } }),
   'mkt-campana-rrhh': async context => {
     if (context.observations.length === 0) return parallel([{ action: 'leads.search', input: 'RR. HH.' }, { action: 'message.context', input: '' }]);
     if (!seen(context, 'campaigns.list')) return read('campaigns.list');
