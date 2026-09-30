@@ -55,6 +55,13 @@ export function analyzeStoredAudience(leads: AudienceLead[], touches: AudienceTo
         denominator: 'distinct_normalized_company_names_in_stored_leads',
       };
     }),
+    // The role of every contact scanned, not only the first hundred listed below: «cuántos decisores hay» is a count of all of them.
+    totalLeads: leads.length,
+    roleCounts: leads.reduce<Record<string, number>>((counts, lead) => {
+      const role = classifyAudienceRole(lead.title).role;
+      counts[role] = (counts[role] || 0) + 1;
+      return counts;
+    }, {}),
     contacts: leads.slice(0, 100).map(lead => ({ id: lead.id, name: lead.name, title: lead.title, company: lead.company,
       classification: classifyAudienceRole(lead.title) })),
     contactsTruncated: leads.length > 100,

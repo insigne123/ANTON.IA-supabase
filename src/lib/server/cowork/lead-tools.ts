@@ -66,3 +66,44 @@ export async function queryCoworkLeads(
     terms: terms.length,
   };
 }
+
+const COUNT_FIELDS = ['title', 'company', 'industry'] as const;
+
+/** The phrases a segment is asked with: «reclutador | recursos humanos | talent». Each one is cleaned like the search terms (no
+ * wildcard or grammar characters) and kept whole, so «recursos humanos» is one phrase and not two words. */
+export function segmentPhrases(raw: string) {
+  return raw.split(/[|,;]/).map(part => part.replace(/[^\p{L}\p{N}\s@.-]/gu, ' ').replace(/\s+/g, ' ').trim())
+    .filter(part => part.length >= 2).slice(0, 6).map(part => part.slice(0, 40));
+}
+
+/** How many of the person's saved contacts belong to a segment: exact counts, not the 20 that «leads.search» returns. A contact
+ * belongs when any phrase appears in its title, company or industry. No phrases counts all of them. Only ids leave the database:
+ * three head-only counts, so even a book of thousands costs three small queries. */
+export async function countCoworkLeads(
+  client: SupabaseClient,
+  scope: { userId: string; organizationId: string },
+  value: string,
+) {
+  const raw = z.string().max(120).parse(value);
+  const phrases = segmentPhrases(raw);
+  if (raw.trim() && phrases.length === 0) throw new Error('Invalid search term');
+  const base = () => {
+    let query = client.from('leads').select('id', { count: 'exact', head: true })
+      .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
+    if (phrases.length) query = query.or(phrases.flatMap(phrase => COUNT_FIELDS.map(field => `${field}.ilike."%${phrase}%"`)).join(','));
+    return query;
+  };
+  const [total, withEmail, withProfile] = await Promise.all([
+    base(),
+    base().not('email', 'is', null).neq('email', ''),
+    base().ilike('linkedin_url', '%linkedin.com/in/%'),
+  ]);
+  if (total.error || withEmail.error || withProfile.error) throw new Error('No se pudieron contar los contactos guardados.');
+  const count = (result: { count: number | null }) => Number(result.count || 0);
+  return {
+    scope: 'own_saved_contacts', phrases, exact: true,
+    total: count(total), withEmail: count(withEmail), withoutEmail: count(total) - count(withEmail), withLinkedinProfile: count(withProfile),
+    matchedIn: [...COUNT_FIELDS],
+    limitation: 'Cuenta por texto en cargo, empresa y sector de tus contactos guardados; un cargo escrito de otra forma no entra. Los conteos son exactos, pero «quiénes son» se ve con leads.search.',
+  };
+}

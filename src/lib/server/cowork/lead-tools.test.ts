@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
-import { queryCoworkLeads } from './lead-tools';
+import { countCoworkLeads, queryCoworkLeads, segmentPhrases } from './lead-tools';
 
 function client() {
   const calls: Array<[string, ...unknown[]]> = [];
@@ -121,4 +121,53 @@ test('a malformed stored profile never makes the whole result unreadable for the
   const observed = collectCoworkLeadRows([{ action: 'leads.search', result }]);
   assert.deepEqual(observed.map(row => row.id).sort(), [ID(1), ID(2), ID(3)]);
   assert.equal(observed.find(row => row.id === ID(2))?.linkedin_url, null);
+});
+
+/** A client that answers the three head counts of a segment by the filters each one applied. */
+function countingClient(counts: { total: number; email: number; profile: number }, error = false) {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const make = (table: string) => {
+    const applied: string[] = [];
+    const chain: Record<string, unknown> = {};
+    for (const name of ['select', 'eq', 'or', 'not', 'neq', 'ilike']) {
+      chain[name] = (...args: unknown[]) => { calls.push([name, ...args]); applied.push(name); return chain; };
+    }
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({
+      count: applied.includes('ilike') ? counts.profile : applied.includes('neq') ? counts.email : counts.total, error: error ? { message: 'boom' } : null }));
+    return chain;
+  };
+  return { calls, db: { from: (table: string) => { calls.push(['from', table]); return make(table); } } as unknown as SupabaseClient };
+}
+
+test('a segment is counted exactly, per user and organization, with whole phrases and no grammar from the model', async () => {
+  const f = countingClient({ total: 214, email: 180, profile: 150 });
+  const result = await countCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'Recursos Humanos | reclutador,%,id.not.is.null,(x)');
+  assert.deepEqual(result.phrases, ['Recursos Humanos', 'reclutador', 'id.not.is.null', 'x'].filter(phrase => phrase.length >= 2));
+  assert.equal(result.total, 214);
+  assert.equal(result.withEmail, 180);
+  assert.equal(result.withoutEmail, 34);
+  assert.equal(result.withLinkedinProfile, 150);
+  assert.equal(result.exact, true);
+  assert.equal(f.calls.filter(call => call[0] === 'eq' && call[1] === 'user_id' && call[2] === 'owner').length, 3);
+  assert.equal(f.calls.filter(call => call[0] === 'eq' && call[1] === 'organization_id' && call[2] === 'org').length, 3);
+  assert.ok(f.calls.filter(call => call[0] === 'select').every(call => call[1] === 'id' && (call[2] as { head: boolean }).head === true), 'only counts leave the database');
+  const filter = String(f.calls.find(call => call[0] === 'or')?.[1]);
+  assert.ok(filter.includes('title.ilike."%Recursos Humanos%"'));
+  assert.ok(!filter.includes('('), 'no parenthesis reaches the filter');
+  assert.ok(filter.split(',').every(part => /^(title|company|industry)\.ilike\."%[^%,()"]+%"$/.test(part)), filter);
+});
+
+test('without phrases it counts every saved contact, and a value that is only symbols is rejected', async () => {
+  const f = countingClient({ total: 9045, email: 7000, profile: 7642 });
+  const all = await countCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, '');
+  assert.deepEqual(all.phrases, []);
+  assert.equal(all.total, 9045);
+  assert.equal(f.calls.some(call => call[0] === 'or'), false);
+  await assert.rejects(countCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, '%%,()'), /Invalid search term/);
+  await assert.rejects(countCoworkLeads(countingClient({ total: 1, email: 1, profile: 1 }, true).db, { userId: 'owner', organizationId: 'org' }, 'rrhh'), /No se pudieron contar/);
+});
+
+test('segment phrases keep whole phrases, drop noise and stop at six', () => {
+  assert.deepEqual(segmentPhrases('gerente general | a | talent acquisition'), ['gerente general', 'talent acquisition']);
+  assert.equal(segmentPhrases('a1,b2,c3,d4,e5,f6,g7,h8').length, 6);
 });

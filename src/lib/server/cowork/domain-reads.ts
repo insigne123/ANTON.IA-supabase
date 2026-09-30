@@ -39,6 +39,11 @@ export async function queryCoworkDomainRead(client: SupabaseClient, scope: Scope
     const { readCoworkAgenda } = await import('./agenda-read');
     return readCoworkAgenda(client, scope);
   }
+  if (action === 'credits.balance') {
+    z.literal('').parse(value);
+    const { readCoworkCredits } = await import('./credits-read');
+    return readCoworkCredits();
+  }
   if (action === 'gmail.contact_history') {
     const { readCoworkGmailContact } = await import('./gmail-contact');
     return readCoworkGmailContact(client, scope, value);

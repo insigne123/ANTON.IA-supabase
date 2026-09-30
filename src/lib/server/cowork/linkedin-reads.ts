@@ -8,6 +8,9 @@ import {
 
 type Scope = { userId: string; organizationId: string };
 
+const AWAITING_WINDOW_DAYS = 30;
+const AWAITING_LOOKUP_MAX = 500;
+
 async function sweepState(client: SupabaseClient, scope: Scope, kind: 'network' | 'inbox') {
   const { data, error } = await client.from('cowork_linkedin_sweep_state')
     .select('last_completed_at,cursor,has_more,observed_count,updated_at')
@@ -64,21 +67,41 @@ export async function readCoworkLinkedinInbox(client: SupabaseClient, scope: Sco
   };
 }
 
-/** 5.6: cupo de invitaciones contando pendientes. Ventana móvil de 7 días. */
+/** 5.6: cupo de invitaciones contando pendientes. Ventana móvil de 7 días. Además cuenta las enviadas desde ANTON.IA que siguen
+ * sin aceptarse (pendientes de verdad en LinkedIn): las confirmadas de los últimos 30 días cuyo perfil no aparece entre las
+ * conexiones observadas. Es un mínimo: lo enviado directo en LinkedIn no se ve desde aquí. */
 export async function readCoworkLinkedinQuota(client: SupabaseClient, scope: Scope) {
   const since = new Date(Date.now() - 7 * 86400000).toISOString();
-  const [pending, sent] = await Promise.all([
+  const since30 = new Date(Date.now() - AWAITING_WINDOW_DAYS * 86400000).toISOString();
+  const [pending, sent, confirmed, sweep] = await Promise.all([
     client.from('cowork_linkedin_jobs').select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
       .eq('kind', 'invite').in('status', ['queued', 'claimed']),
     client.from('cowork_linkedin_jobs').select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
       .eq('kind', 'invite').eq('status', 'confirmed').gte('created_at', since),
+    client.from('cowork_linkedin_jobs').select('canonical_url')
+      .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+      .eq('kind', 'invite').eq('status', 'confirmed').gte('created_at', since30)
+      .order('created_at', { ascending: false }).limit(AWAITING_LOOKUP_MAX),
+    sweepState(client, scope, 'network'),
   ]);
   if (pending.error || sent.error) throw new Error('No se pudo comprobar el cupo.');
   const quota = classifyInviteQuota(Number(pending.count || 0), Number(sent.count || 0), LINKEDIN_WEEKLY_INVITE_LIMIT);
+  const invited = [...new Set(((confirmed.data || []) as Array<{ canonical_url: string | null }>)
+    .map(row => row.canonical_url).filter((url): url is string => Boolean(url)))];
+  const accepted = new Set<string>();
+  for (let at = 0; at < invited.length; at += 100) {
+    const { data } = await client.from('cowork_linkedin_peers').select('canonical_url')
+      .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).in('canonical_url', invited.slice(at, at + 100));
+    for (const row of (data || []) as Array<{ canonical_url: string }>) accepted.add(row.canonical_url);
+  }
+  const networkSynced = sweep.last_completed_at !== null && !sweep.has_more;
   return { scope: 'own_linkedin_quota', ...quota, windowDays: 7,
-    limitation: 'Límite operativo observado en cuentas gratuitas, no oficial de LinkedIn.' };
+    awaitingAcceptance: { count: invited.length - accepted.size, sentFromApp: invited.length, windowDays: AWAITING_WINDOW_DAYS, networkSynced,
+      basis: 'Invitaciones confirmadas desde ANTON.IA cuyo perfil no aparece entre tus conexiones observadas' + (networkSynced ? '.' : ' (falta sincronizar tu red: puede haber aceptadas que aún no se ven).') },
+    limitation: 'Límite operativo observado en cuentas gratuitas, no oficial de LinkedIn. Las invitaciones que enviaste directo en LinkedIn no se ven desde aquí: si sabes cuántas pendientes ves en LinkedIn («Mi red» → «Invitaciones» → «Enviadas»), dímelo y lo uso.',
+  };
 }
 
 /** Estado de trabajos: qué espera tu navegador y qué ya se confirmó en destino. */
@@ -103,6 +126,28 @@ export async function readCoworkLinkedinJobs(client: SupabaseClient, scope: Scop
     recent: recent.data || [],
     executionNote: 'Un trabajo en cola no es un envío: ejecútalo desde la extensión ante el perfil verificado. Lo incierto nunca se reintenta solo.',
   };
+}
+
+/** The company of each profile, read from the saved contact that carries it (the address is stored as the person pasted it, so it
+ * is matched by the profile's own name in it). A profile with no saved contact has no company: null, never a guess. */
+async function companiesByProfile(client: SupabaseClient, scope: Scope, urls: string[]) {
+  const bySlug = new Map<string, string>();
+  for (const url of urls) {
+    const slug = url.match(/\/in\/([^/?#]+)/i)?.[1];
+    if (slug && /^[\p{L}\p{N}_%-]{2,100}$/u.test(slug)) bySlug.set(slug.toLowerCase(), url);
+  }
+  const found = new Map<string, string>();
+  if (!bySlug.size) return found;
+  const { data, error } = await client.from('leads').select('company,linkedin_url')
+    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+    .or([...bySlug.keys()].map(slug => `linkedin_url.ilike."%/in/${slug}%"`).join(',')).limit(100);
+  if (error) return found;
+  for (const row of (data || []) as Array<{ company: string | null; linkedin_url: string | null }>) {
+    const slug = row.linkedin_url?.match(/\/in\/([^/?#]+)/i)?.[1]?.toLowerCase();
+    const url = slug ? bySlug.get(slug) : undefined;
+    if (url && row.company?.trim() && !found.has(url)) found.set(url, row.company.trim());
+  }
+  return found;
 }
 
 /** 5.7: candidatos a segundo contacto con historial fiable y exclusiones. */
@@ -158,7 +203,9 @@ export async function readCoworkLinkedinFollowups(client: SupabaseClient, scope:
     .sort((a, b) => Number(b.eligible) - Number(a.eligible)
       || String(a.lastConfirmedAt).localeCompare(String(b.lastConfirmedAt)))
     .slice(0, 20);
-  return { scope: 'own_linkedin_followups', items, returned: items.length,
+  const companies = await companiesByProfile(client, scope, items.map(item => item.canonicalUrl));
+  const withCompany = items.map(item => ({ ...item, company: companies.get(item.canonicalUrl) ?? null }));
+  return { scope: 'own_linkedin_followups', items: withCompany, returned: withCompany.length,
     limitation: 'Elegibilidad base sin el contenido nuevo: el segundo mensaje debe aportar información distinta, verificada en su revisión.',
   };
 }
