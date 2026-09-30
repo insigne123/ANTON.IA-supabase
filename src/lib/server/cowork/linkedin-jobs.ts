@@ -11,8 +11,9 @@ import {
   verifyLinkedinIdentity,
 } from '@/lib/cowork/linkedin-bridge';
 import { findCompanyReply, findNegotiationHold } from '@/lib/server/campaign-send-guards';
+import { coworkBatchCompanyKeys } from '@/lib/cowork/linkedin-batch';
 
-type Scope = { userId: string; organizationId: string };
+export type Scope = { userId: string; organizationId: string };
 
 const inviteInputSchema = z.object({ leadId: z.string().uuid() });
 const messageInputSchema = z.object({
@@ -33,10 +34,10 @@ export function parseCoworkLinkedinJobTarget(targetId: string) {
   return { hash: parts[1] };
 }
 
-type LeadRow = { id: string; name: string | null; email: string | null; title: string | null;
+export type LeadRow = { id: string; name: string | null; email: string | null; title: string | null;
   company: string | null; linkedin_url: string | null };
 
-async function loadOwnLead(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, leadId: string): Promise<LeadRow> {
+export async function loadOwnLead(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, leadId: string): Promise<LeadRow> {
   const { data, error } = await client.from('leads')
     .select('id,name,email,title,company,linkedin_url')
     .eq('organization_id', scope.organizationId).eq('id', leadId).maybeSingle();
@@ -45,7 +46,7 @@ async function loadOwnLead(client: ReturnType<typeof getSupabaseAdminClient>, sc
   return data as LeadRow;
 }
 
-async function assertRunOpen(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, runId: string) {
+export async function assertRunOpen(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, runId: string) {
   const state = await client.from('cowork_runs').select('status').eq('id', runId)
     .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
   if (state.error || !state.data || (state.data.status !== 'running' && state.data.status !== 'waiting_approval')) {
@@ -53,7 +54,7 @@ async function assertRunOpen(client: ReturnType<typeof getSupabaseAdminClient>, 
   }
 }
 
-async function inviteQuota(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope) {
+export async function inviteQuota(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope) {
   const since = new Date(Date.now() - 7 * 86400000).toISOString();
   const pending = await client.from('cowork_linkedin_jobs').select('id', { count: 'exact', head: true })
     .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
@@ -66,7 +67,7 @@ async function inviteQuota(client: ReturnType<typeof getSupabaseAdminClient>, sc
   return classifyInviteQuota(Number(pending.count || 0), Number(sent.count || 0), LINKEDIN_WEEKLY_INVITE_LIMIT);
 }
 
-async function existingLiveJob(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, idempotencyKey: string) {
+export async function existingLiveJob(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, idempotencyKey: string) {
   const { data, error } = await client.from('cowork_linkedin_jobs')
     .select('id,status,created_at').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
     .eq('idempotency_key', idempotencyKey).not('status', 'in', '(failed,expired)').limit(1);
@@ -74,11 +75,72 @@ async function existingLiveJob(client: ReturnType<typeof getSupabaseAdminClient>
   return (data || [])[0] as { id: string; status: string; created_at: string } | undefined;
 }
 
-async function crmStages(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, leadId: string): Promise<string[]> {
+export async function crmStages(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, leadId: string): Promise<string[]> {
   const { data, error } = await client.from('unified_crm_data').select('stage')
     .eq('organization_id', scope.organizationId).in('id', [`lead_saved|${leadId}`, `lead_enriched|${leadId}`]).limit(10);
   if (error) throw new Error('No se pudo comprobar la etapa comercial.');
   return ((data || []) as Array<{ stage?: unknown }>).map(row => row.stage).filter((stage): stage is string => typeof stage === 'string');
+}
+
+/** The profile of a saved contact as the extension will see it: its canonical URL, and whether the name agrees with it. Throws the reason. */
+export function linkedinProfileOf(lead: LeadRow) {
+  const canonical = normalizeLinkedinProfileUrl(lead.linkedin_url);
+  if (!canonical) throw new Error('El contacto no tiene una URL de perfil LinkedIn válida.');
+  const identity = verifyLinkedinIdentity({ url: canonical, name: lead.name },
+    { kind: 'saved_lead', url: lead.linkedin_url, name: lead.name });
+  return { canonical, identity };
+}
+
+/** The brakes a message has before it is proposed, one person at a time: not repeated, one action per profile a day, the company
+ * did not answer and the account is not negotiating. Throws the reason; returns the commercial stages it read. */
+export async function assertLinkedinMessageAllowed(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, lead: LeadRow, canonical: string, key: string) {
+  const duplicate = await existingLiveJob(client, scope, key);
+  if (duplicate) throw new Error(`Este mensaje ya tiene un trabajo registrado (estado: ${duplicate.status}). No se duplica.`);
+  // Un mensaje por perfil y dia como tope del programador.
+  const dayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+  const today = await client.from('cowork_linkedin_jobs').select('id', { count: 'exact', head: true })
+    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+    .eq('canonical_url', canonical).in('status', ['queued', 'claimed', 'confirmed']).gte('created_at', dayStart);
+  if (today.error) throw new Error('No se pudo comprobar mensajes del día.');
+  if (Number(today.count || 0) > 0) throw new Error('Ya hay una acción para este perfil hoy. Vuelve mañana.');
+  if (lead.email) {
+    const reply = await findCompanyReply(client as never, scope, lead.email, lead.company);
+    if (reply.stopped) throw new Error(`Esta empresa ya respondió (${reply.email}). El mensaje queda retenido.`);
+  }
+  const stages = await crmStages(client, scope, lead.id);
+  if (stages.some(stage => stage === 'negotiation' || stage === 'meeting')) {
+    throw new Error(`La cuenta está en etapa ${stages.join(', ')}. Mensaje retenido.`);
+  }
+  return stages;
+}
+
+/** What is checked again when an approved message is about to be queued: the company did not answer and the account did not enter a negotiation. */
+export async function assertLinkedinMessageStillAllowed(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, lead: LeadRow) {
+  if (lead.email) {
+    const reply = await findCompanyReply(client as never, scope, lead.email, lead.company);
+    if (reply.stopped) throw new Error(`Esta empresa ya respondió (${reply.email}). El mensaje queda retenido.`);
+  }
+  const stages = await crmStages(client, scope, lead.id);
+  if (stages.some(stage => stage === 'negotiation' || stage === 'meeting')) {
+    throw new Error('La cuenta entró en negociación. Mensaje retenido.');
+  }
+}
+
+/** Puts one approved job in the queue of the extension, with the company it is for so the day counts it. Idempotent by key. */
+export async function queueLinkedinJob(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope,
+  job: { runId: string; kind: 'invite' | 'message'; lead: LeadRow; canonical: string; idempotencyKey: string; message: string | null }) {
+  const saved = await client.from('cowork_linkedin_jobs').upsert(
+    { organization_id: scope.organizationId, user_id: scope.userId, run_id: job.runId, kind: job.kind,
+      canonical_url: job.canonical, profile_url: job.lead.linkedin_url, display_name: String(job.lead.name || '').slice(0, 300),
+      message: job.message, status: 'queued', idempotency_key: job.idempotencyKey,
+      company_key: coworkBatchCompanyKeys(job.lead)[0],
+      claim_token: randomUUID(), updated_at: new Date().toISOString() },
+    { onConflict: 'organization_id,user_id,idempotency_key', ignoreDuplicates: true })
+    .select('id,status').maybeSingle();
+  if ((saved.error && String((saved.error as { code?: string }).code) !== '23505') || (!saved.data && saved.error)) {
+    throw new Error('No se pudo encolar el trabajo de LinkedIn.');
+  }
+  return { jobId: (saved.data?.id as string | undefined) || null, reused: !saved.data };
 }
 
 /** Programa una invitacion sin nota: staging con identidad y cupo. La
@@ -90,10 +152,7 @@ export async function stageCoworkLinkedinInvite(scope: Scope, runId: string, inp
   await requireCoworkWorkerAccess(client, scope);
   await assertRunOpen(client, scope, runId);
   const lead = await loadOwnLead(client, scope, parsed.leadId);
-  const canonical = normalizeLinkedinProfileUrl(lead.linkedin_url);
-  if (!canonical) throw new Error('El contacto no tiene una URL de perfil LinkedIn válida.');
-  const identity = verifyLinkedinIdentity({ url: canonical, name: lead.name },
-    { kind: 'saved_lead', url: lead.linkedin_url, name: lead.name });
+  const { canonical, identity } = linkedinProfileOf(lead);
   const quota = await inviteQuota(client, scope);
   if (!quota.allowed) throw new Error(quota.reason);
   const key = inviteIdempotencyKey(scope.organizationId, scope.userId, canonical);
@@ -124,28 +183,9 @@ export async function stageCoworkLinkedinMessage(scope: Scope, runId: string, in
   await requireCoworkWorkerAccess(client, scope);
   await assertRunOpen(client, scope, runId);
   const lead = await loadOwnLead(client, scope, parsed.leadId);
-  const canonical = normalizeLinkedinProfileUrl(lead.linkedin_url);
-  if (!canonical) throw new Error('El contacto no tiene una URL de perfil LinkedIn válida.');
-  const identity = verifyLinkedinIdentity({ url: canonical, name: lead.name },
-    { kind: 'saved_lead', url: lead.linkedin_url, name: lead.name });
+  const { canonical, identity } = linkedinProfileOf(lead);
   const key = messageIdempotencyKey(scope.organizationId, scope.userId, canonical, parsed.message);
-  const duplicate = await existingLiveJob(client, scope, key);
-  if (duplicate) throw new Error(`Este mensaje ya tiene un trabajo registrado (estado: ${duplicate.status}). No se duplica.`);
-  // Un mensaje por perfil y dia como tope del programador.
-  const dayStart = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
-  const today = await client.from('cowork_linkedin_jobs').select('id', { count: 'exact', head: true })
-    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
-    .eq('canonical_url', canonical).in('status', ['queued', 'claimed', 'confirmed']).gte('created_at', dayStart);
-  if (today.error) throw new Error('No se pudo comprobar mensajes del día.');
-  if (Number(today.count || 0) > 0) throw new Error('Ya hay una acción para este perfil hoy. Vuelve mañana.');
-  if (lead.email) {
-    const reply = await findCompanyReply(client as never, scope, lead.email, lead.company);
-    if (reply.stopped) throw new Error(`Esta empresa ya respondió (${reply.email}). El mensaje queda retenido.`);
-  }
-  const stages = await crmStages(client, scope, lead.id);
-  if (stages.some(stage => stage === 'negotiation' || stage === 'meeting')) {
-    throw new Error(`La cuenta está en etapa ${stages.join(', ')}. Mensaje retenido.`);
-  }
+  const stages = await assertLinkedinMessageAllowed(client, scope, lead, canonical, key);
   const messageHash = createHash('sha256').update(parsed.message).digest('hex');
   const hash = hashJob(runId, 'message', lead.id, key, messageHash);
   const staged = await client.from('cowork_linkedin_job_proposals').upsert(
@@ -194,14 +234,7 @@ async function executeJob(auth: AuthContext, runId: string, targetId: string, ki
     const quota = await inviteQuota(client, scope);
     if (!quota.allowed) throw new Error(quota.reason);
   } else {
-    if (lead.email) {
-      const reply = await findCompanyReply(client as never, scope, lead.email, lead.company);
-      if (reply.stopped) throw new Error(`Esta empresa ya respondió (${reply.email}). El mensaje queda retenido.`);
-    }
-    const stages = await crmStages(client, scope, lead.id);
-    if (stages.some(stage => stage === 'negotiation' || stage === 'meeting')) {
-      throw new Error('La cuenta entró en negociación. Mensaje retenido.');
-    }
+    await assertLinkedinMessageStillAllowed(client, scope, lead);
   }
   if (kind === 'message') {
     if (!proposal.message || createHash('sha256').update(proposal.message).digest('hex') !== proposal.message_hash) {
@@ -211,20 +244,11 @@ async function executeJob(auth: AuthContext, runId: string, targetId: string, ki
   const recomputed = hashJob(runId, kind, lead.id, proposal.idempotency_key, proposal.message_hash);
   if (recomputed !== target.hash) throw new Error('La propuesta cambió desde tu revisión. Pide una nueva revisión.');
   const finalMessage = kind === 'message' ? proposal.message : null;
-  const saved = await client.from('cowork_linkedin_jobs').upsert(
-    { organization_id: scope.organizationId, user_id: scope.userId, run_id: runId, kind,
-      canonical_url: canonical, profile_url: lead.linkedin_url, display_name: String(lead.name || '').slice(0, 300),
-      message: finalMessage, status: 'queued', idempotency_key: proposal.idempotency_key,
-      claim_token: randomUUID(), updated_at: new Date().toISOString() },
-    { onConflict: 'organization_id,user_id,idempotency_key', ignoreDuplicates: true })
-    .select('id,status').maybeSingle();
-  if ((saved.error && String((saved.error as { code?: string }).code) !== '23505') || (!saved.data && saved.error)) {
-    throw new Error('No se pudo encolar el trabajo de LinkedIn.');
-  }
+  const saved = await queueLinkedinJob(client, scope, { runId, kind, lead, canonical, idempotencyKey: proposal.idempotency_key, message: finalMessage });
   return { reply: kind === 'invite'
     ? `Invitación en cola para ${lead.name || canonical}. Ejecútala desde la extensión ante ese perfil; vence en ${LINKEDIN_JOB_EXPIRY_DAYS} días.`
     : `Mensaje en cola para ${lead.name || canonical}. Ejecútalo desde la extensión ante ese perfil; vence en ${LINKEDIN_JOB_EXPIRY_DAYS} días.`,
-    result: { jobId: saved.data?.id || null, reused: !saved.data, kind, canonicalUrl: canonical } };
+    result: { jobId: saved.jobId, reused: saved.reused, kind, canonicalUrl: canonical } };
 }
 
 export async function executeCoworkLinkedinInvite(auth: AuthContext, runId: string, targetId: string) {

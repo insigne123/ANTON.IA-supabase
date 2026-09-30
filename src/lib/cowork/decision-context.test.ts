@@ -166,6 +166,26 @@ test('replying in a conversation is described as a proposal with a card only whe
   }
 });
 
+test('LinkedIn batches are described only when they are on, say who the server leaves for another day and that each card needs approval', () => {
+  const base = { history: { turns: [] }, request: 'Invita a los de la lista', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  assert.equal('linkedinBatchCapability' in off, false);
+  const on = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, linkedinBatch: true }), base);
+  const text = String(on.linkedinBatchCapability);
+  assert.match(text, /linkedin\.invite_batch con linkedinBatch \{leads: \[\{leadId\}\]\} \(hasta 25\) invita sin nota/);
+  assert.match(text, /linkedin\.message_batch con linkedinBatch \{leads: \[\{leadId, message\}\]\} \(hasta 15\)/);
+  assert.match(text, /leadId son de contactos guardados que ya consultaste en esta conversación/);
+  assert.match(text, /Antes de invitar consulta linkedin\.quota/);
+  // The server plans the day: one company a day across email and LinkedIn, the quota, and the brakes of a single action.
+  assert.match(text, /una empresa por día sumando correo y LinkedIn \(sale la primera de cada empresa\)/);
+  assert.match(text, /la persona puede quitar a alguien antes de aprobar/);
+  assert.match(text, /No pongas cifras de cuántas personas salen: las fija el servidor/);
+  assert.match(text, /Requiere revisión humana siempre, incluso en modo autónomo/);
+  assert.match(text, /un trabajo en cola no es un envío/);
+  assert.match(text, /Si pide una sola persona, usa linkedin\.invite o linkedin\.message/);
+  assert.match(text, /no reintentes solo a quien no salió/);
+});
+
 test('a datum only the person knows is asked with options, never a yes or a no or what Cowork can decide', () => {
   const { systemPrompt } = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
   assert.match(systemPrompt, /Si para seguir falta un dato que solo el usuario sabe \(regla 5\), la pregunta es por ese dato, con sus opciones \(regla 9\)/);

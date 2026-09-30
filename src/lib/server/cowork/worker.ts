@@ -45,6 +45,7 @@ import { stageCoworkSendBatch } from './send-batch';
 import { coworkContactsImportEnabled, stageCoworkContactsImport } from './contacts-import';
 import { stageCoworkReplyThread } from './reply-thread-effect';
 import { coworkReplyThreadEnabled } from './thread-read';
+import { coworkLinkedinBatchEnabled, stageCoworkLinkedinBatch } from './linkedin-batch';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -159,11 +160,14 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const contactsImportEnabled = coworkContactsImportEnabled();
     // Sending a reply in the thread needs its staging table (reply_thread migration, applied in production) and the flag.
     const replyThreadEnabled = coworkReplyThreadEnabled();
+    // A batch of LinkedIn invitations or messages needs its staging table (batch migration, applied in production) and the flag.
+    const linkedinBatchEnabled = coworkLinkedinBatchEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
       contactsImport: contactsImportEnabled,
       replyThread: replyThreadEnabled,
+      linkedinBatch: linkedinBatchEnabled,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
@@ -248,6 +252,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       judge: judgeTurn?.review,
       contactsImport: contactsImportEnabled,
       replyThread: replyThreadEnabled,
+      linkedinBatch: linkedinBatchEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       userContext,
       proposeNote: async (leadId, note) => {
@@ -416,6 +421,14 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.replyThread) throw new Error('Missing reply');
           const staged = await stageCoworkReplyThread(scope, run.id, proposal.replyThread);
           targetId = `replythread:${staged.hash}`;
+          label = staged.label;
+        }
+        if (proposal.kind === 'linkedin_invite_batch' || proposal.kind === 'linkedin_message_batch') {
+          if (!linkedinBatchEnabled) throw new Error('Los lotes de LinkedIn no están disponibles.');
+          if (!proposal.linkedinBatch) throw new Error('Missing batch people');
+          const staged = await stageCoworkLinkedinBatch(scope, run.id, proposal.originRunId,
+            proposal.kind === 'linkedin_invite_batch' ? 'invite' : 'message', proposal.linkedinBatch);
+          targetId = `linkedinbatch:${staged.hash}`;
           label = staged.label;
         }
         const proposed = await client.rpc('cowork_propose_effect', {

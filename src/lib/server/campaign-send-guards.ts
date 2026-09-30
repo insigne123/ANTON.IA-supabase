@@ -113,6 +113,30 @@ export async function findCompanySendToday(
   return { collided: false, email: null, sentAt: null, source: null };
 }
 
+/** The companies with a send today, read once (the same sources and limits as findCompanySendToday): the ones a batch planned for today leaves out. */
+export async function listCompanyKeysSentToday(client: SupabaseClient, scope: Scope, dayStart: string): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const { data: contacted, error: contactedError } = await client.from('contacted_leads')
+    .select('email,company,sent_at').eq('organization_id', scope.organizationId)
+    .gte('sent_at', dayStart).limit(500);
+  if (contactedError) throw new Error('No se pudo comprobar envios del dia.');
+  if ((contacted || []).length >= 500) throw new Error('Historial de envíos incompleto.');
+  for (const row of ((contacted || []) as Array<{ email?: string | null; company?: string | null }>)) {
+    for (const key of rowKeys(row.email, row.company)) if (key !== 'email:') keys.add(key);
+  }
+  const { data: dispatches, error: dispatchError } = await client.from('outbound_dispatches')
+    .select('metadata,completed_at').eq('organization_id', scope.organizationId)
+    .eq('status', 'sent').gte('completed_at', dayStart).limit(500);
+  if (dispatchError) throw new Error('No se pudo comprobar envios del dia.');
+  if ((dispatches || []).length >= 500) throw new Error('Historial de despachos incompleto.');
+  for (const row of ((dispatches || []) as Array<{ metadata?: { recipient?: { email?: string } } | null }>)) {
+    const sentEmail = String(row.metadata?.recipient?.email || '').trim().toLowerCase();
+    // Dispatches carry no company: only the address says who it was.
+    if (sentEmail) for (const key of rowKeys(sentEmail, null)) keys.add(key);
+  }
+  return keys;
+}
+
 export type PersonFrequencyHold = FrequencyHold & { email: string; checked: number };
 
 /** 9.3: tope transversal por persona (1/día, 3/7 días, 8/40 días). La cadencia

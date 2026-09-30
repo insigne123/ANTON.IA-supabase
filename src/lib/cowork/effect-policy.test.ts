@@ -11,7 +11,7 @@ test('automatic effects require the user mode, live flag and explicit allowlist'
   for (const kind of ['send_email','code_execute','profile_update','campaign_activate','campaign_pause',
     'campaign_stop_v2','saved_search_create','saved_search_update','saved_search_delete',
     'crm_update_record','campaign_prepare_draft_v2',
-    'crm_assign_lead','exception_resolve','mission_control','reply_thread','new_future_write','']) {
+    'crm_assign_lead','exception_resolve','mission_control','reply_thread','linkedin_invite_batch','linkedin_message_batch','new_future_write','']) {
     assert.equal(coworkEffectCanAutoApprove('autonomous',true,kind),false,kind);
   }
 });

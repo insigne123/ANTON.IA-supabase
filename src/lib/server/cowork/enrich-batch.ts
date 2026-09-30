@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getCoworkRun } from './runs';
-import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { observedCoworkLeadIds } from './observed-leads';
 import { requireCoworkWorkerAccess } from './access';
 import { getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { hasUserEnrichmentSearchCreditAccess } from '@/lib/server/enrichment-search-access';
@@ -25,20 +25,6 @@ export function parseCoworkEnrichBatchTarget(targetId: string) {
   return { hash: parts[1] };
 }
 
-function observedIds(events: Array<{ kind: string; payload: unknown }>): Set<string> {
-  const ids = new Set<string>();
-  for (const event of events) {
-    if (event.kind !== 'tool.completed' || !event.payload || typeof event.payload !== 'object') continue;
-    const payload = event.payload as Record<string, unknown>;
-    if (payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact') {
-      const result = payload.result as { items?: Array<{ leadId?: string }> } | null;
-      for (const item of result?.items || []) if (typeof item.leadId === 'string') ids.add(item.leadId);
-    }
-    for (const row of collectCoworkLeadRows([payload])) ids.add(row.id);
-  }
-  return ids;
-}
-
 /** Stage a bounded batch: every id must be an observed own saved lead.
  * Quota and provider access are checked now for an honest estimate; each
  * item re-checks them at execution. Nothing is submitted here. */
@@ -55,7 +41,7 @@ export async function stageCoworkEnrichBatch(scope: Scope, runId: string, leadId
   const events = await client.from('cowork_run_events').select('kind,payload').eq('run_id', runId)
     .eq('user_id', scope.userId).eq('organization_id', scope.organizationId);
   if (events.error) throw new Error('No se pudo comprobar lo observado en este trabajo.');
-  const seen = observedIds((events.data || []) as Array<{ kind: string; payload: unknown }>);
+  const seen = observedCoworkLeadIds((events.data || []) as Array<{ kind: string; payload: unknown }>);
   const missing = ids.filter(id => !seen.has(id));
   if (missing.length) throw new Error('Todos los contactos del lote deben haberse observado primero en esta conversación.');
   const rows = await client.from('leads').select('id').eq('organization_id', scope.organizationId)

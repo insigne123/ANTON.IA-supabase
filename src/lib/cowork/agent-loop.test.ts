@@ -327,6 +327,59 @@ test('importing contacts is proposed only when it is on, for a file seen in the 
   assert.equal(proposals.length, 1);
 });
 
+test('a LinkedIn batch is proposed only when it is on, for saved contacts seen in this thread, with the text each kind needs', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const lead = (n: number) => `00000000-0000-4000-8000-0000000000b${n}`;
+  const proposals: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
+  const found = { scope: 'own_saved_contacts', items: [1, 2, 3].map(n => ({ id: lead(n), name: `Persona ${n}`, company: `Empresa ${n}`, linkedin_url: `https://www.linkedin.com/in/persona-${n}` })) };
+  const base = { message: 'Invita a los de la lista', runId, signal: new AbortController().signal, authorize: async () => {},
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: Record<string, unknown>) => { proposals.push(proposal); } };
+  const search = { action: 'leads.search' as const, query: 'lista', leadId: null, answer: null };
+  const inviteBatch = (leads: unknown) => ({ action: 'linkedin.invite_batch' as const, query: null, leadId: null, answer: null, linkedinBatch: { leads } as never });
+  const messageBatch = (leads: unknown) => ({ action: 'linkedin.message_batch' as const, query: null, leadId: null, answer: null, linkedinBatch: { leads } as never });
+  const flow = (decision: unknown) => ({ execute: async () => found, decide: async (observations: unknown[]) => (observations.length ? decision : search) as never });
+  const three = [1, 2, 3].map(n => ({ leadId: lead(n) }));
+  // Off (the default): refused with the way out, never proposed.
+  await assert.rejects(runCoworkReadLoop({ ...base, ...flow(inviteBatch(three)) }), /LinkedIn batch unavailable/);
+  assert.equal(proposals.length, 0);
+  // On: the contacts read in this turn anchor the proposal to the run that read them; the server names the card, so the label is generic here.
+  await runCoworkReadLoop({ ...base, linkedinBatch: true, ...flow(inviteBatch(three)) });
+  assert.deepEqual(proposals[0], { kind: 'linkedin_invite_batch', targetId: 'new-linkedin-batch', label: 'Proponer invitaciones en LinkedIn para varias personas',
+    originRunId: runId, linkedinBatch: { leads: three } });
+  assert.match(notes[0], /Preparé un lote de invitaciones de LinkedIn\. En la tarjeta ves a quién va y puedes quitar a quien no quieras/);
+  const texts = [1, 2].map(n => ({ leadId: lead(n), message: `Hola Persona ${n}, gracias por aceptar.` }));
+  await runCoworkReadLoop({ ...base, linkedinBatch: true, ...flow(messageBatch(texts)) });
+  assert.equal(proposals[1].kind, 'linkedin_message_batch');
+  assert.deepEqual(proposals[1].linkedinBatch, { leads: texts });
+  assert.match(notes[1], /Preparé un lote de mensajes de LinkedIn, cada uno con su texto/);
+  // Read in the previous turn: that turn is the origin.
+  const history = [{ runId: parentId, observations: [{ action: 'leads.search', input: 'lista', result: found }] }];
+  await runCoworkReadLoop({ ...base, linkedinBatch: true, history, execute: async () => found, decide: async () => inviteBatch(three) as never });
+  assert.equal(proposals[2].originRunId, parentId);
+  // What the kind cannot take is refused with the reason, before it reaches a card.
+  for (const [decision, pattern] of [
+    [inviteBatch([{ leadId: lead(1), message: 'Hola' }]), /Las invitaciones van sin nota/],
+    [messageBatch([{ leadId: lead(1) }]), /necesita su propio texto/],
+    [inviteBatch([{ leadId: lead(1) }, { leadId: lead(1) }]), /repetidas/],
+    [{ ...inviteBatch(three), linkedinBatch: null }, /Faltan datos de la propuesta/],
+  ] as const) {
+    // The model reads the reason in the rejection it gets back, and the turn ends with the same rejection if it insists.
+    const feedback: string[] = [];
+    await assert.rejects(runCoworkReadLoop({ ...base, linkedinBatch: true, execute: async () => found,
+      decide: async (observations, _mustAnswer, rejections) => { if (rejections?.length) feedback.push(JSON.stringify(rejections)); return (observations.length ? decision : search) as never; } }),
+    /Invalid LinkedIn batch|Missing/);
+    assert.match(feedback.join(' '), pattern);
+  }
+  // Nothing observed first: no proposal.
+  await assert.rejects(runCoworkReadLoop({ ...base, linkedinBatch: true, execute: async () => ({}), decide: async () => inviteBatch(three) as never }), /observed first/);
+  assert.equal(proposals.length, 3);
+});
+
 test('replying in a thread is proposed only when it is on, for a conversation read with replies.thread whose advice is reply', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const parentId = '00000000-0000-4000-8000-000000000011';

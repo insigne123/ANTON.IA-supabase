@@ -157,6 +157,9 @@ export type CorpusTurnResult = {
     code?: { language: string; code: string; inputFiles: string[] }; contactsImport?: { file: string; columns?: unknown; card?: unknown };
     /** A reply proposed inside a conversation, as the server stages it: the person's own address, «Re: » once and the text that would go out. */
     replyThread?: { contactedId: string; to: string; subject: string; body: string };
+    /** A batch of LinkedIn invitations or messages as the server stages it: who goes today, with the text each gets, and who waits and why. */
+    linkedinBatch?: { kind: 'invite' | 'message'; items: Array<{ id: string; name: string | null; company: string | null; message?: string }>;
+      deferred: Array<{ id: string; name: string | null; reason: string }> };
     /** A profile update's fields, as the approval card shows them. */
     profile?: Record<string, unknown> } | null;
   search: Record<string, unknown> | null;
@@ -209,6 +212,8 @@ export type CorpusCase = {
   contactsImport?: boolean;
   /** Runs with email.reply_thread available (COWORK_REPLY_THREAD_ENABLED). */
   replyThread?: boolean;
+  /** Runs with the LinkedIn batches available (COWORK_LINKEDIN_BATCH_ENABLED). */
+  linkedinBatch?: boolean;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
 };
 
