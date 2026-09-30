@@ -17,10 +17,13 @@ import {
 } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_USER_CONTEXT, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
+import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
+import { AXIS_REFERENCE_INSTRUCTIONS, axisReferencePrompt, axisReferenceSchema, axisReferenceSummary, type AxisReference } from './fixtures/cowork-axis-judge';
 import { JUDGE_CALIBRATION } from './fixtures/cowork-judge-calibration';
 import { corpusObservations, corpusShownAnswer } from './fixtures/cowork-conversation-runner';
 
-const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
+const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS, ...AXIS_REST_CORPUS];
 
 async function main() {
   // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
@@ -46,6 +49,20 @@ async function main() {
     }
   };
 
+  // The AXIS cases also get compared with what the previous AI had to do and achieved (cowork-axis-judge.ts).
+  const reference = async (prompt: string): Promise<AxisReference | null> => {
+    if (calls >= maxCalls) return null;
+    calls++;
+    try {
+      const response = await generateStructuredWithTelemetry({ schema: axisReferenceSchema, systemPrompt: AXIS_REFERENCE_INSTRUCTIONS, prompt,
+        openAiModel: judgeModel, allowDefaultModelFallback: false, provider: 'openai', maxAttempts: 2, timeoutMs: 60000, maxOutputTokens: 800 });
+      return response.data;
+    } catch (error) {
+      console.warn('[judge] reference failed:', error instanceof Error ? error.message : error);
+      return null;
+    }
+  };
+
   let report: Record<string, unknown>;
   if (process.argv.includes('--calibrate')) {
     const repeat = Math.max(1, Math.min(3, Number(arg('repeat') || 1)));
@@ -64,22 +81,26 @@ async function main() {
     if (!input) throw new Error('Requires --input=report.json (an evaluate-cowork-conversations output) or --calibrate.');
     const source = JSON.parse(readFileSync(input, 'utf8')) as { outcomes: Array<{ id: string; attempt: number; passed: boolean; result: CorpusTurnResult; contactsImport?: boolean }> };
     const selected = arg('cases')?.split(',').filter(Boolean);
-    const rows: Array<{ id: string; attempt: number; passedChecks: boolean; judgement: CoworkJudgement | null }> = [];
+    const rows: Array<{ id: string; attempt: number; passedChecks: boolean; judgement: CoworkJudgement | null;
+      reference?: AxisReference | null; op?: string; block?: string; capability?: string; star?: boolean }> = [];
     for (const outcome of source.outcomes) {
       if (selected && !selected.includes(outcome.id)) continue;
       const entry = CORPUS.find(item => item.id === outcome.id);
       if (!entry) continue;
       // The rules of the turn as it ran: contacts.import on or off (in older reports, as the case says).
       const rules = coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport) });
+      const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
+      const observations = corpusObservations(entry, outcome.result);
+      const shown = corpusShownAnswer(outcome.result);
       const judgement = await judge(coworkJudgePrompt({
         request: entry.request,
         history: (entry.history || []).map(turn => ({ request: turn.request, reply: turn.reply, observations: turn.observations })),
-        userContext: entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext,
-        observations: corpusObservations(entry, outcome.result),
-        shown: corpusShownAnswer(outcome.result),
+        userContext, observations, shown,
       }), rules);
-      rows.push({ id: outcome.id, attempt: outcome.attempt, passedChecks: outcome.passed, judgement });
-      if (judgement) console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id} #${outcome.attempt} · ${COWORK_JUDGE_DIMENSIONS.map(dimension => judgement.scores[dimension]).join('/')} · ${judgement.veredicto}${judgement.problemas.length ? ` · ${judgement.problemas.join(' | ')}` : ''}`);
+      const compared = entry.axis ? await reference(axisReferencePrompt(entry, { shown, observations, userContext })) : undefined;
+      rows.push({ id: outcome.id, attempt: outcome.attempt, passedChecks: outcome.passed, judgement,
+        ...(entry.axis ? { reference: compared ?? null, op: entry.axis.op, block: entry.axis.block, capability: entry.axis.capability, star: Boolean(entry.axis.star) } : {}) });
+      if (judgement) console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id} #${outcome.attempt} · ${COWORK_JUDGE_DIMENSIONS.map(dimension => judgement.scores[dimension]).join('/')} · ${judgement.veredicto}${judgement.problemas.length ? ` · ${judgement.problemas.join(' | ')}` : ''}${compared ? ` · frente a la IA anterior: ${compared.veredicto} (${compared.motivo})` : ''}`);
     }
     const judged = rows.flatMap(row => row.judgement ? [row] : []);
     report = {
@@ -91,6 +112,8 @@ async function main() {
       passedButLow: judged.filter(row => row.passedChecks && COWORK_JUDGE_DIMENSIONS.some(dimension => row.judgement!.scores[dimension] <= 2))
         .map(row => ({ id: row.id, attempt: row.attempt, scores: row.judgement!.scores, problemas: row.judgement!.problemas })),
       failedButGood: judged.filter(row => !row.passedChecks && row.judgement!.veredicto === 'buena').map(row => ({ id: row.id, attempt: row.attempt })),
+      // Only with AXIS cases: how the answers compare with what the previous AI achieved, in total, by block and by what the app can do.
+      ...(rows.some(row => row.reference !== undefined) ? { axisReference: axisReferenceSummary(rows) } : {}),
       rows,
     };
   }

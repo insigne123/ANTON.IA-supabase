@@ -24,6 +24,9 @@
 // (the first answer streamed, then corrected: replacedOnScreen) and how long a turn takes until its
 // answer is final, apart for clean and corrected ones (revealSeconds): with COWORK_ANSWER_HOLD_ENABLED
 // nobody sees the first answer, and the answer shows once, at that time.
+// --cases=axis-* runs the 44 operations of the AXIS package: the 20 ★ (scripts/fixtures/cowork-axis-paquete.ts) and the other 24
+// (cowork-axis-resto.ts). axis:star runs only the 20 ★ and axis:rest only the other 24. Grade them with
+// judge-cowork-conversations.ts, which also compares each answer with what the previous AI achieved.
 //
 // To compare prompts, run it on the previous commit and on this one with the same flags.
 import { writeFileSync } from 'node:fs';
@@ -37,12 +40,15 @@ import { runCoworkWriter } from '../src/lib/cowork/writer';
 import { coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
+import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
+import { selectCases } from './cowork-case-selection';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 
-// Production conversations first, then the marketing use cases (email and LinkedIn)
-// and every button on the Cowork home.
-const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
+// Production conversations first, then the marketing use cases (email and LinkedIn),
+// every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
+const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS, ...AXIS_REST_CORPUS];
 
 // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
 CORPUS.push(...AGENDA_CORPUS);
@@ -52,7 +58,9 @@ async function main() {
     throw new Error('Requires --live and explicit OPENAI_API_KEY/COWORK_MODEL. The offline check is scripts/cowork-conversation-corpus.test.ts.');
   }
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const selected = arg('cases')?.split(',').filter(Boolean) || CORPUS.map(entry => entry.id);
+  // `--cases=axis-*` takes every case whose id starts with «axis-»; `axis:star` and `axis:rest` take the 20 ★ and the other 24.
+  // Without --cases, the corpus as it always was: the AXIS operations are asked for by name.
+  const selected = selectCases(CORPUS, arg('cases')) || CORPUS.filter(entry => !entry.axis).map(entry => entry.id);
   const unknown = selected.filter(id => !CORPUS.some(entry => entry.id === id));
   if (unknown.length) throw new Error(`Unknown cases: ${unknown.join(', ')}`);
   const repeat = Math.max(1, Math.min(5, Number(arg('repeat') || 1)));
