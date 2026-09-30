@@ -207,6 +207,24 @@ test('a provider failure while reading a colleague message does not complete the
   assert.equal(failing.writes.some(write => write.last_completed_at), false);
 });
 
+test('Gmail metadata failures preserve the incomplete window instead of treating messages as absent', async (t) => {
+  for (const status of [403, 429, 500]) {
+    const world = colleagueWorld({
+      contacts: [contact('c1', 'lead1@empresa.cl', '2026-09-01T00:00:00Z')],
+      messages: [{ id: 'm1', from: 'grace@empresa.cl', at: '2026-09-15T00:00:00Z' }],
+    });
+    const mock = t.mock.method(globalThis, 'fetch', async (url: any) => String(url).includes('format=metadata')
+      ? new Response('', { status }) : world.fetchMock(url));
+    try {
+      const result = await world.sweep();
+      assert.equal(result.completedWindow, false, `HTTP ${status} must not claim full coverage`);
+      assert.equal(result.error, 'mailbox_provider_unavailable');
+      assert.equal(world.writes.some(write => write.last_completed_at), false);
+      assert.deepEqual(world.calls, []);
+    } finally { mock.mock.restore(); }
+  }
+});
+
 test('a message that turns out not to be a reply is read once and the window still completes', async (t) => {
   const world = colleagueWorld({
     contacts: [contact('c1', 'lead1@empresa.cl', '2026-09-01T00:00:00Z')],

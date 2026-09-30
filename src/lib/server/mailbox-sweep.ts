@@ -69,7 +69,11 @@ async function gmailFrom(messages: Array<{ id: string }>, accessToken: string) {
       const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=From&fields=id,internalDate,payload/headers`, {
         headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store',
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 410) return null;
+        // Provider failures are not evidence that a message is absent: retry this window.
+        throw new Error(`Gmail sweep metadata failed (${res.status})`);
+      }
       const data = await res.json();
       const from = (data?.payload?.headers || []).find((header: any) => String(header?.name || '').toLowerCase() === 'from')?.value || '';
       return { id: data?.id || item.id, from: extractEmailAddress(from), internalDateMs: Number(data?.internalDate || 0) };
@@ -279,7 +283,7 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
     // stable code, never tokens, provider bodies or recipient data.
     const raw = String(err?.message || err || 'sweep_failed');
     const message = /refresh|invalid_grant|unauthoriz|AADSTS/i.test(raw) ? 'connection_required'
-      : /Gmail sweep (list|profile) failed|Outlook sweep (list|profile) failed|message lookup failed/.test(raw) ? 'mailbox_provider_unavailable'
+      : /Gmail sweep (list|profile|metadata) failed|Outlook sweep (list|profile) failed|message lookup failed/.test(raw) ? 'mailbox_provider_unavailable'
       : /sweep_match_budget_exceeded|contact_history_truncated|sync_failed|incomplete_thread/.test(raw)
         ? raw.match(/sweep_match_budget_exceeded|contact_history_truncated|sync_failed|incomplete_thread/)![0]
         : 'sweep_failed';
