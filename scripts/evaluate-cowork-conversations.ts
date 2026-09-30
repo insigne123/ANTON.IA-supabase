@@ -44,7 +44,7 @@ import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
 import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { selectCases } from './cowork-case-selection';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
-import { THREAD_CORPUS } from './fixtures/cowork-thread-corpus';
+import { THREAD_AGENDA_CORPUS, THREAD_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
@@ -55,7 +55,7 @@ const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ..
 CORPUS.push(...AGENDA_CORPUS);
 
 // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
-CORPUS.push(...THREAD_CORPUS);
+CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {

@@ -142,11 +142,12 @@ export async function readCoworkAgenda(
   const person = (row: Record<string, unknown>) => ({ name: text(row.name), email: text(row.email), company: text(row.company) });
 
   const interestedRows = interested.ok ? interested.value.items.map(item => ({
-    name: item.name, email: item.email, company: item.company, daysWaiting: item.daysWaiting,
+    name: item.name, email: item.email, company: item.company, daysWaiting: item.daysWaiting, contactedId: item.contactedId,
     intent: item.replyIntent === 'meeting_request' ? 'meeting_request' as const : 'positive' as const,
   })) : [];
   const unclassified = (attentionRows?.unclassified || []).map(row => ({
     ...person(row as Record<string, unknown>), daysWaiting: daysSince((row as { replied_at?: unknown }).replied_at, nowMs) ?? 0,
+    contactedId: text((row as { id?: unknown }).id),
   }));
   const autoReplies = (attentionRows?.automatic || []).filter(row => {
     const age = daysSince((row as { replied_at?: unknown }).replied_at, nowMs);

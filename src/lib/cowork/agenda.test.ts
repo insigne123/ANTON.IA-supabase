@@ -46,6 +46,30 @@ test('an empty and complete list says what to read next; a list with something i
   assert.equal(buildCoworkAgenda({ ...empty(), sources: { ...okSources(), interested: 'partial' } }).whenEmpty, undefined);
 });
 
+test('each person carries the conversation that has waited longest, so answering them reads it directly; a row without one adds none', () => {
+  const agenda = buildCoworkAgenda({
+    ...empty(),
+    interested: [
+      { ...person('Marcela Rojas', 'Servicios Norte', 'mrojas@sernorte.cl', 2), intent: 'positive', contactedId: 'c-reciente' },
+      { ...person('Marcela Rojas', 'Servicios Norte', 'mrojas@sernorte.cl', 6), intent: 'meeting_request', contactedId: 'c-antigua' },
+      { ...person('Gerardo Paz', 'Servicios Norte', 'gpaz@sernorte.cl', 5), intent: 'positive' },
+      { ...person('Gerardo Paz', 'Servicios Norte', 'gpaz@sernorte.cl', 3), intent: 'positive', contactedId: 'c-gerardo' },
+      { ...person('Héctor Vidal', 'Casino Central', 'hvidal@casinocentral.cl', 3), intent: 'positive', contactedId: 'c-hector' },
+      { ...person('Ana Ruiz', 'Alimentos del Valle', 'aruiz@delvalle.cl', 1), intent: 'positive' },
+    ],
+    unclassified: [{ ...person('Sofía Lira', 'Minera Norte', 'slira@minanorte.cl', 1), contactedId: 'c-sofia' }],
+  });
+  const members = (who: string) => agenda.items.find(item => item.who === who)!.members;
+  assert.deepEqual(members('Marcela Rojas'), [
+    { name: 'Marcela Rojas', daysWaiting: 6, askedForMeeting: true, contactedId: 'c-antigua' },
+    { name: 'Gerardo Paz', daysWaiting: 5, askedForMeeting: false, contactedId: 'c-gerardo' },
+  ]);
+  assert.deepEqual(members('Héctor Vidal'), [{ name: 'Héctor Vidal', daysWaiting: 3, askedForMeeting: false, contactedId: 'c-hector' }]);
+  assert.deepEqual(members('Sofía Lira'), [{ name: 'Sofía Lira', daysWaiting: 1, askedForMeeting: false, contactedId: 'c-sofia' }]);
+  // Without an id in the row the key is absent, not null: the coordinator is never handed something to read that does not exist.
+  assert.deepEqual(members('Ana Ruiz'), [{ name: 'Ana Ruiz', daysWaiting: 1, askedForMeeting: false }]);
+});
+
 test('the list goes by commercial value: people who answered, then decisions, then what revives, then what runs by itself', () => {
   const agenda = buildCoworkAgenda({
     ...empty(),

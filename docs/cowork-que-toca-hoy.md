@@ -31,7 +31,7 @@ Un extracto de lo que lee el coordinador (el día completo del caso `agenda-toca
               "approvals": 2, "followupsReady": 47, "followupsHeld": 3, "linkedinAccepted": 2, "bounces": 1 },
   "items": [
     { "rank": 1, "kind": "meeting_request", "action": "reply", "who": "Marcela Rojas", "company": "Servicios Norte", "people": 1, "daysWaiting": 4,
-      "members": [ { "name": "Marcela Rojas", "daysWaiting": 4, "askedForMeeting": true } ] },
+      "members": [ { "name": "Marcela Rojas", "daysWaiting": 4, "askedForMeeting": true, "contactedId": "…" } ] },
     { "rank": 6, "kind": "cooled_lead", "action": "revive", "who": "Iván Herrera", "company": "Servicios Integrales", "daysWaiting": 24 },
     { "rank": 8, "kind": "followups_due", "action": "let_run", "campaign": "Prospección construcción y RR. HH.", "ready": 47, "later": 0, "held": 3, "spacingMinutes": 30 }
   ],
@@ -44,7 +44,7 @@ Un extracto de lo que lee el coordinador (el día completo del caso `agenda-toca
 
 ### Reglas que fija el código
 
-- **Una empresa cuenta una vez.** Se agrupa por dominio corporativo (o por el nombre de la empresa cuando escriben desde una casilla compartida como Gmail), con la misma clave que usa el envío (`companyKeysFor`). Si escribieron dos colegas, es una empresa, `people` dice cuántos y `members` trae, de cada persona (hasta tres, la que más espera primero), su nombre, cuánto lleva esperando y si fue ella quien pidió la reunión. Una persona que aparece en varios envíos cuenta una vez, con la mayor espera y con la reunión si la pidió en alguno. Sin este dato por persona, el modelo real atribuía la reunión a los dos colegas cuando la pidió uno, y le ponía a uno la espera del otro.
+- **Una empresa cuenta una vez.** Se agrupa por dominio corporativo (o por el nombre de la empresa cuando escriben desde una casilla compartida como Gmail), con la misma clave que usa el envío (`companyKeysFor`). Si escribieron dos colegas, es una empresa, `people` dice cuántos y `members` trae, de cada persona (hasta tres, la que más espera primero), su nombre, cuánto lleva esperando, si fue ella quien pidió la reunión y su `contactedId`, la conversación que más lleva esperando, que es la que lee `replies.thread` para preparar su respuesta (docs/cowork-responder-en-hilo.md; no va en la respuesta al usuario). Una persona que aparece en varios envíos cuenta una vez, con la mayor espera y con la reunión si la pidió en alguno. Sin este dato por persona, el modelo real atribuía la reunión a los dos colegas cuando la pidió uno, y le ponía a uno la espera del otro.
 - **Una respuesta de esta mañana ya es de hoy.** `replies.stalled` empieza a contar a las 48 horas; la agenda no espera (`selectStalledInterested(rows, now, 0)`). Descarta los que ya recibieron una respuesta nuestra y los que tienen un compromiso abierto.
 - **Las respuestas automáticas son información.** Se cuentan aparte (`autoReplies`, solo las de los últimos 7 días) y nunca se suman a las respuestas ni generan un ítem.
 - **Un rebote es noticia por dos semanas.** Los más antiguos son direcciones muertas que el motor ya evita. Una falla temporal (casilla llena, un error pasajero: `retry_later`) no pide corregir ninguna dirección, solo volver a intentar más tarde: se cuenta aparte en `softBounces` y no genera un ítem.

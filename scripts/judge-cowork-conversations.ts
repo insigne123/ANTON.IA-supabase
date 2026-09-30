@@ -9,7 +9,7 @@
 //   node --loader ./scripts/ts-test-loader.mjs scripts/judge-cowork-conversations.ts --live --judge-model=gpt-6-sol \
 //     (--calibrate [--repeat=2] | --input=report.json [--cases=a,b]) --max-calls=120 [--output=judged.json]
 import { readFileSync, writeFileSync } from 'node:fs';
-import { THREAD_CORPUS } from './fixtures/cowork-thread-corpus';
+import { THREAD_AGENDA_CORPUS, THREAD_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import {
@@ -28,7 +28,7 @@ const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STAR
 
 async function main() {
   // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
-  CORPUS.push(...THREAD_CORPUS);
+  CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS);
   // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
   CORPUS.push(...AGENDA_CORPUS);
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY) throw new Error('Requires --live and an explicit OPENAI_API_KEY.');
