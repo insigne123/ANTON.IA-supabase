@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COWORK_STARTERS, coworkStarter } from './starters';
+import { COWORK_QUICK_ACTIONS, COWORK_STARTERS, coworkStarter } from './starters';
 
 test('home starters are few, short and ready to send, with at most one placeholder to fill', () => {
   assert.ok(COWORK_STARTERS.length >= 4 && COWORK_STARTERS.length <= 6, 'one row or two on the home, never a wall of buttons');
@@ -13,4 +13,15 @@ test('home starters are few, short and ready to send, with at most one placehold
   }
   assert.match(coworkStarter('mejorar').prompt, /\[pega aquí tu correo\]$/);
   assert.throws(() => coworkStarter('no-existe'), /Unknown Cowork starter/);
+});
+
+test('the row above the composer has four actions that send as they are, each one of the corpus', () => {
+  assert.deepEqual(COWORK_QUICK_ACTIONS.map(item => item.id), ['toca-hoy', 'escribir', 'prospectos', 'como-voy']);
+  for (const item of COWORK_QUICK_ACTIONS) {
+    assert.ok(item.title.length <= 28, `${item.id}: fits in one pill`);
+    assert.doesNotMatch(item.prompt, /\[[^\]]+\]/, `${item.id}: one tap sends it, so nothing is left to fill`);
+  }
+  for (const item of COWORK_QUICK_ACTIONS.filter(item => item.id !== 'toca-hoy')) {
+    assert.equal(item.prompt, coworkStarter(item.id).prompt, `${item.id}: the same prompt as the home starter the corpus checks`);
+  }
 });

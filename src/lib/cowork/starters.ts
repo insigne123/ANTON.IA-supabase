@@ -27,3 +27,13 @@ export function coworkStarter(id: string): CoworkStarter {
   if (!starter) throw new Error(`Unknown Cowork starter: ${id}`);
   return starter;
 }
+
+/** The short row above the composer once a conversation is open (the home already has its starters). Each one is ready to
+ * send as it is: «¿Qué toca hoy?» is the agenda's own case, the other three are the home's starters with a shorter label, so
+ * a prompt is changed in one place and its corpus case follows. */
+export const COWORK_QUICK_ACTIONS: CoworkStarter[] = [
+  { id: 'toca-hoy', icon: 'calendar', title: '¿Qué toca hoy?', prompt: '¿Qué toca hoy?' },
+  { ...coworkStarter('escribir'), title: 'Escribir a mis contactos' },
+  { ...coworkStarter('prospectos'), title: 'Buscar prospectos' },
+  { ...coworkStarter('como-voy') },
+];
