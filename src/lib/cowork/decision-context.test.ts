@@ -126,3 +126,18 @@ test('with the Writer on, the coordinator reads how to hand it the emails, and t
   assert.equal(early.writerAvailable, true);
   assert.equal(coworkDecisionContext(instructions, { ...base, mustAnswer: true, turnBudget: budget(0) }).writerAvailable, false);
 });
+
+test('importing contacts is described only when it is on, and says what it leaves out and that it waits for approval', () => {
+  const base = { history: { turns: [] }, request: 'Importa la lista de la feria', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  assert.equal('contactsImportCapability' in off, false);
+  const on = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, contactsImport: true }), base);
+  assert.match(String(on.contactsImportCapability), /contacts\.import con contactsImport \{file, columns\}/);
+  assert.match(String(on.contactsImportCapability), /ya están guardados/);
+  assert.match(String(on.contactsImportCapability), /revisión humana siempre, incluso en modo autónomo/);
+  // The count is the server's: the reply names none, so it cannot contradict the card.
+  assert.match(String(on.contactsImportCapability), /no pongas cifras de personas, ni el total del archivo ni cuántas entran/);
+  // Asking what a file has, or whom to write first, is not asking to import it: the import waits as the next step.
+  assert.match(String(on.contactsImportCapability), /Si solo pregunta qué trae el archivo o a quién escribir primero, o solo lo adjuntó, responde eso \(con el orden, si lo pidió\) y deja la importación/);
+  assert.match(String(on.contactsImportCapability), /o una campaña o un correo para personas de un archivo que aún no están guardadas, propón contacts\.import/);
+});

@@ -22,6 +22,7 @@ import { ExceptionReview } from './ExceptionReview';
 import { MissionReview } from './MissionReview';
 import { MessageContextReview } from './MessageContextReview';
 import { EnrichBatchReview } from './EnrichBatchReview';
+import { ContactsImportReview } from './ContactsImportReview';
 import { ReviewActions, ReviewChips, ReviewField, ReviewFields, ReviewNote, ReviewPaper } from './ReviewParts';
 import { DoneMark } from './CoworkActivity';
 import { AnimatePresence, CW_EASE, CwCollapse, cwPop, cwSwap, cwVariants, m, useReducedMotion } from './motion';
@@ -46,6 +47,7 @@ const REVIEWS: Record<string, (props: ReviewProps) => ReactNode> = {
   mission_control: props => <MissionReview {...props} />,
   message_context_update: props => <MessageContextReview {...props} />,
   enrich_batch: props => <EnrichBatchReview {...props} />,
+  contacts_import: props => <ContactsImportReview {...props} />,
 };
 
 const SENIORITY: Record<string, string> = {

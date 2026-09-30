@@ -121,9 +121,21 @@ export function coworkQuestion(value: unknown): string | null {
 
 /** A line without the questions it ends with: «Te dejo la lista. ¿La reviso?» keeps «Te dejo la lista.». */
 function withoutTrailingQuestions(line: string): string {
-  const sentences = line.match(/[^.!?…]+[.!?…]+[^\p{L}\p{N}¿¡(«"]*|[^.!?…]+$/gu) || [line];
-  while (sentences.length && /\?[^\p{L}\p{N}]*$/u.test(sentences[sentences.length - 1])) sentences.pop();
-  const kept = sentences.join('').trim();
+  let kept = line.trimEnd();
+  // A Spanish question opens with «¿»: it goes from there, so the periods of an abbreviation inside it
+  // («¿… tus contactos de RR. HH. con correo?») do not leave half of it behind.
+  while (/\?[^\p{L}\p{N}]*$/u.test(kept)) {
+    const open = kept.lastIndexOf('¿');
+    if (open < 0) break;
+    kept = kept.slice(0, open).replace(/[\s*_«"(]+$/u, '');
+  }
+  if (/\?[^\p{L}\p{N}]*$/u.test(kept)) {
+    // A question without «¿»: sentence by sentence, as before.
+    const sentences = kept.match(/[^.!?…]+[.!?…]+[^\p{L}\p{N}¿¡(«"]*|[^.!?…]+$/gu) || [kept];
+    while (sentences.length && /\?[^\p{L}\p{N}]*$/u.test(sentences[sentences.length - 1])) sentences.pop();
+    kept = sentences.join('');
+  }
+  kept = kept.trim();
   // Emphasis left open by a dropped «**¿…?**» is not content.
   return /[\p{L}\p{N}]/u.test(kept) ? kept : '';
 }

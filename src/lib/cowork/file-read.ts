@@ -143,27 +143,47 @@ export function coworkFilesByWords(query: string, names: string[]) {
   });
 }
 
+/** A whole table: its named columns and every row with something in it. */
+export type CoworkFileTable = { columns: string[]; body: unknown[][] };
+
+function csvTable(content: string): CoworkFileTable {
+  // The delimiter is detected: exports in Chile often use «;».
+  const parsed = Papa.parse<unknown[]>(content, { skipEmptyLines: 'greedy' });
+  const [first = [], ...rest] = (parsed.data || []).filter(values => Array.isArray(values) && !blank(values));
+  return { columns: coworkTableHeaders(first), body: rest };
+}
+
+/** A JSON list of objects as a table (its keys, from the first rows, are the columns); null for any other JSON. */
+function jsonTable(data: unknown): CoworkFileTable | null {
+  if (!Array.isArray(data) || !data.length || !data.every(item => item && typeof item === 'object' && !Array.isArray(item))) return null;
+  const keys: string[] = [];
+  for (const item of data.slice(0, COWORK_FILE_READ_LIMITS.rows)) {
+    for (const key of Object.keys(item as Record<string, unknown>)) if (!keys.includes(key)) keys.push(key);
+  }
+  const columns = keys.slice(0, COWORK_FILE_READ_LIMITS.columns);
+  return { columns: coworkTableHeaders(columns), body: data.map(item => columns.map(key => (item as Record<string, unknown>)[key])) };
+}
+
+/** The whole table of a CSV or a JSON list (what an import of contacts reads); null for anything else. The preview shows its first rows. */
+export function coworkFileTable(name: string, content: string): CoworkFileTable | null {
+  const kind = coworkFileKind(name);
+  if (kind === 'csv') return csvTable(content);
+  if (kind !== 'json') return null;
+  try { return jsonTable(JSON.parse(content)); } catch { return null; }
+}
+
 /** The preview of a CSV, JSON, Markdown or text file; null for the formats opened on the server (Excel, PDF, Word) and the ones Cowork does not read. */
 export function coworkFilePreview(name: string, content: string): CoworkFilePreview | null {
   const kind = coworkFileKind(name);
   if (kind === 'csv') {
-    // The delimiter is detected: exports in Chile often use «;».
-    const parsed = Papa.parse<unknown[]>(content, { skipEmptyLines: 'greedy' });
-    const [first = [], ...rest] = (parsed.data || []).filter(values => Array.isArray(values) && !blank(values));
-    return coworkTablePreview(coworkTableHeaders(first), rest, rest.length);
+    const { columns, body } = csvTable(content);
+    return coworkTablePreview(columns, body, body.length);
   }
   if (kind === 'json') {
     let data: unknown;
     try { data = JSON.parse(content); } catch { return coworkTextPreview(content); }
-    if (Array.isArray(data) && data.length && data.every(item => item && typeof item === 'object' && !Array.isArray(item))) {
-      const keys: string[] = [];
-      for (const item of data.slice(0, COWORK_FILE_READ_LIMITS.rows)) {
-        for (const key of Object.keys(item as Record<string, unknown>)) if (!keys.includes(key)) keys.push(key);
-      }
-      const columns = keys.slice(0, COWORK_FILE_READ_LIMITS.columns);
-      return coworkTablePreview(coworkTableHeaders(columns), data.map(item => columns.map(key => (item as Record<string, unknown>)[key])), data.length);
-    }
-    return coworkTextPreview(JSON.stringify(data, null, 1));
+    const table = jsonTable(data);
+    return table ? coworkTablePreview(table.columns, table.body, table.body.length) : coworkTextPreview(JSON.stringify(data, null, 1));
   }
   if (kind === 'text') return coworkTextPreview(content);
   return null;

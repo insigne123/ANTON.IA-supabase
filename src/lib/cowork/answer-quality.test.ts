@@ -99,6 +99,14 @@ test('the closing question is one plain sentence that ends the reply exactly onc
     'Priorizaría a Felipe Muñoz (Securitas) y a Camila Fuentes (Adecco): tienen correo. A Marcela ya le escribiste.\n\n¿Preparo el correo para Felipe y Camila?');
   assert.equal(polish('Esto es información general, no asesoría legal. ¿Reviso tus bajas? ¿O prefieres otra cosa?', '¿Reviso tus bajas?').reply,
     'Esto es información general, no asesoría legal.\n\n¿Reviso tus bajas?');
+  // An abbreviation inside the question («RR. HH.») is not where it starts: seen with the real model, the
+  // reply kept «¿La uso … de RR. HH.» and then repeated the whole question.
+  assert.equal(polish('Lo orienté a presentar AXIS, sin resultados no respaldados. ¿La uso en una campaña pausada con tus contactos de RR. HH. con correo?',
+    '¿La uso en una campaña pausada con tus contactos de RR. HH. con correo?').reply,
+  'Lo orienté a presentar AXIS, sin resultados no respaldados.\n\n¿La uso en una campaña pausada con tus contactos de RR. HH. con correo?');
+  assert.equal(polish('Te dejé el correo para la Sra. Rojas. **¿Lo envío a la Sra. Rojas?**', '¿Lo envío?').reply, 'Te dejé el correo para la Sra. Rojas.\n\n¿Lo envío?');
+  // A question written without «¿» still goes sentence by sentence.
+  assert.equal(polish('Te dejé la secuencia. Quieres otro tono?', '¿Creo la campaña?').reply, 'Te dejé la secuencia.\n\n¿Creo la campaña?');
   // A question inside a list is content, not the closing.
   assert.equal(polish('Preguntas para la reunión:\n- ¿Cuántos postulantes revisan?', '¿La agendo?').reply,
     'Preguntas para la reunión:\n- ¿Cuántos postulantes revisan?\n\n¿La agendo?');

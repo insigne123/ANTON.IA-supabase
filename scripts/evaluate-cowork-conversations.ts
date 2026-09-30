@@ -18,6 +18,9 @@
 // COWORK_JUDGE_MODEL picks its model (COWORK_MODEL by default); grade the result with
 // judge-cowork-conversations.ts and a different --judge-model.
 //
+// --contacts-import turns on contacts.import in every case (F4), as COWORK_CONTACTS_IMPORT_ENABLED
+// does; the cases marked contactsImport have it on anyway. The judges read the same flag.
+//
 // To compare prompts, run it on the previous commit and on this one with the same flags.
 import { writeFileSync } from 'node:fs';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
@@ -26,7 +29,7 @@ import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
-import { COWORK_JUDGE_TURN_INSTRUCTIONS, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
+import { coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
@@ -52,15 +55,17 @@ async function main() {
   const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
   const writerCalls = { writer: 0, reviewer: 0 };
   const judgeOn = process.argv.includes('--judge-in-turn');
+  const importOn = process.argv.includes('--contacts-import');
   const judgeModel = process.env.COWORK_JUDGE_MODEL || process.env.COWORK_MODEL;
   let judgeCalls = 0;
   const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
   let calls = 0;
   const usage: unknown[] = [];
-  const outcomes: Array<CorpusOutcome & { attempt: number; seconds: number; decisions: unknown[]; issues: string[] }> = [];
+  const outcomes: Array<CorpusOutcome & { attempt: number; seconds: number; decisions: unknown[]; issues: string[]; contactsImport: boolean }> = [];
   for (let attempt = 1; attempt <= repeat; attempt++) {
     for (const id of selected) {
-      const entry = CORPUS.find(item => item.id === id)!;
+      const found = CORPUS.find(item => item.id === id)!;
+      const entry = importOn ? { ...found, contactsImport: true } : found;
       const decisions: unknown[] = [];
       const started = Date.now();
       // The Writer and the Reviewer, with their own models and the same call budget.
@@ -83,7 +88,7 @@ async function main() {
         calls++;
         judgeCalls++;
         try {
-          const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: COWORK_JUDGE_TURN_INSTRUCTIONS,
+          const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: coworkJudgeInstructions({ contactsImport: Boolean(entry.contactsImport), inTurn: true }),
             prompt: coworkJudgeTurnPrompt({ request: meta.request, history: meta.history, userContext: meta.userContext, observations, answer }),
             provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 45000 });
           usage.push(coworkModelUsage(response.telemetry));
@@ -133,7 +138,7 @@ async function main() {
         return response.data;
       }, write, judgeInTurn);
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
-      outcomes.push({ ...outcome, attempt, seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
+      outcomes.push({ ...outcome, attempt, contactsImport: Boolean(entry.contactsImport), seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
         issues: coworkAnswerIssues(shown, { expectNextStep: !(outcome.result.proposal || outcome.result.search) }).map(issue => issue.detail) });
       if (calls >= maxCalls) break;
     }
@@ -142,6 +147,7 @@ async function main() {
   const checks = outcomes.flatMap(outcome => outcome.checks);
   const summary = {
     model: process.env.COWORK_MODEL, calls, cases: outcomes.length,
+    ...(importOn ? { contactsImport: 'all cases' } : {}),
     // With --writer: how many answers the Writer wrote, and how many calls it and the Reviewer made.
     ...(writerOn ? { writer: { models: writerModels, calls: writerCalls,
       answers: outcomes.filter(outcome => outcome.result.writer).length,

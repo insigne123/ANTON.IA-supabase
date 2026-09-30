@@ -12,6 +12,7 @@ type Preview = {
   messages?: Array<{ subject: string; body: string; delayDays: number }>;
   emails?: string[]; matched?: number; edits?: number;
   status?: string; revision?: number; recipients?: number; matches?: boolean;
+  definitionHash?: string;
 };
 
 const STATUS: Record<string, string> = {
@@ -48,7 +49,7 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
     try {
       const response = await fetch(`/api/cowork/runs/${runId}/campaign-preview`, {
         method: 'PATCH', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: draft.map(item => ({ subject: item.subject.trim(), body: item.body.trim() })) }),
+        body: JSON.stringify({ expectedHash: preview?.definitionHash, messages: draft.map(item => ({ subject: item.subject.trim(), body: item.body.trim() })) }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'No se pudo guardar la edición.');

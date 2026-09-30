@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import type { StructuredResult, StructuredTelemetry } from '@/ai/openai-json';
 import { COWORK_AGENT_ACTION } from '@/lib/cowork/contracts';
 import type { CoworkAnswer, CoworkObservation } from '@/lib/cowork/agent-loop';
-import { COWORK_JUDGE_TURN_INSTRUCTIONS, coworkJudgeFix, coworkJudgeSchema, coworkJudgeTurnPrompt, type CoworkJudgement } from '@/lib/cowork/judge';
+import { coworkJudgeFix, coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt, type CoworkJudgement } from '@/lib/cowork/judge';
 import type { CoworkAgentStep } from '@/lib/cowork/writer';
 
 /** The judge reads the coordinator's final answer before it is shown (plan 2, G2). Off, the answer goes out as before. */
@@ -46,6 +46,8 @@ export function coworkJudgeTurn(deps: {
   liveDraft: { review: () => void; flush: () => Promise<void> } | null;
   timeLeft: () => number;
   model?: string;
+  /** contacts.import is on in this turn (F4): the judge reads the same rules as the coordinator. */
+  contactsImport?: boolean;
   onCall?: (call: { model: string; durationMs: number }) => void;
 }) {
   // The answer the judge asked to fix: the loop returns it unchanged when the correction fails.
@@ -66,7 +68,7 @@ export function coworkJudgeTurn(deps: {
         await deps.liveDraft?.flush();
         const reservationId = await deps.reserve();
         const call = await deps.generate({
-          schema: coworkJudgeSchema, systemPrompt: COWORK_JUDGE_TURN_INSTRUCTIONS,
+          schema: coworkJudgeSchema, systemPrompt: coworkJudgeInstructions({ contactsImport: deps.contactsImport, inTurn: true }),
           prompt: coworkJudgeTurnPrompt({ request: deps.request, history: deps.history, userContext: deps.userContext, observations, answer }),
           provider: 'openai', openAiModel: deps.model, allowDefaultModelFallback: false, maxAttempts: 1,
           timeoutMs: Math.min(CALL.timeoutMs, deps.timeLeft()), maxOutputTokens: CALL.maxOutputTokens, signal: deps.signal,

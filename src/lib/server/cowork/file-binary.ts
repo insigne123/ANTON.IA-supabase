@@ -63,8 +63,30 @@ function showCells(XLSX: typeof import('xlsx'), sheet: import('xlsx').WorkSheet)
   }
 }
 
+/** A sheet as a whole: its columns, every row counted, what stood above the header, and the list of sheets. */
+export type CoworkExcelTable = {
+  columns: string[]; body: unknown[][]; sheet: string; above: string[]; capped: boolean; sheets: Array<{ name: string; rows: number }>;
+};
+type ExcelTableResult = { table: CoworkExcelTable } | { unreadable: 'damaged' | 'large' | 'sheet' };
+
 /** An Excel workbook: the sheet asked for (the first one with data by default) as a table, and the list of sheets. */
 async function excelPreview(bytes: Uint8Array, sheetAsked: string, cells: number): Promise<CoworkBinaryResult> {
+  const opened = await excelTable(bytes, sheetAsked, cells);
+  if ('unreadable' in opened) return opened;
+  const { columns, body, sheet, above, capped, sheets } = opened.table;
+  const table = coworkTablePreview(columns, body, body.length);
+  return { preview: { ...table, sheet, ...(above.length ? { above } : {}), ...(capped ? { capped: true as const } : {}), sheets } };
+}
+
+/**
+ * The whole table of an Excel sheet, with the same limits as the preview (rows counted and cells held
+ * at once): what an import of contacts reads. The preview shows the first rows of the same table.
+ */
+export function coworkExcelTable(bytes: Uint8Array, options: { sheet?: string; cells?: number } = {}): Promise<ExcelTableResult> {
+  return excelTable(bytes, options.sheet || '', options.cells ?? COWORK_BINARY_LIMITS.cells);
+}
+
+async function excelTable(bytes: Uint8Array, sheetAsked: string, cells: number): Promise<ExcelTableResult> {
   const opened = coworkZipGuard(bytes);
   if (!opened.ok) return opened.large ? large : damaged;
   if (opened.xmlBytes > COWORK_BINARY_LIMITS.xlsxXmlBytes) return large;
@@ -103,8 +125,7 @@ async function excelPreview(bytes: Uint8Array, sheetAsked: string, cells: number
   const [first = [], ...rest] = rows.slice(headerAt);
   const capped = rest.length > limit;
   const body = capped ? rest.slice(0, limit) : rest;
-  const table = coworkTablePreview(coworkTableHeaders(first), body, body.length);
-  return { preview: { ...table, sheet: chosen, ...(above.length ? { above } : {}), ...(capped ? { capped: true as const } : {}),
+  return { table: { columns: coworkTableHeaders(first), body, sheet: chosen, above, capped,
     sheets: names.slice(0, COWORK_BINARY_LIMITS.sheets).map(name => ({ name, rows: name === chosen ? body.length : dataRows(name) })) } };
 }
 
