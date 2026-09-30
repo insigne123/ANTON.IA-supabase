@@ -581,7 +581,8 @@ export type CoworkThreadSummary = {
 };
 
 const UUID_PATTERN = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}';
-const ID_REFERENCE = new RegExp(`\\s*\\((?:ID(?: del contacto)?\\s*:?\\s*)?${UUID_PATTERN}\\)`, 'gi');
+// «(ID del contacto: …)» from a card, and «(ID de Marcela Rojas: …)» from a mention (mentions.ts).
+const ID_REFERENCE = new RegExp(`\\s*\\((?:ID(?: del contacto| de [^():\\n]{1,80})?\\s*:?\\s*)?${UUID_PATTERN}\\)`, 'gi');
 
 /** Your message as you wrote it: internal references (contact IDs) stay out of sight. */
 export function coworkDisplayMessage(message: string) {

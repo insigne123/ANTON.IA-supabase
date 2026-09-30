@@ -114,3 +114,9 @@ test('with the Writer on, the coordinator reads how to hand it the emails, and t
   assert.equal(early.writerAvailable, true);
   assert.equal(coworkDecisionContext(instructions, { ...base, mustAnswer: true, turnBudget: budget(0) }).writerAvailable, false);
 });
+
+test('a contact picked with «@» is read by its ID, never searched by name or asked about', () => {
+  const { systemPrompt } = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  assert.match(systemPrompt, /Si el mensaje nombra a alguien con «@Nombre» y termina con «\(ID de Nombre: …\)», el usuario eligió ese contacto guardado de su lista: léelo con leads\.get y ese ID/);
+  assert.match(systemPrompt, /sin buscarlo por nombre ni preguntar cuál es; el ID nunca va en tu respuesta/);
+});
