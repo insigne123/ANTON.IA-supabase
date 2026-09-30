@@ -21,7 +21,7 @@ Es la causa de la operación G3 del banco AXIS (`docs/cowork-banco-axis.md`): ci
    - los remitentes del sistema (`mailer-daemon`, `postmaster`) y los buzones que nadie lee (`no-reply`, `notificaciones`, `newsletter`…);
    - los mensajes automáticos (fuera de oficina) y las fallas de entrega;
    - mensajes anteriores al contacto, o ya cubiertos por una respuesta posterior de la empresa;
-   - el dominio del propio buzón (el buzón también lista lo que envía el usuario);
+   - lo que envía el propio usuario, aunque el contacto esté en su mismo dominio, y el dominio del propio buzón (el buzón también lista lo que envía);
    - una empresa cuyo único contacto rebotó.
 4. **Cómo queda registrado.** Como respuesta del contacto más reciente de esa empresa (antes del mensaje), con «Respondió grace@empresa.cl, otra persona de la empresa.» al inicio del resumen y `repliedBy` en la clasificación. La base valida la dirección del contacto y no la del remitente, así que el registro va en el contacto. Un mensaje fuera del hilo no cambia el hilo del contacto. Si la respuesta es positiva, la alerta dice quién escribió.
 5. **Qué detiene.** Nada nuevo: al quedar la respuesta registrada, `findCompanyReply` retiene los toques a esa empresa en Cowork, lotes, campañas v2 y LinkedIn («Esta empresa ya respondió por otra dirección»). Quien responde «no» detiene además al contacto, como siempre.
@@ -40,6 +40,7 @@ Es la causa de la operación G3 del banco AXIS (`docs/cowork-banco-axis.md`): ci
 
 - **Tarda hasta una pasada del barrido.** Las ventanas se repiten cada 12 horas y cada pasada mira 2 páginas de 50 mensajes; un seguimiento que salga antes de que se registre la respuesta no se frena.
 - **Un contacto que escribe fuera del hilo sigue sin verse:** el barrido deja a las direcciones conocidas en manos del hilo verificado. La empresa igual se detiene si escribe otra persona.
+- **Un mensaje que desaparece entre el listado y su lectura** (404 o 410) se salta y la ventana sigue; las demás fallas del proveedor la hacen reintentar.
 - **Cualquier mensaje de alguien de la empresa cuenta,** aunque no hable de nuestro correo (un cliente que pide una factura). El costo de un falso positivo es un seguimiento pausado, y la respuesta queda a la vista en Respondidos.
 - **Dominios compartidos que no están en la lista** se tratan como una sola empresa.
 - **El motor heredado de campañas** (`/api/cron/process-campaigns`) mira contacto por contacto y no usa el freno por empresa; tampoco se cambia aquí.
