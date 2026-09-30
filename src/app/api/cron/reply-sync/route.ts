@@ -55,7 +55,7 @@ async function runReplySync(req: NextRequest) {
       addOwner(owners, row);
     }
 
-    const summary = { scanned: 0, synced: 0, skippedNoToken: 0, errors: 0, sweepPages: 0, sweepSynced: 0 };
+    const summary = { scanned: 0, synced: 0, skippedNoToken: 0, errors: 0, sweepPages: 0, sweepSynced: 0, sweepColleagues: 0 };
     for (const owner of Array.from(owners.values()).slice(0, ownerLimit)) {
       try {
         const result = await syncRepliesForOrganization(supabase, {
@@ -75,6 +75,7 @@ async function runReplySync(req: NextRequest) {
             const sweep = await sweepMailboxForOwner(supabase, { organizationId: owner.organizationId, userId: owner.userId, provider });
             summary.sweepPages += sweep.pages;
             summary.sweepSynced += sweep.synced;
+            summary.sweepColleagues += sweep.colleagues;
           } catch (error) {
             console.error('[cron/reply-sync] sweep failed', { organizationId: owner.organizationId, userId: owner.userId, provider, error: error instanceof Error ? error.message : String(error) });
           }
