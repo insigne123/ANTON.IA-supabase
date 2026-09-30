@@ -164,7 +164,9 @@ test('the judge reads importing as the turn ran it: the person imports with the 
   assert.match(on, /lo correcto es proponer esa importación, no mandarlo a hacerlo a mano; si solo pregunta qué trae el archivo o a quién escribir primero, lo correcto es responder eso/);
   const inTurn = coworkJudgeInstructions({ contactsImport: true, inTurn: true });
   assert.ok(inTurn.startsWith(on));
-  assert.match(inTurn, /Sé estricto con la fricción/);
+  // What the turn adds is the closing rule the coordinator follows, plus the date of the work.
+  assert.match(inTurn, /Cómo debe cerrar una respuesta/);
+  assert.match(inTurn, /ahora es la fecha y hora del trabajo/);
 });
 
 test('the judge sees the options of a closing question as the chat shows them, and reads when asking with them is right', () => {
