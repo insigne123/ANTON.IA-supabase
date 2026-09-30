@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(16);
+select plan(18);
 
 -- The owner, a teammate with a grant, one without, one whose email is not confirmed and one whose grant is off.
 insert into auth.users (id, email, email_confirmed_at)
@@ -57,6 +57,12 @@ select is(
   array['cowork_open_access'],
   'only cowork_open_access names the owner; every other function asks it'
 );
+select ok(to_regclass('public.cowork_contacts_import_proposals') is null
+  or position('contacts_import' in pg_get_functiondef('public.cowork_propose_effect(uuid,uuid,text,uuid,text,text)'::regprocedure)) > 0,
+  'M5 preserves contacts_import when M3 was applied first');
+select ok(case when to_regprocedure('public.cowork_edit_campaign_definition(uuid,uuid,uuid,jsonb,jsonb,integer[])') is null then true
+  else position('cowork_open_access' in pg_get_functiondef(to_regprocedure('public.cowork_edit_campaign_definition(uuid,uuid,uuid,jsonb,jsonb,integer[])'))) > 0 end,
+  'M5 centralizes access in the M4 edit function when present');
 
 -- Closed: exactly as before.
 select is(pg_temp.has('f0000000-0000-4000-8000-000000000001'), true, 'closed: the owner has Cowork');

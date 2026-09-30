@@ -779,38 +779,26 @@ begin
   return jsonb_build_object('released', true);
 end; $$;
 
--- cowork_propose_effect(uuid,uuid,text,uuid,text,text): as in 20260922050000_cowork_linkedin_bridge.sql.
-create or replace function public.cowork_propose_effect(p_run_id uuid,p_token uuid,p_kind text,
-  p_origin_run_id uuid,p_target_id text,p_label text)
-returns boolean language plpgsql security definer set search_path='' as $$
-declare r public.cowork_runs;
+-- M3 extends cowork_propose_effect, and M4 adds cowork_edit_campaign_definition.
+-- Transform only their access expression in the installed definition: this preserves
+-- contacts_import, atomic edit locks and every future-compatible statement in those bodies.
+-- If M4 is absent, there is no edit function to update. Apply M3/M4 before M5 when using them together.
+do $$
+declare target regprocedure; definition text; changed text;
 begin
-  if p_kind is null or p_kind not in ('save_contact','start_research','request_draft','enrich_contact',
-    'send_email','campaign_create','campaign_activate','campaign_pause','code_execute',
-    'profile_update','saved_search_create','saved_search_update','saved_search_delete',
-    'campaign_stop_v2','crm_update_record','campaign_prepare_draft_v2',
-    'crm_assign_lead','exception_resolve','mission_control','message_context_update',
-    'enrich_batch','campaign_schedule_batch','linkedin_invite','linkedin_message') then
-    raise exception 'Unknown effect' using errcode='22023';
-  end if;
-  if p_target_id is null or length(trim(p_target_id)) = 0 or length(p_target_id) > 300 then raise exception 'Invalid target' using errcode='22023'; end if;
-  if p_label is null or length(trim(p_label)) = 0 or length(p_label) > 280 then raise exception 'Invalid label' using errcode='22023'; end if;
-  select * into r from public.cowork_runs where id=p_run_id and status='running' and lease_token=p_token and lease_expires_at>now() for update;
-  if not found then return false; end if;
-  if not exists(select 1 from public.cowork_access_grants g join auth.users u on u.id=g.user_id join public.organization_members m on m.user_id=u.id
-    where g.user_id=r.user_id and g.enabled and public.cowork_open_access(u.email) and u.email_confirmed_at is not null and m.organization_id=r.organization_id) then return false; end if;
-  if p_origin_run_id is null then raise exception 'Origin unavailable' using errcode='22023'; end if;
-  if p_origin_run_id <> p_run_id then
-    perform 1 from public.cowork_runs where id=p_origin_run_id and user_id=r.user_id and organization_id=r.organization_id and status='completed';
-    if not found then raise exception 'Origin unavailable' using errcode='22023'; end if;
-  end if;
-  insert into public.cowork_effect_proposals(run_id,user_id,organization_id,kind,origin_run_id,target_id,label)
-    values(r.id,r.user_id,r.organization_id,p_kind,p_origin_run_id,trim(p_target_id),trim(p_label));
-  update public.cowork_runs set status='waiting_approval',lease_token=null,lease_expires_at=null,updated_at=now() where id=r.id;
-  insert into public.cowork_run_events(run_id,user_id,organization_id,kind,payload)
-    values(r.id,r.user_id,r.organization_id,'approval.requested',
-      jsonb_build_object('action','cowork.effect','kind',p_kind,'targetId',trim(p_target_id),'label',trim(p_label)));
-  return true;
+  for target in select signature from unnest(array[
+    to_regprocedure('public.cowork_propose_effect(uuid,uuid,text,uuid,text,text)'),
+    to_regprocedure('public.cowork_edit_campaign_definition(uuid,uuid,uuid,jsonb,jsonb,integer[])')
+  ]) as signatures(signature) where signature is not null loop
+    definition := pg_get_functiondef(target);
+    changed := regexp_replace(definition,
+      'lower\(trim\(u\.email\)\)\s*=\s*''nicolas\.yarur\.g@yago\.cl''',
+      'public.cowork_open_access(u.email)', 'g');
+    if changed = definition and position('cowork_open_access(u.email)' in definition) = 0 then
+      raise exception 'Cowork access expression not found in %', target;
+    end if;
+    execute changed;
+  end loop;
 end; $$;
 
 -- cowork_write_run_draft(uuid,uuid,text,jsonb): as in 20260928010000_cowork_run_drafts.sql.
