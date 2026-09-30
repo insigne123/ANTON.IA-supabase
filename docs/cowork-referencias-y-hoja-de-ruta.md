@@ -59,7 +59,7 @@ En orden de impacto por esfuerzo. Cada punto es un PR chico.
 
 | # | Qué | Por qué | Esfuerzo |
 |---|---|---|---|
-| 1 | **Acciones rápidas persistentes** bajo el composer: «Escribir a mis contactos», «Buscar prospectos», «¿Cómo voy?», «Seguimientos» | En LeadAce son la entrada principal. Hoy las sugerencias de inicio de Cowork desaparecen después del primer mensaje | Bajo, solo UI |
+| 1 | **Acciones rápidas persistentes** bajo el composer: «¿Qué toca hoy?», «Escribir a mis contactos», «Buscar prospectos», «¿Cómo voy?» | En LeadAce son la entrada principal. Las sugerencias de inicio de Cowork desaparecían después del primer mensaje | Hecho: `CoworkQuickActions` sobre el composer, con el turno cerrado y la caja vacía (un toque envía en el mismo hilo). «Seguimientos» quedó dentro de «¿Qué toca hoy?», que ya los trae con la lista del día |
 | 2 | **Contexto base del usuario** (nombre, empresa y oferta) en cada turno | En el corpus de marketing, la firma y la oferta cuestan dos de las tres consultas por turno. Sin ellas, algunos correos salen firmados «Yago SpA» | Hecho en insigne123/ANTON.IA-supabase#7 |
 | 3 | **Mencionar contactos con `@`** en el composer | Elegir un contacto guardado evita búsquedas ambiguas y ahorra una consulta. `contactRef` ya viaja oculto con el mensaje | Medio: UI y una lectura existente |
 | 4 | **Plantillas con `/` y variables** («/campaña {segmento} {oferta}») | Tareas frecuentes sin escribir el pedido completo | Medio |
