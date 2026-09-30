@@ -47,18 +47,22 @@ test('missing values stay null and failures fall back to the reads', async () =>
 
 /** A client whose suplia_memories answers with `rows` (as PostgREST would after the filters), and profiles with `profile`. */
 function memoryClient(rows: unknown[], profile: unknown = { id: userId, full_name: 'Ana', value_proposition: 'Verificación de antecedentes' }) {
-  const queries: Array<{ table: string; eq: unknown[][]; order: unknown[] | null; limit: number | null }> = [];
+  const queries: Array<{ table: string; eq: unknown[][]; or: string | null; order: unknown[] | null; limit: number | null }> = [];
   return { queries, client: { from: (table: string) => {
-    const query = { table, eq: [] as unknown[][], order: null as unknown[] | null, limit: null as number | null };
+    const query = { table, eq: [] as unknown[][], or: null as string | null, order: null as unknown[] | null, limit: null as number | null };
     queries.push(query);
     const chain = {
       select: () => chain,
       eq: (...args: unknown[]) => { query.eq.push(args); return chain; },
+      or: (value: string) => { query.or = value; return chain; },
       order: (...args: unknown[]) => { query.order = args; return chain; },
       limit: (value: number) => { query.limit = value; return chain; },
       maybeSingle: async () => ({ data: table === 'profiles' ? profile : null, error: null }),
-      then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) =>
-        Promise.resolve({ data: table === 'suplia_memories' ? rows : null, error: null }).then(resolve, reject),
+      then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => {
+        const visible = table === 'suplia_memories' ? rows.filter(row => !query.or || (row as { scope?: string; user_id?: string }).scope === 'organization'
+          || (row as { user_id?: string }).user_id === userId).slice(0, query.limit ?? rows.length) : null;
+        return Promise.resolve({ data: visible, error: null }).then(resolve, reject);
+      },
     };
     return chain;
   } } };
@@ -82,10 +86,16 @@ test('approved memories: the organization\'s and your own, newest first, never a
   assert.ok(memories[2].startsWith('nota: Evitar') && memories[2].length === 240 && memories[2].endsWith('…'));
   assert.equal(memories[3], 'Oferta: AXIS en 48 horas', 'a value that already names its key is not labelled twice');
   assert.deepEqual(queries[0].eq, [['organization_id', scope.organizationId], ['status', 'approved']]);
+  assert.equal(queries[0].or, `scope.eq.organization,user_id.eq.${userId}`);
   assert.deepEqual(queries[0].order, ['updated_at', { ascending: false }]);
   // At most eight.
   const many = await loadCoworkMemories(memoryClient(Array.from({ length: 12 }, (_, index) => memory({ key: `m${index}`, value: `valor ${index}` }))).client as never, scope, now);
   assert.equal(many.length, 8);
+  const crowded = memoryClient([
+    ...Array.from({ length: 24 }, (_, index) => memory({ scope: 'user', user_id: '00000000-0000-4000-8000-0000000000cc', key: `otro${index}` })),
+    memory({ scope: 'user', user_id: userId, key: 'Preferencia propia', value: 'Tuteo' }),
+  ]);
+  assert.deepEqual(await loadCoworkMemories(crowded.client as never, scope, now), ['Preferencia propia: Tuteo']);
 });
 
 test('the user context carries memories only when there are some, and the home skips reading them', async () => {

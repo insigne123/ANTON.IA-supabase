@@ -20,6 +20,8 @@ export async function loadCoworkMemories(client: SupabaseClient, scope: Scope, n
   try {
     const { data, error } = await client.from('suplia_memories').select('scope,user_id,memory_type,key,value,expires_at')
       .eq('organization_id', scope.organizationId).eq('status', 'approved')
+      // Filter before LIMIT: newer personal memories from teammates must not hide this person's own or shared ones.
+      .or(`scope.eq.organization,user_id.eq.${z.string().uuid().parse(scope.userId)}`)
       .order('updated_at', { ascending: false }).limit(MEMORIES * 3);
     if (error || !Array.isArray(data)) return [];
     const seen = new Set<string>();
