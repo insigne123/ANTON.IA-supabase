@@ -30,7 +30,8 @@ Un extracto de lo que lee el coordinador (el día completo del caso `agenda-toca
   "counts": { "interestedAccounts": 3, "ofWhichMeetingRequests": 1, "cooledAccounts": 1, "unclassifiedReplies": 1, "autoReplies": 2,
               "approvals": 2, "followupsReady": 47, "followupsHeld": 3, "linkedinAccepted": 2, "bounces": 1 },
   "items": [
-    { "rank": 1, "kind": "meeting_request", "action": "reply", "who": "Marcela Rojas", "company": "Servicios Norte", "people": 1, "daysWaiting": 4 },
+    { "rank": 1, "kind": "meeting_request", "action": "reply", "who": "Marcela Rojas", "company": "Servicios Norte", "people": 1, "daysWaiting": 4,
+      "members": [ { "name": "Marcela Rojas", "daysWaiting": 4, "askedForMeeting": true } ] },
     { "rank": 6, "kind": "cooled_lead", "action": "revive", "who": "Iván Herrera", "company": "Servicios Integrales", "daysWaiting": 24 },
     { "rank": 8, "kind": "followups_due", "action": "let_run", "campaign": "Prospección construcción y RR. HH.", "ready": 47, "later": 0, "held": 3, "spacingMinutes": 30 }
   ],
@@ -42,7 +43,7 @@ Un extracto de lo que lee el coordinador (el día completo del caso `agenda-toca
 
 ### Reglas que fija el código
 
-- **Una empresa cuenta una vez.** Se agrupa por dominio corporativo (o por el nombre de la empresa cuando escriben desde una casilla compartida como Gmail), con la misma clave que usa el envío (`companyKeysFor`). Si escribieron dos colegas, es una empresa, `people` dice cuántos y `askedForMeeting` quién pidió la reunión (en una prueba con el modelo real, sin ese dato, atribuyó la reunión a los dos colegas cuando la pidió uno).
+- **Una empresa cuenta una vez.** Se agrupa por dominio corporativo (o por el nombre de la empresa cuando escriben desde una casilla compartida como Gmail), con la misma clave que usa el envío (`companyKeysFor`). Si escribieron dos colegas, es una empresa, `people` dice cuántos y `members` trae, de cada persona (hasta tres, la que más espera primero), su nombre, cuánto lleva esperando y si fue ella quien pidió la reunión. Una persona que aparece en varios envíos cuenta una vez, con la mayor espera y con la reunión si la pidió en alguno. Sin este dato por persona, el modelo real atribuía la reunión a los dos colegas cuando la pidió uno, y le ponía a uno la espera del otro.
 - **Una respuesta de esta mañana ya es de hoy.** `replies.stalled` empieza a contar a las 48 horas; la agenda no espera (`selectStalledInterested(rows, now, 0)`). Descarta los que ya recibieron una respuesta nuestra y los que tienen un compromiso abierto.
 - **Las respuestas automáticas son información.** Se cuentan aparte (`autoReplies`, solo las de los últimos 7 días) y nunca se suman a las respuestas ni generan un ítem.
 - **Un rebote es noticia por dos semanas.** Los más antiguos son direcciones muertas que el motor ya evita. Una falla temporal (casilla llena, un error pasajero: `retry_later`) no pide corregir ninguna dirección, solo volver a intentar más tarde: se cuenta aparte en `softBounces` y no genera un ítem.
@@ -76,7 +77,7 @@ Cada fuente puede fallar sola: el resto de la lista se conserva, `sources` marca
 
 ## Cómo la usa Cowork
 
-La receta (`agent-instructions.ts`) pide: una tabla con el orden, quién o qué, qué pasó y qué hacer (hasta 8 filas), una frase con las cifras exactas, primero las personas que respondieron, después lo que solo la persona puede decidir y lo que se enfrió, al final lo que sale solo y los rebotes; las respuestas automáticas aparte; cuántos seguimientos salen hoy, cuántos pasan de día y cuántos retiene una respuesta o una negociación; no inventar una ventana horaria; decir qué fuente no se pudo revisar; y cerrar con la pregunta del primer paso («¿Te preparo las respuestas a los 3 interesados?»). Sin nada pendiente, dilo en una línea y propone 2 o 3 acciones concretas con `leads.search` y `campaigns.list`.
+La receta (`agent-instructions.ts`) pide: la tabla en `blocks`, como un bloque `table` (el usuario puede copiarla y exportarla; una tabla escrita con barras verticales dentro de la respuesta se ve como tabla, pero sin esas opciones) con el orden, quién o qué, qué pasó y qué hacer, una fila por ítem y hasta 8 filas (una empresa con varias personas es una sola fila), una frase con las cifras exactas, primero las personas que respondieron (con lo que espera y pidió cada una, sin mezclar lo de una con lo de otra), después lo que solo la persona puede decidir y lo que se enfrió, al final lo que sale solo y los rebotes; las respuestas automáticas aparte; cuántos seguimientos salen hoy, cuántos pasan de día y cuántos retiene una respuesta o una negociación; no inventar una ventana horaria; decir qué fuente no se pudo revisar; y cerrar con la pregunta del primer paso («¿Te preparo las respuestas a los 3 interesados?»). Sin nada pendiente, dilo en una línea y propone 2 o 3 acciones concretas con `leads.search` y `campaigns.list`.
 
 ## Cómo se prueba
 

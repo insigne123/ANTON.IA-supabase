@@ -55,8 +55,8 @@ test('the list goes by commercial value: people who answered, then decisions, th
   assert.deepEqual(agenda.items.map(item => item.rank), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   assert.equal(agenda.items[0].who, 'Marcela Rojas');
   assert.equal(agenda.items[0].action, 'reply');
-  assert.deepEqual(agenda.items[0].askedForMeeting, ['Marcela Rojas']);
-  assert.equal(agenda.items[1].askedForMeeting, undefined, 'only an account that asked for a meeting says who did');
+  assert.deepEqual(agenda.items[0].members, [{ name: 'Marcela Rojas', daysWaiting: 4, askedForMeeting: true }]);
+  assert.deepEqual(agenda.items[1].members, [{ name: 'Héctor Vidal', daysWaiting: 3, askedForMeeting: false }]);
   assert.equal(agenda.items[5].action, 'revive');
   assert.equal(agenda.items[7].action, 'let_run');
   assert.equal(agenda.items[8].action, 'fix_email');
@@ -115,8 +115,10 @@ test('colleagues of one company are one account, found by the corporate domain a
   assert.ok(account);
   assert.equal(account!.kind, 'meeting_request', 'one colleague asking for a meeting makes the account a meeting request');
   assert.equal(account!.people, 2);
-  assert.deepEqual(account!.names, ['Marcela Rojas', 'Gerardo Paz']);
-  assert.deepEqual(account!.askedForMeeting, ['Gerardo Paz'], 'the meeting was asked for by Gerardo, not by Marcela');
+  assert.deepEqual(account!.members, [
+    { name: 'Marcela Rojas', daysWaiting: 5, askedForMeeting: false },
+    { name: 'Gerardo Paz', daysWaiting: 2, askedForMeeting: true },
+  ], 'each colleague keeps their own wait, and the meeting was asked for by Gerardo, not by Marcela');
   assert.equal(account!.who, 'Marcela Rojas', 'the one who has waited longest');
   assert.equal(account!.daysWaiting, 5);
 });
@@ -274,4 +276,22 @@ test('the people who asked for a meeting are already inside the interested compa
   assert.equal(agenda.counts.interestedAccounts, 3);
   assert.equal(agenda.counts.ofWhichMeetingRequests, 1);
   assert.ok(Number(agenda.counts.ofWhichMeetingRequests) <= Number(agenda.counts.interestedAccounts));
+});
+
+test('a person who appears twice keeps their longest wait, asks for the meeting if any of their replies did, and the account lists three people at most', () => {
+  const agenda = buildCoworkAgenda({ ...empty(), interested: [
+    { ...person('Ana Ruiz', 'Delvalle', 'aruiz@delvalle.cl', 2), intent: 'positive' },
+    { ...person('Ana Ruiz', 'Delvalle', 'ARuiz@delvalle.cl', 6), intent: 'meeting_request' },
+    { ...person('Beto Díaz', 'Delvalle', 'bdiaz@delvalle.cl', 4), intent: 'positive' },
+    { ...person('Carla Soto', 'Delvalle', 'csoto@delvalle.cl', 3), intent: 'positive' },
+    { ...person('Dani Pino', 'Delvalle', 'dpino@delvalle.cl', 1), intent: 'positive' },
+  ] });
+  const account = agenda.items[0];
+  assert.equal(account.people, 4);
+  assert.deepEqual(account.members, [
+    { name: 'Ana Ruiz', daysWaiting: 6, askedForMeeting: true },
+    { name: 'Beto Díaz', daysWaiting: 4, askedForMeeting: false },
+    { name: 'Carla Soto', daysWaiting: 3, askedForMeeting: false },
+  ]);
+  assert.equal(account.daysWaiting, 6);
 });

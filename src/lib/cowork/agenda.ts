@@ -63,9 +63,10 @@ export type AgendaItem = {
   rank: number; kind: AgendaKind; action: AgendaAction;
   /** The person who has waited longest at this account, and the company; null on aggregate items. */
   who: string | null; company: string | null;
-  /** Accounts: how many people of the company wrote (colleagues count once per person) and up to three of their names, and
-   * which of them asked for the meeting: the request belongs to them, not to the colleagues who only showed interest. */
-  people?: number; names?: string[]; askedForMeeting?: string[];
+  /** Accounts: how many people of the company wrote (colleagues count once per person) and up to three of them, each with their
+   * own wait and whether they asked for the meeting: what one did is not credited to another. */
+  people?: number; members?: AgendaMember[];
+  /** The longest wait of the account (of its first member). */
   daysWaiting?: number;
   /** Aggregate items (approvals, campaign steps, LinkedIn, bounces): how many things they stand for and a few examples. */
   count?: number; examples?: string[];
@@ -108,9 +109,11 @@ const ORDER: Record<AgendaKind, number> = {
   cooled_lead: 6, linkedin_accepted: 7, followups_due: 8, bounce: 9,
 };
 
-type Account = { who: string | null; company: string | null; people: number; names: string[]; askedForMeeting: string[]; oldest: number; freshest: number; intents: string[] };
+export type AgendaMember = { name: string | null; daysWaiting: number; askedForMeeting: boolean };
+type Account = { who: string | null; company: string | null; people: number; members: AgendaMember[]; oldest: number; freshest: number; asked: boolean };
 
-/** One account per corporate domain (or company name for shared mailboxes): two colleagues who wrote count as one company. */
+/** One account per corporate domain (or company name for shared mailboxes): two colleagues who wrote count as one company, and
+ * each keeps their own wait and whether they asked for the meeting, so nobody is credited with what a colleague did. */
 function groupAccounts(rows: Array<AgendaReplyInput & { intent?: string }>): Account[] {
   const groups = new Map<string, Array<AgendaReplyInput & { intent?: string }>>();
   rows.forEach((row, index) => {
@@ -118,26 +121,24 @@ function groupAccounts(rows: Array<AgendaReplyInput & { intent?: string }>): Acc
     const key = email || String(row.company || '').trim() ? companyKeysFor(email, row.company).keys[0] : `anonymous:${index}`;
     groups.set(key, [...(groups.get(key) || []), row]);
   });
-  return [...groups.values()].map(members => {
-    const seen = new Set<string>();
-    const people = members.filter(member => {
-      const identity = String(member.email || member.name || '').trim().toLowerCase();
-      if (!identity) return true;
-      if (seen.has(identity)) return false;
-      seen.add(identity);
-      return true;
+  return [...groups.values()].map(rows => {
+    const byPerson = new Map<string, AgendaMember & { email: string | null }>();
+    rows.forEach((row, index) => {
+      const identity = String(row.email || row.name || '').trim().toLowerCase() || `unnamed:${index}`;
+      const current = byPerson.get(identity);
+      const asked = row.intent === 'meeting_request';
+      if (!current) byPerson.set(identity, { name: row.name || row.email || null, email: row.email, daysWaiting: row.daysWaiting, askedForMeeting: asked });
+      else byPerson.set(identity, { ...current, daysWaiting: Math.max(current.daysWaiting, row.daysWaiting), askedForMeeting: current.askedForMeeting || asked });
     });
-    const longest = [...people].sort((a, b) => b.daysWaiting - a.daysWaiting)[0];
+    const people = [...byPerson.values()].sort((a, b) => b.daysWaiting - a.daysWaiting);
     return {
-      who: longest.name || longest.email || null,
-      company: members.map(member => member.company).find(company => company && company.trim()) || null,
+      who: people[0].name,
+      company: rows.map(row => row.company).find(company => company && company.trim()) || null,
       people: people.length,
-      names: people.map(person => person.name).filter((name): name is string => Boolean(name)).slice(0, 3),
-      askedForMeeting: [...new Set(people.filter(person => person.intent === 'meeting_request')
-        .map(person => person.name || person.email).filter((name): name is string => Boolean(name)))].slice(0, 3),
-      oldest: Math.max(...members.map(member => member.daysWaiting)),
-      freshest: Math.min(...members.map(member => member.daysWaiting)),
-      intents: members.map(member => String(member.intent || '')),
+      members: people.slice(0, 3).map(({ name, daysWaiting, askedForMeeting }) => ({ name, daysWaiting, askedForMeeting })),
+      oldest: Math.max(...rows.map(row => row.daysWaiting)),
+      freshest: Math.min(...rows.map(row => row.daysWaiting)),
+      asked: people.some(person => person.askedForMeeting),
     };
   });
 }
@@ -150,21 +151,20 @@ export function buildCoworkAgenda(input: AgendaInput): CoworkAgenda {
   const interested = groupAccounts(input.interested);
   const live = interested.filter(account => account.freshest < AGENDA_COOLED_AFTER_DAYS);
   const cooled = interested.filter(account => account.freshest >= AGENDA_COOLED_AFTER_DAYS);
-  const asks = (account: Account) => account.intents.includes('meeting_request');
+  const asks = (account: Account) => account.asked;
   for (const account of live) {
     unranked.push({ kind: asks(account) ? 'meeting_request' : 'interested_reply', action: 'reply',
-      who: account.who, company: account.company, people: account.people, names: account.names,
-      ...(asks(account) ? { askedForMeeting: account.askedForMeeting } : {}),
+      who: account.who, company: account.company, people: account.people, members: account.members,
       daysWaiting: account.oldest, sort: -account.oldest });
   }
   for (const account of cooled) {
     unranked.push({ kind: 'cooled_lead', action: 'revive', who: account.who, company: account.company,
-      people: account.people, names: account.names, daysWaiting: account.oldest, sort: account.freshest });
+      people: account.people, members: account.members, daysWaiting: account.oldest, sort: account.freshest });
   }
   const unclassified = groupAccounts(input.unclassified);
   for (const account of unclassified) {
     unranked.push({ kind: 'unclassified_reply', action: 'review_reply', who: account.who, company: account.company,
-      people: account.people, names: account.names, daysWaiting: account.oldest, sort: -account.oldest });
+      people: account.people, members: account.members, daysWaiting: account.oldest, sort: -account.oldest });
   }
 
   if (input.approvals.count > 0) {

@@ -62,6 +62,8 @@ const asksTheFirstStep = (label: string, pattern: RegExp) => ({ label, test: (re
 } });
 const tableOfAtLeast = (label: string, rows: number) => ({ label, test: (result: CorpusTurnResult) =>
   (result.blocks || []).some(block => block.type === 'table' && (block as { rows: unknown[] }).rows.length >= rows) });
+/** A table drawn with vertical bars inside the reply: the table block can be copied and exported, this cannot. */
+const noPipeTable = avoids('no escribe la tabla con barras verticales en el texto', /^\s*\|.*\|\s*$/m);
 
 export const AGENDA_CORPUS: CorpusCase[] = [
   { id: 'agenda-toca-hoy', title: 'Qué toca hoy, con todo lo que espera', request: '¿Qué toca hoy?',
@@ -72,13 +74,15 @@ export const AGENDA_CORPUS: CorpusCase[] = [
       says('da las cifras exactas: 3 interesados, 47 seguimientos y 1 rebote', new RegExp(`\\b3\\b[^.]{0,40}${WAITING}`), /\b47\b/, /\b1\b[^.]{0,30}rebot|rebot[^.]{0,30}\b1\b/),
       says('nombra al que pidió reunión y dice cuánto lleva esperando', /marcela rojas/, /(\b4\b|cuatro) dias/),
       before('las personas que respondieron van antes que los seguimientos que salen solos', new RegExp(`${WAITING}|marcela`), /seguimiento/),
-      says('las autorrespuestas van aparte y no cuentan como respuestas', /(autorrespuesta|(respuesta|mensaje|correo)s? automatic)/, /(no cuent|no estan contad|no las cont|no se cuent|aparte|no son respuesta)/),
+      says('las autorrespuestas van aparte y no cuentan como respuestas', /(autorrespuesta|(respuesta|mensaje|correo)s? automatic)/,
+        /(no (las |los |se )?(cuent|cont|sum)|no estan contad|sin (contar|sumar)|aparte|separad|no son respuesta)/),
       avoids('no suma la reunión pedida a los interesados: son 3, no 4', /\b(4|cuatro) (personas|interesad|empresas|cuentas)/),
       says('el que se enfrió se retoma, no solo se responde', /ivan herrera/, /(retom|enfri|reviv)/),
       says('dice que 3 seguimientos quedan retenidos porque esa empresa ya respondió', /\b3\b[^.]{0,80}(retien|retenid|frena|deten|ya respond)/),
       avoids('no devuelve la pregunta al usuario', /(que quieres hacer|que te gustaria hacer|en que te ayudo)/),
       avoids('no inventa una ventana horaria ni pospone por la hora', /ventana (de|horaria)/, /(martes a jueves|\b9 a 11\b)/, /(espera|esperar|dejo|postergo)[^.]{0,30}(manana|mañana)/),
       tableOfAtLeast('entrega la lista como tabla, en orden', 4),
+      noPipeTable,
       asksTheFirstStep('cierra con el primer paso: responder a los interesados', /(respuesta|responde|interesad|marcela)/),
       noEffect] },
   { id: 'agenda-fuente-caida', title: 'Qué queda por hacer, sin poder revisar los seguimientos', request: '¿Qué queda por hacer hoy?',
@@ -92,6 +96,8 @@ export const AGENDA_CORPUS: CorpusCase[] = [
         /(seguimiento|campan)[^.]{0,60}no (se )?(pude|pudo|pudieron|pueden|alcanz|logr|consegui)/),
       avoids('no da los seguimientos por cero ni por revisados', /no (hay|tienes|salen|quedan) (ningun )?seguimiento/, /\b(0|cero) seguimientos/,
         /seguimientos?[^.]{0,50}\b(son|es|hay|salen|quedan|listos?)\b[^.]{0,12}\b(0|cero)\b/, /47 seguimientos/),
+      tableOfAtLeast('entrega la lista como tabla, en orden', 4),
+      noPipeTable,
       asksTheFirstStep('cierra con una sola pregunta sobre el siguiente paso', /(respuesta|responde|interesad|revis|seguimiento)/),
       noEffect] },
   { id: 'agenda-dos-personas-una-empresa', title: 'Qué toca hoy cuando dos personas de una empresa respondieron', request: 'qué toca hoy?',
@@ -100,13 +106,20 @@ export const AGENDA_CORPUS: CorpusCase[] = [
       { ...HECTOR, daysWaiting: 3, intent: 'positive' }] }),
     checks: [...CORPUS_COMMON_CHECKS,
       onlyTheAgenda,
-      says('cuenta a las 3 personas', /\b(3|tres) personas/),
+      saysAny('cuenta 2 empresas o 3 personas', /\b(3|tres) personas/, /\b(2|dos) (empresas|cuentas)/),
       avoids('no cuenta 3 empresas', /\b(3|tres) (empresas|cuentas)/),
       tableOfExactly('Servicios Norte va en una sola fila: 2 filas para 3 personas', 2),
       saysAny('atribuye la reunión a quien la pidió: Gerardo, no los dos', /gerardo[^.]{0,50}(pidio|solicit|quiere)[^.]{0,30}reunion/, /reunion[^.]{0,50}(pidio|solicit|de) gerardo/, /gerardo pidio/),
-      avoids('no dice que los dos pidieron la reunión', /(marcela y gerardo|gerardo y marcela|los dos|ambos)[^.]{0,50}(pidi|solicit)[^.]{0,30}reunion/),
+      // What is said of a person stays in its own cell and clause (a table reads as cells split by tabs, a clause ends at . or ;), and
+      // the first name that follows ends it: «Marcela espera 5 días; Gerardo pidió reunión» gives each their own.
+      avoids('no le pone a Gerardo la espera de Marcela (5 días)', /gerardo(?:(?!marcela|hector)[^.;\t\n]){0,60}(5|cinco) dias/),
+      avoids('no dice que los dos pidieron la reunión',
+        /(marcela( rojas)? y gerardo( paz)?|gerardo( paz)? y marcela( rojas)?|los dos|ambos|ambas|las dos) (pidieron|solicitaron|piden|solicitan|quieren|quisieron)[^.;\t\n]{0,30}reunion/,
+        /reunion[^.;\t\n]{0,30}(pedida|solicitada) por (los dos|ambos|ambas)/),
+      avoids('no habla de envíos espaciados que no existen: no hay seguimientos', /espaci/),
       says('nombra a las dos personas de Servicios Norte', /marcela/, /gerardo/),
       before('la empresa que pidió reunión va antes', /servicios norte/, /casino central/),
+      noPipeTable,
       asksTheFirstStep('cierra con el primer paso: responderles', /(respuesta|responde|interesad|servicios norte)/),
       noEffect] },
 ];
