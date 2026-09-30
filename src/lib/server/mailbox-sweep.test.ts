@@ -220,3 +220,17 @@ test('a message that turns out not to be a reply is read once and the window sti
   assert.equal(result.synced, 0);
   assert.equal(result.completedWindow, true);
 });
+
+test('a message that is gone when it is read does not stop the window, and the others are still read', async (t) => {
+  const world = colleagueWorld({
+    contacts: [contact('c1', 'lead1@empresa.cl', '2026-09-01T00:00:00Z'), contact('c2', 'lead2@otra.cl', '2026-09-01T00:00:00Z')],
+    messages: [{ id: 'gone', from: 'grace@empresa.cl', at: '2026-09-15T00:00:00Z' }, { id: 'here', from: 'luis@otra.cl', at: '2026-09-15T00:00:00Z' }],
+    record: (_row, id) => { if (id === 'gone') throw new Error('Gmail message lookup failed (404)'); return { recorded: true, reason: 'recorded' }; },
+  });
+  t.mock.method(globalThis, 'fetch', world.fetchMock);
+  const result = await world.sweep();
+  assert.deepEqual(world.calls.map(call => call.messageId), ['gone', 'here']);
+  assert.equal(result.colleagues, 1);
+  assert.equal(result.error, undefined);
+  assert.equal(result.completedWindow, true);
+});

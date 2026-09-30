@@ -159,7 +159,7 @@ test('isCompanyColleague: another address on the same corporate domain, never a 
   assert.equal(isCompanyColleague('grace@other.org', 'ada@example.com'), false);
   for (const shared of ['gmail.com', 'outlook.com', 'vtr.net', 'yahoo.cl']) assert.equal(isCompanyColleague(`grace@${shared}`, `ada@${shared}`), false, shared);
   for (const system of ['mailer-daemon@example.com', 'postmaster@example.com']) assert.equal(isCompanyColleague(system, 'ada@example.com'), false, system);
-  for (const automated of ['no-reply@example.com', 'noreply@example.com', 'do-not-reply@example.com', 'notificaciones@example.com', 'newsletter@example.com']) {
+  for (const automated of ['no-reply@example.com', 'noreply@example.com', 'do-not-reply@example.com', 'auto-reply@example.com', 'notificaciones@example.com', 'newsletter@example.com']) {
     assert.equal(isCompanyColleague(automated, 'ada@example.com'), false, automated);
   }
   assert.equal(isCompanyColleague(null, 'ada@example.com'), false);
@@ -307,4 +307,22 @@ test('inside the thread, the reply of a colleague is recorded through the same p
   assert.equal(ingested[0].threadId, 'thread');
   assert.equal(ingested[0].threadKey, 'thread-key');
   assert.deepEqual(ingested[0].classification.repliedBy, { kind: 'colleague', email: 'grace@example.com' });
+});
+
+test('what we sent is never the company answering, even when the contact is on our own domain', async (t) => {
+  const { inboundCandidates } = load();
+  const sent = { provider: 'gmail', id: 'follow-up', threadId: 'thread', from: 'owner@example.com', receivedAt: '2026-08-02T00:00:00Z', direction: 'outbound' as const };
+  const reply = { provider: 'gmail', id: 'grace', threadId: 'thread', from: 'grace@example.com', receivedAt: '2026-08-03T00:00:00Z', direction: 'inbound' as const };
+  assert.deepEqual(inboundCandidates([sent, reply], companyRow, null).map((item: any) => item.id), ['grace']);
+
+  // Through the sync: the thread holds our own follow-up to a contact on the same domain, and nothing else.
+  const { ingested, stubs } = recorder();
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ messages: [
+    threadMessage('sent', 'owner@example.com', 'ada@example.com', '2026-08-01T00:00:00Z', ['SENT']),
+    threadMessage('follow-up', 'owner@example.com', 'ada@example.com', '2026-08-03T00:00:00Z', ['SENT']),
+  ] }));
+  const chain: any = { update() { return chain; }, eq() { return chain; }, select: async () => ({ data: [], error: null }) };
+  const result = await load(stubs).syncSingleContactRow({ rpc: async () => ({ error: null }), from: () => chain }, 'org', companyRow, 'token');
+  assert.deepEqual(result, { synced: 0, state: 'ok' });
+  assert.equal(ingested.length, 0);
 });

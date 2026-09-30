@@ -101,7 +101,7 @@ export function corporateDomain(email?: string | null) {
 
 /** A mailbox nobody reads and nobody answers from (no-reply, notifications, newsletters): a message from it is not the company answering. */
 function isAutomatedMailbox(address: string) {
-  return /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|no[-_.]?responder|notifications?|notificaciones?|newsletter|mailer|bounces?)([-_.+].*)?@/i.test(address);
+  return /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|no[-_.]?responder|auto[-_.]?reply|autoresponder|notifications?|notificaciones?|newsletter|mailer|bounces?)([-_.+].*)?@/i.test(address);
 }
 
 function getHeader(headers: any[] | undefined, name: string) {
@@ -155,7 +155,7 @@ function gmailMessageToReply(message: any): InboundReply {
   };
 }
 
-export function inboundCandidates(messages: InboundReply[], row: ContactedRow, myEmail?: string | null) {
+export function inboundCandidates(messages: Array<InboundReply & { direction?: 'inbound' | 'outbound' }>, row: ContactedRow, myEmail?: string | null) {
   const leadEmail = normalizeEmail(row.email);
   const senderEmail = normalizeEmail(myEmail);
   const sentAtMs = row.sent_at ? Date.parse(row.sent_at) : 0;
@@ -175,7 +175,8 @@ export function inboundCandidates(messages: InboundReply[], row: ContactedRow, m
       // The contact, a delivery failure, or somebody else at the contact's company inside the thread we wrote in
       // (an automatic message from a colleague, like an out-of-office, is not the company answering).
       const colleague = fromEmail !== leadEmail && isCompanyColleague(fromEmail, leadEmail);
-      if (colleague && message.autoReplyHeader) return false;
+      // What we sent is never the company answering, even when the contact is on our own domain.
+      if (colleague && (message.direction === 'outbound' || message.autoReplyHeader)) return false;
       if (fromEmail !== leadEmail && !colleague
         && !(isSystemSender(fromEmail) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html }))) return false;
       return true;
@@ -198,9 +199,9 @@ export async function mailboxAccessToken(supabase: any, userId: string, provider
   return refreshed.access_token || null;
 }
 
-/** Read only the verified thread. Bounded Graph pagination never claims full coverage. */
-/** `colleagues`: also keep what people at the contact's company wrote in the thread. The reply sync needs it (they answered);
- * the conversation view does not ask for it and keeps showing the contact's messages only. */
+/** Read only the verified thread. Bounded Graph pagination never claims full coverage. `colleagues`: also keep what people at
+ * the contact's company wrote in the thread. The reply sync needs it (they answered); the conversation view does not ask for
+ * it and keeps showing the contact's messages only. */
 export async function readMailboxConversation(accessToken: string, row: ContactedRow, options: { colleagues?: boolean } = {}): Promise<{ messages: MailboxMessage[]; complete: boolean }> {
   let messages: MailboxMessage[] = [];
   let complete = true;

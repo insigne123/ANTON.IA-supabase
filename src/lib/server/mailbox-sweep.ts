@@ -245,7 +245,13 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
         // A message of this page may already have been recorded for the company, which moves its reply forward.
         if (candidate.row.replied_at && candidate.receivedMs <= Date.parse(candidate.row.replied_at)) continue;
         read += 1;
-        const result = await syncColleagueMessage(supabase, candidate.row, accessToken, candidate.id);
+        let result;
+        try { result = await syncColleagueMessage(supabase, candidate.row, accessToken, candidate.id); }
+        catch (error) {
+          // A message deleted or moved between the listing and the read is gone, not a provider failure: the window goes on.
+          if (/\((404|410)\)/.test(String((error as Error)?.message))) continue;
+          throw error;
+        }
         if (result.recorded) {
           recordedColleagues += 1;
           synced += 1;
