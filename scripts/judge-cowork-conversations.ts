@@ -14,21 +14,12 @@ import {
   COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgeInstructions, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
   type CoworkJudgement,
 } from '../src/lib/cowork/judge';
-import { CORPUS as PRODUCTION_CORPUS, CORPUS_USER_CONTEXT, corpusRead, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
+import { CORPUS as PRODUCTION_CORPUS, CORPUS_USER_CONTEXT, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { JUDGE_CALIBRATION } from './fixtures/cowork-judge-calibration';
-import { corpusShownAnswer } from './fixtures/cowork-conversation-runner';
+import { corpusObservations, corpusShownAnswer } from './fixtures/cowork-conversation-runner';
 
 const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
-
-/** The data the model saw, replayed from the fixture with the same inputs. */
-function observationsFor(entry: CorpusCase, result: CorpusTurnResult) {
-  const read = entry.world?.read ?? corpusRead;
-  const reads = result.reads?.length ? result.reads : result.actions.map(action => ({ action, input: '' }));
-  return reads.map(({ action, input }) => {
-    try { return { action, input, result: read(action, input) }; } catch { return { action, input, result: null }; }
-  });
-}
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY) throw new Error('Requires --live and an explicit OPENAI_API_KEY.');
@@ -81,7 +72,7 @@ async function main() {
         request: entry.request,
         history: (entry.history || []).map(turn => ({ request: turn.request, reply: turn.reply, observations: turn.observations })),
         userContext: entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext,
-        observations: observationsFor(entry, outcome.result),
+        observations: corpusObservations(entry, outcome.result),
         shown: corpusShownAnswer(outcome.result),
       }), rules);
       rows.push({ id: outcome.id, attempt: outcome.attempt, passedChecks: outcome.passed, judgement });
