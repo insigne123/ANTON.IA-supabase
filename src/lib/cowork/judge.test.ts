@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
+  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, COWORK_JUDGE_NOW_RULE, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
   coworkJudgeEvidence, coworkJudgeFix, coworkJudgeInstructions, coworkJudgeTurnPrompt, coworkShownFromAnswer, COWORK_JUDGE_TURN_INSTRUCTIONS, type CoworkJudgement,
 } from './judge';
 import { COWORK_NEXT_STEP_RULE } from './next-step';
@@ -113,6 +113,26 @@ test('the judge in the turn keeps the rubric and closes by the coordinator\'s ru
   assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /Ante una pregunta general .*no le exijas consultas/);
   assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /ahora es la fecha y hora del trabajo/);
   assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /Esta revisión ocurre antes de mostrar/);
+});
+
+test('the offline judge can be given the date of the work without changing how much it reads or what it was calibrated on', () => {
+  const observations = Array.from({ length: 8 }, (_, index) => ({ action: `read.${index}`, result: { index } }));
+  const base = { request: '¿Qué toca hoy?', observations, shown: { reply: 'Hoy toca…' } as never };
+  // Without a date nothing is added: the calibration set and older reports read as they always did.
+  const plain = JSON.parse(coworkJudgePrompt(base));
+  assert.equal('ahora' in plain, false);
+  assert.equal(plain.datosConsultados.length, 6, 'the calibrated budget: the first six reads');
+  // With the work's date the judge counts days from it (a world dated the 25th is not read as if it were the day the judge runs)…
+  const dated = JSON.parse(coworkJudgePrompt({ ...base, now: new Date('2026-09-25T13:10:00Z') }));
+  assert.match(dated.ahora, /^25 [a-z]+ 2026, \d{2}:10$/);
+  assert.equal(dated.datosConsultados.length, 6, 'the date does not widen what it reads');
+  // …and the rule that says so is the same sentence the judge in the turn follows.
+  assert.match(COWORK_JUDGE_NOW_RULE, /ahora es la fecha y hora del trabajo/);
+  assert.ok(COWORK_JUDGE_TURN_INSTRUCTIONS.includes(COWORK_JUDGE_NOW_RULE));
+  assert.equal(COWORK_JUDGE_INSTRUCTIONS.includes(COWORK_JUDGE_NOW_RULE), false, 'the calibrated rubric itself does not move');
+  // The in-turn evidence, when given, wins: one date, read once.
+  const both = JSON.parse(coworkJudgePrompt({ ...base, now: new Date('2026-09-01T00:00:00Z'), evidence: { now: new Date('2026-09-25T13:00:00Z') } }));
+  assert.match(both.ahora, /^25 [a-z]+ 2026/);
 });
 
 test('in the turn, the judge reads every read as the coordinator did: local times, no IDs, a count per list, within one budget', () => {

@@ -13,10 +13,10 @@ import { THREAD_AGENDA_CORPUS, THREAD_CORPUS } from './fixtures/cowork-thread-co
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import {
-  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgeInstructions, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
+  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, COWORK_JUDGE_NOW_RULE, coworkJudgeAgreement, coworkJudgeInstructions, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
   type CoworkJudgement,
 } from '../src/lib/cowork/judge';
-import { CORPUS as PRODUCTION_CORPUS, CORPUS_USER_CONTEXT, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
+import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW, CORPUS_USER_CONTEXT, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
 import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
@@ -91,14 +91,15 @@ async function main() {
       const entry = CORPUS.find(item => item.id === outcome.id);
       if (!entry) continue;
       // The rules of the turn as it ran: contacts.import on or off (in older reports, as the case says).
-      const rules = coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport) });
+      // The worlds of the bank run on their own clock (the 25th), not on the day the judge runs: it reads the same date the coordinator did.
+      const rules = [coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport) }), COWORK_JUDGE_NOW_RULE].join('\n');
       const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
       const observations = corpusObservations(entry, outcome.result);
       const shown = corpusShownAnswer(outcome.result);
       const judgement = await judge(coworkJudgePrompt({
         request: entry.request,
         history: (entry.history || []).map(turn => ({ request: turn.request, reply: turn.reply, observations: turn.observations })),
-        userContext, observations, shown,
+        userContext, observations, shown, now: CORPUS_NOW,
       }), rules);
       const compared = entry.axis ? await reference(axisReferencePrompt(entry, { shown, observations, userContext })) : undefined;
       rows.push({ id: outcome.id, attempt: outcome.attempt, passedChecks: outcome.passed, judgement,
