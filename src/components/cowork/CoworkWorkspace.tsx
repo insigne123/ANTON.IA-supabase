@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, CornerDownRight, PanelLeft, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
-import type { CoworkRun } from '@/lib/cowork/contracts';
+import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import {
@@ -224,18 +224,20 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       source.onopen = () => { streamLive = true; };
       source.addEventListener('change', () => { void poll(); });
       // Only what changed travels: keep `from` characters of the text so far and add `text`.
+      // A held answer carries no text, only its phase: it shows once it is final.
       source.addEventListener('draft', event => {
         try {
-          const data = JSON.parse((event as MessageEvent<string>).data) as { from?: unknown; text?: unknown; cards?: unknown; reviewing?: unknown };
+          const data = JSON.parse((event as MessageEvent<string>).data) as { from?: unknown; text?: unknown; cards?: unknown; reviewing?: unknown; phase?: unknown };
           if (typeof data.from !== 'number' || typeof data.text !== 'string') return;
           const from = data.from;
           const text = data.text;
-          streamedRuns.current.add(selected);
+          if (text || from > 0) streamedRuns.current.add(selected);
           setLiveAnswer(current => ({
             runId: selected,
             text: `${current?.runId === selected ? current.text.slice(0, from) : ''}${text}`,
             cards: Array.isArray(data.cards) ? data.cards as CoworkLiveAnswer['cards'] : [],
             reviewing: data.reviewing === true,
+            phase: COWORK_DRAFT_PHASES.find(value => value === data.phase) ?? null,
           }));
         } catch { /* A malformed frame only skips the preview. */ }
       });

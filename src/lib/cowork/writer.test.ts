@@ -47,6 +47,7 @@ function harness(replies: unknown[]) {
   const calls: Array<{ role: string; stream?: boolean; prompt: string }> = [];
   const steps: CoworkAgentStep[] = [];
   let reviewing = 0;
+  let adjusting = 0;
   const run = (extra: Partial<Parameters<typeof runCoworkWriter>[0]> = {}) => runCoworkWriter({
     request: 'armame una secuencia para felipe y camila', brief, userContext: { fullName: 'Nicolás Yarur' }, observations: [],
     generate: async <T extends z.ZodTypeAny>(call: { role: 'writer' | 'reviewer'; schema: T; prompt: string; stream?: boolean }) => {
@@ -57,9 +58,10 @@ function harness(replies: unknown[]) {
     },
     step: async step => { steps.push(step); },
     onReview: () => { reviewing++; },
+    onAdjust: () => { adjusting++; },
     ...extra,
   });
-  return { calls, steps, run, reviewing: () => reviewing };
+  return { calls, steps, run, reviewing: () => reviewing, adjusting: () => adjusting };
 }
 
 test('a clean draft is reviewed once and comes back as it was', async () => {
@@ -70,8 +72,9 @@ test('a clean draft is reviewed once and comes back as it was', async () => {
   assert.deepEqual(h.steps.map(step => `${step.agent}:${step.state}:${step.label}`),
     ['writer:working:Escribiendo 3 correos', 'writer:done:Escribió 3 correos', 'reviewer:working:Revisando 3 correos', 'reviewer:done:Sin ajustes']);
   assert.equal(h.steps.at(-1)?.outcome, 'clean');
-  // The page hears that the draft on screen is being reviewed, once.
+  // The page hears that the draft on screen is being reviewed, once; nothing was adjusted.
   assert.equal(h.reviewing(), 1);
+  assert.equal(h.adjusting(), 0);
 });
 
 test('what the checks find is fixed once, without spending the Reviewer, and the page hears what changed', async () => {
@@ -84,6 +87,8 @@ test('what the checks find is fixed once, without spending the Reviewer, and the
   assert.deepEqual(h.steps.slice(2).map(step => `${step.agent}:${step.state}:${step.label}`), ['reviewer:working:Aplicando 1 ajuste', 'reviewer:done:1 ajuste']);
   assert.deepEqual(h.steps.at(-1), { agent: 'reviewer', state: 'done', label: '1 ajuste', outcome: 'fixed', changes: ['sin «gratis»'] });
   assert.equal(h.reviewing(), 1);
+  // A held draft says it is being adjusted once the correction starts, and not when there is nothing to fix.
+  assert.equal(h.adjusting(), 1);
 });
 
 const review = { verdict: 'fix', issues: [{ where: 'correo 2', problem: 'Dice que AXIS atiende 500 empresas, dato que no está en los datos.', fix: 'Quita la cifra.', short: 'sin cifras inventadas' }] };
@@ -95,6 +100,7 @@ test('the Reviewer can ask for a fix, and the page reads what it fixed in a few 
   assert.deepEqual(await h.run(), fixed);
   assert.match(h.calls[2].prompt, /"issues":\[\{"where":"correo 2"/);
   assert.deepEqual(h.steps.at(-1), { agent: 'reviewer', state: 'done', label: '1 ajuste', outcome: 'fixed', changes: ['sin cifras inventadas'] });
+  assert.equal(h.adjusting(), 1);
 });
 
 test('only the first draft is required: a failed Reviewer or correction, or no time, leaves it and says so', async () => {

@@ -27,9 +27,9 @@ import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
 import { coworkDecisionContext } from '@/lib/cowork/decision-context';
 import { loadCoworkUserContext } from './user-context';
 import { reserveCoworkModelCall } from './model-budget';
-import { coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
+import { coworkAnswerHoldEnabled, coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
 import { coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
-import { coworkJudgeEnabled, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
+import { COWORK_JUDGE_HELD_TIMEOUT_MS, coworkJudgeEnabled, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
 import { stageCoworkSavedSearchCreate, stageCoworkSavedSearchUpdate, stageCoworkSavedSearchDelete } from './saved-search-ops';
@@ -145,12 +145,12 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // How much this turn may spend; the coordinator decides within it.
     const turnCeiling = coworkTurnCeiling();
     // The answer shows while it is being written (cowork_run_drafts); off, or without the
-    // table, the turn works as before.
+    // table, the turn works as before. Held, only its phase and cards show until it is final.
     const liveDraft = coworkStreamingEnabled() ? coworkDraftWriter(async (text, progress) => {
       const written = await client.rpc('cowork_write_run_draft', { p_run_id: run.id, p_token: run.lease_token, p_text: text, p_progress: progress });
       if (written.error) throw written.error;
       return written.data === true;
-    }, { onDisabled: reason => console.warn('[cowork] live draft off for this run:', reason instanceof Error ? reason.message : reason) }) : null;
+    }, { hold: coworkAnswerHoldEnabled(), onDisabled: reason => console.warn('[cowork] live draft off for this run:', reason instanceof Error ? reason.message : reason) }) : null;
     const writerEnabled = coworkWriterEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
@@ -175,6 +175,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       record: recordEvent, liveDraft,
       timeLeft: () => 100000 - (Date.now() - claimedAt),
       model: coworkJudgeModel(),
+      // Held, the person waits for the review before reading anything.
+      ...(liveDraft?.held ? { callTimeoutMs: COWORK_JUDGE_HELD_TIMEOUT_MS } : {}),
       onCall: call => telemetry.push(call),
     }) : null;
     const result = await runCoworkReadLoop({
@@ -187,9 +189,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       decide: async (observations, mustAnswer, rejections = [], turnBudget) => {
         const reservationId = await reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator');
         // The closing correction rewrites an answer already on screen: the page says it is
-        // being reviewed and keeps it, instead of erasing it to write it again.
+        // being reviewed and keeps it, instead of erasing it to write it again. Held, nothing
+        // was on screen: the page says the answer is being adjusted.
         const correcting = rejections.some(rejection => rejection.action === 'answer');
-        if (correcting) liveDraft?.review();
+        if (correcting) {
+          if (liveDraft?.held) liveDraft.adjust();
+          else liveDraft?.review();
+        }
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
           systemPrompt: `${instructions.systemPrompt}\n${coworkSpecialistQueueEnabled()
@@ -205,7 +211,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           provider: 'openai',
           maxAttempts: 1, timeoutMs: 30000, maxOutputTokens: 6000,
           signal: controller.signal,
-          onPartial: liveDraft && !correcting ? text => liveDraft.push(text) : undefined,
+          onPartial: liveDraft && (liveDraft.held || !correcting) ? text => liveDraft.push(text) : undefined,
         });
         await liveDraft?.flush();
         await recordCoworkModelUsage(client, reservationId, run.lease_token, turn.telemetry);
@@ -230,6 +236,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         onCall: call => telemetry.push(call),
       }) : undefined,
       judge: judgeTurn?.review,
+      onCorrection: verdict => judgeTurn?.corrected(verdict),
+      userContext,
       proposeNote: async (leadId, note) => {
         const proposed = await client.rpc('cowork_propose_note', {
           p_run_id: run.id, p_token: run.lease_token, p_lead_id: leadId, p_note: note,

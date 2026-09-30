@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { coworkBlocksText } from './blocks';
 import type { CoworkBlock, CoworkSuggestion } from './contracts';
+import { coworkLocalStamp, coworkTimeZone, coworkWithLocalTimes } from './decision-context';
+import { COWORK_NEXT_STEP_RULE } from './next-step';
 
 /**
  * LLM-as-judge for Cowork answers (plan 2.2). A model other than the one that
@@ -44,7 +46,9 @@ export const COWORK_JUDGE_INSTRUCTIONS = [
  */
 export const COWORK_JUDGE_TURN_INSTRUCTIONS = [
   COWORK_JUDGE_INSTRUCTIONS,
-  'Esta revisión ocurre antes de mostrar la respuesta, y Cowork todavía puede corregirla. Sé estricto con la fricción: si la pregunta final o un botón ofrece hacer algo que Cowork puede hacer ahora sin aprobación (consultar contactos, envíos, respuestas, campañas, métricas o archivos, o preparar una lista, un orden, un resumen o un texto), la fricción es 2 o menos, y el problema dice qué debió hacer. No es fricción ofrecer una acción que necesita aprobación (crear o activar una campaña, buscar prospectos nuevos con el proveedor, buscar el correo de un contacto, guardar contactos) ni preguntar una decisión que solo el usuario puede tomar.',
+  `Esta revisión ocurre antes de mostrar la respuesta, y Cowork todavía puede corregirla. Cómo debe cerrar una respuesta: ${COWORK_NEXT_STEP_RULE}`,
+  'Si la pregunta final ofrece algo que Cowork podía hacer ahora sin aprobación y que el pedido necesitaba, la fricción es 2 o menos, y el problema dice qué debió hacer. No es fricción ofrecer una acción que necesita aprobación ni preguntar una decisión que solo el usuario puede tomar, y los botones pueden ofrecer otros pedidos. Ante una pregunta general («¿qué puedes hacer?», una explicación), presentar las capacidades y ofrecer un primer paso con aprobación no es fricción: no le exijas consultas que el pedido no necesita.',
+  'ahora es la fecha y hora del trabajo: cuenta los días desde ella, no desde la fecha de hoy.',
 ].join('\n');
 
 /** What the person saw in a turn, as plain text for the judge. */
@@ -64,6 +68,35 @@ const clip = (value: unknown, max: number) => {
   return text.length > max ? `${text.slice(0, max)}… [recortado]` : text;
 };
 
+/** Everything the turn consulted, as the coordinator read it (with local times), within one
+ * budget: each read keeps a summary of its list (how many, how many with email, whether it was
+ * cut) and as much of its data as its share allows, so a correct count never looks unsupported
+ * only because the judge saw a slice of the data. */
+export function coworkJudgeEvidence(observations: unknown[], options: { total?: number; each?: number; timeZone?: string } = {}) {
+  const total = options.total ?? 24_000;
+  const each = options.each ?? 8_000;
+  const local = coworkWithLocalTimes(observations, options.timeZone ?? coworkTimeZone()) as unknown[];
+  const texts = local.map(observation => JSON.stringify(observation ?? null)
+    .replace(/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/gi, '[id]'));
+  // Unused share of a short read goes to the long ones.
+  let left = total;
+  const order = texts.map((text, index) => ({ index, length: text.length })).sort((a, b) => a.length - b.length);
+  const shares = new Array<number>(texts.length).fill(0);
+  order.forEach((item, position) => {
+    const fair = Math.floor(left / (order.length - position));
+    shares[item.index] = Math.min(item.length, each, fair);
+    left -= shares[item.index];
+  });
+  return local.map((observation, index) => {
+    const result = (observation as { result?: { items?: unknown; truncated?: unknown } } | null)?.result;
+    const items = Array.isArray(result?.items) ? result.items as Array<Record<string, unknown>> : null;
+    const summary = items ? { elementos: items.length, conCorreo: items.filter(item => Boolean(item?.email)).length, truncado: result?.truncated === true } : null;
+    const text = texts[index];
+    const data = text.length > shares[index] ? `${text.slice(0, shares[index])}… [recortado]` : text;
+    return summary ? { resumen: summary, datos: data } : data;
+  });
+}
+
 /** The judge's input: the case and exactly what was shown, trimmed to a fair size. */
 export function coworkJudgePrompt(input: {
   request: string;
@@ -71,6 +104,9 @@ export function coworkJudgePrompt(input: {
   userContext?: unknown;
   observations?: unknown[];
   shown: CoworkShownAnswer;
+  /** The judge in the turn reads every read within a budget (coworkJudgeEvidence) and the work's
+   * date; offline it keeps the first six reads, cut at 2,500 characters, as it was calibrated. */
+  evidence?: { now: Date; timeZone?: string };
 }) {
   const recent = (input.history || []).slice(-3);
   const card = input.shown.proposal
@@ -82,7 +118,10 @@ export function coworkJudgePrompt(input: {
     historial: recent.map(turn => ({ pedido: clip(turn.request, 600), respuesta: clip(turn.reply, 800) })),
     datosDelHistorial: recent.flatMap(turn => turn.observations || []).slice(-4).map(observation => clip(observation, 2000)),
     usuario: input.userContext ?? null,
-    datosConsultados: (input.observations || []).slice(0, 6).map(observation => clip(observation, 2500)),
+    ...(input.evidence ? { ahora: coworkLocalStamp(input.evidence.now, input.evidence.timeZone ?? coworkTimeZone()) } : {}),
+    datosConsultados: input.evidence
+      ? coworkJudgeEvidence(input.observations || [], { timeZone: input.evidence.timeZone })
+      : (input.observations || []).slice(0, 6).map(observation => clip(observation, 2500)),
     loQueVioElUsuario: {
       respuesta: input.shown.failed ? `Error: ${input.shown.failed}` : clip(input.shown.reply, 6000),
       documento: input.shown.document ? { titulo: input.shown.document.title, contenido: clip(input.shown.document.content, 5000) } : null,
@@ -141,24 +180,26 @@ export function coworkJudgeTurnPrompt(input: {
   userContext?: unknown;
   observations: unknown[];
   answer: Parameters<typeof coworkShownFromAnswer>[0];
+  now?: Date;
 }) {
   return coworkJudgePrompt({ request: input.request, history: input.history, userContext: input.userContext,
-    observations: input.observations, shown: coworkShownFromAnswer(input.answer) });
+    observations: input.observations, shown: coworkShownFromAnswer(input.answer), evidence: { now: input.now ?? new Date() } });
 }
 
 /**
  * Whether a judgement is worth one correction before the answer is shown, and what the
- * coordinator reads. With a read left (`canRead`): a bad answer, one that makes the person do
- * extra work (friction 3 or less; typically a free read offered instead of made) or one that
- * states what the data does not support (veracity 3 or less). Without one, only what a rewrite
- * can fix: an unsupported claim, or a request it did not understand. Null when the answer stands.
+ * coordinator reads. Only clear failures: a bad answer, or a dimension at 2 or less (friction
+ * with a read left, typically a read offered instead of made; veracity; comprehension). A 3
+ * («one avoidable step», «an imprecise figure») used to send half the answers back, and the
+ * corrections were not clearly better (G2). The correction edits the answer it fixes
+ * (answerToCorrect) instead of writing it again. Null when the answer stands.
  */
 export function coworkJudgeFix(judgement: CoworkJudgement, turn: { canRead: boolean; question?: string | null } = { canRead: true }): string | null {
   const { scores, problemas, veredicto } = judgement;
   if (!problemas.length) return null;
   const worth = turn.canRead
-    ? veredicto === 'mala' || scores.friccion <= 3 || scores.veracidad <= 3
-    : scores.veracidad <= 3 || scores.comprension <= 2;
+    ? veredicto === 'mala' || scores.friccion <= 2 || scores.veracidad <= 2 || scores.comprension <= 2
+    : scores.veracidad <= 2 || scores.comprension <= 2;
   if (!worth) return null;
   const question = turn.question?.trim();
   return [
@@ -166,10 +207,10 @@ export function coworkJudgeFix(judgement: CoworkJudgement, turn: { canRead: bool
     ...problemas.map(problem => `- ${problem}`),
     ...(question ? [`Tu respuesta terminaba con «${question}».`] : []),
     turn.canRead
-      ? 'No ofrezcas lo que puedes hacer tú ahora: si ofrecía una consulta (contactos, envíos, respuestas, campañas, métricas o archivos), hazla en esta decisión, dentro de las lecturas que te quedan, y responde con lo que encuentres; si ofrecía preparar algo (una lista, un orden, un resumen o un texto), inclúyelo en la respuesta.'
-      : 'En este turno ya no quedan consultas: corrígela con lo que ya tienes. Si ofrecía preparar algo (una lista, un orden, un resumen o un texto), inclúyelo en la respuesta.',
+      ? 'Si ofrecía una consulta que el pedido necesitaba (contactos, envíos, respuestas, campañas, métricas o archivos), hazla en esta decisión, dentro de las lecturas que te quedan, y responde con lo que encuentres; si ofrecía preparar algo que el pedido necesitaba (una lista, un orden, un resumen o un texto), inclúyelo. No cambies el propósito de la respuesta ni la conviertas en un listado de cifras que no se pidió.'
+      : 'En este turno ya no quedan consultas: corrígela con lo que ya tienes. Si ofrecía preparar algo que el pedido necesitaba (una lista, un orden, un resumen o un texto), inclúyelo.',
     'Si afirmaste algo que los datos no respaldan, quítalo o dilo tal como está en los datos.',
-    'Cierra con una pregunta sobre una decisión que solo el usuario puede tomar o una acción que necesita su aprobación (crear una campaña, buscar prospectos nuevos o el correo de un contacto), no con algo que puedas hacer tú.',
-    'Entrega de nuevo la respuesta completa, con su pregunta final y sus respuestas sugeridas.',
+    `Cómo cerrar: ${COWORK_NEXT_STEP_RULE}`,
+    'Edita tu respuesta anterior (answerToCorrect): cambia solo lo señalado y conserva el resto, con su pregunta final y sus respuestas sugeridas.',
   ].join('\n');
 }

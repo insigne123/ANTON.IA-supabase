@@ -4,8 +4,10 @@
 import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const keys = ['COWORK_ENABLED', 'COWORK_STREAMING_ENABLED', 'COWORK_WRITER_ENABLED', 'COWORK_MODEL_BUDGET_ENABLED', 'COWORK_WRITER_MODEL', 'COWORK_REVIEWER_MODEL', 'COWORK_MODEL'];
+const keys = ['COWORK_ENABLED', 'COWORK_STREAMING_ENABLED', 'COWORK_WRITER_ENABLED', 'COWORK_MODEL_BUDGET_ENABLED', 'COWORK_WRITER_MODEL', 'COWORK_REVIEWER_MODEL', 'COWORK_MODEL',
+  'COWORK_ANSWER_HOLD_ENABLED'];
 const environment = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+delete process.env.COWORK_ANSWER_HOLD_ENABLED;
 Object.assign(process.env, { COWORK_ENABLED: 'true', COWORK_STREAMING_ENABLED: 'true', COWORK_MODEL_BUDGET_ENABLED: 'true', COWORK_MODEL: 'coordinator-model',
   COWORK_WRITER_MODEL: 'writer-model', COWORK_REVIEWER_MODEL: 'reviewer-model' });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -125,6 +127,16 @@ try {
   assert.equal(on.finished.p_payload.question, fixed.question);
   assert.deepEqual(on.finished.p_payload.telemetry.map(call => call.model), ['coordinator-model', 'writer-model', 'reviewer-model', 'writer-model']);
 
+  // Held (COWORK_ANSWER_HOLD_ENABLED): the Writer's words never reach the page, only the phase its draft is in
+  // (written, reviewed, and adjusted once the Reviewer's fix starts) and how far the cards got.
+  process.env.COWORK_ANSWER_HOLD_ENABLED = 'true';
+  const held = await run([handOff, first, review, fixed]);
+  assert.ok(held.drafts.every(draft => draft.p_text === '' && !draft.p_progress.reviewing), 'no text travels while the draft is held');
+  assert.deepEqual(held.drafts.map(draft => draft.p_progress.phase).filter((phase, index, all) => phase !== all[index - 1]), ['writing', 'reviewing', 'adjusting']);
+  assert.ok(held.drafts.some(draft => draft.p_progress.cards.some(card => card.type === 'sequence' && card.title === null && card.parts === 3)), 'the cards show how far they got, without their titles');
+  assert.ok(held.finished.p_payload.reply.startsWith(fixed.reply));
+  delete process.env.COWORK_ANSWER_HOLD_ENABLED;
+
   // Before the ledger knows the in-turn agents, their calls count as the coordinator's.
   state.ledger = 'coordinator-only';
   const before = await run([handOff, first, review, fixed]);
@@ -138,7 +150,7 @@ try {
   assert.deepEqual(state.generations.map(call => call.who), ['coordinator', 'coordinator']);
   assert.deepEqual(off.steps, []);
   assert.ok(off.finished.p_payload.reply.startsWith(answer.answer.reply));
-  console.log('PASS: the Writer streams the turn\'s emails, the Reviewer\'s fix is applied once, each agent\'s step is recorded, the ledger falls back to the coordinator\'s role, and off it is refused.');
+  console.log('PASS: the Writer streams the turn\'s emails, the Reviewer\'s fix is applied once, each agent\'s step is recorded, held only its phase reaches the page, the ledger falls back to the coordinator\'s role, and off it is refused.');
 } finally {
   delete globalThis.__coworkWriter;
   for (const [key, value] of Object.entries(environment)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }

@@ -71,6 +71,11 @@ env:
   - variable: COWORK_STREAMING_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Una sola respuesta: se muestra cuando ya pasó la revisión, sin texto que después cambie a la
+  # vista (docs/cowork-una-respuesta.md). En "false" vuelve el texto en vivo.
+  - variable: COWORK_ANSWER_HOLD_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   - variable: COWORK_WRITER_ENABLED
     value: "true"
     availability: [RUNTIME]

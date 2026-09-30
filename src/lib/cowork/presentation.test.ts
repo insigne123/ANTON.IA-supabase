@@ -6,7 +6,7 @@ import {
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
   coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
-  coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview,
+  coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -325,4 +325,16 @@ test('the judge reads the answer as the Reviewer, and says whether it stood or w
   assert.equal(coworkAnswerReview(coworkAgentRows([agent({ agent: 'reviewer', state: 'done', label: 'Sin ajustes', outcome: 'clean', changes: [] })])), null);
   // The judge does not change what the cards say about their review.
   assert.equal(coworkDraftReview([reviewing, done('clean', 'Sin ajustes')]), null);
+});
+
+test('a held answer says which phase it is in, about the emails when it carries them', () => {
+  assert.equal(coworkHeldAnswerCopy('writing', []), 'Escribiendo la respuesta');
+  assert.equal(coworkHeldAnswerCopy(null, [{ type: 'table' }]), 'Escribiendo la respuesta');
+  // While it is reviewed, the line says why no text shows yet.
+  assert.equal(coworkHeldAnswerCopy('reviewing', []), 'Revisando la respuesta antes de mostrártela');
+  assert.equal(coworkHeldAnswerCopy('adjusting', []), 'Ajustando la respuesta tras revisarla');
+  assert.equal(coworkHeldAnswerCopy('writing', [{ type: 'email_draft' }]), 'Escribiendo el correo');
+  assert.equal(coworkHeldAnswerCopy('reviewing', [{ type: 'email_draft' }, { type: 'table' }]), 'Revisando el correo antes de mostrártelo');
+  assert.equal(coworkHeldAnswerCopy('reviewing', [{ type: 'sequence' }]), 'Revisando los correos antes de mostrártelos');
+  assert.equal(coworkHeldAnswerCopy('adjusting', [{ type: 'email_draft' }, { type: 'email_draft' }]), 'Ajustando los correos tras revisarlos');
 });

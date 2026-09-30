@@ -61,13 +61,14 @@ export function coworkLocalStamp(date: Date, timeZone: string) {
 }
 
 /** The model converted UTC to local time unreliably (04:26Z shown as 10:26),
- * so every timestamp it reads travels with its local reading. Originals stay. */
-function withLocalTimes(value: unknown, timeZone: string, depth = 0): unknown {
+ * so every timestamp it reads travels with its local reading. Originals stay.
+ * The judge reads the same data the same way (judge.ts). */
+export function coworkWithLocalTimes(value: unknown, timeZone: string, depth = 0): unknown {
   if (depth > 8 || !value || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map(item => withLocalTimes(item, timeZone, depth + 1));
+  if (Array.isArray(value)) return value.map(item => coworkWithLocalTimes(item, timeZone, depth + 1));
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    output[key] = withLocalTimes(item, timeZone, depth + 1);
+    output[key] = coworkWithLocalTimes(item, timeZone, depth + 1);
     const localKey = `${key}${key.includes('_') ? '_local' : 'Local'}`;
     if (typeof item !== 'string' || !TIMESTAMP.test(item) || localKey in value) continue;
     const date = new Date(item);
@@ -89,6 +90,36 @@ export type CoworkUserContext = {
 };
 
 const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer, sin consultar profile.get ni app.context para eso. Un valor null no se inventa.';
+
+const ANSWER_TO_CORRECT_INSTRUCTION = 'Esta es tu respuesta anterior. Edítala: cambia solo lo que señala rejectedDecisions y conserva el resto (lo que hiciste bien, sus cifras, nombres, tarjetas y tono). Si un bloque o el documento no cambian, puedes dejarlos en null: se conservan. No menciones la corrección ni que hubo una versión anterior.';
+const clipText = (value: unknown, max: number) => typeof value === 'string' ? (value.length > max ? `${value.slice(0, max)}… [recortado]` : value) : null;
+
+function withoutPrevious(rejection: unknown) {
+  if (!rejection || typeof rejection !== 'object' || !('previous' in rejection)) return rejection;
+  const { previous: _previous, ...rest } = rejection as Record<string, unknown>;
+  return rest;
+}
+
+/** The answer the latest correction asks to edit, trimmed to a fair size: its cards whole when
+ * they fit, their titles otherwise. */
+function coworkAnswerToCorrect(rejections: unknown[] | undefined) {
+  const previous = [...(rejections || [])].reverse()
+    .map(item => item && typeof item === 'object' ? (item as { previous?: unknown }).previous : undefined)
+    .find(value => value && typeof value === 'object') as Record<string, unknown> | undefined;
+  if (!previous) return {};
+  const blocks = Array.isArray(previous.blocks) && previous.blocks.length ? previous.blocks : null;
+  const blocksJson = blocks ? JSON.stringify(blocks) : '';
+  const document = previous.document && typeof previous.document === 'object' ? previous.document as { title?: unknown; content?: unknown } : null;
+  return { answerToCorrect: {
+    instruction: ANSWER_TO_CORRECT_INSTRUCTION,
+    reply: clipText(previous.reply, 6000),
+    question: clipText(previous.question, 400),
+    suggestions: Array.isArray(previous.suggestions) ? previous.suggestions.slice(0, 3) : null,
+    blocks: blocks ? (blocksJson.length <= 8000 ? blocks
+      : blocks.map(block => ({ type: (block as { type?: unknown }).type, title: (block as { title?: unknown }).title }))) : null,
+    document: document ? { title: clipText(document.title, 200), content: clipText(document.content, 6000) } : null,
+  } };
+}
 
 /** Shared by the worker and AXIS replay. Time comes from the server, not the model. */
 export function coworkDecisionContext(
@@ -119,8 +150,11 @@ export function coworkDecisionContext(
   return {
     ...input,
     userContext: input.userContext ? { ...input.userContext, instruction: USER_CONTEXT_INSTRUCTION } : null,
-    history: withLocalTimes(input.history, timeZone) as typeof input.history,
-    observations: withLocalTimes(input.observations, timeZone) as unknown[],
+    history: coworkWithLocalTimes(input.history, timeZone) as typeof input.history,
+    observations: coworkWithLocalTimes(input.observations, timeZone) as unknown[],
+    // A correction edits the answer it was asked to fix: it travels apart from the reasons.
+    ...(input.rejectedDecisions ? { rejectedDecisions: input.rejectedDecisions.map(withoutPrevious) } : {}),
+    ...coworkAnswerToCorrect(input.rejectedDecisions),
     contactReadGuidance: {
       observedLeadIds: [...observedLeadIds],
       instruction: input.observations.length === 0
