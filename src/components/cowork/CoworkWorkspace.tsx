@@ -6,6 +6,7 @@ import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import type { CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
+import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
   coworkCardStatuses, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
@@ -13,7 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { CoworkArtifactPanel } from './CoworkArtifactPanel';
 import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
-import { CoworkHome } from './CoworkHome';
+import { CoworkHome, type CoworkOfferDraft } from './CoworkHome';
 import { CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkExportProvider } from './ExportMenu';
@@ -153,6 +154,24 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     if (!response.ok) throw Object.assign(new Error(data.error || 'No se pudo completar la solicitud.'), { status: response.status });
     return data;
   }, [clearPrivateResults]);
+
+  // The home's figures (V7), read each time the home shows so they reflect the work just done.
+  // If they cannot be read, the home goes on without them.
+  const [overview, setOverview] = useState<CoworkOverview | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  // «Cuéntame qué vendes» leaves while its message is sent; what was written waits here in case it fails.
+  const [offerDraft, setOfferDraft] = useState<CoworkOfferDraft>({ offer: '', website: '' });
+  const onHome = !selected && !optimistic;
+  useEffect(() => {
+    if (!onHome) return;
+    let current = true;
+    setOverviewLoading(true);
+    request('/api/cowork/overview').then(
+      data => { if (current) setOverview(data as CoworkOverview); },
+      () => { if (current) setOverview(null); },
+    ).finally(() => { if (current) setOverviewLoading(false); });
+    return () => { current = false; };
+  }, [onHome, request]);
 
   /** Asks the worker to take the next step now instead of waiting for the scheduler. */
   const wake = useCallback((force = false) => {
@@ -711,7 +730,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       </CwCollapse>
 
       {!inConversation
-        ? <CoworkHome composer={homeComposer} threads={threads} ready={ready} loading={loading} onSuggestion={applySuggestion} onOpenThread={choose} />
+        ? <CoworkHome composer={homeComposer} threads={threads} ready={ready} loading={loading} onSuggestion={applySuggestion} onOpenThread={choose}
+          overview={overview} overviewLoading={overviewLoading} offerDraft={offerDraft} onOfferDraftChange={setOfferDraft}
+          onSaveOffer={ready && !sending ? async text => {
+            const sent = await post(text, null);
+            if (sent) setOfferDraft({ offer: '', website: '' });
+            return sent;
+          } : null} />
         : <>
           <div ref={scroller} onScroll={onScroll} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
             <div ref={conversation} className="mx-auto w-full max-w-[46rem] space-y-9 px-4 pb-8 pt-7 sm:px-6">

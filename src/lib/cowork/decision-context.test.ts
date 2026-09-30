@@ -114,3 +114,17 @@ test('with the Writer on, the coordinator reads how to hand it the emails, and t
   assert.equal(early.writerAvailable, true);
   assert.equal(coworkDecisionContext(instructions, { ...base, mustAnswer: true, turnBudget: budget(0) }).writerAvailable, false);
 });
+
+test('approved memories travel with the user context and say how to use them; without them nothing changes', () => {
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  const base = { history: { turns: [], olderTurnsOmitted: false }, request: 'escribe un correo', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' as const } };
+  const person = { fullName: 'Nicolás Y.', jobTitle: null, companyName: 'Yago SpA', companyDomain: null, offer: 'AXIS', offerSource: 'profile' as const };
+  const plain = coworkDecisionContext(instructions, { ...base, userContext: person });
+  assert.doesNotMatch(plain.userContext?.instruction || '', /memories/);
+  const remembered = coworkDecisionContext(instructions, { ...base, userContext: { ...person, memories: ['tono: tuteo, cercano y breve'] } });
+  assert.deepEqual(remembered.userContext?.memories, ['tono: tuteo, cercano y breve']);
+  assert.match(remembered.userContext?.instruction || '', /memories son cosas que el usuario aprobó que ANTON\.IA recuerde/);
+  assert.match(remembered.userContext?.instruction || '', /salvo que el pedido de ahora diga otra cosa/);
+  // The recipe for the home's «Cuéntame qué vendes» card.
+  assert.match(instructions.systemPrompt, /«Guarda en mi perfil lo que vendo: …»[^']*profile\.update con valueProposition/);
+});

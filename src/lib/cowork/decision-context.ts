@@ -86,9 +86,12 @@ export type CoworkUserContext = {
   companyDomain: string | null;
   offer: string | null;
   offerSource: 'profile' | 'organization' | null;
+  /** What the person approved for ANTON.IA to remember (plan 2, V7); absent when there is nothing. */
+  memories?: string[];
 };
 
 const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer, sin consultar profile.get ni app.context para eso. Un valor null no se inventa.';
+const MEMORIES_INSTRUCTION = ' memories son cosas que el usuario aprobó que ANTON.IA recuerde (preferencias, su negocio, cómo quiere que le escriban): síguelas al redactar y decidir, salvo que el pedido de ahora diga otra cosa, y no las presentes como datos consultados en este trabajo.';
 
 /** Shared by the worker and AXIS replay. Time comes from the server, not the model. */
 export function coworkDecisionContext(
@@ -118,7 +121,8 @@ export function coworkDecisionContext(
   }
   return {
     ...input,
-    userContext: input.userContext ? { ...input.userContext, instruction: USER_CONTEXT_INSTRUCTION } : null,
+    userContext: input.userContext ? { ...input.userContext,
+      instruction: USER_CONTEXT_INSTRUCTION + (input.userContext.memories?.length ? MEMORIES_INSTRUCTION : '') } : null,
     history: withLocalTimes(input.history, timeZone) as typeof input.history,
     observations: withLocalTimes(input.observations, timeZone) as unknown[],
     contactReadGuidance: {

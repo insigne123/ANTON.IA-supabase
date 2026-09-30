@@ -7,6 +7,7 @@ import { coworkStarter } from '../../src/lib/cowork/starters';
 import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '../../src/lib/cowork/blocks';
 import { COWORK_FILE_NOTICE, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTablePreview, coworkTextPreview } from '../../src/lib/cowork/file-read';
 import { coworkWithAttachments } from '../../src/lib/cowork/attachments';
+import { coworkOfferMessage } from '../../src/lib/cowork/overview';
 import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -130,6 +131,17 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'menciona correos o campañas y LinkedIn', test: r => /correo|campa/i.test(r.reply) && /linkedin/i.test(r.reply) },
       { label: 'breve: 12 líneas como máximo', test: r => r.reply.split('\n').filter(line => line.trim()).length <= 12 },
       { label: 'no pregunta qué vende el usuario', test: r => !/qué (?:producto|servicio|vendes|ofreces)/i.test(r.reply) }] },
+  // The home's «Cuéntame qué vendes» card (V7) sends this message: Cowork proposes saving it in the profile.
+  { id: 'guardar-oferta', title: 'Guardar lo que vende desde la tarjeta del inicio', world,
+    request: coworkOfferMessage('revisión de antecedentes laborales en minutos, para equipos de RR. HH. en Chile', 'https://yago.cl'),
+    origin: 'Una cuenta sin oferta la escribe en la tarjeta «Cuéntame qué vendes»: Cowork propone guardarla en el perfil, con sus palabras y sin inventar.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'consulta el perfil antes de proponer', test: r => (r.reads || []).some(item => item.action === 'profile.get') },
+      { label: 'propone guardar la oferta en el perfil', test: r => r.proposal?.kind === 'profile_update'
+        && /antecedentes/i.test(String(r.proposal.profile?.valueProposition || '')) },
+      { label: 'guarda el sitio que dio', test: r => r.proposal?.kind !== 'profile_update' || /yago\.cl/.test(String(r.proposal.profile?.website || '')) },
+      { label: 'no agrega cifras ni precios que el usuario no dijo', test: r => !/\d/.test(String(r.proposal?.profile?.valueProposition || '')) },
+      { label: 'no cambia la firma ni datos que no pidió', test: r => !['signature', 'name', 'role', 'companyName', 'sector'].some(key => r.proposal?.profile?.[key] !== undefined) }] },
   { id: 'mkt-campana-rrhh', title: 'Correo a los contactos de un área', request: 'quiero mandarle un correo a mis contactos de rrhh ofreciendo axis', world,
     origin: 'Pedido típico de mailing: un segmento guardado y la oferta. Debe encontrar a quiénes, usar la oferta y dejar el correo o la campaña para aprobar.',
     checks: [...CORPUS_COMMON_CHECKS,

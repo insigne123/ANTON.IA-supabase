@@ -93,7 +93,8 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
         result.proposal = { kind: proposal.kind, label: proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
-          ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}) };
+          ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),
+          ...(proposal.profile ? { profile: proposal.profile } : {}) };
       },
     });
     if (result.judgeInTurn?.asked) result.judgeInTurn.fixed = answer !== judgedAnswer;
@@ -126,7 +127,9 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
       ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: campaign.messages } }
         : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage }
         // The code card shows the files it runs on and the code itself.
-        : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } } : {}) } : null,
+        : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }
+        // The profile card shows the fields it saves.
+        : result.proposal.profile ? { detail: result.proposal.profile } : {}) } : null,
     search: result.search,
     document: result.document,
     failed: result.failed,
