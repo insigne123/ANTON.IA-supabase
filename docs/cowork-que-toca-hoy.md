@@ -39,6 +39,7 @@ Un extracto de lo que lee el coordinador (el día completo del caso `agenda-toca
 ```
 
 - **`counts`**, las cifras exactas (interesados, cuántos de ellos pidieron reunión, enfriados, sin clasificar, respuestas automáticas, aprobaciones, seguimientos que salen / pasan de día / retenidos, aceptaciones de LinkedIn, rebotes). El modelo no cuenta ni reordena. `ofWhichMeetingRequests` está **dentro** de `interestedAccounts` (el nombre lo dice porque en una primera prueba con el modelo real sumó la reunión pedida como una persona más y contó cuatro). **Un `null` significa que esa parte no se pudo leer y nunca es un cero:** con la fuente de seguimientos caída, el modelo repetía «0 seguimientos» cuando el conteo venía en 0.
+- **`whenEmpty`**, solo cuando la lista está completa y vacía: qué leer a continuación (`leads.search` y `campaigns.list`) para proponer con datos. Va junto a los datos porque, con la receta sola, el modelo a veces ofrecía «¿reviso tus contactos?» en lugar de revisarlos. Una lista vacía con una fuente caída no lo trae: ahí corresponde decir qué no se pudo leer.
 - **`sources`** y **`complete`**: qué fuentes se leyeron (`interested`, `attention`, `approvals`, `campaignSteps`, `followups`, `linkedin`). Si una falló o se cortó por un límite, la lista lo dice y el modelo no la presenta como completa.
 
 ### Reglas que fija el código

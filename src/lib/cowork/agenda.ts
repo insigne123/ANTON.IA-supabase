@@ -100,7 +100,13 @@ export type CoworkAgenda = {
   complete: boolean;
   mailboxSynced: boolean | null;
   limitation: string;
+  /** Only when the list is complete and empty: what to do next, said next to the data because the coordinator offered to «look at the
+   * contacts» instead of looking when the recipe alone asked for it. */
+  whenEmpty?: string;
 };
+
+/** What the coordinator reads when a complete list has nothing in it. */
+export const AGENDA_WHEN_EMPTY = 'No hay nada pendiente: dilo en una línea y lee ahora leads.search (query vacía) y campaigns.list en un reads.parallel para proponer 2 o 3 acciones concretas con su dato; no le preguntes al usuario si quiere que lo revises.';
 
 /** Commercial value, highest first: people who answered, then decisions only the person can take, then what revives or
  * prepares a conversation, then what runs by itself, then hygiene. */
@@ -228,5 +234,6 @@ export function buildCoworkAgenda(input: AgendaInput): CoworkAgenda {
     limitation: input.mailboxSynced === false
       ? 'Lo registrado en ANTON.IA: el correo no está sincronizado por completo y pueden faltar respuestas. Cada envío vuelve a comprobar los frenos de la empresa antes de salir.'
       : 'Lo registrado en ANTON.IA. Cada envío vuelve a comprobar los frenos de la empresa antes de salir.',
+    ...(ranked.length === 0 && complete ? { whenEmpty: AGENDA_WHEN_EMPTY } : {}),
   };
 }

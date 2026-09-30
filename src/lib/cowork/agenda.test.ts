@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { coworkActionInfo, coworkReadFinding } from './presentation';
 import { COWORK_DOMAIN_FIXED_READS, isCoworkDomainRead } from './domain-reads';
 import {
-  AGENDA_COOLED_AFTER_DAYS, AGENDA_MAX_ITEMS, buildCoworkAgenda,
+  AGENDA_COOLED_AFTER_DAYS, AGENDA_MAX_ITEMS, AGENDA_WHEN_EMPTY, buildCoworkAgenda,
   type AgendaFollowupCampaign, type AgendaInput, type AgendaSourceKey, type AgendaSourceStatus,
 } from './agenda';
 
@@ -31,6 +31,19 @@ test('an empty day is an empty list with every count at zero and the list comple
   assert.equal(agenda.counts.linkedinAccepted, 0);
   assert.equal(agenda.day, '2026-09-25');
   assert.equal(agenda.weekday, 'viernes');
+});
+
+test('an empty and complete list says what to read next; a list with something in it, or one that could not be read, does not', () => {
+  const agenda = buildCoworkAgenda(empty());
+  assert.equal(agenda.whenEmpty, AGENDA_WHEN_EMPTY);
+  assert.match(AGENDA_WHEN_EMPTY, /leads\.search/);
+  assert.match(AGENDA_WHEN_EMPTY, /campaigns\.list/);
+  // Automatic replies and soft bounces are information, not work: the day is still empty.
+  assert.equal(buildCoworkAgenda({ ...empty(), autoReplies: 2 }).whenEmpty, AGENDA_WHEN_EMPTY);
+  assert.equal(buildCoworkAgenda({ ...empty(), interested: [{ ...person('A', 'Empresa A', 'a@empresa-a.cl', 1), intent: 'positive' }] }).whenEmpty, undefined);
+  // An empty list that left something unread is not «nothing pending»: it must say what it could not read instead.
+  assert.equal(buildCoworkAgenda({ ...empty(), sources: { ...okSources(), followups: 'unavailable' } }).whenEmpty, undefined);
+  assert.equal(buildCoworkAgenda({ ...empty(), sources: { ...okSources(), interested: 'partial' } }).whenEmpty, undefined);
 });
 
 test('the list goes by commercial value: people who answered, then decisions, then what revives, then what runs by itself', () => {
