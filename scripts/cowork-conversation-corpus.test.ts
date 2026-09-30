@@ -359,7 +359,30 @@ test('with the judge on, an answer that offers a read it could do is fixed in th
   assert.deepEqual(seen, [offered.answer!.reply], 'the judge reads once');
   assert.deepEqual(outcome.result.actions, ['metrics.rates', 'campaigns.list']);
   assert.deepEqual({ ...outcome.result.judgeInTurn, scores: undefined, problemas: undefined },
-    { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true });
+    { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true, kept: 'correction', keptReason: 'improved' });
+  // Every answer decision is kept in order: the first one is the answer the correction edited.
+  assert.equal(outcome.result.answers?.length, 2);
+  assert.equal(outcome.result.answers?.[0], offered.answer!.reply);
+});
+
+test('with the judge on, a correction with a figure nothing supports leaves the first answer, and the report says why', async () => {
+  const entry = CORPUS.find(item => item.id === 'metricas-semana')!;
+  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?' });
+  // The correction invents a rate: neither the reads nor the first answer say 73 %.
+  const invented = answer('Esta semana no enviaste correos desde ANTON.IA; tus campañas abren el 73 % de lo que envían.', null, undefined, { question: '¿Armamos una campaña corta?' });
+  const decide: CorpusDecider = async context => {
+    const fixing = ((context.rejectedDecisions || []) as Array<{ reason: string }>).some(rejection => /una revisión de tu respuesta/.test(rejection.reason));
+    if (context.observations.length === 0) return parallel([{ action: 'metrics.rates', input: '' }]);
+    if (!fixing) return offered;
+    return context.observations.length === 1 ? read('campaigns.list', '') : invented;
+  };
+  const judge: CorpusJudge = async () => ({ scores: { comprension: 5, veracidad: 5, utilidad: 3, claridad: 5, friccion: 2 }, veredicto: 'mala',
+    problemas: ['Pregunta si revisa las campañas, aunque podía consultarlas antes de responder.'] });
+  const outcome = await runCorpusCase(entry, decide, undefined, judge);
+  assert.equal(outcome.result.reply.startsWith(offered.answer!.reply), true, outcome.result.reply);
+  assert.equal(outcome.result.reply.includes('73'), false);
+  assert.deepEqual({ asked: outcome.result.judgeInTurn?.asked, fixed: outcome.result.judgeInTurn?.fixed, kept: outcome.result.judgeInTurn?.kept, why: outcome.result.judgeInTurn?.keptReason },
+    { asked: true, fixed: false, kept: 'first', why: 'new_figures' });
 });
 
 test('an import is staged as the server stages it: the judge sees the card, the model reads the same refusals', async () => {

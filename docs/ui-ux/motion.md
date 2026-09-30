@@ -59,6 +59,7 @@ Cada animación le responde al usuario una de cuatro preguntas. Si no responde n
 | Íconos de «Progreso» | Cambian con una transición corta |
 | Números de un hallazgo o una cifra | Cuentan hasta su valor al aparecer (solo los mayores que 9; `CwCount`) |
 | Respuesta mientras se escribe | Cada párrafo nuevo entra con un fundido; el cursor está quieto; las tarjetas en camino muestran un esqueleto |
+| Respuesta retenida hasta revisarla (`COWORK_ANSWER_HOLD_ENABLED`) | No hay texto que leer: una línea dice en qué fase está («Escribiendo», «Revisando antes de mostrártela», «Ajustando tras revisarla») y cambia con un fundido cruzado sobre esqueletos quietos; nada gira. La respuesta final entra una sola vez |
 | Estado de una tarjeta | «Borrador», «Editado por ti», «Campaña propuesta»… cambia con un fundido cruzado |
 | Filas de una tabla | Entran escalonadas cuando la tarjeta aparece |
 | Palabras editadas | Al tocar «Listo» se marcan y se apagan en unos 3 s |

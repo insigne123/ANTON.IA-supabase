@@ -13,7 +13,7 @@ const draft = {
 };
 const brief: CoworkWriteBrief = { kind: 'email', recipients: ['Felipe'], objective: 'Una reunión', angle: null, tone: null, steps: null, notes: null, findings: null };
 
-function harness(replies: unknown[], timeLeft = () => 90_000) {
+function harness(replies: unknown[], timeLeft = () => 90_000, adjust = true) {
   const log: string[] = [];
   const pushed: string[] = [];
   const options: Array<{ timeoutMs: number; maxOutputTokens: number; openAiModel?: string; streamed: boolean }> = [];
@@ -31,7 +31,8 @@ function harness(replies: unknown[], timeLeft = () => 90_000) {
     },
     recordUsage: async id => { log.push(`usage:${id}`); },
     record: async event => { log.push(`step:${event.result.agent}:${event.result.state}`); },
-    liveDraft: { push: text => { pushed.push(text); }, review: () => { log.push('review'); }, flush: async () => { log.push('flush'); } },
+    liveDraft: { push: text => { pushed.push(text); }, review: () => { log.push('review'); }, ...(adjust ? { adjust: () => { log.push('adjust'); } } : {}),
+      flush: async () => { log.push('flush'); } },
     timeLeft, models: { writer: 'writer-model', reviewer: 'reviewer-model' },
   });
   return { write, log, pushed, options };
@@ -50,6 +51,19 @@ test('the Writer streams into the live draft and the Reviewer reads it, each und
   assert.deepEqual(coworkLiveDraft(h.pushed.at(-1) || '')?.cards, [{ type: 'email_draft', title: 'Correo a Felipe', parts: 1 }]);
   assert.deepEqual(h.options.map(option => `${option.openAiModel}:${option.maxOutputTokens}:${option.streamed}`),
     ['writer-model:6000:true', 'reviewer-model:1500:false']);
+});
+
+test('a correction of the draft tells the live draft before it is written, and a draft without that hook still works', async () => {
+  const gratis = { ...draft, blocks: [{ ...draft.blocks[0], body: signed.replace('en minutos', 'gratis') }] };
+  const h = harness([gratis, draft]);
+  await h.write(brief, []);
+  assert.deepEqual(h.log.filter(item => item === 'review' || item === 'adjust' || item.startsWith('step:reviewer')),
+    ['review', 'step:reviewer:working', 'adjust', 'step:reviewer:done']);
+  // Not held, the live draft has no adjust hook: the turn goes on.
+  const plain = harness([gratis, draft], () => 90_000, false);
+  await plain.write(brief, []);
+  assert.ok(!plain.log.includes('adjust'));
+  assert.ok(plain.log.includes('step:reviewer:done'));
 });
 
 test('the calls fit in the time the turn has left', async () => {

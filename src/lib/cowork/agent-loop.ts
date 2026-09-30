@@ -21,6 +21,7 @@ import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } f
 import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
 import { coworkWithCharts } from './charts';
 import { coworkContactsImportSchema, type CoworkContactsImportInput } from './contacts-import';
+import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -312,7 +313,9 @@ export class CoworkDecisionRejected extends Error {
   }
 }
 
-export type CoworkRejection = { action: string; reason: string };
+/** previous: the answer a correction has to edit (the closing correction and the judge's), so the model
+ * fixes what was pointed out and keeps the rest instead of writing it again from scratch. */
+export type CoworkRejection = { action: string; reason: string; previous?: CoworkAnswer };
 
 const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, campaignId o contactsImport).';
 
@@ -396,11 +399,11 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
     filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
   ].filter(Boolean);
   if (!missing.length) return null;
-  // The model does not see its previous answer: name what already worked so the retry keeps it.
+  // The model edits its previous answer (answerToCorrect): name what already worked so it keeps it.
   const keep = [answer.document ? `el document «${answer.document.title.slice(0, 80)}»` : null,
     blocks.length && !filler ? 'los bloques' : null,
     closingQuestion(answer) ? 'la pregunta final' : null, chips ? 'las respuestas sugeridas' : null].filter(Boolean);
-  return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Entrega de nuevo la respuesta completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
+  return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Edita tu respuesta anterior (answerToCorrect) y entrégala completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
 }
 
 export type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
@@ -574,6 +577,10 @@ async function runCoworkLoop(input: {
    * what to fix, or null when it stands. At most once per turn, and only with a decision to spare;
    * `canRead` says whether its correction may still make a read (a decision for it and one to answer). */
   judge?: (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => Promise<string | null>;
+  /** Whether the judge's correction was kept (coworkCorrectionVerdict), once it arrives. */
+  onCorrection?: (verdict: CoworkCorrectionVerdict) => void;
+  /** Who the person is and what they sell: figures from it are not new when a correction uses them. */
+  userContext?: unknown;
 }, observations: CoworkObservation[]) {
   if (observations.length) {
     // The pre-queue phase already spent reads/model decisions. Resume only
@@ -681,12 +688,20 @@ async function runCoworkLoop(input: {
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
         if (closingFallback) return completeFrom(closingFallback, decision.answer);
+        // The judge's correction edits the judged answer: it keeps what the correction dropped, and
+        // it is kept only if it is one (not empty, not the same, no figures without support).
+        if (judgedFallback) {
+          const corrected = completeFrom(judgedFallback, decision.answer);
+          const verdict = coworkCorrectionVerdict(judgedFallback, corrected, [observations, input.history ?? [], input.userContext ?? null]);
+          input.onCorrection?.(verdict);
+          return verdict.keep === 'first' ? judgedFallback : corrected;
+        }
         // A correction needs one more decision, and time for it.
         const closing = turn < last && !late() ? closingFeedback(decision.answer) : null;
         if (closing) {
           // Asked directly, not thrown: the catch below returns closingFallback once it is set.
           closingFallback = decision.answer;
-          rejections.push({ action: 'answer', reason: closing });
+          rejections.push({ action: 'answer', reason: closing, previous: decision.answer });
           continue;
         }
         // The judge reads the answer once, with a decision to spare and time for it; its
@@ -704,7 +719,7 @@ async function runCoworkLoop(input: {
             judgedFallback = decision.answer;
             judgeReadsAt = readsUsed;
             judgeCanRead = canRead;
-            rejections.push({ action: 'answer', reason: fix });
+            rejections.push({ action: 'answer', reason: fix, previous: decision.answer });
             continue;
           }
         }

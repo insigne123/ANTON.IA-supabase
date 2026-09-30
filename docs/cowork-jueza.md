@@ -2,6 +2,8 @@
 
 Segundo PR de la Ola G del plan 2 de Cowork (punto G2, juez dentro del turno). Antes de mostrar la respuesta final del coordinador, un juez la lee con la misma rúbrica que el juez de la evaluación y, si vale la pena, pide **una** corrección. La corrección puede hacer **una** consulta: el arreglo típico es hacer la consulta que la respuesta ofrecía en vez de preguntar «¿quieres que revise…?». Todo va detrás de `COWORK_JUDGE_ENABLED`: sin el flag, Cowork funciona igual que hoy.
 
+> **30 sep:** la Jueza está apagada en producción (`COWORK_JUDGE_ENABLED=false`, #48) porque revisaba la respuesta después de mostrarla y la corrección la reemplazaba a la vista. `docs/cowork-una-respuesta.md` cambia eso: con `COWORK_ANSWER_HOLD_ENABLED` la respuesta se muestra una vez revisada, la Jueza corrige solo con puntajes de 2 o menos, la corrección edita la respuesta anterior y se descarta si empeora. Prenderla de nuevo es una decisión del mantenedor con las cifras de ese documento.
+
 ## Qué cambia para el usuario
 
 - **Se ve que la respuesta se revisa:** para el usuario, el juez es la misma Revisora de G1, ahora leyendo la respuesta.
