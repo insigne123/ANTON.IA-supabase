@@ -4,6 +4,7 @@ import { readdirSync } from 'node:fs';
 const suites = ['src/lib/cowork', 'src/lib/server/cowork'].flatMap(directory =>
   readdirSync(directory).filter(name => name.endsWith('.test.ts')).map(name => `${directory}/${name}`));
 const checks = [
+  ['--test', 'scripts/compare-cowork-evals.test.mjs'],
   ['scripts/test-cowork-company-results.mjs'],
   ['scripts/test-cowork-message-context.mjs'],
   ['scripts/test-cowork-enrich-batch.mjs'],
