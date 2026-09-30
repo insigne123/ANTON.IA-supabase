@@ -13,6 +13,8 @@ export class CoworkCampaignEditRefused extends Error {
 }
 
 export const coworkCampaignEditSchema = z.object({
+  /** Version seen in the preview. Older clients without it must reload before saving. */
+  expectedHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   messages: z.array(z.object({
     subject: z.string().trim().min(1).max(300),
     body: z.string().trim().min(1).max(12000),
