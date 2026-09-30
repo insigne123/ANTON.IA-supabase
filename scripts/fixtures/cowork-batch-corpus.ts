@@ -49,10 +49,15 @@ const companyOf = (id: string) => BATCH_SAVED.find(lead => lead.id === id)?.comp
 
 const readsFirst = (action: string) => ({ label: `consulta ${action} antes de proponer`, test: (result: CorpusTurnResult) => result.actions.includes(action) });
 /** The approval card is where the person decides: the answer says so and never says it already went. */
-const leavesItToApproval = saysAny('dice que lo revisas o lo apruebas en la tarjeta antes de que salga', /(aprueb|aprobar|aprobarlo|tarjeta)/);
+const leavesItToApproval = saysAny('dice que lo revisas o lo apruebas en la tarjeta antes de que salga', /(aprueb|aprob|tarjeta)/);
 const noSendYet = avoids('no dice que ya se enviaron ni que ya salieron', /\b(ya (se )?(las? |los? )*(envie|envio|mande|salio|salieron|enviaron)|quedaron? enviad[oa]s?|fueron? enviad[oa]s?|se enviaron)\b/);
-/** How many go is the server's to say: the card shows it, and a figure in the reply could contradict it. */
-const noCount = avoids('no dice cuántas salen: lo fija el servidor y lo muestra la tarjeta', /\b(\d+|una|dos|tres|cuatro|cinco|seis)\s+(invitaciones|mensajes|personas)\s+(saldran|saldrian|van a salir|quedan en cola|iran|van)\b/);
+/** How many go is the server's to say: the card shows who goes today and who waits, and a figure in the reply («5 contactos», «cinco personas»)
+ * can contradict it. «Una persona por empresa» is the rule, not a count, so «una» is not one; a sentence about the quota («8 invitaciones pendientes
+ * de 100 a la semana») is a fact the quota read gave, not how many go, so it is not one either. */
+const COUNT = /\b(\d+|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\s+(de\s+(tus|los|las)\s+)?(contactos|personas|invitaciones|mensajes|perfiles)\b/;
+const QUOTA_FACT = /\b(cupo|limite|pendientes?|enviadas?|enviados?|semanal|semana|ultimos|dias)\b/;
+const noCount = { label: 'no dice cuántas salen: lo fija el servidor y lo muestra la tarjeta',
+  test: (result: CorpusTurnResult) => !shown(result).split(/(?<=[.!?:;])\s+|\n+/).some(sentence => COUNT.test(sentence) && !QUOTA_FACT.test(sentence)) };
 const oneProposal = { label: 'propone una sola cosa: ni búsqueda ni otra acción', test: (result: CorpusTurnResult) => !result.search && Boolean(result.proposal) };
 
 const INVITE_REQUEST = 'invita por LinkedIn a mis contactos guardados que tengan perfil';
@@ -117,7 +122,7 @@ export const BATCH_CORPUS: CorpusCase[] = [
       readsFirst('leads.search'),
       { label: 'no propone ninguna invitación', test: result => !result.proposal && !result.search },
       says('nombra a Paz Soto', /paz/),
-      saysAny('dice que no tiene perfil de LinkedIn guardado', /(no tiene|sin|falta)[^.]{0,40}(perfil|linkedin|url)/, /(perfil|linkedin|url)[^.]{0,40}(no (esta|figura|tiene)|falta|sin)/),
+      saysAny('dice que no tiene perfil de LinkedIn guardado', /(no tiene|no tengo|no hay|no figura|no consta|no cuenta con|sin|falta)[^.]{0,40}(perfil|linkedin|url)/, /\bno\s+(un\s+|el\s+|su\s+)?perfil/, /(perfil|linkedin|url)[^.]{0,40}(no (esta|figura|tiene)|falta|sin)/),
       saysAny('ofrece otra vía: escribirle por correo', /(correo|email|mail)/),
       noSendYet] },
 ];

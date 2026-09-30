@@ -152,8 +152,12 @@ test('replying in a conversation is described as a proposal with a card only whe
   assert.match(text, /propón enviarla con action email\.reply_thread y replyThread \{contactedId/);
   assert.match(text, /solo si el usuario la aprueba y nunca la des por enviada/);
   // One person per proposal; several are drafts and the first is offered, each with its own approval.
-  assert.match(text, /Si varias personas esperan, entrega los borradores en blocks/);
-  assert.match(text, /cada envío lleva su propia aprobación/);
+  assert.match(text, /Si varias personas esperan \(leíste más de una conversación\), el «propónla» del next de cada lectura no aplica en este turno: no propongas ningún envío todavía \(cabe una sola propuesta por turno y las demás se quedarían sin borrador\)/);
+  assert.match(text, /entrega los borradores de todas, uno por persona, con asunto «Re: » y el asunto del envío tal como lo trae la lectura \(no inventes otro\) y to con su correo/);
+  assert.match(text, /con draft\.write si hay Redactora, y en ese caso pon en notes que son respuestas en conversaciones ya abiertas \(no una campaña\), que cada envío lleva su propia aprobación y que question ofrezca proponer el envío de la primera, la de mayor valor, por su nombre/);
+  assert.match(text, /Lee la conversación de cada una \(hasta 3 por turno, en un solo reads\.parallel\)/);
+  assert.match(text, /No ofrezcas aprobarlos todos juntos ni preguntes «¿apruebas estos tres\?»/);
+  assert.match(text, /cierra ofreciendo proponer el envío de la primera, la de mayor valor, nombrándola, con sugerencias que la acepten \(«Sí, propón la primera»\) o pidan ajustar un borrador/);
   // What only the user decides stays with the user, and a thread that takes no reply or a polite no is never sent.
   assert.match(text, /no lo resuelvas tú: pídele a la persona lo que falta o invítala a conversar en el texto, y di en reply que eso lo decide el usuario/);
   assert.match(text, /Si canReplyInThread es false, no propongas el envío/);
@@ -179,7 +183,10 @@ test('LinkedIn batches are described only when they are on, say who the server l
   // The server plans the day: one company a day across email and LinkedIn, the quota, and the brakes of a single action.
   assert.match(text, /una empresa por día sumando correo y LinkedIn \(sale la primera de cada empresa\)/);
   assert.match(text, /la persona puede quitar a alguien antes de aprobar/);
-  assert.match(text, /No pongas cifras de cuántas personas salen: las fija el servidor/);
+  // Only the people with a saved profile are proposed, and how many go is never said: the card shows it.
+  assert.match(text, /y que traen linkedin_url: a quien lo trae null no se le propone nada, menciónalo aparte como «sin perfil guardado» y ofrece el correo/);
+  assert.match(text, /No digas cuántas personas o invitaciones salen, ni con cifras ni con letras \(«5 contactos», «cinco personas»\): las fija el servidor/);
+  assert.match(text, /habla de «las personas con perfil» y di que la tarjeta muestra quién sale hoy y quién espera/);
   assert.match(text, /Requiere revisión humana siempre, incluso en modo autónomo/);
   assert.match(text, /un trabajo en cola no es un envío/);
   assert.match(text, /Si pide una sola persona, usa linkedin\.invite o linkedin\.message/);
@@ -245,4 +252,16 @@ test('a correction edits the answer it fixes: it travels once, trimmed, apart fr
   // Without a correction there is nothing to edit.
   assert.equal('answerToCorrect' in coworkDecisionContext(instructions, base), false);
   assert.equal('answerToCorrect' in coworkDecisionContext(instructions, { ...base, rejectedDecisions: [{ action: 'decision', reason: 'formato' }] }), false);
+});
+
+test('a person is proposed for LinkedIn only with a saved profile: without one Cowork says so and offers the email', () => {
+  const { systemPrompt } = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  assert.match(systemPrompt, /propón linkedin\.message con el texto listo y firmado solo si trae linkedin_url; si es null no tiene perfil de LinkedIn guardado: dilo en una frase, nómbrala y ofrece escribirle por correo, sin proponer nada por LinkedIn/);
+  const base = { history: { turns: [] }, request: 'Invita a Paz por LinkedIn', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const context = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  const linkedin = JSON.stringify(context);
+  assert.match(linkedin, /linkedin\.invite con leadId de un contacto observado con linkedin_url propone invitación sin nota/);
+  assert.match(linkedin, /Un contacto con linkedin_url null no tiene perfil guardado: no propongas invitarlo ni escribirle por LinkedIn, dilo y ofrece el correo/);
+  // The quota adds the pending to the sent of 7 days: when it is cited, the two are told apart, never «se usaron 20».
+  assert.match(linkedin, /linkedin\.quota cuenta las invitaciones pendientes y las enviadas de los últimos 7 días contra el límite operativo semanal: si citas el cupo, separa pending y sent7d/);
 });

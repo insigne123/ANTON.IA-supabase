@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { queryCoworkLeads } from './lead-tools';
 
 function client() {
@@ -78,4 +79,46 @@ test('a saved contact can be found by its email address', async () => {
   assert.ok(filter.split(',').includes('email.ilike.%nicogun123@gmail.com%'));
   assert.equal(result.returned, 1);
   assert.equal(result.partial, false);
+});
+
+const ID = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+const stored = (n: number, linkedin: unknown) => ({ id: ID(n), name: `Persona ${n}`, title: null, company: 'Empresa', email: null, city: null, country: null, created_at: `2026-09-0${n}`, linkedin_url: linkedin });
+
+test('the saved contact reads its LinkedIn profile, so a batch can tell who has one', async () => {
+  const f = rowsClient([stored(1, 'https://www.linkedin.com/in/ana-ruiz')]);
+  await queryCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'persona');
+  assert.match(String(f.calls.find(call => call[0] === 'select')?.[1]), /(^|,)linkedin_url(,|$)/);
+  const one = rowsClient([stored(1, 'https://www.linkedin.com/in/ana-ruiz')]);
+  await queryCoworkLeads(one.db, { userId: 'owner', organizationId: 'org' }, 'leads.get', ID(1));
+  assert.match(String(one.calls.find(call => call[0] === 'select')?.[1]), /(^|,)linkedin_url(,|$)/);
+});
+
+test('only the canonical profile address is passed on, and what is not a profile is nothing', async () => {
+  const rows = [
+    stored(1, 'https://cl.linkedin.com/in/ana-ruiz/?trk=public_profile'),
+    stored(2, 'linkedin.com/in/hector-vidal'),
+    stored(3, 'https://www.linkedin.com/company/alimentos-del-valle'),
+    stored(4, 'sin perfil, pedir por correo'),
+    stored(5, null),
+    stored(6, undefined),
+    stored(7, { url: 'https://www.linkedin.com/in/otro' }),
+    stored(8, 'javascript:alert(1)'),
+  ];
+  const result = await queryCoworkLeads(rowsClient(rows).db, { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
+  const byId = new Map((result.items as Array<{ id: string; linkedin_url: string | null }>).map(item => [item.id, item.linkedin_url]));
+  assert.equal(byId.get(ID(1)), 'https://www.linkedin.com/in/ana-ruiz');
+  assert.equal(byId.get(ID(2)), 'https://www.linkedin.com/in/hector-vidal');
+  for (const n of [3, 4, 5, 6, 7, 8]) assert.equal(byId.get(ID(n)), null, `contacto ${n}`);
+  assert.equal(result.returned, 8);
+  // The detail lookup says the same.
+  const detail = await queryCoworkLeads(rowsClient([rows[0]]).db, { userId: 'owner', organizationId: 'org' }, 'leads.get', ID(1));
+  assert.equal((detail.items as Array<{ linkedin_url: string | null }>)[0].linkedin_url, 'https://www.linkedin.com/in/ana-ruiz');
+});
+
+test('a malformed stored profile never makes the whole result unreadable for the exports and batches', async () => {
+  const rows = [stored(1, 'https://www.linkedin.com/in/ana-ruiz'), stored(2, 'no es una url'), stored(3, 'http://[::1')];
+  const result = await queryCoworkLeads(rowsClient(rows).db, { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
+  const observed = collectCoworkLeadRows([{ action: 'leads.search', result }]);
+  assert.deepEqual(observed.map(row => row.id).sort(), [ID(1), ID(2), ID(3)]);
+  assert.equal(observed.find(row => row.id === ID(2))?.linkedin_url, null);
 });

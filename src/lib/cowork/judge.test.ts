@@ -199,7 +199,10 @@ test('the judge reads replying in a thread as the turn ran it: a proposal with a
   assert.match(on, /propone la respuesta con una tarjeta de aprobación que muestra el texto exacto, y solo sale si el usuario la aprueba/);
   assert.match(on, /una propuesta no es un envío hecho, así que decir que ya se envió es un dato falso/);
   assert.match(on, /No se responde a quien pidió no recibir más mensajes, a un aviso automático, a quien ya tiene respuesta ni a quien dijo que no/);
-  assert.match(on, /cada envío lleva su propia aprobación/);
+  // With several people waiting only one send fits in a turn: the drafts are cards, the first send is offered and asking to approve the three together is the error.
+  assert.match(on, /solo cabe una propuesta de envío por turno: los borradores van en tarjetas de correo \(no son envíos y no se aprueban\)/);
+  assert.match(on, /cada envío es una propuesta aparte, con su propia tarjeta y su propia aprobación/);
+  assert.match(on, /pedir aprobar las tres juntas es el error/);
   assert.match(on, /Cowork no crea contactos a partir de un correo: solo guarda personas encontradas con el proveedor/, 'the import rule stays as it was');
   // Both flags together keep both rules, and the turn rules still come after.
   const both = coworkJudgeInstructions({ contactsImport: true, replyThread: true, inTurn: true });

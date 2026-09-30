@@ -304,8 +304,8 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   linkedin_invite: { happens: 'Se deja en cola una invitación sin nota.', not: 'No sale hasta que la ejecutes desde la extensión.' },
   linkedin_message: { happens: 'Se deja en cola el mensaje aprobado.', not: 'No sale hasta que lo ejecutes desde la extensión.' },
   contacts_import: { happens: 'Se guardan en tus contactos las personas nuevas del archivo.', not: 'No se les escribe, no se buscan correos y no cambian los contactos que ya tenías.' },
-  linkedin_invite_batch: { happens: 'Se deja en cola una invitación sin nota por cada persona que dejes en la lista.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o espera otro día, no se le toca.' },
-  linkedin_message_batch: { happens: 'Se deja en cola el mensaje de cada persona que dejes en la lista, con el texto que ves.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o espera otro día, no se le toca.' },
+  linkedin_invite_batch: { happens: 'Se deja en cola una invitación sin nota por cada persona que dejes en la lista.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o no sale hoy, no se le toca.' },
+  linkedin_message_batch: { happens: 'Se deja en cola el mensaje de cada persona que dejes en la lista, con el texto que ves.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o no sale hoy, no se le toca.' },
   reply_thread: { happens: 'La respuesta sale en el hilo de esa conversación, con el texto que ves, desde tu correo.', not: 'No se envía nada más ni a nadie más, y no sale hasta que la apruebes.' },
 };
 

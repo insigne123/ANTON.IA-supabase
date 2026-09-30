@@ -111,7 +111,7 @@ export const world = (own: Record<string, ReadValue>, userContext: CoworkUserCon
 };
 
 export const person = (leadId: string, name: string, title: string, company: string, email: string | null, extra: Record<string, unknown> = {}) =>
-  ({ id: leadId, name, title, company, email, linkedinUrl: null, status: 'saved', created_at: '2026-09-20T14:00:00Z', ...extra });
+  ({ id: leadId, name, title, company, email, linkedin_url: null, status: 'saved', created_at: '2026-09-20T14:00:00Z', ...extra });
 export const search = (items: unknown[], extra: Record<string, unknown> = {}) =>
   ({ items, returned: items.length, limit: 20, scope: 'own_saved_contacts', truncated: false, partial: false, ...extra });
 export const contacted = (items: unknown[], extra: Record<string, unknown> = {}) => ({ ...CONTACTED_EMPTY, items, returned: items.length, ...extra });
@@ -285,9 +285,9 @@ export function axisCorpus(userContext: CoworkUserContext | null): CorpusCase[] 
         { id: id(322), lead_id: AXIS_LEAD.gerente, name: 'Héctor Vidal', email: 'hvidal@casinocentral.cl', company: 'Casino Central', replied_at: '2026-09-10T14:00:00Z', reply_intent: 'meeting_request' }],
       returned: 2, total: 2, truncated: false, coverage: noCoverage, rule: 'Interés humano sin envío posterior ni compromiso abierto tras 48 horas.' },
       'leads.search': search([
-        person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedinUrl: 'https://www.linkedin.com/in/patricio-soto' }),
-        person(AXIS_LEAD.jorge, 'Jorge Lagos', 'Jefe de Reclutamiento', 'Constructora Pehuén', 'jlagos@pehuen.cl', { linkedinUrl: 'https://www.linkedin.com/in/jorge-lagos' }),
-        person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedinUrl: 'https://www.linkedin.com/in/carla-ibanez' }),
+        person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedin_url: 'https://www.linkedin.com/in/patricio-soto' }),
+        person(AXIS_LEAD.jorge, 'Jorge Lagos', 'Jefe de Reclutamiento', 'Constructora Pehuén', 'jlagos@pehuen.cl', { linkedin_url: 'https://www.linkedin.com/in/jorge-lagos' }),
+        person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedin_url: 'https://www.linkedin.com/in/carla-ibanez' }),
         person(AXIS_LEAD.felipe, 'Felipe Araya', 'Head of Recruitment', 'Ingeniería Andes', 'faraya@ingandes.cl')], { truncated: true }),
       'linkedin.quota': { scope: 'own_linkedin_quota', pending: 38, sent: 20, limit: 100, windowDays: 7, allowed: true },
     }),
@@ -458,7 +458,7 @@ export function axisCorpus(userContext: CoworkUserContext | null): CorpusCase[] 
       'linkedin.quota': { scope: 'own_linkedin_quota', pending: 86, sent: 22, limit: 100, windowDays: 7, allowed: true },
       'contacted.search': contacted(Array.from({ length: 6 }, (_, index) => ({ leadId: id(400 + index), name: `Persona ${index + 1}`, company: index < 4 ? 'Constructora Andes' : `Empresa ${index}`, channel: 'email', sentAt: '2026-09-15T13:00:00Z', replied: false })),
         { truncated: true, total: 96 }),
-      'leads.search': search([person(id(400), 'Persona 1', 'Gerente de Personas', 'Constructora Andes', 'p1@andes.cl', { linkedinUrl: 'https://www.linkedin.com/in/persona-1' })], { truncated: true }),
+      'leads.search': search([person(id(400), 'Persona 1', 'Gerente de Personas', 'Constructora Andes', 'p1@andes.cl', { linkedin_url: 'https://www.linkedin.com/in/persona-1' })], { truncated: true }),
     }),
     checks: commonWith(
       reads('cuenta las invitaciones pendientes', 'linkedin.quota'),
