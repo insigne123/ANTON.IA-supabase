@@ -15,7 +15,7 @@ const checks = [
   ['scripts/test-cowork-send-batch.mjs'],
   ['scripts/test-cowork-linkedin-jobs.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', ...suites, 'scripts/cowork-axis-replay.test.ts', 'scripts/cowork-conversation-corpus.test.ts'],
-  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','block-export-route','overview-route','contacts-import','reply-thread','linkedin-batch','campaign-edit','search-queue-ui','workspace','conversation-flow','draft','wake','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3','live-draft','writer','judge','contacts-route','held-answer','quick-actions']
+  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','block-export-route','overview-route','contacts-import','reply-thread','linkedin-batch','campaign-edit','search-queue-ui','workspace','conversation-flow','draft','wake','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3','live-draft','writer','judge','contacts-route','held-answer','quick-actions','email-review-ui']
     .map(name => [`scripts/test-cowork-${name}.mjs`]),
   ['--loader', './scripts/ts-test-loader.mjs', 'scripts/test-cowork-send-email.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-axis-paquete.test.ts'],
