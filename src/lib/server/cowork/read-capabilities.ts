@@ -56,7 +56,7 @@ export function coworkReadCapabilities(
       execute: input => queryCoworkContactabilityBatch(client, scope, JSON.parse(input as string)),
     },
     {
-      name: 'profile.get', version: 1, effect: 'read', description: 'Identidad comercial propia, no verifica mailbox',
+      name: 'profile.get', version: 1, effect: 'read', description: 'Identidad comercial propia (lo que guardó en Perfil y sus firmas), no verifica mailbox',
       input: z.literal(''), output: z.unknown(), execute: input => readCoworkProfile(client, scope, input as string),
     },
     {
@@ -189,7 +189,7 @@ export function coworkReadCapabilities(
     extended('contacted.search', 'Historial de contactados del equipo que coincide con un texto'),
     extended('contacted.timeline', 'Historial de envíos de un contacto por UUID de ficha'),
     extended('metrics.overview', 'Métricas de la organización de los últimos 7 días, sin entrada'),
-    extended('app.context', 'Conexiones de correo, volúmenes y oferta, sin entrada'),
+    extended('app.context', 'Conexiones de correo, volúmenes y oferta (de Perfil o de la organización), sin entrada'),
     extended('draft.get', 'Versión vigente de un borrador propio con su hash de contenido, por UUID'),
     extended('campaigns.list', 'Campañas propias con estado y destinatarios, sin entrada'),
     extended('files.list', 'Archivos subidos (nombre, trabajo, tamaño), sin contenido'),

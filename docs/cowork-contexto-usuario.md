@@ -1,5 +1,31 @@
 # Cowork · nombre, empresa y oferta en cada turno (26 sep 2026)
 
+## Corrección del 30 sep: la oferta de «Perfil» no llegaba
+
+**Qué pasaba.** Un usuario con la oferta cargada en «Perfil» preguntó «¿qué puedes hacer tú?» y Cowork respondió «No veo … qué ofrece Yago», y le pidió la oferta.
+
+**Por qué.** La oferta se guarda en un lugar y se buscaba en otro:
+- «Perfil» guarda descripción, productos y servicios, propuesta de valor, pruebas y rubro en `profiles.signatures.profile_extended` (`src/lib/profile/profile-mappings.ts`).
+- `profileOffer` buscaba columnas que no existen (`value_proposition`, `offer`) o que nadie escribe (`company_profile`).
+- El cargador de Cowork excluía `signatures` a propósito.
+- Resultado: `offer` llegaba nulo a Cowork, a `app.context`, a la Redactora y a la Jueza. Para la Jueza, además, toda frase sobre la oferta parecía inventada.
+- Las pruebas no lo vieron: simulaban una columna `value_proposition`, y el corpus inyectaba la oferta ya armada.
+
+**Qué cambia:**
+
+| Pieza | Dónde |
+|---|---|
+| `profileOfferDetails` lee `profile_extended` con `normalizeSellerProfile`, el mismo lector de borradores e investigación. Recorta cada campo antes de pasarlo: el normalizador rechaza campos de más de 2.000 caracteres y «Perfil» no tiene tope | `src/lib/server/suplia-context.ts` |
+| `profileOffer` usa primero «Perfil» (propuesta de valor, descripción si cabe y servicios, hasta 600 caracteres) y después los campos antiguos. Un nombre de empresa ya no cuenta como oferta | `src/lib/server/suplia-context.ts` |
+| `coworkUserContextFromProfile` suma `services` (hasta 6), `proofPoints` (hasta 4) y `sector`, solo si existen. Nunca las firmas de correo, que viven en la misma columna | `src/lib/server/cowork/user-context.ts` |
+| `profile.get` devuelve `commercial`: lo que guardó en «Perfil» | `src/lib/server/cowork/profile-read.ts` |
+| `app.context` y el asistente Suplia reciben la misma oferta; Suplia ya no puede mostrar «[object Object]» | `suplia-context.ts`, `suplia-tools.ts` |
+| La Jueza cuenta lo que trae `usuario` como dato consultado, y decir que falta un dato presente es veracidad 2 o menos. La Redactora y la Revisora aceptan `proofPoints` como respaldo | `src/lib/cowork/judge.ts`, `src/lib/cowork/writer.ts` |
+| Receta «¿Qué puedes hacer?»: una frase que conecta Cowork con su oferta, tres puntos adaptados a ella, una o dos cifras de la cuenta y nunca «no veo», «no tienes» ni «no hay». Si la oferta falta de verdad, invita a guardarla en «Perfil» | `src/lib/cowork/agent-instructions.ts` |
+| El corpus arma `userContext` desde una fila realista de `profiles`, con firma de Gmail, usando la misma función. Suma el caso de producción `que-puedes-hacer-tu` | `scripts/fixtures/cowork-conversation-corpus.ts` |
+
+Sin migraciones ni flags. Lee las mismas tablas de antes.
+
 ## Qué cambia para el usuario
 
 Cowork ya sabe quién eres y qué vendes desde el primer mensaje. Los correos, seguimientos y mensajes de LinkedIn salen firmados con tu nombre y hablan de tu oferta, sin gastar consultas en averiguarlo.
