@@ -44,7 +44,7 @@ import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
 import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { selectCases } from './cowork-case-selection';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
-import { THREAD_AGENDA_CORPUS, THREAD_CORPUS } from './fixtures/cowork-thread-corpus';
+import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
@@ -54,8 +54,9 @@ const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ..
 // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
 CORPUS.push(...AGENDA_CORPUS);
 
-// Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
-CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS);
+// Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts): drafting the reply, and, with email.reply_thread on
+// (COWORK_REPLY_THREAD_ENABLED; the hilo-enviar-* cases have it on), proposing to send it in the thread.
+CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS, ...THREAD_SEND_CORPUS, ...THREAD_SEND_AGENDA_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
@@ -82,7 +83,7 @@ async function main() {
   const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
   let calls = 0;
   const usage: unknown[] = [];
-  const outcomes: Array<CorpusOutcome & { attempt: number; seconds: number; decisions: unknown[]; issues: string[]; contactsImport: boolean }> = [];
+  const outcomes: Array<CorpusOutcome & { attempt: number; seconds: number; decisions: unknown[]; issues: string[]; contactsImport: boolean; replyThread: boolean }> = [];
   for (let attempt = 1; attempt <= repeat; attempt++) {
     for (const id of selected) {
       const found = CORPUS.find(item => item.id === id)!;
@@ -109,7 +110,7 @@ async function main() {
         calls++;
         judgeCalls++;
         try {
-          const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: coworkJudgeInstructions({ contactsImport: Boolean(entry.contactsImport), inTurn: true }),
+          const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: coworkJudgeInstructions({ contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), inTurn: true }),
             prompt: coworkJudgeTurnPrompt({ request: meta.request, history: meta.history, userContext: meta.userContext, observations, answer, now: CORPUS_NOW }),
             provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 45000 });
           usage.push(coworkModelUsage(response.telemetry));
@@ -159,7 +160,7 @@ async function main() {
         return response.data;
       }, write, judgeInTurn);
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
-      outcomes.push({ ...outcome, attempt, contactsImport: Boolean(entry.contactsImport), seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
+      outcomes.push({ ...outcome, attempt, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
         issues: coworkAnswerIssues(shown, { expectNextStep: !(outcome.result.proposal || outcome.result.search) }).map(issue => issue.detail) });
       if (calls >= maxCalls) break;
     }

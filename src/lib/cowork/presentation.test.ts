@@ -6,7 +6,7 @@ import {
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions, coworkTurnChoices,
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
-  coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy,
+  coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -274,7 +274,7 @@ test('an approval says what happens and what does not, and where the proposal st
   // Every kind of action has its own sentences; an unknown one still reads plainly.
   for (const kind of ['save_contact', 'start_research', 'enrich_contact', 'request_draft', 'send_email', 'campaign_activate', 'campaign_pause', 'code_execute',
     'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2', 'crm_update_record', 'campaign_prepare_draft_v2',
-    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import']) {
+    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread']) {
     assert.notEqual(coworkProposalOutcome(effect(kind)).happens, 'Se ejecuta la acción propuesta.', kind);
   }
   assert.equal(coworkProposalOutcome(effect('otra_cosa')).not, 'No se hace nada más sin tu aprobación.');
@@ -290,6 +290,11 @@ test('an approval says what happens and what does not, and where the proposal st
   assert.equal(coworkProposalLink({ ...effect('campaign_create'), state: 'running' }), null);
   assert.equal(coworkProposalLink({ ...effect('code_execute'), state: 'done' }), null);
   assert.deepEqual(coworkProposalLink({ ...effect('contacts_import'), state: 'done' }), { href: '/saved/leads', label: 'Ver tus contactos' });
+  // A reply sent in a thread is seen where the conversation lives, and the card says it goes out only once approved.
+  assert.deepEqual(coworkProposalLink({ ...effect('reply_thread'), state: 'done' }), { href: '/contacted', label: 'Ver en Contactados' });
+  assert.equal(coworkProposalLink({ ...effect('reply_thread'), state: 'pending' }), null);
+  assert.equal(coworkEffectCopy('reply_thread').title, 'Responder en el hilo');
+  assert.match(coworkProposalOutcome(effect('reply_thread')).not, /no sale hasta que la apruebes/);
 });
 
 test('the Writer and the Reviewer read as one row each, at their latest step, and say how the review ended', () => {

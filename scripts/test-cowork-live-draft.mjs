@@ -33,6 +33,7 @@ const mocks = {
   './crm-assign': 'export const stageCoworkCrmAssign=async()=>{throw new Error("unexpected assign")};',
   './exception-resolve': 'export const stageCoworkExceptionResolve=async()=>{throw new Error("unexpected exception")};',
   './mission-control': 'export const stageCoworkMissionControl=async()=>{throw new Error("unexpected mission")};',
+  './reply-thread-effect': 'export const stageCoworkReplyThread=async()=>{throw new Error("unexpected reply")};',
   '@/lib/server/bulk-campaigns': 'export const getBulkCampaign=async()=>{throw new Error("unexpected campaign")};',
   '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};',
   '@/ai/openai-json': 'export const generateStructuredWithTelemetry=opts=>globalThis.__coworkLiveDraft.generate(opts);export const generateStructured=async()=>{throw new Error("unused")};',

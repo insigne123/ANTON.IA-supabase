@@ -43,6 +43,8 @@ import { stageCoworkMessageContextUpdate } from './message-context';
 import { stageCoworkEnrichBatch } from './enrich-batch';
 import { stageCoworkSendBatch } from './send-batch';
 import { coworkContactsImportEnabled, stageCoworkContactsImport } from './contacts-import';
+import { stageCoworkReplyThread } from './reply-thread-effect';
+import { coworkReplyThreadEnabled } from './thread-read';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -155,10 +157,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const writerEnabled = coworkWriterEnabled();
     // Importing contacts needs its staging table (M3): off until the migration is applied.
     const contactsImportEnabled = coworkContactsImportEnabled();
+    // Sending a reply in the thread needs its staging table (reply_thread migration, applied in production) and the flag.
+    const replyThreadEnabled = coworkReplyThreadEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
       contactsImport: contactsImportEnabled,
+      replyThread: replyThreadEnabled,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
@@ -242,6 +247,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       }) : undefined,
       judge: judgeTurn?.review,
       contactsImport: contactsImportEnabled,
+      replyThread: replyThreadEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       userContext,
       proposeNote: async (leadId, note) => {
@@ -403,6 +409,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.contactsImport) throw new Error('Missing import file');
           const staged = await stageCoworkContactsImport(scope, run.id, proposal.contactsImport);
           targetId = `contactsimport:${staged.hash}`;
+          label = staged.label;
+        }
+        if (proposal.kind === 'reply_thread') {
+          if (!replyThreadEnabled) throw new Error('Responder dentro del hilo no está disponible.');
+          if (!proposal.replyThread) throw new Error('Missing reply');
+          const staged = await stageCoworkReplyThread(scope, run.id, proposal.replyThread);
+          targetId = `replythread:${staged.hash}`;
           label = staged.label;
         }
         const proposed = await client.rpc('cowork_propose_effect', {

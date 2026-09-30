@@ -2,7 +2,7 @@
 
 Cuando alguien contesta un correo, Cowork puede **leer lo que escribió y dejar el correo de respuesta listo para revisar**: «prepárale la respuesta a Marcela», o «sí, prepáralas» después de «¿Qué toca hoy?». Antes Cowork solo sabía que la persona había respondido (intención y resumen); no veía sus palabras, así que no podía contestarle.
 
-Es **solo lectura y borrador**: no envía, no propone efectos, no toca la base (sin migración) y no agrega flags ni secretos. El envío dentro del hilo original se sigue haciendo desde Contactados (Respuestas). Rige apenas se despliegue: la receta se lee en cada turno.
+Con el flag apagado (el estado por defecto) es **solo lectura y borrador**: no envía ni propone efectos, y el envío dentro del hilo original se hace desde Contactados (Respuestas). Con `COWORK_REPLY_THREAD_ENABLED=true`, Cowork además **propone enviar esa respuesta en el hilo** y sale solo si la persona la aprueba en una tarjeta (sección «Enviar dentro del hilo»).
 
 ## La lectura: `replies.thread`
 
@@ -41,6 +41,24 @@ Una baja gana sobre «ya respondida»: a quien pidió parar no se le escribe. La
 - **Varias personas**: hasta 3 conversaciones por turno, en un `reads.parallel`. Si quedaron otras esperando, nombra a la primera (la de mayor valor) y ofrece prepararle la respuesta.
 - **Desde «¿Qué toca hoy?»**: cada persona de `agenda.today` trae su `contactedId` en `members` (el de la conversación que más lleva esperando), así que «sí, prepáralas» lee las conversaciones directamente, sin otra lectura previa. También sirve el `contactedId` de `replies.stalled` o el `id` de una fila de `replies.attention`.
 
+## Enviar dentro del hilo (apagado por defecto)
+
+Con `COWORK_REPLY_THREAD_ENABLED=true` el consejo `reply` cambia: en vez de entregar solo un borrador, Cowork **propone la respuesta como un efecto** (`email.reply_thread`, tipo `reply_thread`) con `replyThread {contactedId, subject, body}`. Es una propuesta, nunca un envío hecho: sale en el hilo original solo si el usuario la aprueba.
+
+| Paso | Qué pasa |
+|---|---|
+| Proponer | El bucle acepta la acción solo si la conversación se leyó con `replies.thread` en ese hilo, con `available`, el mismo `contactedId` y `advice` = `reply` (lo decide el código, no el modelo). Con el flag apagado, o sin esa lectura, la propuesta se rechaza y el modelo entrega el borrador de siempre. |
+| Preparar | `stageCoworkReplyThread` vuelve a comprobar la conversación (es tuya, espera respuesta, tiene hilo en Gmail u Outlook, la persona no se dio de baja) y guarda el texto exacto en `cowork_reply_proposals`, atado al hilo de la propuesta con un hash (`replythread:<sha256>`). **El destinatario nunca lo elige el modelo**: es la persona de esa conversación. El asunto lleva «Re: » una vez y el texto sale normalizado. |
+| Aprobar | La tarjeta (`ReplyThreadReview`) muestra **para quién**, **lo que escribió** y **tu respuesta tal como saldrá**. Bloquea «Aprobar y enviar en el hilo» si la respuesta ya no coincide con la propuesta o si alguien la respondió, o la persona se dio de baja, mientras tanto. Siempre pide revisión humana, también en modo autónomo: `reply_thread` no está en la lista de efectos automáticos. |
+| Enviar | `executeCoworkReplyThread` revisa, antes del proveedor: flag, hash, autorización vigente, que nadie haya respondido después, baja, dominio bloqueado, reglas de lenguaje aprobadas, enlace de baja, conexión del correo y cupo diario. Envía **desde el buzón que mandó el correo original**, en su hilo (`resolveContactedReplyTarget`), con una llave de idempotencia por respuesta: aprobar dos veces no envía dos. |
+| Después | Al salir, la conversación queda marcada como respondida (`conversation_outbound_at`) y Contactados y «¿Qué toca hoy?» dejan de listarla como pendiente. Si el envío no se puede confirmar o queda diferido, **nunca se da por enviado ni se repite solo**: el hilo pide revisar en Contactados. |
+
+- **El flag también frena lo ya aprobado:** apagarlo hace que una respuesta aprobada pero aún sin enviar falle con «desactivado por ahora: no se envió nada».
+- **Varias personas:** los borradores van en tarjetas `email_draft` y se ofrece proponer el envío de la primera (la de mayor valor); cada envío lleva su propia aprobación.
+- **Lo que solo decide el usuario** (precio, plazos, contrato, seguridad, integraciones, compras, propuesta a medida) no lo resuelve el texto: pide lo que falta o invita a conversar, y `reply` dice que eso lo decide el usuario. Con `closed_politely`, a lo más un borrador de una línea, nunca un envío.
+- **Base de datos:** la migración `cowork_reply_thread` (tabla `cowork_reply_proposals` y el tipo `reply_thread` en `cowork_propose_effect`) ya está aplicada en producción.
+- **Cómo se enciende (lo hace el mantenedor):** tras medir el banco `hilo-enviar-*` con el modelo real, agregar `COWORK_REPLY_THREAD_ENABLED` = `"true"` al entorno de App Hosting. Para apagarlo, quitarla o ponerla en `"false"`.
+
 ## Privacidad
 
 - **Solo lo tuyo:** la lectura filtra por organización, por tu usuario y por ese envío. La respuesta a un correo de un compañero es de él; una conversación ajena o que ya no existe devuelve «no es tuya o ya no existe», sin más detalle. Un error de la base no cuenta nada de la consulta.
@@ -49,13 +67,17 @@ Una baja gana sobre «ya respondida»: a quien pidió parar no se le escribe. La
 
 ## Cómo se prueba
 
-- **Sin red:** `src/lib/cowork/reply-thread.test.ts` (consejo, fecha, historial citado, corte, bloqueadores, marcas de riesgo), `src/lib/server/cowork/thread-read.test.ts` (qué se consulta, lo ajeno, errores, bajas) y `scripts/cowork-thread-corpus.test.ts`.
+- **Sin red:** `src/lib/cowork/reply-thread.test.ts` (consejo, fecha, conversación resuelta en Contactados, avisos de entrega, historial citado, corte, bloqueadores, marcas de riesgo, el consejo con el envío encendido), `src/lib/cowork/reply-proposal.test.ts` (el esquema estricto, «Re: » una vez, el texto), `src/lib/server/cowork/thread-read.test.ts` (qué se consulta, lo ajeno, errores, bajas) y `scripts/cowork-thread-corpus.test.ts`.
+- **El envío, con dobles en memoria** (`scripts/test-cowork-reply-thread.mjs`, dentro de `verify-cowork`): qué se prepara y qué se rechaza, la tarjeta atada a la propuesta, el flag como freno, cada guarda antes del proveedor, el envío una sola vez en el hilo por Gmail y por Outlook con su llave de idempotencia, y un envío sin confirmar que nunca se lee como enviado. No hay base, buzón, proveedor ni secretos: nunca se envía nada. `src/lib/cowork/agent-loop.test.ts` fija cuándo se acepta o rechaza la propuesta, y `effect-policy.test.ts`, que nunca se aprueba sola.
+- **El banco del envío** (`scripts/cowork-thread-send-corpus.test.ts`, mismo mundo con el envío encendido): la propuesta pasa por el mismo staging del servidor y se comprueba lo que vería la tarjeta (a quién va y el texto exacto). Un turno bueno los pasa todos, una propuesta para una conversación que no admite respuesta o que no se leyó nunca llega a una tarjeta, y cada verificación se vio fallar con una sola cosa peor.
 - **El banco del hilo** (`scripts/fixtures/cowork-thread-corpus.ts`, con el mundo armado por las funciones reales): 6 casos — el precio, la reunión, quien ya tiene respuesta, quien pidió que no le escriban, quien escondió una orden en su texto, y «sí, prepáralas» con tres personas desde la lista del día. Un turno bueno los pasa todos; responder sin mirar o mirar y no decir nada falla al menos tres verificaciones; y cada verificación se vio fallar en un turno bueno con una sola cosa peor (un precio, un plazo, «ya se lo envié», un borrador a otra persona, un horario que no dio, la orden escondida).
-- **Con el modelo real:** `scripts/evaluate-cowork-conversations.ts --live --stream --writer --cases=hilo-varias-desde-la-agenda,hilo-responder-precio,hilo-responder-reunion,hilo-ya-respondida,hilo-no-escribir-baja,hilo-instruccion-en-la-respuesta --repeat=3` y `scripts/judge-cowork-conversations.ts`. Las claves solo en el entorno; los scripts nunca leen `.env.local`.
+- **Con el modelo real:** `scripts/evaluate-cowork-conversations.ts --live --stream --writer --cases=hilo-varias-desde-la-agenda,hilo-responder-precio,hilo-responder-reunion,hilo-ya-respondida,hilo-no-escribir-baja,hilo-instruccion-en-la-respuesta --repeat=3` y `scripts/judge-cowork-conversations.ts`. Para el envío, los casos `hilo-enviar-precio`, `hilo-enviar-reunion`, `hilo-enviar-ya-respondida`, `hilo-enviar-baja`, `hilo-enviar-instruccion` y `hilo-enviar-varias-desde-la-agenda` (traen el flag encendido y el juez lo lee igual). Las claves solo en el entorno; los scripts nunca leen `.env.local`.
 
 ## Límites
 
-- **Cowork todavía no envía dentro del hilo.** El envío con `reply_contact` ya existe en Contactados; conectarlo a Cowork pide un tipo de efecto nuevo con su aprobación, que es una migración y se pide aparte.
+- **Con el flag apagado Cowork no envía dentro del hilo**: entrega el borrador y el envío se hace desde Contactados (Respuestas), donde ya existe `reply_contact`.
+- **Una respuesta por trabajo:** cada trabajo guarda una sola respuesta propuesta (`cowork_reply_proposals` tiene una fila por trabajo); responder a varias personas son varios trabajos, cada uno con su aprobación.
+- **Solo Gmail y Outlook:** un correo enviado por otro medio se queda como borrador, con el motivo.
 - **Un envío, una respuesta:** si la persona escribió varias veces en el mismo hilo, Cowork lee el texto de la última respuesta que la app guardó (`last_reply_text`, o su vista previa); los mensajes anteriores de esa conversación no viajan.
 - **800 caracteres:** una respuesta más larga se corta y `textComplete` es falso; Cowork lo dice en lugar de fingir que leyó todo.
 - **Mide contra casos sintéticos** sobre mundos armados con las funciones reales; las cuentas reales tienen más variedad. El orden de «a quién le respondo primero» lo fija la lista del día, no esta lectura.

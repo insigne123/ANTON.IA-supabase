@@ -189,6 +189,25 @@ test('the judge reads importing as the turn ran it: the person imports with the 
   assert.match(inTurn, /ahora es la fecha y hora del trabajo/);
 });
 
+test('the judge reads replying in a thread as the turn ran it: a proposal with a card, never a send already done', () => {
+  // Off, nothing about it: the rules read as before.
+  assert.equal(coworkJudgeInstructions({ replyThread: false }), COWORK_JUDGE_INSTRUCTIONS);
+  assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /dentro del hilo original/);
+  // On, one rule is added next to the import one, and the rest reads the same.
+  const on = coworkJudgeInstructions({ replyThread: true });
+  assert.match(on, /Cowork responde a quien escribió dentro del hilo original: lee su conversación \(replies\.thread\)/);
+  assert.match(on, /propone la respuesta con una tarjeta de aprobación que muestra el texto exacto, y solo sale si el usuario la aprueba/);
+  assert.match(on, /una propuesta no es un envío hecho, así que decir que ya se envió es un dato falso/);
+  assert.match(on, /No se responde a quien pidió no recibir más mensajes, a un aviso automático, a quien ya tiene respuesta ni a quien dijo que no/);
+  assert.match(on, /cada envío lleva su propia aprobación/);
+  assert.match(on, /Cowork no crea contactos a partir de un correo: solo guarda personas encontradas con el proveedor/, 'the import rule stays as it was');
+  // Both flags together keep both rules, and the turn rules still come after.
+  const both = coworkJudgeInstructions({ contactsImport: true, replyThread: true, inTurn: true });
+  assert.match(both, /importa a las personas de un archivo subido/);
+  assert.match(both, /dentro del hilo original/);
+  assert.ok(both.indexOf('Cómo debe cerrar una respuesta') > both.indexOf('dentro del hilo original'));
+});
+
 test('the judge sees the options of a closing question as the chat shows them, and reads when asking with them is right', () => {
   const choices = { multiple: true, options: ['RR. HH.', 'Retail'] };
   const shown = coworkShownFromAnswer({ reply: 'Marca los segmentos.', question: '¿A qué segmentos va la campaña?', document: null,

@@ -138,3 +138,46 @@ test('the person\'s text is marked as their words, not as instructions, and what
   assert.equal(bare.reply, null);
   assert.equal(bare.canReplyInThread, false);
 });
+
+test('a conversation the person marked as handled in Contactados is answered too, and the latest of the two dates is given', () => {
+  const resolved = coworkReplyThread(replied({ conversation_resolved_at: '2026-09-29T09:00:00Z' }), NOW);
+  assert.equal(resolved.answered, true);
+  assert.equal(resolved.advice, 'already_answered');
+  assert.equal(resolved.answeredAt, '2026-09-29T09:00:00.000Z');
+  const both = coworkReplyThread(replied({ conversation_outbound_at: '2026-09-29T10:00:00Z', conversation_resolved_at: '2026-09-29T12:00:00Z' }), NOW);
+  assert.equal(both.answeredAt, '2026-09-29T12:00:00.000Z');
+  // Marking it handled before their reply does not cover what they wrote afterwards.
+  const before = coworkReplyThread(replied({ conversation_resolved_at: '2026-09-25T09:00:00Z' }), NOW);
+  assert.equal(before.answered, false);
+  assert.equal(before.advice, 'reply');
+  assert.equal(before.answeredAt, null);
+});
+
+test('a delivery failure notice is not a person: it is not answered', () => {
+  const thread = coworkReplyThread(replied({ reply_intent: 'delivery_failure', last_reply_text: 'Delivery Status Notification (Failure)' }), NOW);
+  assert.equal(thread.advice, 'auto_reply_no_answer');
+  assert.match(thread.next, /aviso automático/);
+});
+
+test('with sending on, the advice to reply says to propose it with email.reply_thread and never to call it sent; off, it is a draft as before', () => {
+  const off = coworkReplyThread(replied(), NOW).next;
+  const on = coworkReplyThread(replied(), NOW, { sendEnabled: true }).next;
+  assert.match(off, /email_draft/);
+  assert.match(off, /Cowork todavía no envía dentro del hilo/);
+  assert.doesNotMatch(off, /email\.reply_thread/);
+  assert.match(on, /email\.reply_thread/);
+  assert.match(on, /replyThread \{contactedId/);
+  assert.match(on, /solo si el usuario la aprueba en la tarjeta, y no digas que ya se envió/);
+  assert.doesNotMatch(on, /Cowork todavía no envía dentro del hilo/);
+  // The same content rules apply to the proposed text as to the draft.
+  for (const next of [off, on]) {
+    assert.match(next, /no inventes días, horas, precios ni plazos/);
+    assert.match(next, /ni le dice a la persona que está «pendiente de definición»/);
+    assert.match(next, /No propongas crear una campaña ni email\.send ni otra búsqueda/);
+  }
+  // Sending changes only the advice to reply: the rest read the same either way.
+  for (const advice of ['already_answered', 'no_reply_yet', 'auto_reply_no_answer', 'unsubscribe_do_not_write', 'closed_politely'] as const) {
+    assert.equal(coworkThreadNext(advice, '2026-09-29T10:00:00.000Z', true), coworkThreadNext(advice, '2026-09-29T10:00:00.000Z'));
+  }
+  assert.doesNotMatch(coworkThreadNext('closed_politely', null, true), /email\.reply_thread/);
+});

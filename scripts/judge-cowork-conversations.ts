@@ -9,7 +9,7 @@
 //   node --loader ./scripts/ts-test-loader.mjs scripts/judge-cowork-conversations.ts --live --judge-model=gpt-6-sol \
 //     (--calibrate [--repeat=2] | --input=report.json [--cases=a,b]) --max-calls=120 [--output=judged.json]
 import { readFileSync, writeFileSync } from 'node:fs';
-import { THREAD_AGENDA_CORPUS, THREAD_CORPUS } from './fixtures/cowork-thread-corpus';
+import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import {
@@ -28,7 +28,7 @@ const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STAR
 
 async function main() {
   // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
-  CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS);
+  CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS, ...THREAD_SEND_CORPUS, ...THREAD_SEND_AGENDA_CORPUS);
   // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
   CORPUS.push(...AGENDA_CORPUS);
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY) throw new Error('Requires --live and an explicit OPENAI_API_KEY.');
@@ -82,7 +82,7 @@ async function main() {
   } else {
     const input = arg('input');
     if (!input) throw new Error('Requires --input=report.json (an evaluate-cowork-conversations output) or --calibrate.');
-    const source = JSON.parse(readFileSync(input, 'utf8')) as { outcomes: Array<{ id: string; attempt: number; passed: boolean; result: CorpusTurnResult; contactsImport?: boolean }> };
+    const source = JSON.parse(readFileSync(input, 'utf8')) as { outcomes: Array<{ id: string; attempt: number; passed: boolean; result: CorpusTurnResult; contactsImport?: boolean; replyThread?: boolean }> };
     const selected = arg('cases')?.split(',').filter(Boolean);
     const rows: Array<{ id: string; attempt: number; passedChecks: boolean; judgement: CoworkJudgement | null;
       reference?: AxisReference | null; op?: string; block?: string; capability?: string; star?: boolean }> = [];
@@ -90,9 +90,9 @@ async function main() {
       if (selected && !selected.includes(outcome.id)) continue;
       const entry = CORPUS.find(item => item.id === outcome.id);
       if (!entry) continue;
-      // The rules of the turn as it ran: contacts.import on or off (in older reports, as the case says).
+      // The rules of the turn as it ran: contacts.import and email.reply_thread on or off (in older reports, as the case says).
       // The worlds of the bank run on their own clock (the 25th), not on the day the judge runs: it reads the same date the coordinator did.
-      const rules = [coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport) }), COWORK_JUDGE_NOW_RULE].join('\n');
+      const rules = [coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport), replyThread: outcome.replyThread ?? Boolean(entry.replyThread) }), COWORK_JUDGE_NOW_RULE].join('\n');
       const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
       const observations = corpusObservations(entry, outcome.result);
       const shown = corpusShownAnswer(outcome.result);
