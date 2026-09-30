@@ -143,6 +143,9 @@ try {
   assert.equal(window.document.body.textContent.includes('Punto uno'), false);
   assert.equal(window.document.body.textContent.includes('ana@example.com'), false);
   assert.equal(window.document.querySelector('aside[aria-label="Documento"]'), null);
-  assert.ok(calls.every(url => url.startsWith('/api/cowork/runs')), `unexpected calls: ${calls.filter(url => !url.startsWith('/api/cowork/runs')).join(', ')}`);
+  // Only Cowork's own API: its runs, and the home's figures (V7), read when the home shows.
+  const own = url => url.startsWith('/api/cowork/runs') || url === '/api/cowork/overview';
+  assert.ok(calls.every(own), `unexpected calls: ${calls.filter(url => !own(url)).join(', ')}`);
+  assert.ok(calls.includes('/api/cowork/overview'), 'the home asks for its figures');
   console.log('PASS: worker-unavailable state, conversation view, Markdown artifacts, safe text rendering, focus restoration, access revocation.');
 } finally { window.close(); }

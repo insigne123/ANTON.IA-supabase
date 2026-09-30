@@ -1,9 +1,10 @@
 import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const keys = ['COWORK_ENABLED', 'COWORK_STREAMING_ENABLED'];
+const keys = ['COWORK_ENABLED', 'COWORK_STREAMING_ENABLED', 'COWORK_ANSWER_HOLD_ENABLED'];
 const environment = Object.fromEntries(keys.map(key => [key, process.env[key]]));
 process.env.COWORK_ENABLED = 'true';
+delete process.env.COWORK_ANSWER_HOLD_ENABLED;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 // The first answer has no closing question, so the loop asks once more (the closing correction).
 const first = { action: 'answer', query: null, leadId: null, answer: { reply: 'Tus 3 contactos de RR. HH. tienen correo y ninguno ha recibido nada.', document: null, question: null, blocks: null, suggestions: null } };
@@ -95,6 +96,17 @@ try {
   assert.equal(on.finished.p_status, 'completed');
   assert.match(on.finished.p_payload.reply, /todavía/);
 
+  // Held (COWORK_ANSWER_HOLD_ENABLED): no text is written, only the phase the answer is in. The closing
+  // correction is streamed too, but nobody sees a text that a correction replaces: the page says it is being adjusted.
+  process.env.COWORK_ANSWER_HOLD_ENABLED = 'true';
+  const held = await run();
+  assert.deepEqual(state.generations, [{ streamed: true }, { streamed: true }]);
+  assert.ok(held.drafts.every(draft => draft.p_run_id === 'run' && draft.p_token === 'token' && draft.p_text === ''), 'no text travels while held');
+  assert.deepEqual(held.drafts.map(draft => draft.p_progress), [{ cards: [], phase: 'writing' }, { cards: [], phase: 'adjusting' }]);
+  assert.equal(held.finished.p_status, 'completed');
+  assert.match(held.finished.p_payload.reply, /todavía/);
+  delete process.env.COWORK_ANSWER_HOLD_ENABLED;
+
   // Without the table (migration not applied yet) the turn works as before, with one warning.
   const warnings = [];
   console.warn = (...args) => { warnings.push(args.join(' ')); };
@@ -104,7 +116,7 @@ try {
   assert.equal(missing.finished.p_status, 'completed');
   assert.match(missing.finished.p_payload.reply, /todavía/);
   assert.equal(warnings.filter(line => line.includes('live draft off')).length, 1);
-  console.log('PASS: live draft off by default, written while the answer streams, correction marked as reviewed, missing table falls back.');
+  console.log('PASS: live draft off by default, written while the answer streams, correction marked as reviewed, held it only says which phase the answer is in, missing table falls back.');
 } finally {
   console.warn = warn;
   delete globalThis.__coworkLiveDraft;

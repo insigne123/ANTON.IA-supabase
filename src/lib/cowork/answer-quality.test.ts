@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkAnswerIssues, coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText } from './answer-quality';
-import { coworkReplyBody, coworkStoredQuestion } from './contracts';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText } from './answer-quality';
+import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
   assert.equal(polishCoworkText('El período disponible es *last_30_days* (30 días móviles).'), 'El período disponible es últimos 30 días (30 días móviles).');
@@ -99,6 +99,14 @@ test('the closing question is one plain sentence that ends the reply exactly onc
     'Priorizaría a Felipe Muñoz (Securitas) y a Camila Fuentes (Adecco): tienen correo. A Marcela ya le escribiste.\n\n¿Preparo el correo para Felipe y Camila?');
   assert.equal(polish('Esto es información general, no asesoría legal. ¿Reviso tus bajas? ¿O prefieres otra cosa?', '¿Reviso tus bajas?').reply,
     'Esto es información general, no asesoría legal.\n\n¿Reviso tus bajas?');
+  // An abbreviation inside the question («RR. HH.») is not where it starts: seen with the real model, the
+  // reply kept «¿La uso … de RR. HH.» and then repeated the whole question.
+  assert.equal(polish('Lo orienté a presentar AXIS, sin resultados no respaldados. ¿La uso en una campaña pausada con tus contactos de RR. HH. con correo?',
+    '¿La uso en una campaña pausada con tus contactos de RR. HH. con correo?').reply,
+  'Lo orienté a presentar AXIS, sin resultados no respaldados.\n\n¿La uso en una campaña pausada con tus contactos de RR. HH. con correo?');
+  assert.equal(polish('Te dejé el correo para la Sra. Rojas. **¿Lo envío a la Sra. Rojas?**', '¿Lo envío?').reply, 'Te dejé el correo para la Sra. Rojas.\n\n¿Lo envío?');
+  // A question written without «¿» still goes sentence by sentence.
+  assert.equal(polish('Te dejé la secuencia. Quieres otro tono?', '¿Creo la campaña?').reply, 'Te dejé la secuencia.\n\n¿Creo la campaña?');
   // A question inside a list is content, not the closing.
   assert.equal(polish('Preguntas para la reunión:\n- ¿Cuántos postulantes revisan?', '¿La agendo?').reply,
     'Preguntas para la reunión:\n- ¿Cuántos postulantes revisan?\n\n¿La agendo?');
@@ -140,4 +148,44 @@ test('blocks become cards one by one: plain text, no IDs, trimmed to what a card
   assert.equal(sequence.type, 'sequence');
   if (sequence.type === 'sequence') assert.deepEqual(sequence.steps.map(step => step.day), [1, 2, 3, 4, 5, 6, 7]);
   assert.equal(polishCoworkAnswer({ reply: 'Listo.', document: null }).blocks, null);
+});
+
+test('options keep 2 to 5 short plain distinct answers, or none', () => {
+  assert.deepEqual(coworkChoices({ multiple: true, options: ['- RR. HH. y outsourcing', '**Retail**', 'retail', '1) Transporte.', 'Seguridad [2 contactos]', 'RR. HH.'] }),
+    { multiple: true, options: ['RR. HH. y outsourcing', 'Retail', 'Transporte', 'RR. HH.'] });
+  // Long labels, IDs and placeholders go one by one; more than five are cut.
+  assert.deepEqual(coworkChoices({ multiple: false, options: ['a'.repeat(61), 'Contacto c517a22f-d087-45ae-b450-045f2abc60e1', 'A', 'B', 'C', 'D', 'E', 'F'] }),
+    { multiple: false, options: ['A', 'B', 'C', 'D', 'E'] });
+  // One option is no choice, and a yes or a no is a closed question the quick replies answer.
+  assert.equal(coworkChoices({ multiple: false, options: ['Retail', 'retail'] }), null);
+  // «Otra industria» repeats the app's own «Otra respuesta».
+  assert.deepEqual(coworkChoices({ multiple: false, options: ['Salud', 'Construcción', 'Otra industria', 'Otros'] })?.options, ['Salud', 'Construcción']);
+  assert.equal(coworkChoices({ multiple: false, options: ['Sí', 'No'] }), null);
+  assert.equal(coworkChoices(null), null);
+  assert.equal(coworkChoices({ multiple: 'yes', options: ['A', 'B'] })?.multiple, false);
+});
+
+test('options answer the closing question: with them there are no quick replies, and without a question there are none', () => {
+  const choices = { multiple: false, options: ['Minería', 'Retail'] };
+  const asked = polishCoworkAnswer({ reply: 'Elige la industria y preparo la búsqueda.', document: null, question: '¿En qué industria buscamos?',
+    suggestions: [{ label: 'Sí, adelante', message: 'Sí, adelante.' }], choices });
+  assert.deepEqual(asked.choices, choices);
+  assert.equal(asked.suggestions, null);
+  assert.ok(asked.reply.endsWith('¿En qué industria buscamos?'));
+  const unasked = polishCoworkAnswer({ reply: 'Listo.', document: null, question: null, choices });
+  assert.equal(unasked.choices, null);
+  // A question without valid options keeps its one-tap yes, as before.
+  const closed = polishCoworkAnswer({ reply: 'Te dejo la lista.', document: null, question: '¿La reviso?', choices: { multiple: false, options: ['Sí', 'No'] } });
+  assert.equal(closed.choices, null);
+  assert.deepEqual(closed.suggestions, [COWORK_YES_CHIP]);
+});
+
+test('the page reads stored options as they came, and picking sends what the person would type', () => {
+  assert.deepEqual(coworkStoredChoices({ multiple: true, options: ['RR. HH.', 'Retail', 3] }), { multiple: true, options: ['RR. HH.', 'Retail'] });
+  assert.equal(coworkStoredChoices({ multiple: true, options: ['RR. HH.'] }), null);
+  assert.equal(coworkStoredChoices({ options: ['A', 'B'] }), null);
+  assert.equal(coworkChoiceMessage(['Minería']), 'Minería');
+  assert.equal(coworkChoiceMessage(['RR. HH.', 'Retail']), 'RR. HH. y Retail');
+  assert.equal(coworkChoiceMessage(['RR. HH.', 'Retail', ' solo los de Santiago ']), 'RR. HH., Retail y solo los de Santiago');
+  assert.equal(coworkChoiceMessage([]), '');
 });

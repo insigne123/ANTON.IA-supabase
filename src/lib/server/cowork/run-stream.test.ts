@@ -75,11 +75,11 @@ test('while the run works, the draft goes out once per change, and a missing dra
   let clock = 0;
   const drafts: Array<CoworkRunDraft | null> = [
     null,
-    { text: 'Tus 3 contactos', cards: [], reviewing: false, updatedAt: 't1' },
-    { text: 'Tus 3 contactos', cards: [], reviewing: false, updatedAt: 't1' },
-    { text: 'Tus 3 contactos de RR. HH.', cards: [{ type: 'sequence', title: 'Secuencia', parts: 1 }], reviewing: false, updatedAt: 't2' },
+    { text: 'Tus 3 contactos', cards: [], reviewing: false, phase: null, updatedAt: 't1' },
+    { text: 'Tus 3 contactos', cards: [], reviewing: false, phase: null, updatedAt: 't1' },
+    { text: 'Tus 3 contactos de RR. HH.', cards: [{ type: 'sequence', title: 'Secuencia', parts: 1 }], reviewing: false, phase: null, updatedAt: 't2' },
     // The closing correction: same text, now being reviewed.
-    { text: 'Tus 3 contactos de RR. HH.', cards: [{ type: 'sequence', title: 'Secuencia', parts: 1 }], reviewing: true, updatedAt: 't3' },
+    { text: 'Tus 3 contactos de RR. HH.', cards: [{ type: 'sequence', title: 'Secuencia', parts: 1 }], reviewing: true, phase: null, updatedAt: 't3' },
   ];
   const frames = await collect(coworkStreamFrames({
     first: { status: 'running', sequence: 1 },
@@ -106,4 +106,29 @@ test('while the run works, the draft goes out once per change, and a missing dra
   assert.equal(draftReads, 1);
   assert.equal(doorbell.some(item => item.startsWith('event: draft')), false);
   assert.equal(doorbell.at(-1), 'event: end\ndata: {"status":"completed","sequence":2}\n\n');
+});
+
+test('a held answer sends its phase and never text: a new phase or card is a new frame', async () => {
+  let clock = 0;
+  const card = (parts: number) => [{ type: 'sequence', title: null, parts }];
+  const drafts: Array<CoworkRunDraft | null> = [
+    { text: '', cards: [], reviewing: false, phase: 'writing', updatedAt: 't1' },
+    { text: '', cards: card(1), reviewing: false, phase: 'writing', updatedAt: 't2' },
+    { text: '', cards: card(1), reviewing: false, phase: 'writing', updatedAt: 't3' },
+    { text: '', cards: card(3), reviewing: false, phase: 'reviewing', updatedAt: 't4' },
+    { text: '', cards: card(3), reviewing: false, phase: 'adjusting', updatedAt: 't5' },
+  ];
+  const frames = await collect(coworkStreamFrames({
+    first: { status: 'running', sequence: 1 },
+    read: async () => (drafts.length ? { status: 'running', sequence: 2 } : { status: 'completed', sequence: 3 }),
+    readDraft: async () => (drafts.length ? drafts.shift() ?? null : null),
+    signal: new AbortController().signal, now: () => (clock += 1),
+    options: { ...fast, tickMs: 3, draftTickMs: 1 },
+  }));
+  assert.deepEqual(frames.filter(item => item.startsWith('event: draft')).map(item => JSON.parse(item.split('data: ')[1])), [
+    { from: 0, text: '', cards: [], reviewing: false, phase: 'writing' },
+    { from: 0, text: '', cards: card(1), reviewing: false, phase: 'writing' },
+    { from: 0, text: '', cards: card(3), reviewing: false, phase: 'reviewing' },
+    { from: 0, text: '', cards: card(3), reviewing: false, phase: 'adjusting' },
+  ]);
 });

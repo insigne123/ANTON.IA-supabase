@@ -9,6 +9,7 @@ import { loadAudience } from '@/lib/server/bulk-campaign-audience';
 import { editCoworkCampaignMessages, parseCoworkCampaignTarget } from '@/lib/server/cowork/campaign-ops';
 import { CoworkCampaignEditRefused, coworkCampaignEditSchema } from '@/lib/cowork/campaign-edit';
 import { CampaignInputSchema } from '@/lib/bulk-campaigns';
+import { canonicalSha256 } from '@/lib/messaging-contracts';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
@@ -43,6 +44,7 @@ export async function GET(_req: NextRequest, context: Context) {
       const edits = state.events.filter((event: { kind: string }) => event.kind === 'proposal.edited').length;
       return NextResponse.json({
         kind: 'campaign_create', label: String(proposal.label || ''), edits,
+        definitionHash: canonicalSha256(row.data.definition),
         name: definition.name, objective: definition.objective, provider: definition.provider,
         messages: definition.messages.map(message => ({ subject: message.subject, body: message.body, delayDays: message.delayDays })),
         emails: definition.emails,
@@ -75,7 +77,7 @@ export async function PATCH(req: NextRequest, context: Context) {
     const auth = await requireCoworkAccess();
     const id = z.string().uuid().parse((await context.params).id);
     const body = coworkCampaignEditSchema.parse(await req.json());
-    return NextResponse.json(await editCoworkCampaignMessages(auth, id, body.messages), { headers });
+    return NextResponse.json(await editCoworkCampaignMessages(auth, id, body.messages, body.expectedHash), { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     if (error instanceof CoworkCampaignEditRefused) return NextResponse.json({ error: error.message }, { status: error.status, headers });

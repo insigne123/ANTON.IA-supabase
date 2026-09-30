@@ -2,6 +2,8 @@
 
 Tercer PR de la Ola V del plan 2 de Cowork (punto V2). Depende de la migración de insigne123/ANTON.IA-supabase#21 (`cowork_run_drafts`). Sin ella, o sin el flag, todo funciona como antes.
 
+> **30 sep:** con `COWORK_ANSWER_HOLD_ENABLED` (encendido en `apphosting.yaml`) el texto ya no se transmite: la página solo muestra la fase en que va la respuesta y esta aparece una vez, ya revisada. Sin ese flag, todo lo de abajo sigue igual. Detalle en `docs/cowork-una-respuesta.md`.
+
 ## Qué cambia para el usuario
 
 - **Las primeras palabras aparecen antes:** en cuanto Cowork empieza a escribir la respuesta, el texto aparece y crece. Un cursor marca dónde sigue y cada párrafo nuevo entra con un fundido corto. Antes, la respuesta aparecía entera recién al terminar.

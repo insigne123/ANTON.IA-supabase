@@ -45,7 +45,7 @@ export function coworkWriterTurn(deps: {
   generate: Generate;
   recordUsage: (reservationId: string | undefined, telemetry: StructuredTelemetry) => Promise<unknown>;
   record: (event: { action: typeof COWORK_AGENT_ACTION; input: ''; result: CoworkAgentStep }) => Promise<void>;
-  liveDraft: { push: (text: string) => void; review: () => void; flush: () => Promise<void> } | null;
+  liveDraft: { push: (text: string) => void; review: () => void; adjust?: () => void; flush: () => Promise<void> } | null;
   timeLeft: () => number;
   models: { writer?: string; reviewer?: string };
   onCall?: (call: { model: string; durationMs: number }) => void;
@@ -79,6 +79,7 @@ export function coworkWriterTurn(deps: {
         await deps.record({ action: COWORK_AGENT_ACTION, input: '', result: step });
       },
       onReview: () => deps.liveDraft?.review(),
+      onAdjust: () => deps.liveDraft?.adjust?.(),
       canReview: () => deps.timeLeft() >= REVIEW_MS,
     });
     return { reply: output.reply, document: null, question: output.question, blocks: coworkWriterBlocks(output), suggestions: output.suggestions };

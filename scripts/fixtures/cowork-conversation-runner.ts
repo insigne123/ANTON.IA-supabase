@@ -11,6 +11,10 @@ import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 import { coworkTurnCeiling } from '../../src/lib/cowork/turn-budget';
 import { coworkJudgeFix, type CoworkJudgement, type CoworkShownAnswer } from '../../src/lib/cowork/judge';
 import { coworkWriterBlocks, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput } from '../../src/lib/cowork/writer';
+import {
+  COWORK_IMPORT_FIELDS, COWORK_IMPORT_FIELD_LABEL, COWORK_IMPORT_LIMIT, COWORK_IMPORT_SHOWN, coworkContactKeys, coworkImportColumns, coworkImportPlan,
+  coworkImportLabel, coworkImportSummary, type CoworkContactsImportInput,
+} from '../../src/lib/cowork/contacts-import';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
 
@@ -37,6 +41,51 @@ export const corpusWriterInstructions = coworkAgentInstructions({
   threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
 });
 
+/** Instructions for a case: with the Writer, and with contacts.import when the case turns it on. */
+function instructionsFor(writer: boolean, contactsImport: boolean) {
+  if (!contactsImport) return writer ? corpusWriterInstructions : corpusInstructions;
+  return coworkAgentInstructions({
+    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport: true,
+    threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
+  });
+}
+
+/**
+ * The import as the server stages it (server/cowork/contacts-import.ts), from the files and the saved
+ * contacts of the case: the model reads the same refusals, and the judge sees the label and the card the person would.
+ */
+export function corpusStageImport(input: CoworkContactsImportInput, read: (action: string, input: string) => unknown) {
+  const quote = (value: string) => `«${value}»`;
+  const file = read('files.read', input.file) as { found?: boolean; name?: string; kind?: string; columns?: string[]; rows?: string[][]; sheet?: string | null } | null;
+  if (!file?.found || !file.name) throw new Error(`No encontré ${quote(input.file)} entre los archivos que subiste: léelo primero con files.read y usa su nombre exacto.`);
+  if (file.kind !== 'table' || !file.columns || !file.rows) throw new Error('Los contactos se importan desde un CSV, un Excel (.xlsx) o una lista JSON; este archivo no trae una tabla.');
+  if (!file.rows.length) throw new Error('El archivo no trae filas para importar.');
+  const { columns, unknown } = coworkImportColumns(file.columns, input.columns);
+  const headers = file.columns.map(quote).join(', ');
+  if (unknown.length) throw new Error(`El archivo no tiene ${unknown.length === 1 ? 'la columna' : 'las columnas'} ${unknown.map(quote).join(', ')}; sus columnas son ${headers}.`);
+  if (!columns.name) throw new Error(`No encontré la columna con el nombre de cada persona; las columnas del archivo son ${headers}. Indica cuál es en columns.name.`);
+  const saved = (read('leads.search', '') as { items?: Array<{ name?: string | null; email?: string | null; company?: string | null }> } | null)?.items || [];
+  const plan = coworkImportPlan({ columns: file.columns, body: file.rows }, columns, new Set(saved.flatMap(coworkContactKeys)));
+  if (!plan.contacts.length) {
+    throw new Error(plan.duplicates
+      ? `No hay contactos nuevos: ${plan.duplicates === 1 ? 'la persona del archivo ya está' : `las ${plan.duplicates} personas del archivo ya están`} en tus contactos.`
+      : 'Ninguna fila del archivo trae un nombre para importar.');
+  }
+  const summary = coworkImportSummary({ file: file.name, sheet: file.sheet ?? null, count: plan.contacts.length, duplicates: plan.duplicates,
+    skipped: plan.skipped, withoutEmail: plan.contacts.filter(contact => !contact.email).length, overLimit: plan.overLimit, limit: COWORK_IMPORT_LIMIT,
+    columns: COWORK_IMPORT_FIELDS.flatMap(field => columns[field] ? [{ field, label: COWORK_IMPORT_FIELD_LABEL[field], header: columns[field]! }] : []) });
+  // The label the worker gives the proposal, and the card as ContactsImportReview draws it.
+  return { label: coworkImportLabel(file.name, plan), card: {
+    entran: `${summary.headline} ${summary.source}`,
+    ...(summary.leftOut.length ? { quedanFuera: summary.leftOut.join(' · ') } : {}),
+    columnas: summary.columns,
+    contactos: plan.contacts.slice(0, COWORK_IMPORT_SHOWN).map(contact => [contact.name, contact.title, contact.company, contact.email || 'Sin correo'].filter(Boolean).join(' · ')),
+    ...(summary.more ? { masContactos: summary.more } : {}),
+    notas: summary.notes,
+    boton: summary.approve,
+  } };
+}
+
 export type CorpusOutcome = { id: string; result: CorpusTurnResult; checks: Array<{ label: string; passed: boolean }>; passed: boolean };
 
 export function scoreCorpusCase(entry: CorpusCase, result: CorpusTurnResult): CorpusOutcome {
@@ -58,18 +107,29 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const recorded: CoworkObservation[] = [];
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
-  const instructions = write ? corpusWriterInstructions : corpusInstructions;
+  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport));
   const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
-      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling,
+      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport),
+      // Figures from what the person saved in their profile are not new when a correction uses them.
+      userContext,
+      onCorrection: verdict => {
+        if (!result.judgeInTurn) return;
+        result.judgeInTurn.kept = verdict.keep;
+        result.judgeInTurn.keptReason = verdict.reason;
+        result.judgeInTurn.fixed = verdict.keep === 'correction';
+      },
       decide: (observations, mustAnswer, rejections: CoworkRejection[] = [], turnBudget) => decide(coworkDecisionContext(instructions, {
         history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer, turnBudget,
         executionPolicy: { mode: 'approval' }, userContext,
         ...(rejections.length ? { rejectedDecisions: rejections } : {}),
-      }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }),
+      }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }).then(chosen => {
+        if (chosen.action === 'answer' && chosen.answer) (result.answers ||= []).push(chosen.answer.reply);
+        return chosen;
+      }),
       execute: async (action, value) => { actions.push(action); reads.push({ action, input: value }); return (entry.world?.read ?? corpusRead)(action, value); },
       record: async observation => { recorded.push(observation); },
       proposeSearch: async criteria => { result.search = criteria as unknown as Record<string, unknown>; },
@@ -92,17 +152,23 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       } } : {}),
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
-        result.proposal = { kind: proposal.kind, label: proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
-          ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}) };
+        const staged = proposal.contactsImport ? corpusStageImport(proposal.contactsImport, entry.world?.read ?? corpusRead) : null;
+        result.proposal = { kind: proposal.kind, label: staged?.label ?? proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
+          ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),
+          ...(proposal.contactsImport ? { contactsImport: { ...proposal.contactsImport, card: staged?.card } } : {}),
+          ...(proposal.profile ? { profile: proposal.profile } : {}) };
       },
     });
-    if (result.judgeInTurn?.asked) result.judgeInTurn.fixed = answer !== judgedAnswer;
+    // Without the loop's verdict (the correction became the Writer's emails), a different reply is the correction:
+    // comparing objects would count the charts step's new copy of the same answer as one.
+    if (result.judgeInTurn?.asked && result.judgeInTurn.kept === undefined) result.judgeInTurn.fixed = answer.reply !== (judgedAnswer as CoworkAnswer | null)?.reply;
     const polished = polishCoworkAnswer(answer);
     result.reply = polished.reply;
     result.document = polished.document;
     result.suggestions = polished.suggestions || [];
     result.blocks = polished.blocks || [];
     result.question = polished.question;
+    result.choices = polished.choices;
   } catch (error) {
     result.failed = coworkFailureMessage(error);
   }
@@ -113,6 +179,15 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   return scoreCorpusCase(entry, result);
 }
 
+/** The data the model saw in a corpus turn, replayed from the fixture with the same inputs. */
+export function corpusObservations(entry: CorpusCase, result: CorpusTurnResult) {
+  const read = entry.world?.read ?? corpusRead;
+  const reads = result.reads?.length ? result.reads : result.actions.map(action => ({ action, input: '' }));
+  return reads.map(({ action, input }) => {
+    try { return { action, input, result: read(action, input) }; } catch { return { action, input, result: null }; }
+  });
+}
+
 /** What the person saw in a corpus turn. */
 export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
   const campaign = result.proposal?.campaign as { name?: unknown; objective?: unknown; messages?: unknown; emails?: unknown } | undefined;
@@ -121,12 +196,17 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
     cards: result.blocks?.length ? coworkBlocksText(result.blocks) : null,
     question: result.question ?? null,
     quickReplies: (result.suggestions || []).map(chip => chip.message),
+    ...(result.choices ? { choices: result.choices } : {}),
     proposal: result.proposal ? { kind: result.proposal.kind, label: result.proposal.label, note: result.note,
       // The review card shows the campaign's name and objective above its recipients and emails.
       ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: campaign.messages } }
         : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage }
         // The code card shows the files it runs on and the code itself.
-        : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } } : {}) } : null,
+        : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }
+        // The import card shows who comes in, who stays out and the columns (older reports: only the file).
+        : result.proposal.contactsImport ? { detail: result.proposal.contactsImport.card ?? { archivo: result.proposal.contactsImport.file } }
+        // The profile card shows the fields it saves.
+        : result.proposal.profile ? { detail: result.proposal.profile } : {}) } : null,
     search: result.search,
     document: result.document,
     failed: result.failed,

@@ -13,6 +13,7 @@ import { isExplicitOptOut } from '@/lib/reply-text';
 import { detectAutoReplyHeaders } from '@/lib/reply-autoresponse';
 import { conversationAdvice } from '@/lib/conversation-advice';
 import { replySyncDueFilter } from '@/lib/server/reply-sync-policy';
+import { emailDomain, isFreeMailDomain } from '@/lib/cowork/send-cadence';
 
 export { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 export type { InboundReplyIngestionResult } from '@/lib/server/inbound-reply-ingestion';
@@ -81,6 +82,28 @@ function isSystemSender(address?: string | null) {
   return /mailer-daemon|postmaster|mail delivery subsystem|microsoftoffice|outlook/i.test(String(address || ''));
 }
 
+/** Somebody else at the contact's company: another address on the same corporate domain. A free-mail or shared provider
+ * domain never counts (it says nothing about the company), and neither does a system sender. The company is the unit that
+ * stops being written to when anyone in it answers (findCompanyReply), so a reply from a colleague is a reply. */
+export function isCompanyColleague(sender?: string | null, contactEmail?: string | null) {
+  const from = normalizeEmail(sender);
+  const contact = normalizeEmail(contactEmail);
+  if (!from || !contact || from === contact || isSystemSender(from) || isAutomatedMailbox(from)) return false;
+  const domain = corporateDomain(from);
+  return domain !== null && domain === corporateDomain(contact);
+}
+
+/** The domain that identifies the company behind an address; null for free-mail and shared providers. */
+export function corporateDomain(email?: string | null) {
+  const domain = emailDomain(normalizeEmail(email));
+  return domain && !isFreeMailDomain(domain) ? domain : null;
+}
+
+/** A mailbox nobody reads and nobody answers from (no-reply, notifications, newsletters): a message from it is not the company answering. */
+function isAutomatedMailbox(address: string) {
+  return /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|no[-_.]?responder|auto[-_.]?reply|autoresponder|notifications?|notificaciones?|newsletter|mailer|bounces?)([-_.+].*)?@/i.test(address);
+}
+
 function getHeader(headers: any[] | undefined, name: string) {
   return (headers || []).find((header) => String(header?.name || '').toLowerCase() === name.toLowerCase())?.value || '';
 }
@@ -132,7 +155,7 @@ function gmailMessageToReply(message: any): InboundReply {
   };
 }
 
-export function inboundCandidates(messages: InboundReply[], row: ContactedRow, myEmail?: string | null) {
+export function inboundCandidates(messages: Array<InboundReply & { direction?: 'inbound' | 'outbound' }>, row: ContactedRow, myEmail?: string | null) {
   const leadEmail = normalizeEmail(row.email);
   const senderEmail = normalizeEmail(myEmail);
   const sentAtMs = row.sent_at ? Date.parse(row.sent_at) : 0;
@@ -149,7 +172,13 @@ export function inboundCandidates(messages: InboundReply[], row: ContactedRow, m
       const parentId = String(row.internet_message_id || '').replace(/^<|>$/g, '');
       const references: string[] = String(message.references || '').match(/<[^<>\s]+>/g) || [];
       if (!threadMatches && !(parentId && references.includes(`<${parentId}>`))) return false;
-      if (fromEmail !== leadEmail && !(isSystemSender(fromEmail) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html }))) return false;
+      // The contact, a delivery failure, or somebody else at the contact's company inside the thread we wrote in
+      // (an automatic message from a colleague, like an out-of-office, is not the company answering).
+      const colleague = fromEmail !== leadEmail && isCompanyColleague(fromEmail, leadEmail);
+      // What we sent is never the company answering, even when the contact is on our own domain.
+      if (colleague && (message.direction === 'outbound' || message.autoReplyHeader)) return false;
+      if (fromEmail !== leadEmail && !colleague
+        && !(isSystemSender(fromEmail) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html }))) return false;
       return true;
     })
     .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt));
@@ -170,8 +199,10 @@ export async function mailboxAccessToken(supabase: any, userId: string, provider
   return refreshed.access_token || null;
 }
 
-/** Read only the verified thread. Bounded Graph pagination never claims full coverage. */
-export async function readMailboxConversation(accessToken: string, row: ContactedRow): Promise<{ messages: MailboxMessage[]; complete: boolean }> {
+/** Read only the verified thread. Bounded Graph pagination never claims full coverage. `colleagues`: also keep what people at
+ * the contact's company wrote in the thread. The reply sync needs it (they answered); the conversation view does not ask for
+ * it and keeps showing the contact's messages only. */
+export async function readMailboxConversation(accessToken: string, row: ContactedRow, options: { colleagues?: boolean } = {}): Promise<{ messages: MailboxMessage[]; complete: boolean }> {
   let messages: MailboxMessage[] = [];
   let complete = true;
   if (row.provider === 'gmail') {
@@ -214,7 +245,10 @@ export async function readMailboxConversation(accessToken: string, row: Contacte
   }
   // Never expose unrelated participants simply because a provider grouped a thread.
   const email = normalizeEmail(row.email);
-  return { complete, messages: messages.filter(message => Number.isFinite(Date.parse(message.receivedAt)) && (extractEmailAddress(message.from) === email || (message.direction === 'outbound' && message.to.includes(email)) || (isSystemSender(message.from) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html })))).sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt)) };
+  return { complete, messages: messages.filter(message => Number.isFinite(Date.parse(message.receivedAt)) && (extractEmailAddress(message.from) === email
+    || (options.colleagues === true && message.direction === 'inbound' && isCompanyColleague(extractEmailAddress(message.from), email))
+    || (message.direction === 'outbound' && message.to.includes(email))
+    || (isSystemSender(message.from) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html })))).sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt)) };
 }
 
 async function fetchGmailMessage(accessToken: string, id: string) {
@@ -354,12 +388,14 @@ export async function findOutlookReply(accessToken: string, row: ContactedRow): 
   return pickInboundCandidate(items.map(outlookMessageToReply), row, null);
 }
 
-async function recordInboundReply(supabase: any, row: ContactedRow, reply: InboundReply) {
+/** `outsideThread`: the message is not part of the contact's conversation (a colleague wrote to us on their own), so it must
+ * not rebind the contact's thread: the ingestion keeps the row's thread, conversation and thread key when it gets none. */
+async function recordInboundReply(supabase: any, row: ContactedRow, reply: InboundReply, options: { outsideThread?: boolean } = {}) {
   const receivedAt = reply.receivedAt || new Date().toISOString();
   const rawText = String(reply.text || stripHtmlToText(reply.html || '') || reply.snippet || '').trim();
   const preview = extractReplyPreview(rawText || reply.html || reply.snippet || '');
   const failure = detectDeliveryFailure({ subject: reply.subject, from: reply.from, text: rawText, html: reply.html });
-  const threadKey = buildThreadKey({
+  const threadKey = options.outsideThread ? null : buildThreadKey({
     provider: reply.provider,
     threadId: reply.threadId || row.thread_id,
     conversationId: reply.conversationId || row.conversation_id,
@@ -403,6 +439,15 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
         : 'pending';
   }
 
+  // Somebody else at the contact's company answered: it is recorded on the contact (the company is what answered, and
+  // findCompanyReply stops the whole company from it), saying who wrote it.
+  const sender = extractEmailAddress(reply.from);
+  const colleague = !failure && !reply.autoReplyHeader && isCompanyColleague(sender, row.email);
+  if (colleague) {
+    classification = { ...classification, repliedBy: { kind: 'colleague', email: sender },
+      summary: `Respondió ${sender}, otra persona de la empresa.${classification.summary ? ` ${classification.summary}` : ''}` };
+  }
+
   const ingestion = await ingestInboundReply(supabase, {
     contactedId: row.id,
     recipientEmail: normalizeEmail(row.email),
@@ -413,8 +458,8 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
     eventSource: 'reply_sync',
     eventAt: receivedAt,
     threadKey,
-    threadId: reply.threadId || row.thread_id,
-    conversationId: reply.conversationId || row.conversation_id,
+    threadId: options.outsideThread ? null : reply.threadId || row.thread_id,
+    conversationId: options.outsideThread ? null : reply.conversationId || row.conversation_id,
     subject: reply.subject,
     content: rawText || reply.html || reply.snippet,
     preview,
@@ -430,10 +475,11 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
   if (!failure && row.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
     const summary = classification.summary || preview || 'Respuesta positiva detectada';
+    const who = colleague ? `${sender}, de la empresa de ${row.email || row.lead_id || row.id},` : `Lead ${row.email || row.lead_id || row.id}`;
     await notificationService.sendAlert(
       row.organization_id,
       'Respuesta positiva detectada',
-      `Lead ${row.email || row.lead_id || row.id} respondio: ${summary}. Revisar: ${appUrl}/contacted/replied`
+      `${who} respondio: ${summary}. Revisar: ${appUrl}/contacted/replied`
     ).catch(() => null);
 
     await createAntoniaException(supabase, {
@@ -489,7 +535,7 @@ export type SingleContactSyncState = 'ok' | 'incomplete_thread' | 'sync_failed';
  * never invents its own matching rules. */
 export async function syncSingleContactRow(supabase: any, organizationId: string, row: ContactedRow, accessToken: string): Promise<{ synced: number; state: SingleContactSyncState; error?: string }> {
   try {
-    const conversation = await readMailboxConversation(accessToken, row);
+    const conversation = await readMailboxConversation(accessToken, row, { colleagues: true });
     const boundRow = { ...row, thread_id: row.thread_id || conversation.messages.find(m => m.threadId)?.threadId, conversation_id: row.conversation_id || conversation.messages.find(m => m.conversationId)?.conversationId };
     let synced = 0;
     for (const reply of inboundCandidates(conversation.messages, boundRow)) {
@@ -525,6 +571,34 @@ export async function syncSingleContactRow(supabase: any, organizationId: string
   } catch (err: any) {
     return { synced: 0, state: 'sync_failed', error: err?.message || String(err) };
   }
+}
+
+export type ColleagueMessageResult = { recorded: boolean; reason: 'recorded' | 'duplicate' | 'not_colleague' | 'before_contact' | 'already_covered' | 'automatic' | 'delivery_failure' };
+
+async function fetchOutlookMessage(accessToken: string, id: string): Promise<InboundReply> {
+  const select = '$select=id,subject,conversationId,internetMessageId,internetMessageHeaders,from,receivedDateTime,bodyPreview,body';
+  const response = await graphFetch(accessToken, `/me/messages/${encodeURIComponent(id)}?${select}`);
+  if (!response.ok) throw new Error(`Outlook message lookup failed (${response.status})`);
+  const message = await response.json();
+  return { ...outlookMessageToReply(message), text: message.body?.contentType === 'text' ? message.body.content : stripHtmlToText(message.body?.content || message.bodyPreview || '') };
+}
+
+/** A message that reached the mailbox on its own, outside the contact's thread, from somebody else at a company we wrote to (the
+ * mailbox sweep finds them by domain). The company answered, so it is recorded as a reply on that company's contact and the
+ * company-level guards stop the rest of the company. Automatic messages, delivery failures and messages from before the
+ * contact are not replies. Discovery only: the provider is read for this one message. */
+export async function syncColleagueMessage(supabase: any, row: ContactedRow, accessToken: string, messageId: string): Promise<ColleagueMessageResult> {
+  const reply = row.provider === 'outlook' ? await fetchOutlookMessage(accessToken, messageId) : gmailMessageToReply(await fetchGmailMessage(accessToken, messageId));
+  if (!isCompanyColleague(extractEmailAddress(reply.from), row.email)) return { recorded: false, reason: 'not_colleague' };
+  const receivedMs = Date.parse(reply.receivedAt || '');
+  const sentMs = Date.parse(row.sent_at || '');
+  if (!Number.isFinite(receivedMs) || !Number.isFinite(sentMs) || receivedMs <= sentMs + 1000) return { recorded: false, reason: 'before_contact' };
+  // The company already answered at or after this message: nothing new to record (the ingestion is idempotent, this saves the model call).
+  if (row.replied_at && receivedMs <= Date.parse(row.replied_at)) return { recorded: false, reason: 'already_covered' };
+  if (reply.autoReplyHeader) return { recorded: false, reason: 'automatic' };
+  if (detectDeliveryFailure({ subject: reply.subject, from: reply.from, text: reply.text, html: reply.html })) return { recorded: false, reason: 'delivery_failure' };
+  const inserted = await recordInboundReply(supabase, row, { ...reply, threadId: null, conversationId: null }, { outsideThread: true });
+  return { recorded: inserted, reason: inserted ? 'recorded' : 'duplicate' };
 }
 
 export async function syncRepliesForOrganization(supabase: any, input: { organizationId: string; userId?: string | null; limit?: number; cursor?: string | null; fairQueue?: boolean; contactedIds?: string[] }): Promise<ReplySyncResult> {

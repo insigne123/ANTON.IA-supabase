@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
-import { coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
+import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
@@ -10,7 +10,7 @@ import { coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } fro
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
-import { coworkProfilePatchSchema, type CoworkProfilePatch } from './profile-proposal';
+import { coworkProfileDecisionSchema, coworkProfilePatchFromDecision, type CoworkProfilePatch } from './profile-proposal';
 import { coworkSavedSearchCreateSchema, coworkSavedSearchUpdateSchema, coworkSavedSearchDeleteSchema,
   type CoworkSavedSearchCreate, type CoworkSavedSearchUpdate, type CoworkSavedSearchDelete } from './saved-search-proposal';
 import { coworkCrmRecordPatchSchema, type CoworkCrmRecordPatch } from './crm-record-proposal';
@@ -20,13 +20,15 @@ import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from 
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
 import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
 import { coworkWithCharts } from './charts';
+import { coworkContactsImportSchema, type CoworkContactsImportInput } from './contacts-import';
+import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
-  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message']);
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
@@ -39,7 +41,7 @@ export const coworkDecisionSchema = z.object({
     'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
     'crm.update_record', 'campaign.prepare_draft_v2',
     'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
-    'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message',
+    'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'contacts.import',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs',
     'answer', 'draft.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
@@ -53,7 +55,7 @@ export const coworkDecisionSchema = z.object({
   leadIds: z.array(z.string().uuid()).min(1).max(5).nullable().optional(),
   stepId: z.string().uuid().nullable().optional(),
   enrollmentId: z.string().uuid().nullable().optional(),
-  profile: coworkProfilePatchSchema.nullable().optional(),
+  profile: coworkProfileDecisionSchema.nullable().optional(),
   savedSearch: z.union([coworkSavedSearchCreateSchema, coworkSavedSearchUpdateSchema, coworkSavedSearchDeleteSchema]).nullable().optional(),
   crmRecord: coworkCrmRecordPatchSchema.nullable().optional(),
   crmAssign: coworkCrmAssignSchema.nullable().optional(),
@@ -72,6 +74,8 @@ export const coworkDecisionSchema = z.object({
   searchCriteria: coworkSearchCriteriaSchema.nullable().optional(),
   /** draft.write: the brief the Writer gets instead of the coordinator writing the emails itself (writer.ts). */
   write: coworkWriteBriefSchema.nullable().optional(),
+  /** contacts.import: the uploaded file whose contacts to save and, if needed, which column is which (contacts-import.ts). */
+  contactsImport: coworkContactsImportSchema.nullable().optional(),
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
@@ -83,7 +87,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'profile.update' | 'saved_search.create' | 'saved_search.update' | 'saved_search.delete' | 'campaign.stop_v2'
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
-  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message';
+  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'contacts.import';
 export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
@@ -97,6 +101,7 @@ export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; l
   enrichBatch?: string[];
   scheduleBatch?: { campaignId: string; spacingMinutes?: number };
   linkedinJob?: { leadId: string; message?: string };
+  contactsImport?: CoworkContactsImportInput;
   campaignId?: string; enrollmentId?: string; stepId?: string };
 
 function observationRunId(
@@ -256,6 +261,17 @@ function codeOriginRunId(
   return null;
 }
 
+/** Origin for contacts.import: the file must have been seen via files.list or files.read; «archivo.xlsx#Hoja» names a sheet of it. */
+function importOriginRunId(file: string, observations: CoworkObservation[], history: CoworkHistoryTurn[], currentRunId: string): string | null {
+  const asked = file.trim().toLowerCase();
+  const hash = asked.lastIndexOf('#');
+  for (const name of hash > 0 ? [asked.slice(0, hash).trim(), asked] : [asked]) {
+    const origin = codeOriginRunId([name], observations, history, currentRunId);
+    if (origin) return origin;
+  }
+  return null;
+}
+
 function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: string | null): string {
   const named = (verb: string) => targetName ? `${verb} ${targetName}` : `${verb} ${targetId.slice(0, 120)}`;
   if (action === 'leads.save_contact') return named('Guardar contacto');
@@ -281,6 +297,7 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'campaign.schedule_batch') return 'Programar lote de envíos';
   if (action === 'linkedin.invite') return 'Proponer invitación LinkedIn';
   if (action === 'linkedin.message') return 'Proponer mensaje LinkedIn';
+  if (action === 'contacts.import') return 'Importar contactos de un archivo';
   return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
 }
 
@@ -296,9 +313,11 @@ export class CoworkDecisionRejected extends Error {
   }
 }
 
-export type CoworkRejection = { action: string; reason: string };
+/** previous: the answer a correction has to edit (the closing correction and the judge's), so the model
+ * fixes what was pointed out and keeps the rest instead of writing it again from scratch. */
+export type CoworkRejection = { action: string; reason: string; previous?: CoworkAnswer };
 
-const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage o campaignId).';
+const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, campaignId o contactsImport).';
 
 function budgetFeedback(readsUsed: number, maximum: number) {
   const left = Math.max(0, maximum - readsUsed);
@@ -326,7 +345,7 @@ const PROPOSAL_ACTIONS = new Set<string>(['crm.propose_note', 'prospecting.propo
   'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
   'crm.update_record', 'campaign.prepare_draft_v2',
   'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
-  'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message']);
+  'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'contacts.import']);
 const USE_VERSION_ONLY = 'El usuario tocó «Usar esta versión»: solo fija su texto y todavía no quiere crear nada. No propongas acciones: responde en una frase que usarás su versión tal cual (sin reescribirla) y pregunta el siguiente paso, por ejemplo crear la campaña pausada con ella.';
 const VERSION_KEPT_ANSWER = {
   reply: 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.', document: null, question: '¿Creo la campaña pausada con ella?',
@@ -380,11 +399,11 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
     filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
   ].filter(Boolean);
   if (!missing.length) return null;
-  // The model does not see its previous answer: name what already worked so the retry keeps it.
+  // The model edits its previous answer (answerToCorrect): name what already worked so it keeps it.
   const keep = [answer.document ? `el document «${answer.document.title.slice(0, 80)}»` : null,
     blocks.length && !filler ? 'los bloques' : null,
     closingQuestion(answer) ? 'la pregunta final' : null, chips ? 'las respuestas sugeridas' : null].filter(Boolean);
-  return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Entrega de nuevo la respuesta completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
+  return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Edita tu respuesta anterior (answerToCorrect) y entrégala completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
 }
 
 export type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
@@ -407,6 +426,7 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   if (action === 'lead.enrich') return `Propongo buscar el correo de ${who} con el proveedor; usa un crédito. Revísalo antes de aprobar.`;
   if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
   if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
+  if (action === 'contacts.import') return 'Propongo guardar en tus contactos a las personas del archivo que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.';
   return null;
 }
 
@@ -452,7 +472,7 @@ function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
   ].join('');
 }
 
-/** The retry only has to fix the closing. Quick replies, a closing question or a
+/** The retry only has to fix the closing. Quick replies, options, a closing question or a
  * document the first answer had and the retry dropped come back, unless the
  * retry now carries the emails in the chat itself (then that document would
  * repeat them). */
@@ -466,6 +486,7 @@ function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
       : emailsInChat || coworkBlocks(first.blocks).some(hasFiller) ? null : first.blocks ?? null,
     question: closingQuestion(retry) ? retry.question ?? null : closingQuestion(first),
     suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
+    choices: coworkChoices(retry.choices) ? retry.choices : first.choices ?? null,
   };
 }
 
@@ -550,10 +571,16 @@ async function runCoworkLoop(input: {
   proposeEffect?: (proposal: CoworkEffectProposal) => Promise<void>;
   /** The Writer: writes the emails of a `draft.write` decision and returns the turn's answer. */
   write?: (brief: CoworkWriteBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
+  /** contacts.import may be proposed (COWORK_CONTACTS_IMPORT_ENABLED, once its migration is applied). */
+  contactsImport?: boolean;
   /** The judge (plan 2, G2): reads the coordinator's final answer before it is shown and returns
    * what to fix, or null when it stands. At most once per turn, and only with a decision to spare;
    * `canRead` says whether its correction may still make a read (a decision for it and one to answer). */
   judge?: (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => Promise<string | null>;
+  /** Whether the judge's correction was kept (coworkCorrectionVerdict), once it arrives. */
+  onCorrection?: (verdict: CoworkCorrectionVerdict) => void;
+  /** Who the person is and what they sell: figures from it are not new when a correction uses them. */
+  userContext?: unknown;
 }, observations: CoworkObservation[]) {
   if (observations.length) {
     // The pre-queue phase already spent reads/model decisions. Resume only
@@ -661,12 +688,20 @@ async function runCoworkLoop(input: {
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
         if (closingFallback) return completeFrom(closingFallback, decision.answer);
+        // The judge's correction edits the judged answer: it keeps what the correction dropped, and
+        // it is kept only if it is one (not empty, not the same, no figures without support).
+        if (judgedFallback) {
+          const corrected = completeFrom(judgedFallback, decision.answer);
+          const verdict = coworkCorrectionVerdict(judgedFallback, corrected, [observations, input.history ?? [], input.userContext ?? null]);
+          input.onCorrection?.(verdict);
+          return verdict.keep === 'first' ? judgedFallback : corrected;
+        }
         // A correction needs one more decision, and time for it.
         const closing = turn < last && !late() ? closingFeedback(decision.answer) : null;
         if (closing) {
           // Asked directly, not thrown: the catch below returns closingFallback once it is set.
           closingFallback = decision.answer;
-          rejections.push({ action: 'answer', reason: closing });
+          rejections.push({ action: 'answer', reason: closing, previous: decision.answer });
           continue;
         }
         // The judge reads the answer once, with a decision to spare and time for it; its
@@ -684,7 +719,7 @@ async function runCoworkLoop(input: {
             judgedFallback = decision.answer;
             judgeReadsAt = readsUsed;
             judgeCanRead = canRead;
-            rejections.push({ action: 'answer', reason: fix });
+            rejections.push({ action: 'answer', reason: fix, previous: decision.answer });
             continue;
           }
         }
@@ -748,7 +783,8 @@ async function runCoworkLoop(input: {
         || decision.action === 'crm.assign_lead' || decision.action === 'exception.resolve' || decision.action === 'mission.control'
         || decision.action === 'message_context.update' || decision.action === 'lead.enrich_batch'
         || decision.action === 'campaign.schedule_batch'
-        || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message') {
+        || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message'
+        || decision.action === 'contacts.import') {
         if (!input.proposeEffect) throw rejected('Effect proposals unavailable', 'En este contexto no puedes proponer acciones: responde con lo observado.');
         const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
           : decision.action === 'research.start' ? 'start_research'
@@ -772,7 +808,8 @@ async function runCoworkLoop(input: {
           : decision.action === 'lead.enrich_batch' ? 'enrich_batch'
           : decision.action === 'campaign.schedule_batch' ? 'campaign_schedule_batch'
           : decision.action === 'linkedin.invite' ? 'linkedin_invite'
-          : decision.action === 'linkedin.message' ? 'linkedin_message' : 'request_draft';
+          : decision.action === 'linkedin.message' ? 'linkedin_message'
+          : decision.action === 'contacts.import' ? 'contacts_import' : 'request_draft';
         const targetId = decision.action === 'leads.save_contact' ? decision.providerId
           : decision.action === 'draft.request' ? decision.snapshotId
           : decision.action === 'email.send' ? decision.draftId
@@ -793,12 +830,14 @@ async function runCoworkLoop(input: {
           : decision.action === 'lead.enrich_batch' ? 'new-enrich-batch'
           : decision.action === 'campaign.schedule_batch' ? decision.campaignId
           : decision.action === 'linkedin.invite' || decision.action === 'linkedin.message' ? 'new-linkedin-job'
+          : decision.action === 'contacts.import' ? 'new-contacts-import'
           : decision.leadId;
         const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) : null;
         const campaign = decision.action === 'campaign.create' && decision.campaign
           ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
-        const profile = decision.action === 'profile.update' ? decision.profile ?? undefined : undefined;
+        // Only what changes: a field sent as null keeps its value.
+        const profile = decision.action === 'profile.update' ? coworkProfilePatchFromDecision(decision.profile) ?? undefined : undefined;
         const savedSearch = decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete'
           ? decision.savedSearch ?? undefined : undefined;
         const campaignId = decision.action === 'campaign.stop_v2' ? decision.campaignId ?? undefined : undefined;
@@ -834,9 +873,17 @@ async function runCoworkLoop(input: {
           ? { campaignId: decision.campaignId, ...(decision.spacingMinutes == null ? {} : { spacingMinutes: decision.spacingMinutes }) }
           : undefined;
         if (decision.action === 'campaign.schedule_batch' && !scheduleBatch) throw rejected('Missing batch schedule', MISSING_PROPOSAL_FIELDS);
-        let originRunId = decision.action === 'code.execute'
+        if (decision.action === 'contacts.import' && !input.contactsImport) {
+          throw rejected('Contacts import unavailable', 'Importar contactos desde Cowork todavía no está disponible: di que se importan con «Importar Leads» en la app y sigue con lo que sí puedes hacer.');
+        }
+        const contactsImport = decision.action === 'contacts.import' ? decision.contactsImport ?? undefined : undefined;
+        if (decision.action === 'contacts.import' && !contactsImport) throw rejected('Missing import file', MISSING_PROPOSAL_FIELDS);
+        const effectAction = decision.action;
+        const originOf = () => effectAction === 'code.execute'
           ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
-          : effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
+          : contactsImport ? importOriginRunId(contactsImport.file, observations, input.history || [], input.runId || '')
+          : effectTargetRun(effectAction, targetId, observations, input.history || [], input.runId || '');
+        let originRunId = originOf();
         // A campaign is proposed next to the list of existing ones. When the model
         // skipped that read, the loop reads it instead of losing the whole proposal
         // (seen with the real model on the last decision, after its three reads).
@@ -853,7 +900,7 @@ async function runCoworkLoop(input: {
         }
         // The same for code on uploaded files proposed before reading them (seen with an
         // Excel): the loop lists the uploads once instead of rejecting the whole turn away.
-        if (!originRunId && decision.action === 'code.execute' && !filesListed) {
+        if (!originRunId && (decision.action === 'code.execute' || decision.action === 'contacts.import') && !filesListed) {
           filesListed = true;
           await input.authorize();
           input.signal.throwIfAborted();
@@ -861,11 +908,11 @@ async function runCoworkLoop(input: {
           readsUsed++;
           await input.record(listed);
           observations.push(listed);
-          originRunId = codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '');
+          originRunId = originOf();
         }
         if (!originRunId) {
-          throw rejected('Effect target must be observed first', decision.action === 'code.execute'
-            ? 'Los archivos de code.execute no están entre las subidas del usuario: usa el nombre exacto que muestra files.list o files.read; si falta, pide subirlo con el clip «Adjuntar archivos».'
+          throw rejected('Effect target must be observed first', decision.action === 'code.execute' || decision.action === 'contacts.import'
+            ? `Los archivos de ${decision.action} no están entre las subidas del usuario: usa el nombre exacto que muestra files.list o files.read; si falta, pide subirlo con el clip «Adjuntar archivos».`
             : 'El objetivo de la propuesta no aparece en los resultados de este hilo: consúltalo primero (leads.search, campaigns.list, draft.get o research.get_existing) y usa su ID exacto. Para crear una campaña, los destinatarios deben ser contactos guardados con correo.');
         }
         if (decision.answer?.document && turn < last) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
@@ -891,7 +938,8 @@ async function runCoworkLoop(input: {
           ...(messageContext === undefined ? {} : { messageContext }),
           ...(enrichBatch === undefined ? {} : { enrichBatch }),
           ...(scheduleBatch === undefined ? {} : { scheduleBatch }),
-          ...(linkedinJob === undefined ? {} : { linkedinJob }) });
+          ...(linkedinJob === undefined ? {} : { linkedinJob }),
+          ...(contactsImport === undefined ? {} : { contactsImport }) });
         } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
       }

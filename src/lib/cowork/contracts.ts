@@ -64,6 +64,11 @@ export function coworkPlanSteps(payload: unknown): CoworkPlanStep[] | null {
   return steps.length > 1 ? steps : null;
 }
 
+/** What a held answer goes through, in order (COWORK_ANSWER_HOLD_ENABLED, live-draft.ts): it is
+ * written, reviewed and, when the review asks for it, adjusted. Only then does its text show. */
+export const COWORK_DRAFT_PHASES = ['writing', 'reviewing', 'adjusting'] as const;
+export type CoworkDraftPhase = typeof COWORK_DRAFT_PHASES[number];
+
 /** What the Writer, the Reviewer or the judge is doing in the turn (writer.ts, judge-run.ts), for the page. */
 export const COWORK_AGENT_ACTION = 'assistant.agent';
 
@@ -113,6 +118,35 @@ export const coworkSuggestionSchema = z.object({
 export type CoworkSuggestion = { label: string; message: string };
 
 export const COWORK_SUGGESTION_LIMITS = { count: 3, label: 40, message: 200 } as const;
+
+/** A closing question answered by picking (plan 2, V5): the answers a person
+ * would give, one or several, and the app adds «Otra respuesta» to write one.
+ * The decision accepts generous shapes; `coworkChoices` keeps 2 to 5 short
+ * distinct options (answer-quality.ts). */
+export const coworkChoicesSchema = z.object({
+  multiple: z.boolean(),
+  options: z.array(z.string().max(120)).max(8),
+}).strict();
+
+export type CoworkChoices = { multiple: boolean; options: string[] };
+
+export const COWORK_CHOICE_LIMITS = { min: 2, max: 5, label: 60, other: 200 } as const;
+
+/** Structural read of stored choices for the UI; the worker already cleaned them. */
+export function coworkStoredChoices(value: unknown): CoworkChoices | null {
+  if (!value || typeof value !== 'object') return null;
+  const { multiple, options } = value as { multiple?: unknown; options?: unknown };
+  if (typeof multiple !== 'boolean' || !Array.isArray(options)) return null;
+  const kept = options.filter((option): option is string => typeof option === 'string' && option.trim().length > 0 && option.length <= COWORK_CHOICE_LIMITS.label)
+    .slice(0, COWORK_CHOICE_LIMITS.max);
+  return kept.length >= COWORK_CHOICE_LIMITS.min ? { multiple, options: kept } : null;
+}
+
+/** What picking sends, as the person would type it: one option as is; several as «A, B y C». */
+export function coworkChoiceMessage(picked: string[]): string {
+  const answers = picked.map(item => item.trim()).filter(Boolean);
+  return answers.length < 2 ? answers[0] || '' : `${answers.slice(0, -1).join(', ')} y ${answers[answers.length - 1]}`;
+}
 
 /** Structural read of stored quick replies for the UI. The worker already
  * cleaned them (answer-quality.ts); this only refuses shapes that do not fit. */
@@ -213,6 +247,8 @@ export const coworkDocumentSchema = z.object({
   /** Emails, sequences, tables and figures to show as cards (rule 11). */
   blocks: z.array(coworkBlockSchema).max(10).nullable().optional(),
   suggestions: z.array(coworkSuggestionSchema).max(6).nullable().optional(),
+  /** The closing question's answers to pick, when it asks for something only the person knows (V5). */
+  choices: coworkChoicesSchema.nullable().optional(),
 }).strict();
 
 const transitions: Record<CoworkRunStatus, readonly CoworkRunStatus[]> = {

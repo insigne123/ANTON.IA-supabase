@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
-  coworkJudgeFix, coworkShownFromAnswer, COWORK_JUDGE_TURN_INSTRUCTIONS, type CoworkJudgement,
+  coworkJudgeEvidence, coworkJudgeFix, coworkJudgeInstructions, coworkJudgeTurnPrompt, coworkShownFromAnswer, COWORK_JUDGE_TURN_INSTRUCTIONS, type CoworkJudgement,
 } from './judge';
+import { COWORK_NEXT_STEP_RULE } from './next-step';
 
 const judgement = (scores: number[], veredicto: CoworkJudgement['veredicto'] = 'mejorable'): CoworkJudgement => ({
   scores: Object.fromEntries(COWORK_JUDGE_DIMENSIONS.map((dimension, index) => [dimension, scores[index]])) as CoworkJudgement['scores'],
@@ -76,17 +77,23 @@ test('in the turn, the judge asks for one correction only when it is worth it, a
   const deferral = coworkJudgeFix(judgement({ friccion: 2 }, 'mala', ['Pide permiso para revisar los envíos, una consulta que podía hacer.']));
   assert.match(String(deferral), /una revisión de tu respuesta encontró:\n- Pide permiso para revisar los envíos/);
   assert.match(String(deferral), /hazla en esta decisión/);
-  assert.ok(coworkJudgeFix(judgement({ veracidad: 3 }, 'mejorable', ['Dice «1 envío registrado» sin respaldo.'])));
+  assert.ok(coworkJudgeFix(judgement({ veracidad: 2 }, 'mala', ['Dice «1 envío registrado» sin respaldo.'])));
   assert.equal(coworkJudgeFix(judgement({ friccion: 2 }, 'mala', [])), null, 'nothing concrete to fix');
-  // The correction knows what the answer offered: its closing question, quoted.
+  // A 3 (one avoidable step, an imprecise figure) stands: those corrections were not clearly better (G2).
+  assert.equal(coworkJudgeFix(judgement({ friccion: 3 }, 'mejorable', ['Pregunta si revisa los envíos.'])), null);
+  assert.equal(coworkJudgeFix(judgement({ veracidad: 3 }, 'mejorable', ['Dice «1 envío registrado» sin respaldo.'])), null);
+  // The correction knows what the answer offered (its closing question, quoted), closes by the same rule
+  // as the coordinator, and edits the answer instead of writing it again.
   const quoted = coworkJudgeFix(judgement({ friccion: 2 }, 'mala', ['Pide permiso para revisar los envíos.']),
     { canRead: true, question: '¿Quieres que revise tus envíos?' });
   assert.match(String(quoted), /Tu respuesta terminaba con «¿Quieres que revise tus envíos\?»/);
-  assert.match(String(quoted), /no con algo que puedas hacer tú/);
+  assert.ok(String(quoted).includes(`Cómo cerrar: ${COWORK_NEXT_STEP_RULE}`));
+  assert.match(String(quoted), /Edita tu respuesta anterior \(answerToCorrect\): cambia solo lo señalado/);
+  assert.match(String(quoted), /No cambies el propósito de la respuesta/);
   // Without a read left, only what a rewrite can fix: a claim without support, or a misunderstood request.
   const noRead = { canRead: false, question: '¿Quieres que revise tus envíos?' };
   assert.equal(coworkJudgeFix(judgement({ friccion: 2 }, 'mala', ['Pide permiso para revisar los envíos.']), noRead), null);
-  const rewrite = coworkJudgeFix(judgement({ veracidad: 3 }, 'mejorable', ['Dice «1 envío registrado» sin respaldo.']), noRead);
+  const rewrite = coworkJudgeFix(judgement({ veracidad: 2 }, 'mala', ['Dice «1 envío registrado» sin respaldo.']), noRead);
   assert.match(String(rewrite), /ya no quedan consultas: corrígela con lo que ya tienes/);
   assert.doesNotMatch(String(rewrite), /hazla en esta decisión/);
   assert.ok(coworkJudgeFix(judgement({ comprension: 2 }, 'mala', ['Responde otra cosa.']), noRead));
@@ -95,9 +102,85 @@ test('in the turn, the judge asks for one correction only when it is worth it, a
   { reply: 'Te dejo la tabla.', cards: 'Contactos\nNombre\nFelipe', question: '¿La exporto?', quickReplies: ['Sí, expórtala'], document: null });
 });
 
-test('the judge in the turn keeps the rubric and is stricter with offering what Cowork could do now; the offline judge does not change', () => {
+test('the judge in the turn keeps the rubric and closes by the coordinator\'s rule; the offline judge does not change', () => {
   assert.ok(COWORK_JUDGE_TURN_INSTRUCTIONS.startsWith(COWORK_JUDGE_INSTRUCTIONS));
-  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /Sé estricto con la fricción/);
+  // One rule for how an answer closes: the coordinator was told to offer a next step and the judge
+  // punished it, so most judged answers were sent back.
+  assert.ok(COWORK_JUDGE_TURN_INSTRUCTIONS.includes(COWORK_NEXT_STEP_RULE));
+  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /que el pedido necesitaba, la fricción es 2 o menos/);
   assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /No es fricción ofrecer una acción que necesita aprobación/);
-  assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /Sé estricto con la fricción/);
+  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /los botones pueden ofrecer otros pedidos/);
+  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /Ante una pregunta general .*no le exijas consultas/);
+  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /ahora es la fecha y hora del trabajo/);
+  assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /Esta revisión ocurre antes de mostrar/);
+});
+
+test('in the turn, the judge reads every read as the coordinator did: local times, no IDs, a count per list, within one budget', () => {
+  const id = '3f2a9c1e-8b7d-4e6f-9a0b-1c2d3e4f5a6b';
+  const leads = { action: 'leads.search', input: 'RR. HH.', result: { items: [
+    { id, name: 'Felipe Mu***z', email: 'felipe@empresa.cl', created_at: '2026-09-25T13:05:00Z' },
+    { id: 'x2', name: 'Paula Ro***s', email: null },
+  ], truncated: true } };
+  const evidence = coworkJudgeEvidence([leads, { action: 'metrics.overview', input: '', result: { sent: 12 } }], { timeZone: 'America/Santiago' });
+  const [list, metrics] = evidence as [{ resumen: unknown; datos: string }, string];
+  assert.deepEqual(list.resumen, { elementos: 2, conCorreo: 1, truncado: true });
+  // The coordinator read 10:05 in Santiago next to the stored time; the judge reads the same, without internal IDs.
+  assert.match(list.datos, /"created_at_local":"25 [a-z]+ 2026, 10:05"/);
+  assert.equal(list.datos.includes(id), false);
+  assert.match(list.datos, /\[id\]/);
+  assert.equal(metrics, JSON.stringify({ action: 'metrics.overview', input: '', result: { sent: 12 } }));
+  // Many long reads share the budget: none is left out, each is cut, the total stays near it.
+  const long = Array.from({ length: 8 }, (_, index) => ({ action: 'crm.search', input: String(index), result: 'x'.repeat(9000) }));
+  const shared = coworkJudgeEvidence(long, { total: 24_000, timeZone: 'UTC' }) as string[];
+  assert.equal(shared.length, 8);
+  assert.ok(shared.every(text => text.endsWith('… [recortado]')));
+  assert.ok(shared.reduce((sum, text) => sum + text.length, 0) < 24_000 + 8 * 20);
+  // A short read keeps all of it and leaves its share to the long ones.
+  const mixed = coworkJudgeEvidence([{ action: 'a', result: 'corto' }, { action: 'b', result: 'y'.repeat(30_000) }], { total: 10_000, each: 8_000, timeZone: 'UTC' }) as string[];
+  assert.equal(mixed[0], JSON.stringify({ action: 'a', result: 'corto' }));
+  assert.equal(mixed[1].length, 8_000 + '… [recortado]'.length);
+  // The turn's prompt carries the work's date, in local time, and every read.
+  const prompt = JSON.parse(coworkJudgeTurnPrompt({ request: '¿a quién le escribo?', history: [], userContext: null,
+    observations: [leads, ...long], answer: { reply: 'A Felipe.', document: null }, now: new Date('2026-09-25T13:00:00Z') }));
+  assert.match(prompt.ahora, /^25 [a-z]+ 2026, \d{2}:00$/);
+  assert.equal(prompt.datosConsultados.length, 9);
+});
+
+test('the judge reads importing as the turn ran it: the person imports with the flag off, Cowork proposes it with the flag on', () => {
+  // Off (the default), offline and in the turn, the rules read as before F4.
+  assert.equal(coworkJudgeInstructions(), COWORK_JUDGE_INSTRUCTIONS);
+  assert.equal(coworkJudgeInstructions({ inTurn: true }), COWORK_JUDGE_TURN_INSTRUCTIONS);
+  const offRule = 'Cowork no crea contactos a partir de un correo: solo guarda personas encontradas con el proveedor, y un correo que no está guardado lo importa el usuario.';
+  assert.ok(COWORK_JUDGE_INSTRUCTIONS.includes(offRule));
+  // On, only that rule changes: Cowork imports the people of a file with its card, and sending the person to do it by hand is the miss.
+  const on = coworkJudgeInstructions({ contactsImport: true });
+  const [before, after] = COWORK_JUDGE_INSTRUCTIONS.split(offRule);
+  assert.ok(on.startsWith(before) && on.endsWith(after));
+  assert.doesNotMatch(on, /lo importa el usuario/);
+  assert.match(on, /importa a las personas de un archivo subido \(CSV, Excel o lista JSON\) con una tarjeta de aprobación que muestra quiénes entran/);
+  assert.match(on, /deja fuera sola a quienes ya estaban guardados/);
+  // The card's figures are the server's, so a reply that says another figure is the one that is wrong.
+  assert.match(on, /las calcula el servidor contra el archivo completo y los contactos guardados: son datos/);
+  assert.match(on, /lo correcto es proponer esa importación, no mandarlo a hacerlo a mano; si solo pregunta qué trae el archivo o a quién escribir primero, lo correcto es responder eso/);
+  const inTurn = coworkJudgeInstructions({ contactsImport: true, inTurn: true });
+  assert.ok(inTurn.startsWith(on));
+  // What the turn adds is the closing rule the coordinator follows, plus the date of the work.
+  assert.match(inTurn, /Cómo debe cerrar una respuesta/);
+  assert.match(inTurn, /ahora es la fecha y hora del trabajo/);
+});
+
+test('the judge sees the options of a closing question as the chat shows them, and reads when asking with them is right', () => {
+  const choices = { multiple: true, options: ['RR. HH.', 'Retail'] };
+  const shown = coworkShownFromAnswer({ reply: 'Marca los segmentos.', question: '¿A qué segmentos va la campaña?', document: null,
+    suggestions: [{ label: 'Sí', message: 'Sí, adelante' }], choices });
+  assert.deepEqual(shown.choices, choices);
+  assert.deepEqual(shown.quickReplies, []);
+  const prompt = JSON.parse(coworkJudgePrompt({ request: 'arma una campaña', shown }));
+  assert.deepEqual(prompt.loQueVioElUsuario.opciones, { variasALaVez: true, opciones: ['RR. HH.', 'Retail'], puedeEscribirOtra: true });
+  // Without options, what the judge reads does not change.
+  const plain = JSON.parse(coworkJudgePrompt({ request: 'hola', shown: coworkShownFromAnswer({ reply: 'Hola.', question: '¿Seguimos?', document: null }) }));
+  assert.equal('opciones' in plain.loQueVioElUsuario, false);
+  // Options without a question are not shown, as in the chat.
+  assert.equal(coworkShownFromAnswer({ reply: 'Listo.', document: null, choices }).choices, undefined);
+  assert.match(COWORK_JUDGE_INSTRUCTIONS, /pregunta final con opciones .* no es fricción; pedir con opciones algo que Cowork podía decidir/);
 });

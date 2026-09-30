@@ -6,8 +6,9 @@
 import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
 import { coworkUserContextFromProfile } from '../../src/lib/server/cowork/user-context';
-import type { CoworkBlock } from '../../src/lib/cowork/contracts';
+import type { CoworkBlock, CoworkChoices } from '../../src/lib/cowork/contracts';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
+import { buildCoworkAgenda } from '../../src/lib/cowork/agenda';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
 
@@ -67,6 +68,11 @@ export function corpusRead(action: string, input: string): unknown {
         limitation: 'Lo registrado en ANTON.IA; si el correo está sincronizado por completo se indica aparte.' };
     case 'campaigns.inbox':
       return { scope: 'own', items: [], truncated: false };
+    case 'agenda.today':
+      return buildCoworkAgenda({ interested: [], unclassified: [], autoReplies: 0, bounces: [], approvals: { count: 0, oldestDays: null, examples: [] },
+        campaignSteps: { count: 0, examples: [] }, followups: [], linkedinAccepted: [], mailboxSynced: null,
+        sources: { interested: 'ok', attention: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'none', linkedin: 'sync_incomplete' },
+        timing: { timeZone: 'America/Santiago', day: '2026-09-25', weekday: 'viernes' } });
     case 'exceptions.list':
       return { scope: 'team', truncated: false, items: [
         { id: id(41), type: 'sync_error', summary: 'La sincronización de Outlook falló el 24 sep', status: 'open' },
@@ -148,7 +154,9 @@ export type CorpusTurnResult = {
   reply: string;
   document: { title: string; content: string } | null;
   proposal: { kind: string; label: string; targetId?: string; campaign?: unknown; linkedinMessage?: string;
-    code?: { language: string; code: string; inputFiles: string[] } } | null;
+    code?: { language: string; code: string; inputFiles: string[] }; contactsImport?: { file: string; columns?: unknown; card?: unknown };
+    /** A profile update's fields, as the approval card shows them. */
+    profile?: Record<string, unknown> } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;
@@ -158,6 +166,8 @@ export type CorpusTurnResult = {
   blocks?: CoworkBlock[];
   /** The closing question, when it traveled apart (it also ends the reply). */
   question?: string | null;
+  /** The options that answer it (V5), when it asks for something only the person knows. */
+  choices?: CoworkChoices | null;
   /** The plan shown while it worked, when the turn consulted something. */
   plan?: Array<{ label: string; read: string | null }> | null;
   /** Each read with its input, so the judge can see the same data the model saw. */
@@ -165,11 +175,15 @@ export type CorpusTurnResult = {
   /** When the Writer wrote the answer (writer.ts): the coordinator's brief and what each agent did. */
   writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }> };
   /** The judge in the turn (G2): its judgement of the first answer, whether it asked for a fix and whether the answer changed. */
-  judgeInTurn?: { veredicto: string; scores: Record<string, number>; problemas: string[]; canRead?: boolean; asked: boolean; fixed: boolean };
+  judgeInTurn?: { veredicto: string; scores: Record<string, number>; problemas: string[]; canRead?: boolean; asked: boolean; fixed: boolean;
+    /** Whether the loop kept the correction or the first answer (correction-guard.ts), and why. */
+    kept?: 'correction' | 'first'; keptReason?: string | null };
+  /** The reply of every answer decision, in order: more than one means the first was corrected (closing or judge). */
+  answers?: string[];
 };
 
 /** What the person reads in the chat: the reply plus every card. */
-export const corpusShown = (result: CorpusTurnResult) => [result.reply, coworkBlocksText(result.blocks || [])].filter(Boolean).join('\n\n');
+export const corpusShown = (result: CorpusTurnResult) => [result.reply, result.choices?.options.join(' · ') || '', coworkBlocksText(result.blocks || [])].filter(Boolean).join('\n\n');
 
 export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[]; userContext?: CoworkUserContext | null };
 
@@ -184,8 +198,13 @@ export type CorpusCase = {
   production?: { run: string; latencySeconds: number; scores: { comprension: number; veracidad: number; utilidad: number; claridad: number; friccion: number }; problem: string };
   /** For cases written from a use case rather than copied from production: why it exists. */
   origin?: string;
+  /** For the cases of the AXIS package (cowork-axis-paquete.ts): the operation, what the app can do about it, what the previous AI
+   * had to do and what it achieved and failed at, so a run can be measured against it. */
+  axis?: { op: string; block: string; capability: 'cubierta' | 'parcial' | 'faltante'; /** One of the 20 ★ operations of the package (the rest are not starred). */ star?: boolean; mustDo: string[]; reference: { result: string; failed: string } };
   /** Tool results and saved emails of this case's account; the production workspace by default. */
   world?: CorpusWorld;
+  /** Runs with contacts.import available (COWORK_CONTACTS_IMPORT_ENABLED). */
+  contactsImport?: boolean;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
 };
 
@@ -196,8 +215,8 @@ const noJargon = (result: CorpusTurnResult) => coworkAnswerIssues(shownText(resu
 const nextStep = (result: CorpusTurnResult) => Boolean(result.proposal || result.search)
   || !coworkAnswerIssues(result.reply).some(issue => issue.code === 'next_step');
 const explained = (result: CorpusTurnResult) => !(result.proposal || result.search) || Boolean(result.note && result.note.length > 20);
-// A plain answer offers at least one quick reply; a proposal already has its card.
-const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search) || (result.suggestions?.length ?? 0) > 0;
+// A plain answer offers at least one quick reply, or the options that answer its question (V5); a proposal already has its card.
+const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search || result.choices) || (result.suggestions?.length ?? 0) > 0;
 // Each quick reply asks for something Cowork does on click, never a promise the person makes.
 // The sanitizer drops these; the check guards it on the chips the person would see.
 const actionable = (result: CorpusTurnResult) => (result.suggestions || []).every(chip => !COWORK_DEFERRAL.test(chip.message));
@@ -207,7 +226,7 @@ export const CORPUS_COMMON_CHECKS = [
   { label: 'sin jerga, códigos, IDs ni horas UTC', test: noJargon },
   { label: 'cierra con un siguiente paso o una propuesta', test: nextStep },
   { label: 'si propone, explica la propuesta', test: explained },
-  { label: 'ofrece respuestas sugeridas para seguir', test: suggested },
+  { label: 'ofrece respuestas sugeridas u opciones para seguir', test: suggested },
   { label: 'las sugerencias piden algo que Cowork hace al tocarlas', test: actionable },
 ];
 
@@ -217,7 +236,9 @@ export const CORPUS: CorpusCase[] = [
   { id: 'pendientes-vacio', title: 'Pendientes de hoy sin conversaciones activas', request: 'hola, que tengo pendiente para hoy?',
     production: { run: '3e143ba7', latencySeconds: 27, scores: { comprension: 4, veracidad: 4, utilidad: 2, claridad: 3, friccion: 2 }, problem: 'Callejón sin salida con jerga de «cobertura»; no mira campañas ni incidencias.' },
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'consulta pendientes antes de responder', test: r => r.actions.some(a => ['contacted.search', 'replies.attention', 'campaigns.inbox'].includes(a)) },
+      { label: 'consulta pendientes antes de responder', test: r => r.actions.some(a => ['agenda.today', 'contacted.search', 'replies.attention', 'campaigns.inbox'].includes(a)) },
+      // With an empty day the agenda has nothing to rank: the proposal comes from the contacts and campaigns, read, not offered to read.
+      { label: 'con el día vacío lee sus contactos y campañas para proponer con datos', test: r => !r.actions.includes('agenda.today') || (r.actions.includes('leads.search') && r.actions.includes('campaigns.list')) },
       { label: 'propone algo concreto (incidencias, campañas o contactos)', test: r => /incidenc|campañ|contacto/i.test(r.reply) }] },
   { id: 'recomendacion-hoy', title: 'Qué hacer hoy, dos minutos después', request: 'ok y entonces que me recomiendas hacer hoy para avanzar?',
     history: [{ request: 'hola, que tengo pendiente para hoy?', at: recentAt,

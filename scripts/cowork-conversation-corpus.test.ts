@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusShownAnswer, corpusStageImport, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -12,14 +12,16 @@ const parallel = (reads: Array<{ action: string; input: string }>) =>
   coworkDecisionSchema.parse({ action: 'reads.parallel', query: null, leadId: null, answer: null, reads });
 const answer = (reply: string, document: { title: string; content: string } | null = null,
   suggestions: Array<{ label: string; message: string }> = [{ label: 'Sí, adelante', message: 'Sí, adelante con lo que propones' }],
-  extra: { blocks?: unknown[]; question?: string } = {}) =>
+  extra: { blocks?: unknown[]; question?: string; choices?: { multiple: boolean; options: string[] } } = {}) =>
   coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document, suggestions, ...extra } });
 
 /** What a good turn looks like for each case, played through the real loop. */
 const IDEAL: Record<string, CorpusDecider> = {
   'pendientes-vacio': async context => context.observations.length === 0
-    ? parallel([{ action: 'contacted.search', input: '' }, { action: 'replies.attention', input: '' }, { action: 'campaigns.inbox', input: '' }])
-    : answer('Hoy no tienes respuestas ni seguimientos pendientes en ANTON.IA.\nPara avanzar:\n- Hay 2 incidencias abiertas del equipo.\n- 3 de tus 4 contactos recientes no tienen correo.\n¿Reviso las incidencias primero?'),
+    ? read('agenda.today')
+    : context.observations.length === 1
+      ? parallel([{ action: 'leads.search', input: '' }, { action: 'campaigns.list', input: '' }])
+      : answer('Hoy no tienes respuestas ni seguimientos pendientes en ANTON.IA.\nPara avanzar:\n- 3 de tus 4 contactos guardados no tienen correo.\n- Tu campaña «Campaña de prueba» sigue en borrador.\n¿Busco el correo de esos 3 contactos?'),
   'recomendacion-hoy': async context => context.observations.length === 0
     ? parallel([{ action: 'app.context', input: '' }, { action: 'exceptions.list', input: '' }])
     : answer('Con 0 envíos este mes, lo que más mueve la aguja hoy es activar contactos.\n- Tienes 256 contactos guardados y 19 campañas, ninguna con envíos.\n- Hay 2 incidencias abiertas (una es la sincronización de Outlook).\n¿Busco el correo de tus 3 contactos más recientes para armar la primera campaña?'),
@@ -84,6 +86,13 @@ Object.assign(IDEAL, {
     ? parallel([{ action: 'app.context', input: '' }, { action: 'leads.search', input: '' }])
     : answer('Te ayudo a conseguir reuniones para AXIS con empresas que contratan mucho personal, sin salir del chat:\n- Correos y campañas: redacto la secuencia sobre AXIS y la dejo lista para aprobar. De tus 5 contactos guardados, 4 tienen correo.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos de RR. HH. y operaciones, e informes de cómo van tus envíos.\n¿Te dejo una campaña pausada con un primer correo para Marcela, Felipe y Camila, tus contactos de RR. HH. con correo?',
       null, chip('Sí, déjala pausada', 'Sí, deja una campaña pausada con un primer correo sobre AXIS para Marcela, Felipe y Camila')),
+  'guardar-oferta': async context => context.observations.length === 0
+    ? read('profile.get', '')
+    : coworkDecisionSchema.parse({ action: 'profile.update', query: null, leadId: null,
+      // As strict structured output sends it: every field, null where nothing changes.
+      profile: { name: null, role: null, companyName: null, sector: null, website: 'https://yago.cl', description: null, services: null,
+        valueProposition: 'Revisión de antecedentes laborales en minutos para equipos de RR. HH. en Chile.', proofPoints: null, signature: null },
+      answer: { reply: 'Guardo en tu perfil lo que vendes y tu sitio. Desde ahí escribo tus correos con esa oferta.', document: null } }),
   'mkt-campana-rrhh': async context => {
     if (context.observations.length === 0) return parallel([{ action: 'leads.search', input: 'RR. HH.' }, { action: 'message.context', input: '' }]);
     if (!seen(context, 'campaigns.list')) return read('campaigns.list');
@@ -108,6 +117,11 @@ Object.assign(IDEAL, {
     : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
       linkedinMessage: 'Hola Marcela, soy Nicolás de Yago. Ayudamos a equipos de personas a revisar antecedentes laborales en minutos con AXIS. ¿Te interesa conversarlo?',
       answer: { reply: 'Encontré a Marcela, Gerente de Personas en Sodexo. Te dejo un mensaje corto firmado con tu nombre; se envía desde tu extensión cuando lo apruebes.', document: null } }),
+  'mencion-linkedin': async context => context.observations.length === 0
+    ? read('leads.get', null, { leadId: MARKETING_LEAD.marcela })
+    : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
+      linkedinMessage: 'Hola Marcela, soy Nicolás de Yago. Ayudamos a equipos de personas a revisar antecedentes laborales en minutos con AXIS. ¿Te interesa conversarlo?',
+      answer: { reply: 'Te dejo un mensaje corto para Marcela, Gerente de Personas en Sodexo, firmado con tu nombre; se envía desde tu extensión cuando lo apruebes.', document: null } }),
   'mkt-linkedin-invitar': async context => context.observations.length === 0
     ? parallel([{ action: 'leads.search', input: 'Felipe Securitas' }, { action: 'linkedin.quota', input: '' }])
     : coworkDecisionSchema.parse({ action: 'linkedin.invite', query: null, leadId: MARKETING_LEAD.felipe,
@@ -139,6 +153,11 @@ Object.assign(IDEAL, {
         question: '¿Lo dejo listo para enviar desde tu correo?',
         blocks: [{ type: 'email_draft', title: 'Seguimiento a Marcela', to: ['Marcela Rojas'], subject: '¿Cómo lo resuelven hoy?',
           body: 'Hola Marcela,\nMe quedé pensando en cómo revisan hoy los antecedentes en Sodexo. Si te sirve, te muestro en 15 minutos cómo lo hace AXIS.\nNicolás' }] }),
+  // A datum only the person knows (V5): asked with options, no quick replies.
+  'opciones-industria': async context => context.observations.length === 0 ? read('app.context', '')
+    : answer('AXIS le sirve a quien contrata mucho personal. Elige la industria y preparo la búsqueda de gerentes de personas y de reclutamiento para que la apruebes.',
+      null, [], { question: '¿En qué industria buscamos?',
+        choices: { multiple: false, options: ['Minería', 'Construcción', 'Retail', 'Seguridad privada', 'Logística'] } }),
 } satisfies Record<string, CorpusDecider>);
 
 /** Home starters: what a good first turn looks like for each button. */
@@ -236,6 +255,18 @@ Object.assign(IDEAL, {
           body: 'Hola Felipe,\nEn Yago revisamos antecedentes laborales de postulantes en el Poder Judicial de forma automática con AXIS. Para un equipo de reclutamiento como el tuyo, son horas menos por candidato.\n¿Te sirve que te lo muestre en 15 minutos esta semana?\nSaludos,\nNicolás' }] }),
 } satisfies Record<string, CorpusDecider>);
 
+/** Importing the people of a file (F4): read it, then propose the import; its card shows who comes in. */
+const importing = (file: string, reply: string) => coworkDecisionSchema.parse({ action: 'contacts.import', query: null, leadId: null,
+  contactsImport: { file, columns: null }, answer: { reply, document: null } });
+Object.assign(IDEAL, {
+  'importar-feria': async context => !seen(context, 'files.read') ? read('files.read', FAIR)
+    : importing(FAIR, 'Propongo guardar en tus contactos a las personas de la lista de la feria que aún no están; las que ya tenías quedan fuera. Revisa en la tarjeta quiénes entran.'),
+  'importar-excel': async context => !seen(context, 'files.read') ? read('files.read', 'prospectos.xlsx')
+    : importing('prospectos.xlsx', 'Propongo guardar en tus contactos a los prospectos del Excel (hoja Prospectos) que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.'),
+  'importar-para-escribir': async context => context.observations.length === 0 ? parallel([{ action: 'files.read', input: FAIR }, { action: 'leads.search', input: '' }])
+    : importing(FAIR, 'Una campaña solo puede ir a contactos guardados, así que primero propongo guardar a los de la feria que aún no están. Después armo la campaña con los que tienen correo.'),
+} satisfies Record<string, CorpusDecider>);
+
 const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
 
 test('every corpus case has an ideal turn that passes all its checks through the real loop', async () => {
@@ -245,6 +276,17 @@ test('every corpus case has an ideal turn that passes all its checks through the
     const failing = outcome.checks.filter(check => !check.passed).map(check => check.label);
     assert.deepEqual(failing, [], `${entry.id}: ${failing.join(', ')} · ${outcome.result.failed || outcome.result.reply}`);
   }
+});
+
+test('pendientes-vacio: reading only the agenda and offering to look at the contacts fails; looking at them passes', async () => {
+  const entry = CORPUS.find(item => item.id === 'pendientes-vacio')!;
+  const lazy: CorpusDecider = async context => context.observations.length === 0 ? read('agenda.today')
+    : coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply: 'Hoy no aparecen pendientes registrados en ANTON.IA.\n¿Reviso tus contactos con correo y tus campañas en borrador?',
+      document: null, suggestions: [{ label: 'Sí, revísalos', message: 'Sí, revisa mis contactos' }] } });
+  const lazyFailing = (await runCorpusCase(entry, lazy)).checks.filter(check => !check.passed).map(check => check.label);
+  assert.deepEqual(lazyFailing, ['con el día vacío lee sus contactos y campañas para proponer con datos']);
+  const good = (await runCorpusCase(entry, IDEAL['pendientes-vacio'])).checks.filter(check => !check.passed);
+  assert.deepEqual(good, []);
 });
 
 test('the production baseline answers fail the checks the corpus was written for', () => {
@@ -330,5 +372,50 @@ test('with the judge on, an answer that offers a read it could do is fixed in th
   assert.deepEqual(seen, [offered.answer!.reply], 'the judge reads once');
   assert.deepEqual(outcome.result.actions, ['metrics.rates', 'campaigns.list']);
   assert.deepEqual({ ...outcome.result.judgeInTurn, scores: undefined, problemas: undefined },
-    { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true });
+    { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true, kept: 'correction', keptReason: 'improved' });
+  // Every answer decision is kept in order: the first one is the answer the correction edited.
+  assert.equal(outcome.result.answers?.length, 2);
+  assert.equal(outcome.result.answers?.[0], offered.answer!.reply);
+});
+
+test('with the judge on, a correction with a figure nothing supports leaves the first answer, and the report says why', async () => {
+  const entry = CORPUS.find(item => item.id === 'metricas-semana')!;
+  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?' });
+  // The correction invents a rate: neither the reads nor the first answer say 73 %.
+  const invented = answer('Esta semana no enviaste correos desde ANTON.IA; tus campañas abren el 73 % de lo que envían.', null, undefined, { question: '¿Armamos una campaña corta?' });
+  const decide: CorpusDecider = async context => {
+    const fixing = ((context.rejectedDecisions || []) as Array<{ reason: string }>).some(rejection => /una revisión de tu respuesta/.test(rejection.reason));
+    if (context.observations.length === 0) return parallel([{ action: 'metrics.rates', input: '' }]);
+    if (!fixing) return offered;
+    return context.observations.length === 1 ? read('campaigns.list', '') : invented;
+  };
+  const judge: CorpusJudge = async () => ({ scores: { comprension: 5, veracidad: 5, utilidad: 3, claridad: 5, friccion: 2 }, veredicto: 'mala',
+    problemas: ['Pregunta si revisa las campañas, aunque podía consultarlas antes de responder.'] });
+  const outcome = await runCorpusCase(entry, decide, undefined, judge);
+  assert.equal(outcome.result.reply.startsWith(offered.answer!.reply), true, outcome.result.reply);
+  assert.equal(outcome.result.reply.includes('73'), false);
+  assert.deepEqual({ asked: outcome.result.judgeInTurn?.asked, fixed: outcome.result.judgeInTurn?.fixed, kept: outcome.result.judgeInTurn?.kept, why: outcome.result.judgeInTurn?.keptReason },
+    { asked: true, fixed: false, kept: 'first', why: 'new_figures' });
+});
+
+test('an import is staged as the server stages it: the judge sees the card, the model reads the same refusals', async () => {
+  const entry = FILE_CORPUS.find(item => item.id === 'importar-feria')!;
+  const read = entry.world!.read!;
+  const { label, card } = corpusStageImport({ file: 'asistentes-feria-rrhh.csv', columns: null }, read);
+  assert.equal(label, 'Importar 6 contactos de asistentes-feria-rrhh.csv (2 ya estaban)');
+  // Marcela and Camila were saved: 6 of the 8 come in, and the card names who.
+  assert.equal(card.entran, '6 contactos nuevos de asistentes-feria-rrhh.csv');
+  assert.equal(card.quedanFuera, '2 ya estaban en tus contactos');
+  assert.deepEqual(card.columnas, ['Nombre ← Nombre', 'Correo ← Correo', 'Cargo ← Cargo', 'Empresa ← Empresa']);
+  assert.equal(card.contactos[0], 'Tomás Riquelme · Jefe de Reclutamiento · Walmart Chile · triquelme@walmart.cl');
+  assert.equal(card.contactos.filter(line => line.endsWith('Sin correo')).length, 2);
+  assert.equal(card.boton, 'Importar 6 contactos');
+  // What the judge reads is that card, not only the file name.
+  const outcome = await runCorpusCase(entry, IDEAL[entry.id]);
+  assert.deepEqual(corpusShownAnswer(outcome.result).proposal?.detail, card);
+  assert.equal(outcome.result.proposal?.label, label);
+  // The server refuses what it cannot import, and the model reads why.
+  assert.throws(() => corpusStageImport({ file: 'brief-axis.pdf', columns: null }, read), /este archivo no trae una tabla/);
+  assert.throws(() => corpusStageImport({ file: 'no-existe.csv', columns: null }, read), /No encontré «no-existe.csv» entre los archivos que subiste/);
+  assert.throws(() => corpusStageImport({ file: 'asistentes-feria-rrhh.csv', columns: { name: 'Contacto' } }, read), /no tiene la columna «Contacto»/);
 });

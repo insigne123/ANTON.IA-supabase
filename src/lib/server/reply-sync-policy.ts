@@ -6,6 +6,9 @@ export const SWEEP_REPEAT_MS = 12 * 60 * 60 * 1000;
 export const SWEEP_WINDOW_DAYS = 30;
 export const SWEEP_PAGE_BUDGET = 2;
 export const SWEEP_MATCH_BUDGET = 5;
+/** Messages from somebody else at a contacted company that one sweep page reads in full. What a page does not reach is still
+ * unrecorded, so the next window finds it again. */
+export const SWEEP_COLLEAGUE_BUDGET = 5;
 
 export type MailboxSweepState = {
   page_token?: string | null;

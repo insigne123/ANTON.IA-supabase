@@ -1,10 +1,14 @@
-import { extractEmailAddress, mailboxAccessToken, normalizeEmail, syncSingleContactRow } from './reply-sync';
-import { mailboxSweepDue, SWEEP_MATCH_BUDGET, SWEEP_PAGE_BUDGET, SWEEP_WINDOW_DAYS } from './reply-sync-policy';
+import { corporateDomain, extractEmailAddress, isCompanyColleague, mailboxAccessToken, normalizeEmail, syncColleagueMessage, syncSingleContactRow } from './reply-sync';
+import { mailboxSweepDue, SWEEP_COLLEAGUE_BUDGET, SWEEP_MATCH_BUDGET, SWEEP_PAGE_BUDGET, SWEEP_WINDOW_DAYS } from './reply-sync-policy';
 
 /** Mailbox-level history sweep (stage 6.3). Discovery only: every candidate
  * contact goes through the same verified-thread pipeline as the per-row tick.
  * Bounded per tick (pages + matches) and resumable through a durable cursor.
- * Never throws: failures are recorded in the sweep state for the next tick. */
+ * Never throws: failures are recorded in the sweep state for the next tick.
+ *
+ * Stage 6.4: a message from somebody who is not a contact but works at a company we wrote to (same corporate domain) is the
+ * company answering, in the thread or not. It is read and recorded as a reply on that company's latest contact, which is what
+ * stops the rest of the company (findCompanyReply). */
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 const SENT_LOOKBACK_MS = 180 * 24 * 60 * 60 * 1000;
@@ -16,6 +20,8 @@ export type MailboxSweepResult = {
   pages: number;
   matched: number;
   synced: number;
+  /** Messages from somebody else at a contacted company recorded as the company's reply (also counted in `synced`). */
+  colleagues: number;
   completedWindow: boolean;
   error?: string;
 };
@@ -63,7 +69,11 @@ async function gmailFrom(messages: Array<{ id: string }>, accessToken: string) {
       const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}?format=metadata&metadataHeaders=From&fields=id,internalDate,payload/headers`, {
         headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store',
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 410) return null;
+        // Provider failures are not evidence that a message is absent: retry this window.
+        throw new Error(`Gmail sweep metadata failed (${res.status})`);
+      }
       const data = await res.json();
       const from = (data?.payload?.headers || []).find((header: any) => String(header?.name || '').toLowerCase() === 'from')?.value || '';
       return { id: data?.id || item.id, from: extractEmailAddress(from), internalDateMs: Number(data?.internalDate || 0) };
@@ -102,9 +112,25 @@ async function outlookListPage(accessToken: string, windowStartIso: string, next
   return { messages: (data.value || []) as Array<{ id: string; conversationId?: string; from?: { emailAddress?: { address?: string } }; receivedDateTime?: string }>, nextLink: link ? String(link) : null };
 }
 
+/** The domains of the mailbox itself: what its owner sends is never a company answering (the mailbox lists what was sent too). */
+async function ownMailboxDomains(provider: 'gmail' | 'outlook', accessToken: string) {
+  const addresses: unknown[] = [];
+  if (provider === 'gmail') {
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' });
+    if (!res.ok) throw new Error(`Gmail sweep profile failed (${res.status})`);
+    addresses.push((await res.json())?.emailAddress);
+  } else {
+    const res = await graphFetch(accessToken, '/me?$select=mail,userPrincipalName');
+    if (!res.ok) throw new Error(`Outlook sweep profile failed (${res.status})`);
+    const profile = await res.json();
+    addresses.push(profile?.mail, profile?.userPrincipalName);
+  }
+  return new Set(addresses.map(address => corporateDomain(extractEmailAddress(String(address || '')))).filter((domain): domain is string => Boolean(domain)));
+}
+
 export async function sweepMailboxForOwner(supabase: any, input: { organizationId: string; userId: string; provider: 'gmail' | 'outlook' }, now = Date.now()): Promise<MailboxSweepResult> {
   const { organizationId, userId, provider } = input;
-  const idle: MailboxSweepResult = { provider, due: false, reason: 'cooling_down', pages: 0, matched: 0, synced: 0, completedWindow: false };
+  const idle: MailboxSweepResult = { provider, due: false, reason: 'cooling_down', pages: 0, matched: 0, synced: 0, colleagues: 0, completedWindow: false };
   try {
     const { data: stateRows, error: stateError } = await supabase.from('cowork_mailbox_sweep_state')
       .select('window_days,page_token,window_started_at,last_completed_at')
@@ -136,11 +162,32 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
       if (!byEmail.has(email)) byEmail.set(email, []);
       byEmail.get(email)!.push(row);
     }
+    // The companies we wrote to, by corporate domain (free mail and shared providers never identify a company).
+    const byDomain = new Map<string, any[]>();
+    for (const row of contacts || []) {
+      const domain = corporateDomain(row.email);
+      if (domain) byDomain.set(domain, [...(byDomain.get(domain) || []), row]);
+    }
+    // Somebody who is not a contact, at a company we wrote to, writing after that contact: the company answering. The row it is
+    // recorded on is the company's latest contact from before the message (a bounced address is no place to record an answer).
+    const colleagues: Array<{ id: string; domain: string; receivedMs: number; row: any }> = [];
+    const collectColleague = (id: string | undefined, from: string, receivedMs: number) => {
+      const domain = corporateDomain(from);
+      const domainRows = domain ? byDomain.get(domain) : undefined;
+      if (!id || !domain || !domainRows || !Number.isFinite(receivedMs)) return;
+      const row = domainRows.filter(item => item.status !== 'failed' && Date.parse(item.sent_at) + 1000 < receivedMs)
+        .sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at))[0];
+      if (!row || !isCompanyColleague(from, row.email)) return;
+      if (row.replied_at && receivedMs <= Date.parse(row.replied_at)) return;
+      colleagues.push({ id, domain, receivedMs, row });
+    };
+    let ownDomains: Set<string> | null = null;
 
     let cursor: string | null = (resuming ? state?.page_token : null) || null;
     let pages = 0;
     let matched = 0;
     let synced = 0;
+    let recordedColleagues = 0;
     const matchedIds: string[] = [];
     const seen = new Set<string>();
     const startedAt = resuming && state?.window_started_at ? state.window_started_at : new Date(now).toISOString();
@@ -151,7 +198,6 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
         const listed = await gmailListPage(accessToken, windowDays, cursor);
         const metas = await gmailFrom(listed.messages || [], accessToken);
         for (const [id, meta] of metas) {
-          void id;
           const rows = byEmail.get(meta.from) || [];
           for (const row of rows) {
             const sentAtMs = Date.parse(row.sent_at);
@@ -160,6 +206,7 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
             seen.add(row.id);
             matchedIds.push(row.id);
           }
+          if (!rows.length) collectColleague(id, meta.from, meta.internalDateMs);
         }
         next = listed.nextPageToken || null;
       } else {
@@ -175,6 +222,7 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
             seen.add(row.id);
             matchedIds.push(row.id);
           }
+          if (from && !rows.length) collectColleague(message.id, from, receivedMs);
         }
         next = listed.nextLink;
       }
@@ -191,6 +239,29 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
         if (single.state !== 'ok') throw new Error(single.state);
       }
       matchedIds.length = 0;
+      // What somebody else at a contacted company sent: read in full and recorded as the company's reply. Past the budget, what is
+      // left is still unrecorded, so the next window finds it again.
+      let read = 0;
+      for (const candidate of colleagues.splice(0)) {
+        if (read >= SWEEP_COLLEAGUE_BUDGET) break;
+        ownDomains ??= await ownMailboxDomains(provider, accessToken);
+        if (ownDomains.has(candidate.domain)) continue;
+        // A message of this page may already have been recorded for the company, which moves its reply forward.
+        if (candidate.row.replied_at && candidate.receivedMs <= Date.parse(candidate.row.replied_at)) continue;
+        read += 1;
+        let result;
+        try { result = await syncColleagueMessage(supabase, candidate.row, accessToken, candidate.id); }
+        catch (error) {
+          // A message deleted or moved between the listing and the read is gone, not a provider failure: the window goes on.
+          if (/\((404|410)\)/.test(String((error as Error)?.message))) continue;
+          throw error;
+        }
+        if (result.recorded) {
+          recordedColleagues += 1;
+          synced += 1;
+          candidate.row.replied_at = new Date(candidate.receivedMs).toISOString();
+        }
+      }
       pages += 1;
       cursor = next;
       await saveState(supabase, { organizationId, userId, provider }, {
@@ -206,13 +277,13 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
         last_completed_at: new Date(now).toISOString(), last_error: null,
       });
     }
-    return { provider, due: true, reason: resuming ? 'resume_window' : 'sweep_window', pages, matched, synced, completedWindow };
+    return { provider, due: true, reason: resuming ? 'resume_window' : 'sweep_window', pages, matched, synced, colleagues: recordedColleagues, completedWindow };
   } catch (err: any) {
     // Refresh failures can contain upstream OAuth details. Persist only a
     // stable code, never tokens, provider bodies or recipient data.
     const raw = String(err?.message || err || 'sweep_failed');
     const message = /refresh|invalid_grant|unauthoriz|AADSTS/i.test(raw) ? 'connection_required'
-      : /Gmail sweep list failed|Outlook sweep list failed/.test(raw) ? 'mailbox_provider_unavailable'
+      : /Gmail sweep (list|profile|metadata) failed|Outlook sweep (list|profile) failed|message lookup failed/.test(raw) ? 'mailbox_provider_unavailable'
       : /sweep_match_budget_exceeded|contact_history_truncated|sync_failed|incomplete_thread/.test(raw)
         ? raw.match(/sweep_match_budget_exceeded|contact_history_truncated|sync_failed|incomplete_thread/)![0]
         : 'sweep_failed';

@@ -1,8 +1,9 @@
+import { coworkSpecialistFor, type CoworkSpecialistInfo } from './agents';
 import { collectCoworkLeadRows } from './lead-export';
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
-import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
-  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent } from './contracts';
+import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
+  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent, type CoworkDraftPhase } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -73,6 +74,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'missions.list': { label: 'Revisó tus misiones', source: 'Misiones', icon: 'target' },
   'exceptions.list': { label: 'Revisó incidencias abiertas', source: 'Incidencias', icon: 'alert' },
   'audience.analyze': { label: 'Analizó tu audiencia', source: 'Audiencia', icon: 'audience' },
+  'agenda.today': { label: 'Armó tu lista de hoy', source: 'Agenda', icon: 'calendar' },
   'gmail.contact_history': { label: 'Revisó correos en tu Gmail', source: 'Gmail', icon: 'mail' },
   'prospecting.search': { label: 'Buscó nuevos contactos en el proveedor', source: 'Búsqueda externa', icon: 'globe' },
 };
@@ -92,7 +94,7 @@ function countOf(result: unknown): number | null {
 }
 
 /** One human line for a recorded read, with the query and result size when known. */
-export function describeCoworkObservation(payload: Record<string, unknown>): { label: string; detail: string | null; icon: CoworkIconKey; source: string } {
+export function describeCoworkObservation(payload: Record<string, unknown>): { label: string; detail: string | null; icon: CoworkIconKey; source: string; agent: CoworkSpecialistInfo | null } {
   const action = String(payload.action || '');
   const info = coworkActionInfo(action);
   const input = typeof payload.input === 'string' ? payload.input.trim() : '';
@@ -112,7 +114,7 @@ export function describeCoworkObservation(payload: Record<string, unknown>): { l
     const count = countOf(payload.result);
     if (count !== null) parts.push(`${count} resultado${count === 1 ? '' : 's'}`);
   }
-  return { label: info.label, detail: parts.length ? parts.join(' · ') : null, icon: info.icon, source: info.source };
+  return { label: info.label, detail: parts.length ? parts.join(' · ') : null, icon: info.icon, source: info.source, agent: coworkSpecialistFor(action) };
 }
 
 /** What a read found, in the person's words, for the chip beside its plan step:
@@ -135,6 +137,7 @@ const FINDING_NOUNS: Record<string, [string, string]> = {
   'linkedin.inbox': ['conversación', 'conversaciones'],
   'missions.list': ['misión', 'misiones'],
   'exceptions.list': ['incidencia', 'incidencias'],
+  'agenda.today': ['pendiente de hoy', 'pendientes de hoy'],
   'prospecting.search': ['contacto nuevo', 'contactos nuevos'],
 };
 
@@ -219,6 +222,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   campaign_schedule_batch: { title: 'Programar lote', icon: 'calendar', help: 'Se reservará un día por empresa y un espaciado entre envíos. No crea ni activa la campaña ni envía nada.' },
   linkedin_invite: { title: 'Invitar en LinkedIn', icon: 'linkedin', help: 'Se encolará una invitación sin nota. La ejecutarás desde la extensión ante ese perfil.' },
   linkedin_message: { title: 'Mensaje de LinkedIn', icon: 'linkedin', help: 'Se encolará el mensaje aprobado. La ejecutarás desde la extensión ante ese perfil; solo lo confirmado cuenta como enviado.' },
+  contacts_import: { title: 'Importar contactos', icon: 'user-plus', help: 'Se guardarán en tus contactos las personas del archivo que aún no están. Los que ya estaban no se tocan.' },
 };
 
 export function coworkEffectCopy(kind: unknown): CoworkEffectCopy {
@@ -296,6 +300,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   campaign_schedule_batch: { happens: 'Se reserva un día por empresa y un espaciado entre envíos.', not: 'No se crea ni se activa la campaña, ni se envía nada.' },
   linkedin_invite: { happens: 'Se deja en cola una invitación sin nota.', not: 'No sale hasta que la ejecutes desde la extensión.' },
   linkedin_message: { happens: 'Se deja en cola el mensaje aprobado.', not: 'No sale hasta que lo ejecutes desde la extensión.' },
+  contacts_import: { happens: 'Se guardan en tus contactos las personas nuevas del archivo.', not: 'No se les escribe, no se buscan correos y no cambian los contactos que ya tenías.' },
 };
 
 export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' | 'payload'>): CoworkOutcome {
@@ -332,7 +337,7 @@ export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | '
   if (proposal.state !== 'done' || proposal.type !== 'effect') return null;
   const kind = String(proposal.payload.kind || '');
   if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch') return { href: '/campaigns', label: 'Ver campañas' };
-  if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch') return { href: '/saved/leads', label: 'Ver tus contactos' };
+  if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch' || kind === 'contacts_import') return { href: '/saved/leads', label: 'Ver tus contactos' };
   if (kind === 'send_email') return { href: '/contacted', label: 'Ver en Contactados' };
   if (kind === 'profile_update') return { href: '/profile', label: 'Ver tu perfil' };
   return null;
@@ -369,7 +374,8 @@ export function coworkTurnNote(events: CoworkEvent[]): string | null {
 
 export type CoworkPlanState = 'done' | 'current' | 'pending' | 'skipped';
 /** Each step with its state and, once its read is in, what that read found. */
-export type CoworkPlanProgress = Array<CoworkPlanStep & { state: CoworkPlanState; found: CoworkReadFinding | null }>;
+/** `agent`: who does the step (G4), from its read; null for Cowork's own steps and the answer. */
+export type CoworkPlanProgress = Array<CoworkPlanStep & { state: CoworkPlanState; found: CoworkReadFinding | null; agent: CoworkSpecialistInfo | null }>;
 
 /** The plan shown while a turn works, with each step's state. A step with a
  * read is done once that read completes; the final step, once the answer or
@@ -395,7 +401,12 @@ export function coworkPlanProgress(run: Pick<CoworkRun, 'status'>, events: Cowor
     const current = states.indexOf('pending');
     if (current !== -1) states[current] = 'current';
   }
-  return steps.map((step, index) => ({ ...step, state: states[index], found: found[index] }));
+  return steps.map((step, index) => ({ ...step, state: states[index], found: found[index], agent: coworkSpecialistFor(step.read) }));
+}
+
+/** A plan step as the headline says it: «Analista · reviso tus cifras de la semana», or just the step. */
+export function coworkPlanStepLine(step: { label: string; agent: CoworkSpecialistInfo | null }): string {
+  return step.agent ? `${step.agent.name} · ${step.label.charAt(0).toLocaleLowerCase('es')}${step.label.slice(1)}` : step.label;
 }
 
 /** What a turn's reads found, in order and without repeats: the evidence behind its answer. */
@@ -478,6 +489,12 @@ export function coworkTurnSuggestions(events: CoworkEvent[]): CoworkSuggestion[]
   return coworkStoredSuggestions(completed?.suggestions);
 }
 
+/** The options that answer the closing question of a turn (V5), or null. */
+export function coworkTurnChoices(events: CoworkEvent[]): CoworkChoices | null {
+  const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
+  return coworkStoredChoices(completed?.choices);
+}
+
 /** Cards that also open in the side panel; figures and charts stay inline in the chat. */
 export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' | 'chart' }>;
 
@@ -557,7 +574,7 @@ export function coworkTurnProgress(run: Pick<CoworkRun, 'status' | 'automatic'>,
   steps.push({
     key: 'work', label: run.status === 'queued' && !started ? 'En cola para empezar' : 'Analizar y consultar datos',
     state: run.status === 'queued' && !started ? 'active' : workDone ? (run.status === 'failed' && !proposal && reads === 0 ? 'error' : 'done') : 'active',
-    detail: plan && current !== -1 ? `Paso ${current + 1} de ${plan.length}: ${plan[current].label}`
+    detail: plan && current !== -1 ? `Paso ${current + 1} de ${plan.length}: ${coworkPlanStepLine(plan[current])}`
       : reads ? `${reads} consulta${reads === 1 ? '' : 's'}` : undefined,
   });
   if (run.status === 'waiting_workers') steps.push({ key: 'specialists', label: 'Revisión de especialistas', state: 'active' });
@@ -588,7 +605,8 @@ export type CoworkThreadSummary = {
 };
 
 const UUID_PATTERN = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}';
-const ID_REFERENCE = new RegExp(`\\s*\\((?:ID(?: del contacto)?\\s*:?\\s*)?${UUID_PATTERN}\\)`, 'gi');
+// «(ID del contacto: …)» from a card, and «(ID de Marcela Rojas: …)» from a mention (mentions.ts).
+const ID_REFERENCE = new RegExp(`\\s*\\((?:ID(?: del contacto| de [^():\\n]{1,80})?\\s*:?\\s*)?${UUID_PATTERN}\\)`, 'gi');
 
 /** Your message as you wrote it: internal references (contact IDs) stay out of sight. */
 export function coworkDisplayMessage(message: string) {
@@ -711,6 +729,19 @@ export function coworkDraftReview(events: CoworkEvent[]): CoworkDraftReview | nu
   const reviewer = coworkAgentRows(events).find(row => row.agent === 'reviewer');
   if (!reviewer || reviewer.state !== 'done' || !reviewer.outcome || reviewer.outcome === 'skipped') return null;
   return { outcome: reviewer.outcome, changes: reviewer.changes };
+}
+
+/**
+ * The line a held answer shows until it is final (COWORK_ANSWER_HOLD_ENABLED): which phase it is in,
+ * about the emails when it carries them. While it is reviewed the line says why no text shows yet.
+ */
+export function coworkHeldAnswerCopy(phase: CoworkDraftPhase | null, cards: Array<{ type: string }>): string {
+  const emails = cards.filter(card => card.type === 'email_draft' || card.type === 'sequence');
+  const [noun, pronoun] = !emails.length ? ['la respuesta', 'la']
+    : emails.length === 1 && emails[0].type === 'email_draft' ? ['el correo', 'lo'] : ['los correos', 'los'];
+  if (phase === 'reviewing') return `Revisando ${noun} antes de mostrárte${pronoun}`;
+  if (phase === 'adjusting') return `Ajustando ${noun} tras revisar${pronoun}`;
+  return `Escribiendo ${noun}`;
 }
 
 /** How the judge left the turn's answer (G2): read with nothing to fix, or fixed after its review.

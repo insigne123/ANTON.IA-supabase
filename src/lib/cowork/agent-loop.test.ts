@@ -294,6 +294,39 @@ test('code execution also takes a file that files.read found, here or in an earl
   assert.equal(proposals.length, 2);
 });
 
+test('importing contacts is proposed only when it is on, for a file seen in the thread, with its sheet and columns', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const proposals: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
+  const reads: string[] = [];
+  const found = { scope: 'own_uploads', found: true, name: 'prospectos.xlsx', runId: parentId, size: 900, kind: 'table', columns: ['Quién'], rows: [] };
+  const base = { message: 'Guarda en mis contactos a los del excel', runId, signal: new AbortController().signal, authorize: async () => {},
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: Record<string, unknown>) => { proposals.push(proposal); } };
+  const readFile = { action: 'files.read' as const, query: 'prospectos.xlsx', leadId: null, answer: null };
+  const importing = { action: 'contacts.import' as const, query: null, leadId: null, answer: null,
+    contactsImport: { file: 'prospectos.xlsx#Prospectos', columns: { name: 'Quién' } } };
+  // Off (the default, until its migration is applied): refused, never proposed.
+  await assert.rejects(runCoworkReadLoop({ ...base, execute: async () => found,
+    decide: async observations => observations.length ? importing : readFile }), /Contacts import unavailable/);
+  assert.equal(proposals.length, 0);
+  // On: the file files.read found (a sheet of it) anchors the proposal to the run that read it.
+  await runCoworkReadLoop({ ...base, contactsImport: true, execute: async () => found,
+    decide: async observations => observations.length ? importing : readFile });
+  assert.deepEqual(proposals[0], { kind: 'contacts_import', targetId: 'new-contacts-import', label: 'Importar contactos de un archivo',
+    originRunId: runId, contactsImport: { file: 'prospectos.xlsx#Prospectos', columns: { name: 'Quién' } } });
+  assert.match(notes[0], /Propongo guardar en tus contactos a las personas del archivo que aún no están/);
+  // Proposed before reading anything: the loop lists the uploads once, and a file that is not there is refused.
+  await assert.rejects(runCoworkReadLoop({ ...base, contactsImport: true,
+    execute: async action => { reads.push(action); return { scope: 'own_uploads', files: [{ name: 'otra.csv', runId, size: 3 }] }; },
+    decide: async () => importing }), /observed first/);
+  assert.deepEqual(reads, ['files.list']);
+  assert.equal(proposals.length, 1);
+});
+
 test('a proposal carries the model explanation as a persisted note, recorded before the approval card', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const leadId = '00000000-0000-4000-8000-000000000021';
@@ -882,6 +915,59 @@ test('the judge reads the final answer once; its correction may read once, and t
   assert.equal(judgedVersion, 0);
 });
 
+test('a correction edits the answer it fixes, and is kept only when it is one: no figures without support, not the same answer', async () => {
+  const ask = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres que revise a quiénes ya les escribiste?',
+      suggestions: [{ label: 'Sí, revísalo', message: 'Sí, revisa a quiénes ya les escribí' }] } };
+  const fixed = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados; a 2 ya les escribiste (12 correos en total).', document: null, question: '¿Les preparo el correo?',
+      suggestions: [{ label: 'Sí, prepáralo', message: 'Sí, prepara el correo' }] } };
+  const readSent = { action: 'contacted.search' as const, query: '', leadId: null, answer: null };
+  const base = { message: '¿A quién le escribo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({ contacted: 2, sent: 12 }), judge: async () => 'Antes de mostrarla, una revisión de tu respuesta encontró:\n- Ofrece una consulta que podía hacer.' };
+  const script = (answers: unknown[]) => { let step = 0; return async () => [ask, readSent, ...answers][step++] as never; };
+
+  // The correction is handed the answer it edits, apart from the reason, and its figures come from what was read.
+  const seen: Array<Array<{ reason: string; previous?: { reply: string } }>> = [];
+  const verdicts: unknown[] = [];
+  const next = script([fixed]);
+  const edited = await runCoworkReadLoop({ ...base, onCorrection: verdict => verdicts.push(verdict), decide: async (_observations, _mustAnswer, rejections = []) => {
+    seen.push(rejections);
+    return next();
+  } });
+  assert.equal(edited.reply, fixed.answer.reply);
+  assert.deepEqual(verdicts, [{ keep: 'correction', reason: 'improved' }]);
+  assert.equal(seen[1][0].previous?.reply, ask.answer.reply);
+  assert.match(seen[1][0].reason, /una revisión de tu respuesta/);
+
+  // A figure that is neither in the first answer nor in what was read: the first answer stands.
+  const invented = { ...fixed, answer: { ...fixed.answer, reply: 'Tienes 5 contactos guardados; el 37 % abrió tus correos.' } };
+  const guarded: unknown[] = [];
+  const stands = await runCoworkReadLoop({ ...base, onCorrection: verdict => guarded.push(verdict), decide: script([invented]) });
+  assert.equal(stands.reply, ask.answer.reply);
+  assert.deepEqual(guarded, [{ keep: 'first', reason: 'new_figures', figures: ['37'] }]);
+  // The person's own profile backs figures too: it travels to the check as userContext.
+  const backed = await runCoworkReadLoop({ ...base, userContext: { proofPoints: ['Reduce 37 % el tiempo de verificación'] },
+    decide: script([invented]) });
+  assert.equal(backed.reply, invented.answer.reply);
+
+  // The same answer again is not a correction either.
+  const same: unknown[] = [];
+  const unchanged = await runCoworkReadLoop({ ...base, onCorrection: verdict => same.push(verdict), decide: script([ask]) });
+  assert.equal(unchanged.reply, ask.answer.reply);
+  assert.deepEqual(same, [{ keep: 'first', reason: 'unchanged' }]);
+
+  // The closing correction also edits the answer it fixes (a missing final question).
+  const noQuestion = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Tienes 5 contactos guardados.', document: null } };
+  const closing: Array<{ previous?: { reply: string }; reason: string }> = [];
+  await runCoworkReadLoop({ ...base, judge: undefined, decide: async (_observations, _mustAnswer, rejections = []) => {
+    closing.push(...rejections);
+    return (rejections.length ? ask : noQuestion) as never;
+  } });
+  assert.equal(closing[0].previous?.reply, noQuestion.answer.reply);
+  assert.match(closing[0].reason, /Edita tu respuesta anterior \(answerToCorrect\)/);
+});
+
 test('the coordinator sees what is left of the turn and may read past three when the ceiling is raised', async () => {
   const seen: Array<{ mustAnswer: boolean; budget?: CoworkTurnBudget }> = [];
   const batch = (inputs: string[]) => ({ action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
@@ -989,4 +1075,16 @@ test('an uploaded file is read by its name, alone or next to other reads', async
   });
   assert.equal(result.reply, 'Un contacto encontrado.');
   assert.deepEqual(calls, ['files.read:leads-feria.csv', 'files.read:notas.md', 'leads.search:']);
+});
+
+test('options the first answer had come back when the closing correction drops them', async () => {
+  const choices = { multiple: true, options: ['RR. HH.', 'Retail'] };
+  const first = { ...answer, answer: { reply: 'Tus contactos están en dos segmentos. Marca los que van en la campaña.', document: null, suggestions: null, choices } };
+  const fixed = await runCoworkReadLoop({ message: 'Arma una campaña para algunos', signal: new AbortController().signal, authorize: async () => {},
+    record: async () => {}, execute: async () => ({}),
+    decide: async (_observations, _mustAnswer, rejections = []) => rejections.length
+      ? { ...answer, answer: { reply: 'Tus contactos están en dos segmentos.', document: null, question: '¿A qué segmentos va la campaña?', suggestions: null, choices: null } }
+      : first });
+  assert.equal(fixed.question, '¿A qué segmentos va la campaña?');
+  assert.deepEqual('choices' in fixed ? fixed.choices : undefined, choices);
 });

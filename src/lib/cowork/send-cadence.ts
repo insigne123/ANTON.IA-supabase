@@ -23,11 +23,19 @@ export function describeCadence(delayDays: number[]): string {
 export const NEGOTIATION_HOLD_STAGES = ['negotiation', 'meeting'] as const;
 export const CLOSED_STAGES = ['closed_won', 'closed_lost'] as const;
 
-const FREE_MAIL_DOMAINS = new Set([
+/** Domains that serve many unrelated people (free mail and the big Chilean providers): an address there says nothing about
+ * the company of the person, so it never identifies one. */
+export const FREE_MAIL_DOMAINS: ReadonlySet<string> = new Set([
   'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'hotmail.es', 'hotmail.cl',
   'live.com', 'live.cl', 'msn.com', 'yahoo.com', 'yahoo.es', 'icloud.com', 'me.com',
   'mac.com', 'proton.me', 'protonmail.com', 'aol.com', 'gmx.com', 'gmx.es', 'yandex.com',
+  'outlook.cl', 'outlook.es', 'yahoo.cl', 'mail.com', 'pm.me', 'zoho.com', 'fastmail.com', 'hey.com',
+  'vtr.net', 'movistar.cl', 'entelchile.net', 'terra.cl', 'latinmail.com',
 ]);
+
+export function isFreeMailDomain(domain: string | null | undefined): boolean {
+  return FREE_MAIL_DOMAINS.has(String(domain || '').trim().toLowerCase());
+}
 
 export function normalizeCompanyKey(value: unknown): string | null {
   const text = String(value || '')
@@ -50,7 +58,7 @@ export type CompanyKeys = { keys: string[]; basis: CompanyKeyBasis };
 export function companyKeysFor(email: string, company: unknown): CompanyKeys {
   const normalized = normalizeCompanyKey(company);
   const domain = emailDomain(email);
-  if (domain && !FREE_MAIL_DOMAINS.has(domain)) return {
+  if (domain && !isFreeMailDomain(domain)) return {
     keys: [`domain:${domain}`, ...(normalized ? [`company:${normalized}`] : [])], basis: 'domain',
   };
   if (normalized) return { keys: [`company:${normalized}`, `email:${String(email || '').trim().toLowerCase()}`], basis: 'company' };

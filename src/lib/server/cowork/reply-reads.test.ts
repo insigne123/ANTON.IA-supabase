@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readContactedAccount, readMailboxCoverage, readMeetingChain, readRepliesAttention, readRepliesStalled } from './reply-reads';
+import {
+  INTERESTED_WAITING_LIMIT, readContactedAccount, readInterestedWaiting, readMailboxCoverage, readMeetingChain,
+  readRepliesAttention, readRepliesStalled,
+} from './reply-reads';
 
 const scope = { userId: 'user-1', organizationId: 'org-1' };
 const LEAD = '00000000-0000-4000-8000-000000000001';
@@ -91,4 +94,65 @@ test('meeting chain links outbound, reply and confirmed commitment', async () =>
   });
   const result = await readMeetingChain(client, scope, LEAD);
   assert.equal(result.chains[0].verdict, 'complete');
+});
+
+test('interested waiting counts an answer that came in this morning, which stalled does not see for 48 hours', async () => {
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3600000).toISOString();
+  const client = mockClient({ contacted_leads: { rows: [
+    { id: 'fresh', lead_id: LEAD, name: 'Ana', email: 'ana@acme.cl', company: 'Acme', replied_at: hoursAgo(3), reply_intent: 'positive', conversation_outbound_at: null, data: null },
+    { id: 'answered', name: 'Luis', email: 'luis@beta.cl', company: 'Beta', replied_at: hoursAgo(30), reply_intent: 'positive', conversation_outbound_at: hoursAgo(20), data: null },
+    { id: 'booked', name: 'Eva', email: 'eva@gamma.cl', company: 'Gamma', replied_at: hoursAgo(50), reply_intent: 'meeting_request', conversation_outbound_at: null,
+      data: { commitment: { id: 'k1', kind: 'meeting', completedAt: null } } },
+    { id: 'old', name: 'Raúl', email: 'raul@delta.cl', company: 'Delta', replied_at: hoursAgo(24 * 20), reply_intent: 'meeting_request', conversation_outbound_at: null, data: null },
+  ] } });
+  const waiting = await readInterestedWaiting(client, scope);
+  assert.deepEqual(waiting.items.map(item => item.contactedId).sort(), ['fresh', 'old']);
+  const fresh = waiting.items.find(item => item.contactedId === 'fresh')!;
+  assert.equal(fresh.company, 'Acme');
+  assert.equal(fresh.daysWaiting, 0);
+  assert.equal(waiting.items.find(item => item.contactedId === 'old')!.daysWaiting, 20);
+  assert.equal(waiting.truncated, false);
+  const stalled = await readRepliesStalled(client, scope);
+  assert.deepEqual(stalled.items.map(item => item.contactedId), ['old'], 'the 48 hour rule leaves the reply of this morning out');
+  assert.equal(stalled.items[0].company, 'Delta', 'stalled items carry the company too');
+});
+
+test('interested waiting says when the page is full, because older replies may be missing', async () => {
+  const rows = Array.from({ length: INTERESTED_WAITING_LIMIT }, (_, index) => ({
+    id: `c${index}`, replied_at: new Date(Date.now() - 3600000).toISOString(), reply_intent: 'positive', conversation_outbound_at: new Date().toISOString(), data: null,
+  }));
+  const waiting = await readInterestedWaiting(mockClient({ contacted_leads: { rows } }), scope);
+  assert.equal(waiting.items.length, 0);
+  assert.equal(waiting.truncated, true);
+});
+
+test('interested waiting stays generic on database errors', async () => {
+  await assert.rejects(readInterestedWaiting(mockClient({ contacted_leads: { error: { message: 'db down' } } }), scope),
+    /No se pudieron consultar los interesados sin respuesta/);
+});
+
+function recordingClient() {
+  const eqs: Array<{ table: string; key: string; value: unknown }> = [];
+  const client = { from: (table: string) => {
+    const chain: Record<string, (...args: any[]) => any> = {
+      select: () => chain, order: () => chain, limit: () => chain, in: () => chain, not: () => chain, is: () => chain, gte: () => chain, or: () => chain,
+      eq: (key: string, value: unknown) => { eqs.push({ table, key, value }); return chain; },
+      then: (resolve: (value: unknown) => void) => resolve({ data: [], error: null }),
+    };
+    return chain;
+  } } as never;
+  return { client, eqs };
+}
+
+test('the agenda reads only what the person sent; the team reads stay as they were', async () => {
+  const own = recordingClient();
+  await readInterestedWaiting(own.client, scope);
+  await readRepliesAttention(own.client, scope, { own: true });
+  const mine = own.eqs.filter(call => call.table === 'contacted_leads' && call.key === 'user_id');
+  assert.equal(mine.length, 4, 'the interested read and the three attention reads');
+  assert.ok(mine.every(call => call.value === scope.userId));
+  const team = recordingClient();
+  await readRepliesAttention(team.client, scope);
+  await readRepliesStalled(team.client, scope);
+  assert.equal(team.eqs.filter(call => call.table === 'contacted_leads' && call.key === 'user_id').length, 0, 'replies.attention and replies.stalled belong to the team');
 });

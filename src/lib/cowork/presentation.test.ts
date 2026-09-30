@@ -3,10 +3,10 @@ import test from 'node:test';
 import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
-  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
-  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
+  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions, coworkTurnChoices,
+  coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
-  coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview,
+  coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -105,6 +105,10 @@ test('quick replies come only from the finished answer and only in shapes that f
   // Turns saved before quick replies existed, and failed turns, have none.
   assert.deepEqual(coworkTurnSuggestions(completed({ reply: 'Listo.', document: null })), []);
   assert.deepEqual(coworkTurnSuggestions([{ sequence: 1, kind: 'run.failed', payload: { suggestions: [{ label: 'Sí', message: 'Sí' }] }, created_at: '2026-09-26T12:00:00Z' }]), []);
+  // The options of a closing question come from the finished answer too; turns saved before them have none.
+  assert.deepEqual(coworkTurnChoices(completed({ reply: '¿Qué segmentos?', document: null, question: '¿Qué segmentos?',
+    choices: { multiple: true, options: ['RR. HH.', 'Retail'] } })), { multiple: true, options: ['RR. HH.', 'Retail'] });
+  assert.equal(coworkTurnChoices(completed({ reply: 'Listo.', document: null })), null);
 });
 
 test('the closing question of a finished turn reads apart; older turns keep it in the reply', () => {
@@ -156,8 +160,15 @@ test('the plan of a turn checks off each step as its read completes, and the las
   // Each done step says what its read found; the others found nothing yet.
   const counted = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { items: [{}, {}, {}, {}] } });
   assert.deepEqual(coworkPlanProgress({ status: 'running' }, [plan, counted])?.map(step => step.found), [{ count: 4, label: 'contactos' }, null, null]);
+  // Who does each step (G4): the sent emails are the Researcher's; finding the contacts and answering are Cowork's own.
+  const progress = coworkPlanProgress({ status: 'running' }, [plan, leads])!;
+  assert.deepEqual(progress.map(step => step.agent?.name ?? null), [null, 'Investigadora', null]);
+  assert.equal(coworkPlanStepLine(progress[1]), 'Investigadora · veo qué correos ya enviaste');
+  assert.equal(coworkPlanStepLine(progress[0]), 'Reviso tus contactos');
+  assert.equal(describeCoworkObservation({ action: 'metrics.rates', input: '', result: {} }).agent?.name, 'Analista');
+  assert.equal(describeCoworkObservation({ action: 'leads.search', input: '', result: {} }).agent, null);
   // The side panel names the step in progress.
-  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Veo qué correos ya enviaste');
+  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Investigadora · veo qué correos ya enviaste');
   assert.equal(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).find(step => step.key === 'work')?.detail, '2 consultas');
 });
 
@@ -263,7 +274,7 @@ test('an approval says what happens and what does not, and where the proposal st
   // Every kind of action has its own sentences; an unknown one still reads plainly.
   for (const kind of ['save_contact', 'start_research', 'enrich_contact', 'request_draft', 'send_email', 'campaign_activate', 'campaign_pause', 'code_execute',
     'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2', 'crm_update_record', 'campaign_prepare_draft_v2',
-    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message']) {
+    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import']) {
     assert.notEqual(coworkProposalOutcome(effect(kind)).happens, 'Se ejecuta la acción propuesta.', kind);
   }
   assert.equal(coworkProposalOutcome(effect('otra_cosa')).not, 'No se hace nada más sin tu aprobación.');
@@ -278,6 +289,7 @@ test('an approval says what happens and what does not, and where the proposal st
   assert.deepEqual(coworkProposalLink({ ...effect('campaign_create'), state: 'done' }), { href: '/campaigns', label: 'Ver campañas' });
   assert.equal(coworkProposalLink({ ...effect('campaign_create'), state: 'running' }), null);
   assert.equal(coworkProposalLink({ ...effect('code_execute'), state: 'done' }), null);
+  assert.deepEqual(coworkProposalLink({ ...effect('contacts_import'), state: 'done' }), { href: '/saved/leads', label: 'Ver tus contactos' });
 });
 
 test('the Writer and the Reviewer read as one row each, at their latest step, and say how the review ended', () => {
@@ -325,4 +337,16 @@ test('the judge reads the answer as the Reviewer, and says whether it stood or w
   assert.equal(coworkAnswerReview(coworkAgentRows([agent({ agent: 'reviewer', state: 'done', label: 'Sin ajustes', outcome: 'clean', changes: [] })])), null);
   // The judge does not change what the cards say about their review.
   assert.equal(coworkDraftReview([reviewing, done('clean', 'Sin ajustes')]), null);
+});
+
+test('a held answer says which phase it is in, about the emails when it carries them', () => {
+  assert.equal(coworkHeldAnswerCopy('writing', []), 'Escribiendo la respuesta');
+  assert.equal(coworkHeldAnswerCopy(null, [{ type: 'table' }]), 'Escribiendo la respuesta');
+  // While it is reviewed, the line says why no text shows yet.
+  assert.equal(coworkHeldAnswerCopy('reviewing', []), 'Revisando la respuesta antes de mostrártela');
+  assert.equal(coworkHeldAnswerCopy('adjusting', []), 'Ajustando la respuesta tras revisarla');
+  assert.equal(coworkHeldAnswerCopy('writing', [{ type: 'email_draft' }]), 'Escribiendo el correo');
+  assert.equal(coworkHeldAnswerCopy('reviewing', [{ type: 'email_draft' }, { type: 'table' }]), 'Revisando el correo antes de mostrártelo');
+  assert.equal(coworkHeldAnswerCopy('reviewing', [{ type: 'sequence' }]), 'Revisando los correos antes de mostrártelos');
+  assert.equal(coworkHeldAnswerCopy('adjusting', [{ type: 'email_draft' }, { type: 'email_draft' }]), 'Ajustando los correos tras revisarlos');
 });

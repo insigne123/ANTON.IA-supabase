@@ -1,4 +1,7 @@
-import { COWORK_BLOCK_LIMIT, COWORK_SUGGESTION_LIMITS, coworkBlockSchema, coworkSameLine, type CoworkBlock, type CoworkSuggestion } from './contracts';
+import {
+  COWORK_BLOCK_LIMIT, COWORK_CHOICE_LIMITS, COWORK_SUGGESTION_LIMITS, coworkBlockSchema, coworkSameLine,
+  type CoworkBlock, type CoworkChoices, type CoworkSuggestion,
+} from './contracts';
 import { COWORK_GLOSSARY } from './decision-context';
 
 /** Deterministic last pass over what the person reads. The prompt asks for
@@ -54,6 +57,34 @@ export function coworkSuggestions(value: unknown): CoworkSuggestion[] {
     if (kept.length === COWORK_SUGGESTION_LIMITS.count) break;
   }
   return kept;
+}
+
+/**
+ * The closing question's answers to pick (V5): short plain labels, no IDs, codes or
+ * [placeholders], each once; 2 to 5 of them or none. A yes or a no is not a choice:
+ * «Sí» and «No» alone mean the question was a closed one, which quick replies answer.
+ */
+export function coworkChoices(value: unknown): CoworkChoices | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as { multiple?: unknown; options?: unknown };
+  if (!Array.isArray(raw.options)) return null;
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const item of raw.options) {
+    const trimmed = polishCoworkText(String(item ?? '')).replace(/\s+/g, ' ').trim()
+      .replace(/^(?:\*\*|`)(.+)(?:\*\*|`)$/, '$1').replace(/^(?:[-*•]|\d+[.)])\s+/, '').replace(/[;:,]+$/, '');
+    // A lone final period goes; the one of an abbreviation stays («RR. HH.», «S.A.»).
+    const label = /^[^.]*\.$/.test(trimmed) ? trimmed.slice(0, -1) : trimmed;
+    // «Otra…» repeats what the app already offers under the options («Otra respuesta»).
+    if (!label || label.length > COWORK_CHOICE_LIMITS.label || UUID.test(label) || /\[[^\]]{2,}\]/.test(label) || /^otr[oa]s?(?:\s|$)/i.test(label)) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push(label);
+    if (options.length === COWORK_CHOICE_LIMITS.max) break;
+  }
+  if (options.length < COWORK_CHOICE_LIMITS.min || options.every(option => /^(?:s[íi]|no)$/i.test(option))) return null;
+  return { multiple: raw.multiple === true, options };
 }
 
 /** What a card shows at most; longer results belong in a document or an export. */
@@ -121,9 +152,21 @@ export function coworkQuestion(value: unknown): string | null {
 
 /** A line without the questions it ends with: «Te dejo la lista. ¿La reviso?» keeps «Te dejo la lista.». */
 function withoutTrailingQuestions(line: string): string {
-  const sentences = line.match(/[^.!?…]+[.!?…]+[^\p{L}\p{N}¿¡(«"]*|[^.!?…]+$/gu) || [line];
-  while (sentences.length && /\?[^\p{L}\p{N}]*$/u.test(sentences[sentences.length - 1])) sentences.pop();
-  const kept = sentences.join('').trim();
+  let kept = line.trimEnd();
+  // A Spanish question opens with «¿»: it goes from there, so the periods of an abbreviation inside it
+  // («¿… tus contactos de RR. HH. con correo?») do not leave half of it behind.
+  while (/\?[^\p{L}\p{N}]*$/u.test(kept)) {
+    const open = kept.lastIndexOf('¿');
+    if (open < 0) break;
+    kept = kept.slice(0, open).replace(/[\s*_«"(]+$/u, '');
+  }
+  if (/\?[^\p{L}\p{N}]*$/u.test(kept)) {
+    // A question without «¿»: sentence by sentence, as before.
+    const sentences = kept.match(/[^.!?…]+[.!?…]+[^\p{L}\p{N}¿¡(«"]*|[^.!?…]+$/gu) || [kept];
+    while (sentences.length && /\?[^\p{L}\p{N}]*$/u.test(sentences[sentences.length - 1])) sentences.pop();
+    kept = sentences.join('');
+  }
+  kept = kept.trim();
   // Emphasis left open by a dropped «**¿…?**» is not content.
   return /[\p{L}\p{N}]/u.test(kept) ? kept : '';
 }
@@ -135,12 +178,14 @@ export const COWORK_YES_CHIP: CoworkSuggestion = { label: 'Sí, adelante', messa
 /** The reply as it is kept and read back (history, copies, exports): it ends
  * with the closing question, which also travels apart so the chat can show it
  * next to the quick replies. */
-export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown }>(
+export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown; choices?: unknown }>(
   answer: T,
-): T & { question: string | null; blocks: CoworkBlock[] | null; suggestions: CoworkSuggestion[] | null } {
+): T & { question: string | null; blocks: CoworkBlock[] | null; suggestions: CoworkSuggestion[] | null; choices: CoworkChoices | null } {
   const suggestions = coworkSuggestions(answer.suggestions);
   const blocks = coworkBlocks(answer.blocks);
   const question = coworkQuestion(answer.question);
+  // Options answer the closing question, so they need one; with them, the question is picked, not tapped «sí».
+  const choices = question ? coworkChoices(answer.choices) : null;
   let reply = polishCoworkText(answer.reply).trimEnd();
   if (question) {
     const lines = reply.split('\n');
@@ -162,7 +207,8 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     document: answer.document ? { ...answer.document, content: polishCoworkText(answer.document.content) } : null,
     question,
     blocks: blocks.length ? blocks : null,
-    suggestions: suggestions.length ? suggestions : question ? [COWORK_YES_CHIP] : null,
+    suggestions: choices ? null : suggestions.length ? suggestions : question ? [COWORK_YES_CHIP] : null,
+    choices,
   };
 }
 

@@ -34,8 +34,8 @@ export function coworkDraftDelta(previous: string, next: string): { from: number
 }
 
 /** Server-sent event frames for one run: `change` when its status or latest
- * event moves, `draft` with what the answer being written added, its cards and
- * whether it is being reviewed (only when readDraft is given), `end` once it
+ * event moves, `draft` with what the answer being written added, its cards,
+ * whether it is being reviewed and, held, its phase (only when readDraft is given), `end` once it
  * stops being active, a comment as heartbeat.
  * Ends when the reader leaves, the run is gone or unreadable, or the lifetime is up. */
 export async function* coworkStreamFrames(input: {
@@ -72,14 +72,15 @@ export async function* coworkStreamFrames(input: {
     if (drafts && input.readDraft && cursor.status === 'running') {
       try {
         const draft = await input.readDraft();
-        const shape = JSON.stringify([draft?.cards || [], Boolean(draft?.reviewing)]);
+        const shape = JSON.stringify([draft?.cards || [], Boolean(draft?.reviewing), draft?.phase ?? null]);
         if (draft && draft.updatedAt !== draftAt && (draft.text !== sent || shape !== sentShape)) {
           draftAt = draft.updatedAt;
           const delta = coworkDraftDelta(sent, draft.text);
           sent = draft.text;
           sentShape = shape;
           beat = now();
-          yield frame('draft', { ...delta, cards: draft.cards, reviewing: Boolean(draft.reviewing) });
+          // A held answer carries its phase (writing, reviewing, adjusting) and no text.
+          yield frame('draft', { ...delta, cards: draft.cards, reviewing: Boolean(draft.reviewing), ...(draft.phase ? { phase: draft.phase } : {}) });
         }
       } catch {
         // No draft table yet, or unreadable: the stream goes on as a doorbell only.
