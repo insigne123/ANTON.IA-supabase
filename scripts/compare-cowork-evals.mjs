@@ -29,10 +29,11 @@ const REFERENCE = ['supera', 'iguala', 'por_debajo', 'fuera_de_alcance'];
 
 function summarize({ label, files }) {
   const evals = files.map(load);
-  const outcomes = evals.flatMap(report => report.outcomes);
-  const judges = files.filter(file => existsSync(judgeFile(file))).map(file => load(judgeFile(file)));
-  const rows = judges.flatMap(report => report.rows);
-  const judged = new Map(rows.map(row => [`${row.id}#${row.attempt}`, row]));
+  const outcomes = evals.flatMap((report, sourceIndex) => report.outcomes.map(outcome => ({ ...outcome, sourceIndex })));
+  const judges = files.flatMap((file, sourceIndex) => existsSync(judgeFile(file)) ? [{ ...load(judgeFile(file)), sourceIndex }] : []);
+  const rows = judges.flatMap(report => report.rows.map(row => ({ ...row, sourceIndex: report.sourceIndex })));
+  // Attempts restart in separate evaluations: pair a judgement only with the file it belongs to.
+  const judged = new Map(rows.map(row => [`${row.sourceIndex}:${row.id}#${row.attempt}`, row]));
   const checks = outcomes.flatMap(outcome => outcome.checks);
   const verdicts = { buena: 0, mejorable: 0, mala: 0 };
   const dims = Object.fromEntries(DIMENSIONS.map(dimension => [dimension, []]));
@@ -47,7 +48,7 @@ function summarize({ label, files }) {
   const tokens = evals.reduce((sum, report) => sum + (report.usage || []).reduce((inner, item) => inner + (item?.totalTokens || 0), 0), 0);
   const perOp = new Map();
   for (const outcome of outcomes) {
-    const row = judged.get(`${outcome.id}#${outcome.attempt}`);
+    const row = judged.get(`${outcome.sourceIndex}:${outcome.id}#${outcome.attempt}`);
     const op = row?.op || outcome.id;
     const entry = perOp.get(op) || { id: outcome.id, op, block: row?.block || null, capability: row?.capability || null, star: Boolean(row?.star), runs: 0, passed: 0, checks: [0, 0], reference: [], verdicts: [] };
     entry.runs++;
