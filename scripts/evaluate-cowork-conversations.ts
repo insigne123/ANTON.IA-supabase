@@ -18,6 +18,9 @@
 // COWORK_JUDGE_MODEL picks its model (COWORK_MODEL by default); grade the result with
 // judge-cowork-conversations.ts and a different --judge-model.
 //
+// --cases=axis-* runs the 20 ★ operations of the AXIS package (scripts/fixtures/cowork-axis-paquete.ts); grade them with
+// judge-cowork-conversations.ts, which also compares each answer with what the previous AI achieved.
+//
 // To compare prompts, run it on the previous commit and on this one with the same flags.
 import { writeFileSync } from 'node:fs';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
@@ -29,18 +32,23 @@ import { runCoworkWriter } from '../src/lib/cowork/writer';
 import { COWORK_JUDGE_TURN_INSTRUCTIONS, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 
-// Production conversations first, then the marketing use cases (email and LinkedIn)
-// and every button on the Cowork home.
-const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
+// Production conversations first, then the marketing use cases (email and LinkedIn),
+// every button on the Cowork home and the 20 ★ operations of the AXIS package (axis-*).
+const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS];
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
     throw new Error('Requires --live and explicit OPENAI_API_KEY/COWORK_MODEL. The offline check is scripts/cowork-conversation-corpus.test.ts.');
   }
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const selected = arg('cases')?.split(',').filter(Boolean) || CORPUS.map(entry => entry.id);
+  // `--cases=axis-*` takes every case whose id starts with «axis-».
+  const selected = arg('cases')?.split(',').filter(Boolean).flatMap(token => token.endsWith('*')
+    ? CORPUS.filter(entry => entry.id.startsWith(token.slice(0, -1))).map(entry => entry.id) : [token])
+    // Without --cases, the corpus as it always was: the AXIS operations are asked for by name.
+    || CORPUS.filter(entry => !entry.axis).map(entry => entry.id);
   const unknown = selected.filter(id => !CORPUS.some(entry => entry.id === id));
   if (unknown.length) throw new Error(`Unknown cases: ${unknown.join(', ')}`);
   const repeat = Math.max(1, Math.min(5, Number(arg('repeat') || 1)));

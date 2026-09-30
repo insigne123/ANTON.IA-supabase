@@ -166,6 +166,9 @@ export type CorpusCase = {
   production?: { run: string; latencySeconds: number; scores: { comprension: number; veracidad: number; utilidad: number; claridad: number; friccion: number }; problem: string };
   /** For cases written from a use case rather than copied from production: why it exists. */
   origin?: string;
+  /** For the cases of the AXIS package (cowork-axis-paquete.ts): the operation, what the app can do about it, what the previous AI
+   * had to do and what it achieved and failed at, so a run can be measured against it. */
+  axis?: { op: string; block: string; capability: 'cubierta' | 'parcial' | 'faltante'; mustDo: string[]; reference: { result: string; failed: string } };
   /** Tool results and saved emails of this case's account; the production workspace by default. */
   world?: CorpusWorld;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
