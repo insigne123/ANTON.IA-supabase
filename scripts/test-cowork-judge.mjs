@@ -5,11 +5,12 @@
 import { build } from 'esbuild';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const keys = ['COWORK_ENABLED', 'COWORK_STREAMING_ENABLED', 'COWORK_JUDGE_ENABLED', 'COWORK_WRITER_ENABLED', 'COWORK_MODEL_BUDGET_ENABLED', 'COWORK_JUDGE_MODEL', 'COWORK_MODEL'];
+const keys = ['COWORK_ENABLED', 'COWORK_STREAMING_ENABLED', 'COWORK_JUDGE_ENABLED', 'COWORK_WRITER_ENABLED', 'COWORK_CONTACTS_IMPORT_ENABLED', 'COWORK_MODEL_BUDGET_ENABLED', 'COWORK_JUDGE_MODEL', 'COWORK_MODEL'];
 const environment = Object.fromEntries(keys.map(key => [key, process.env[key]]));
 Object.assign(process.env, { COWORK_ENABLED: 'true', COWORK_STREAMING_ENABLED: 'true', COWORK_MODEL_BUDGET_ENABLED: 'true', COWORK_MODEL: 'coordinator-model',
   COWORK_JUDGE_MODEL: 'judge-model' });
 delete process.env.COWORK_WRITER_ENABLED;
+delete process.env.COWORK_CONTACTS_IMPORT_ENABLED;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const chips = message => [{ label: 'Sí', message }];
@@ -37,7 +38,7 @@ state.generate = async opts => {
   const who = opts.systemPrompt.startsWith('Eres un evaluador estricto') ? 'judge' : opts.systemPrompt.startsWith('Eres la Redactora') ? 'writer'
     : opts.systemPrompt.startsWith('Eres la Revisora') ? 'reviewer' : 'coordinator';
   const data = state.script.shift();
-  state.generations.push({ who, model: opts.openAiModel, streamed: typeof opts.onPartial === 'function' });
+  state.generations.push({ who, model: opts.openAiModel, streamed: typeof opts.onPartial === 'function', rules: opts.systemPrompt });
   if (data instanceof Error) throw data;
   if (opts.onPartial) {
     const json = JSON.stringify(data);
@@ -129,6 +130,14 @@ try {
   assert.deepEqual(kept.who, ['coordinator:streamed', 'judge']);
   assert.deepEqual(kept.steps.map(line), ['judge:working:Revisando la respuesta', 'judge:done:Sin ajustes']);
   assert.ok(kept.finished.p_payload.reply.startsWith(offered.answer.reply));
+  // The judge reads the rules the coordinator works with: the person imports while contacts.import is off,
+  // and Cowork proposes the import once it is on (F4).
+  assert.match(state.generations[1].rules, /un correo que no está guardado lo importa el usuario/);
+  process.env.COWORK_CONTACTS_IMPORT_ENABLED = 'true';
+  await run([offered, clean]);
+  assert.match(state.generations[1].rules, /importa a las personas de un archivo subido/);
+  assert.doesNotMatch(state.generations[1].rules, /lo importa el usuario/);
+  delete process.env.COWORK_CONTACTS_IMPORT_ENABLED;
 
   // The correction fails: the judged answer stands and the row says it could not fix it.
   const failed = await run([offered, worth, new Error('model timeout')]);
@@ -161,7 +170,7 @@ try {
   assert.deepEqual(off.who, ['coordinator:streamed']);
   assert.deepEqual(off.steps, []);
   assert.ok(off.finished.p_payload.reply.startsWith(offered.answer.reply));
-  console.log('PASS: the judge reads the coordinator\'s answer, its correction may read once and replaces it, a failed correction or call lets the answer stand, each step is recorded, the ledger falls back to the coordinator\'s role, the Writer\'s answers are not judged, and off nothing changes.');
+  console.log('PASS: the judge reads the coordinator\'s answer, its correction may read once and replaces it, a failed correction or call lets the answer stand, each step is recorded, the ledger falls back to the coordinator\'s role, the Writer\'s answers are not judged, it reads whether importing is on, and off nothing changes.');
 } finally {
   delete globalThis.__coworkJudge;
   for (const [key, value] of Object.entries(environment)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }

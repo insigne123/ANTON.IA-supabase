@@ -263,7 +263,7 @@ test('an approval says what happens and what does not, and where the proposal st
   // Every kind of action has its own sentences; an unknown one still reads plainly.
   for (const kind of ['save_contact', 'start_research', 'enrich_contact', 'request_draft', 'send_email', 'campaign_activate', 'campaign_pause', 'code_execute',
     'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2', 'crm_update_record', 'campaign_prepare_draft_v2',
-    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message']) {
+    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import']) {
     assert.notEqual(coworkProposalOutcome(effect(kind)).happens, 'Se ejecuta la acción propuesta.', kind);
   }
   assert.equal(coworkProposalOutcome(effect('otra_cosa')).not, 'No se hace nada más sin tu aprobación.');
@@ -278,6 +278,7 @@ test('an approval says what happens and what does not, and where the proposal st
   assert.deepEqual(coworkProposalLink({ ...effect('campaign_create'), state: 'done' }), { href: '/campaigns', label: 'Ver campañas' });
   assert.equal(coworkProposalLink({ ...effect('campaign_create'), state: 'running' }), null);
   assert.equal(coworkProposalLink({ ...effect('code_execute'), state: 'done' }), null);
+  assert.deepEqual(coworkProposalLink({ ...effect('contacts_import'), state: 'done' }), { href: '/saved/leads', label: 'Ver tus contactos' });
 });
 
 test('the Writer and the Reviewer read as one row each, at their latest step, and say how the review ended', () => {

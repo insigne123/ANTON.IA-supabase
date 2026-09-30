@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
-  coworkJudgeFix, coworkShownFromAnswer, COWORK_JUDGE_TURN_INSTRUCTIONS, type CoworkJudgement,
+  coworkJudgeFix, coworkJudgeInstructions, coworkShownFromAnswer, COWORK_JUDGE_TURN_INSTRUCTIONS, type CoworkJudgement,
 } from './judge';
 
 const judgement = (scores: number[], veredicto: CoworkJudgement['veredicto'] = 'mejorable'): CoworkJudgement => ({
@@ -100,4 +100,25 @@ test('the judge in the turn keeps the rubric and is stricter with offering what 
   assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /Sé estricto con la fricción/);
   assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /No es fricción ofrecer una acción que necesita aprobación/);
   assert.doesNotMatch(COWORK_JUDGE_INSTRUCTIONS, /Sé estricto con la fricción/);
+});
+
+test('the judge reads importing as the turn ran it: the person imports with the flag off, Cowork proposes it with the flag on', () => {
+  // Off (the default), offline and in the turn, the rules read as before F4.
+  assert.equal(coworkJudgeInstructions(), COWORK_JUDGE_INSTRUCTIONS);
+  assert.equal(coworkJudgeInstructions({ inTurn: true }), COWORK_JUDGE_TURN_INSTRUCTIONS);
+  const offRule = 'Cowork no crea contactos a partir de un correo: solo guarda personas encontradas con el proveedor, y un correo que no está guardado lo importa el usuario.';
+  assert.ok(COWORK_JUDGE_INSTRUCTIONS.includes(offRule));
+  // On, only that rule changes: Cowork imports the people of a file with its card, and sending the person to do it by hand is the miss.
+  const on = coworkJudgeInstructions({ contactsImport: true });
+  const [before, after] = COWORK_JUDGE_INSTRUCTIONS.split(offRule);
+  assert.ok(on.startsWith(before) && on.endsWith(after));
+  assert.doesNotMatch(on, /lo importa el usuario/);
+  assert.match(on, /importa a las personas de un archivo subido \(CSV, Excel o lista JSON\) con una tarjeta de aprobación que muestra quiénes entran/);
+  assert.match(on, /deja fuera sola a quienes ya estaban guardados/);
+  // The card's figures are the server's, so a reply that says another figure is the one that is wrong.
+  assert.match(on, /las calcula el servidor contra el archivo completo y los contactos guardados: son datos/);
+  assert.match(on, /lo correcto es proponer esa importación, no mandarlo a hacerlo a mano; si solo pregunta qué trae el archivo o a quién escribir primero, lo correcto es responder eso/);
+  const inTurn = coworkJudgeInstructions({ contactsImport: true, inTurn: true });
+  assert.ok(inTurn.startsWith(on));
+  assert.match(inTurn, /Sé estricto con la fricción/);
 });

@@ -66,10 +66,11 @@ export async function stageCoworkCampaignDefinition(
  * reviewed, so the approval card and its label stay true. Creation reads the
  * staged definition when it runs, so the edit is what gets created (paused;
  * activating it is another review bound to its own hash). The edit is recorded
- * as a run event, without the text.
+ * as a run event, without the text. With M4 applied it is one transaction with
+ * the approval, and an edit over a version another tab changed is refused.
  */
 export async function editCoworkCampaignMessages(
-  auth: AuthContext, runId: string, edits: CoworkCampaignEdit,
+  auth: AuthContext, runId: string, edits: CoworkCampaignEdit, expectedHash?: string,
 ): Promise<{ changed: number[] }> {
   requireBulkEnabled();
   const state = await getCoworkRun(auth, runId);
@@ -83,8 +84,27 @@ export async function editCoworkCampaignMessages(
   const row = await admin.from('cowork_campaign_definitions').select('definition')
     .eq('run_id', runId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
   if (row.error || !row.data) throw new CoworkCampaignEditRefused('La definición de la campaña ya no está disponible.', 409);
+  // The version in the browser may already be stale before this server request starts.
+  if (!expectedHash || canonicalSha256(row.data.definition) !== expectedHash) {
+    throw new CoworkCampaignEditRefused('La campaña cambió mientras la editabas: vuelve a abrirla y repite el cambio.', 409);
+  }
   const { next, changed } = coworkEditedCampaignDefinition(row.data.definition, edits);
   if (!changed.length) return { changed };
+  // One transaction with the approval (M4, cowork_edit_campaign_definition): the edit lands only while the
+  // proposal is pending and only over the version read above, and records its event. Until that migration
+  // is applied, the two steps of before.
+  const atomic = await admin.rpc('cowork_edit_campaign_definition', {
+    p_run_id: runId, p_user_id: auth.user.id, p_organization_id: auth.organizationId,
+    p_expected: row.data.definition, p_definition: next, p_changed: changed.map(index => index + 1),
+  });
+  if (!atomic.error) {
+    if (atomic.data === 'edited') return { changed };
+    if (atomic.data === 'stale') throw new CoworkCampaignEditRefused('La campaña cambió mientras la editabas: vuelve a abrirla y repite el cambio.', 409);
+    throw new CoworkCampaignEditRefused('Esta propuesta ya no se puede editar: ya se aprobó, se descartó o cambió.', 409);
+  }
+  if (!['PGRST202', '42883'].includes(String((atomic.error as { code?: string }).code || ''))) {
+    throw new Error('No se pudo guardar la edición de la campaña.');
+  }
   const updated = await admin.from('cowork_campaign_definitions').update({ definition: next })
     .eq('run_id', runId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).select('run_id').maybeSingle();
   if (updated.error || !updated.data) throw new Error('No se pudo guardar la edición de la campaña.');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusShownAnswer, corpusStageImport, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -236,6 +236,18 @@ Object.assign(IDEAL, {
           body: 'Hola Felipe,\nEn Yago revisamos antecedentes laborales de postulantes en el Poder Judicial de forma automática con AXIS. Para un equipo de reclutamiento como el tuyo, son horas menos por candidato.\n¿Te sirve que te lo muestre en 15 minutos esta semana?\nSaludos,\nNicolás' }] }),
 } satisfies Record<string, CorpusDecider>);
 
+/** Importing the people of a file (F4): read it, then propose the import; its card shows who comes in. */
+const importing = (file: string, reply: string) => coworkDecisionSchema.parse({ action: 'contacts.import', query: null, leadId: null,
+  contactsImport: { file, columns: null }, answer: { reply, document: null } });
+Object.assign(IDEAL, {
+  'importar-feria': async context => !seen(context, 'files.read') ? read('files.read', FAIR)
+    : importing(FAIR, 'Propongo guardar en tus contactos a las personas de la lista de la feria que aún no están; las que ya tenías quedan fuera. Revisa en la tarjeta quiénes entran.'),
+  'importar-excel': async context => !seen(context, 'files.read') ? read('files.read', 'prospectos.xlsx')
+    : importing('prospectos.xlsx', 'Propongo guardar en tus contactos a los prospectos del Excel (hoja Prospectos) que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.'),
+  'importar-para-escribir': async context => context.observations.length === 0 ? parallel([{ action: 'files.read', input: FAIR }, { action: 'leads.search', input: '' }])
+    : importing(FAIR, 'Una campaña solo puede ir a contactos guardados, así que primero propongo guardar a los de la feria que aún no están. Después armo la campaña con los que tienen correo.'),
+} satisfies Record<string, CorpusDecider>);
+
 const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
 
 test('every corpus case has an ideal turn that passes all its checks through the real loop', async () => {
@@ -331,4 +343,26 @@ test('with the judge on, an answer that offers a read it could do is fixed in th
   assert.deepEqual(outcome.result.actions, ['metrics.rates', 'campaigns.list']);
   assert.deepEqual({ ...outcome.result.judgeInTurn, scores: undefined, problemas: undefined },
     { veredicto: 'mala', scores: undefined, problemas: undefined, canRead: true, asked: true, fixed: true });
+});
+
+test('an import is staged as the server stages it: the judge sees the card, the model reads the same refusals', async () => {
+  const entry = FILE_CORPUS.find(item => item.id === 'importar-feria')!;
+  const read = entry.world!.read!;
+  const { label, card } = corpusStageImport({ file: 'asistentes-feria-rrhh.csv', columns: null }, read);
+  assert.equal(label, 'Importar 6 contactos de asistentes-feria-rrhh.csv (2 ya estaban)');
+  // Marcela and Camila were saved: 6 of the 8 come in, and the card names who.
+  assert.equal(card.entran, '6 contactos nuevos de asistentes-feria-rrhh.csv');
+  assert.equal(card.quedanFuera, '2 ya estaban en tus contactos');
+  assert.deepEqual(card.columnas, ['Nombre ← Nombre', 'Correo ← Correo', 'Cargo ← Cargo', 'Empresa ← Empresa']);
+  assert.equal(card.contactos[0], 'Tomás Riquelme · Jefe de Reclutamiento · Walmart Chile · triquelme@walmart.cl');
+  assert.equal(card.contactos.filter(line => line.endsWith('Sin correo')).length, 2);
+  assert.equal(card.boton, 'Importar 6 contactos');
+  // What the judge reads is that card, not only the file name.
+  const outcome = await runCorpusCase(entry, IDEAL[entry.id]);
+  assert.deepEqual(corpusShownAnswer(outcome.result).proposal?.detail, card);
+  assert.equal(outcome.result.proposal?.label, label);
+  // The server refuses what it cannot import, and the model reads why.
+  assert.throws(() => corpusStageImport({ file: 'brief-axis.pdf', columns: null }, read), /este archivo no trae una tabla/);
+  assert.throws(() => corpusStageImport({ file: 'no-existe.csv', columns: null }, read), /No encontré «no-existe.csv» entre los archivos que subiste/);
+  assert.throws(() => corpusStageImport({ file: 'asistentes-feria-rrhh.csv', columns: { name: 'Contacto' } }, read), /no tiene la columna «Contacto»/);
 });
