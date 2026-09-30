@@ -15,15 +15,15 @@ export const MARKETING_LEAD = { marcela: id(101), felipe: id(102), andrea: id(10
 
 const contacts = [
   { id: MARKETING_LEAD.marcela, name: 'Marcela Rojas', title: 'Gerente de Personas', company: 'Sodexo Chile', email: 'mrojas@sodexo.cl',
-    linkedinUrl: 'https://www.linkedin.com/in/marcela-r', status: 'saved', created_at: '2026-09-20T14:00:00Z' },
+    linkedin_url: 'https://www.linkedin.com/in/marcela-r', status: 'saved', created_at: '2026-09-20T14:00:00Z' },
   { id: MARKETING_LEAD.felipe, name: 'Felipe Muñoz', title: 'Jefe de Reclutamiento', company: 'Securitas Chile', email: 'fmunoz@securitas.cl',
-    linkedinUrl: 'https://www.linkedin.com/in/felipe-m', status: 'saved', created_at: '2026-09-19T15:30:00Z' },
+    linkedin_url: 'https://www.linkedin.com/in/felipe-m', status: 'saved', created_at: '2026-09-19T15:30:00Z' },
   { id: MARKETING_LEAD.andrea, name: 'Andrea Vega', title: 'HR Business Partner', company: 'Falabella', email: null,
-    linkedinUrl: 'https://www.linkedin.com/in/andrea-v', status: 'saved', created_at: '2026-09-18T12:10:00Z' },
+    linkedin_url: 'https://www.linkedin.com/in/andrea-v', status: 'saved', created_at: '2026-09-18T12:10:00Z' },
   { id: MARKETING_LEAD.rodrigo, name: 'Rodrigo Pino', title: 'Gerente de Operaciones', company: 'Transportes Andes', email: 'rpino@tandes.cl',
-    linkedinUrl: null, status: 'saved', created_at: '2026-09-17T10:00:00Z' },
+    linkedin_url: null, status: 'saved', created_at: '2026-09-17T10:00:00Z' },
   { id: MARKETING_LEAD.camila, name: 'Camila Fuentes', title: 'Analista de Selección', company: 'Adecco', email: 'cfuentes@adecco.cl',
-    linkedinUrl: 'https://www.linkedin.com/in/camila-f', status: 'saved', created_at: '2026-09-16T09:45:00Z' },
+    linkedin_url: 'https://www.linkedin.com/in/camila-f', status: 'saved', created_at: '2026-09-16T09:45:00Z' },
 ];
 const PEOPLE_TEAMS = /rr\.?\s*hh|recursos humanos|personas|selecci|reclut|talento|\bhr\b|human/i;
 const isPeopleTeam = (lead: typeof contacts[number]) => PEOPLE_TEAMS.test(lead.title);

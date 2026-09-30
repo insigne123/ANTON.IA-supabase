@@ -176,10 +176,10 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
       onlyKnown('no inventa cifras', known(100)),
       noSend, endsAsking)});
 
-  const a8People = [person(AXIS_LEAD.jorge, 'Jorge Lagos', 'Jefe de Reclutamiento', 'Constructora Pehuén', 'jlagos@pehuen.cl', { linkedinUrl: 'https://www.linkedin.com/in/jorge-lagos' }),
-    person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedinUrl: 'https://www.linkedin.com/in/carla-ibanez' }),
-    person(AXIS_LEAD.felipe, 'Felipe Araya', 'Head of Recruitment', 'Ingeniería Andes', 'faraya@ingandes.cl', { linkedinUrl: 'https://www.linkedin.com/in/felipe-araya' }),
-    person(AXIS_LEAD.marcela, 'Marcela Rojas', 'Líder de Reclutamiento', 'Servicios Norte', 'mrojas@sernorte.cl', { linkedinUrl: 'https://www.linkedin.com/in/marcela-rojas' })];
+  const a8People = [person(AXIS_LEAD.jorge, 'Jorge Lagos', 'Jefe de Reclutamiento', 'Constructora Pehuén', 'jlagos@pehuen.cl', { linkedin_url: 'https://www.linkedin.com/in/jorge-lagos' }),
+    person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedin_url: 'https://www.linkedin.com/in/carla-ibanez' }),
+    person(AXIS_LEAD.felipe, 'Felipe Araya', 'Head of Recruitment', 'Ingeniería Andes', 'faraya@ingandes.cl', { linkedin_url: 'https://www.linkedin.com/in/felipe-araya' }),
+    person(AXIS_LEAD.marcela, 'Marcela Rojas', 'Líder de Reclutamiento', 'Servicios Norte', 'mrojas@sernorte.cl', { linkedin_url: 'https://www.linkedin.com/in/marcela-rojas' })];
   add({ id: 'axis-a8-perfil-real', title: 'Verificar el perfil real antes de invitar',
     request: 'Antes de invitarlos, revisa los perfiles de LinkedIn de los primeros 36 contactos de la lista y dime cuáles no sirven: que el cargo y la empresa sean los que dice la base.',
     axis: meta('A8', 'A · Investigar y armar audiencia', 'faltante',
@@ -209,7 +209,7 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
       { result: 'El mensaje corregido conservó su estructura y su voz; los cambios quedaron explicados uno a uno y los borradores de LinkedIn salieron con el mismo estilo.',
         failed: 'Ninguna en particular: el valor estuvo en corregir solo lo que estaba mal.' }),
     world: w({
-      'leads.search': search([person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedinUrl: 'https://www.linkedin.com/in/patricio-soto' })]),
+      'leads.search': search([person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedin_url: 'https://www.linkedin.com/in/patricio-soto' })]),
     }),
     checks: commonWith(
       says('nombra lo que el mensaje hace bien y lo conserva', /(pedido|reunion de 10 minutos)[^.]{0,80}(linea 2|segunda linea)|(linea 2|segunda linea)[^.]{0,80}(pedido|reunion)/, /(conserv|mantengo|dejo igual|sigue igual|queda igual)/),
@@ -493,12 +493,12 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
   // ── E · Ejecutar por LinkedIn
   const liUrl = (slug: string) => `https://www.linkedin.com/in/${slug}/`;
   const e1People = [
-    person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedinUrl: liUrl('patricio-soto') }),
-    person(AXIS_LEAD.ana, 'Ana Ruiz', 'Analista de Selección', 'Alimentos del Valle', 'aruiz@delvalle.cl', { linkedinUrl: liUrl('ana-ruiz') }),
-    person(AXIS_LEAD.jorge, 'Jorge Lagos', 'Jefe de Reclutamiento', 'Constructora Pehuén', 'jlagos@pehuen.cl', { linkedinUrl: liUrl('jorge-lagos') }),
-    person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedinUrl: liUrl('carla-ibanez') }),
-    person(AXIS_LEAD.felipe, 'Felipe Araya', 'Subgerente de RR. HH.', 'INGENIERÍA ANDES LTDA.', 'faraya@ingandes.cl', { linkedinUrl: liUrl('felipe-araya') }),
-    person(AXIS_LEAD.gerente, 'Héctor Vidal', 'Gerente Legal', 'Casino Central', 'hvidal@casinocentral.cl', { linkedinUrl: liUrl('hector-vidal') })];
+    person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedin_url: liUrl('patricio-soto') }),
+    person(AXIS_LEAD.ana, 'Ana Ruiz', 'Analista de Selección', 'Alimentos del Valle', 'aruiz@delvalle.cl', { linkedin_url: liUrl('ana-ruiz') }),
+    person(AXIS_LEAD.jorge, 'Jorge Lagos', 'Jefe de Reclutamiento', 'Constructora Pehuén', 'jlagos@pehuen.cl', { linkedin_url: liUrl('jorge-lagos') }),
+    person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedin_url: liUrl('carla-ibanez') }),
+    person(AXIS_LEAD.felipe, 'Felipe Araya', 'Subgerente de RR. HH.', 'INGENIERÍA ANDES LTDA.', 'faraya@ingandes.cl', { linkedin_url: liUrl('felipe-araya') }),
+    person(AXIS_LEAD.gerente, 'Héctor Vidal', 'Gerente Legal', 'Casino Central', 'hvidal@casinocentral.cl', { linkedin_url: liUrl('hector-vidal') })];
   add({ id: 'axis-e1-lista-linkedin', title: 'Construir la lista de LinkedIn con un mensaje por persona',
     request: 'Arma el archivo de las personas que vamos a invitar por LinkedIn: día de tanda (20 por día), tipo (decisor o referidor), URL del perfil, el mensaje que les mando al aceptar y estado. Dame solo el link simple del perfil.',
     axis: meta('E1', 'E · Ejecutar por LinkedIn', 'cubierta',
@@ -533,12 +533,12 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
     return { canonical_url: liUrl(slug), display_name: index < 6 ? ['Patricio Soto', 'Elisa Mora', 'Daniel Rey', 'Bruno Paz', 'Rodrigo Pino', 'Tomás Rivas'][index] : personName(index + 60), first_seen: first, last_seen: '2026-09-24T22:00:00Z' };
   });
   const e2People = [
-    person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedinUrl: liUrl('patricio-soto') }),
-    person(AXIS_REST.elisa, 'Elisa Mora', 'Reclutadora independiente', 'Independiente', null, { linkedinUrl: liUrl('elisa-mora') }),
-    person(AXIS_REST.daniel, 'Daniel Rey', 'Director de Alianzas', 'SoftRH', 'drey@softrh.cl', { linkedinUrl: liUrl('daniel-rey') }),
-    person(AXIS_REST.bruno, 'Bruno Paz', 'Coordinador de Capacitación', 'Fundación Empresarial de Capacitación', 'bpaz@fundacionemp.cl', { linkedinUrl: liUrl('bruno-paz') }),
-    person(AXIS_REST.rodrigo, 'Rodrigo Pino', 'Gerente General', 'Grupo Sureño', 'rpino@gruposureno.cl', { linkedinUrl: liUrl('rodrigo-pino') }),
-    person(AXIS_REST.tomas, 'Tomás Rivas', 'Ingeniero de Software', 'Tecnología Sur', null, { linkedinUrl: liUrl('tomas-rivas') })];
+    person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedin_url: liUrl('patricio-soto') }),
+    person(AXIS_REST.elisa, 'Elisa Mora', 'Reclutadora independiente', 'Independiente', null, { linkedin_url: liUrl('elisa-mora') }),
+    person(AXIS_REST.daniel, 'Daniel Rey', 'Director de Alianzas', 'SoftRH', 'drey@softrh.cl', { linkedin_url: liUrl('daniel-rey') }),
+    person(AXIS_REST.bruno, 'Bruno Paz', 'Coordinador de Capacitación', 'Fundación Empresarial de Capacitación', 'bpaz@fundacionemp.cl', { linkedin_url: liUrl('bruno-paz') }),
+    person(AXIS_REST.rodrigo, 'Rodrigo Pino', 'Gerente General', 'Grupo Sureño', 'rpino@gruposureno.cl', { linkedin_url: liUrl('rodrigo-pino') }),
+    person(AXIS_REST.tomas, 'Tomás Rivas', 'Ingeniero de Software', 'Tecnología Sur', null, { linkedin_url: liUrl('tomas-rivas') })];
   add({ id: 'axis-e2-red-linkedin', title: 'Revisar la red y clasificar los contactos',
     request: 'Revisa mi red de LinkedIn para decirme a quiénes deberíamos contactar por el producto y qué mensaje.',
     axis: meta('E2', 'E · Ejecutar por LinkedIn', 'parcial',
@@ -578,9 +578,9 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
         followupItem('Felipe Araya', 'felipe-araya', 3, false, ['cooldown_active'])], returned: 6,
         limitation: 'Elegibilidad base sin el contenido nuevo: el segundo mensaje debe aportar información distinta, verificada en su revisión.' },
       'leads.search': search([
-        person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedinUrl: liUrl('patricio-soto') }),
-        person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedinUrl: liUrl('carla-ibanez') }),
-        person(AXIS_REST.rodrigo, 'Rodrigo Pino', 'Gerente General', 'Grupo Sureño', 'rpino@gruposureno.cl', { linkedinUrl: liUrl('rodrigo-pino') })]),
+        person(AXIS_LEAD.patricio, 'Patricio Soto', 'Gerente de Personas', 'Constructora Pehuén', 'psoto@pehuen.cl', { linkedin_url: liUrl('patricio-soto') }),
+        person(AXIS_LEAD.carla, 'Carla Ibáñez', 'Jefa de Selección', 'Inmobiliaria Sur', 'cibanez@inmosur.cl', { linkedin_url: liUrl('carla-ibanez') }),
+        person(AXIS_REST.rodrigo, 'Rodrigo Pino', 'Gerente General', 'Grupo Sureño', 'rpino@gruposureno.cl', { linkedin_url: liUrl('rodrigo-pino') })]),
     }),
     checks: commonWith(
       reads('lee los candidatos a segundo contacto con sus exclusiones', 'linkedin.followups'),
@@ -595,9 +595,9 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
       noSend, endsAsking)});
 
   const e6People = [
-    person(AXIS_REST.bruno, 'Bruno Paz', 'Coordinador de Capacitación', 'Fundación Empresarial de Capacitación', 'bpaz@fundacionemp.cl', { linkedinUrl: liUrl('bruno-paz') }),
-    person(AXIS_REST.elisa, 'Elisa Mora', 'Socia', 'Consultora de Personas Andes', 'emora@personasandes.cl', { linkedinUrl: liUrl('elisa-mora') }),
-    person(AXIS_REST.daniel, 'Daniel Rey', 'Director de Outsourcing de TI', 'Soluciones TI Austral', 'drey@tiaustral.cl', { linkedinUrl: liUrl('daniel-rey') })];
+    person(AXIS_REST.bruno, 'Bruno Paz', 'Coordinador de Capacitación', 'Fundación Empresarial de Capacitación', 'bpaz@fundacionemp.cl', { linkedin_url: liUrl('bruno-paz') }),
+    person(AXIS_REST.elisa, 'Elisa Mora', 'Socia', 'Consultora de Personas Andes', 'emora@personasandes.cl', { linkedin_url: liUrl('elisa-mora') }),
+    person(AXIS_REST.daniel, 'Daniel Rey', 'Director de Outsourcing de TI', 'Soluciones TI Austral', 'drey@tiaustral.cl', { linkedin_url: liUrl('daniel-rey') })];
   add({ id: 'axis-e6-gremios-socios', title: 'Proponer a gremios y socios',
     request: 'Escríbeles a Bruno Paz, coordinador de una fundación empresarial de capacitación; a Elisa Mora, de una consultora de personas; y a Daniel Rey, director de outsourcing de TI. Ninguno es cliente directo.',
     axis: meta('E6', 'E · Ejecutar por LinkedIn', 'cubierta',

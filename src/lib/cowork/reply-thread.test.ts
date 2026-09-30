@@ -67,6 +67,8 @@ test('when the account answered is given, and what to do with each advice is sai
   assert.match(coworkReplyThread(replied({ reply_intent: 'unsubscribe' }), NOW).next, /no redactes nada/);
   assert.match(coworkReplyThread(replied({ reply_intent: 'negative' }), NOW).next, /no insistas/);
   assert.match(coworkThreadNext('already_answered', null), /Ya se le respondió, después de su mensaje/);
+  // The next person offered is the one of most value: who asked for a meeting goes before who only showed interest, and the order of the day's list rules.
+  assert.match(coworkThreadNext('already_answered', null), /la de mayor valor: quien pidió una reunión va antes que quien solo mostró interés, y el orden de la lista del día manda/);
 });
 
 test('automatic replies, unsubscribes and clear refusals are not answered like an interested person', () => {
@@ -168,6 +170,8 @@ test('with sending on, the advice to reply says to propose it with email.reply_t
   assert.match(on, /email\.reply_thread/);
   assert.match(on, /replyThread \{contactedId/);
   assert.match(on, /solo si el usuario la aprueba en la tarjeta, y no digas que ya se envió/);
+  // The answer tells what the person asked, what is left for the user to decide and that the card is where they approve.
+  assert.match(on, /En reply: qué pidió la persona, lo que queda para que el usuario decida \(si preguntó precio o plazos, dilo con esas palabras\) y que la revisa y aprueba en la tarjeta antes de que salga/);
   assert.doesNotMatch(on, /Cowork todavía no envía dentro del hilo/);
   // The same content rules apply to the proposed text as to the draft.
   for (const next of [off, on]) {

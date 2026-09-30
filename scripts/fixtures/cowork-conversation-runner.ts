@@ -108,6 +108,20 @@ export function corpusStageReply(input: CoworkReplyThreadInput, read: (action: s
   return { label: `Responder a ${who} en su hilo`, to, subject: coworkReplySubject(input.subject), body: coworkReplyBody(input.body) };
 }
 
+/** The server's sentence when a saved contact has no profile the extension can open (server/cowork/linkedin-jobs.ts, linkedinProfileOf). */
+const NO_LINKEDIN_PROFILE = 'El contacto no tiene una URL de perfil LinkedIn válida.';
+
+/**
+ * The single LinkedIn action as the server stages it: the saved contact must have a profile the extension can open, and without one the
+ * server refuses with its own sentence, which the loop hands back to the model. A world that does not model the profile of its contacts
+ * (no linkedin_url on them) is taken as it is: only a contact that says it has none is refused.
+ */
+export function corpusStageLinkedinJob(job: { leadId: string }, read: (action: string, input: string) => unknown) {
+  const saved = ((read('leads.search', '') as { items?: Array<{ id: string; linkedin_url?: string | null }> } | null)?.items || []);
+  const lead = saved.find(item => item.id === job.leadId);
+  if (lead && 'linkedin_url' in lead && !normalizeLinkedinProfileUrl(lead.linkedin_url)) throw new Error(NO_LINKEDIN_PROFILE);
+}
+
 /**
  * The batch as the server stages it (server/cowork/linkedin-batch.ts), from the saved contacts of the case: each person must exist, the
  * guards of a single action stop whoever has no usable profile, and who goes today and who waits is planned with the same function
@@ -125,7 +139,7 @@ export function corpusStageLinkedinBatch(kind: CoworkLinkedinBatchKind, input: C
     const canonical = normalizeLinkedinProfileUrl(lead.linkedin_url);
     return { id: lead.id, name: lead.name ?? null, company: lead.company ?? null, title: lead.title ?? null, canonicalUrl: canonical || '',
       ...(message ? { message } : {}), keys: coworkBatchCompanyKeys(lead),
-      blocked: canonical ? null : 'El contacto no tiene una URL de perfil LinkedIn válida.' };
+      blocked: canonical ? null : NO_LINKEDIN_PROFILE };
   });
   const plan = planLinkedinBatch(kind, candidates, { quotaLeft });
   if (!plan.items.length) throw new Error(`Nadie del lote puede salir hoy. ${[...new Set(plan.deferred.map(person => person.reason))].slice(0, 3).join(' · ')}`);
@@ -199,6 +213,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       } } : {}),
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
+        if (proposal.linkedinJob) corpusStageLinkedinJob(proposal.linkedinJob, entry.world?.read ?? corpusRead);
         const staged = proposal.contactsImport ? corpusStageImport(proposal.contactsImport, entry.world?.read ?? corpusRead) : null;
         const reply = proposal.replyThread ? corpusStageReply(proposal.replyThread, entry.world?.read ?? corpusRead) : null;
         const batch = proposal.linkedinBatch

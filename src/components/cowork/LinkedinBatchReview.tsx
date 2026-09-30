@@ -97,7 +97,7 @@ export function LinkedinBatchReview({ runId, onApprove, onReject, resolving }: {
     </ul>
     {!!preview.deferred.length && <details className="rounded-xl border border-cw-border bg-cw-panel px-3 py-2.5 text-[13px]">
       <summary className="cursor-pointer text-cw-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
-        {preview.deferred.length === 1 ? '1 persona espera otro día' : `${preview.deferred.length} personas esperan otro día`}
+        {preview.deferred.length === 1 ? '1 persona no sale hoy' : `${preview.deferred.length} personas no salen hoy`}
       </summary>
       <ul className="mt-2 space-y-1.5">
         {preview.deferred.map(person => <li key={person.id}><span className="font-medium">{who(person)}</span>
@@ -109,7 +109,7 @@ export function LinkedinBatchReview({ runId, onApprove, onReject, resolving }: {
     <ReviewNote ok={preview.matches && preview.open}>{!preview.matches
       ? 'La lista cambió desde la propuesta. Descártala y pide una nueva.'
       : !preview.open ? 'Esta propuesta ya se decidió.'
-        : `Coincide con la propuesta. Al aprobar se dejan en cola solo las personas marcadas; nada sale hasta que lo ejecutes desde tu extensión, y las que esperan otro día no se tocan.`}</ReviewNote>
+        : `Coincide con la propuesta. Al aprobar se dejan en cola solo las personas marcadas; nada sale hasta que lo ejecutes desde tu extensión, y a quienes no salen hoy no se les toca.`}</ReviewNote>
     <ReviewActions onReject={onReject} onApprove={() => void approve()} approveLabel={kept.length ? `Aprobar ${kept.length} ${kept.length === 1 ? singular : noun}` : 'Aprobar'}
       disabled={!preview.matches || !preview.open || !kept.length || saving} resolving={resolving} />
   </div>;

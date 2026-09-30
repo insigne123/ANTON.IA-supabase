@@ -1,8 +1,16 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 // Email is searchable too: people often look a contact up by the address they know.
 const SEARCH_FIELDS = ['name', 'title', 'company', 'email', 'location', 'city', 'country'] as const;
+
+/** What Cowork sees of a saved contact's LinkedIn: the canonical profile address or nothing. A stored value that is not a profile
+ * (a company page, a typo) is never passed on, so nobody is proposed for an invitation that cannot be queued, and a malformed one
+ * cannot make the whole result unreadable for the exports and batches that validate it. */
+function withProfile<Row extends { linkedin_url?: unknown }>(row: Row): Omit<Row, 'linkedin_url'> & { linkedin_url: string | null } {
+  return { ...row, linkedin_url: normalizeLinkedinProfileUrl(typeof row.linkedin_url === 'string' ? row.linkedin_url : null) || null };
+}
 
 function searchTerms(raw: string) {
   return raw.replace(/[^\p{L}\p{N}\s@.-]/gu, ' ').replace(/\s+/g, ' ').trim()
@@ -17,7 +25,7 @@ export async function queryCoworkLeads(
   value: string,
 ) {
   let query = client.from('leads')
-    .select('id,name,title,company,email,status,industry,location,city,country,created_at')
+    .select('id,name,title,company,email,status,industry,linkedin_url,location,city,country,created_at')
     .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
     .order('created_at', { ascending: false });
   let terms: string[] = [];
@@ -41,7 +49,8 @@ export async function queryCoworkLeads(
   const { data, error } = await query;
   if (error) throw new Error('No se pudieron consultar los contactos guardados.');
   if (action === 'leads.get' || !data) {
-    return { items: data || [], returned: data?.length || 0, limit: action === 'leads.get' ? 1 : 20, scope: 'own_saved_contacts', truncated: action === 'leads.search' && data?.length === 20 };
+    const rows = (data || []).map(withProfile);
+    return { items: rows, returned: rows.length, limit: action === 'leads.get' ? 1 : 20, scope: 'own_saved_contacts', truncated: action === 'leads.search' && rows.length === 20 };
   }
   const ranked = data.map(row => {
     const haystack = SEARCH_FIELDS.map(field => String((row as Record<string, unknown>)[field] || '')).join(' ').toLocaleLowerCase('es');
@@ -49,7 +58,7 @@ export async function queryCoworkLeads(
     return { row, matched };
   }).sort((left, right) => right.matched - left.matched);
   const best = ranked[0]?.matched || 0;
-  const items = ranked.slice(0, 20).map(entry => entry.row);
+  const items = ranked.slice(0, 20).map(entry => withProfile(entry.row));
   return {
     items, returned: items.length, limit: 20, scope: 'own_saved_contacts',
     truncated: ranked.length > 20,

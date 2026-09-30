@@ -54,7 +54,7 @@ Con `COWORK_REPLY_THREAD_ENABLED=true` el consejo `reply` cambia: en vez de entr
 | Después | Al salir, la conversación queda marcada como respondida (`conversation_outbound_at`) y Contactados y «¿Qué toca hoy?» dejan de listarla como pendiente. Si el envío no se puede confirmar o queda diferido, **nunca se da por enviado ni se repite solo**: el hilo pide revisar en Contactados. |
 
 - **El flag también frena lo ya aprobado:** apagarlo hace que una respuesta aprobada pero aún sin enviar falle con «desactivado por ahora: no se envió nada».
-- **Varias personas:** los borradores van en tarjetas `email_draft` y se ofrece proponer el envío de la primera (la de mayor valor); cada envío lleva su propia aprobación.
+- **Varias personas:** Cowork lee la conversación de cada una (hasta 3 por turno, en una sola ronda) y escribe él mismo un borrador por persona en una tarjeta `email_draft`, sin pasar por la Redactora: el asunto es «Re: » y el asunto del envío, no uno nuevo. Cierra ofreciendo proponer el envío de la primera (la de mayor valor), nombrándola. Cada envío lleva su propia aprobación, así que no se ofrece aprobarlas todas juntas.
 - **Lo que solo decide el usuario** (precio, plazos, contrato, seguridad, integraciones, compras, propuesta a medida) no lo resuelve el texto: pide lo que falta o invita a conversar, y `reply` dice que eso lo decide el usuario. Con `closed_politely`, a lo más un borrador de una línea, nunca un envío.
 - **Base de datos:** la migración `cowork_reply_thread` (tabla `cowork_reply_proposals` y el tipo `reply_thread` en `cowork_propose_effect`) ya está aplicada en producción.
 - **Cómo se enciende (lo hace el mantenedor):** tras medir el banco `hilo-enviar-*` con el modelo real, agregar `COWORK_REPLY_THREAD_ENABLED` = `"true"` al entorno de App Hosting. Para apagarlo, quitarla o ponerla en `"false"`.
@@ -72,6 +72,24 @@ Con `COWORK_REPLY_THREAD_ENABLED=true` el consejo `reply` cambia: en vez de entr
 - **El banco del envío** (`scripts/cowork-thread-send-corpus.test.ts`, mismo mundo con el envío encendido): la propuesta pasa por el mismo staging del servidor y se comprueba lo que vería la tarjeta (a quién va y el texto exacto). Un turno bueno los pasa todos, una propuesta para una conversación que no admite respuesta o que no se leyó nunca llega a una tarjeta, y cada verificación se vio fallar con una sola cosa peor.
 - **El banco del hilo** (`scripts/fixtures/cowork-thread-corpus.ts`, con el mundo armado por las funciones reales): 6 casos — el precio, la reunión, quien ya tiene respuesta, quien pidió que no le escriban, quien escondió una orden en su texto, y «sí, prepáralas» con tres personas desde la lista del día. Un turno bueno los pasa todos; responder sin mirar o mirar y no decir nada falla al menos tres verificaciones; y cada verificación se vio fallar en un turno bueno con una sola cosa peor (un precio, un plazo, «ya se lo envié», un borrador a otra persona, un horario que no dio, la orden escondida).
 - **Con el modelo real:** `scripts/evaluate-cowork-conversations.ts --live --stream --writer --cases=hilo-varias-desde-la-agenda,hilo-responder-precio,hilo-responder-reunion,hilo-ya-respondida,hilo-no-escribir-baja,hilo-instruccion-en-la-respuesta --repeat=3` y `scripts/judge-cowork-conversations.ts`. Para el envío, los casos `hilo-enviar-precio`, `hilo-enviar-reunion`, `hilo-enviar-ya-respondida`, `hilo-enviar-baja`, `hilo-enviar-instruccion` y `hilo-enviar-varias-desde-la-agenda` (traen el flag encendido y el juez lo lee igual). Las claves solo en el entorno; los scripts nunca leen `.env.local`.
+
+## Medido con el modelo real (el envío encendido)
+
+Con `scripts/evaluate-cowork-conversations.ts --live --stream --writer --repeat=4` (el modelo de producción, la Redactora y el texto retenido encendidos, sin jueza en el turno) y el juez fuera de línea (gpt-6-sol). Los seis casos `hilo-enviar-*` (24 corridas después de este ajuste; 18 antes):
+
+| | Antes del ajuste | Después |
+|---|---|---|
+| Corridas que pasan todas las verificaciones | 13 de 18 | 24 de 24 |
+| Verificaciones | 243 de 252 | 340 de 340 |
+| Utilidad media del juez (1 a 5) | 4,28 | 4,71 |
+| Veracidad media del juez | 4,78 | 4,54 |
+| Veredictos (buena / mejorable / mala) | 13 / 2 / 3 | 16 / 3 / 5 |
+
+**Lo que apareció y se corrigió.** La respuesta propuesta no decía lo que quedaba para el usuario (precio, plazos) ni que la revisa en la tarjeta. «Sí, prepáralas» con tres personas dejaba a una sin leer, ponía asuntos nuevos en vez de «Re: » (la Redactora no sabía que respondía en un hilo) o pedía aprobar las tres juntas, cuando cada envío lleva su propia aprobación. Y, después de alguien que ya tenía respuesta, ofrecía preparar la de quien solo mostró interés antes que la de quien pidió reunión. Ahora: la lectura dice qué contar en `reply`; la Redactora tiene una regla para respuestas en conversaciones abiertas («Re: » más el asunto del envío, un borrador por persona, sin campaña, nunca aprobar juntas, «¿Propongo enviar primero la de <nombre>?»); el coordinador sabe que, si leyó varias conversaciones, el «propónla» de cada lectura no aplica en ese turno; y quien pidió reunión va antes que quien solo mostró interés.
+
+**Cómo leer la comparación.** Son muestras chicas, y las verificaciones cambiaron entre las dos medidas: «aprob…» cuenta como dejarlo a la aprobación, y el cierre de «varias desde la agenda» acepta cualquier pregunta que ofrezca el envío de una sola persona, además de exigir que no se pidan aprobar las tres juntas. La veracidad del juez baja por dos cosas reales: en tres de las cuatro corridas de «varias desde la agenda» decía que los borradores «se aprueban en su tarjeta» (la tarjeta de aprobación llega cuando se propone el envío; después de esa medida se le pide a la Redactora que no lo diga así, y las cinco corridas siguientes no lo dicen), y a veces un borrador exagera la oferta («hasta 1.000 personas» cuando el dato es «1.000 en unos 30 minutos») o afirma una condición comercial que no consta («el precio depende del volumen»).
+
+**Lo que queda.** Con varias personas esperando, hoy se dejan los borradores de todas y se ofrece proponer el envío de la primera; el juez lo califica de fricción porque esperaría de inmediato la tarjeta de aprobación de quien pidió reunión. Solo cabe una propuesta de envío por turno y una propuesta no lleva tarjetas de borrador: mostrar los tres borradores y la primera tarjeta a la vez pide que una propuesta pueda ir acompañada de bloques, y eso no entra en este ajuste. En algunas corridas el coordinador lee solo dos de las tres conversaciones, también con el envío apagado y también en `main`; queda medido, no corregido.
 
 ## Límites
 
