@@ -5,7 +5,7 @@ import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
-  coworkTurnSuggestions, isCoworkActive, type CoworkArtifact, type CoworkCardStatus,
+  coworkTurnChoices, coworkTurnSuggestions, isCoworkActive, type CoworkArtifact, type CoworkCardStatus,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
@@ -16,6 +16,7 @@ import { CoworkActivity } from './CoworkActivity';
 import { CoworkUserMessage } from './CoworkAttachments';
 import { BlockCard, ChartBlock, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
+import { CoworkChoicesCard } from './CoworkChoices';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
 import { AnimatePresence, cwFadeRise, cwVariants, m } from './motion';
@@ -221,8 +222,10 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   // The assistant's explanation of its proposal reads before the card; the
   // outcome of the approved action reads after it.
   const note = proposal ? coworkTurnNote(events) : null;
-  // Only the conversation's current answer offers quick replies.
-  const suggestions = latest && onSuggestion && run.status === 'completed' && !proposal ? coworkTurnSuggestions(events) : [];
+  // Only the conversation's current answer offers quick replies, or the options that answer its question.
+  const answerable = Boolean(latest && onSuggestion && run.status === 'completed' && !proposal);
+  const choices = answerable && question ? coworkTurnChoices(events) : null;
+  const suggestions = answerable && !choices ? coworkTurnSuggestions(events) : [];
   // The answer was reviewed after it was shown and came back different: it fades in and says so.
   const adjusted = streamed && !active && Boolean(reply) && Boolean(liveAnswer?.reviewing) && coworkAnswerChanged(liveAnswer?.text || '', reply);
   const replyBlock = reply ? <div className={cn('group/reply', live && !streamed && 'cw-rise', adjusted && 'cw-fade')}>
@@ -258,6 +261,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         </div>}
         {question && <NextStep question={question} live={live} />}
         <AnimatePresence initial={false}>
+          {choices && onSuggestion && <CoworkChoicesCard key="choices" choices={choices} live={live} onSelect={onSuggestion} />}
           {suggestions.length > 0 && onSuggestion && <SuggestedReplies key="suggestions" suggestions={suggestions} live={live} onSelect={onSuggestion} />}
         </AnimatePresence>
         {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} live={live} />}

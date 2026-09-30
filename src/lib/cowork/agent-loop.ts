@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
-import { coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
+import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
@@ -10,7 +10,7 @@ import { coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } fro
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
-import { coworkProfilePatchSchema, type CoworkProfilePatch } from './profile-proposal';
+import { coworkProfileDecisionSchema, coworkProfilePatchFromDecision, type CoworkProfilePatch } from './profile-proposal';
 import { coworkSavedSearchCreateSchema, coworkSavedSearchUpdateSchema, coworkSavedSearchDeleteSchema,
   type CoworkSavedSearchCreate, type CoworkSavedSearchUpdate, type CoworkSavedSearchDelete } from './saved-search-proposal';
 import { coworkCrmRecordPatchSchema, type CoworkCrmRecordPatch } from './crm-record-proposal';
@@ -54,7 +54,7 @@ export const coworkDecisionSchema = z.object({
   leadIds: z.array(z.string().uuid()).min(1).max(5).nullable().optional(),
   stepId: z.string().uuid().nullable().optional(),
   enrollmentId: z.string().uuid().nullable().optional(),
-  profile: coworkProfilePatchSchema.nullable().optional(),
+  profile: coworkProfileDecisionSchema.nullable().optional(),
   savedSearch: z.union([coworkSavedSearchCreateSchema, coworkSavedSearchUpdateSchema, coworkSavedSearchDeleteSchema]).nullable().optional(),
   crmRecord: coworkCrmRecordPatchSchema.nullable().optional(),
   crmAssign: coworkCrmAssignSchema.nullable().optional(),
@@ -469,7 +469,7 @@ function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
   ].join('');
 }
 
-/** The retry only has to fix the closing. Quick replies, a closing question or a
+/** The retry only has to fix the closing. Quick replies, options, a closing question or a
  * document the first answer had and the retry dropped come back, unless the
  * retry now carries the emails in the chat itself (then that document would
  * repeat them). */
@@ -483,6 +483,7 @@ function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
       : emailsInChat || coworkBlocks(first.blocks).some(hasFiller) ? null : first.blocks ?? null,
     question: closingQuestion(retry) ? retry.question ?? null : closingQuestion(first),
     suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
+    choices: coworkChoices(retry.choices) ? retry.choices : first.choices ?? null,
   };
 }
 
@@ -820,7 +821,8 @@ async function runCoworkLoop(input: {
         const campaign = decision.action === 'campaign.create' && decision.campaign
           ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
-        const profile = decision.action === 'profile.update' ? decision.profile ?? undefined : undefined;
+        // Only what changes: a field sent as null keeps its value.
+        const profile = decision.action === 'profile.update' ? coworkProfilePatchFromDecision(decision.profile) ?? undefined : undefined;
         const savedSearch = decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete'
           ? decision.savedSearch ?? undefined : undefined;
         const campaignId = decision.action === 'campaign.stop_v2' ? decision.campaignId ?? undefined : undefined;

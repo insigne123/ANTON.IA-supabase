@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, LoaderCircle, Minus, PenLine, SearchCheck, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import {
-  coworkAgentLine, coworkAgentRows, coworkAnswerReview, coworkElapsed, coworkFindingText, coworkReadEvents, coworkTurnFindings, describeCoworkObservation, type CoworkAgentRow,
+  coworkAgentLine, coworkAgentRows, coworkAnswerReview, coworkElapsed, coworkFindingText, coworkPlanStepLine, coworkReadEvents, coworkTurnFindings, describeCoworkObservation, type CoworkAgentRow,
   type CoworkIconKey, type CoworkPlanProgress, type CoworkPlanState, type CoworkReadFinding,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
@@ -13,7 +13,7 @@ import {
 } from './motion';
 import { CoworkIcon } from './ui';
 
-type Step = { key: string; label: string; detail: string | null; icon: CoworkIconKey };
+type Step = { key: string; label: string; detail: string | null; icon: CoworkIconKey; agent: string | null };
 
 function stepsFrom(events: CoworkEvent[]): Step[] {
   const steps: Step[] = [];
@@ -21,11 +21,11 @@ function stepsFrom(events: CoworkEvent[]): Step[] {
   for (const event of events) {
     if (reads.has(event)) {
       const line = describeCoworkObservation(event.payload || {});
-      steps.push({ key: String(event.sequence), label: line.label, detail: line.detail, icon: line.icon });
+      steps.push({ key: String(event.sequence), label: line.label, detail: line.detail, icon: line.icon, agent: line.agent?.name ?? null });
     }
     if (event.kind === 'artifact.created') {
       const name = typeof event.payload?.name === 'string' ? event.payload.name : 'archivo';
-      steps.push({ key: String(event.sequence), label: `Generó ${name}`, detail: null, icon: 'file' });
+      steps.push({ key: String(event.sequence), label: `Generó ${name}`, detail: null, icon: 'file', agent: null });
     }
   }
   return steps;
@@ -136,8 +136,10 @@ function PlanList({ plan, live, className, agents = [], agentsAt = -1 }: {
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className={cn('min-w-0 text-[13.5px] leading-5 transition-colors duration-200',
             step.state === 'current' ? 'font-medium text-cw-text'
-              : step.state === 'done' ? 'text-cw-muted'
-                : step.state === 'skipped' ? 'text-cw-faint line-through' : 'text-cw-faint')}>
+              : step.state === 'skipped' ? 'text-cw-faint line-through' : 'text-cw-muted')}>
+            {/* Who does the step (G4): «Analista · Reviso tus cifras». Cowork's own steps carry no name. */}
+            {step.agent && <><span className={cn('font-medium', step.state === 'current' ? 'text-cw-accent' : step.state === 'skipped' ? '' : 'text-cw-text')}>{step.agent.name}</span>
+              <span aria-hidden="true" className="text-cw-faint"> · </span></>}
             {step.label}<span className="sr-only"> ({STATE_TEXT[step.state]}{step.state === 'done' && step.found ? `: ${coworkFindingText(step.found)}` : ''})</span>
           </span>
           <AnimatePresence initial={false}>
@@ -168,7 +170,7 @@ function LivePlan({ plan, liveLabel, elapsed, agents }: { plan: CoworkPlanProgre
   const done = plan.filter(step => step.state === 'done').length;
   // A step in progress counts a little, so the bar moves as soon as the work starts.
   const progress = Math.min(1, (finished + (current ? 0.35 : 0)) / plan.length);
-  const headline = (working ? coworkAgentLine(working) : current ? current.label : liveLabel).replace(/[.…\s]+$/, '');
+  const headline = (working ? coworkAgentLine(working) : current ? coworkPlanStepLine(current) : liveLabel).replace(/[.…\s]+$/, '');
   return <div className="rounded-2xl border border-cw-border bg-cw-panel px-3.5 py-3">
     <div className="flex items-center gap-2 text-[13px]">
       <span className="shrink-0 rounded-md bg-cw-accent-soft px-1.5 py-px text-[11px] font-semibold uppercase tracking-wide text-cw-accent">Ahora</span>
@@ -268,6 +270,7 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
               </span>
               <CoworkIcon name={step.icon} className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cw-muted" />
               <span className="min-w-0">
+                {step.agent && <><span className="font-medium text-cw-text">{step.agent}</span><span className="text-cw-faint" aria-hidden="true"> · </span></>}
                 <span className="text-cw-text">{step.label}</span>
                 {step.detail && <span className="text-cw-muted"> · {step.detail}</span>}
               </span>

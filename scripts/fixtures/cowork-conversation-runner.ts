@@ -144,7 +144,8 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         const staged = proposal.contactsImport ? corpusStageImport(proposal.contactsImport, entry.world?.read ?? corpusRead) : null;
         result.proposal = { kind: proposal.kind, label: staged?.label ?? proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),
-          ...(proposal.contactsImport ? { contactsImport: { ...proposal.contactsImport, card: staged?.card } } : {}) };
+          ...(proposal.contactsImport ? { contactsImport: { ...proposal.contactsImport, card: staged?.card } } : {}),
+          ...(proposal.profile ? { profile: proposal.profile } : {}) };
       },
     });
     if (result.judgeInTurn?.asked) result.judgeInTurn.fixed = answer !== judgedAnswer;
@@ -154,6 +155,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
     result.suggestions = polished.suggestions || [];
     result.blocks = polished.blocks || [];
     result.question = polished.question;
+    result.choices = polished.choices;
   } catch (error) {
     result.failed = coworkFailureMessage(error);
   }
@@ -172,6 +174,7 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
     cards: result.blocks?.length ? coworkBlocksText(result.blocks) : null,
     question: result.question ?? null,
     quickReplies: (result.suggestions || []).map(chip => chip.message),
+    ...(result.choices ? { choices: result.choices } : {}),
     proposal: result.proposal ? { kind: result.proposal.kind, label: result.proposal.label, note: result.note,
       // The review card shows the campaign's name and objective above its recipients and emails.
       ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: campaign.messages } }
@@ -179,7 +182,9 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
         // The code card shows the files it runs on and the code itself.
         : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }
         // The import card shows who comes in, who stays out and the columns (older reports: only the file).
-        : result.proposal.contactsImport ? { detail: result.proposal.contactsImport.card ?? { archivo: result.proposal.contactsImport.file } } : {}) } : null,
+        : result.proposal.contactsImport ? { detail: result.proposal.contactsImport.card ?? { archivo: result.proposal.contactsImport.file } }
+        // The profile card shows the fields it saves.
+        : result.proposal.profile ? { detail: result.proposal.profile } : {}) } : null,
     search: result.search,
     document: result.document,
     failed: result.failed,

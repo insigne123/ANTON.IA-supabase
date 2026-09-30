@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildProfileUpdate, createEmptyProfileForm } from '@/lib/profile/profile-mappings';
-import { coworkUserContextFromProfile, loadCoworkUserContext } from './user-context';
+import { coworkUserContextFromProfile, loadCoworkMemories, loadCoworkUserContext } from './user-context';
 
 const userId = '00000000-0000-4000-8000-000000000001';
 const scope = { userId, organizationId: '00000000-0000-4000-8000-000000000002' };
@@ -89,4 +89,72 @@ test('missing values stay null and failures fall back to the reads', async () =>
   assert.equal(await loadCoworkUserContext(client({ id: userId }).client as never, { ...scope, userId: 'not-a-uuid' }), null);
   const throwing = { from: () => { throw new Error('network'); } };
   assert.equal(await loadCoworkUserContext(throwing as never, scope), null);
+});
+
+/** A client whose suplia_memories answers with `rows` (as PostgREST would after the filters), and profiles with `profile`. */
+function memoryClient(rows: unknown[], profile: unknown = { id: userId, full_name: 'Ana', value_proposition: 'Verificación de antecedentes' }) {
+  const queries: Array<{ table: string; eq: unknown[][]; or: string | null; order: unknown[] | null; limit: number | null }> = [];
+  return { queries, client: { from: (table: string) => {
+    const query = { table, eq: [] as unknown[][], or: null as string | null, order: null as unknown[] | null, limit: null as number | null };
+    queries.push(query);
+    const chain = {
+      select: () => chain,
+      eq: (...args: unknown[]) => { query.eq.push(args); return chain; },
+      or: (value: string) => { query.or = value; return chain; },
+      order: (...args: unknown[]) => { query.order = args; return chain; },
+      limit: (value: number) => { query.limit = value; return chain; },
+      maybeSingle: async () => ({ data: table === 'profiles' ? profile : null, error: null }),
+      then: (resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) => {
+        const visible = table === 'suplia_memories' ? rows.filter(row => !query.or || (row as { scope?: string; user_id?: string }).scope === 'organization'
+          || (row as { user_id?: string }).user_id === userId).slice(0, query.limit ?? rows.length) : null;
+        return Promise.resolve({ data: visible, error: null }).then(resolve, reject);
+      },
+    };
+    return chain;
+  } } };
+}
+const memory = (patch: Record<string, unknown>) => ({ scope: 'organization', user_id: null, memory_type: 'preference', key: 'tono', value: 'Tuteo', expires_at: null, ...patch });
+
+test('approved memories: the organization\'s and your own, newest first, never a teammate\'s or an expired one', async () => {
+  const now = Date.parse('2026-09-30T12:00:00Z');
+  const { client: db, queries } = memoryClient([
+    memory({ key: 'tono', value: { text: 'Tuteo, cercano y breve' } }),
+    memory({ scope: 'user', user_id: userId, memory_type: 'business', key: 'Clientes ideales', value: 'Empresas de outsourcing con más de 200 personas', expires_at: '2027-01-01T00:00:00Z' }),
+    memory({ scope: 'user', user_id: '00000000-0000-4000-8000-0000000000cc', key: 'firma', value: 'Firma como Ana' }),
+    memory({ key: 'promo', value: 'Descuento de septiembre', expires_at: '2026-09-01T00:00:00Z' }),
+    memory({ key: 'tono', value: { text: 'Tuteo, cercano y breve' } }),
+    memory({ key: '', memory_type: 'nota', value: { summary: `Evitar ${'x'.repeat(400)}` } }),
+    memory({ key: 'Oferta', value: 'Oferta: AXIS en 48 horas' }),
+  ]);
+  const memories = await loadCoworkMemories(db as never, scope, now);
+  assert.deepEqual(memories.slice(0, 2), ['tono: Tuteo, cercano y breve', 'Clientes ideales: Empresas de outsourcing con más de 200 personas']);
+  assert.equal(memories.length, 4, 'no teammate memory, no expired one, no repeat');
+  assert.ok(memories[2].startsWith('nota: Evitar') && memories[2].length === 240 && memories[2].endsWith('…'));
+  assert.equal(memories[3], 'Oferta: AXIS en 48 horas', 'a value that already names its key is not labelled twice');
+  assert.deepEqual(queries[0].eq, [['organization_id', scope.organizationId], ['status', 'approved']]);
+  assert.equal(queries[0].or, `scope.eq.organization,user_id.eq.${userId}`);
+  assert.deepEqual(queries[0].order, ['updated_at', { ascending: false }]);
+  // At most eight.
+  const many = await loadCoworkMemories(memoryClient(Array.from({ length: 12 }, (_, index) => memory({ key: `m${index}`, value: `valor ${index}` }))).client as never, scope, now);
+  assert.equal(many.length, 8);
+  const crowded = memoryClient([
+    ...Array.from({ length: 24 }, (_, index) => memory({ scope: 'user', user_id: '00000000-0000-4000-8000-0000000000cc', key: `otro${index}` })),
+    memory({ scope: 'user', user_id: userId, key: 'Preferencia propia', value: 'Tuteo' }),
+  ]);
+  assert.deepEqual(await loadCoworkMemories(crowded.client as never, scope, now), ['Preferencia propia: Tuteo']);
+});
+
+test('the user context carries memories only when there are some, and the home skips reading them', async () => {
+  const withMemories = await loadCoworkUserContext(memoryClient([memory({ key: 'tono', value: 'Tuteo' })]).client as never, scope);
+  assert.deepEqual(withMemories?.memories, ['tono: Tuteo']);
+  const without = await loadCoworkUserContext(memoryClient([]).client as never, scope);
+  assert.ok(without && !('memories' in without), 'a turn without memories reads exactly as before');
+  const home = memoryClient([memory({})]);
+  await loadCoworkUserContext(home.client as never, scope, { memories: false });
+  assert.ok(!home.queries.some(query => query.table === 'suplia_memories'));
+  // A failing read leaves them out; the rest of the context stays.
+  const failing = { from: (table: string) => table === 'suplia_memories' ? { select: () => { throw new Error('network'); } } : memoryClient([]).client.from(table) };
+  const context = await loadCoworkUserContext(failing as never, scope);
+  assert.equal(context?.offer, 'Verificación de antecedentes');
+  assert.ok(context && !('memories' in context));
 });

@@ -7,6 +7,7 @@ import { coworkStarter } from '../../src/lib/cowork/starters';
 import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '../../src/lib/cowork/blocks';
 import { COWORK_FILE_NOTICE, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTablePreview, coworkTextPreview } from '../../src/lib/cowork/file-read';
 import { coworkWithAttachments } from '../../src/lib/cowork/attachments';
+import { coworkOfferMessage } from '../../src/lib/cowork/overview';
 import { CORPUS_COMMON_CHECKS, CORPUS_USER_CONTEXT, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -104,6 +105,8 @@ const campaign = (result: CorpusTurnResult) => result.proposal?.campaign as { em
 const PLACEHOLDER = /\[(?:tu |su )?(?:nombre|empresa|cargo|firma|name)[^\]]*\]/i;
 const PEOPLE_EMAILS = ['mrojas@sodexo.cl', 'fmunoz@securitas.cl', 'cfuentes@adecco.cl'];
 const lastLine = (reply: string) => reply.split('\n').filter(line => line.trim()).pop() || '';
+/** Industries a buyer of AXIS may be in. */
+const INDUSTRY = /miner|retail|comercio|construc|seguridad|log[íi]stica|transporte|salud|cl[íi]nica|outsourcing|servicios|manufactur|industria|agr[íi]col|agro|energ|banca|financ|educaci|call center|contact center|alimentos|miner[íi]a/i;
 /** Drops sentences that deny something («No agregué prueba gratuita»): a denial is not an offer. */
 const withoutDenials = (content: string) => content.split(/(?<=[.!?\n])/).filter(sentence => !/\bno\b|\bni\b|\bsin\b(?! costo)/i.test(sentence)).join('');
 
@@ -132,6 +135,17 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'no pregunta qué vende el usuario', test: r => !/qué (?:producto|servicio|vendes|ofreces?)/i.test(r.reply) },
       { label: 'nombra su oferta (AXIS)', test: r => /axis/i.test(r.reply) },
       { label: 'no dice lo que no ve', test: r => !/\bno (?:veo|tengo a la vista|aparece)/i.test(r.reply) }] },
+  // The home's «Cuéntame qué vendes» card (V7) sends this message: Cowork proposes saving it in the profile.
+  { id: 'guardar-oferta', title: 'Guardar lo que vende desde la tarjeta del inicio', world,
+    request: coworkOfferMessage('revisión de antecedentes laborales en minutos, para equipos de RR. HH. en Chile', 'https://yago.cl'),
+    origin: 'Una cuenta sin oferta la escribe en la tarjeta «Cuéntame qué vendes»: Cowork propone guardarla en el perfil, con sus palabras y sin inventar.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'consulta el perfil antes de proponer', test: r => (r.reads || []).some(item => item.action === 'profile.get') },
+      { label: 'propone guardar la oferta en el perfil', test: r => r.proposal?.kind === 'profile_update'
+        && /antecedentes/i.test(String(r.proposal.profile?.valueProposition || '')) },
+      { label: 'guarda el sitio que dio', test: r => r.proposal?.kind !== 'profile_update' || /yago\.cl/.test(String(r.proposal.profile?.website || '')) },
+      { label: 'no agrega cifras ni precios que el usuario no dijo', test: r => !/\d/.test(String(r.proposal?.profile?.valueProposition || '')) },
+      { label: 'no cambia la firma ni datos que no pidió', test: r => !['signature', 'name', 'role', 'companyName', 'sector'].some(key => r.proposal?.profile?.[key] !== undefined) }] },
   { id: 'mkt-campana-rrhh', title: 'Correo a los contactos de un área', request: 'quiero mandarle un correo a mis contactos de rrhh ofreciendo axis', world,
     origin: 'Pedido típico de mailing: un segmento guardado y la oferta. Debe encontrar a quiénes, usar la oferta y dejar el correo o la campaña para aprobar.',
     checks: [...CORPUS_COMMON_CHECKS,
@@ -158,6 +172,15 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'el mensaje es breve y sin relleno', test: r => !r.proposal?.linkedinMessage
         || (r.proposal.linkedinMessage.length <= 600 && !PLACEHOLDER.test(r.proposal.linkedinMessage)) },
       { label: 'el mensaje lleva el nombre real del usuario', test: r => !r.proposal?.linkedinMessage || /Nicol[aá]s/.test(r.proposal.linkedinMessage) }] },
+  // A contact picked with «@» in the composer (V6): its ID travels at the end, so Cowork reads it without searching by name.
+  { id: 'mencion-linkedin', title: 'Mensaje de LinkedIn a un contacto elegido con @', world,
+    request: `escribele a @Marcela Rojas por linkedin, algo corto presentandome\n\n(ID de Marcela Rojas: ${MARKETING_LEAD.marcela})`,
+    origin: 'La mención ya dice quién es: Cowork la lee por su ID (sin buscar por nombre ni preguntar cuál Marcela) y deja el mensaje para aprobar.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'lee el contacto por su ID', test: r => (r.reads || []).some(item => item.action === 'leads.get' && item.input === MARKETING_LEAD.marcela) },
+      { label: 'no lo busca por nombre', test: r => !(r.reads || []).some(item => item.action === 'leads.search' && /marcela/i.test(item.input)) },
+      { label: 'propone el mensaje de LinkedIn a Marcela', test: r => r.proposal?.kind === 'linkedin_message' && /Marcela/.test(r.proposal.linkedinMessage || '') },
+      { label: 'el ID no aparece en la respuesta', test: r => !(r.note || r.reply).includes(MARKETING_LEAD.marcela) }] },
   { id: 'mkt-linkedin-invitar', title: 'Invitar a un contacto en LinkedIn', request: 'invita a felipe de securitas a mi red de linkedin', world,
     origin: 'La invitación exige revisar el cupo semanal antes de proponerla.',
     checks: [...CORPUS_COMMON_CHECKS,
@@ -208,6 +231,14 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'no reprocha el silencio ni anuncia cierre', test: r => !/no (?:me )?respondiste|última vez|ultimo mensaje|último mensaje|cierro (?:el|este) hilo/i.test(text(r)) },
       { label: 'firma con el nombre del perfil', test: r => r.proposal?.kind === 'linkedin_message' || /Nicol[aá]s/.test(text(r)) },
       { label: 'el seguimiento va como tarjeta', test: r => Boolean(r.proposal) || (r.blocks || []).some(block => block.type === 'email_draft') }] },
+  // A datum only the person knows, with few possible answers (V5): Cowork asks with options instead of guessing or making them type.
+  { id: 'opciones-industria', title: 'Prospectar en otra industria sin decir cuál', world,
+    request: 'quiero buscar prospectos nuevos en otra industria para axis, ayudame',
+    origin: 'La industria nueva la decide el usuario: Cowork no la adivina ni busca a ciegas; pregunta cuál, con opciones que encajan con lo que vende.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'pregunta con opciones', test: r => (r.choices?.options.length ?? 0) >= 2 },
+      { label: 'las opciones son industrias', test: r => (r.choices?.options || []).filter(option => INDUSTRY.test(option)).length >= 2 },
+      { label: 'no busca sin saber la industria', test: r => !r.search && !r.proposal }] },
 ];
 
 /** Contacts with an email who never received anything: Marcela already got one. */

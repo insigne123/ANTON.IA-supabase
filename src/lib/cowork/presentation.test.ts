@@ -3,8 +3,8 @@ import test from 'node:test';
 import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
-  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
-  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
+  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions, coworkTurnChoices,
+  coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview,
 } from './presentation';
@@ -105,6 +105,10 @@ test('quick replies come only from the finished answer and only in shapes that f
   // Turns saved before quick replies existed, and failed turns, have none.
   assert.deepEqual(coworkTurnSuggestions(completed({ reply: 'Listo.', document: null })), []);
   assert.deepEqual(coworkTurnSuggestions([{ sequence: 1, kind: 'run.failed', payload: { suggestions: [{ label: 'Sí', message: 'Sí' }] }, created_at: '2026-09-26T12:00:00Z' }]), []);
+  // The options of a closing question come from the finished answer too; turns saved before them have none.
+  assert.deepEqual(coworkTurnChoices(completed({ reply: '¿Qué segmentos?', document: null, question: '¿Qué segmentos?',
+    choices: { multiple: true, options: ['RR. HH.', 'Retail'] } })), { multiple: true, options: ['RR. HH.', 'Retail'] });
+  assert.equal(coworkTurnChoices(completed({ reply: 'Listo.', document: null })), null);
 });
 
 test('the closing question of a finished turn reads apart; older turns keep it in the reply', () => {
@@ -156,8 +160,15 @@ test('the plan of a turn checks off each step as its read completes, and the las
   // Each done step says what its read found; the others found nothing yet.
   const counted = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { items: [{}, {}, {}, {}] } });
   assert.deepEqual(coworkPlanProgress({ status: 'running' }, [plan, counted])?.map(step => step.found), [{ count: 4, label: 'contactos' }, null, null]);
+  // Who does each step (G4): the sent emails are the Researcher's; finding the contacts and answering are Cowork's own.
+  const progress = coworkPlanProgress({ status: 'running' }, [plan, leads])!;
+  assert.deepEqual(progress.map(step => step.agent?.name ?? null), [null, 'Investigadora', null]);
+  assert.equal(coworkPlanStepLine(progress[1]), 'Investigadora · veo qué correos ya enviaste');
+  assert.equal(coworkPlanStepLine(progress[0]), 'Reviso tus contactos');
+  assert.equal(describeCoworkObservation({ action: 'metrics.rates', input: '', result: {} }).agent?.name, 'Analista');
+  assert.equal(describeCoworkObservation({ action: 'leads.search', input: '', result: {} }).agent, null);
   // The side panel names the step in progress.
-  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Veo qué correos ya enviaste');
+  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Investigadora · veo qué correos ya enviaste');
   assert.equal(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).find(step => step.key === 'work')?.detail, '2 consultas');
 });
 

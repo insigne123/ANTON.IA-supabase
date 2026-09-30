@@ -12,7 +12,7 @@ const parallel = (reads: Array<{ action: string; input: string }>) =>
   coworkDecisionSchema.parse({ action: 'reads.parallel', query: null, leadId: null, answer: null, reads });
 const answer = (reply: string, document: { title: string; content: string } | null = null,
   suggestions: Array<{ label: string; message: string }> = [{ label: 'Sí, adelante', message: 'Sí, adelante con lo que propones' }],
-  extra: { blocks?: unknown[]; question?: string } = {}) =>
+  extra: { blocks?: unknown[]; question?: string; choices?: { multiple: boolean; options: string[] } } = {}) =>
   coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document, suggestions, ...extra } });
 
 /** What a good turn looks like for each case, played through the real loop. */
@@ -84,6 +84,13 @@ Object.assign(IDEAL, {
     ? parallel([{ action: 'app.context', input: '' }, { action: 'leads.search', input: '' }])
     : answer('Te ayudo a conseguir reuniones para AXIS con empresas que contratan mucho personal, sin salir del chat:\n- Correos y campañas: redacto la secuencia sobre AXIS y la dejo lista para aprobar. De tus 5 contactos guardados, 4 tienen correo.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos de RR. HH. y operaciones, e informes de cómo van tus envíos.\n¿Te dejo una campaña pausada con un primer correo para Marcela, Felipe y Camila, tus contactos de RR. HH. con correo?',
       null, chip('Sí, déjala pausada', 'Sí, deja una campaña pausada con un primer correo sobre AXIS para Marcela, Felipe y Camila')),
+  'guardar-oferta': async context => context.observations.length === 0
+    ? read('profile.get', '')
+    : coworkDecisionSchema.parse({ action: 'profile.update', query: null, leadId: null,
+      // As strict structured output sends it: every field, null where nothing changes.
+      profile: { name: null, role: null, companyName: null, sector: null, website: 'https://yago.cl', description: null, services: null,
+        valueProposition: 'Revisión de antecedentes laborales en minutos para equipos de RR. HH. en Chile.', proofPoints: null, signature: null },
+      answer: { reply: 'Guardo en tu perfil lo que vendes y tu sitio. Desde ahí escribo tus correos con esa oferta.', document: null } }),
   'mkt-campana-rrhh': async context => {
     if (context.observations.length === 0) return parallel([{ action: 'leads.search', input: 'RR. HH.' }, { action: 'message.context', input: '' }]);
     if (!seen(context, 'campaigns.list')) return read('campaigns.list');
@@ -108,6 +115,11 @@ Object.assign(IDEAL, {
     : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
       linkedinMessage: 'Hola Marcela, soy Nicolás de Yago. Ayudamos a equipos de personas a revisar antecedentes laborales en minutos con AXIS. ¿Te interesa conversarlo?',
       answer: { reply: 'Encontré a Marcela, Gerente de Personas en Sodexo. Te dejo un mensaje corto firmado con tu nombre; se envía desde tu extensión cuando lo apruebes.', document: null } }),
+  'mencion-linkedin': async context => context.observations.length === 0
+    ? read('leads.get', null, { leadId: MARKETING_LEAD.marcela })
+    : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
+      linkedinMessage: 'Hola Marcela, soy Nicolás de Yago. Ayudamos a equipos de personas a revisar antecedentes laborales en minutos con AXIS. ¿Te interesa conversarlo?',
+      answer: { reply: 'Te dejo un mensaje corto para Marcela, Gerente de Personas en Sodexo, firmado con tu nombre; se envía desde tu extensión cuando lo apruebes.', document: null } }),
   'mkt-linkedin-invitar': async context => context.observations.length === 0
     ? parallel([{ action: 'leads.search', input: 'Felipe Securitas' }, { action: 'linkedin.quota', input: '' }])
     : coworkDecisionSchema.parse({ action: 'linkedin.invite', query: null, leadId: MARKETING_LEAD.felipe,
@@ -139,6 +151,11 @@ Object.assign(IDEAL, {
         question: '¿Lo dejo listo para enviar desde tu correo?',
         blocks: [{ type: 'email_draft', title: 'Seguimiento a Marcela', to: ['Marcela Rojas'], subject: '¿Cómo lo resuelven hoy?',
           body: 'Hola Marcela,\nMe quedé pensando en cómo revisan hoy los antecedentes en Sodexo. Si te sirve, te muestro en 15 minutos cómo lo hace AXIS.\nNicolás' }] }),
+  // A datum only the person knows (V5): asked with options, no quick replies.
+  'opciones-industria': async context => context.observations.length === 0 ? read('app.context', '')
+    : answer('AXIS le sirve a quien contrata mucho personal. Elige la industria y preparo la búsqueda de gerentes de personas y de reclutamiento para que la apruebes.',
+      null, [], { question: '¿En qué industria buscamos?',
+        choices: { multiple: false, options: ['Minería', 'Construcción', 'Retail', 'Seguridad privada', 'Logística'] } }),
 } satisfies Record<string, CorpusDecider>);
 
 /** Home starters: what a good first turn looks like for each button. */

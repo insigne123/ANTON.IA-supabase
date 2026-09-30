@@ -1,7 +1,8 @@
+import { coworkSpecialistFor, type CoworkSpecialistInfo } from './agents';
 import { collectCoworkLeadRows } from './lead-export';
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
-import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
+import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
   coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent } from './contracts';
 
 /**
@@ -91,7 +92,7 @@ function countOf(result: unknown): number | null {
 }
 
 /** One human line for a recorded read, with the query and result size when known. */
-export function describeCoworkObservation(payload: Record<string, unknown>): { label: string; detail: string | null; icon: CoworkIconKey; source: string } {
+export function describeCoworkObservation(payload: Record<string, unknown>): { label: string; detail: string | null; icon: CoworkIconKey; source: string; agent: CoworkSpecialistInfo | null } {
   const action = String(payload.action || '');
   const info = coworkActionInfo(action);
   const input = typeof payload.input === 'string' ? payload.input.trim() : '';
@@ -111,7 +112,7 @@ export function describeCoworkObservation(payload: Record<string, unknown>): { l
     const count = countOf(payload.result);
     if (count !== null) parts.push(`${count} resultado${count === 1 ? '' : 's'}`);
   }
-  return { label: info.label, detail: parts.length ? parts.join(' · ') : null, icon: info.icon, source: info.source };
+  return { label: info.label, detail: parts.length ? parts.join(' · ') : null, icon: info.icon, source: info.source, agent: coworkSpecialistFor(action) };
 }
 
 /** What a read found, in the person's words, for the chip beside its plan step:
@@ -364,7 +365,8 @@ export function coworkTurnNote(events: CoworkEvent[]): string | null {
 
 export type CoworkPlanState = 'done' | 'current' | 'pending' | 'skipped';
 /** Each step with its state and, once its read is in, what that read found. */
-export type CoworkPlanProgress = Array<CoworkPlanStep & { state: CoworkPlanState; found: CoworkReadFinding | null }>;
+/** `agent`: who does the step (G4), from its read; null for Cowork's own steps and the answer. */
+export type CoworkPlanProgress = Array<CoworkPlanStep & { state: CoworkPlanState; found: CoworkReadFinding | null; agent: CoworkSpecialistInfo | null }>;
 
 /** The plan shown while a turn works, with each step's state. A step with a
  * read is done once that read completes; the final step, once the answer or
@@ -390,7 +392,12 @@ export function coworkPlanProgress(run: Pick<CoworkRun, 'status'>, events: Cowor
     const current = states.indexOf('pending');
     if (current !== -1) states[current] = 'current';
   }
-  return steps.map((step, index) => ({ ...step, state: states[index], found: found[index] }));
+  return steps.map((step, index) => ({ ...step, state: states[index], found: found[index], agent: coworkSpecialistFor(step.read) }));
+}
+
+/** A plan step as the headline says it: «Analista · reviso tus cifras de la semana», or just the step. */
+export function coworkPlanStepLine(step: { label: string; agent: CoworkSpecialistInfo | null }): string {
+  return step.agent ? `${step.agent.name} · ${step.label.charAt(0).toLocaleLowerCase('es')}${step.label.slice(1)}` : step.label;
 }
 
 /** What a turn's reads found, in order and without repeats: the evidence behind its answer. */
@@ -473,6 +480,12 @@ export function coworkTurnSuggestions(events: CoworkEvent[]): CoworkSuggestion[]
   return coworkStoredSuggestions(completed?.suggestions);
 }
 
+/** The options that answer the closing question of a turn (V5), or null. */
+export function coworkTurnChoices(events: CoworkEvent[]): CoworkChoices | null {
+  const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
+  return coworkStoredChoices(completed?.choices);
+}
+
 /** Cards that also open in the side panel; figures and charts stay inline in the chat. */
 export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' | 'chart' }>;
 
@@ -552,7 +565,7 @@ export function coworkTurnProgress(run: Pick<CoworkRun, 'status' | 'automatic'>,
   steps.push({
     key: 'work', label: run.status === 'queued' && !started ? 'En cola para empezar' : 'Analizar y consultar datos',
     state: run.status === 'queued' && !started ? 'active' : workDone ? (run.status === 'failed' && !proposal && reads === 0 ? 'error' : 'done') : 'active',
-    detail: plan && current !== -1 ? `Paso ${current + 1} de ${plan.length}: ${plan[current].label}`
+    detail: plan && current !== -1 ? `Paso ${current + 1} de ${plan.length}: ${coworkPlanStepLine(plan[current])}`
       : reads ? `${reads} consulta${reads === 1 ? '' : 's'}` : undefined,
   });
   if (run.status === 'waiting_workers') steps.push({ key: 'specialists', label: 'Revisión de especialistas', state: 'active' });
@@ -583,7 +596,8 @@ export type CoworkThreadSummary = {
 };
 
 const UUID_PATTERN = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}';
-const ID_REFERENCE = new RegExp(`\\s*\\((?:ID(?: del contacto)?\\s*:?\\s*)?${UUID_PATTERN}\\)`, 'gi');
+// «(ID del contacto: …)» from a card, and «(ID de Marcela Rojas: …)» from a mention (mentions.ts).
+const ID_REFERENCE = new RegExp(`\\s*\\((?:ID(?: del contacto| de [^():\\n]{1,80})?\\s*:?\\s*)?${UUID_PATTERN}\\)`, 'gi');
 
 /** Your message as you wrote it: internal references (contact IDs) stay out of sight. */
 export function coworkDisplayMessage(message: string) {
