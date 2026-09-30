@@ -84,6 +84,18 @@ test('the user context travels with its instruction and stays null when the serv
   assert.match(instructions.systemPrompt, /userContext trae quién es el usuario/);
 });
 
+test('what «Perfil» adds (services, proof points, sector) travels with the user context', () => {
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  const base = { history: { turns: [] }, request: '¿Qué puedes hacer?', observations: [], mustAnswer: false, executionPolicy: {} };
+  const userContext = { fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl',
+    offer: 'AXIS consulta el PJUD por lote.', offerSource: 'profile' as const, services: ['AXIS'], proofPoints: ['1.000 personas en 30 minutos'], sector: 'Software' };
+  const context = coworkDecisionContext(instructions, { ...base, userContext });
+  assert.deepEqual({ ...context.userContext, instruction: undefined }, { ...userContext, instruction: undefined });
+  assert.match(context.userContext?.instruction || '', /proofPoints son resultados que el usuario cargó en su perfil/);
+  assert.match(instructions.systemPrompt, /nunca escribas «no veo», «no tienes» ni «no hay»/);
+  assert.match(instructions.systemPrompt, /puede guardarla en Perfil/);
+});
+
 test('the coordinator reads what the loop has left of the turn, and a batch spends all of it', () => {
   const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
   const base = { history: { turns: [] }, request: 'Revisa mis contactos', observations: [], mustAnswer: false, executionPolicy: {} };

@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { sanitizeCoworkSignature } from './signature';
 
 /** Profile identity is global to the owner, not an organization mailbox.
- * Exposes only sanitized channel signatures; never provider credentials. */
+ * Exposes only sanitized channel signatures; never provider credentials. The commercial fields
+ * are the ones «Perfil» saves, with the same names profile.update uses. */
 export async function readCoworkProfile(client: SupabaseClient, scope: { userId: string; organizationId: string }, value: string) {
   z.literal('').parse(value);
   const userId = z.string().uuid().parse(scope.userId);
@@ -21,8 +23,12 @@ export async function readCoworkProfile(client: SupabaseClient, scope: { userId:
     try { return [{ channel, enabled: value.enabled === true, ...sanitizeCoworkSignature(value.html) }]; }
     catch { return []; }
   });
+  const form = mapProfileToForm(data);
+  const commercialEntries = (['role', 'sector', 'description', 'services', 'valueProposition', 'proofPoints'] as const)
+    .map(field => [field, form[field].trim() ? form[field].trim().slice(0, 500) : null] as const);
+  const commercial = commercialEntries.some(([, value]) => value) ? Object.fromEntries(commercialEntries) : null;
   return { scope: 'own_profile', profile: {
     fullName: text(data.full_name), email: text(data.email), companyName: text(data.company_name),
     companyDomain: text(data.company_domain), jobTitle: text(data.job_title), updatedAt: text(data.updated_at),
-  }, signatures, mailboxVerified: false };
+  }, commercial, signatures, mailboxVerified: false };
 }

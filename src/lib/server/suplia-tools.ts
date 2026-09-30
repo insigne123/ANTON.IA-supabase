@@ -788,7 +788,8 @@ async function personalizeForLead(input: Record<string, unknown>, context: Supli
   const openingName = fullName.split(' ')[0] || fullName;
   const companyName = asText(lead.companyName || lead.company) || 'tu equipo';
   const role = asText(lead.title || lead.role);
-  const offer = asText(input.offerSummary || input.offer || appContext.offer || profile.company_profile || profile.companyName || profile.company || 'ANTON.IA');
+  // company_profile is JSON and would read «[object Object]»; the offer from «Perfil» comes in appContext.offer.
+  const offer = asText(input.offerSummary || input.offer || appContext.offer || profile.company_name || 'ANTON.IA');
   const cta = asText(input.cta) || 'te parece si lo revisamos 15 minutos esta semana?';
   const signal = asText((lead as any).signal || (lead as any).buyingSignal || (lead as any).reason || input.signal);
   const winningSubjects = asList(input.winningSubjects).slice(0, 5);
