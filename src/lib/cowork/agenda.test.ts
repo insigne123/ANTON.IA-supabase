@@ -293,11 +293,12 @@ test('the people who asked for a meeting are already inside the interested compa
 
 test('a person who appears twice keeps their longest wait, asks for the meeting if any of their replies did, and the account lists three people at most', () => {
   const agenda = buildCoworkAgenda({ ...empty(), interested: [
+    // Not in order of wait, so that the order of the members is the code's and not the order the rows came in.
+    { ...person('Dani Pino', 'Delvalle', 'dpino@delvalle.cl', 1), intent: 'positive' },
+    { ...person('Carla Soto', 'Delvalle', 'csoto@delvalle.cl', 3), intent: 'positive' },
     { ...person('Ana Ruiz', 'Delvalle', 'aruiz@delvalle.cl', 2), intent: 'positive' },
     { ...person('Ana Ruiz', 'Delvalle', 'ARuiz@delvalle.cl', 6), intent: 'meeting_request' },
     { ...person('Beto Díaz', 'Delvalle', 'bdiaz@delvalle.cl', 4), intent: 'positive' },
-    { ...person('Carla Soto', 'Delvalle', 'csoto@delvalle.cl', 3), intent: 'positive' },
-    { ...person('Dani Pino', 'Delvalle', 'dpino@delvalle.cl', 1), intent: 'positive' },
   ] });
   const account = agenda.items[0];
   assert.equal(account.people, 4);

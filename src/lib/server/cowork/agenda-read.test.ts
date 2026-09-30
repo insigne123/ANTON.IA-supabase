@@ -155,6 +155,12 @@ test('rows left out by a limit make the source partial, not complete', async () 
     ...dependencies() as object, followups: async () => ({ ...followups, failed: 1 }),
   } as never, NOW);
   assert.equal(failedCampaign.sources.followups, 'partial', 'one campaign that could not be read leaves the list partial');
+  const fullAttention = await readCoworkAgenda(tables({}), scope, {
+    ...dependencies() as object, attention: async () => ({ ...attention, truncated: true }),
+  } as never, NOW);
+  assert.equal(fullAttention.sources.attention, 'partial', 'a full page of bounces or unclassified replies leaves that half partial');
+  assert.equal(fullAttention.sources.interested, 'ok', 'and only that half');
+  assert.equal(fullAttention.complete, false);
 });
 
 test('no approved campaign and no campaigns v2 are nothing to read, not a failure', async () => {
