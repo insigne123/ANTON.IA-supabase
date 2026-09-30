@@ -45,6 +45,8 @@ test('the message carries one reference per mentioned person still in the text, 
   assert.equal(coworkWithMentions('mrojas@Marcela Rojas', [MARCELA]), 'mrojas@Marcela Rojas');
   const punctuated = 'escríbele a @Marcela Rojas, por favor';
   assert.equal(coworkWithMentions(punctuated, [MARCELA]), `${punctuated}\n\n(ID de Marcela Rojas: ${MARCELA.id})`);
+  const sameName = { id: '00000000-0000-4000-8000-000000000104', name: 'Marcela Rojas' };
+  assert.equal(coworkWithMentions(punctuated, [MARCELA, sameName]), punctuated, 'one visible name cannot identify two different contacts');
   assert.deepEqual(coworkMessageMentions(sent), [MARCELA, FELIPE]);
   // The bubble shows the text without the references, with each mention apart.
   const shown = coworkDisplayMessage(sent);

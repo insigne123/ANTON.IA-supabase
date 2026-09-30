@@ -58,7 +58,9 @@ export function coworkWithMentions(text: string, mentions: CoworkMention[]) {
   const seen = new Set<string>();
   const references = mentions.flatMap(mention => {
     const name = coworkMentionName(mention.name);
-    if (!name || seen.has(mention.id) || mentionIndex(text, `@${name}`) < 0) return [];
+    // Identical visible tags cannot tell two different people apart after one is edited away.
+    if (!name || seen.has(mention.id) || mentionIndex(text, `@${name}`) < 0
+      || mentions.some(other => other.id !== mention.id && coworkMentionName(other.name) === name)) return [];
     seen.add(mention.id);
     const reference = `(ID de ${name}: ${mention.id})`;
     return text.includes(reference) ? [] : [reference];
