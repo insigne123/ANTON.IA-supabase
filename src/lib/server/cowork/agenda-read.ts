@@ -135,8 +135,8 @@ export async function readCoworkAgenda(
   ]);
 
   const sources = {} as Record<AgendaSourceKey, AgendaSourceStatus>;
-  sources.replies = !interested.ok || !attention.ok ? 'unavailable'
-    : interested.value.truncated || attention.value.truncated ? 'partial' : 'ok';
+  sources.interested = !interested.ok ? 'unavailable' : interested.value.truncated ? 'partial' : 'ok';
+  sources.attention = !attention.ok ? 'unavailable' : attention.value.truncated ? 'partial' : 'ok';
   const attentionRows = attention.ok ? attention.value : null;
   const text = (value: unknown) => typeof value === 'string' && value.trim() ? value : null;
   const person = (row: Record<string, unknown>) => ({ name: text(row.name), email: text(row.email), company: text(row.company) });

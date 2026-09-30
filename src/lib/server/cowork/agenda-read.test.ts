@@ -68,7 +68,7 @@ test('the agenda puts every source in one ranked list with exact counts', async 
   assert.equal(agenda.weekday, 'viernes');
   assert.equal(agenda.timeZone, 'America/Santiago');
   assert.equal(agenda.counts.interestedAccounts, 3);
-  assert.equal(agenda.counts.meetingRequests, 1);
+  assert.equal(agenda.counts.ofWhichMeetingRequests, 1);
   assert.equal(agenda.counts.followupsReady, 47);
   assert.equal(agenda.counts.followupsHeld, 3);
   assert.equal(agenda.counts.unclassifiedReplies, 1);
@@ -79,7 +79,7 @@ test('the agenda puts every source in one ranked list with exact counts', async 
   assert.deepEqual(agenda.items.map(item => item.kind), [
     'meeting_request', 'interested_reply', 'interested_reply', 'approval', 'unclassified_reply', 'linkedin_accepted', 'followups_due', 'bounce']);
   assert.equal(agenda.items[0].who, 'Marcela Rojas');
-  assert.deepEqual(agenda.sources, { replies: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'ok', linkedin: 'ok' });
+  assert.deepEqual(agenda.sources, { interested: 'ok', attention: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'ok', linkedin: 'ok' });
 });
 
 test('automatic replies of the last week are news and older ones history; they are never pending work', async () => {
@@ -105,25 +105,38 @@ test('a source that fails is named and the rest of the list stays', async () => 
   assert.equal(agenda.complete, false);
   assert.equal(agenda.sources.followups, 'unavailable');
   assert.equal(agenda.sources.linkedin, 'unavailable');
-  assert.equal(agenda.sources.replies, 'ok');
+  assert.equal(agenda.sources.interested, 'ok');
+  assert.equal(agenda.sources.attention, 'ok');
   assert.equal(agenda.counts.linkedinAccepted, null, 'an unreadable LinkedIn is not zero acceptances');
-  assert.equal(agenda.counts.followupsReady, 0);
+  assert.equal(agenda.counts.followupsReady, null, 'follow-ups that could not be read are unknown, never a zero the coordinator would repeat');
+  assert.equal(agenda.counts.followupsLater, null);
+  assert.equal(agenda.counts.followupsHeld, null);
   assert.equal(agenda.counts.interestedAccounts, 3);
   assert.ok(!agenda.items.some(item => item.kind === 'followups_due'));
 });
 
-test('if the replies cannot be fully read the list says so, whichever half failed', async () => {
+test('if one half of the replies cannot be read, its counts are unknown and the other half stands', async () => {
   const noAttention = await readCoworkAgenda(tables({}), scope, {
     ...dependencies() as object, attention: async () => { throw new Error('down'); },
   } as never, NOW);
-  assert.equal(noAttention.sources.replies, 'unavailable');
+  assert.equal(noAttention.sources.attention, 'unavailable');
+  assert.equal(noAttention.sources.interested, 'ok');
   assert.equal(noAttention.counts.interestedAccounts, 3, 'what could be read is still there');
+  assert.equal(noAttention.counts.unclassifiedReplies, null);
+  assert.equal(noAttention.counts.autoReplies, null);
+  assert.equal(noAttention.counts.bounces, null);
+  assert.equal(noAttention.counts.softBounces, null);
   assert.equal(noAttention.mailboxSynced, null);
+  assert.equal(noAttention.complete, false);
   const noInterested = await readCoworkAgenda(tables({}), scope, {
     ...dependencies() as object, interested: async () => { throw new Error('down'); },
   } as never, NOW);
-  assert.equal(noInterested.sources.replies, 'unavailable');
-  assert.equal(noInterested.counts.interestedAccounts, 0);
+  assert.equal(noInterested.sources.interested, 'unavailable');
+  assert.equal(noInterested.counts.interestedAccounts, null, 'no one interested is not the same as not knowing');
+  assert.equal(noInterested.counts.interestedPeople, null);
+  assert.equal(noInterested.counts.cooledAccounts, null);
+  assert.equal(noInterested.counts.ofWhichMeetingRequests, null);
+  assert.equal(noInterested.counts.bounces, 1, 'the other half is unaffected');
   assert.equal(noInterested.complete, false);
 });
 
@@ -134,7 +147,7 @@ test('rows left out by a limit make the source partial, not complete', async () 
     followups: async () => ({ ...followups, truncated: true }),
     approvals: async () => ({ count: 20, oldestDays: 9, examples: [], truncated: true }),
   } as never, NOW);
-  assert.equal(agenda.sources.replies, 'partial');
+  assert.equal(agenda.sources.interested, 'partial');
   assert.equal(agenda.sources.followups, 'partial');
   assert.equal(agenda.sources.approvals, 'partial');
   assert.equal(agenda.complete, false);

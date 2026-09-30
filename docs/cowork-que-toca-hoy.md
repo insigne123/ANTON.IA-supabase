@@ -27,18 +27,18 @@ Un extracto de lo que lee el coordinador (el día completo del caso `agenda-toca
 
 ```json
 { "scope": "own_agenda_today", "day": "2026-09-25", "weekday": "viernes",
-  "counts": { "interestedAccounts": 3, "meetingRequests": 1, "cooledAccounts": 1, "unclassifiedReplies": 1, "autoReplies": 2,
+  "counts": { "interestedAccounts": 3, "ofWhichMeetingRequests": 1, "cooledAccounts": 1, "unclassifiedReplies": 1, "autoReplies": 2,
               "approvals": 2, "followupsReady": 47, "followupsHeld": 3, "linkedinAccepted": 2, "bounces": 1 },
   "items": [
     { "rank": 1, "kind": "meeting_request", "action": "reply", "who": "Marcela Rojas", "company": "Servicios Norte", "people": 1, "daysWaiting": 4 },
     { "rank": 6, "kind": "cooled_lead", "action": "revive", "who": "Iván Herrera", "company": "Servicios Integrales", "daysWaiting": 24 },
     { "rank": 8, "kind": "followups_due", "action": "let_run", "campaign": "Prospección construcción y RR. HH.", "ready": 47, "later": 0, "held": 3, "spacingMinutes": 30 }
   ],
-  "sources": { "replies": "ok", "approvals": "ok", "campaignSteps": "none", "followups": "ok", "linkedin": "ok" }, "complete": true }
+  "sources": { "interested": "ok", "attention": "ok", "approvals": "ok", "campaignSteps": "none", "followups": "ok", "linkedin": "ok" }, "complete": true }
 ```
 
-- **`counts`**, las cifras exactas (interesados, reuniones pedidas, enfriados, sin clasificar, respuestas automáticas, aprobaciones, seguimientos que salen / pasan de día / retenidos, aceptaciones de LinkedIn, rebotes). El modelo no cuenta ni reordena.
-- **`sources`** y **`complete`**: qué fuentes se leyeron. Si una falló o se cortó por un límite, la lista lo dice y el modelo no la presenta como completa.
+- **`counts`**, las cifras exactas (interesados, cuántos de ellos pidieron reunión, enfriados, sin clasificar, respuestas automáticas, aprobaciones, seguimientos que salen / pasan de día / retenidos, aceptaciones de LinkedIn, rebotes). El modelo no cuenta ni reordena. `ofWhichMeetingRequests` está **dentro** de `interestedAccounts` (el nombre lo dice porque en una primera prueba con el modelo real sumó la reunión pedida como una persona más y contó cuatro). **Un `null` significa que esa parte no se pudo leer y nunca es un cero:** con la fuente de seguimientos caída, el modelo repetía «0 seguimientos» cuando el conteo venía en 0.
+- **`sources`** y **`complete`**: qué fuentes se leyeron (`interested`, `attention`, `approvals`, `campaignSteps`, `followups`, `linkedin`). Si una falló o se cortó por un límite, la lista lo dice y el modelo no la presenta como completa.
 
 ### Reglas que fija el código
 
@@ -104,7 +104,7 @@ node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-conversations
 
 - **Sin medición con el modelo real todavía.** La cuenta de OpenAI de las mediciones está sin créditos. El orden de la lista es un criterio explícito y probado, no un resultado medido; se ajusta con el banco AXIS (D2 y G1) cuando haya línea base.
 - **La aceptación de LinkedIn es una señal indirecta:** la persona figura en la red observada y hay una invitación confirmada. No distingue una conexión aceptada de una que ya existía y se observó después.
-- **Los interesados son los 300 más recientes.** Con más, `sources.replies` queda en `partial` y la lista lo dice.
+- **Los interesados son los 300 más recientes.** Con más, `sources.interested` queda en `partial` y la lista lo dice.
 - **Solo lo tuyo.** Si una respuesta llegó a un envío de un compañero, no figura en tu lista aunque sea de la misma empresa; lo que sí se comparte es el freno: si alguien de la empresa respondió (a quien sea), tus seguimientos a esa empresa quedan retenidos y se cuentan como tales.
 - **Son hasta 8 campañas aprobadas;** con más, `sources.followups` queda en `partial`.
 - **Las respuestas automáticas se cuentan sobre las 10 más recientes** que devuelve `replies.attention`; es una cifra informativa, nunca trabajo pendiente.

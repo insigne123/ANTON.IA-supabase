@@ -21,7 +21,8 @@ export type AgendaAction = 'reply' | 'decide' | 'review_reply' | 'review_step' |
 /** ok: read in full. none: nothing to read (no active campaign, campaigns v2 off). partial: read, but rows beyond the limit were
  * left out. sync_incomplete: LinkedIn is not fully synced, so acceptances cannot be told. unavailable: the read failed. */
 export type AgendaSourceStatus = 'ok' | 'none' | 'partial' | 'sync_incomplete' | 'unavailable';
-export type AgendaSourceKey = 'replies' | 'approvals' | 'campaignSteps' | 'followups' | 'linkedin';
+/** interested: the interested people who wrote. attention: bounces, replies nobody has classified and automatic replies. */
+export type AgendaSourceKey = 'interested' | 'attention' | 'approvals' | 'campaignSteps' | 'followups' | 'linkedin';
 
 type Person = { name: string | null; email: string | null; company: string | null };
 export type AgendaReplyInput = Person & { daysWaiting: number };
@@ -74,18 +75,20 @@ export type AgendaItem = {
 export type CoworkAgenda = {
   scope: 'own_agenda_today';
   day: string; weekday: string; timeZone: string;
+  /** A count is null when its source could not be read: that is «unknown», never zero. */
   counts: {
-    /** Companies with an interested person waiting (fresh), how many people wrote and how many of those companies asked for a meeting. */
-    interestedAccounts: number; interestedPeople: number; meetingRequests: number;
-    /** Companies whose interested people have waited AGENDA_COOLED_AFTER_DAYS or more. */
-    cooledAccounts: number;
-    unclassifiedReplies: number;
-    autoReplies: number;
-    approvals: number;
-    campaignSteps: number;
-    followupsReady: number; followupsLater: number; followupsHeld: number;
+    /** Companies with an interested person waiting (fresh) and how many people wrote; ofWhichMeetingRequests is how many of
+     * those companies asked for a meeting (they are already inside interestedAccounts: do not add them). */
+    interestedAccounts: number | null; interestedPeople: number | null; ofWhichMeetingRequests: number | null;
+    /** Companies whose interested people have waited AGENDA_COOLED_AFTER_DAYS or more (a different group from interestedAccounts). */
+    cooledAccounts: number | null;
+    unclassifiedReplies: number | null;
+    autoReplies: number | null;
+    approvals: number | null;
+    campaignSteps: number | null;
+    followupsReady: number | null; followupsLater: number | null; followupsHeld: number | null;
     linkedinAccepted: number | null;
-    bounces: number; softBounces: number;
+    bounces: number | null; softBounces: number | null;
   };
   items: AgendaItem[];
   truncated: boolean;
@@ -191,25 +194,27 @@ export function buildCoworkAgenda(input: AgendaInput): CoworkAgenda {
     .map(({ sort: _sort, ...item }, index): AgendaItem => ({ rank: index + 1, ...item }));
 
   const followupsReady = input.followups.reduce((sum, campaign) => sum + campaign.ready, 0);
+  /** What could not be read is unknown, not zero: the coordinator repeated a «0» when it read a source that had failed. */
+  const known = (source: AgendaSourceKey, value: number) => input.sources[source] === 'unavailable' ? null : value;
   const complete = (Object.values(input.sources) as AgendaSourceStatus[]).every(status => status !== 'unavailable' && status !== 'partial');
   return {
     scope: 'own_agenda_today',
     day: input.timing.day, weekday: input.timing.weekday, timeZone: input.timing.timeZone,
     counts: {
-      interestedAccounts: live.length,
-      interestedPeople: live.reduce((sum, account) => sum + account.people, 0),
-      meetingRequests: live.filter(asks).length,
-      cooledAccounts: cooled.length,
-      unclassifiedReplies: input.unclassified.length,
-      autoReplies: input.autoReplies,
-      approvals: input.approvals.count,
-      campaignSteps: input.campaignSteps.count,
-      followupsReady,
-      followupsLater: input.followups.reduce((sum, campaign) => sum + campaign.scheduledLater, 0),
-      followupsHeld: input.followups.reduce((sum, campaign) => sum + campaign.heldCompanyReplied + campaign.heldNegotiation + campaign.historyIncomplete, 0),
+      interestedAccounts: known('interested', live.length),
+      interestedPeople: known('interested', live.reduce((sum, account) => sum + account.people, 0)),
+      ofWhichMeetingRequests: known('interested', live.filter(asks).length),
+      cooledAccounts: known('interested', cooled.length),
+      unclassifiedReplies: known('attention', input.unclassified.length),
+      autoReplies: known('attention', input.autoReplies),
+      approvals: known('approvals', input.approvals.count),
+      campaignSteps: known('campaignSteps', input.campaignSteps.count),
+      followupsReady: known('followups', followupsReady),
+      followupsLater: known('followups', input.followups.reduce((sum, campaign) => sum + campaign.scheduledLater, 0)),
+      followupsHeld: known('followups', input.followups.reduce((sum, campaign) => sum + campaign.heldCompanyReplied + campaign.heldNegotiation + campaign.historyIncomplete, 0)),
       linkedinAccepted: input.sources.linkedin === 'ok' ? input.linkedinAccepted.length : null,
-      bounces: actionable.length,
-      softBounces: input.bounces.length - actionable.length,
+      bounces: known('attention', actionable.length),
+      softBounces: known('attention', input.bounces.length - actionable.length),
     },
     items: ranked.slice(0, AGENDA_MAX_ITEMS),
     truncated: ranked.length > AGENDA_MAX_ITEMS,

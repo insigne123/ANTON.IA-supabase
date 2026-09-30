@@ -8,7 +8,7 @@ import {
 } from './agenda';
 
 const okSources = (): Record<AgendaSourceKey, AgendaSourceStatus> =>
-  ({ replies: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'ok', linkedin: 'ok' });
+  ({ interested: 'ok', attention: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'ok', linkedin: 'ok' });
 const empty = (): AgendaInput => ({
   interested: [], unclassified: [], autoReplies: 0, bounces: [],
   approvals: { count: 0, oldestDays: null, examples: [] }, campaignSteps: { count: 0, examples: [] },
@@ -78,7 +78,7 @@ test('the counts are exact and separate what waits for an answer from what has c
   });
   assert.equal(agenda.counts.interestedAccounts, 3);
   assert.equal(agenda.counts.interestedPeople, 3);
-  assert.equal(agenda.counts.meetingRequests, 1);
+  assert.equal(agenda.counts.ofWhichMeetingRequests, 1, 'the one that asked for a meeting is one of the three, not a fourth');
   assert.equal(agenda.counts.cooledAccounts, 1);
   assert.equal(agenda.counts.followupsReady, 47);
   assert.equal(agenda.counts.followupsLater, 5);
@@ -216,7 +216,7 @@ test('a source that failed or left rows out makes the list partial; nothing to r
   const failed = buildCoworkAgenda({ ...empty(), sources: { ...okSources(), followups: 'unavailable' } });
   assert.equal(failed.complete, false);
   assert.equal(failed.sources.followups, 'unavailable');
-  assert.equal(buildCoworkAgenda({ ...empty(), sources: { ...okSources(), replies: 'partial' } }).complete, false);
+  assert.equal(buildCoworkAgenda({ ...empty(), sources: { ...okSources(), interested: 'partial' } }).complete, false);
   const none = buildCoworkAgenda({ ...empty(), sources: { ...okSources(), campaignSteps: 'none', followups: 'none' } });
   assert.equal(none.complete, true, 'nothing to read is not a failure');
   const unsynced = buildCoworkAgenda({ ...empty(), sources: { ...okSources(), linkedin: 'sync_incomplete' } });
@@ -243,4 +243,32 @@ test('agenda.today is a fixed read with its own plan label and its own count', (
   const agenda = buildCoworkAgenda({ ...empty(), interested: [{ ...person('A', 'Empresa A', 'a@empresa-a.cl', 1), intent: 'positive' }], followups: [campaign({ ready: 3 })] });
   assert.deepEqual(coworkReadFinding({ action: 'agenda.today', result: agenda }), { count: 2, label: 'pendientes de hoy' });
   assert.deepEqual(coworkReadFinding({ action: 'agenda.today', result: buildCoworkAgenda(empty()) }), { count: null, label: 'sin pendientes de hoy' });
+});
+
+test('what could not be read is unknown, never zero: each source makes only its own counts null', () => {
+  const nulls = (source: AgendaSourceKey, status: AgendaSourceStatus) => {
+    const counts = buildCoworkAgenda({ ...empty(), sources: { ...okSources(), [source]: status } }).counts as Record<string, number | null>;
+    return Object.keys(counts).filter(key => counts[key] === null).sort();
+  };
+  assert.deepEqual(nulls('interested', 'unavailable'), ['cooledAccounts', 'interestedAccounts', 'interestedPeople', 'ofWhichMeetingRequests']);
+  assert.deepEqual(nulls('attention', 'unavailable'), ['autoReplies', 'bounces', 'softBounces', 'unclassifiedReplies']);
+  assert.deepEqual(nulls('approvals', 'unavailable'), ['approvals']);
+  assert.deepEqual(nulls('campaignSteps', 'unavailable'), ['campaignSteps']);
+  assert.deepEqual(nulls('followups', 'unavailable'), ['followupsHeld', 'followupsLater', 'followupsReady']);
+  assert.deepEqual(nulls('linkedin', 'unavailable'), ['linkedinAccepted']);
+  assert.deepEqual(nulls('linkedin', 'sync_incomplete'), ['linkedinAccepted']);
+  assert.deepEqual(nulls('interested', 'partial'), [], 'a page that was cut is a lower bound, and the source says so');
+  assert.deepEqual(nulls('followups', 'none'), [], 'no campaign is a real zero');
+  assert.deepEqual(nulls('campaignSteps', 'none'), [], 'campaigns v2 off is a real zero');
+});
+
+test('the people who asked for a meeting are already inside the interested companies', () => {
+  const agenda = buildCoworkAgenda({ ...empty(), interested: [
+    { ...person('Marcela Rojas', 'Servicios Norte', 'mrojas@sernorte.cl', 4), intent: 'meeting_request' },
+    { ...person('Héctor Vidal', 'Casino Central', 'hvidal@casinocentral.cl', 3), intent: 'positive' },
+    { ...person('Ana Ruiz', 'Alimentos del Valle', 'aruiz@delvalle.cl', 2), intent: 'positive' },
+  ] });
+  assert.equal(agenda.counts.interestedAccounts, 3);
+  assert.equal(agenda.counts.ofWhichMeetingRequests, 1);
+  assert.ok(Number(agenda.counts.ofWhichMeetingRequests) <= Number(agenda.counts.interestedAccounts));
 });

@@ -71,7 +71,7 @@ export function corpusRead(action: string, input: string): unknown {
     case 'agenda.today':
       return buildCoworkAgenda({ interested: [], unclassified: [], autoReplies: 0, bounces: [], approvals: { count: 0, oldestDays: null, examples: [] },
         campaignSteps: { count: 0, examples: [] }, followups: [], linkedinAccepted: [], mailboxSynced: null,
-        sources: { replies: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'none', linkedin: 'sync_incomplete' },
+        sources: { interested: 'ok', attention: 'ok', approvals: 'ok', campaignSteps: 'none', followups: 'none', linkedin: 'sync_incomplete' },
         timing: { timeZone: 'America/Santiago', day: '2026-09-25', weekday: 'viernes' } });
     case 'exceptions.list':
       return { scope: 'team', truncated: false, items: [
