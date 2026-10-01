@@ -104,13 +104,21 @@ export const coworkLinkedinBatchLabel = (kind: CoworkLinkedinBatchKind, count: n
 export type CoworkLinkedinBatchResult = { id: string; name: string | null; status: 'queued' | 'reused' | 'skipped' | 'removed'; reason?: string };
 
 /** The reply after running a batch: counts first, then what each person that did not go needs to be told. */
+/**
+ * How a queued LinkedIn job goes out, in steps the person can follow: nothing is sent by itself. The extension runs it on the
+ * profile's own page (Plan 5, PR-8; docs/linkedin-prueba-guiada.md).
+ */
+export function coworkLinkedinRunSteps(what: string, profileUrl?: string | null) {
+  const open = profileUrl ? `abre su perfil (${profileUrl})` : 'abre cada perfil en LinkedIn';
+  return `Para enviar ${what}: ${open}, abre la extensión de ANTON.IA, toca «Consultar trabajos» y luego «Ejecutar». Nada sale solo; vence en ${LINKEDIN_JOB_EXPIRY_DAYS} días si no lo ejecutas.`;
+}
+
 export function coworkLinkedinBatchSummary(kind: CoworkLinkedinBatchKind, results: CoworkLinkedinBatchResult[]) {
   const count = (status: CoworkLinkedinBatchResult['status']) => results.filter(result => result.status === status).length;
   const queued = count('queued') + count('reused');
   const noun = kind === 'invite' ? 'invitaciones' : 'mensajes';
   const left = count('skipped');
   const removed = count('removed');
-  const run = kind === 'invite' ? 'Ejecútalas' : 'Ejecútalos';
-  return `Quedaron en cola ${queued} de ${results.length} ${noun}.${queued ? ` ${run} desde la extensión ante cada perfil; vencen en ${LINKEDIN_JOB_EXPIRY_DAYS} días.` : ''}`
+  return `Quedaron listas ${queued} de ${results.length} ${noun}.${queued ? ` ${coworkLinkedinRunSteps(kind === 'invite' ? 'cada invitación' : 'cada mensaje')}` : ''}`
     + `${left ? ` ${left === 1 ? '1 no salió' : `${left} no salieron`}: el motivo está en cada persona.` : ''}${removed ? ` ${removed === 1 ? 'Quitaste a 1 persona' : `Quitaste a ${removed} personas`} de la lista.` : ''}`;
 }
