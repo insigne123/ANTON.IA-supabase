@@ -30,7 +30,7 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
-  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry']);
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
@@ -38,7 +38,7 @@ export const coworkDecisionSchema = z.object({
     'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'replies.attention', 'replies.stalled', 'metrics.overview', 'metrics.rates', 'metrics.diagnose', 'metrics.channels', 'metrics.incidents', 'deliverability.check', 'site.read', 'leads.count', 'deliverability.bounces', 'deliverability.sender', 'compliance.check', 'compliance.law', 'compliance.obligation', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'files.read', 'saved_searches.list', 'profile.get',
     'privacy.contactability_batch', 'lists.review_batch',
     'crm.propose_note', 'prospecting.propose_search',
-    'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send', 'email.reply_thread', 'campaign.retry',
+    'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send', 'email.reply_thread', 'campaign.retry', 'lead.enrich_phone',
     'campaign.create', 'campaign.activate', 'campaign.pause', 'code.execute',
     'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
     'crm.update_record', 'campaign.prepare_draft_v2',
@@ -93,7 +93,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'profile.update' | 'saved_search.create' | 'saved_search.update' | 'saved_search.delete' | 'campaign.stop_v2'
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
-  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry';
+  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry' | 'lead.enrich_phone';
 export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
@@ -241,7 +241,7 @@ function describeLeadTarget(
   observations: CoworkObservation[], history: CoworkHistoryTurn[],
 ): string | null {
   if (action === 'email.reply_thread') return observedThreadName(targetId, observations, history);
-  if (action !== 'leads.save_contact' && action !== 'research.start' && action !== 'lead.enrich') return null;
+  if (action !== 'leads.save_contact' && action !== 'research.start' && action !== 'lead.enrich' && action !== 'lead.enrich_phone') return null;
   return observedLeadName(targetId, observations, history);
 }
 
@@ -340,6 +340,7 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'contacts.import') return 'Importar contactos de un archivo';
   if (action === 'email.reply_thread') return targetName ? `Responder a ${targetName} en su hilo` : 'Responder en el hilo de una conversación';
   if (action === 'campaign.retry') return 'Reintentar los envíos fallidos de una campaña';
+  if (action === 'lead.enrich_phone') return named('Revelar el teléfono de');
   return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
 }
 
@@ -471,6 +472,7 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
   if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
   if (action === 'contacts.import') return 'Propongo guardar en tus contactos a las personas del archivo que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.';
+  if (action === 'lead.enrich_phone') return `Propongo pedir el teléfono de ${who} al proveedor: cuesta 10 créditos y es una persona por aprobación. La tarjeta muestra tu saldo; revísalo antes de aprobar.`;
   if (action === 'campaign.retry') return 'Propongo reintentar los envíos de esa campaña que fallaron por un motivo que se puede reintentar. En la tarjeta ves cuáles son; si la apruebas, vuelven a la cola y salen con los frenos de siempre, sin enviarse dos veces.';
   if (action === 'email.reply_thread') return `Preparé la respuesta para ${who} y la propongo enviar en su hilo. Revisa el texto en la tarjeta antes de aprobarla: si la apruebas, sale tal cual.`;
   return null;
@@ -538,9 +540,9 @@ function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
 
 /** The same email lookup already ran in this thread (history.actions): it would
  * spend another credit for the same provider answer. */
-function repeatedEnrichment(label: string, history: CoworkHistoryTurn[]) {
+function repeatedEnrichment(label: string, history: CoworkHistoryTurn[], kind: 'enrich_contact' | 'enrich_phone' = 'enrich_contact') {
   return history.some(turn => ((turn as { actions?: Array<{ kind?: unknown; label?: unknown }> }).actions || [])
-    .some(action => action.kind === 'enrich_contact' && action.label === label));
+    .some(action => action.kind === kind && action.label === label));
 }
 
 function issueSummary(error: unknown): string | null {
@@ -623,6 +625,8 @@ async function runCoworkLoop(input: {
   replyThread?: boolean;
   /** campaign.retry may be proposed (COWORK_CAMPAIGN_RETRY_ENABLED; its campaign_retry effect is in the migration 20260930170000). */
   campaignRetry?: boolean;
+  /** lead.enrich_phone may be proposed (COWORK_PHONE_REVEAL_ENABLED; its enrich_phone effect is in the migration 20260930170000). */
+  phoneReveal?: boolean;
   /** linkedin.invite_batch / linkedin.message_batch may be proposed (COWORK_LINKEDIN_BATCH_ENABLED; its migration is applied in production). */
   linkedinBatch?: boolean;
   /** The judge (plan 2, G2): reads the coordinator's final answer before it is shown and returns
@@ -837,7 +841,7 @@ async function runCoworkLoop(input: {
         || decision.action === 'campaign.schedule_batch'
         || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message'
         || decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch'
-        || decision.action === 'contacts.import' || decision.action === 'email.reply_thread' || decision.action === 'campaign.retry') {
+        || decision.action === 'contacts.import' || decision.action === 'email.reply_thread' || decision.action === 'campaign.retry' || decision.action === 'lead.enrich_phone') {
         if (!input.proposeEffect) throw rejected('Effect proposals unavailable', 'En este contexto no puedes proponer acciones: responde con lo observado.');
         const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
           : decision.action === 'research.start' ? 'start_research'
@@ -866,7 +870,8 @@ async function runCoworkLoop(input: {
           : decision.action === 'linkedin.message_batch' ? 'linkedin_message_batch'
           : decision.action === 'contacts.import' ? 'contacts_import'
           : decision.action === 'email.reply_thread' ? 'reply_thread'
-          : decision.action === 'campaign.retry' ? 'campaign_retry' : 'request_draft';
+          : decision.action === 'campaign.retry' ? 'campaign_retry'
+          : decision.action === 'lead.enrich_phone' ? 'enrich_phone' : 'request_draft';
         const targetId = decision.action === 'leads.save_contact' ? decision.providerId
           : decision.action === 'draft.request' ? decision.snapshotId
           : decision.action === 'email.send' ? decision.draftId
@@ -955,6 +960,9 @@ async function runCoworkLoop(input: {
           throw rejected('Campaign retry unavailable', 'Reintentar envíos desde Cowork todavía no está disponible: di qué envíos se pueden reintentar (campaigns.retry_review) y que se reintentan desde la campaña en la app; los que necesitan conciliar no se reintentan.');
         }
         if (decision.action === 'campaign.retry' && !decision.campaignId) throw rejected('Missing campaign', MISSING_PROPOSAL_FIELDS);
+        if (decision.action === 'lead.enrich_phone' && !input.phoneReveal) {
+          throw rejected('Phone reveal unavailable', 'Pedir teléfonos desde Cowork todavía no está disponible: di que no puedes revelar teléfonos y ofrece lo que sí: su correo (lead.enrich, 1 crédito) o escribirle por LinkedIn si tiene perfil.');
+        }
         const replyThread = decision.action === 'email.reply_thread' ? decision.replyThread ?? undefined : undefined;
         if (decision.action === 'email.reply_thread' && !replyThread) throw rejected('Missing reply', MISSING_PROPOSAL_FIELDS);
         const effectAction = decision.action;
@@ -1003,6 +1011,9 @@ async function runCoworkLoop(input: {
         if (decision.answer?.document && turn < last) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
         const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
         const label = effectLabel(decision.action, targetId, targetName);
+        if (kind === 'enrich_phone' && turn < last && repeatedEnrichment(label, input.history || [], 'enrich_phone')) {
+          throw rejected('Phone already requested in this thread', 'Ya se pidió el teléfono de este contacto en este hilo (mira history.actions): repetirlo gasta otros 10 créditos. No lo vuelvas a proponer: di que ya se pidió y que llega a los contactos enriquecidos.');
+        }
         if (kind === 'enrich_contact' && turn < last && repeatedEnrichment(label, input.history || [])) {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
         }

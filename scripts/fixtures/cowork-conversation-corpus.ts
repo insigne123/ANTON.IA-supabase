@@ -216,6 +216,8 @@ export type CorpusCase = {
   linkedinBatch?: boolean;
   /** Runs with campaign.retry available (COWORK_CAMPAIGN_RETRY_ENABLED). */
   campaignRetry?: boolean;
+  /** Runs with lead.enrich_phone available (COWORK_PHONE_REVEAL_ENABLED). */
+  phoneReveal?: boolean;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
 };
 
