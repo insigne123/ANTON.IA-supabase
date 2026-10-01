@@ -74,6 +74,43 @@ export function linkedinSlugConflictsWithName(profileUrl?: string | null, person
   return !slugTokens.some((token) => nameCandidates.has(token));
 }
 
+function foldSlug(pathname: string) {
+  return pathname.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+/** Two addresses name the same profile when their slugs are equal ignoring case and accents: LinkedIn and the provider write
+ * the same person as laura-sofía-…, laura-sof%C3%ADa-… or laura-sofia-…, and a strict comparison refused real matches. */
+export function linkedinProfilesMatch(left?: string | null, right?: string | null): boolean {
+  const a = parseProfileUrl(left);
+  const b = parseProfileUrl(right);
+  return Boolean(a && b && foldSlug(a) === foldSlug(b));
+}
+
+/** When the provider returns a person without an address, a personal slug can still vouch for them: every name-like token of
+ * the slug (two or more, none with digits) must be in the returned name. A custom slug (jperez87, luisruben-rrhh) vouches for
+ * nobody, so it keeps refusing. */
+export function linkedinSlugMatchesName(profileUrl?: string | null, personName?: string | null): boolean {
+  const slugTokens = slugNameTokens(profileUrl);
+  const nameTokens = personNameTokens(personName);
+  if (slugTokens.length < 2 || nameTokens.length < 2 || slugTokens.some((token) => /\d/.test(token))) return false;
+  const nameCandidates = new Set(nameTokens);
+  return slugTokens.every((token) => nameCandidates.has(token));
+}
+
+export type LinkedinInputKind = 'empty' | 'profile' | 'sales_navigator' | 'company_page' | 'other';
+
+/** What the person pasted, so a wrong kind of address gets a precise fix instead of «La URL no es válida». */
+export function classifyLinkedinInput(input?: string | null): LinkedinInputKind {
+  const value = String(input || '').trim();
+  if (!value) return 'empty';
+  if (parseProfileUrl(value)) return 'profile';
+  const lower = value.toLowerCase();
+  if (!lower.includes('linkedin.com')) return 'other';
+  if (/linkedin\.com\/(sales|talent|recruiter)\//.test(lower)) return 'sales_navigator';
+  if (/linkedin\.com\/(company|school|showcase)\//.test(lower)) return 'company_page';
+  return 'other';
+}
+
 export function getLinkedinProfileDisplayName(input?: string | null): string {
   const pathname = parseProfileUrl(input);
   if (!pathname) return '';

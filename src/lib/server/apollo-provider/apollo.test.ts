@@ -660,3 +660,25 @@ test('LinkedIn match accepts Apollo short name for luisruben-rrhh only when the 
       (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('LinkedIn match accepts the same slug with or without accents, and a missing address only when the slug spells the name', async () => {
+  const originalFetch = globalThis.fetch;
+  const accented = validateEnrichmentInput({ lead: { linkedin_url: 'https://cl.linkedin.com/in/laura-sof%C3%ADa-sotelo-torres-47423735/' },
+    reveal_email: true, reveal_phone: false, enrichment_level: 'basic' });
+  const named = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/maria-jose-perez' },
+    reveal_email: true, reveal_phone: false, enrichment_level: 'basic' });
+  assert.equal(accented.ok && named.ok, true);
+  if (!accented.ok || !named.ok) return;
+  try {
+    globalThis.fetch = async () => Response.json({ person: { id: 'p1', name: 'Laura Sofía Sotelo Torres',
+      linkedin_url: 'http://www.linkedin.com/in/laura-sofia-sotelo-torres-47423735' } });
+    assert.equal((await executeApolloEnrichment(accented.value, 'test-key', getGatewayConfig())).success, true);
+
+    globalThis.fetch = async () => Response.json({ person: { id: 'p2', name: 'María José Pérez González', linkedin_url: null } });
+    assert.equal((await executeApolloEnrichment(named.value, 'test-key', getGatewayConfig())).success, true);
+
+    globalThis.fetch = async () => Response.json({ person: { id: 'p3', name: 'María Pérez', linkedin_url: null } });
+    await assert.rejects(() => executeApolloEnrichment(named.value, 'test-key', getGatewayConfig()),
+      (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
+  } finally { globalThis.fetch = originalFetch; }
+});

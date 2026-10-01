@@ -36,6 +36,15 @@ import {
   type CompanySearchOrganization,
   type LeadsSearchParams,
 } from '@/lib/leads-client';
+import { ToastAction } from '@/components/ui/toast';
+import { useRouter } from 'next/navigation';
+import { activeFilterChips, savedLeadsToast, searchStartersFor, type ActiveFilterChip, type SearchStarter } from '@/lib/search/search-guidance';
+import { FilterRelaxHint, SearchStarters } from '@/components/search/SearchGuidance';
+import { ProfileSearchProblemAlert } from '@/components/search/ProfileSearchProblemAlert';
+import {
+  ProfileSearchProblemError, profileProblemFromMessage, profileSearchMessage, profileSearchPersonHint, profileUrlProblem,
+  type ProfileSearchAction, type ProfileSearchMessage,
+} from '@/lib/search/profile-search-outcome';
 import type { Lead, LeadSearchResponse } from '@/lib/schemas/leads';
 import {
   DropdownMenu,
@@ -119,21 +128,24 @@ function MultiCheckDropdown({
 function getFriendlySearchErrorMessage(message?: string) {
   const raw = String(message || '').trim();
   const lower = raw.toLowerCase();
+  const generic = 'No pudimos completar la búsqueda. Prueba de nuevo en unos minutos; si se repite, cambia algún filtro.';
 
-  if (!raw) {
-    return 'No pudimos completar la busqueda. Revisa los filtros y vuelve a intentarlo.';
-  }
+  if (!raw) return generic;
 
   if (raw.includes('APOLLO_PROFILE_NO_USABLE_DATA')) {
-    return 'No se encontraron datos en las bases de datos para esta URL (nombre, cargo o empresa). Puedes reintentar solo los datos profesionales, verificar la URL o buscar por cargo y empresa.';
+    return 'No hay nombre, cargo ni empresa para esa dirección. Prueba solo con datos profesionales o busca a la persona por su empresa.';
   }
 
   if (lower.includes('perfil distinto') || lower.includes('otra persona') || lower.includes('corresponda a la url')) {
-    return 'El proveedor devolvió datos de otra persona para esa URL y no los mostramos para protegerte. Prueba buscar por cargo y empresa en la pestaña Filtros.';
+    return 'El proveedor devolvió datos de otra persona para esa dirección y no los mostramos. Busca a la persona por su empresa y cargo.';
+  }
+
+  if (/http_5\d\d|upstream|gateway|timeout|failed to fetch|no pudimos iniciar|no pudimos confirmar/.test(lower)) {
+    return 'El proveedor de datos no respondió. Es temporal y no depende de tus filtros: prueba de nuevo en unos minutos.';
   }
 
   if (lower.includes('linkedin') || lower.includes('url')) {
-    return 'Revisa la URL de LinkedIn e intenta nuevamente.';
+    return 'Revisa la dirección de LinkedIn e intenta nuevamente.';
   }
 
   if (lower.includes('industria') || lower.includes('ubicacion') || lower.includes('ubicación') || lower.includes('tamano') || lower.includes('tamaño') || lower.includes('obligatorio') || lower.includes('al menos un filtro') || lower.startsWith('debes')) {
@@ -144,14 +156,14 @@ function getFriendlySearchErrorMessage(message?: string) {
 
   if (lower.includes('quota') || lower.includes('limite') || lower.includes('límite') || lower.includes('429')) {
     if (lower.includes('alcanzaste el límite diario') || lower.includes('alcanzaste el limite diario')) return raw;
-    return 'Llegaste al limite disponible por hoy. Puedes volver a intentarlo mas tarde o ajustar el volumen de la busqueda.';
+    return 'Llegaste al límite disponible por hoy. Puedes volver a intentarlo más tarde o pedir más cupo a quien administra tu cuenta.';
   }
 
   if (lower.includes('unauthorized') || lower.includes('401') || lower.includes('sesion') || lower.includes('sesión')) {
-    return 'Tu sesion necesita renovarse. Vuelve a iniciar sesion y repite la busqueda.';
+    return 'Tu sesión necesita renovarse. Vuelve a iniciar sesión y repite la búsqueda.';
   }
 
-  return 'No pudimos completar la busqueda. Revisa los filtros y vuelve a intentarlo.';
+  return generic;
 }
 
 function normalizeLeadForUI(raw: Lead, options?: {
@@ -407,6 +419,7 @@ type SearchMode = LeadSearchMode;
 
 
 export default function SearchPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [leads, setLeads] = useState<UILaed[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
@@ -414,6 +427,10 @@ export default function SearchPage() {
   const [contactedIds, setContactedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const [profileOnlyRetry, setProfileOnlyRetry] = useState(false);
+  // A LinkedIn profile search problem with its next step (src/lib/search/profile-search-outcome.ts).
+  const [profileProblem, setProfileProblem] = useState<ProfileSearchMessage | null>(null);
+  // The person a failed profile search was looking for, shown while searching for them by company.
+  const [companySearchHint, setCompanySearchHint] = useState('');
   const { toast } = useToast();
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DEFAULT);
@@ -806,6 +823,20 @@ export default function SearchPage() {
     return () => { unsubscribe(); };
   }, []);
 
+  // Starting points follow what the active organization sells (src/lib/search/search-guidance.ts).
+  const [organizationName, setOrganizationName] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    organizationService.listOrganizations()
+      .then((list) => {
+        if (cancelled) return;
+        setOrganizationName(list.organizations.find((org) => org.id === list.activeOrganizationId)?.name || '');
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+  const searchStarters = useMemo(() => searchStartersFor(organizationName), [organizationName]);
+
   useEffect(() => {
     let cancelled = false;
     void fetch('/api/leads/search/checkpoint', { cache: 'no-store' }).then(async (response) => {
@@ -861,6 +892,8 @@ export default function SearchPage() {
     companyRun.current += 1;
     companyPeopleAbortRef.current?.abort();
     setError('');
+    setProfileProblem(null);
+    if (field === 'searchMode' && value !== 'company_name') setCompanySearchHint('');
     setProfileOnlyRetry(false);
     if (field === 'searchMode') {
       setAdvancedFiltersOpen(value === 'linkedin_profile');
@@ -962,19 +995,19 @@ export default function SearchPage() {
       setSavedIds(new Set(all.map(l => l.id)));
       await refreshSavedApolloIds();
 
-      const savedToEnrichedOnly = enrichedAdded > 0 && resSv.addedCount === 0;
       const phonePendingNote =
         filters.searchMode === 'linkedin_profile' &&
         lastProfilePhoneStatus === 'queued' &&
         withDirectContactData.length > 0
-          ? ' El telefono aun esta en proceso y puede no reflejarse todavia en Leads Enriquecidos.'
+          ? ' El teléfono sigue en camino y aparecerá solo.'
           : '';
-
+      const saved = savedLeadsToast({ withContact: enrichedAdded, withoutContact: resSv.addedCount, duplicates: resSv.duplicateCount });
       toast({
-        title: savedToEnrichedOnly ? 'Guardado en Leads Enriquecidos' : 'Guardado completado',
-        description: savedToEnrichedOnly
-          ? `Se guardo ${enrichedAdded} lead${enrichedAdded === 1 ? '' : 's'} en Leads Enriquecidos.${phonePendingNote}`
-          : `En Leads Enriquecidos: ${enrichedAdded} · En Guardados: ${resSv.addedCount} · Duplicados: ${resSv.duplicateCount}.${phonePendingNote}`,
+        title: saved.title,
+        description: `${saved.description}${phonePendingNote}`,
+        action: saved.href ? (
+          <ToastAction altText={saved.actionLabel} onClick={() => router.push(saved.href)}>{saved.actionLabel}</ToastAction>
+        ) : undefined,
       });
 
       setSelectedLeads(new Set());
@@ -1161,9 +1194,16 @@ export default function SearchPage() {
     const activeRevealEmail = revealOverride?.revealEmail ?? filters.revealEmail;
     const activeRevealPhone = revealOverride?.revealPhone ?? filters.revealPhone;
     let validationMessage = '';
-    if (filters.searchMode === 'linkedin_profile' && !normalizeLinkedinProfileUrl(filters.linkedinUrl)) {
-      validationMessage = 'La URL de LinkedIn no es valida.';
-    } else if (filters.searchMode === 'company_name'
+    if (filters.searchMode === 'linkedin_profile') {
+      const urlProblem = profileUrlProblem(filters.linkedinUrl);
+      if (urlProblem) {
+        setError('');
+        setProfileProblem(profileSearchMessage(urlProblem, { url: filters.linkedinUrl }));
+        window.requestAnimationFrame(() => document.getElementById('linkedinUrl')?.focus());
+        return;
+      }
+    }
+    if (filters.searchMode === 'company_name'
       && !filters.companyName.trim()
       && !organization
       && splitDomainInput(filters.companyDomains).length === 0) {
@@ -1200,6 +1240,7 @@ export default function SearchPage() {
     setSelectedLeads(new Set());
     setPageIndex(0);
     setError('');
+    setProfileProblem(null);
     setProfileOnlyRetry(false);
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
@@ -1267,7 +1308,10 @@ export default function SearchPage() {
       applySearchResult(result, filters.searchMode, { revealEmail: activeRevealEmail, revealPhone: activeRevealPhone });
     } catch (error: any) {
       if (searchRunIdRef.current !== searchRunId) return;
-      if (error.name !== 'AbortError') {
+      if (error.name !== 'AbortError' && filters.searchMode === 'linkedin_profile') {
+        const problem = error instanceof ProfileSearchProblemError ? error.problem : profileProblemFromMessage(error?.message);
+        setProfileProblem(profileSearchMessage(problem, { url: filters.linkedinUrl }));
+      } else if (error.name !== 'AbortError') {
         const friendlyMessage = getFriendlySearchErrorMessage(error.message);
         setError(friendlyMessage);
         setProfileOnlyRetry(
@@ -1276,7 +1320,7 @@ export default function SearchPage() {
           && (filters.revealEmail || filters.revealPhone),
         );
         toast({
-          title: 'No se pudo completar la busqueda',
+          title: 'No se pudo completar la búsqueda',
           description: friendlyMessage,
         });
       }
@@ -1311,6 +1355,47 @@ export default function SearchPage() {
     setFilters(prev => ({ ...prev, ...override }));
     setProfileOnlyRetry(false);
     await executeSearch({ revealOverride: override });
+  };
+
+  const applySearchStarter = (starter: SearchStarter) => {
+    companyRun.current += 1;
+    companyPeopleAbortRef.current?.abort();
+    setError('');
+    setProfileProblem(null);
+    setFilterStep('filters');
+    setCompanies([]);
+    setCompanyWindows({});
+    setSelectedCompanyIds(new Set());
+    setActiveCompanyId(null);
+    setActiveSavedSearchId(null);
+    setFilters((prev) => ({ ...prev, searchMode: 'filters', industry: '', companyNameFilter: '', personLocation: '', ...starter.filters }));
+    toast({ title: `Filtros de «${starter.label}» listos`, description: 'Revísalos y presiona «Buscar empresas».' });
+  };
+
+  const removeFilterChip = (chip: ActiveFilterChip) => {
+    handleFilterChange(chip.field, chip.field === 'seniorities' ? [] : '');
+  };
+
+  const handleProfileProblemAction = (action: ProfileSearchAction) => {
+    if (action === 'retry') {
+      void handleSearch();
+    } else if (action === 'professional_only') {
+      void handleProfileOnlyRetry();
+    } else if (action === 'sign_in') {
+      window.location.assign('/login');
+    } else if (action === 'fix_url') {
+      setProfileProblem(null);
+      window.requestAnimationFrame(() => {
+        const input = document.getElementById('linkedinUrl') as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+      });
+    } else {
+      const person = profileSearchPersonHint(filters.linkedinUrl);
+      handleFilterChange('searchMode', 'company_name');
+      setCompanySearchHint(person);
+      window.requestAnimationFrame(() => document.getElementById('companyName')?.focus());
+    }
   };
 
   const handleAbort = () => {
@@ -1520,7 +1605,7 @@ export default function SearchPage() {
               profilePhoneToastStateRef.current = 'found';
               toast({
                 title: 'Datos actualizados',
-                description: 'El perfil ya se actualizo en el resultado de la busqueda.',
+                description: 'El perfil ya se actualizó en el resultado de la búsqueda.',
               });
             }
             return;
@@ -1795,6 +1880,9 @@ export default function SearchPage() {
             aria-describedby={filters.searchMode === 'filters' ? 'filterRequirement' : undefined}
             className="min-w-0 space-y-5 border-0 p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
+            {filters.searchMode === 'filters' && filterStep === 'filters' && !activeSavedSearchId ? (
+              <SearchStarters starters={searchStarters} onPick={applySearchStarter} disabled={isLoading || isLoadingCompanies} />
+            ) : null}
           <legend className="sr-only">Criterios de búsqueda</legend>
           <div className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1 sm:w-[420px]" role="group" aria-label="Modo de búsqueda">
             {([
@@ -1834,7 +1922,7 @@ export default function SearchPage() {
                     onChange={(event) => handleFilterChange('linkedinUrl', event.target.value)}
                     required
                   />
-                  <p className="text-xs text-muted-foreground">Define qué datos laborales solicitarás al enriquecer los perfiles encontrados.</p>
+                  <p className="text-xs text-muted-foreground">Pega la dirección del perfil, la que empieza con linkedin.com/in/. No sirven las de Sales Navigator ni las páginas de empresas.</p>
                 </div>
                 <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
                   <CollapsibleTrigger asChild>
@@ -1856,7 +1944,7 @@ export default function SearchPage() {
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div>
                           <Label htmlFor="revealPhone">Teléfono</Label>
-                          <p className="text-xs text-muted-foreground">Se completa de forma asíncrona cuando está disponible.</p>
+                          <p className="text-xs text-muted-foreground">Cuesta 10 créditos por persona y llega en 1 a 3 minutos, si el proveedor lo tiene.</p>
                         </div>
                         <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
                       </div>
@@ -1870,6 +1958,11 @@ export default function SearchPage() {
             ) : filters.searchMode === 'company_name' ? (
               <div className="space-y-4">
                 <div className="max-w-3xl space-y-2">
+                  {companySearchHint ? (
+                    <p className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm" role="status">
+                      Buscando a <strong>{companySearchHint}</strong>: escribe su empresa y, en opciones avanzadas, su cargo.
+                    </p>
+                  ) : null}
                   <Label htmlFor="companyName">Empresa *</Label>
                   <Input
                     id="companyName"
@@ -1940,7 +2033,7 @@ export default function SearchPage() {
                     <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
                     <AlertTitle>Revisa tus criterios</AlertTitle>
                     <AlertDescription>
-                      Esta búsqueda aún usa el filtro antiguo de Industria. Ya no lo enviamos a Apollo. Muévelo a Palabras clave antes de continuar.
+                      Esta búsqueda guardada usa el filtro antiguo «Industria», que ya no se aplica. Mueve ese término a «Palabras clave de empresa» antes de continuar.
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -2106,7 +2199,10 @@ export default function SearchPage() {
                   </div>
                 </div>
               ) : !error ? (
-                <p className="text-sm text-muted-foreground">Ajusta los filtros y busca empresas para continuar.</p>
+                <div className="text-center">
+                  <p className="text-sm font-medium">No encontramos empresas con estos filtros</p>
+                  <FilterRelaxHint chips={activeFilterChips(filters)} onRemove={removeFilterChip} disabled={isLoadingCompanies} />
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -2352,6 +2448,9 @@ export default function SearchPage() {
           </Button>
         </CardHeader>
         <CardContent className="p-4 sm:p-5">
+          {filters.searchMode === 'linkedin_profile' && profileProblem ? (
+            <ProfileSearchProblemAlert message={profileProblem} busy={isLoading} onAction={handleProfileProblemAction} onDismiss={() => setProfileProblem(null)} />
+          ) : null}
           {error && !missingFilterError ? (
             <Alert role="alert" className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
               <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
@@ -2492,7 +2591,7 @@ export default function SearchPage() {
                 </Table>
               </div>
             </>
-          ) : !error ? (
+          ) : !error && !(filters.searchMode === 'linkedin_profile' && profileProblem) ? (
             <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
               <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
                 <Search className="h-5 w-5" />
@@ -2511,8 +2610,11 @@ export default function SearchPage() {
                   ? 'Selecciona una de las coincidencias mostradas arriba.'
                   : hasSearched
                     ? 'Prueba ampliando la ubicación, el tamaño de empresa o el cargo.'
-                    : 'Completa los criterios y selecciona Buscar leads.'}
+                    : 'Completa los criterios y presiona «Buscar leads».'}
               </p>
+              {hasSearched && !companySelectionPending && filters.searchMode !== 'linkedin_profile' ? (
+                <FilterRelaxHint chips={activeFilterChips(filters)} onRemove={removeFilterChip} disabled={isLoading} />
+              ) : null}
             </div>
           ) : null}
           {totalPages > 1 && (

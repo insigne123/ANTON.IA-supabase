@@ -671,9 +671,13 @@ export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: st
   // The URL comparison alone is not enough: Apollo may echo the requested URL
   // on a stale record, so a name-disjoint personal slug also refuses the match.
   if (input.lead.linkedinUrl) {
-    const requested = normalizeLinkedinProfileUrl(input.lead.linkedinUrl).toLowerCase();
-    const returned = normalizeLinkedinProfileUrl(lead.linkedin_url).toLowerCase();
-    if (!requested || !returned || requested !== returned) {
+    const requested = normalizeLinkedinProfileUrl(input.lead.linkedinUrl);
+    // Same slug ignoring case and accents; without a returned address, only a personal slug fully contained in the
+    // returned name vouches for the person.
+    const sameProfile = lead.linkedin_url
+      ? linkedinProfilesMatch(requested, lead.linkedin_url)
+      : linkedinSlugMatchesName(requested, lead.name);
+    if (!requested || !sameProfile) {
       console.warn('[apollo] person identity mismatch: url', { requested: requested || null });
       throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
     }
@@ -814,4 +818,4 @@ export async function executeApolloOrganizationEnrichment(
     organization,
   };
 }
-import { linkedinSlugConflictsWithName, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { linkedinProfilesMatch, linkedinSlugConflictsWithName, linkedinSlugMatchesName, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
