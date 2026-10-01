@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { PageHeader } from '@/components/page-header';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { providerConnectionError } from '@/lib/provider-connection-feedback';
 
@@ -39,9 +40,10 @@ export default function GmailConnectPage() {
 
   return (
     <div className="container mx-auto max-w-3xl space-y-6">
+      <PageHeader title="Gmail" description="Envía desde tu cuenta de Gmail y recibe las respuestas en ANTON.IA." />
       <Card>
         <CardHeader>
-          <CardTitle>Conexión con Gmail</CardTitle>
+          <CardTitle>Estado de la conexión</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {feedback ? <p role="status" className="text-sm text-muted-foreground">{feedback}</p> : null}

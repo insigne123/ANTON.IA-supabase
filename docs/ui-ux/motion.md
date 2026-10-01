@@ -70,3 +70,14 @@ Cada animación le responde al usuario una de cuatro preguntas. Si no responde n
 - Claro, oscuro y 390 px: sin scroll horizontal durante ni después de una transición.
 - Teclado: el foco sigue donde estaba al abrir o cerrar un panel, salvo cuando la acción lo mueve a propósito (abrir un resultado enfoca su título).
 - `scripts/test-cowork-workspace.mjs` (jsdom) abre y cierra paneles varias veces seguidas: una salida que nunca termina deja el panel en el DOM y la prueba lo detecta.
+
+## Resto de la app (fuera de Cowork)
+
+Las mismas reglas, con utilidades de `tailwindcss-animate` y siempre detrás de `motion-safe:`. Con «reducir movimiento», todo aparece sin animación.
+
+| Qué | Cómo | Dónde |
+|---|---|---|
+| Cambiar de pantalla | La pantalla nueva aparece con un fundido y sube 4 px, en 300 ms. Next.js vuelve a montar la plantilla en cada navegación, así que solo se anima lo nuevo. Cowork queda fuera: tiene su propio sistema y altura completa | `src/app/(app)/template.tsx` |
+| Pulsar un botón | Se encoge al 98 % mientras se presiona, y los colores cambian en 150 ms | `src/components/ui/button.tsx` |
+| Lista vacía | Aparece con un fundido y un leve acercamiento. Dice por qué está vacía y ofrece una sola acción | `src/components/ui/empty-state.tsx` («Por completar», «Por escribir», Conversaciones) |
+| «Hoy» y «¿Les está sirviendo?» | Las tarjetas suben al aparecer, la cola entra escalonada (40 ms por fila, hasta 5) y las barras de adopción crecen hasta su valor | `TodayPanel.tsx`, `AdminValueSection.tsx` |

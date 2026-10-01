@@ -14,7 +14,8 @@ import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/le
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, CheckCircle2, AlertTriangle, MoreHorizontal, ArrowLeft, ChevronDown, ListFilter, Search } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, CheckCircle2, AlertTriangle, MoreHorizontal, ArrowLeft, ChevronDown, ListFilter, MailCheck, Search } from 'lucide-react';
+import { EmptyState } from '@/components/ui/empty-state';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
 import { supabase } from '@/lib/supabase';
@@ -1629,12 +1630,15 @@ export default function EnrichedLeadsClient() {
           ) : null}
 
           {!loadingLeads && !loadError && pageLeads.length === 0 ? (
-            <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 px-6 text-center">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted/60"><Search className="h-5 w-5 text-muted-foreground" /></div>
-              <h2 className="mt-4 font-medium">{enriched.length === 0 ? 'Aún no hay leads enriquecidos' : 'No hay resultados con estos filtros'}</h2>
-              <p className="mt-1 max-w-md text-sm text-muted-foreground">{enriched.length === 0 ? 'Enriquece leads guardados para investigarlos y preparar tu contacto.' : 'Ajusta la búsqueda o limpia los filtros para volver a ver la lista.'}</p>
-              <Button className="mt-4" size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/saved/leads') : clearFilters()}>{enriched.length === 0 ? 'Ver guardados' : 'Limpiar filtros'}</Button>
-            </div>
+            <EmptyState
+              className="min-h-56 max-w-none justify-center rounded-2xl border border-dashed border-border/70"
+              icon={enriched.length === 0 ? MailCheck : Search}
+              title={enriched.length === 0 ? 'Aún no tienes contactos con correo' : 'No hay resultados con estos filtros'}
+              description={enriched.length === 0
+                ? 'Busca el correo de tus contactos en «Por completar». Cuando lo encontremos, aparecerán aquí listos para escribirles.'
+                : 'Ajusta la búsqueda o limpia los filtros para volver a ver la lista.'}
+              action={<Button size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/saved/leads') : clearFilters()}>{enriched.length === 0 ? 'Ir a «Por completar»' : 'Limpiar filtros'}</Button>}
+            />
           ) : null}
           {/* Paginador inferior (igual al superior) */}
           {!loadingLeads && !loadError && total > 0 ? <div className="mt-3 flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
