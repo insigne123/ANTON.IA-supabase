@@ -136,14 +136,14 @@ select throws_ok(
 
 -- The usage of an in-turn call is recorded under the run's lease, once.
 select is(public.cowork_record_model_usage(
-    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at limit 1),
+    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at, id limit 1),
     'c4000000-0000-4000-8000-00000000001f', '{"output_tokens": 812}'),
   false, 'a wrong token records no usage');
 select is(public.cowork_record_model_usage(
-    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at limit 1),
+    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at, id limit 1),
     'c4000000-0000-4000-8000-000000000011', '{"output_tokens": 812}'),
   true, 'the lease holder records the writer usage');
-select is((select usage from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at limit 1),
+select is((select usage from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at, id limit 1),
   '{"output_tokens": 812}'::jsonb, 'the usage is stored');
 
 select ok(not has_function_privilege('authenticated', 'public.cowork_reserve_model_call(uuid, uuid, text, uuid)', 'execute')
