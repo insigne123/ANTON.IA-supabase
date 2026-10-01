@@ -270,7 +270,7 @@ try {
   ]);
   assert.deepEqual(done.result.items.map(item => [item.name, item.status]), [['Ana Pérez', 'queued'], ['Eva Soto', 'removed'], ['Teo Ríos', 'queued']]);
   assert.equal(done.result.queued, 2);
-  assert.match(done.reply, /^Quedaron en cola 2 de 3 invitaciones\. Ejecútalas desde la extensión ante cada perfil; vencen en 7 días\. Quitaste a 1 persona de la lista\.$/);
+  assert.match(done.reply, /^Quedaron listas 2 de 3 invitaciones\. Para enviar cada invitación: abre cada perfil en LinkedIn, abre la extensión de ANTON\.IA, toca «Consultar trabajos» y luego «Ejecutar»\. Nada sale solo; vence en 7 días si no lo ejecutas\. Quitaste a 1 persona de la lista\.$/);
   assert.ok(state.jobs.every(job => job.run_id === RUN && job.user_id === USER && job.organization_id === ORG));
 
   // 8. Each person is checked again when it runs: a profile that changed, a company with something out since, the quota, a stopped account.
@@ -283,7 +283,7 @@ try {
   assert.deepEqual(partial.result.items.map(item => [item.name, item.status]), [['Ana Pérez', 'skipped'], ['Eva Soto', 'skipped'], ['Teo Ríos', 'queued']]);
   assert.match(partial.result.items[0].reason, /perfil del contacto cambió|no corresponde|no coincide/);
   assert.match(partial.result.items[1].reason, /una empresa por día/);
-  assert.match(partial.reply, /^Quedaron en cola 1 de 3 invitaciones\..* 2 no salieron: el motivo está en cada persona\.$/);
+  assert.match(partial.reply, /^Quedaron listas 1 de 3 invitaciones\..* 2 no salieron: el motivo está en cada persona\.$/);
   assert.equal(state.jobs.length, 1);
   // If nobody can be queued, the effect fails with the reasons instead of reporting a batch that did nothing.
   reset();
@@ -309,7 +309,7 @@ try {
   assert.deepEqual(state.jobs.map(job => [job.kind, job.display_name, job.message]), [
     ['message', 'Ana Pérez', 'Hola Ana, gracias por aceptar.'], ['message', 'Eva Soto', 'Hola Eva, gracias por aceptar.'],
   ]);
-  assert.match(sent.reply, /^Quedaron en cola 2 de 2 mensajes\. Ejecútalos desde la extensión/);
+  assert.match(sent.reply, /^Quedaron listas 2 de 2 mensajes\. Para enviar cada mensaje: abre cada perfil en LinkedIn, abre la extensión de ANTON\.IA/);
   // Approving it again queues nothing new: the jobs are found by their keys.
   state.proposal = { status: 'executing', kind: 'linkedin_message_batch', target_id: `linkedinbatch:${sendRun.hash}` };
   state.touchedByEmail = new Set();

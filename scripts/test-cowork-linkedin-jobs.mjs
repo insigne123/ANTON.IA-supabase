@@ -84,9 +84,9 @@ const bundle = await build({ entryPoints: ['src/lib/server/cowork/linkedin-jobs.
     b.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: sources[args.path] }));
   } }],
 });
-const module = { exports: {} };
-new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
-const api = module.exports;
+const loaded = { exports: {} };
+new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
+const api = loaded.exports;
 const scope = { userId: 'owner', organizationId: 'org' };
 const auth = { user: { id: 'owner' }, organizationId: 'org' };
 try {
@@ -111,7 +111,7 @@ try {
   assert.throws(() => api.parseCoworkLinkedinJobTarget('linkedinjob:xyz'), /no es válida/);
   // 5. Approved execution queues the job with expiry guidance.
   const done = await api.executeCoworkLinkedinInvite(auth, RUN, `linkedinjob:${invite.hash}`);
-  assert.match(done.reply, /en cola/);
+  assert.match(done.reply, /^Dejé lista la invitación para .+\. Para enviar la invitación: abre su perfil \(https:\/\/www\.linkedin\.com\/in\/[^)]+\), abre la extensión de ANTON\.IA, toca «Consultar trabajos» y luego «Ejecutar»\. Nada sale solo/);
   assert.equal(state.jobs.length, 1);
   assert.equal(state.jobs[0].kind, 'invite');
   assert.equal(state.jobs[0].message, null);
@@ -131,7 +131,7 @@ try {
   const staged = await api.stageCoworkLinkedinMessage(scope, RUN, { leadId: LEAD, message: 'Hola Ana, ¿conversamos?' });
   assert.match(staged.hash, /^[a-f0-9]{64}$/);
   const sent = await api.executeCoworkLinkedinMessage(auth, RUN, `linkedinjob:${staged.hash}`);
-  assert.match(sent.reply, /en cola/);
+  assert.match(sent.reply, /^Dejé listo el mensaje para .+\. Para enviar el mensaje: abre su perfil/);
   assert.equal(state.jobs.length, 2);
   assert.equal(state.jobs[1].message, 'Hola Ana, ¿conversamos?');
   // 10. Same content refuses as duplicate; profile change refuses execution.
