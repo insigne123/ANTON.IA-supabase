@@ -205,8 +205,8 @@ export default function ConversationsWorkspace({ initialView = 'reply' }: { init
   return <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
     <PageHeader title="Contactados" description="Cada conversación, su estado y el próximo paso." />
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div role="group" aria-label="Ver conversaciones" className="flex flex-wrap gap-1">{views.map(([key, label]) => <Button key={key} variant={view === key ? 'default' : 'ghost'} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
-      <Button variant="outline" disabled={syncing} onClick={() => void sync()}>{syncing ? 'Actualizando…' : 'Actualizar mis respuestas'}</Button>
+      <div data-tour="conv-views" role="group" aria-label="Ver conversaciones" className="flex flex-wrap gap-1">{views.map(([key, label]) => <Button key={key} variant={view === key ? 'default' : 'ghost'} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
+      <Button data-tour="conv-sync" variant="outline" disabled={syncing} onClick={() => void sync()}>{syncing ? 'Actualizando…' : 'Actualizar mis respuestas'}</Button>
     </div>
     <p role="status" className="text-sm text-muted-foreground">{syncStatus || 'La revisión automática continúa en segundo plano. La actualización manual consulta tus cuentas; el equipo depende de la conexión de cada titular.'}</p>
     <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">

@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
 const USER = '00000000-0000-4000-8000-0000000000aa';
-const MENU_TARGETS = ['profile', 'search', 'campaigns', 'saved-leads', 'contacted', 'connections'];
+const MENU_TARGETS = ['home', 'profile', 'search', 'campaigns', 'saved-leads', 'contacted', 'connections'];
 const bundle = await build({
   stdin: {
     contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
@@ -36,7 +36,7 @@ const bundle = await build({
 
 // Where each menu entry sits. On phones the entries live in the closed menu sheet.
 const DESKTOP_RECTS = {
-  antonia: [72, 16, 224, 40], profile: [120, 16, 224, 40], search: [220, 16, 224, 40], campaigns: [268, 16, 224, 40],
+  home: [72, 16, 224, 40], profile: [120, 16, 224, 40], search: [220, 16, 224, 40], campaigns: [268, 16, 224, 40],
   'saved-leads': [380, 16, 224, 40], contacted: [428, 16, 224, 40], connections: [560, 16, 224, 40], 'tour-help': [690, 16, 224, 40],
 };
 const PHONE_RECTS = { menu: [8, 12, 40, 40] };
@@ -92,32 +92,37 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     app.button('Empezar recorrido').click();
 
     await waitFor(() => app.card()?.textContent.includes('Paso 1 de 8'), 'first step');
-    assert.match(app.card().textContent, /Cuéntanos qué vendes/);
+    assert.match(app.card().textContent, /Empieza cada día aquí/);
     assert.equal(app.card().getAttribute('role'), 'dialog');
-    assert.equal(app.doc.getElementById(app.card().getAttribute('aria-labelledby')).textContent, 'Cuéntanos qué vendes');
-    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]')?.style.top === '116px', 'spotlight on «Perfil»');
+    assert.equal(app.doc.getElementById(app.card().getAttribute('aria-labelledby')).textContent, 'Empieza cada día aquí');
+    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]')?.style.top === '68px', 'spotlight on «Hoy»');
     assert.equal(app.card().style.left, '256px', 'the card sits right of the menu');
-    assert.equal(app.card().style.top, '112px');
-    assert.ok(app.card().querySelector('.sr-only')?.textContent.includes('En el menú: Perfil'), 'the location is only read aloud when the entry is highlighted');
+    assert.equal(app.card().style.top, '64px');
+    assert.ok(app.card().querySelector('.sr-only')?.textContent.includes('En el menú: Hoy'), 'the location is only read aloud when the entry is highlighted');
     await waitFor(() => app.doc.activeElement === app.button('Siguiente'), 'focus on «Siguiente»');
     assert.equal(app.button('Atrás'), undefined);
 
     // The menu still moves well after the step opens (the workspace switcher loads): the spotlight follows.
     await pause(900);
-    app.rects.profile = [147, 16, 224, 40];
-    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]').style.top === '143px', 'spotlight follows a menu that moved');
-    assert.equal(app.card().style.top, '139px');
-    app.rects.profile = DESKTOP_RECTS.profile;
-    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]').style.top === '116px', 'and back');
+    app.rects.home = [99, 16, 224, 40];
+    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]').style.top === '95px', 'spotlight follows a menu that moved');
+    assert.equal(app.card().style.top, '91px');
+    app.rects.home = DESKTOP_RECTS.home;
+    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]').style.top === '68px', 'and back');
 
     app.key('ArrowRight');
     await waitFor(() => app.card().textContent.includes('Paso 2 de 8'), 'arrow key goes forward');
+    assert.match(app.card().textContent, /Cuéntanos qué vendes/);
+    assert.match(app.card().textContent, /Paso 2 de 8: Cuéntanos qué vendes\./, 'the new step is announced');
+    app.key('ArrowRight');
+    await waitFor(() => app.card().textContent.includes('Paso 3 de 8'), 'third step');
     assert.match(app.card().textContent, /Conecta tu correo/);
-    assert.match(app.card().textContent, /Paso 2 de 8: Conecta tu correo\./, 'the new step is announced');
     await waitFor(() => app.card().style.bottom === '160px', 'entries in the lower half grow the card upwards');
 
     app.button('Atrás').click();
-    await waitFor(() => app.card().textContent.includes('Paso 1 de 8'), 'back');
+    await waitFor(() => app.card().textContent.includes('Paso 2 de 8'), 'back');
+    app.button('Atrás').click();
+    await waitFor(() => app.card().textContent.includes('Paso 1 de 8'), 'back to the first step');
     await waitFor(() => app.doc.activeElement === app.button('Siguiente'), 'focus stays in the card when «Atrás» goes away');
 
     app.button('Omitir').click();
@@ -134,7 +139,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       app.key('ArrowRight');
       await waitFor(() => app.card().textContent.includes(`Paso ${step} de 8`), `step ${step}`);
     }
-    assert.match(app.card().textContent, /Listo para empezar/);
+    assert.match(app.card().textContent, /Ayuda en cada pantalla/);
     assert.equal(app.button('Omitir'), undefined, 'nothing to skip on the last step');
     assert.ok(app.button('Terminar'));
     app.key('ArrowRight');
@@ -206,7 +211,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     app.button('Siguiente').click();
     await waitFor(() => app.card().textContent.includes('Paso 2 de 9'), 'second phone step');
     const where = [...app.card().querySelectorAll('p')].find(node => node.textContent.startsWith('En el menú:'));
-    assert.equal(where.textContent, 'En el menú: Perfil');
+    assert.equal(where.textContent, 'En el menú: Hoy');
     assert.ok(!where.classList.contains('sr-only'), 'the location is shown when the entry is folded away');
     assert.equal(app.doc.querySelector('[data-tour-spotlight]').style.top, '4px', 'the menu button stays highlighted');
     for (let step = 3; step <= 9; step++) {

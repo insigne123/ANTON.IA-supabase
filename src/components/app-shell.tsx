@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { AppSidebar } from '@/components/app-sidebar';
-import { ProductTourProvider } from '@/components/onboarding/ProductTour';
+import { PageHelpButton, ProductTourProvider } from '@/components/onboarding/ProductTour';
 import QuotaSync from '@/components/quota/quota-sync';
 import ThemeToggle from '@/components/theme-toggle';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
@@ -35,12 +35,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           <p className="sr-only" role="status" aria-live="polite">{workspaceAnnouncement}</p>
           <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/85 px-4 backdrop-blur-sm md:hidden">
             <SidebarTrigger data-tour="menu" />
-            <div className="ml-auto"><ThemeToggle /></div>
+            <div className="ml-auto flex items-center gap-1"><PageHelpButton /><ThemeToggle /></div>
           </header>
 
           <div className="sticky top-0 z-10 hidden h-12 items-center justify-between border-b bg-background/85 px-6 backdrop-blur-sm md:flex">
             <SidebarTrigger />
-            <ThemeToggle />
+            <div className="flex items-center gap-1"><PageHelpButton /><ThemeToggle /></div>
           </div>
 
           <main ref={contentRef} tabIndex={-1} className={cn(
