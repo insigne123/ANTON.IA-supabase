@@ -27,6 +27,7 @@ const state = {
   conversations: [], staged: null, excludedDomains: [], suppressed: false, suppressedThrows: false, language: { verdict: 'pass' },
   token: { refresh_token: 'fake-refresh' }, quota: { allowed: true }, replyTargetError: false, dispatchStatus: 'sent',
   sent: [], dispatches: [], projected: [], updates: 0,
+  userContext: { fullName: 'Nicolás Yarur', jobTitle: 'Gerente comercial', companyName: 'Yago', companyDomain: 'yago.cl', offer: 'Revisión de antecedentes laborales en minutos', offerSource: 'profile' },
 };
 globalThis.__replyTest = state;
 const flag = process.env.COWORK_REPLY_THREAD_ENABLED;
@@ -98,6 +99,7 @@ const sources = {
   '@/lib/server/reply-target': `export class ReplyTargetError extends Error{};
     export const resolveContactedReplyTarget=async(client,input)=>{if(globalThis.__replyTest.replyTargetError)throw new ReplyTargetError("No pudimos verificar el mensaje original.");
       return input.provider==="gmail"?{provider:"gmail",threadId:"t-1",messageId:"m-1"}:{provider:"outlook",conversationId:"c-1",messageId:"m-1"};};`,
+  './user-context': 'export const loadCoworkUserContext=async()=>globalThis.__replyTest.userContext;',
   './message-context': 'export const readCoworkMessageContext=async()=>({context:{prohibitedTerms:["garantizado"],requiredTerms:[]}});',
   '@/lib/cowork/message-checks': 'export const checkMessageTerms=(text,{prohibitedTerms})=>{const found=prohibitedTerms.filter(t=>text.toLowerCase().includes(t));return{verdict:found.length?"blocked":"pass",prohibitedFound:found,requiredMissing:[]};};',
   '@/lib/server/outbound-dispatch': `export class OutboundPreProviderDeferredError extends Error{constructor(message,options){super(message);this.code=options&&options.code;}}
@@ -196,6 +198,42 @@ try {
   assert.match(preview.theirs.text, /Cuánto cuesta/);
   assert.equal(preview.body, pinned.body);
   assert.equal((await readCoworkReplyThreadPreview(auth, RUN, `replythread:${'f'.repeat(64)}`)).matches, false, 'another target does not match');
+  // 3b. The automatic read of the exact reply (COWORK_EMAIL_REVIEW): off asks nobody, on shows what Jev found, and a Jev that does not answer is no review.
+  assert.equal(preview.review, null, 'off by default: the card has no review');
+  const realFetch = globalThis.fetch; const keyBefore = process.env.TYPESAFE_API_KEY; const modeBefore = process.env.COWORK_EMAIL_REVIEW;
+  process.env.TYPESAFE_API_KEY = 'tsk-fake-key-never-recorded';
+  const jevCalls = [];
+  const jev = probabilities => async (url, init) => {
+    jevCalls.push({ url: String(url), auth: init.headers.authorization, body: JSON.parse(init.body) });
+    return { ok: true, status: 200, json: async () => ({ model: 'jev-latest', usage: { input_tokens: 300 }, answers: Object.fromEntries(Object.keys(JSON.parse(init.body).questions).map(id => [id, { type: 'noul', noul: probabilities[id] ?? 0.05 }])) }) };
+  };
+  try {
+    globalThis.fetch = jev({ contradicts_thread: 0.97 });
+    assert.equal((await readCoworkReplyThreadPreview(auth, RUN, target)).review, null, 'off: Jev is not asked even with a key');
+    assert.equal(jevCalls.length, 0);
+    process.env.COWORK_EMAIL_REVIEW = 'on';
+    const flagged = (await readCoworkReplyThreadPreview(auth, RUN, target)).review;
+    assert.equal(flagged.checked, true);
+    assert.deepEqual(flagged.issues.map(item => item.id), ['contradicts_thread']);
+    assert.equal(jevCalls.length, 1);
+    assert.equal(jevCalls[0].auth, 'Bearer tsk-fake-key-never-recorded');
+    assert.match(jevCalls[0].body.state.conversation.theirLastMessage, /Cuánto cuesta/, 'Jev reads what they wrote');
+    assert.equal(jevCalls[0].body.state.draftReply.body, pinned.body, 'and the exact reply that would go out');
+    assert.equal(jevCalls[0].body.state.seller.offer, 'Revisión de antecedentes laborales en minutos', 'and what the seller offers');
+    assert.deepEqual(Object.keys(jevCalls[0].body.questions), ['contradicts_thread', 'invents_commitment', 'ignores_question']);
+    globalThis.fetch = jev({});
+    assert.deepEqual((await readCoworkReplyThreadPreview(auth, RUN, target)).review, { checked: true, issues: [] }, 'nothing found');
+    globalThis.fetch = async () => { throw new Error('network down'); };
+    assert.deepEqual((await readCoworkReplyThreadPreview(auth, RUN, target)).review, { checked: false, issues: [] }, 'a Jev that does not answer fails open');
+    const before = jevCalls.length;
+    globalThis.fetch = jev({ contradicts_thread: 0.97 });
+    assert.equal((await readCoworkReplyThreadPreview(auth, RUN, `replythread:${'f'.repeat(64)}`)).review, null, 'a reply that does not match the proposal is not reviewed');
+    assert.equal(jevCalls.length, before);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (keyBefore === undefined) delete process.env.TYPESAFE_API_KEY; else process.env.TYPESAFE_API_KEY = keyBefore;
+    if (modeBefore === undefined) delete process.env.COWORK_EMAIL_REVIEW; else process.env.COWORK_EMAIL_REVIEW = modeBefore;
+  }
   state.conversations[0].conversation_outbound_at = iso(0);
   assert.match((await readCoworkReplyThreadPreview(auth, RUN, target)).unavailable, /ya tiene una respuesta/, 'someone answered after the proposal: the card says so before approving');
   state.conversations[0].conversation_outbound_at = null;

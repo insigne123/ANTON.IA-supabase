@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote, ReviewPaper } from './ReviewParts';
+import { EmailReviewNote, ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote, ReviewPaper, type EmailReview } from './ReviewParts';
 
 type Preview = {
   to: string; name: string | null; company: string | null; subject: string; body: string; matches: boolean;
   theirs: { text: string; complete: boolean } | null;
   /** Why the reply can no longer go out (someone answered meanwhile, the person unsubscribed…); null when it still can. */
   unavailable: string | null;
+  /** What the automatic read found in the reply (COWORK_EMAIL_REVIEW); absent when it is off or did not answer. */
+  review?: EmailReview | null;
 };
 
 /**
@@ -45,6 +47,7 @@ export function ReplyThreadReview({ runId, onApprove, onReject, resolving }: {
     </ReviewField>}
     <ReviewField label="Tu respuesta, tal como saldrá"><ReviewPaper>{preview.body}</ReviewPaper></ReviewField>
     {preview.unavailable && <ReviewNote ok={false}>{preview.unavailable} Descarta la propuesta.</ReviewNote>}
+    <EmailReviewNote review={preview.review} against="contra lo que escribió y tu oferta" />
     <ReviewNote ok={preview.matches}>{preview.matches
       ? 'Coincide con la propuesta. Al aprobar se comprueba de nuevo que nadie la haya respondido ni se haya dado de baja, y sale en el hilo original desde tu correo.'
       : 'La respuesta cambió desde la propuesta. Descártala y pide una nueva.'}</ReviewNote>
