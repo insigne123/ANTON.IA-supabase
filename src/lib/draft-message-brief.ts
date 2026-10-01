@@ -32,6 +32,9 @@ export function buildDraftMessageBrief(context: DraftContextV2, sequence?: Outre
       capabilities: context.seller.services,
       valueProposition: context.seller.valueProposition,
       proofPoints: context.seller.proofPoints,
+      ...(context.seller.differentiators?.length ? { differentiators: context.seller.differentiators } : {}),
+      ...(context.seller.referenceClients?.length ? { referenceClients: context.seller.referenceClients } : {}),
+      ...(context.seller.painPoints?.length ? { problemsSolved: context.seller.painPoints } : {}),
       authority: 'Solo perfil autorizado recibido del servidor; las plantillas no aprueban capacidades ni cifras. El remitente trabaja en esta empresa y nunca en otra organización mencionada por el reporte, el workspace o un ejemplo.',
     },
     uncertainties: [

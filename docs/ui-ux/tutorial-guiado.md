@@ -28,7 +28,7 @@ Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Co
 | Conversaciones (`/contacted`) | Por responder (`conv-views`), Traer respuestas (`conv-sync`) |
 | Campañas (`/campaigns`) | Masivas o una por una (`campaigns-tabs`) |
 | Pipeline (`/crm`) | Etapas (`crm-board`) |
-| Perfil (`/profile`) | Empresa (`profile-company`), Lo que vendes (`profile-offer`) |
+| Perfil (`/profile`) | Complétalo con IA (`profile-ai`), Lo que vendes (`profile-offer`), Tu cliente ideal (`profile-icp`) |
 | Conexiones (`/connections`) | Gmail u Outlook (`connections-list`) |
 
 - **Solo puntos visibles:** una guía muestra solo los puntos cuyo control está en pantalla. Si no hay ninguno (por ejemplo, «Por escribir» sin contactos), no se ofrece, y «Ayuda» dice «Aún no hay nada que mostrar aquí» en vez de abrir una guía vacía.

@@ -384,6 +384,8 @@ ANCLA FACTUAL (verificación automática, no la nombres ni la expliques): el hec
       capabilities: input.context.seller.services.slice(0, 4),
       proofPoint: input.context.seller.proofPoints[0] || null,
       description: input.context.seller.description,
+      ...(input.context.seller.differentiators?.length ? { differentiator: input.context.seller.differentiators[0] } : {}),
+      ...(input.context.seller.painPoints?.length ? { problemsSolved: input.context.seller.painPoints.slice(0, 3) } : {}),
     },
     style: boundedWritingStyle(input.context.style.profile),
   };

@@ -1,26 +1,21 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
-import { AlertCircle, Building2, Check, Save, Sparkles, UserRound } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { AlertCircle, Building2, PenLine, Save, Sparkles, Target, UserRound } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
+  PROFILE_COMPANY_SIZES,
   PROFILE_SUGGESTION_FIELDS,
   applyProfileSuggestion,
   buildProfileUpdate,
@@ -28,29 +23,60 @@ import {
   getDefaultSuggestionSelection,
   mapProfileToForm,
   normalizeCompanyWebsite,
-  type CompanyProfileSuggestion,
+  websiteFromWorkEmail,
   type ProfileFormValues,
-  type ProfileSuggestionField,
   type ProfileSuggestionSelection,
 } from '@/lib/profile/profile-mappings';
+import { autofillEmptyMessage, suggestionFromAutofill, type AutofillResponse, type AutofillSuggestion } from '@/lib/profile/autofill-suggestion';
 import { profileService } from '@/lib/services/profile-service';
 import { PasswordChangeForm } from '@/components/profile/password-change-form';
-import type { GenerateCompanyProfileOutput } from '@/ai/flows/generate-company-profile';
+import { ProfileAutofillCard } from '@/components/profile/ProfileAutofillCard';
+import { ProfileCompleteness } from '@/components/profile/ProfileCompleteness';
+import { ProfileSuggestionDialog } from '@/components/profile/ProfileSuggestionDialog';
 
-const fieldCopy: Record<ProfileSuggestionField, string> = {
-  sector: 'Sector',
-  website: 'Sitio web',
-  description: 'Descripcion de la empresa',
-  services: 'Productos y servicios',
-  valueProposition: 'Propuesta de valor',
-};
+const FIELD_CLASS = 'rounded-xl bg-background/70';
+const TEXTAREA_CLASS = `min-h-24 resize-y ${FIELD_CLASS} leading-6`;
 
 function sameProfile(left: ProfileFormValues | null, right: ProfileFormValues): boolean {
   if (!left) return false;
   return Object.keys(right).every((key) => left[key as keyof ProfileFormValues] === right[key as keyof ProfileFormValues]);
 }
 
+function Section({ id, icon: Icon, title, description, children, ...anchor }: {
+  id: string;
+  icon: typeof UserRound;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+  /** The screen guide's anchor (src/lib/onboarding/product-tour.ts). */
+  'data-tour'?: string;
+}) {
+  return (
+    <section {...anchor} className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[200px_minmax(0,1fr)]" aria-labelledby={`${id}-heading`}>
+      <div>
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          <h2 id={`${id}-heading`}>{title}</h2>
+        </div>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
+      </div>
+      <div className="grid min-w-0 gap-4">{children}</div>
+    </section>
+  );
+}
+
+function Field({ id, label, hint, optional, children }: { id: string; label: string; hint?: string; optional?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}{optional ? <span className="font-normal text-muted-foreground"> (opcional)</span> : null}</Label>
+      {children}
+      {hint ? <p id={`${id}-help`} className="text-xs leading-5 text-muted-foreground">{hint}</p> : null}
+    </div>
+  );
+}
+
 export default function ProfilePage() {
+  const { user } = useAuth();
   const [profile, setProfile] = useState<ProfileFormValues>(createEmptyProfileForm);
   const [savedProfile, setSavedProfile] = useState<ProfileFormValues | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -58,11 +84,15 @@ export default function ProfilePage() {
   const [loadError, setLoadError] = useState('');
   const [websiteError, setWebsiteError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [aiWebsite, setAiWebsite] = useState('');
+  const [aiWebsiteTouched, setAiWebsiteTouched] = useState(false);
+  const [aiError, setAiError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [suggestion, setSuggestion] = useState<CompanyProfileSuggestion | null>(null);
+  const [suggestion, setSuggestion] = useState<AutofillSuggestion | null>(null);
   const [suggestionSelection, setSuggestionSelection] = useState<ProfileSuggestionSelection | null>(null);
   const { toast } = useToast();
   const isDirty = !isLoading && savedProfile !== null && !sameProfile(savedProfile, profile);
+  const emailWebsite = useMemo(() => websiteFromWorkEmail(user?.email), [user?.email]);
 
   useEffect(() => {
     async function loadProfile() {
@@ -83,6 +113,12 @@ export default function ProfilePage() {
     void loadProfile();
   }, [loadAttempt]);
 
+  // The AI card starts from the saved website or, without one, from the work email's domain.
+  useEffect(() => {
+    if (aiWebsiteTouched || isLoading) return;
+    setAiWebsite(normalizeCompanyWebsite(profile.website).domain || emailWebsite);
+  }, [aiWebsiteTouched, emailWebsite, isLoading, profile.website]);
+
   useEffect(() => {
     if (!isDirty) return;
     const warnAboutUnsavedChanges = (event: BeforeUnloadEvent) => {
@@ -93,11 +129,13 @@ export default function ProfilePage() {
     return () => window.removeEventListener('beforeunload', warnAboutUnsavedChanges);
   }, [isDirty]);
 
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const field = event.target.id as keyof ProfileFormValues;
-    const value = event.target.value;
+  const setField = (field: keyof ProfileFormValues, value: string) => {
     setProfile((current) => ({ ...current, [field]: value }));
     if (field === 'website') setWebsiteError('');
+  };
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    setField(event.target.id as keyof ProfileFormValues, event.target.value);
   };
 
   const handleWebsiteBlur = () => {
@@ -107,104 +145,78 @@ export default function ProfilePage() {
     }
     const normalized = normalizeCompanyWebsite(profile.website);
     if (!normalized.domain) {
-      setWebsiteError('Ingresa un dominio publico valido, por ejemplo empresa.com.');
+      setWebsiteError('Ingresa un dominio público válido, por ejemplo empresa.com.');
       return;
     }
     setWebsiteError('');
     setProfile((current) => ({ ...current, website: normalized.website }));
   };
 
+  const focusField = (field: keyof ProfileFormValues) => {
+    const element = document.getElementById(field);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => element?.focus({ preventScroll: true }), 250);
+  };
+
   const handleSave = async (event: React.FormEvent) => {
     event.preventDefault();
     const normalizedWebsite = normalizeCompanyWebsite(profile.website);
     if (profile.website.trim() && !normalizedWebsite.domain) {
-      setWebsiteError('Ingresa un dominio publico valido, por ejemplo empresa.com.');
+      setWebsiteError('Ingresa un dominio público válido, por ejemplo empresa.com.');
       return;
     }
 
     setIsSaving(true);
     try {
       const currentProfile = await profileService.getProfile();
-      const normalizedForm = {
-        ...profile,
-        website: normalizedWebsite.website,
-      };
+      const normalizedForm = { ...profile, website: normalizedWebsite.website };
       const updated = await profileService.updateProfile(buildProfileUpdate(normalizedForm, currentProfile));
       const saved = mapProfileToForm(updated);
       setProfile(saved);
       setSavedProfile(saved);
-      toast({
-        title: 'Perfil guardado',
-        description: 'Tu identidad y contexto comercial quedaron actualizados.',
-      });
+      toast({ title: 'Perfil guardado', description: 'Desde ahora, la IA usa estos datos para buscar, investigar y escribir.' });
     } catch (error) {
       console.error('Error saving profile:', error);
-      toast({
-        variant: 'destructive',
-        title: 'No pudimos guardar el perfil',
-        description: 'Tus cambios siguen en pantalla. Intenta nuevamente en unos segundos.',
-      });
+      toast({ variant: 'destructive', title: 'No pudimos guardar el perfil', description: 'Tus cambios siguen en pantalla. Intenta nuevamente en unos segundos.' });
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleAutofill = async () => {
-    if (!profile.companyName.trim()) {
-      toast({
-        variant: 'destructive',
-        title: 'Falta el nombre de la empresa',
-        description: 'Escribelo antes de pedir sugerencias.',
-      });
+    const website = aiWebsite.trim();
+    if (website && !normalizeCompanyWebsite(website).domain) {
+      setAiError('Ese sitio no parece una dirección pública. Escríbelo como empresa.com.');
       return;
     }
-
-    if (profile.website.trim() && !normalizeCompanyWebsite(profile.website).domain) {
-      setWebsiteError('Corrige el sitio web o dejalo vacio antes de usar IA.');
-      return;
-    }
-
+    setAiError('');
     setIsGenerating(true);
     try {
       const response = await fetch('/api/ai/company-profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyName: profile.companyName.trim(),
-          website: profile.website.trim() || undefined,
-        }),
+        body: JSON.stringify({ companyName: profile.companyName.trim() || undefined, website: website || undefined }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error || 'AI request failed');
+      if (!response.ok) throw new Error(payload?.error || 'No pudimos leer tu empresa ahora. Inténtalo de nuevo en un minuto.');
 
-      const output = payload as GenerateCompanyProfileOutput;
-      const nextSuggestion: CompanyProfileSuggestion = {
-        sector: output.sector || '',
-        website: output.website || (output.domain ? `https://${output.domain}` : ''),
-        description: output.description || '',
-        services: output.services || '',
-        valueProposition: output.valueProposition || '',
-      };
-      const hasSuggestions = PROFILE_SUGGESTION_FIELDS.some(
-        (field) => nextSuggestion[field].trim() && nextSuggestion[field].trim() !== profile[field].trim()
-      );
-      if (!hasSuggestions) {
-        toast({
-          title: 'No encontramos datos confiables',
-          description: 'Agrega el sitio web oficial o completa el perfil manualmente. No inventamos información incierta.',
-        });
+      const output = payload as AutofillResponse;
+      const next = suggestionFromAutofill(output);
+      const hasSuggestions = PROFILE_SUGGESTION_FIELDS.some((field) => {
+        const value = String(next.values[field] || '').trim();
+        return value && value !== String(profile[field] || '').trim();
+      });
+      if (output.emptyReason || !hasSuggestions) {
+        const message = output.emptyReason
+          ? autofillEmptyMessage(output)
+          : { title: 'Tu perfil ya dice lo mismo', description: 'No encontramos nada distinto de lo que ya escribiste.' };
+        setAiError(`${message.title}. ${message.description}`);
         return;
       }
-
-      setSuggestion(nextSuggestion);
-      setSuggestionSelection(getDefaultSuggestionSelection(profile, nextSuggestion));
+      setSuggestion(next);
+      setSuggestionSelection(getDefaultSuggestionSelection(profile, next.values));
     } catch (error) {
-      console.error('Error generating company profile:', error);
-      toast({
-        variant: 'destructive',
-        title: 'No pudimos generar sugerencias',
-        description: 'Puedes completar los campos manualmente o intentarlo nuevamente.',
-      });
+      setAiError(error instanceof Error ? error.message : 'No pudimos leer tu empresa ahora. Inténtalo de nuevo en un minuto.');
     } finally {
       setIsGenerating(false);
     }
@@ -212,13 +224,11 @@ export default function ProfilePage() {
 
   const handleApplySuggestion = () => {
     if (!suggestion || !suggestionSelection) return;
-    setProfile((current) => applyProfileSuggestion(current, suggestion, suggestionSelection));
+    const count = Object.values(suggestionSelection).filter(Boolean).length;
+    setProfile((current) => applyProfileSuggestion(current, suggestion.values, suggestionSelection));
     setSuggestion(null);
     setSuggestionSelection(null);
-    toast({
-      title: 'Sugerencias aplicadas',
-      description: 'Revisa los cambios y guarda el perfil cuando estes listo.',
-    });
+    toast({ title: `${count} ${count === 1 ? 'campo listo' : 'campos listos'} para revisar`, description: 'Ajusta lo que quieras y presiona «Guardar cambios».' });
   };
 
   const closeSuggestionReview = () => {
@@ -226,15 +236,11 @@ export default function ProfilePage() {
     setSuggestionSelection(null);
   };
 
-  const selectedSuggestionCount = suggestionSelection
-    ? PROFILE_SUGGESTION_FIELDS.filter((field) => suggestionSelection[field]).length
-    : 0;
-
   return (
     <div className="mx-auto max-w-5xl pb-10 pt-2">
       <PageHeader
         title="Perfil"
-        description="Administra tu perfil comercial y la seguridad de tu cuenta."
+        description="Lo que la IA sabe de ti y de tu empresa para buscar prospectos, investigarlos y escribirles."
       />
 
       {loadError ? (
@@ -250,137 +256,126 @@ export default function ProfilePage() {
         </Alert>
       ) : null}
 
+      {!loadError ? (
+        <ProfileAutofillCard
+          website={aiWebsite}
+          websiteFromEmail={!aiWebsiteTouched && !profile.website.trim() && Boolean(emailWebsite) && aiWebsite === emailWebsite}
+          companyName={profile.companyName}
+          running={isGenerating}
+          error={aiError}
+          onWebsiteChange={(value) => { setAiWebsiteTouched(true); setAiWebsite(value); setAiError(''); }}
+          onRun={() => void handleAutofill()}
+        />
+      ) : null}
+
+      {!isLoading && !loadError ? <ProfileCompleteness profile={profile} onComplete={focusField} /> : null}
+
       <form id="profile-form" onSubmit={handleSave}>
         <fieldset disabled={Boolean(loadError) || isSaving} className="min-w-0 border-0 p-0">
           <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/90 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.45)] dark:bg-card/75">
-          <CardHeader className="border-b border-border/60 bg-muted/15 px-5 py-5 sm:px-7">
-            <CardTitle className="text-xl tracking-tight">Perfil comercial</CardTitle>
-            <CardDescription>Usaremos estos datos para personalizar mensajes y propuestas sin cambiar tu contenido automáticamente.</CardDescription>
-          </CardHeader>
+            <CardHeader className="border-b border-border/60 bg-muted/15 px-5 py-5 sm:px-7">
+              <CardTitle className="text-xl tracking-tight">Perfil comercial</CardTitle>
+              <CardDescription>
+                La IA usa estos datos en cada búsqueda, investigación y borrador, y nunca los cambia sin que lo apruebes. El tono, la firma y la llamada a la acción se ajustan en{' '}
+                <Link href="/settings/email-studio" className="font-medium text-foreground underline underline-offset-2">Firmas y estilo</Link>.
+              </CardDescription>
+            </CardHeader>
 
-          <CardContent className="p-0">
-            {isLoading ? (
-              <div className="space-y-8 p-5 sm:p-7">
-                {[0, 1, 2].map((section) => (
-                  <div className="space-y-4" key={section}>
-                    <Skeleton className="h-5 w-36 rounded-lg" />
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Skeleton className="h-11 w-full rounded-xl" />
-                      <Skeleton className="h-11 w-full rounded-xl" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="divide-y divide-border/60">
-                <section className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby="identity-heading">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      <UserRound className="h-4 w-4 text-muted-foreground" />
-                      <h2 id="identity-heading">Identidad</h2>
-                    </div>
-                    <p className="mt-1 text-sm leading-5 text-muted-foreground">La firma personal de tus comunicaciones.</p>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Nombre</Label>
-                      <Input id="name" autoComplete="name" value={profile.name} onChange={handleInputChange} placeholder="Tu nombre completo" className="h-11 rounded-xl bg-background/70" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="role">Cargo</Label>
-                      <Input id="role" autoComplete="organization-title" value={profile.role} onChange={handleInputChange} placeholder="Ej. Directora comercial" className="h-11 rounded-xl bg-background/70" />
-                    </div>
-                  </div>
-                </section>
-
-                <section data-tour="profile-company" className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby="company-heading">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      <Building2 className="h-4 w-4 text-muted-foreground" />
-                      <h2 id="company-heading">Empresa</h2>
-                    </div>
-                    <p className="mt-1 text-sm leading-5 text-muted-foreground">Contexto factual para identificar tu negocio.</p>
-                  </div>
-                  <div className="space-y-4">
-                    <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">Completar datos de empresa</p>
-                        <p className="text-xs leading-5 text-muted-foreground">La IA propone; tu decides que campos aplicar.</p>
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="space-y-8 p-5 sm:p-7" aria-busy="true" aria-label="Cargando tu perfil">
+                  {[0, 1, 2, 3].map((section) => (
+                    <div className="space-y-4" key={section}>
+                      <Skeleton className="h-5 w-36 rounded-lg" />
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Skeleton className="h-11 w-full rounded-xl" />
+                        <Skeleton className="h-11 w-full rounded-xl" />
                       </div>
-                      <Button type="button" variant="outline" size="sm" onClick={handleAutofill} disabled={isGenerating || !profile.companyName.trim()} aria-busy={isGenerating} className="shrink-0 rounded-xl bg-background/80 shadow-none">
-                        <Sparkles className="h-4 w-4" />
-                        {isGenerating ? 'Buscando datos...' : 'Sugerir con IA'}
-                      </Button>
                     </div>
-
+                  ))}
+                </div>
+              ) : (
+                <div className="divide-y divide-border/60">
+                  <Section id="identity" icon={UserRound} title="Tú" description="Quién firma tus correos y mensajes.">
                     <div className="grid gap-4 sm:grid-cols-2">
+                      <Field id="name" label="Nombre">
+                        <Input id="name" autoComplete="name" value={profile.name} onChange={handleInputChange} placeholder="Tu nombre completo" className={`h-11 ${FIELD_CLASS}`} />
+                      </Field>
+                      <Field id="role" label="Cargo">
+                        <Input id="role" autoComplete="organization-title" value={profile.role} onChange={handleInputChange} placeholder="Ej. Ejecutiva comercial" className={`h-11 ${FIELD_CLASS}`} />
+                      </Field>
+                    </div>
+                  </Section>
+
+                  <Section id="company" icon={Building2} title="Tu empresa" description="A quién representas cuando escribes." data-tour="profile-company">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field id="companyName" label="Nombre de la empresa">
+                        <Input id="companyName" autoComplete="organization" value={profile.companyName} onChange={handleInputChange} placeholder="Ej. Acme" className={`h-11 ${FIELD_CLASS}`} />
+                      </Field>
                       <div className="space-y-2">
-                        <Label htmlFor="companyName">Nombre de la empresa</Label>
-                        <Input id="companyName" autoComplete="organization" value={profile.companyName} onChange={handleInputChange} placeholder="Ej. Acme" className="h-11 rounded-xl bg-background/70" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="website">Sitio web <span className="font-normal text-muted-foreground">(opcional)</span></Label>
-                        <Input
-                          id="website"
-                          inputMode="url"
-                          autoComplete="url"
-                          value={profile.website}
-                          onChange={handleInputChange}
-                          onBlur={handleWebsiteBlur}
-                          placeholder="empresa.com"
-                          aria-invalid={Boolean(websiteError)}
-                          aria-describedby={websiteError ? 'website-error' : undefined}
-                          className="h-11 rounded-xl bg-background/70"
-                        />
+                        <Label htmlFor="website">Sitio web</Label>
+                        <Input id="website" inputMode="url" autoComplete="url" value={profile.website} onChange={handleInputChange} onBlur={handleWebsiteBlur}
+                          placeholder="empresa.com" aria-invalid={Boolean(websiteError)} aria-describedby={websiteError ? 'website-error' : undefined} className={`h-11 ${FIELD_CLASS}`} />
                         {websiteError ? <p id="website-error" className="text-xs text-destructive">{websiteError}</p> : null}
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="sector">Sector o industria</Label>
-                      <Input id="sector" value={profile.sector} onChange={handleInputChange} placeholder="Ej. Software B2B" className="h-11 rounded-xl bg-background/70" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="description">Descripcion de la empresa</Label>
-                      <Textarea id="description" value={profile.description} onChange={handleInputChange} placeholder="Que hace la empresa y para quien" className="min-h-24 resize-y rounded-xl bg-background/70" />
-                    </div>
-                  </div>
-                </section>
+                    <Field id="sector" label="Sector o industria">
+                      <Input id="sector" value={profile.sector} onChange={handleInputChange} placeholder="Ej. Outsourcing de recursos humanos" className={`h-11 ${FIELD_CLASS}`} />
+                    </Field>
+                    <Field id="description" label="Descripción de la empresa" hint="Una o dos oraciones: qué hace y para quién.">
+                      <Textarea id="description" value={profile.description} onChange={handleInputChange} aria-describedby="description-help" placeholder="Qué hace la empresa y para quién" className={TEXTAREA_CLASS} />
+                    </Field>
+                  </Section>
 
-                <section data-tour="profile-offer" className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby="message-heading">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      <Sparkles className="h-4 w-4 text-muted-foreground" />
-                      <h2 id="message-heading">Mensaje comercial</h2>
+                  <Section id="offer" icon={Sparkles} title="Tu oferta" description="Lo que la IA puede afirmar en tus correos. Solo usa lo que escribas aquí." data-tour="profile-offer">
+                    <Field id="services" label="Productos y servicios" hint="Uno por línea, con una frase de qué resuelve. Ej. «Servicios transitorios: personal temporal para peaks de temporada».">
+                      <Textarea id="services" value={profile.services} onChange={handleInputChange} aria-describedby="services-help" placeholder={'Ej. Servicio: qué resuelve\nEj. Otro servicio: qué resuelve'} className={`min-h-28 ${TEXTAREA_CLASS}`} />
+                    </Field>
+                    <Field id="valueProposition" label="Propuesta de valor" hint="El resultado que consigue tu cliente y cómo. Ej. «Ayudamos a centros de distribución a cubrir peaks sin sobrecostos de contratación».">
+                      <Textarea id="valueProposition" value={profile.valueProposition} onChange={handleInputChange} aria-describedby="valueProposition-help" placeholder="Qué resultado ayudas a conseguir y por qué elegirte" className={TEXTAREA_CLASS} />
+                    </Field>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Field id="painPoints" label="Problemas que resuelves" optional hint="Uno por línea, como los diría tu cliente.">
+                        <Textarea id="painPoints" value={profile.painPoints} onChange={handleInputChange} aria-describedby="painPoints-help" placeholder={'Ej. Rotación alta en temporada\nEj. Procesos de selección lentos'} className={TEXTAREA_CLASS} />
+                      </Field>
+                      <Field id="differentiators" label="Por qué elegirte" optional hint="Uno por línea: cobertura, trayectoria, garantías, tecnología.">
+                        <Textarea id="differentiators" value={profile.differentiators} onChange={handleInputChange} aria-describedby="differentiators-help" placeholder={'Ej. Cobertura nacional\nEj. Reemplazo garantizado en 48 horas'} className={TEXTAREA_CLASS} />
+                      </Field>
                     </div>
-                    <p className="mt-1 text-sm leading-5 text-muted-foreground">La base para redactar mensajes relevantes.</p>
-                  </div>
-                  <div className="grid gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="services">Productos y servicios</Label>
-                      <Textarea id="services" value={profile.services} onChange={handleInputChange} placeholder="Describe brevemente lo que ofreces" className="min-h-24 resize-y rounded-xl bg-background/70" />
+                    <Field id="proofPoints" label="Pruebas y resultados" optional hint="Un dato verificable por línea. La IA puede citarlos tal cual.">
+                      <Textarea id="proofPoints" rows={4} value={profile.proofPoints} onChange={handleInputChange} aria-describedby="proofPoints-help" placeholder={'Ej. Reducimos un 25 % el tiempo de gestión\nEj. Más de 40 equipos implementados'} className={`min-h-28 ${TEXTAREA_CLASS}`} />
+                    </Field>
+                    <Field id="referenceClients" label="Clientes que puedes nombrar" optional hint="Separados por coma. Solo los que te autorizan a mencionar.">
+                      <Input id="referenceClients" value={profile.referenceClients} onChange={handleInputChange} aria-describedby="referenceClients-help" placeholder="Ej. Empresa A, Empresa B" className={`h-11 ${FIELD_CLASS}`} />
+                    </Field>
+                  </Section>
+
+                  <Section id="icp" icon={Target} title="Tu cliente ideal" description="A quién le vendes. «Buscar prospectos» parte de aquí." data-tour="profile-icp">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Field id="targetRoles" label="Cargos que buscas" hint="Separados por coma, como aparecen en LinkedIn.">
+                        <Input id="targetRoles" value={profile.targetRoles} onChange={handleInputChange} aria-describedby="targetRoles-help" placeholder="Ej. Gerente de Personas, Jefe de Operaciones" className={`h-11 ${FIELD_CLASS}`} />
+                      </Field>
+                      <Field id="targetIndustries" label="Industrias de tus clientes" hint="Separadas por coma.">
+                        <Input id="targetIndustries" value={profile.targetIndustries} onChange={handleInputChange} aria-describedby="targetIndustries-help" placeholder="Ej. Retail, logística, minería" className={`h-11 ${FIELD_CLASS}`} />
+                      </Field>
+                      <div className="space-y-2">
+                        <Label htmlFor="targetCompanySize">Tamaño de empresa</Label>
+                        <Select value={profile.targetCompanySize || 'any'} onValueChange={(value) => setField('targetCompanySize', value === 'any' ? '' : value)}>
+                          <SelectTrigger id="targetCompanySize" className={`h-11 ${FIELD_CLASS}`}><SelectValue placeholder="Cualquier tamaño" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="any">Cualquier tamaño</SelectItem>
+                            {PROFILE_COMPANY_SIZES.map((size) => <SelectItem key={size} value={size}>{size.replace('+', ' o más')} personas</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Field id="targetLocations" label="Países o regiones" hint="Separados por coma.">
+                        <Input id="targetLocations" value={profile.targetLocations} onChange={handleInputChange} aria-describedby="targetLocations-help" placeholder="Ej. Chile, Perú" className={`h-11 ${FIELD_CLASS}`} />
+                      </Field>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="valueProposition">Propuesta de valor</Label>
-                      <Textarea id="valueProposition" value={profile.valueProposition} onChange={handleInputChange} placeholder="Que resultado ayudas a conseguir y por que elegirte" className="min-h-24 resize-y rounded-xl bg-background/70" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="proofPoints">Pruebas y resultados <span className="font-normal text-muted-foreground">(opcional)</span></Label>
-                      <Textarea
-                        id="proofPoints"
-                        rows={4}
-                        value={profile.proofPoints}
-                        onChange={handleInputChange}
-                        placeholder={'Ej. Reducimos un 25% el tiempo de gestión\nEj. Más de 40 equipos implementados'}
-                        aria-describedby="proofPoints-help"
-                        className="min-h-28 resize-y rounded-xl bg-background/70 leading-6"
-                      />
-                      <p id="proofPoints-help" className="text-xs leading-5 text-muted-foreground">Agrega un caso, resultado o dato verificable por línea. La IA podrá usarlos como respaldo al redactar.</p>
-                    </div>
-                  </div>
-                </section>
-              </div>
-            )}
-          </CardContent>
+                  </Section>
+                </div>
+              )}
+            </CardContent>
           </Card>
         </fieldset>
       </form>
@@ -388,58 +383,26 @@ export default function ProfilePage() {
       {isDirty ? (
         <div className="sticky bottom-3 z-20 mt-4 flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/90 p-3 shadow-[0_18px_45px_-20px_rgba(15,23,42,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/75 sm:flex-row sm:items-center sm:justify-between" role="status">
           <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
-            <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
+            <PenLine className="h-4 w-4 text-amber-600 dark:text-amber-300" aria-hidden="true" />
             Cambios sin guardar
           </div>
           <Button type="submit" form="profile-form" disabled={isSaving || Boolean(websiteError)} aria-busy={isSaving} className="w-full rounded-xl sm:w-auto">
             {isSaving ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" /> : <Save className="h-4 w-4" />}
-            {isSaving ? 'Guardando...' : 'Guardar cambios'}
+            {isSaving ? 'Guardando…' : 'Guardar cambios'}
           </Button>
         </div>
       ) : null}
 
       <PasswordChangeForm />
 
-      <Dialog open={Boolean(suggestion)} onOpenChange={(open) => { if (!open) closeSuggestionReview(); }}>
-        <DialogContent className="max-h-[88vh] w-[calc(100%-1.5rem)] max-w-2xl overflow-y-auto rounded-3xl border-border/70 p-0">
-          <DialogHeader className="border-b border-border/60 px-5 py-5 pr-12 text-left sm:px-6">
-            <DialogTitle>Revisar sugerencias</DialogTitle>
-            <DialogDescription>Selecciona qué información quieres llevar al formulario. Los campos con contenido no se reemplazan por defecto.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 px-5 py-1 sm:px-6">
-            {suggestion && suggestionSelection ? PROFILE_SUGGESTION_FIELDS.map((field) => {
-              const value = suggestion[field].trim();
-              if (!value) return null;
-              const hasCurrentValue = Boolean(profile[field].trim());
-              return (
-                <label key={field} htmlFor={`suggestion-${field}`} className="flex cursor-pointer gap-3 rounded-2xl border border-border/60 p-4 transition-colors hover:bg-muted/35">
-                  <Checkbox
-                    id={`suggestion-${field}`}
-                    checked={suggestionSelection[field]}
-                    onCheckedChange={(checked) => setSuggestionSelection((current) => current ? { ...current, [field]: checked === true } : current)}
-                    aria-label={`Aplicar ${fieldCopy[field]}`}
-                    className="mt-0.5 rounded-md"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                      {fieldCopy[field]}
-                      {hasCurrentValue ? <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">Reemplaza contenido</span> : <span className="inline-flex items-center gap-1 text-xs font-normal text-emerald-700 dark:text-emerald-300"><Check className="h-3 w-3" /> Campo vacio</span>}
-                    </span>
-                    <span className="mt-1 block whitespace-pre-wrap text-sm leading-5 text-muted-foreground">{value}</span>
-                    {hasCurrentValue ? <span className="mt-2 block text-xs leading-5 text-muted-foreground"><strong className="font-medium text-foreground">Actual:</strong> {profile[field]}</span> : null}
-                  </span>
-                </label>
-              );
-            }) : null}
-          </div>
-          <DialogFooter className="border-t border-border/60 bg-muted/15 px-5 py-4 sm:px-6">
-            <Button type="button" variant="ghost" onClick={closeSuggestionReview} className="rounded-xl">Cancelar</Button>
-            <Button type="button" onClick={handleApplySuggestion} disabled={selectedSuggestionCount === 0} className="rounded-xl">
-              Aplicar {selectedSuggestionCount || ''} {selectedSuggestionCount === 1 ? 'campo' : 'campos'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ProfileSuggestionDialog
+        suggestion={suggestion}
+        selection={suggestionSelection}
+        profile={profile}
+        onSelectionChange={setSuggestionSelection}
+        onApply={handleApplySuggestion}
+        onClose={closeSuggestionReview}
+      />
     </div>
   );
 }

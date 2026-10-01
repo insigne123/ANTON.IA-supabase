@@ -1,14 +1,17 @@
 'use client';
 
+import Link from 'next/link';
 import { Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ActiveFilterChip, SearchStarter } from '@/lib/search/search-guidance';
 
 /** «Empieza con…»: one tap fills the filters for a typical buyer of what the organization sells; everything stays editable. */
-export function SearchStarters({ starters, onPick, disabled }: {
+export function SearchStarters({ starters, onPick, disabled, missingIdealCustomer }: {
   starters: SearchStarter[];
   onPick: (starter: SearchStarter) => void;
   disabled?: boolean;
+  /** No «Tu cliente ideal» in «Perfil» yet: say where to define it. */
+  missingIdealCustomer?: boolean;
 }) {
   if (starters.length === 0) return null;
   return (
@@ -26,7 +29,10 @@ export function SearchStarters({ starters, onPick, disabled }: {
           </button>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">Rellena los filtros de abajo; puedes cambiarlos antes de buscar.</p>
+      <p className="text-xs text-muted-foreground">
+        Rellena los filtros de abajo; puedes cambiarlos antes de buscar.
+        {missingIdealCustomer ? <> Define tu cliente ideal en <Link href="/profile" className="font-medium text-foreground underline underline-offset-2">Perfil</Link> para tener tu propio punto de partida.</> : null}
+      </p>
     </section>
   );
 }

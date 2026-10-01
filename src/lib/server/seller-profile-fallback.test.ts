@@ -70,3 +70,23 @@ test('the person\'s own offer always wins, and nothing is borrowed without an or
   const onlyOutsider = await loadSellerProfile(MEMBER, ORG, admin([{ id: MEMBER, full_name: 'Marta', signatures: {} }, offer(OUTSIDER, 'Otra empresa, otra oferta')]));
   assert.equal(hasUsableDraftSellerOfferV2(onlyOutsider), false, 'never another organization\'s offer');
 });
+
+test('the seller read by drafts carries what «Perfil» now declares, and an old profile keeps its exact shape', async () => {
+  const { normalizeSellerProfile } = await import('@/lib/server/seller-profile');
+  const legacy = normalizeSellerProfile({ company_name: 'Acme', signatures: { profile_extended: { services: 'Outsourcing, Selección', valueProposition: 'Personal listo en 48 horas' } } });
+  assert.deepEqual(Object.keys(legacy).sort(), ['companyDomain', 'companyName', 'description', 'jobTitle', 'name', 'proofPoints', 'sector', 'services', 'valueProposition'],
+    'no new keys when they are empty, so the draft identity hash of existing profiles does not move');
+  assert.deepEqual(legacy.services, ['Outsourcing', 'Selección']);
+
+  const seller = normalizeSellerProfile({ company_name: 'Acme', signatures: { profile_extended: {
+    services: 'Personal temporal para retail, logística y agroindustria en temporada alta',
+    painPoints: ['Rotación alta'], differentiators: ['Cobertura nacional'], referenceClients: ['Falabella'],
+    targetRoles: ['Gerente de Personas'], targetIndustries: ['Retail'],
+  } } });
+  assert.deepEqual(seller.services, ['Personal temporal para retail, logística y agroindustria en temporada alta'], 'a sentence is not cut into fragments');
+  assert.deepEqual(seller.painPoints, ['Rotación alta']);
+  assert.deepEqual(seller.differentiators, ['Cobertura nacional']);
+  assert.deepEqual(seller.referenceClients, ['Falabella']);
+  assert.deepEqual(seller.targetRoles, ['Gerente de Personas']);
+  assert.deepEqual(seller.targetIndustries, ['Retail']);
+});

@@ -38,7 +38,9 @@ import {
 } from '@/lib/leads-client';
 import { ToastAction } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
-import { activeFilterChips, savedLeadsToast, searchStartersFor, type ActiveFilterChip, type SearchStarter } from '@/lib/search/search-guidance';
+import { activeFilterChips, idealCustomerStarter, savedLeadsToast, searchStartersFor, type ActiveFilterChip, type SearchStarter } from '@/lib/search/search-guidance';
+import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { profileService } from '@/lib/services/profile-service';
 import { FilterRelaxHint, SearchStarters } from '@/components/search/SearchGuidance';
 import { ProfileSearchProblemAlert } from '@/components/search/ProfileSearchProblemAlert';
 import {
@@ -835,7 +837,21 @@ export default function SearchPage() {
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
-  const searchStarters = useMemo(() => searchStartersFor(organizationName), [organizationName]);
+  // «Tu cliente ideal» from «Perfil» goes first when the person defined it.
+  const [idealCustomer, setIdealCustomer] = useState<SearchStarter | null>(null);
+  const [idealCustomerChecked, setIdealCustomerChecked] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    profileService.getProfile()
+      .then((data) => { if (!cancelled) setIdealCustomer(idealCustomerStarter(mapProfileToForm(data))); })
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setIdealCustomerChecked(true); });
+    return () => { cancelled = true; };
+  }, []);
+  const searchStarters = useMemo(
+    () => [...(idealCustomer ? [idealCustomer] : []), ...searchStartersFor(organizationName)].slice(0, 4),
+    [idealCustomer, organizationName],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1881,7 +1897,7 @@ export default function SearchPage() {
             className="min-w-0 space-y-5 border-0 p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             {filters.searchMode === 'filters' && filterStep === 'filters' && !activeSavedSearchId ? (
-              <SearchStarters starters={searchStarters} onPick={applySearchStarter} disabled={isLoading || isLoadingCompanies} />
+              <SearchStarters starters={searchStarters} onPick={applySearchStarter} disabled={isLoading || isLoadingCompanies} missingIdealCustomer={idealCustomerChecked && !idealCustomer} />
             ) : null}
           <legend className="sr-only">Criterios de búsqueda</legend>
           <div data-tour="search-modes" className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1 sm:w-[420px]" role="group" aria-label="Modo de búsqueda">

@@ -62,6 +62,34 @@ const GENERIC_STARTERS: SearchStarter[] = [
     filters: { companyKeywords: '', location: 'Chile', title: 'Gerente de Administración y Finanzas, Jefe de Compras', sizeRange: '201-500', seniorities: ['director', 'manager', 'head'] } },
 ];
 
+/** The person's own starting point, from «Tu cliente ideal» in «Perfil»: first in the list when they filled roles or
+ * industries. Seniority stays open because the roles already say who. */
+export function idealCustomerStarter(profile: {
+  targetRoles?: string;
+  targetIndustries?: string;
+  targetCompanySize?: string;
+  targetLocations?: string;
+}): SearchStarter | null {
+  const split = (value?: string) => String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+  const roles = split(profile.targetRoles);
+  const industries = split(profile.targetIndustries);
+  if (roles.length === 0 && industries.length === 0) return null;
+  const who = roles.slice(0, 2).join(' y ') || 'Tus cargos';
+  const where = industries.slice(0, 2).join(' y ');
+  return {
+    id: 'profile-ideal-customer',
+    label: 'Tu cliente ideal',
+    description: `Desde tu perfil: ${who}${where ? ` en ${where}` : ''}.`,
+    filters: {
+      companyKeywords: industries.join(', '),
+      location: split(profile.targetLocations)[0] || 'Chile',
+      title: roles.join(', '),
+      sizeRange: String(profile.targetCompanySize || ''),
+      seniorities: [],
+    },
+  };
+}
+
 export function searchStartersFor(organizationName?: string | null): SearchStarter[] {
   const name = String(organizationName || '');
   return ORGANIZATION_STARTERS.find((entry) => entry.matches.test(name))?.starters || GENERIC_STARTERS;
