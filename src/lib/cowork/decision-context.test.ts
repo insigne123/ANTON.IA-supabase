@@ -182,6 +182,19 @@ test('retrying failed sends is described only when it is on, and says what never
   assert.match(text, /Si summary\.retryable es 0, dilo y no propongas nada/);
 });
 
+test('a phone reveal is described only when it is on, says the cost, one person per approval and never to invent a number', () => {
+  const base = { history: { turns: [] }, request: 'Dame el teléfono de Paula', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  assert.equal('phoneRevealCapability' in off, false);
+  const on = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, phoneReveal: true }), base);
+  const text = String(on.phoneRevealCapability);
+  assert.match(text, /lead\.enrich_phone con leadId \(un contacto que ya consultaste en esta conversación/);
+  assert.match(text, /Cuesta 10 créditos por persona y se aprueba de a una/);
+  assert.match(text, /nunca propongas teléfonos en lote/);
+  assert.match(text, /nunca inventes un número, ni digas que ya lo tienes, ni prometas que habrá uno/);
+  assert.match(text, /ANTON\.IA no verifica que tenga una base legal para llamar a esa persona/);
+});
+
 test('LinkedIn batches are described only when they are on, say who the server leaves for another day and that each card needs approval', () => {
   const base = { history: { turns: [] }, request: 'Invita a los de la lista', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
   const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);

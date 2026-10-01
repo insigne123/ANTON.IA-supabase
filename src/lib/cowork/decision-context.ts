@@ -194,6 +194,7 @@ export function coworkDecisionContext(
     ...(instructions.contactsImportCapability ? { contactsImportCapability: instructions.contactsImportCapability } : {}),
     ...(instructions.linkedinBatchCapability ? { linkedinBatchCapability: instructions.linkedinBatchCapability } : {}),
     ...(instructions.campaignRetryCapability ? { campaignRetryCapability: instructions.campaignRetryCapability } : {}),
+    ...(instructions.phoneRevealCapability ? { phoneRevealCapability: instructions.phoneRevealCapability } : {}),
     threadBudgetCapability: instructions.threadBudgetCapability,
   };
 }

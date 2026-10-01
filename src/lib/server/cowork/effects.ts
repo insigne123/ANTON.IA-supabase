@@ -26,6 +26,7 @@ import { executeCoworkLinkedinInvite, executeCoworkLinkedinMessage } from './lin
 import { executeCoworkContactsImport } from './contacts-import';
 import { executeCoworkReplyThread } from './reply-thread-effect';
 import { executeCoworkCampaignRetry } from './campaign-retry';
+import { executeCoworkPhoneReveal } from './enrich-phone';
 import { executeCoworkLinkedinBatch } from './linkedin-batch';
 import { coworkContinuationArgs } from './continuation';
 
@@ -33,7 +34,7 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
-  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry']);
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 type Scope = { userId: string; organizationId: string };
@@ -252,6 +253,10 @@ async function executeEffect(
   if (proposal.kind === 'contacts_import') {
     const imported = await executeCoworkContactsImport(auth, proposal.run_id, proposal.target_id);
     return { reply: imported.reply, result: imported.result };
+  }
+  if (proposal.kind === 'enrich_phone') {
+    const requested = await executeCoworkPhoneReveal(auth, proposal.run_id, proposal.target_id);
+    return { reply: requested.reply, result: requested.result };
   }
   if (proposal.kind === 'campaign_retry') {
     const retried = await executeCoworkCampaignRetry(auth, proposal.run_id, proposal.target_id);

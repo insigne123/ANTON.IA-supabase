@@ -56,6 +56,7 @@ import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
 import { WEB_CORPUS } from './fixtures/cowork-web-corpus';
 import { LECTURAS_CORPUS } from './fixtures/cowork-lecturas-corpus';
+import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
@@ -72,6 +73,8 @@ CORPUS.push(...WEB_CORPUS);
 
 // The reads that close gaps 6, 7 and 10 of the AXIS bank (scripts/fixtures/cowork-lecturas-corpus.ts).
 CORPUS.push(...LECTURAS_CORPUS);
+// Revealing a phone (scripts/fixtures/cowork-telefono-corpus.ts).
+CORPUS.push(...TELEFONO_CORPUS);
 
 // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts): drafting the reply, and, with email.reply_thread on
 // (COWORK_REPLY_THREAD_ENABLED; the hilo-enviar-* cases have it on), proposing to send it in the thread.
