@@ -50,6 +50,7 @@ const sources = {
   './enrich-contact': 'export const enrichCoworkContact=async()=>{throw new Error("unexpected enrichment")};',
   './send-email': 'export const sendCoworkEmail=async()=>{throw new Error("unexpected send")};',
   './reply-thread-effect': 'export const executeCoworkReplyThread=async()=>{throw new Error("unexpected reply")};',
+  './enrich-phone': 'export const executeCoworkPhoneReveal=async()=>{throw new Error("unexpected phone reveal")};',
   './campaign-ops': 'export const createCoworkCampaign=async()=>{throw new Error("unexpected campaign")};export const reviewCoworkCampaign=createCoworkCampaign;',
   '@/lib/server/supabase-admin': 'export const getSupabaseAdminClient=()=>globalThis.__coworkSearch.client;',
   '@/lib/server/daily-quota-store': 'export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:10});export const checkAndConsumeDailyQuota=()=>globalThis.__coworkSearch.quota();',

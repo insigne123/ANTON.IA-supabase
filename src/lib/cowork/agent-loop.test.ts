@@ -522,6 +522,41 @@ test('an email lookup that already ran in the thread is not proposed again', asy
   assert.deepEqual(proposals.map(proposal => [proposal.kind, proposal.label]), [['start_research', 'Investigar contacto Carlos A. (Minera Centinela)']]);
 });
 
+test('a phone reveal is proposed only when it is on, for a contact read in the thread, once, and its note says the cost', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const row = { id: leadId, name: 'Paula Ríos', company: 'Transportes del Sur' };
+  const proposals: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
+  const base = { message: 'Necesito el teléfono de Paula', runId, signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [row], scope: 'own_saved_contacts' }),
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: Record<string, unknown>) => { proposals.push(proposal); } };
+  const found = { action: 'leads.search' as const, query: 'Paula', leadId: null, answer: null };
+  const phone = { action: 'lead.enrich_phone' as const, query: null, leadId, answer: null };
+  const decide = (decision: unknown = phone) => ({ decide: async (observations: unknown[]) => (observations.length ? decision : found) as never });
+  // Off (the default): refused with the way out (the email, LinkedIn), never proposed.
+  await assert.rejects(runCoworkReadLoop({ ...base, ...decide() }), /Phone reveal unavailable/);
+  assert.equal(proposals.length, 0);
+  // On: the contact read in this turn anchors the proposal, the card is named after the person and the note says what it costs.
+  await runCoworkReadLoop({ ...base, phoneReveal: true, ...decide() });
+  assert.deepEqual(proposals[0], { kind: 'enrich_phone', targetId: leadId, label: 'Revelar el teléfono de Paula Ríos (Transportes del Sur)', originRunId: runId });
+  assert.match(notes[0], /Propongo pedir el teléfono de Paula Ríos \(Transportes del Sur\) al proveedor: cuesta 10 créditos y es una persona por aprobación/);
+  // A contact that was not read in this thread is refused.
+  await assert.rejects(runCoworkReadLoop({ ...base, phoneReveal: true, execute: async () => ({}), decide: async () => phone }), /Effect target must be observed first/);
+  // The same reveal in the thread is not proposed again: it would spend ten credits more for the same answer.
+  const history = [{ runId: '00000000-0000-4000-8000-000000000009', observations: [{ action: 'leads.search', input: 'Paula', result: { items: [row], scope: 'own_saved_contacts' } }],
+    actions: [{ kind: 'enrich_phone', label: 'Revelar el teléfono de Paula Ríos (Transportes del Sur)', outcome: 'ejecutada', result: { requested: true } }] } as never];
+  await runCoworkReadLoop({ ...base, phoneReveal: true, history, decide: async (_observations, _mustAnswer, rejections = []) => {
+    if (!rejections.length) return phone;
+    assert.match(rejections[0].reason, /Ya se pidió el teléfono/);
+    return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Ya pedí su teléfono: llega a tus contactos enriquecidos.', document: null, question: '¿Te muestro tus contactos enriquecidos?', suggestions: [{ label: 'Sí, muéstralos', message: 'Muéstrame mis contactos enriquecidos' }] } };
+  } });
+  assert.equal(proposals.length, 1);
+});
+
 test('a proposal without explanation gets a note that says what it does and for whom', async () => {
   const leadId = '00000000-0000-4000-8000-000000000021';
   const recorded: string[] = [];
