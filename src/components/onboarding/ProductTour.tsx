@@ -5,7 +5,8 @@ import {
   type CSSProperties, type ReactNode,
 } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Compass } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { CircleHelp, Compass, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -15,8 +16,9 @@ import { useSidebar } from '@/components/ui/sidebar';
 import { toast } from '@/hooks/use-toast';
 import { getBrowserStorage } from '@/lib/browser-storage';
 import {
-  PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, productTourRecord, productTourSteps,
-  type ProductTourRecord, type ProductTourStatus, type ProductTourStep,
+  PAGE_GUIDES, PAGE_GUIDES_METADATA_KEY, PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, pageGuideFor, productTourRecord,
+  productTourSteps, seenPageGuides,
+  type PageGuide, type ProductTourRecord, type ProductTourStatus, type ProductTourStep,
 } from '@/lib/onboarding/product-tour';
 import { cn } from '@/lib/utils';
 
@@ -28,17 +30,25 @@ const SPOTLIGHT_PADDING = 4;
 const SCREEN_INSET = 3;
 /** The menu sheet takes this long to close. */
 const SETTLE_MS = 320;
+/** A screen gets this long to render its controls before its guide is offered. */
+const GUIDE_OFFER_DELAY_MS = 900;
 
-type ProductTourContextValue = { start: () => void; active: boolean };
+type ProductTourContextValue = {
+  start: () => void;
+  active: boolean;
+  /** The guide of the screen on view, if it has one. */
+  guide: PageGuide | null;
+  startGuide: (id: string) => void;
+};
 
-const ProductTourContext = createContext<ProductTourContextValue>({ start: () => {}, active: false });
+const ProductTourContext = createContext<ProductTourContextValue>({ start: () => {}, active: false, guide: null, startGuide: () => {} });
 
 /** Opens the guided tour. Outside the app shell it does nothing. */
 export function useProductTour() {
   return useContext(ProductTourContext);
 }
 
-type Phase = 'idle' | 'welcome' | 'touring';
+type Phase = 'idle' | 'welcome' | 'touring' | 'guide';
 
 type ProductTourProviderProps = {
   userId?: string | null;
@@ -49,10 +59,16 @@ type ProductTourProviderProps = {
 
 export function ProductTourProvider({ userId, onNavigate, children }: ProductTourProviderProps) {
   const sidebar = useSidebar();
+  const pathname = usePathname();
   const [phase, setPhase] = useState<Phase>('idle');
   const [steps, setSteps] = useState<ProductTourStep[]>([]);
   const [index, setIndex] = useState(0);
   const [announcement, setAnnouncement] = useState('');
+  const [guideId, setGuideId] = useState<string | null>(null);
+  const [seenGuides, setSeenGuides] = useState<Record<string, true>>({});
+  const [guidesLoaded, setGuidesLoaded] = useState(false);
+  const [offeredGuide, setOfferedGuide] = useState<PageGuide | null>(null);
+  const currentGuide = useMemo(() => pageGuideFor(pathname), [pathname]);
   const collapseSidebarAfter = useRef(false);
   const scrolledAreas = useRef(new Map<HTMLElement, number>());
   const startTimer = useRef<number | undefined>(undefined);
@@ -63,7 +79,14 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
   useEffect(() => {
     if (!userId) return;
     const stored = readStoredRecord(userId);
-    if (stored && stored.version >= PRODUCT_TOUR_VERSION) return;
+    const cachedGuides = readStoredGuides(userId);
+    const storedGuides = cachedGuides || {};
+    setSeenGuides(storedGuides);
+    // Both already known on this browser: nothing to ask the server on every page load.
+    if (stored && stored.version >= PRODUCT_TOUR_VERSION && cachedGuides) {
+      setGuidesLoaded(true);
+      return;
+    }
     const controller = new AbortController();
     fetch(TOUR_ENDPOINT, { cache: 'no-store', signal: controller.signal })
       .then(response => (response.ok ? response.json() : null))
@@ -71,11 +94,59 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
         if (!data || controller.signal.aborted) return;
         const record = productTourRecord({ [PRODUCT_TOUR_METADATA_KEY]: data.record });
         if (record) storeRecord(userId, record);
-        if (data.offer === true) setPhase(current => (current === 'idle' ? 'welcome' : current));
+        const guides = { ...storedGuides, ...seenPageGuides({ [PAGE_GUIDES_METADATA_KEY]: data.guides }) };
+        storeGuides(userId, guides);
+        setSeenGuides(guides);
+        const tourSeen = stored && stored.version >= PRODUCT_TOUR_VERSION;
+        if (data.offer === true && !tourSeen) setPhase(current => (current === 'idle' ? 'welcome' : current));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (!controller.signal.aborted) setGuidesLoaded(true); });
     return () => controller.abort();
   }, [userId]);
+
+  const markGuideSeen = useCallback((id: string) => {
+    if (!userId) return;
+    setSeenGuides((current) => {
+      if (current[id]) return current;
+      const next = { ...current, [id]: true as const };
+      storeGuides(userId, next);
+      return next;
+    });
+    fetch(TOUR_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guide: id }),
+      keepalive: true,
+    }).catch(() => {});
+  }, [userId]);
+
+  // A screen with a guide the person has not seen offers it once, quietly, after its controls are on screen.
+  useEffect(() => {
+    setOfferedGuide(null);
+    if (!guidesLoaded || phase !== 'idle' || !currentGuide || seenGuides[currentGuide.id]) return;
+    const timer = window.setTimeout(() => {
+      if (currentGuide.steps.some((step) => visibleElement(step.target))) setOfferedGuide(currentGuide);
+    }, GUIDE_OFFER_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentGuide, guidesLoaded, phase, seenGuides]);
+
+  const startGuide = useCallback((id: string) => {
+    const guide = PAGE_GUIDES.find((item) => item.id === id);
+    if (!guide) return;
+    setOfferedGuide(null);
+    const visible = guide.steps.filter((step) => visibleElement(step.target));
+    markGuideSeen(guide.id);
+    if (visible.length === 0) {
+      toast({ title: 'Aún no hay nada que mostrar aquí', description: 'Vuelve a abrir la guía cuando esta pantalla tenga contactos o datos.' });
+      return;
+    }
+    setSteps(visible.map((step) => ({ id: step.id, target: step.target, title: step.title, body: step.body })));
+    setIndex(0);
+    setAnnouncement('');
+    setGuideId(guide.id);
+    setPhase('guide');
+  }, [markGuideSeen]);
 
   const save = useCallback((status: ProductTourStatus) => {
     if (!userId) return;
@@ -120,6 +191,11 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
   }, [save]);
 
   const close = useCallback((status: ProductTourStatus, navigateTo?: string) => {
+    if (phase === 'guide') {
+      setPhase('idle');
+      setGuideId(null);
+      return;
+    }
     setPhase('idle');
     save(status);
     if (collapseSidebarAfter.current) {
@@ -133,7 +209,7 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
       toast({ title: 'Recorrido omitido', description: 'Puedes verlo cuando quieras desde «Ver tutorial», al final del menú.' });
     }
     if (navigateTo) onNavigate(navigateTo);
-  }, [onNavigate, save, sidebar]);
+  }, [onNavigate, phase, save, sidebar]);
 
   const goTo = useCallback((next: number) => {
     const step = steps[next];
@@ -142,7 +218,7 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     setAnnouncement(`Paso ${next + 1} de ${steps.length}: ${step.title}. ${step.body}`);
   }, [steps]);
 
-  const value = useMemo(() => ({ start, active: phase !== 'idle' }), [phase, start]);
+  const value = useMemo(() => ({ start, active: phase !== 'idle', guide: currentGuide, startGuide }), [currentGuide, phase, start, startGuide]);
 
   return (
     <ProductTourContext.Provider value={value}>
@@ -153,8 +229,17 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
         onStart={begin}
         onDecline={decline}
       />
-      {phase === 'touring' && steps[index] && (
+      {offeredGuide && phase === 'idle' && (
+        <GuideOffer
+          guide={offeredGuide}
+          onStart={() => startGuide(offeredGuide.id)}
+          onDecline={() => { markGuideSeen(offeredGuide.id); setOfferedGuide(null); }}
+        />
+      )}
+      {(phase === 'touring' || phase === 'guide') && steps[index] && (
         <TourStep
+          key={phase === 'guide' ? `guide:${guideId}` : 'tour'}
+          kind={phase === 'guide' ? 'guide' : 'tour'}
           steps={steps}
           index={index}
           isMobile={sidebar.isMobile}
@@ -221,7 +306,9 @@ function WelcomeDialog({ open, stepCount, onStart, onDecline }: {
   );
 }
 
-function TourStep({ steps, index, isMobile, announcement, scrolledAreas, onBack, onNext, onClose }: {
+function TourStep({ kind, steps, index, isMobile, announcement, scrolledAreas, onBack, onNext, onClose }: {
+  /** The app tour walks the menu; a screen guide walks the controls of the page on view. */
+  kind: 'tour' | 'guide';
   steps: ProductTourStep[];
   index: number;
   isMobile: boolean;
@@ -234,7 +321,15 @@ function TourStep({ steps, index, isMobile, announcement, scrolledAreas, onBack,
 }) {
   const step = steps[index];
   const last = index === steps.length - 1;
-  const layout = useTargetLayout(step.target, isMobile, scrolledAreas);
+  const guide = kind === 'guide';
+  const layout = useTargetLayout(step.target, isMobile && !guide, scrolledAreas);
+
+  // Page controls can be below the fold: bring each one into view (the menu has its own scrolling).
+  useEffect(() => {
+    if (!guide) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    visibleElement(step.target)?.scrollIntoView?.({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+  }, [guide, step.target]);
   const cardRef = useRef<HTMLDivElement>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
 
@@ -288,7 +383,7 @@ function TourStep({ steps, index, isMobile, announcement, scrolledAreas, onBack,
                 className="-mr-2 h-8 px-2.5 text-muted-foreground"
                 onClick={() => onClose('skipped')}
               >
-                Omitir
+                {guide ? 'Cerrar' : 'Omitir'}
               </Button>
             )}
           </div>
@@ -309,13 +404,13 @@ function TourStep({ steps, index, isMobile, announcement, scrolledAreas, onBack,
           <div className="flex items-center justify-between gap-2">
             {index > 0 ? <Button variant="ghost" size="sm" onClick={onBack}>Atrás</Button> : <span />}
             <div className="flex items-center gap-2">
-              {last && <Button variant="outline" size="sm" onClick={() => onClose('completed')}>Terminar</Button>}
+              {last && !guide && <Button variant="outline" size="sm" onClick={() => onClose('completed')}>Terminar</Button>}
               <Button
                 ref={primaryRef}
                 size="sm"
-                onClick={last ? () => onClose('completed', '/profile') : onNext}
+                onClick={last ? () => (guide ? onClose('completed') : onClose('completed', '/profile')) : onNext}
               >
-                {last ? 'Ir a mi perfil' : 'Siguiente'}
+                {last ? (guide ? 'Entendido' : 'Ir a mi perfil') : 'Siguiente'}
               </Button>
             </div>
           </div>
@@ -323,6 +418,46 @@ function TourStep({ steps, index, isMobile, announcement, scrolledAreas, onBack,
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
+  );
+}
+
+/** «¿Primera vez aquí?»: a quiet card, not a modal, so the person can keep working and ignore it. */
+function GuideOffer({ guide, onStart, onDecline }: { guide: PageGuide; onStart: () => void; onDecline: () => void }) {
+  return (
+    <div role="region" aria-label={`Guía de ${guide.title}`}
+      className="fixed bottom-4 right-4 z-50 w-[calc(100%-2rem)] max-w-sm rounded-2xl border bg-background p-4 shadow-xl duration-300 animate-in fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none">
+      <div className="flex items-start gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <CircleHelp className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">¿Primera vez en {guide.title}?</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Te mostramos cómo usar esta pantalla en {guide.steps.length === 1 ? 'un paso' : `${guide.steps.length} pasos`}.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" onClick={onStart}>Ver guía</Button>
+            <Button size="sm" variant="ghost" onClick={onDecline}>Ahora no</Button>
+          </div>
+        </div>
+        <Button variant="ghost" size="icon" className="-mr-2 -mt-2 size-8 text-muted-foreground" aria-label="Cerrar" onClick={onDecline}>
+          <X className="size-4" aria-hidden />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** «?» in the top bar: the guide of the screen on view, any time. Nothing when the screen has no guide. */
+export function PageHelpButton({ className }: { className?: string }) {
+  const { guide, startGuide, active } = useProductTour();
+  if (!guide) return null;
+  return (
+    <Button variant="ghost" size="sm" className={cn('h-8 gap-1.5 px-2 text-muted-foreground', className)} disabled={active}
+      onClick={() => startGuide(guide.id)} aria-label={`Cómo usar ${guide.title}`} data-tour="page-help">
+      <CircleHelp className="size-4" aria-hidden />
+      <span className="hidden sm:inline">Ayuda</span>
+    </Button>
   );
 }
 
@@ -450,6 +585,26 @@ function readStoredRecord(userId: string): ProductTourRecord | null {
 function storeRecord(userId: string, record: ProductTourRecord) {
   try {
     getBrowserStorage()?.setItem(storageKey(userId), JSON.stringify(record));
+  } catch {
+    // Storage full or blocked: the account keeps its own copy.
+  }
+}
+
+const guidesKey = (userId: string) => `antonia:guides:${userId}`;
+
+/** The guides this browser knows the person has seen; null when it never asked the account. */
+function readStoredGuides(userId: string): Record<string, true> | null {
+  try {
+    const raw = getBrowserStorage()?.getItem(guidesKey(userId));
+    return raw ? seenPageGuides({ [PAGE_GUIDES_METADATA_KEY]: JSON.parse(raw) }) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeGuides(userId: string, guides: Record<string, true>) {
+  try {
+    getBrowserStorage()?.setItem(guidesKey(userId), JSON.stringify(guides));
   } catch {
     // Storage full or blocked: the account keeps its own copy.
   }

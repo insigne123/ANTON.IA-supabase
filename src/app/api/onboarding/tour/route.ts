@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import {
-  PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, productTourRecord, shouldOfferProductTour,
+  PAGE_GUIDES, PAGE_GUIDES_METADATA_KEY, PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, productTourRecord, seenPageGuides,
+  shouldOfferProductTour,
 } from '@/lib/onboarding/product-tour';
 import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
 
@@ -10,6 +11,7 @@ export const dynamic = 'force-dynamic';
 
 const noStore = { 'Cache-Control': 'private, no-store' };
 const TourStatusSchema = z.object({ status: z.enum(['completed', 'skipped']) }).strict();
+const GuideSeenSchema = z.object({ guide: z.enum(PAGE_GUIDES.map((guide) => guide.id) as [string, ...string[]]) }).strict();
 
 /** Whether the guided tour opens on its own for the signed-in person. */
 export async function GET() {
@@ -17,7 +19,7 @@ export async function GET() {
     const { user } = await requireSessionRequestAuth();
     const record = productTourRecord(user.user_metadata);
     return NextResponse.json(
-      { record, offer: shouldOfferProductTour({ record, createdAt: user.created_at }) },
+      { record, offer: shouldOfferProductTour({ record, createdAt: user.created_at }), guides: seenPageGuides(user.user_metadata) },
       { headers: noStore },
     );
   } catch (error) {
@@ -29,7 +31,16 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const auth = await requireSessionRequestAuth();
-    const body = TourStatusSchema.safeParse(await request.json().catch(() => null));
+    const raw = await request.json().catch(() => null);
+    const guide = GuideSeenSchema.safeParse(raw);
+    if (guide.success) {
+      // A screen guide seen or declined: it is not offered on its own again (it stays in «?»).
+      const guides = { ...seenPageGuides(auth.user.user_metadata), [guide.data.guide]: true };
+      const { error } = await auth.supabase.auth.updateUser({ data: { [PAGE_GUIDES_METADATA_KEY]: guides } });
+      if (error) throw error;
+      return NextResponse.json({ guides }, { headers: noStore });
+    }
+    const body = TourStatusSchema.safeParse(raw);
     if (!body.success) {
       return NextResponse.json({ error: 'Estado del tutorial no válido.' }, { status: 400, headers: noStore });
     }

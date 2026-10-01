@@ -1884,7 +1884,7 @@ export default function SearchPage() {
               <SearchStarters starters={searchStarters} onPick={applySearchStarter} disabled={isLoading || isLoadingCompanies} />
             ) : null}
           <legend className="sr-only">Criterios de búsqueda</legend>
-          <div className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1 sm:w-[420px]" role="group" aria-label="Modo de búsqueda">
+          <div data-tour="search-modes" className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1 sm:w-[420px]" role="group" aria-label="Modo de búsqueda">
             {([
               ['filters', 'Filtros'],
               ['company_name', 'Empresa'],
@@ -2098,7 +2098,7 @@ export default function SearchPage() {
           <div className="sticky bottom-2 z-10 flex flex-col gap-2 rounded-xl border border-border/70 bg-card/95 p-2 pt-2 shadow-lg backdrop-blur sm:static sm:flex-row sm:items-center sm:justify-end sm:rounded-none sm:border-x-0 sm:border-b-0 sm:bg-transparent sm:p-0 sm:pt-4 sm:shadow-none sm:backdrop-blur-none">
             <Button variant="ghost" className="shadow-none" onClick={handleClear} disabled={isLoading}><X className="h-4 w-4" />Limpiar</Button>
             {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
-            <Button className="shadow-none sm:min-w-36" onClick={handleSearch} disabled={isLoading || checkpointLoading}>
+            <Button data-tour="search-run" className="shadow-none sm:min-w-36" onClick={handleSearch} disabled={isLoading || checkpointLoading}>
               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               {isLoading ? 'Buscando…' : filters.searchMode === 'filters' ? 'Buscar empresas' : 'Buscar leads'}
             </Button>

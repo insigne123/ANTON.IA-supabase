@@ -39,3 +39,49 @@ test('steps are short, unique and point at menu entries; the menu button step is
   assert.equal(productTourSteps(true)[0].id, 'menu');
   assert.equal(productTourSteps(false).at(-1)?.target, 'tour-help', 'it ends where it can be replayed');
 });
+test('screen guides are short, unique, cover the main screens and point at anchors that exist in the code', async () => {
+  const { readFileSync, readdirSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { PAGE_GUIDES, pageGuideFor } = await import('./product-tour');
+  const sources: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.tsx$/.test(name)) sources.push(readFileSync(path, 'utf8'));
+    }
+  };
+  walk('src');
+  const code = sources.join('\n');
+  const ids = PAGE_GUIDES.map((guide) => guide.id);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const guide of PAGE_GUIDES) {
+    assert.ok(guide.steps.length >= 1 && guide.steps.length <= 4, guide.id);
+    for (const step of guide.steps) {
+      assert.ok(step.title.length <= 40, `${guide.id}:${step.id}`);
+      assert.ok(step.body.length <= 140, `${guide.id}:${step.id}`);
+      assert.ok(code.includes(`data-tour="${step.target}"`), `${guide.id}:${step.target} is anchored on a real control`);
+    }
+  }
+  assert.equal(pageGuideFor('/search')?.id, 'search');
+  assert.equal(pageGuideFor('/saved/leads')?.id, 'saved');
+  assert.equal(pageGuideFor('/saved/leads/enriched')?.id, 'enriched');
+  assert.equal(pageGuideFor('/contacted/replied')?.id, 'conversations');
+  assert.equal(pageGuideFor('/dashboard')?.id, 'home');
+  assert.equal(pageGuideFor('/settings/privacy'), null);
+  assert.equal(pageGuideFor(null), null);
+});
+
+test('only known guides marked true count as seen', async () => {
+  const { PAGE_GUIDES_METADATA_KEY, seenPageGuides } = await import('./product-tour');
+  assert.deepEqual(seenPageGuides({ [PAGE_GUIDES_METADATA_KEY]: { search: true, crm: 'yes', ghost: true } }), { search: true });
+  assert.deepEqual(seenPageGuides({ [PAGE_GUIDES_METADATA_KEY]: ['search'] }), {});
+  assert.deepEqual(seenPageGuides(null), {});
+});
+
+test('the tour walks the real path to a first email and ends where help lives', () => {
+  assert.deepEqual(productTourSteps(false).map((step) => step.id),
+    ['home', 'profile', 'connections', 'search', 'saved-leads', 'contacted', 'campaigns', 'help']);
+  assert.ok(PRODUCT_TOUR_VERSION >= 2, 'the new steps are offered again to new accounts');
+  assert.doesNotMatch(JSON.stringify(PRODUCT_TOUR_STEPS), /agente|misiones/i, 'the retired agent is not in the tour');
+});
