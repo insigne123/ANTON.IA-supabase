@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     if (body.action === 'message') {
       const { writeLinkedinMessage } = await import('@/lib/server/linkedin-message-writer');
       const { loadSellerProfile } = await import('@/lib/server/seller-profile');
-      const seller = await loadSellerProfile(auth.user.id);
+      const seller = await loadSellerProfile(auth.user.id, auth.organizationId);
       const { extensionResearchReport } = await import('@/lib/server/extension-research-report');
       const finalResearch = await extensionResearchReport(research, access);
       const report = finalResearch?.reportDocumentV2;

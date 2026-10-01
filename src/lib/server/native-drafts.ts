@@ -171,7 +171,7 @@ export type NativeDraftGenerationResult =
 
 export type NativeDraftGenerationDependencies = {
   getSnapshot?: (input: { snapshotId: string; access: NativeDraftAccess }) => Promise<NativeSnapshotRow | null>;
-  loadSellerProfile?: (userId: string) => Promise<DraftSellerProfileV2>;
+  loadSellerProfile?: (userId: string, organizationId?: string | null) => Promise<DraftSellerProfileV2>;
   loadWritingStyle?: (input: NativeDraftAccess & { styleProfileId?: string | null; styleName?: string | null; readOnly?: boolean }) => Promise<DraftWritingStyleV2>;
   ensureReportDocument?: (input: {
     snapshot: ResearchSnapshotV1;
@@ -778,7 +778,8 @@ async function createDraftContext(input: {
 }) {
   const snapshot = parseNativeSnapshotRow(input.snapshotRow, input.snapshotId);
   const seller = input.seller
-    || await (input.dependencies?.loadSellerProfile?.(input.access.userId) || loadSellerProfile(input.access.userId));
+    || await (input.dependencies?.loadSellerProfile?.(input.access.userId, input.access.organizationId)
+      || loadSellerProfile(input.access.userId, input.access.organizationId));
   const [style, reportSelection] = await Promise.all([
     input.style || loadDraftWritingStyle({
       access: input.access,

@@ -90,6 +90,7 @@ import {
   researchSerpJobsSignals,
   researchWhois,
 } from '@/lib/server/suplia-research-tools';
+import { nativeResearchSearchContext } from '@/lib/server/native-research-search-context';
 
 const NATIVE_PROVIDER = 'native-research-v1';
 const ACTIVE_STATUSES = ['queued', 'running', 'in_progress', 'pending', 'processing'];
@@ -1000,20 +1001,18 @@ async function collectCompanySignals(input: {
   }
 }
 
+function logUnavailableSource(source: string, error: any) {
+  // Only the reason code: the message never carries lead data, and it tells a missing key from a provider outage.
+  console.warn('[native-research] optional source unavailable', { source, reason: text(error?.message).slice(0, 120) || 'unknown' });
+}
+
 async function collectSearchSignals(input: {
   organizationId: string;
   lead: NativeResearchLead;
   options: NativeResearchOptions;
 }) {
   const domain = companyResearchDomain(input.lead);
-  const context = {
-    auth: {
-      user: { id: input.lead.id || 'native-research' },
-      organizationId: input.organizationId,
-      supabase: getSupabaseAdminClient(),
-    },
-    conversationId: 'native-research',
-  } as any;
+  const context = nativeResearchSearchContext(input.organizationId, input.lead.id, getSupabaseAdminClient());
   const providerInput = {
     domain,
     company: input.lead.companyName || domain,
@@ -1026,31 +1025,36 @@ async function collectSearchSignals(input: {
   const warnings: string[] = [];
   const [profile, news, jobs, mentions, similarweb] = await Promise.all([
     domain || input.lead.companyName
-      ? researchSerpCompanyProfile(providerInput, context).catch(() => {
+      ? researchSerpCompanyProfile(providerInput, context).catch((error: any) => {
+        logUnavailableSource('company_profile', error);
         warnings.push('company_profile_unavailable');
         return null;
       })
       : Promise.resolve(null),
     domain || input.lead.companyName
       ? researchSerpCompanyNews(providerInput, context).catch((error: any) => {
+        logUnavailableSource('company_news', error);
         warnings.push('company_news_unavailable');
         return null;
       })
       : Promise.resolve(null),
     domain || input.lead.companyName
       ? researchSerpJobsSignals(providerInput, context).catch((error: any) => {
+        logUnavailableSource('hiring_signals', error);
         warnings.push('hiring_signals_unavailable');
         return null;
       })
       : Promise.resolve(null),
     input.options.depth === 'deep' && (domain || input.lead.companyName)
-      ? researchBrandMentions(providerInput, context).catch(() => {
+      ? researchBrandMentions(providerInput, context).catch((error: any) => {
+        logUnavailableSource('company_mentions', error);
         warnings.push('company_mentions_unavailable');
         return null;
       })
       : Promise.resolve(null),
     domain
-      ? researchSimilarweb(providerInput, context).catch(() => {
+      ? researchSimilarweb(providerInput, context).catch((error: any) => {
+        logUnavailableSource('similarweb', error);
         warnings.push('similarweb_unavailable');
         return null;
       })
@@ -1559,9 +1563,10 @@ function buildSnapshot(input: {
   }
   if (input.publicCompany) {
     const publicGraph = publicCompanyToNative(input.publicCompany.graph, input.publicCompany.reference);
-    sources.push(...publicGraph.sources);
-    evidence.push(...publicGraph.evidence);
-    claims.push(...publicGraph.claims);
+    // The public graph can repeat what the site already gave: keep one of each id, or the report fails validation.
+    for (const source of publicGraph.sources) if (!sources.some((item) => item.id === source.id)) sources.push(source);
+    for (const item of publicGraph.evidence) if (!evidence.some((existing) => existing.id === item.id)) evidence.push(item);
+    for (const claim of publicGraph.claims) if (!claims.some((existing) => existing.id === claim.id)) claims.push(claim);
     const cited = new Set(publicGraph.claims.flatMap((claim) => claim.supportingEvidenceIds));
     companyFactEvidence.push(...publicGraph.evidence.filter((item) => cited.has(item.id)));
   }
@@ -2163,7 +2168,7 @@ async function ensureNativeResearchReport(job: NativeResearchJob, snapshot: Rese
   } catch {
     // An invalid V2 configuration must not break the already-shipped V1 report path.
   }
-  const sellerProfile = await loadSellerProfile(job.userId);
+  const sellerProfile = await loadSellerProfile(job.userId, job.organizationId);
   return tryEnsureResearchReportDocument({ snapshot, access, sellerProfile });
 }
 

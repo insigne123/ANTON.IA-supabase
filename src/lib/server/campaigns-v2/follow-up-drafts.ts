@@ -151,7 +151,7 @@ export async function pregenerateFirstContactPlanDrafts(input: {
     if (!draft) throw new Error('CAMPAIGN_V2_NATIVE_DRAFT_MISSING');
     existingDrafts.set(step.id, draft);
   }
-  const sellerProfile = input.sellerProfile || await loadSellerProfile(input.userId);
+  const sellerProfile = input.sellerProfile || await loadSellerProfile(input.userId, input.organizationId);
   const config = draftingConfig(campaign.settings);
   const writingStyle = input.writingStyle || (config.styleProfileId
     ? undefined
