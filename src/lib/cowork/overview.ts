@@ -34,9 +34,11 @@ export function coworkOverviewFigures(overview: CoworkOverview | null): CoworkOv
   return figures;
 }
 
-/** The message the «Cuéntame qué vendes» card sends: what you wrote, and your site if you gave it. */
+/** The message the «Cuéntame qué vendes» card sends: what you wrote, and your site if you gave it. With only the site, Cowork reads
+ * it (site.read) and proposes who to aim at before anything is saved (scripts/fixtures/cowork-web-corpus.ts). */
 export function coworkOfferMessage(offer: string, website = '') {
   const said = offer.replace(/\s+/g, ' ').trim().replace(/[.\s]+$/, '');
   const site = website.trim();
+  if (!said && site) return `Mi web es ${site}, ayúdame a partir`;
   return `Guarda en mi perfil lo que vendo: ${said}.${site ? ` Mi sitio web es ${site}.` : ''}`;
 }
