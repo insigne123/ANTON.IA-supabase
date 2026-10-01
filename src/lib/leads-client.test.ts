@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { searchLinkedInProfileLead } from '@/lib/leads-client';
+import { ProfileSearchProblemError } from '@/lib/search/profile-search-outcome';
 
 function mockEnrichmentResponse(
   payload: Record<string, unknown>,
@@ -36,7 +37,7 @@ test('LinkedIn profile search surfaces exhausted Apollo credits', async () => {
   }
 });
 
-test('LinkedIn profile search does not render a not-found tracking row', async () => {
+test('LinkedIn profile search reports a not-found profile as its own problem, not as an empty row', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = mockEnrichmentResponse({
     id: 'tracking-1',
@@ -44,12 +45,64 @@ test('LinkedIn profile search does not render a not-found tracking row', async (
     linkedinUrl: 'https://www.linkedin.com/in/example',
   });
   try {
-    const result = await searchLinkedInProfileLead({
-      search_mode: 'linkedin_profile',
-      linkedin_url: 'https://www.linkedin.com/in/example',
-    });
-    assert.equal(result.count, 0);
-    assert.deepEqual(result.leads, []);
+    await assert.rejects(
+      () => searchLinkedInProfileLead({ search_mode: 'linkedin_profile', linkedin_url: 'https://www.linkedin.com/in/example' }),
+      (error: unknown) => error instanceof ProfileSearchProblemError && error.problem === 'not_found',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a provider outage is reported as such and is not retried into a false «no data»', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ queued: false, operationId: 'profile-match:down', operationStatus: 'completed',
+      enriched: [{ id: 'tracking-1', enrichmentStatus: 'failed', errorCode: 'APOLLO_UPSTREAM_ERROR' }] });
+  };
+  try {
+    await assert.rejects(
+      () => searchLinkedInProfileLead({ search_mode: 'linkedin_profile', linkedin_url: 'https://www.linkedin.com/in/example', reveal_email: true }),
+      (error: unknown) => error instanceof ProfileSearchProblemError && error.problem === 'provider_unavailable',
+    );
+    assert.equal(calls, 1);
+    globalThis.fetch = async () => Response.json({ error: 'APOLLO_UPSTREAM_ERROR' }, { status: 503 });
+    await assert.rejects(
+      () => searchLinkedInProfileLead({ search_mode: 'linkedin_profile', linkedin_url: 'https://www.linkedin.com/in/example' }),
+      (error: unknown) => error instanceof ProfileSearchProblemError && error.problem === 'provider_unavailable',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a Sales Navigator link is refused before any request, with its own problem', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return Response.json({}); };
+  try {
+    await assert.rejects(
+      () => searchLinkedInProfileLead({ search_mode: 'linkedin_profile', linkedin_url: 'https://www.linkedin.com/sales/lead/ACwAAA123' }),
+      (error: unknown) => error instanceof ProfileSearchProblemError && error.problem === 'sales_navigator_url',
+    );
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the returned profile matches the requested one ignoring accents', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mockEnrichmentResponse({
+    id: 'person-1', fullName: 'Laura Sofía Sotelo Torres', title: 'Jefa de Selección', companyName: 'Retail Sur',
+    linkedinUrl: 'http://www.linkedin.com/in/laura-sofia-sotelo-torres-47423735', enrichmentStatus: 'completed',
+  });
+  try {
+    const result = await searchLinkedInProfileLead({ search_mode: 'linkedin_profile',
+      linkedin_url: 'https://cl.linkedin.com/in/laura-sof%C3%ADa-sotelo-torres-47423735/' });
+    assert.equal(result.count, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
