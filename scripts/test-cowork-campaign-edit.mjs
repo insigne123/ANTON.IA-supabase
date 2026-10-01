@@ -125,7 +125,8 @@ try {
     firstEmails: [felipe] };
   reset(null);
   globalThis.__campaignEditAudience = [person('marcela@sodexo.cl', 'Marcela Soto'), person('felipe@securitas.cl', 'Felipe Muñoz')];
-  assert.deepEqual(await stageCoworkCampaignDefinition(scope, RUN, proposal), { recipients: 2 });
+  // No mailbox read in this isolated client: the model's choice stays (the default mailbox has its own unit tests).
+  assert.deepEqual(await stageCoworkCampaignDefinition(scope, RUN, proposal), { recipients: 2, provider: 'google' });
   const staged = state.writes.find(write => write.op === 'upsert').values.definition;
   assert.deepEqual(staged.overrides, [{ ...felipe, messageIndex: 0 }]);
   assert.deepEqual(staged.messages.map(message => message.body.split('\n')[0]), ['Hola {{nombre}},', 'Hola {{nombre}},']);

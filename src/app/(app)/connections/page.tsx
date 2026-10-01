@@ -1,6 +1,7 @@
 import { Mail, Send } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
+import { DefaultSenderCard } from '@/components/settings/DefaultSenderCard';
 import { SettingsLinkRow } from '@/components/settings/settings-link-row';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -32,6 +33,8 @@ export default function ConnectionsPage() {
           />
         </CardContent>
       </Card>
+
+      <DefaultSenderCard />
     </div>
   );
 }

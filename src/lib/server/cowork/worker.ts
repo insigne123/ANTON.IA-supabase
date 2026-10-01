@@ -22,6 +22,7 @@ import { processCoworkEffectQueue, resolveCoworkEffect } from './effects';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 import { stageCoworkCampaignDefinition } from './campaign-ops';
+import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 import { stageCoworkCode } from './code-runner';
 import { hashCoworkCodeProposal } from '@/lib/cowork/code-proposal';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
@@ -267,7 +268,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       record: recordEvent,
       // The Writer and the Reviewer write the emails when the coordinator hands them a brief.
       write: writerEnabled ? coworkWriterTurn({
-        request: run.message, userContext, signal: controller.signal, authorize,
+        request: run.message, signal: controller.signal, authorize,
+        // The product the person asked to promote in this conversation goes with the emails (Plan 5, decision 3).
+        userContext: userContext && threadMemory?.memory?.offer ? { ...userContext, offerInPlay: threadMemory.memory.offer } : userContext,
         reserve: role => reserveCoworkModelCall(client, run.id, run.lease_token, role),
         generate: generateStructuredWithTelemetry,
         recordUsage: (reservationId, callTelemetry) => recordCoworkModelUsage(client, reservationId, run.lease_token, callTelemetry),
@@ -331,9 +334,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         }
         if (proposal.kind === 'campaign_create') {
           if (!proposal.campaign) throw new Error('Missing campaign definition');
-          const staged = await stageCoworkCampaignDefinition(scope, run.id, proposal.campaign);
+          const staged = await stageCoworkCampaignDefinition(scope, run.id, proposal.campaign, run.message);
           targetId = run.id;
-          label = `Crear campaña «${proposal.campaign.name.slice(0, 80)}» · ${staged.recipients} ${staged.recipients === 1 ? 'destinatario' : 'destinatarios'} · ${proposal.campaign.messages.length} ${proposal.campaign.messages.length === 1 ? 'correo' : 'correos'} · se guarda sin enviar`;
+          label = `Crear campaña «${proposal.campaign.name.slice(0, 80)}» · ${staged.recipients} ${staged.recipients === 1 ? 'destinatario' : 'destinatarios'} · ${proposal.campaign.messages.length} ${proposal.campaign.messages.length === 1 ? 'correo' : 'correos'} · desde ${MAIL_PROVIDER_LABEL[staged.provider]} · se guarda sin enviar`;
         }
         if (proposal.kind === 'campaign_activate' || proposal.kind === 'campaign_pause') {
           const campaign = await getBulkCampaign(

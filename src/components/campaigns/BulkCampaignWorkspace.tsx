@@ -56,6 +56,15 @@ export function BulkCampaignWorkspace() {
   const [individualInstruction, setIndividualInstruction] = useState('');
   const [individualProposal, setIndividualProposal] = useState<CampaignMessage | null>(null);
   const frozen = campaign?.status === 'approved' || campaign?.status === 'paused';
+  // The mailbox chosen in Conexiones (or the only connected one) starts every new campaign.
+  const [defaultProvider, setDefaultProvider] = useState<'google' | 'outlook' | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    fetch('/api/integrations/default-sender', { cache: 'no-store' }).then(response => response.ok ? response.json() : null)
+      .then(data => { if (!disposed && (data?.resolved === 'google' || data?.resolved === 'outlook')) setDefaultProvider(data.resolved); })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, []);
 
   async function run(work: () => Promise<void>) {
     setBusy(true); setError(''); setFeedback('');
@@ -151,7 +160,7 @@ export function BulkCampaignWorkspace() {
       <TabsContent value="followups"><CampaignReviewInbox /></TabsContent>
       <TabsContent value="campaigns" className="space-y-5">
         {!editing ? <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { setDefinition(initial()); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { setDefinition({ ...initial(), provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
           {busy && <p role="status">Cargando campañas…</p>}
           {!busy && !items.length && !error && <div className="rounded-2xl border bg-card p-8"><h3 className="font-medium">Tu próxima conversación empieza aquí</h3><p className="mt-2 text-sm text-muted-foreground">Crea una campaña para tus leads nuevos o vuelve a contactar a quienes ya conoces.</p></div>}
           <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.definition.emails.length} destinatarios · {item.definition.messages.length} correos por persona</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>

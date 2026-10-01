@@ -46,3 +46,16 @@ export async function saveCoworkThreadMemory(client: SupabaseClient, scope: Scop
     return false;
   }
 }
+
+/** The product the person asked to promote in the conversation of a run (its memory), or null. Never throws. */
+export async function loadCoworkOfferInPlay(client: SupabaseClient, scope: Scope, runId: string): Promise<string | null> {
+  try {
+    const run = await client.from('cowork_runs').select('id,root_run_id').eq('id', runId)
+      .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
+    if (run.error || !run.data) return null;
+    const { memory } = await loadCoworkThreadMemory(client, scope, run.data as Run);
+    return memory?.offer || null;
+  } catch {
+    return null;
+  }
+}
