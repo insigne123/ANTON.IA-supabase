@@ -13,7 +13,7 @@ export default function EmailStudioPage() {
   return (
     <div className="mx-auto min-w-0 max-w-[1500px] space-y-6 pb-16">
       <PageHeader
-        title="Email Studio"
+        title="Firmas y estilo"
         description="Tu firma y el estilo de tus correos, listos antes de enviar."
       >
         <Button asChild variant="outline" size="sm" className="w-full rounded-full sm:w-auto">

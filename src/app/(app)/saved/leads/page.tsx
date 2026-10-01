@@ -87,7 +87,7 @@ export default function SavedLeadsPage() {
 
       if (deletedCount > 0) {
         setSavedLeads(prev => prev.filter(l => l.id !== id));
-        toast({ title: 'Eliminado', description: 'Se quito el lead de Guardados.' });
+        toast({ title: 'Eliminado', description: 'Se quitó el contacto de «Por completar».' });
       } else {
         toast({ title: 'No se pudo eliminar', description: 'El lead sigue en tu lista. Intenta nuevamente en unos segundos.' });
       }
@@ -376,7 +376,7 @@ export default function SavedLeadsPage() {
 
       toast({
         title: 'Enriquecimiento en curso',
-        description: `${leadsToSave.length} lead(s) enviados a Enriquecidos. Los datos aparecerán al finalizar.`,
+        description: `${leadsToSave.length} contacto(s) en búsqueda de correo. Al encontrarlo pasan a «Por escribir».`,
       });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });
@@ -392,13 +392,13 @@ export default function SavedLeadsPage() {
       <header className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2">
-            <h1 className="text-2xl font-semibold tracking-[-0.025em] sm:text-[2rem]">Leads guardados</h1>
+            <h1 className="text-2xl font-semibold tracking-[-0.025em] sm:text-[2rem]">Por completar</h1>
             <span className="text-sm tabular-nums text-muted-foreground">{savedLeads.length}</span>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">Filtra, selecciona y enriquece los contactos que quieras trabajar.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Contactos guardados que aún no tienen correo. Busca su correo y pasarán a «Por escribir».</p>
         </div>
         <Button data-tour="saved-enriched-link" className="w-full rounded-full sm:w-auto" onClick={() => router.push('/saved/leads/enriched')}>
-          Ver enriquecidos
+          Ir a «Por escribir»
           <ArrowRight className="h-4 w-4" />
         </Button>
       </header>
@@ -497,11 +497,11 @@ export default function SavedLeadsPage() {
           <div className="p-4 sm:p-5">
           {selectedCount > 0 ? (
             <div className="sticky top-14 z-20 mb-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-background/95 p-3 shadow-lg shadow-black/5 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm font-medium">{selectedCount} {selectedCount === 1 ? 'lead seleccionado' : 'leads seleccionados'}</div>
+              <div className="text-sm font-medium">{selectedCount} {selectedCount === 1 ? 'contacto seleccionado' : 'contactos seleccionados'}</div>
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setSelLead({})}>Cancelar</Button>
                 <Button size="sm" disabled={enriching} onClick={initiateEnrichSelected}>
-                  {enriching ? 'Enriqueciendo…' : 'Enriquecer selección'}
+                  {enriching ? 'Buscando correo…' : 'Buscar correo'}
                 </Button>
               </div>
             </div>
@@ -612,10 +612,10 @@ export default function SavedLeadsPage() {
                           <Search className="h-5 w-5 text-muted-foreground" />
                         </div>
                         <div>
-                          <p className="font-medium">{savedLeads.length === 0 ? 'Aun no hay leads guardados' : 'No hay leads con esos filtros'}</p>
+                          <p className="font-medium">{savedLeads.length === 0 ? 'Aún no hay leads guardados' : 'No hay leads con esos filtros'}</p>
                           <p className="mt-1 text-sm text-muted-foreground">
                             {savedLeads.length === 0
-                              ? 'Guarda leads desde la busqueda para revisarlos y enriquecerlos despues.'
+                              ? 'Guarda leads desde la búsqueda para revisarlos y enriquecerlos después.'
                               : 'Prueba limpiar algun filtro para volver a ver tu base guardada.'}
                           </p>
                         </div>
@@ -651,7 +651,7 @@ export default function SavedLeadsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Eliminar lead guardado</AlertDialogTitle>
             <AlertDialogDescription>
-              Quitaremos {leadPendingDelete?.name || 'este lead'} de Guardados. No se enviara ningun correo ni afectara tus leads ya enriquecidos.
+              Quitaremos {leadPendingDelete?.name || 'este lead'} de «Por completar». No se enviará ningún correo ni cambiarán tus contactos de «Por escribir».
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

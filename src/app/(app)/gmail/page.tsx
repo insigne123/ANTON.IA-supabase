@@ -19,7 +19,7 @@ export default function GmailConnectPage() {
       const connections = await response.json();
       setConnected(Boolean(connections?.google));
     } catch {
-      setError('No pudimos consultar la conexion. Intenta nuevamente.');
+      setError('No pudimos consultar la conexión. Intenta nuevamente.');
     } finally {
       setLoading(false);
     }
@@ -47,7 +47,7 @@ export default function GmailConnectPage() {
           {feedback ? <p role="status" className="text-sm text-muted-foreground">{feedback}</p> : null}
           <div className="flex items-center gap-4">
             {loading ? (
-              <div className="text-sm text-muted-foreground">Verificando conexión...</div>
+              <div className="text-sm text-muted-foreground">Verificando conexión…</div>
             ) : error ? (
               <div role="alert" className="text-sm text-destructive">{error}<Button variant="ghost" onClick={() => void checkConnection()}>Reintentar</Button></div>
             ) : connected ? (
@@ -77,7 +77,7 @@ export default function GmailConnectPage() {
               <li>Envío de correos manuales desde la plataforma.</li>
               <li><strong>Envío automático</strong> de campañas en segundo plano (24/7).</li>
               <li>Lectura de hilos para detectar respuestas cuando sincronizas la bandeja.</li>
-              <li>Almacenamiento seguro de credenciales (Refresh Token).</li>
+              <li>Almacenamiento seguro de credenciales (token de acceso cifrado).</li>
             </ul>
           </div>
         </CardContent>

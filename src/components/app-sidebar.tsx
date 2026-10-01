@@ -20,7 +20,7 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2, CircleHelp
+  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2, CircleHelp, Megaphone
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
@@ -39,15 +39,43 @@ type NavItem = {
   feature?: 'opportunities' | 'admin-dashboard' | 'cowork';
   /** Step of the guided tour that highlights this entry. */
   tour?: string;
+  /** Active only on its own path, not on the paths below it (/saved/leads vs /saved/leads/enriched). */
+  exact?: boolean;
 };
 
+/** Grouped by what the person is doing, in the order of the work: today, find people, the people to write to, follow-up.
+ * Labels say the state of a contact («Por escribir»: has an email; «Por completar»: still needs one) instead of the table it
+ * lives in, so a contact that gets its email does not seem to vanish (H01, H14 of the GrupoExpro walkthrough). */
 const navSections: Array<{ label: string; items: NavItem[] }> = [
   {
     label: 'Centro de mando',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Hoy', tour: 'home' },
       { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork' },
-      { href: '/profile', icon: User, label: 'Perfil', tour: 'profile' },
+    ],
+  },
+  {
+    label: 'Prospectar',
+    items: [
+      { href: '/search', icon: Search, label: 'Buscar prospectos', tour: 'search' },
+      { href: '/opportunities', icon: Briefcase, label: 'Oportunidades', feature: 'opportunities' },
+    ],
+  },
+  {
+    label: 'Contactos',
+    items: [
+      { href: '/saved/leads/enriched', icon: MailCheck, label: 'Por escribir', tour: 'saved-leads' },
+      { href: '/saved/leads', icon: Users, label: 'Por completar', exact: true },
+      { href: '/saved/opportunities', icon: Briefcase, label: 'Empresas guardadas', feature: 'opportunities' },
+      { href: '/sheet', label: 'Tabla de datos', icon: TableIcon, aliases: ['/leads/import'] },
+    ],
+  },
+  {
+    label: 'Seguimiento',
+    items: [
+      { href: '/contacted', icon: Send, label: 'Conversaciones', tour: 'contacted' },
+      { href: '/campaigns', icon: Megaphone, label: 'Campañas', tour: 'campaigns' },
+      { href: '/crm', label: 'Pipeline', icon: LayoutGrid },
     ],
   },
   {
@@ -57,28 +85,11 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     ],
   },
   {
-    label: 'Prospección',
-    items: [
-      { href: '/search', icon: Search, label: 'Búsqueda de Leads', tour: 'search' },
-      { href: '/opportunities', icon: Briefcase, label: 'Oportunidades', feature: 'opportunities' },
-      { href: '/campaigns', icon: MailCheck, label: 'Campañas', tour: 'campaigns' },
-    ],
-  },
-  {
-    label: 'Pipeline y seguimiento',
-    items: [
-      { href: '/sheet', label: 'Sheet (Datos)', icon: TableIcon },
-      { href: '/crm', label: 'Pipeline (CRM)', icon: LayoutGrid },
-      { href: '/saved/leads', icon: Users, label: 'Guardados · Leads', tour: 'saved-leads' },
-      { href: '/saved/opportunities', icon: Briefcase, label: 'Guardados · Oportunidades', feature: 'opportunities' },
-      { href: '/contacted', icon: Send, label: 'Leads Contactados', tour: 'contacted' },
-    ],
-  },
-  {
     label: 'Configuración',
     items: [
+      { href: '/profile', icon: User, label: 'Perfil', tour: 'profile' },
       { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'], tour: 'connections' },
-      { href: '/settings/email-studio', icon: Settings, label: 'Email Studio' },
+      { href: '/settings/email-studio', icon: Settings, label: 'Firmas y estilo' },
       {
         href: '/settings/privacy',
         icon: Shield,
@@ -114,7 +125,7 @@ export function AppSidebar() {
     && adminAllowedEmails.includes(String(user?.email || '').trim().toLowerCase());
 
   const isActiveRoute = (item: NavItem) => [item.href, ...(item.aliases || [])]
-    .some((href) => pathname === href || (href !== '/dashboard' && pathname.startsWith(`${href}/`)));
+    .some((href) => pathname === href || (!item.exact && href !== '/dashboard' && pathname.startsWith(`${href}/`)));
   const visibleSections = navSections
     .map((section) => ({
       ...section,

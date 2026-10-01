@@ -9,7 +9,7 @@ export type PipelineStage =
     | 'closed_lost'; // Perdido
 
 export const PIPELINE_STAGES: { id: PipelineStage; label: string; color: string }[] = [
-    { id: 'inbox', label: 'Inbox', color: 'bg-slate-100 text-slate-700' },
+    { id: 'inbox', label: 'Nuevos', color: 'bg-slate-100 text-slate-700' },
     { id: 'qualified', label: 'Calificado', color: 'bg-blue-100 text-blue-700' },
     { id: 'contacted', label: 'Contactado', color: 'bg-indigo-100 text-indigo-700' },
     { id: 'engaged', label: 'Interesado', color: 'bg-purple-100 text-purple-700' },

@@ -32,11 +32,11 @@ export const PRODUCT_TOUR_STEPS: ProductTourStep[] = [
     body: 'Completa tu empresa, lo que ofreces y tu firma. ANTON.IA lo usa para escribir correos a tu medida.' },
   { id: 'connections', target: 'connections', menuLabel: 'Conexiones', title: 'Conecta tu correo',
     body: 'Vincula Gmail u Outlook para enviar desde tu propia cuenta y recibir las respuestas.' },
-  { id: 'search', target: 'search', menuLabel: 'Búsqueda de Leads', title: 'Encuentra prospectos',
+  { id: 'search', target: 'search', menuLabel: 'Buscar prospectos', title: 'Encuentra prospectos',
     body: 'Elige un punto de partida según lo que vendes, o pega un perfil de LinkedIn. Guarda a quienes te interesen.' },
-  { id: 'saved-leads', target: 'saved-leads', menuLabel: 'Guardados · Leads', title: 'Escríbeles',
-    body: 'Aquí quedan tus contactos. A los que tienen correo les escribes desde «Enriquecidos»: la IA prepara el borrador.' },
-  { id: 'contacted', target: 'contacted', menuLabel: 'Leads Contactados', title: 'Sigue las respuestas',
+  { id: 'saved-leads', target: 'saved-leads', menuLabel: 'Por escribir', title: 'Escríbeles',
+    body: 'Aquí están tus contactos con correo: la IA prepara el borrador y tú lo revisas. Los que aún no tienen correo esperan en «Por completar».' },
+  { id: 'contacted', target: 'contacted', menuLabel: 'Conversaciones', title: 'Sigue las respuestas',
     body: 'Quien responde aparece aquí y en «Hoy». Contestas en el mismo hilo, desde la app.' },
   { id: 'campaigns', target: 'campaigns', menuLabel: 'Campañas', title: 'Seguimientos y campañas',
     body: 'Programa seguimientos o una campaña para varios contactos a la vez. Nada sale sin tu aprobación.' },
@@ -80,7 +80,7 @@ export const PAGE_GUIDES: PageGuide[] = [
     { id: 'setup', target: 'setup', title: 'Prepara tu cuenta',
       body: 'Cuatro pasos comprobados. Cuando estén listos, ya puedes vender desde ANTON.IA.' },
   ] },
-  { id: 'search', title: 'Búsqueda de leads', routes: /^\/search\/?$/, steps: [
+  { id: 'search', title: 'Buscar prospectos', routes: /^\/search\/?$/, steps: [
     { id: 'modes', target: 'search-modes', title: 'Tres formas de buscar',
       body: 'Por filtros (cargo, empresa, tamaño), por una empresa en particular o pegando un perfil de LinkedIn.' },
     { id: 'starters', target: 'search-starters', title: 'Parte sin pensar en filtros',
@@ -88,13 +88,13 @@ export const PAGE_GUIDES: PageGuide[] = [
     { id: 'run', target: 'search-run', title: 'Busca y guarda',
       body: 'Primero eliges empresas y después personas. Marca a quienes te interesan y guárdalas.' },
   ] },
-  { id: 'saved', title: 'Guardados', routes: /^\/saved\/leads\/?$/, steps: [
+  { id: 'saved', title: 'Por completar', routes: /^\/saved\/leads\/?$/, steps: [
     { id: 'list', target: 'saved-list', title: 'Contactos sin correo',
-      body: 'Selecciona a quienes quieras y usa «Enriquecer selección» para encontrar su correo (usa créditos).' },
+      body: 'Selecciona a quienes quieras y busca su correo (usa créditos).' },
     { id: 'enriched', target: 'saved-enriched-link', title: 'Los que tienen correo, aquí',
-      body: 'Al encontrar su correo pasan a «Enriquecidos». Desde ahí les escribes.' },
+      body: 'Al encontrar su correo pasan a «Por escribir». Desde ahí les escribes.' },
   ] },
-  { id: 'enriched', title: 'Enriquecidos', routes: /^\/saved\/leads\/enriched\/?$/, steps: [
+  { id: 'enriched', title: 'Por escribir', routes: /^\/saved\/leads\/enriched\/?$/, steps: [
     { id: 'research', target: 'enriched-research', title: 'Investiga antes de escribir',
       body: 'Marca a quién investigar: la IA lee su empresa y su rol para que el correo no sea genérico.' },
     { id: 'contact', target: 'enriched-contact', title: 'Escríbeles',

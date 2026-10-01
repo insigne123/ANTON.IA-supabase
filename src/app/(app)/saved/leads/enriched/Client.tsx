@@ -1024,7 +1024,7 @@ export default function EnrichedLeadsClient() {
 
       toast({
         title: 'Llamada registrada',
-        description: `Lead movido a Contactados. ${notes ? 'Notas guardadas.' : ''}`
+        description: `Contacto movido a Conversaciones. ${notes ? 'Notas guardadas.' : ''}`
       });
     } catch (e) {
       console.error(e);
@@ -1033,7 +1033,7 @@ export default function EnrichedLeadsClient() {
   }
 
   async function handleDeleteEnriched(id: string) {
-    const ok = confirm('¿Eliminar este lead de Enriquecidos?');
+    const ok = confirm('¿Quitar este contacto de «Por escribir»?');
     if (!ok) return;
     try {
       const next = await removeEnrichedLeadById(id);
@@ -1041,7 +1041,7 @@ export default function EnrichedLeadsClient() {
       // limpia selecciones
       setSel(prev => { const p = { ...prev }; delete p[id]; return p; });
       const s = new Set(selectedToContact); s.delete(id); setSelectedToContact(s);
-      toast({ title: 'Eliminado', description: 'Se quitó el lead de Enriquecidos.' });
+      toast({ title: 'Eliminado', description: 'Se quitó el contacto de «Por escribir».' });
     } catch (error) {
       console.error('[enriched-leads] Delete failed:', error);
       toast({ variant: 'destructive', title: 'No se pudo eliminar', description: 'El lead sigue en la lista. Inténtalo nuevamente.' });
@@ -1156,13 +1156,13 @@ export default function EnrichedLeadsClient() {
         <div className="min-w-0">
           <Button variant="ghost" size="sm" className="-ml-3 mb-1 rounded-full text-muted-foreground" onClick={() => router.push('/saved/leads')}>
             <ArrowLeft className="h-4 w-4" />
-            Guardados
+            Por completar
           </Button>
           <div className="flex items-baseline gap-2">
-            <h1 className="text-2xl font-semibold tracking-[-0.025em] sm:text-[2rem]">Leads enriquecidos</h1>
+            <h1 className="text-2xl font-semibold tracking-[-0.025em] sm:text-[2rem]">Por escribir</h1>
             <span className="text-sm tabular-nums text-muted-foreground">{enriched.length}</span>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">Investiga contactos, revisa su contexto y prepara el siguiente contacto.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Contactos con correo. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas.</p>
         </div>
         {contactCount > 0 ? <Button className="w-full rounded-full sm:w-auto" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Contactar seleccionados ({contactCount})</Button> : null}
       </header>
