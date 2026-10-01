@@ -2,6 +2,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
+import { resolveActiveOrganization } from '@/lib/server/organization-context';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export type AdminDashboardAuthContext = {
@@ -9,6 +10,8 @@ export type AdminDashboardAuthContext = {
   organizationId: string;
   organizationName: string;
   supabase: ReturnType<typeof getSupabaseAdminClient>;
+  /** Credit limits cost the platform money: only the operators in ADMIN_DASHBOARD_ALLOWED_EMAILS change them. */
+  canManageCredits: boolean;
 };
 
 export class AdminDashboardAuthError extends Error {
@@ -21,44 +24,43 @@ export class AdminDashboardAuthError extends Error {
   }
 }
 
-function getConfiguredOrganizationId() {
-  const configuredId = String(process.env.ADMIN_DASHBOARD_ORGANIZATION_ID || '').trim();
-  if (!configuredId) {
-    throw new AdminDashboardAuthError('El panel administrativo no está configurado.', 503);
-  }
-  return configuredId;
-}
-
-function getConfiguredAdminEmails() {
-  const emails = String(process.env.ADMIN_DASHBOARD_ALLOWED_EMAILS || '')
+function platformOperatorEmails() {
+  return new Set(String(process.env.ADMIN_DASHBOARD_ALLOWED_EMAILS || '')
     .split(',')
     .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  if (emails.length === 0) {
-    throw new AdminDashboardAuthError('El acceso del panel administrativo no está configurado.', 503);
-  }
-  return new Set(emails);
+    .filter(Boolean));
 }
 
-export async function requireAdminDashboardAccess(): Promise<AdminDashboardAuthContext> {
+/**
+ * The panel of the person's active organization, for its owners and admins. Every read below is scoped to that
+ * organization id, which comes from the signed-in membership and never from the request.
+ */
+export async function requireAdminDashboardAccess(options: { manageCredits?: boolean } = {}): Promise<AdminDashboardAuthContext> {
   const sessionClient = createRouteHandlerClient({ cookies });
   const { data: { user }, error: userError } = await sessionClient.auth.getUser();
   if (userError || !user) {
     throw new AdminDashboardAuthError('Inicia sesión para abrir el panel administrativo.', 401);
   }
 
-  const configuredOrganizationId = getConfiguredOrganizationId();
-  const allowedEmails = getConfiguredAdminEmails();
-  const userEmail = String(user.email || '').trim().toLowerCase();
-  if (!allowedEmails.has(userEmail)) {
-    throw new AdminDashboardAuthError('Tu cuenta no está autorizada para abrir este panel.', 403);
+  let activeOrganizationId = '';
+  try {
+    const resolved = await resolveActiveOrganization(sessionClient, user.id);
+    activeOrganizationId = String(resolved.active?.organizationId || '');
+  } catch (error) {
+    console.error('[admin-dashboard-auth] Organization lookup failed:', error);
+    throw new AdminDashboardAuthError('No pudimos verificar el acceso administrativo.', 503);
   }
+  if (!activeOrganizationId) {
+    throw new AdminDashboardAuthError('Necesitas pertenecer a una organización para abrir este panel.', 403);
+  }
+
+  // The role is checked again with the service client, so a stale client-side role never opens the panel.
   const supabase = getSupabaseAdminClient();
   const { data: membership, error: membershipError } = await supabase
     .from('organization_members')
     .select('organization_id, role')
     .eq('user_id', user.id)
-    .eq('organization_id', configuredOrganizationId)
+    .eq('organization_id', activeOrganizationId)
     .in('role', ['owner', 'admin'])
     .maybeSingle();
 
@@ -70,10 +72,15 @@ export async function requireAdminDashboardAccess(): Promise<AdminDashboardAuthC
     throw new AdminDashboardAuthError('Necesitas un rol de owner o admin para abrir este panel.', 403);
   }
 
+  const canManageCredits = platformOperatorEmails().has(String(user.email || '').trim().toLowerCase());
+  if (options.manageCredits && !canManageCredits) {
+    throw new AdminDashboardAuthError('Los límites de créditos los cambia el equipo de ANTON.IA. Escríbenos si tu equipo necesita más.', 403);
+  }
+
   const { data: organization, error: organizationError } = await supabase
     .from('organizations')
     .select('id, name')
-    .eq('id', configuredOrganizationId)
+    .eq('id', activeOrganizationId)
     .maybeSingle();
 
   if (organizationError || !organization) {
@@ -86,6 +93,7 @@ export async function requireAdminDashboardAccess(): Promise<AdminDashboardAuthC
     organizationId: String(organization.id),
     organizationName: String(organization.name || 'Organización'),
     supabase,
+    canManageCredits,
   };
 }
 

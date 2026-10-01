@@ -3,6 +3,7 @@ import type {
   AdminCreditOverview,
   AdminCreditPolicy,
 } from '@/lib/admin-dashboard-types';
+import { loadMemberIdentities } from '@/lib/server/admin-member-identities';
 
 type PolicyRow = {
   id: string;
@@ -72,7 +73,7 @@ export async function loadAdminCreditOverview(
   nextReset.setUTCDate(nextReset.getUTCDate() + 1);
   const nextDay = nextReset.toISOString().slice(0, 10);
 
-  const [policiesResult, assignmentsResult, groupsResult, groupMembersResult, membersResult, usersResult, bucketsResult] = await Promise.all([
+  const [policiesResult, assignmentsResult, groupsResult, groupMembersResult, membersResult, bucketsResult] = await Promise.all([
     supabase.from('antonia_credit_policies')
       .select('id, subject_type, user_id, reporting_group_id, mode, user_daily_limit, team_daily_limit, effective_from, effective_to, cancelled_at')
       .eq('organization_id', organizationId),
@@ -91,7 +92,6 @@ export async function loadAdminCreditOverview(
     supabase.from('organization_members')
       .select('user_id, role')
       .eq('organization_id', organizationId),
-    supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     supabase.from('antonia_daily_credit_buckets')
       .select('bucket_type, user_id, reporting_group_id, usage_count, limit_snapshot')
       .eq('organization_id', organizationId)
@@ -101,6 +101,7 @@ export async function loadAdminCreditOverview(
   for (const result of [policiesResult, assignmentsResult, groupsResult, groupMembersResult, membersResult, bucketsResult]) {
     if (result.error) throw result.error;
   }
+  const usersResult = await loadMemberIdentities(supabase, ((membersResult.data || []) as any[]).map((member) => member.user_id));
   if (usersResult.error) throw usersResult.error;
 
   const policies = (policiesResult.data || []) as PolicyRow[];

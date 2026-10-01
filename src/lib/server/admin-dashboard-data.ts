@@ -4,8 +4,12 @@ import type {
   AdminReportingGroup,
   AdminReportingUser,
 } from '@/lib/admin-dashboard-types';
+import { dayInZone, dayStartInZone, daysBetween, shiftDay } from '@/lib/admin/chile-time';
+import { loadMemberIdentities } from '@/lib/server/admin-member-identities';
 
 const MAX_ROWS = 20_000;
+// `contact.sent` is what /api/contact/send writes; the others come from older senders and backfills.
+const SENT_LEDGER_EVENTS = ['contact.sent', 'email.sent', 'outbound.sent', 'dispatch.sent'];
 
 type QueryResult = {
   data: any[] | null;
@@ -18,16 +22,6 @@ type DashboardQuery = {
   groupId?: string | null;
   userId?: string | null;
 };
-
-function isoDate(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
-function addDays(value: string, days: number) {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString();
-}
 
 function normalize(value: unknown) {
   return String(value ?? '').trim();
@@ -97,7 +91,11 @@ function hasPhone(row: any) {
   );
 }
 
+// Automatic answers and bounces are not a person replying: they never count as a reply.
+const NOT_A_REPLY = new Set(['auto_reply', 'delivery_failure', 'bounce']);
+
 function hasReply(row: any) {
+  if (NOT_A_REPLY.has(normalizeKey(row?.reply_intent))) return false;
   return Boolean(
     row?.replied_at
     || normalizeKey(row?.status) === 'replied'
@@ -144,11 +142,12 @@ export async function loadAdminDashboardOverview(
   organizationName: string,
   query: DashboardQuery,
 ): Promise<AdminDashboardOverview> {
-  const from = new Date(`${query.from}T00:00:00.000Z`);
-  const to = new Date(addDays(query.to, 1));
+  // Calendar days in Chile time (src/lib/admin/chile-time.ts), so «hoy» ends at local midnight.
+  const from = dayStartInZone(query.from);
+  const to = dayStartInZone(shiftDay(query.to, 1));
   const errors: string[] = [];
 
-  const [organizationResult, groupsResult, groupMembersResult, organizationMembersResult, usersResult] = await Promise.all([
+  const [organizationResult, groupsResult, groupMembersResult, organizationMembersResult] = await Promise.all([
     supabase.from('organizations').select('id, name').eq('id', organizationId).maybeSingle(),
     supabase
       .from('organization_reporting_groups')
@@ -164,8 +163,10 @@ export async function loadAdminDashboardOverview(
       .select('user_id, role, created_at')
       .eq('organization_id', organizationId)
       .order('created_at', { ascending: true }),
-    supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
+  const usersResult = organizationMembersResult.error
+    ? { data: null, error: null }
+    : await loadMemberIdentities(supabase, ((organizationMembersResult.data || []) as any[]).map((member) => member.user_id));
 
   if (organizationResult.error) errors.push('organizations');
   if (groupsResult.error) errors.push('organization_reporting_groups');
@@ -303,7 +304,7 @@ export async function loadAdminDashboardOverview(
   const sentContacted = filteredContacted.filter((row) => isWithinRange(row, ['sent_at'], from, to));
   const replyEvents = filteredEmailEvents.filter((event) => eventMatches(event.event_type, ['reply', 'replied', 'received']));
   const sentEmailEvents = filteredEmailEvents.filter((event) => eventMatches(event.event_type, ['sent']));
-  const sentLedgerEvents = filteredLedger.filter((event) => eventMatches(event.event_type, ['email.sent', 'outbound.sent', 'dispatch.sent']));
+  const sentLedgerEvents = filteredLedger.filter((event) => eventMatches(event.event_type, SENT_LEDGER_EVENTS));
   const replyLedgerEvents = filteredLedger.filter((event) => eventMatches(event.event_type, ['reply.received', 'contact.replied']));
   const replies = Math.max(
     countUnique(repliedContacted, (row) => row.lead_id || row.id),
@@ -331,17 +332,15 @@ export async function loadAdminDashboardOverview(
   );
   const leadsCaptured = countUnique(filteredLeads, (row) => row.id) || filteredLeads.length;
   const responseRate = emailsSent > 0 ? Math.min(100, Math.round((replies / emailsSent) * 1000) / 10) : 0;
-  const elapsedDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86_400_000));
+  const elapsedDays = Math.max(1, daysBetween(query.from, query.to));
   const daysInMonth = new Date(to.getUTCFullYear(), to.getUTCMonth() + 1, 0).getUTCDate();
   const totalUsage = leadsCaptured + investigations + emailsSent;
   const monthlyProjection = Math.round((totalUsage / elapsedDays) * daysInMonth);
 
   const trend = Array.from({ length: elapsedDays }, (_, index) => {
-    const date = new Date(from);
-    date.setUTCDate(date.getUTCDate() + index);
-    const key = isoDate(date);
-    const dayFrom = new Date(`${key}T00:00:00.000Z`);
-    const dayTo = new Date(addDays(key, 1));
+    const key = shiftDay(query.from, index);
+    const dayFrom = dayStartInZone(key);
+    const dayTo = dayStartInZone(shiftDay(key, 1));
     const dayLeads = filteredLeads.filter((row) => isWithinRange(row, ['created_at'], dayFrom, dayTo)).length;
     const dayContacted = Math.max(
       countUnique(sentContacted.filter((row) => isWithinRange(row, ['sent_at'], dayFrom, dayTo)), (row) => row.lead_id || row.id),
@@ -370,7 +369,7 @@ export async function loadAdminDashboardOverview(
     const userEmailEvents = filteredEmailEvents.filter((event) => rowUserId(contactedById.get(normalize(event.contacted_id))) === userId);
     const userSentEmailEvents = userEmailEvents.filter((event) => eventMatches(event.event_type, ['sent']));
     const userReplyEmailEvents = userEmailEvents.filter((event) => eventMatches(event.event_type, ['reply', 'replied', 'received']));
-    const userSentLedgerEvents = userLedger.filter((event) => eventMatches(event.event_type, ['email.sent', 'outbound.sent', 'dispatch.sent']));
+    const userSentLedgerEvents = userLedger.filter((event) => eventMatches(event.event_type, SENT_LEDGER_EVENTS));
     const userReplyLedgerEvents = userLedger.filter((event) => eventMatches(event.event_type, ['reply.received', 'contact.replied']));
     const activityDates = [
       ...userLeads.map((row) => rowDate(row, ['created_at'])),
@@ -404,7 +403,7 @@ export async function loadAdminDashboardOverview(
       ),
       replies,
       responseRate: userEmailsSent > 0 ? Math.min(100, Math.round((replies / userEmailsSent) * 1000) / 10) : 0,
-      activeDays: new Set(activityDates.map((date) => date.toISOString().slice(0, 10))).size,
+      activeDays: new Set(activityDates.map((date) => dayInZone(date))).size,
       lastActivityAt: activityDates.length > 0
         ? new Date(Math.max(...activityDates.map((date) => date.getTime()))).toISOString()
         : null,
