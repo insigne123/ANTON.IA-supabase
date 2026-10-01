@@ -820,8 +820,19 @@ test('a search proposed without an explanation still gets a sentence built from 
     decide: async () => ({ action: 'prospecting.propose_search' as const, query: null, leadId: null, answer: null,
       searchCriteria: { titles: ['Gerente de Operaciones', 'Superintendente'], industries: ['minería'], locations: ['Antofagasta, Chile'], limit: 25 } }),
   });
+  // With industries the search goes companies first (search-proposal.ts), and the sentence says so.
   assert.deepEqual(notes, [{ action: 'assistant.note', input: '', result: { reply:
-    'Propongo buscar hasta 25 personas con cargos como Gerente de Operaciones o Superintendente, del rubro minería, en Antofagasta, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.' } }]);
+    'Propongo buscar empresas del rubro minería y, dentro de ellas, hasta 25 personas con cargos como Gerente de Operaciones o Superintendente, en Antofagasta, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.' } }]);
+  // A single people search, asked for, keeps its sentence; «Traer más» continues it.
+  const single: unknown[] = [];
+  await runCoworkReadLoop({
+    message: 'Busca gerentes', signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}),
+    record: async observation => { single.push(observation); }, proposeSearch: async () => {},
+    decide: async () => ({ action: 'prospecting.propose_search' as const, query: null, leadId: null, answer: null,
+      searchCriteria: { strategy: 'people' as const, titles: ['Gerente de Operaciones', 'Superintendente'], industries: ['minería'], locations: ['Antofagasta, Chile'], limit: 25, page: 2 } }),
+  });
+  assert.equal((single[0] as { result: { reply: string } }).result.reply,
+    'Propongo seguir buscando hasta 25 personas con cargos como Gerente de Operaciones o Superintendente, del rubro minería, en Antofagasta, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.');
   // Seen with the real model: a repeated industry was named twice («del rubro retail y retail»).
   const repeated: unknown[] = [];
   await runCoworkReadLoop({
@@ -831,7 +842,7 @@ test('a search proposed without an explanation still gets a sentence built from 
       searchCriteria: { titles: ['HR Manager', 'hr manager '], industries: ['retail', 'Retail'], locations: ['Santiago, Chile'], limit: 10 } }),
   });
   assert.equal((repeated[0] as { result: { reply: string } }).result.reply,
-    'Propongo buscar hasta 10 personas con cargos como HR Manager, del rubro retail, en Santiago, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.');
+    'Propongo buscar empresas del rubro retail y, dentro de ellas, hasta 10 personas con cargos como HR Manager, en Santiago, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.');
   // Seen with the real model: the first step of «busca… y después armame una campaña» came without a note.
   const chained: unknown[] = [];
   await runCoworkReadLoop({

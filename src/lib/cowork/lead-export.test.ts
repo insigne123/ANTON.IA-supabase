@@ -41,3 +41,14 @@ test('external results keep provider identity separate from saved contacts', () 
   assert.equal(buildCoworkLeadCsv([{ action: 'leads.search', result }]), null);
   assert.equal(buildCoworkLeadCsv([{ action: 'prospecting.search', result: { ...result, items: [{ id }] } }]), null);
 });
+
+test('a search of up to 100 people exports all of them with why each one is on the list', () => {
+  const items = Array.from({ length: 100 }, (_, index) => ({ id: `apollo:p${index}`, name: `Persona ${index}`, email: null,
+    fit: 'Posible comprador: cargo con «gerente» · outsourcing, 120 empleados' }));
+  const csv = buildCoworkLeadCsv([{ action: 'prospecting.search', result: { scope: 'external_search', items } }]);
+  assert.ok(csv);
+  const rows = Papa.parse<Record<string, string>>(csv, { header: true }).data;
+  assert.equal(rows.length, 100);
+  assert.equal(rows[0].fit, 'Posible comprador: cargo con «gerente» · outsourcing, 120 empleados');
+  assert.equal(buildCoworkLeadCsv([{ action: 'prospecting.search', result: { scope: 'external_search', items: [...items, { id: 'apollo:p100' }] } }]), null);
+});

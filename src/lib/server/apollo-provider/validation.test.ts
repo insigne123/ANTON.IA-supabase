@@ -166,3 +166,11 @@ test('organization search accepts a company name as the only filter', () => {
   if (!orgInput.ok) return;
   assert.equal(orgInput.value.companyName, 'Adecco');
 });
+
+test('a people search inside chosen companies needs no other filter', () => {
+  const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
+  const inside = validateLeadSearchInput({ search_mode: 'batch', organization_ids: ['org-1', 'org-2'] }, config);
+  assert.equal(inside.ok, true);
+  if (inside.ok) assert.deepEqual(inside.value.organizationIds, ['org-1', 'org-2']);
+  assert.equal(validateLeadSearchInput({ search_mode: 'batch', organization_ids: Array.from({ length: 101 }, (_, index) => `org-${index}`) }, config).ok, false);
+});

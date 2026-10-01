@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { ArrowRight, Check, CircleSlash, LoaderCircle, Minus, TriangleAlert } from 'lucide-react';
-import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
+import { COWORK_SEARCH_COMPANIES, coworkSearchCriteriaSchema, coworkSearchStrategy } from '@/lib/cowork/search-proposal';
 import type { CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkProposalLink, coworkProposalOutcome, coworkProposalTimeline, type CoworkOutcome, type CoworkProposalState, type CoworkProposalView,
@@ -70,11 +70,19 @@ function SearchDetails({ criteria }: { criteria: unknown }) {
   const parsed = coworkSearchCriteriaSchema.safeParse(criteria);
   if (!parsed.success) return <ReviewNote ok={false}>No se pudieron leer los criterios de la búsqueda. Descártala y pide una nueva.</ReviewNote>;
   const data = parsed.data;
+  const strategy = coworkSearchStrategy(data);
+  const more = (data.page || 1) > 1 || Boolean(data.offset);
+  const noun = strategy === 'companies' ? (data.limit === 1 ? 'empresa' : 'empresas') : (data.limit === 1 ? 'persona' : 'personas');
   return <div className="space-y-4">
     <ReviewFields>
-      <ReviewField label="Buscar">{data.target === 'companies' ? 'Empresas' : 'Personas'}</ReviewField>
-      <ReviewField label="Cargos"><ReviewChips values={data.titles} /></ReviewField>
-      <ReviewField label="Sectores"><ReviewChips values={data.industries} /></ReviewField>
+      <ReviewField label="Buscar">{strategy === 'companies_first'
+        ? <span className="block">Empresas primero
+          <span className="block text-[12.5px] text-cw-muted">Hasta {COWORK_SEARCH_COMPANIES} empresas de esos rubros y, dentro de ellas, las personas con esos cargos o parecidos.</span>
+        </span>
+        : strategy === 'companies' ? 'Empresas' : 'Personas, en una sola búsqueda'}</ReviewField>
+      <ReviewField label="Cantidad">{`Hasta ${data.limit} ${noun}`}{more ? ' más, después de las que ya viste' : ''}</ReviewField>
+      <ReviewField label={strategy === 'companies' ? 'Cargos' : 'Cargos (y parecidos)'}><ReviewChips values={data.titles} /></ReviewField>
+      <ReviewField label={strategy === 'companies_first' ? 'Rubros de las empresas' : 'Sectores'}><ReviewChips values={data.industries} /></ReviewField>
       <ReviewField label="Ubicación de la persona"><ReviewChips values={data.locations} /></ReviewField>
       {!!data.seniorities?.length && <ReviewField label="Nivel de responsabilidad"><ReviewChips values={data.seniorities.map(value => SENIORITY[value] || value)} /></ReviewField>}
       {!!data.companyLocations?.length && <ReviewField label="Ubicación de la empresa"><ReviewChips values={data.companyLocations} /></ReviewField>}
@@ -89,6 +97,7 @@ function SearchDetails({ criteria }: { criteria: unknown }) {
         </span>
       </ReviewField>}
     </ReviewFields>
+    {strategy !== 'companies' && <ReviewNote>Los posibles compradores aparecen primero, agrupados por empresa; nadie se descarta.</ReviewNote>}
   </div>;
 }
 
