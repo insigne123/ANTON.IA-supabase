@@ -28,13 +28,15 @@ import { executeCoworkReplyThread } from './reply-thread-effect';
 import { executeCoworkCampaignRetry } from './campaign-retry';
 import { executeCoworkPhoneReveal } from './enrich-phone';
 import { executeCoworkLinkedinBatch } from './linkedin-batch';
+import { executeCoworkPrepareBatch } from './prepare-batch-run';
 import { coworkContinuationArgs } from './continuation';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
-  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone']);
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone',
+  'lead_prepare_batch']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 type Scope = { userId: string; organizationId: string };
@@ -271,6 +273,10 @@ async function executeEffect(
     const queued = await executeCoworkLinkedinBatch(auth, proposal.run_id, proposal.target_id, proposal.kind);
     return { reply: queued.reply, result: queued.result };
   }
+  if (proposal.kind === 'lead_prepare_batch') {
+    const prepared = await executeCoworkPrepareBatch(auth, proposal.run_id, proposal.target_id);
+    return { reply: prepared.reply, result: prepared.result };
+  }
   const requested = await requestCoworkDraft(auth, proposal.origin_run_id, { snapshotId: proposal.target_id });
   return { reply: requested.reused ? 'Ese borrador ya estaba solicitado para este informe.'
       : 'El borrador quedó en preparación; podrás revisarlo cuando esté listo.',
@@ -299,8 +305,10 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
     const finished = await finish(true, outcome.reply, outcome.result);
     if (finished.error) throw finished.error;
     if (finished.data === true) {
-      await admitCoworkContinuation(client, scope, job.run_id,
-        'Continúa a partir del efecto recién ejecutado, dentro del mismo encargo. Resume qué quedó hecho y propón el siguiente paso concreto sin repetir el efecto.');
+      await admitCoworkContinuation(client, scope, job.run_id, job.kind === 'lead_prepare_batch'
+        // The people of the batch are the people of this work: shown by what the batch returned, never searched again by name.
+        ? 'Continúa a partir del lote recién ejecutado, dentro del mismo encargo. Presenta su resultado en un bloque table con esas mismas personas (nombre real, correo y su estado, LinkedIn, investigación), tomado del resultado del lote en history.actions, sin buscarlas de nuevo por nombre; di en una frase qué faltó y por qué, y propón el siguiente paso concreto sin repetir el lote.'
+        : 'Continúa a partir del efecto recién ejecutado, dentro del mismo encargo. Resume qué quedó hecho y propón el siguiente paso concreto sin repetir el efecto.');
     }
     return { processed: finished.data === true ? 1 : 0, claimed: true };
   } catch (error) {

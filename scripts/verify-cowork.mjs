@@ -7,6 +7,8 @@ const checks = [
   ['--test', 'scripts/compare-cowork-evals.test.mjs'],
   ['scripts/test-cowork-company-results.mjs'],
   ['scripts/test-cowork-contact-names.mjs'],
+  ['scripts/test-cowork-prepare-batch.mjs'],
+  ['scripts/test-cowork-prepare-batch-card.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-send-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-batch-corpus.test.ts'],

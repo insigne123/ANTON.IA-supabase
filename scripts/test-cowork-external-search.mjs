@@ -47,7 +47,7 @@ globalThis.__coworkSearch = {
   },
 };
 const sources = {
-  './enrich-contact': 'export const enrichCoworkContact=async()=>{throw new Error("unexpected enrichment")};',
+  './enrich-contact': 'export const enrichCoworkContact=async()=>{throw new Error("unexpected enrichment")};export const enrichCoworkSavedLead=enrichCoworkContact;',
   './send-email': 'export const sendCoworkEmail=async()=>{throw new Error("unexpected send")};',
   './reply-thread-effect': 'export const executeCoworkReplyThread=async()=>{throw new Error("unexpected reply")};',
   './enrich-phone': 'export const executeCoworkPhoneReveal=async()=>{throw new Error("unexpected phone reveal")};',

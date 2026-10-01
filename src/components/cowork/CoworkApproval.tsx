@@ -27,6 +27,7 @@ import { ReplyThreadReview } from './ReplyThreadReview';
 import { CampaignRetryReview } from './CampaignRetryReview';
 import { PhoneRevealReview } from './PhoneRevealReview';
 import { LinkedinBatchResults, LinkedinBatchReview } from './LinkedinBatchReview';
+import { PrepareBatchResults, PrepareBatchReview } from './PrepareBatchReview';
 import { ReviewActions, ReviewChips, ReviewField, ReviewFields, ReviewNote, ReviewPaper } from './ReviewParts';
 import { DoneMark } from './CoworkActivity';
 import { AnimatePresence, CW_EASE, CwCollapse, cwPop, cwSwap, cwVariants, m, useReducedMotion } from './motion';
@@ -57,6 +58,7 @@ const REVIEWS: Record<string, (props: ReviewProps) => ReactNode> = {
   enrich_phone: props => <PhoneRevealReview {...props} />,
   linkedin_invite_batch: props => <LinkedinBatchReview {...props} />,
   linkedin_message_batch: props => <LinkedinBatchReview {...props} />,
+  lead_prepare_batch: props => <PrepareBatchReview {...props} />,
 };
 
 const SENIORITY: Record<string, string> = {
@@ -232,6 +234,7 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
       <div className="space-y-3 px-4 py-4">
         <ApprovalTimeline state={state} live={live} />
         {state === 'done' && (kind === 'linkedin_invite_batch' || kind === 'linkedin_message_batch') && <LinkedinBatchResults runId={run.id} />}
+        {state === 'done' && kind === 'lead_prepare_batch' && <PrepareBatchResults runId={run.id} />}
         {!deciding && (detail || link) && <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] leading-5 text-cw-muted">
           {detail && <span>{detail}</span>}
           {link && <a href={link.href} className="inline-flex items-center gap-1 rounded font-medium text-cw-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">{link.label}<ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></a>}

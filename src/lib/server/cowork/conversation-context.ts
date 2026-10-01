@@ -44,11 +44,22 @@ export async function loadCoworkHistory(
     const acted = await client.from('cowork_run_events').select('kind,payload')
       .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
       .in('kind', ['effect.completed', 'effect.failed']).order('sequence', { ascending: false }).limit(2);
-    const actions = acted.error ? [] : ((acted.data || []) as Array<{ kind: string; payload: Record<string, unknown> | null }>).map(row => ({
+    const effects = acted.error ? [] : ((acted.data || []) as Array<{ kind: string; payload: Record<string, unknown> | null }>).map(row => ({
       kind: String(row.payload?.kind || ''), label: String(row.payload?.label || '').slice(0, 200),
       outcome: row.kind === 'effect.completed' ? 'ejecutada' : 'falló',
       ...(row.payload?.result === undefined ? {} : { result: row.payload.result }),
     })).reverse();
+    // Contacts the person saved from the panel of that turn: done, so they are never proposed for saving again.
+    const panel = await client.from('cowork_run_events').select('payload')
+      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
+      .eq('kind', 'contact.saved').order('sequence', { ascending: true }).limit(25);
+    const saved = panel.error ? [] : ((panel.data || []) as Array<{ payload: Record<string, unknown> | null }>)
+      .filter(row => typeof row.payload?.leadId === 'string' && row.payload.leadId).map(row => {
+      const who = [row.payload?.name, row.payload?.company].filter(value => typeof value === 'string' && value).join(' · ');
+      return { kind: 'save_contact', label: `Guardaste desde el panel a ${who || 'un contacto'}`.slice(0, 200), outcome: 'ejecutada',
+        result: { leadId: row.payload?.leadId ?? null, providerId: row.payload?.providerId ?? null, reused: row.payload?.reused === true } };
+    });
+    const actions = [...effects, ...saved];
     const turn = { runId: cursor, at: typeof run.created_at === 'string' ? run.created_at : null, request: run.message, reply: result.reply, document: result.document,
       ...(blocks.length ? { blocks } : {}), observations: observedPayloads, ...(actions.length ? { actions } : {}) };
     const size = JSON.stringify(turn).length;
