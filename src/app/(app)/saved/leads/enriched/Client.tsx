@@ -875,6 +875,17 @@ export default function EnrichedLeadsClient() {
     setResearchOpen(true);
   };
 
+  // Compose sends here a contact that still needs research (?investigar=<id>): open its research directly, once, instead of
+  // asking the person to find and select it in the list again.
+  const deepLinkedResearch = useRef(false);
+  useEffect(() => {
+    if (deepLinkedResearch.current || loadingLeads || !nativeResearchStatusKnown) return;
+    const target = new URLSearchParams(window.location.search).get('investigar');
+    deepLinkedResearch.current = true;
+    if (target && enriched.some((lead) => lead.id === target)) openResearchWorkspace([target]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingLeads, nativeResearchStatusKnown, enriched]);
+
   function clearInvestigationFor(lead: EnrichedLead) {
     if (!confirm(`¿Borrar investigación para ${lead.fullName}?`)) return;
     const ref = leadRefOf(lead);

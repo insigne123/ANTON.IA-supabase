@@ -64,7 +64,7 @@ test('legacy composer has a canonical creation gate before any editor or send UI
   assert.ok(gate > 0 && gate < source.indexOf('id="compose-body"'));
   assert.match(source.slice(gate), /fetch\('\/api\/native-drafts'/);
   assert.match(source.slice(gate), /Idempotency-Key/);
-  assert.match(source.slice(gate), /Ir a investigar el contacto/);
+  assert.match(source.slice(gate), /Investigar a este contacto/);
   assert.match(source, /if \(!isCanonicalDraft \|\| proposal/);
 });
 
@@ -227,6 +227,7 @@ test('rendered editors preserve edits across proposals/conflicts/overlapping sav
       '@/components/campaigns-v2/FirstContactFollowUpPlan': { FirstContactFollowUpPlan: (props: any) => { followUpProps = props; return null; } },
       '@/components/commercial/ContactabilityStatusCard': { ContactabilityStatusCard: () => null },
       '@/components/commercial/CampaignQaPanel': { CampaignQaPanel: () => null },
+      '@/components/compose/SenderLine': { SenderLine: () => null },
     };
     // Import-only legacy utilities are intentionally inert: they must not generate or send anything.
     for (const match of readFileSync('src/app/(app)/contact/compose/page.tsx', 'utf8').matchAll(/from '(@\/lib\/[^']+)'/g)) modules[match[1]] ??= {};

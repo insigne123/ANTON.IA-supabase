@@ -52,6 +52,7 @@ import type { CampaignV2RecipientStepSendContextResponse } from '@/lib/campaigns
 import type { DurableSendReceipt } from '@/lib/outbound-send-receipt';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ArrowLeft, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, SendHorizontal, Sparkles } from 'lucide-react';
+import { SenderLine, type SenderState } from '@/components/compose/SenderLine';
 
 type AnyLead = EnrichedLead | EnrichedOppLead | any;
 
@@ -136,6 +137,22 @@ function ComposeInner() {
   const [sendReceipt, setSendReceipt] = useState<DurableSendReceipt | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendProvider, setSendProvider] = useState<'outlook' | 'gmail'>('outlook');
+  // The real mailbox for the chosen provider (/api/integrations/sender), shown as «De:» before sending.
+  const [sender, setSender] = useState<SenderState>({ state: 'loading' });
+  useEffect(() => {
+    let cancelled = false;
+    setSender({ state: 'loading' });
+    fetch(`/api/integrations/sender?provider=${sendProvider === 'outlook' ? 'outlook' : 'google'}`, { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.state === 'connected' && data.email) setSender({ state: 'connected', email: String(data.email) });
+        else if (data?.state === 'not_connected') setSender({ state: 'not_connected' });
+        else setSender({ state: 'unverified' });
+      })
+      .catch(() => { if (!cancelled) setSender({ state: 'unverified' }); });
+    return () => { cancelled = true; };
+  }, [sendProvider]);
   const [campaignSendContext, setCampaignSendContext] = useState<CampaignV2RecipientStepSendContextResponse | null>(null);
   const [campaignSendContextLoading, setCampaignSendContextLoading] = useState(Boolean(campaignStepId));
   const [campaignSendContextError, setCampaignSendContextError] = useState<string | null>(null);
@@ -998,7 +1015,10 @@ function ComposeInner() {
   if (!isCanonicalDraft) {
     const report = findReportForLead({ leadId: id, email: composeEmail, companyDomain: lead?.companyDomain, companyName: lead?.companyName });
     const snapshotId = String(report?.raw?.research_snapshot_id || report?.raw?.researchSnapshotId || '').trim();
-    const researchHref = lead?._sourceTable === 'opportunities' ? '/saved/opportunities/enriched' : '/saved/leads/enriched';
+    const leadIdForResearch = String((lead as any)?.id || '');
+    const researchHref = lead?._sourceTable === 'opportunities'
+      ? '/saved/opportunities/enriched'
+      : `/saved/leads/enriched${leadIdForResearch ? `?investigar=${encodeURIComponent(leadIdForResearch)}` : ''}`;
     const createDraft = async () => {
       if (!snapshotId || creatingDraft) return;
       setCreatingDraft(true);
@@ -1021,11 +1041,11 @@ function ComposeInner() {
         <h1 className="text-2xl font-semibold tracking-tight">Preparar correo</h1>
         <Card><CardHeader><CardTitle className="text-base">{lead.fullName || 'Contacto'}</CardTitle><CardDescription>{composeEmail || 'Sin email disponible'}</CardDescription></CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm leading-6 text-muted-foreground">{snapshotId ? 'Crea un borrador desde la investigación guardada. Después podrás editarlo, revisarlo y decidir si enviarlo.' : 'Este contacto necesita una investigación actualizada antes de crear el correo. Abre la lista, selecciona este contacto y elige Investigar.'} Nada se enviará desde este paso.</p>
+            <p className="text-sm leading-6 text-muted-foreground">{snapshotId ? 'Crea un borrador desde la investigación guardada. Después podrás editarlo, revisarlo y decidir si enviarlo.' : 'Este contacto necesita una investigación actualizada antes de crear el correo. «Investigar a este contacto» la abre directo, sin buscarlo en la lista.'} Nada se enviará desde este paso.</p>
             {creationError ? <Alert variant="destructive"><AlertTitle>No se pudo preparar</AlertTitle><AlertDescription>{creationError}</AlertDescription></Alert> : null}
             <div className="flex flex-col gap-2 sm:flex-row">
               {snapshotId ? <Button disabled={creatingDraft || !composeEmail} onClick={() => void createDraft()}>{creatingDraft ? 'Creando borrador…' : 'Crear borrador para revisar'}</Button> : null}
-              {creatingDraft ? <Button variant="outline" disabled>Ir a investigar el contacto</Button> : <Button asChild variant={snapshotId ? 'outline' : 'default'}><Link href={researchHref}>Ir a investigar el contacto</Link></Button>}
+              {creatingDraft ? <Button variant="outline" disabled>Investigar a este contacto</Button> : <Button asChild variant={snapshotId ? 'outline' : 'default'}><Link href={researchHref}>Investigar a este contacto</Link></Button>}
             </div>
           </CardContent>
         </Card>
@@ -1109,6 +1129,7 @@ function ComposeInner() {
   };
   const isSafeRequestRetry = Boolean(sendError && sendOperation && !sendReceipt);
   const isSendBlocked = isLoading
+    || sender.state === 'not_connected'
     || Boolean(rewriteInstruction.trim())
     || Boolean(proposal)
     || !isCanonicalDraft
@@ -1207,7 +1228,7 @@ function ComposeInner() {
       </header>
 
       <section aria-label="Estado del correo" className="grid gap-2">
-        <p className="break-words text-xs leading-5 text-muted-foreground">Perfil remitente: {currentProfile?.full_name || 'Sin nombre configurado'}{currentProfile?.email ? ` · ${currentProfile.email}` : ''}<br />Envío por {sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}: se usará la cuenta conectada al proveedor, que puede diferir del perfil.<br />Versión guardada: <span className="break-all">{nativeDraft?.versionId || 'No disponible'}</span></p>
+        <SenderLine name={currentProfile?.full_name || ''} provider={sendProvider} sender={sender} />
         {saveError ? <Alert variant="destructive"><AlertTitle>No se guardaron los cambios</AlertTitle><AlertDescription>{saveError}</AlertDescription></Alert> : null}
         {isCanonicalDraft ? (
           <div
@@ -1516,8 +1537,12 @@ function ComposeInner() {
                   : hasNativeEdits
                     ? 'Guarda los cambios y vuelve a revisar el correo antes de enviarlo.'
                     : nativeReviewRequired
-                      ? 'Este correo no se enviará hasta que confirmes la revisión.'
-                      : `Se enviará por ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.`}
+                      ? 'Léelo y confirma la revisión: confirmar no lo envía todavía.'
+                      : sender.state === 'not_connected'
+                        ? `Conecta ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'} para poder enviarlo.`
+                        : sender.state === 'connected'
+                          ? `Saldrá ahora desde ${sender.email}.`
+                          : `Saldrá ahora por ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.`}
         </p>
         <div className="flex flex-col-reverse gap-2 sm:flex-row">
           <Button
@@ -1557,7 +1582,7 @@ function ComposeInner() {
               aria-describedby="review-status"
             >
               {nativeDraftApproving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <CheckCircle2 data-icon="inline-start" />}
-              {nativeDraftApproving ? 'Confirmando…' : contactabilityChecking ? 'Verificando contacto…' : 'Revisar y aprobar'}
+              {nativeDraftApproving ? 'Confirmando…' : contactabilityChecking ? 'Verificando contacto…' : 'Confirmar revisión'}
             </Button>
           ) : (
             <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={send} disabled={isSendBlocked} aria-describedby="send-summary">
@@ -1572,7 +1597,7 @@ function ComposeInner() {
                   ? 'Verificando…'
                   : isSafeRequestRetry
                     ? 'Reintentar envío seguro'
-                    : 'Enviar correo'}
+                    : 'Enviar ahora'}
             </Button>
           )}
         </div>
