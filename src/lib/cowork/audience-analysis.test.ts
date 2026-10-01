@@ -38,3 +38,15 @@ test('partial history cannot imply a fresh vertical; unsent rows never count as 
   const partial = analyzeStoredAudience(leads, [], { leadsComplete: true, historyComplete: false });
   assert.equal(partial.verticals[0].newCompanyPercent, null);
 });
+
+test('roles are counted over every contact scanned, not only the hundred listed', () => {
+  const leads = Array.from({ length: 250 }, (_, index) => ({ id: String(index), company: `Empresa ${index}`, industry: 'Retail',
+    title: index < 40 ? 'Gerente de recursos humanos' : index < 100 ? 'Analista de reclutamiento' : index < 120 ? null : 'Vendedor' }));
+  const result = analyzeStoredAudience(leads, [], { leadsComplete: true, historyComplete: true });
+  assert.equal(result.contacts.length, 100);
+  assert.equal(result.contactsTruncated, true);
+  assert.equal(result.totalLeads, 250);
+  assert.equal(Object.values(result.roleCounts).reduce((sum, count) => sum + count, 0), 250);
+  assert.equal(result.roleCounts.decision_maker_candidate, 40);
+  assert.equal(result.roleCounts.referrer_candidate, 60);
+});

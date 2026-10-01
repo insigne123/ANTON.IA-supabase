@@ -41,6 +41,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'metrics.incidents': { label: 'Revisó incidencias del sistema', source: 'Métricas', icon: 'alert' },
   'deliverability.check': { label: 'Verificó los registros DNS del dominio', source: 'Entregabilidad', icon: 'shield' },
   'site.read': { label: 'Leyó tu sitio web', source: 'Sitio web', icon: 'globe' },
+  'leads.count': { label: 'Contó tus contactos guardados', source: 'Contactos', icon: 'contacts' },
   'deliverability.bounces': { label: 'Analizó los rebotes', source: 'Entregabilidad', icon: 'shield' },
   'deliverability.sender': { label: 'Contrastó tu remitente con envíos reales', source: 'Entregabilidad', icon: 'shield' },
   'compliance.check': { label: 'Revisó la política de contacto', source: 'Cumplimiento', icon: 'scale' },
@@ -76,6 +77,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'exceptions.list': { label: 'Revisó incidencias abiertas', source: 'Incidencias', icon: 'alert' },
   'audience.analyze': { label: 'Analizó tu audiencia', source: 'Audiencia', icon: 'audience' },
   'agenda.today': { label: 'Armó tu lista de hoy', source: 'Agenda', icon: 'calendar' },
+  'credits.balance': { label: 'Revisó tu saldo de créditos', source: 'Créditos', icon: 'scale' },
   'gmail.contact_history': { label: 'Revisó correos en tu Gmail', source: 'Gmail', icon: 'mail' },
   'prospecting.search': { label: 'Buscó nuevos contactos en el proveedor', source: 'Búsqueda externa', icon: 'globe' },
 };
@@ -100,7 +102,7 @@ export function describeCoworkObservation(payload: Record<string, unknown>): { l
   const info = coworkActionInfo(action);
   const input = typeof payload.input === 'string' ? payload.input.trim() : '';
   const parts: string[] = [];
-  const showsQuery = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'site.read', 'compliance.obligation'].includes(action);
+  const showsQuery = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'site.read', 'leads.count', 'compliance.obligation'].includes(action);
   if (showsQuery && input) parts.push(`«${input.length > 48 ? `${input.slice(0, 47)}…` : input}»`);
   if (action === 'prospecting.search' && payload.input && typeof payload.input === 'object') {
     const criteria = payload.input as { titles?: unknown; target?: unknown };
@@ -139,6 +141,7 @@ const FINDING_NOUNS: Record<string, [string, string]> = {
   'missions.list': ['misión', 'misiones'],
   'exceptions.list': ['incidencia', 'incidencias'],
   'agenda.today': ['pendiente de hoy', 'pendientes de hoy'],
+  'credits.balance': ['saldo', 'saldos'],
   'prospecting.search': ['contacto nuevo', 'contactos nuevos'],
 };
 

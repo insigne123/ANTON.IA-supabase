@@ -10,6 +10,7 @@ function mockClient(rows: Record<string, unknown[]>) {
       select() { return chain; },
       eq(key: unknown, value: unknown) { if (key === 'organization_id') assert.equal(value, 'org'); return chain; },
       in() { return chain; },
+      or() { return chain; },
       gte() { return chain; },
       order() { return chain; },
       limit() { return chain; },
@@ -96,4 +97,49 @@ test('followups require cooldown, silence, open stage and new content', async ()
   const mia = followups.items.find((item: any) => item.canonicalUrl === 'https://www.linkedin.com/in/mia');
   assert.equal(mia.eligible, false);
   assert.ok(mia.blockedBy.includes('inbound_reply_observed'));
+});
+
+/** A client where each table answers its own rows, and head counts answer `count`. */
+function tablesClient(rows: Record<string, unknown[]>, count = 0) {
+  return { from(table: string) {
+    let head = false;
+    const chain: Record<string, (...args: any[]) => any> = {
+      select(_columns: string, options?: { head?: boolean }) { head = Boolean(options?.head); return chain; },
+      eq() { return chain; }, in() { return chain; }, gte() { return chain; }, order() { return chain; }, limit() { return chain; }, or() { return chain; },
+      async maybeSingle() { return { data: (rows[table] || [])[0] || null, error: null }; },
+      then(resolve: (value: unknown) => void) { resolve(head ? { data: null, error: null, count } : { data: rows[table] || [], error: null }); },
+    };
+    return chain;
+  } };
+}
+
+test('quota also says how many invitations sent from the app still wait for an answer, and what it cannot see', async () => {
+  const jobs = [{ canonical_url: 'https://www.linkedin.com/in/ana' }, { canonical_url: 'https://www.linkedin.com/in/luis' }, { canonical_url: 'https://www.linkedin.com/in/mia' },
+    { canonical_url: 'https://www.linkedin.com/in/ana' }];
+  const synced = await readCoworkLinkedinQuota(tablesClient({
+    cowork_linkedin_jobs: jobs, cowork_linkedin_peers: [{ canonical_url: 'https://www.linkedin.com/in/mia' }],
+    cowork_linkedin_sweep_state: [{ last_completed_at: '2026-09-21T12:00:00Z', cursor: null, has_more: false, observed_count: 1, updated_at: '2026-09-21T12:00:00Z' }],
+  }, 5) as never, scope) as any;
+  assert.equal(synced.awaitingAcceptance.sentFromApp, 3, 'the same person invited twice counts once');
+  assert.equal(synced.awaitingAcceptance.count, 2, 'Mia already accepted');
+  assert.equal(synced.awaitingAcceptance.networkSynced, true);
+  assert.match(synced.limitation, /directo en LinkedIn/);
+  const unsynced = await readCoworkLinkedinQuota(tablesClient({ cowork_linkedin_jobs: jobs }, 5) as never, scope) as any;
+  assert.equal(unsynced.awaitingAcceptance.networkSynced, false);
+  assert.match(unsynced.awaitingAcceptance.basis, /falta sincronizar/);
+  assert.equal(unsynced.pending, 5, 'the queue count is unchanged');
+});
+
+test('follow-up candidates carry the company of the saved contact with that profile, or null', async () => {
+  const followups = await readCoworkLinkedinFollowups(mockClient({
+    cowork_linkedin_jobs: [
+      { canonical_url: 'https://www.linkedin.com/in/ana-rojas', display_name: 'Ana', status: 'confirmed', created_at: '2026-09-01T12:00:00Z', message: 'Hola Ana' },
+      { canonical_url: 'https://www.linkedin.com/in/luis-paz', display_name: 'Luis', status: 'confirmed', created_at: '2026-09-01T12:00:00Z', message: 'Hola Luis' },
+    ],
+    leads: [{ company: ' Adecco ', linkedin_url: 'http://linkedin.com/in/Ana-Rojas/' }, { company: null, linkedin_url: 'https://www.linkedin.com/in/otra-persona' }],
+    unified_crm_data: [{ id: 'x', stage: 'contacted' }],
+  }) as never, scope) as any;
+  const byUrl = (url: string) => followups.items.find((item: any) => item.canonicalUrl === url);
+  assert.equal(byUrl('https://www.linkedin.com/in/ana-rojas').company, 'Adecco');
+  assert.equal(byUrl('https://www.linkedin.com/in/luis-paz').company, null, 'no saved contact, no company: never a guess');
 });
