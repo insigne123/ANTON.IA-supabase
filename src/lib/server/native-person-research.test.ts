@@ -176,3 +176,16 @@ test('person evidence does not spend a fallback query after two safe primary mat
   assert.equal(calls, 1);
   assert.equal(result.items.length, 2);
 });
+
+test('a hidden surname is searched by first name, company and role, and still needs the visible ends to match', () => {
+  const masked = { fullName: 'Rafael Du***n', title: 'Jefe de Operaciones', companyName: 'R&D Montajes', companyDomain: 'rydmontajes.com' };
+  assert.deepEqual(buildPublicPersonSearchQueries(masked), [
+    '"Rafael" "R&D Montajes" "Jefe de Operaciones"',
+    '"Rafael" "R&D Montajes" linkedin',
+  ]);
+  const item = (title: string) => ({ title, snippet: '', link: 'https://www.linkedin.com/in/x', source: 'LinkedIn', date: null, position: 1 });
+  assert.equal(isStrictPublicPersonIdentityMatch({ lead: masked, item: item('Rafael Durán - Jefe de Operaciones - R&D Montajes | LinkedIn') }), true);
+  assert.equal(isStrictPublicPersonIdentityMatch({ lead: masked, item: item('Rafael Godoy - Supervisor - R&D Montajes') }), false,
+    'another Rafael of the same company is not this person');
+  assert.equal(isStrictPublicPersonIdentityMatch({ lead: masked, item: item('Rafael Durán - Otra Empresa') }), false, 'the company still has to match');
+});

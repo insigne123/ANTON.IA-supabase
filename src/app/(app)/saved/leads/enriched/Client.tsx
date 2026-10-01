@@ -45,6 +45,7 @@ import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components
 import { researchDetailLoadingState } from '@/lib/research-report-loading';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
 import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
+import { EmailOwnerWarning, LeadName } from '@/components/leads/LeadName';
 
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
@@ -1396,7 +1397,7 @@ export default function EnrichedLeadsClient() {
                 <article key={e.id} className="rounded-2xl border border-border/60 bg-background/60 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="truncate font-semibold">{e.fullName || 'Lead sin nombre'}</h2>
+                      <h2 className="truncate font-semibold"><LeadName name={e.fullName} fallback="Lead sin nombre" /></h2>
                       <p className="mt-0.5 truncate text-sm text-muted-foreground">{e.title || 'Sin cargo'} · {e.companyName || 'Sin empresa'}</p>
                     </div>
                     {reportStatusLabelFor(e) ? <span className="shrink-0 text-xs font-medium text-muted-foreground">{reportStatusLabelFor(e)}</span> : viewable ? (
@@ -1521,7 +1522,7 @@ export default function EnrichedLeadsClient() {
                       />
                     </TableCell>
                     <TableCell className="py-3">
-                      <div className="max-w-[200px] truncate font-medium">{e.fullName}</div>
+                      <div className="max-w-[240px] truncate font-medium"><LeadName name={e.fullName} fallback="Lead sin nombre" /></div>
                       <div className="max-w-[220px] truncate text-xs text-muted-foreground">{e.title || 'Sin cargo'}</div>
                     </TableCell>
                     <TableCell className="py-3">
@@ -1533,7 +1534,7 @@ export default function EnrichedLeadsClient() {
                         ? (e.emailStatus === 'locked'
                           ? <span className="text-xs text-muted-foreground">Email no revelado</span>
                           : <span className="text-xs text-muted-foreground">Sin email</span>)
-                        : <div className="max-w-[260px] truncate">{e.email}</div>}
+                        : <><div className="max-w-[260px] truncate">{e.email}</div><EmailOwnerWarning email={e.email} name={e.fullName} className="max-w-[260px]" /></>}
                       {(() => {
                         const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
                         const shownPhone = e.primaryPhone || fallbackPhone;

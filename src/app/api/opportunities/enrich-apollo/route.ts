@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { applyEnrichedIdentity, identityFromProvider } from '@/lib/server/lead-identity';
 
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import {
@@ -774,6 +775,15 @@ async function persistImmediateResult(input: {
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error('ENRICHMENT_TARGET_NOT_FOUND');
+  // «Buscar correo» from «Por completar» sends the saved contact as clientRef: it gets the real name, LinkedIn and
+  // title too (only its gaps), so it stops showing a hidden surname. Best effort: the result above already stands.
+  const savedLeadId = text(input.target.clientRef, 64);
+  if (input.tableName === 'enriched_leads' && isUuid(savedLeadId)) {
+    await applyEnrichedIdentity(admin, {
+      userId: input.userId, organizationId: input.organizationId, savedLeadId, providerId: providerId || null,
+      identity: identityFromProvider(input.extracted),
+    }).catch(() => undefined);
+  }
   return object(data) || {};
 }
 
