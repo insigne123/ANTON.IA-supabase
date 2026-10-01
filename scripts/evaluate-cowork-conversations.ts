@@ -53,6 +53,7 @@ import { COWORK_JEV_DEFAULT_SCREEN, COWORK_JEV_DEFAULT_THRESHOLDS, COWORK_JEV_QU
 import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
+import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
 import { WEB_CORPUS } from './fixtures/cowork-web-corpus';
 import { LECTURAS_CORPUS } from './fixtures/cowork-lecturas-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
@@ -64,6 +65,8 @@ const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ..
 // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
 CORPUS.push(...AGENDA_CORPUS);
 
+// Retrying failed sends (scripts/fixtures/cowork-reintento-corpus.ts).
+CORPUS.push(...REINTENTO_CORPUS);
 // Onboarding by the company's website (scripts/fixtures/cowork-web-corpus.ts).
 CORPUS.push(...WEB_CORPUS);
 

@@ -210,6 +210,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   campaign_create: { title: 'Crear campaña', icon: 'campaign', help: 'Se crea pausada como borrador. Activarla requiere otra revisión.' },
   campaign_activate: { title: 'Activar campaña', icon: 'play', help: 'Al aprobar se verifican de nuevo audiencia, bajas y cada mensaje.' },
   campaign_pause: { title: 'Pausar campaña', icon: 'pause', help: 'Los envíos que ya estaban en curso podrían completarse.' },
+  campaign_retry: { title: 'Reintentar envíos fallidos', icon: 'send', help: 'Solo vuelven a la cola los envíos que fallaron por un motivo que se puede reintentar. Salen con los frenos de siempre y ninguno se envía dos veces.' },
   code_execute: { title: 'Ejecutar código', icon: 'code', help: 'Se ejecutará exactamente este código en un entorno aislado.' },
   profile_update: { title: 'Actualizar perfil', icon: 'profile', help: 'Se actualizará solo tu perfil comercial con los valores mostrados.' },
   saved_search_create: { title: 'Guardar búsqueda', icon: 'bookmark', help: 'Solo se guardará la búsqueda; no se ejecutará ni consumirá créditos.' },
@@ -291,6 +292,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   campaign_create: { happens: 'Se crea la campaña con estos correos, pausada.', not: 'No se envía nada: activarla pide otra aprobación.' },
   campaign_activate: { happens: 'Se activa la campaña y empieza a enviar según su calendario.', not: 'No cambian los correos ni los destinatarios.' },
   campaign_pause: { happens: 'Se pausa la campaña.', not: 'Lo que ya se envió no se revierte.' },
+  campaign_retry: { happens: 'Los envíos de la lista vuelven a la cola para reintentarse.', not: 'No se envía nada ahora ni se salta ningún freno: cupo, una empresa por día, respuestas y bajas siguen mandando.' },
   code_execute: { happens: 'Se ejecuta este código en un entorno aislado.', not: 'No toca tus contactos ni envía nada.' },
   profile_update: { happens: 'Se actualiza tu perfil comercial con estos valores.', not: 'No cambian tus contactos ni tus campañas.' },
   saved_search_create: { happens: 'Se guarda la búsqueda.', not: 'No se ejecuta ni gasta créditos.' },
@@ -346,7 +348,7 @@ export function coworkProposalTimeline(state: CoworkProposalState): CoworkTimeli
 export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | 'payload' | 'state'>): { href: string; label: string } | null {
   if (proposal.state !== 'done' || proposal.type !== 'effect') return null;
   const kind = String(proposal.payload.kind || '');
-  if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch') return { href: '/campaigns', label: 'Ver campañas' };
+  if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch' || kind === 'campaign_retry') return { href: '/campaigns', label: 'Ver campañas' };
   if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch' || kind === 'contacts_import') return { href: '/saved/leads', label: 'Ver tus contactos' };
   if (kind === 'send_email' || kind === 'reply_thread') return { href: '/contacted', label: 'Ver en Contactados' };
   if (kind === 'profile_update') return { href: '/profile', label: 'Ver tu perfil' };

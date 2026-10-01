@@ -422,6 +422,45 @@ test('replying in a thread is proposed only when it is on, for a conversation re
   assert.equal(proposals.length, 2);
 });
 
+test('retrying failed sends is proposed only when it is on, for a campaign whose retry review has something to retry', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const campaignId = '00000000-0000-4000-8000-000000000031';
+  const otherId = '00000000-0000-4000-8000-000000000032';
+  const proposals: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
+  const review = (overrides: Record<string, unknown> = {}) => ({ scope: 'own_campaign_retry_review', campaignId, summary: { retryable: 3, terminal: 1, reconcileFirst: 1 }, items: [], ...overrides });
+  const base = { message: 'Reintenta los envíos que fallaron', runId, signal: new AbortController().signal, authorize: async () => {},
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: Record<string, unknown>) => { proposals.push(proposal); } };
+  const read = { action: 'campaigns.retry_review' as const, query: null, leadId: null, campaignId, answer: null };
+  const retry = { action: 'campaign.retry' as const, query: null, leadId: null, campaignId, answer: null };
+  const flow = (result: unknown, decision: unknown = retry) => ({ execute: async () => result,
+    decide: async (observations: unknown[]) => (observations.length ? decision : read) as never });
+  // Off (the default): refused with the way out, never proposed.
+  await assert.rejects(runCoworkReadLoop({ ...base, ...flow(review()) }), /Campaign retry unavailable/);
+  assert.equal(proposals.length, 0);
+  // On: the review read in this turn anchors the proposal to the run that read it, with the campaign as its target.
+  await runCoworkReadLoop({ ...base, campaignRetry: true, ...flow(review()) });
+  assert.deepEqual(proposals[0], { kind: 'campaign_retry', targetId: campaignId, label: 'Reintentar los envíos fallidos de una campaña', originRunId: runId });
+  assert.match(notes[0], /Propongo reintentar los envíos de esa campaña que fallaron/);
+  assert.match(notes[0], /sin enviarse dos veces/);
+  // Read in the previous turn: that turn is the origin.
+  const history = [{ runId: parentId, observations: [{ action: 'campaigns.retry_review', input: campaignId, result: review() }] }];
+  await runCoworkReadLoop({ ...base, campaignRetry: true, history, execute: async () => review(), decide: async () => retry });
+  assert.equal(proposals[1].originRunId, parentId);
+  // Nothing to retry (only terminal or uncertain ones), or another campaign: refused, the retry is never the model's count.
+  for (const result of [review({ summary: { retryable: 0, terminal: 2, reconcileFirst: 1 } }), review({ campaignId: otherId }), { error: 'x' }]) {
+    await assert.rejects(runCoworkReadLoop({ ...base, campaignRetry: true, ...flow(result) }), /Retry campaign must be reviewed first/);
+  }
+  // Proposed without reading anything first, or without a campaign.
+  await assert.rejects(runCoworkReadLoop({ ...base, campaignRetry: true, execute: async () => ({}), decide: async () => retry }), /Retry campaign must be reviewed first/);
+  await assert.rejects(runCoworkReadLoop({ ...base, campaignRetry: true, ...flow(review(), { ...retry, campaignId: null }) }), /Missing effect target/);
+  assert.equal(proposals.length, 2);
+});
+
 test('a proposal carries the model explanation as a persisted note, recorded before the approval card', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const leadId = '00000000-0000-4000-8000-000000000021';

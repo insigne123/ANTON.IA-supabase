@@ -24,6 +24,7 @@ import { MessageContextReview } from './MessageContextReview';
 import { EnrichBatchReview } from './EnrichBatchReview';
 import { ContactsImportReview } from './ContactsImportReview';
 import { ReplyThreadReview } from './ReplyThreadReview';
+import { CampaignRetryReview } from './CampaignRetryReview';
 import { LinkedinBatchResults, LinkedinBatchReview } from './LinkedinBatchReview';
 import { ReviewActions, ReviewChips, ReviewField, ReviewFields, ReviewNote, ReviewPaper } from './ReviewParts';
 import { DoneMark } from './CoworkActivity';
@@ -51,6 +52,7 @@ const REVIEWS: Record<string, (props: ReviewProps) => ReactNode> = {
   enrich_batch: props => <EnrichBatchReview {...props} />,
   contacts_import: props => <ContactsImportReview {...props} />,
   reply_thread: props => <ReplyThreadReview {...props} />,
+  campaign_retry: props => <CampaignRetryReview {...props} />,
   linkedin_invite_batch: props => <LinkedinBatchReview {...props} />,
   linkedin_message_batch: props => <LinkedinBatchReview {...props} />,
 };

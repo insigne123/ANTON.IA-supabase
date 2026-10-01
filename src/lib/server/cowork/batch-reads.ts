@@ -363,6 +363,20 @@ export async function readCoworkRetryReview(client: SupabaseClient, scope: Scope
     items, limitation: 'Los inciertos exigen conciliar en Contactados; un reintento a ciegas esta prohibido.' };
 }
 
+/** The touches of a campaign that failed for a reason that can be retried (classifySendRetry says «retry»), with the draft each one
+ * belongs to: what the retry effect lists on its card and retries once approved. Never a touch that was sent, is uncertain (reconcile
+ * first) or ended for good. A campaign that is not the person's is not found. */
+export async function listCoworkRetryableTouches(client: SupabaseClient, scope: Scope, value: string) {
+  const campaign = await loadOwnCampaign(client, scope, value);
+  const context = await loadBatchContext(client, scope, campaign);
+  const touches = campaign.recipients.flatMap(person => touchStates(context, person)
+    .filter(touch => touch.retryAction === 'retry' && touch.status !== 'sent' && touch.status !== 'planned')
+    .map(touch => ({ draftId: touch.draftId, email: person.email, touchNumber: touch.touchNumber, status: touch.status, error: touch.error, reason: touch.retryReason })));
+  const name = String((campaign as unknown as { name?: unknown; definition?: { name?: unknown } }).name
+    ?? (campaign as unknown as { definition?: { name?: unknown } }).definition?.name ?? '').trim();
+  return { campaignId: campaign.id, name: name || null, touches };
+}
+
 /** 4.3 (planificacion): dia asignado por destinatario para que nunca salgan
  * dos correos a la misma empresa el mismo dia. Programar el lote persiste
  * estas reservas con proteccion concurrente. */
