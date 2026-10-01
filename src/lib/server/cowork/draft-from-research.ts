@@ -5,6 +5,8 @@ import { createNativeDraft, getCurrentNativeDraft } from '@/lib/server/native-dr
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
 import { ResearchSnapshotV1Schema } from '@/lib/research-contracts';
+import { loadSellerProfile, sellerWithOfferInPlay } from '@/lib/server/seller-profile';
+import { loadCoworkOfferInPlay } from './thread-memory';
 
 export const coworkDraftRequestSchema = z.object({ snapshotId: z.string().uuid() }).strict();
 
@@ -154,10 +156,14 @@ export async function processCoworkDraftQueue() {
       }
     }
     const { buildMessagingGenerationInstruction } = await import('./message-context');
+    // A product the person asked to promote in this conversation drives the draft; otherwise «Perfil» (Plan 5, decision 3).
+    const offerInPlay = await loadCoworkOfferInPlay(client, scope, job.run_id);
+    const sellerProfile = offerInPlay ? sellerWithOfferInPlay(await loadSellerProfile(scope.userId, scope.organizationId, client), offerInPlay) : null;
     const result = await createNativeDraft({
       ...scope, snapshotId: job.snapshot_id,
       idempotencyKey: coworkDraftIdempotencyKey(job.run_id, job.snapshot_id),
       ...(styleProfileId ? { styleProfileId } : {}),
+      ...(sellerProfile ? { sellerProfile } : {}),
       // Only approved, configured context steers generation. Unconfigured
       // orgs keep the previous default behavior unchanged.
       ...(messaging.data ? { instruction: buildMessagingGenerationInstruction(messaging.data) } : {}),

@@ -7,6 +7,7 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
+import { firstNameOf } from '@/lib/lead-name';
 import { buildDraftMessageBrief, draftMessageBriefForModel, draftPriorMessageReference } from '@/lib/draft-message-brief';
 import { selectOutreachExamples, selectOpeningScaffold, type OutreachOpeningKind } from '@/lib/outreach-example-library';
 import { SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
@@ -198,11 +199,9 @@ function draftWordCount(value: string) {
   return value.match(/[\p{L}\p{N}]+/gu)?.length || 0;
 }
 
+/** «Hola Rafael,»: the first name, never a hidden one («Ra***l», from a research made before the email lookup). */
 function draftGreeting(context: DraftContextV2) {
-  const firstName = String(context.recipient.displayName || '')
-    .trim()
-    .split(/\s+/)[0]
-    ?.replace(/[,.:;!?]+$/g, '');
+  const firstName = firstNameOf(String(context.recipient.displayName || '').trim().split(/\s+/)[0]?.replace(/[,.:;!?]+$/g, ''));
   return firstName ? `Hola ${firstName},` : 'Hola,';
 }
 

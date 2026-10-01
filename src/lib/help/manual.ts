@@ -341,13 +341,14 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Elige Gmail u Outlook.',
       'Pulsa conectar y acepta los permisos en la ventana del proveedor.',
       'Vuelve a la app: el estado de la conexión dice si quedó lista.',
+      'Si conectas las dos, elige en «Remitente predeterminado» cuál envía.',
     ],
     tips: [
       'La conexión permite enviar correos desde la plataforma y leer los hilos para detectar respuestas.',
       'Las credenciales se guardan cifradas. Si el proveedor revocó el acceso, vuelve a conectar.',
     ],
     faqs: [
-      { q: '¿Puedo conectar Gmail y Outlook a la vez?', a: 'Sí. En cada correo, la línea «De:» muestra desde qué cuenta saldrá.' },
+      { q: '¿Puedo conectar Gmail y Outlook a la vez?', a: 'Sí. Elige en «Remitente predeterminado» cuál envía: Cowork y tus campañas la usan sin preguntarte. En cada correo, la línea «De:» muestra desde qué cuenta saldrá.' },
       { q: '¿ANTON.IA lee todo mi correo?', a: 'Lee los hilos de los correos enviados desde la app para detectar respuestas cuando se sincroniza la bandeja.' },
       { q: 'Dice que hay credenciales guardadas pero no envía. ¿Qué hago?', a: 'Su vigencia se comprueba al usarlas. Si el proveedor revocó el acceso, vuelve a conectar la cuenta.' },
     ],
