@@ -23,6 +23,12 @@ test('render only supported variables; reject missing facts and subject injectio
   assert.throws(() => renderCampaignMessage({ subject: 'Hola', body: '{{empresa}}', delayDays: 0 }, { ...person, company: '' }));
   assert.throws(() => renderCampaignMessage({ subject: 'Hola\nBcc: evil@example.com', body: 'Texto', delayDays: 0 }, person));
 });
+test('{{nombre}} is the first name, and a hidden one is never written', () => {
+  const greet = { subject: 'Tema', body: 'Hola {{nombre}},', delayDays: 0 };
+  assert.equal(renderCampaignMessage(greet, { ...person, name: 'Rafael Du***n' }).body, 'Hola Rafael,');
+  assert.throws(() => renderCampaignMessage(greet, { ...person, name: 'Ra***l Durán' }), /Falta nombre/);
+  assert.throws(() => renderCampaignMessage(greet, { ...person, name: '' }), /Falta nombre/);
+});
 const recipient: CampaignRecipient = { ...person, messages: [
   { subject: 'Hola', body: 'Mensaje', delayDays: 0, draftId: 'first', versionId: 'v1' },
   { subject: 'Seguimiento', body: 'Segundo', delayDays: 3, draftId: 'second', versionId: 'v2' },

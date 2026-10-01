@@ -12,14 +12,15 @@ export class CoworkCampaignEditRefused extends Error {
   }
 }
 
+const emailText = { subject: z.string().trim().min(1).max(300), body: z.string().trim().min(1).max(12000) };
+
+/** Either the emails of the sequence (the template, for everyone) or the first email of one person. */
 export const coworkCampaignEditSchema = z.object({
   /** Version seen in the preview. Older clients without it must reload before saving. */
   expectedHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  messages: z.array(z.object({
-    subject: z.string().trim().min(1).max(300),
-    body: z.string().trim().min(1).max(12000),
-  }).strict()).min(1).max(7),
-}).strict();
+  messages: z.array(z.object(emailText).strict()).min(1).max(7).optional(),
+  person: z.object({ email: z.string().trim().email().max(320).transform(value => value.toLowerCase()), ...emailText }).strict().optional(),
+}).strict().refine(value => Boolean(value.messages) !== Boolean(value.person), 'Edita los correos de la secuencia o el de una persona, uno a la vez.');
 
 /** The staged definition with the person's subjects and bodies: same recipients,
  * number of emails and spacing. `changed` lists the emails that differ. */
@@ -35,4 +36,22 @@ export function coworkEditedCampaignDefinition(definition: unknown, edits: Cowor
   return { next, changed };
 }
 
-export type CoworkCampaignEdit = z.infer<typeof coworkCampaignEditSchema>['messages'];
+/** The staged definition with one person's first email (an override at the first step): the template and the
+ * other recipients stay as reviewed. `changed` is [0] when the text differs from what that person had. */
+export function coworkEditedCampaignPerson(definition: unknown, person: CoworkCampaignPersonEdit) {
+  const current = CampaignInputSchema.parse(definition);
+  if (!current.emails.includes(person.email)) {
+    throw new CoworkCampaignEditRefused(`${person.email} no está entre los destinatarios de esta campaña.`, 400);
+  }
+  const own = current.overrides.find(item => item.email === person.email && item.messageIndex === 0);
+  const before = own ?? current.messages[0];
+  if (before.subject === person.subject && before.body === person.body) return { next: current, changed: [] as number[] };
+  const next = CampaignInputSchema.parse({ ...current, overrides: [
+    ...current.overrides.filter(item => item.email !== person.email || item.messageIndex !== 0),
+    { email: person.email, messageIndex: 0, subject: person.subject, body: person.body },
+  ] });
+  return { next, changed: [0] };
+}
+
+export type CoworkCampaignEdit = NonNullable<z.infer<typeof coworkCampaignEditSchema>['messages']>;
+export type CoworkCampaignPersonEdit = NonNullable<z.infer<typeof coworkCampaignEditSchema>['person']>;

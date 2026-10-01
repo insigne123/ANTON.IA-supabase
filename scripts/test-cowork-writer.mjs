@@ -17,7 +17,7 @@ const brief = { kind: 'sequence', recipients: ['Felipe Muñoz', 'Camila Fuentes'
 const handOff = { action: 'draft.write', query: null, leadId: null, answer: null, write: brief };
 const answer = { action: 'answer', query: null, leadId: null, answer: { reply: 'Te dejo la secuencia que escribí yo.', document: null, question: '¿Creo la campaña pausada?', blocks: null,
   suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] } };
-const signed = body => `Hola,\n${body}\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur`;
+const signed = body => `Hola {{nombre}},\n${body}\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur`;
 const sequence = bodies => ({ reply: `${findings} Usé el tiempo que pierde RR. HH. revisando antecedentes a mano.`,
   blocks: [{ type: 'sequence', title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index], subject: `Asunto ${index + 1}`, body: signed(body) })) }],
   question: '¿Creo la campaña pausada para Felipe y Camila?', suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] });

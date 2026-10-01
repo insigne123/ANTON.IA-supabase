@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { firstNameOf } from '@/lib/lead-name';
 
 const terms = z.array(z.string().trim().min(1).max(100)).max(12).default([]);
 export const AudienceCriteriaSchema = z.object({
@@ -135,9 +136,10 @@ export function matchAudience(person: AudiencePerson, criteria: AudienceCriteria
   return reasons;
 }
 
-/** Plain text only. React renders previews as text; the sender builds escaped HTML. */
+/** Plain text only. React renders previews as text; the sender builds escaped HTML.
+ * {{nombre}} is the first name, never a hidden one («Ra***l»): without it the message asks for it. */
 export function renderCampaignMessage(message: CampaignMessage, person: AudiencePerson): CampaignMessage {
-  const values: Record<string, string> = { nombre: person.name.split(/\s+/)[0] || '', empresa: person.company, cargo: person.title };
+  const values: Record<string, string> = { nombre: firstNameOf(person.name) || '', empresa: person.company, cargo: person.title };
   const render = (text: string) => text.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, key: string) => {
     if (!(key in values)) throw new Error(`La variable {{${key}}} no está disponible. Usa nombre, empresa o cargo.`);
     if (!values[key]) throw new Error(`Falta ${key} para ${person.email}. Ajusta el mensaje o la audiencia.`);

@@ -391,7 +391,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const latest = turns[turns.length - 1] || null;
   const latestIsCurrent = Boolean(latest && latest.run.id === selected);
   const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events)), [turns]);
-  // What later turns did with each email or sequence card («Campaña creada · pausada»…).
+  // What later turns did with each email or sequence card («Campaña creada · guardada sin enviar»…).
   const cardStatuses = useMemo(() => coworkCardStatuses(turns), [turns]);
   const openArtifact = artifactId ? artifacts.find(item => item.id === artifactId) || null : null;
   const proposal = latest ? coworkProposalView(latest.run, latest.events) : null;

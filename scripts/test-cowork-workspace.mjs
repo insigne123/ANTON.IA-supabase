@@ -117,7 +117,7 @@ try {
   const campCard = window.document.querySelector('section[aria-label="Revisar acción propuesta"]');
   assert.match(campCard.textContent, /ana@example\.com/);
   assert.match(campCard.textContent, /Reactivación/);
-  const campApprove = [...campCard.querySelectorAll('button')].find(node => node.textContent.trim() === 'Crear borrador pausado');
+  const campApprove = [...campCard.querySelectorAll('button')].find(node => node.textContent.trim() === 'Crear campaña sin enviar');
   assert.ok(campApprove);
   assert.equal(campApprove.disabled, false);
   console.log('PASS: reviews render sender, full bodies and recipients; drift blocks send approval.');
