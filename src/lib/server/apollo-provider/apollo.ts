@@ -385,7 +385,8 @@ async function searchPeople(params: {
 
     const query = new URLSearchParams();
     query.set('per_page', String(Math.min(100, remaining)));
-    query.set('page', '1');
+    // «Traer más» asks for the next page of the same query; every other caller sends page 1.
+    query.set('page', String(Math.min(500, Math.max(1, params.input.page || 1))));
     appendAll(query, 'person_titles[]', params.input.titles);
     if (params.input.titles.length > 0) query.set('include_similar_titles', String(params.input.includeSimilarTitles));
     appendAll(query, 'person_seniorities[]', params.input.seniorities);
@@ -619,7 +620,8 @@ export async function executeApolloLeadSearch(input: LeadSearchInput, apiKey: st
   const leads = await searchPeople({
     input,
     domains: input.organizationDomains,
-    organizationIds: input.selectedOrganizationId ? [input.selectedOrganizationId] : [],
+    // The companies a search already chose (Cowork's «empresas primero»), plus a selected one; chunks of 50 per call.
+    organizationIds: input.organizationIds?.length ? input.organizationIds : input.selectedOrganizationId ? [input.selectedOrganizationId] : [],
     apiKey,
     config,
   });

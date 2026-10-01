@@ -247,6 +247,7 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       && input.employee_range.length === 0
       && input.employee_ranges.length === 0
       && input.organization_domains.length === 0
+      && input.organization_ids.length === 0
       && !input.selected_organization_id) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['search_mode'], message: 'at least one bounded search filter is required' });
     }

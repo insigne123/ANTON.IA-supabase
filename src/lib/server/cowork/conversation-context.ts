@@ -1,12 +1,38 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkDocumentSchema, coworkStoredBlocks, type CoworkBlock } from '@/lib/cowork/contracts';
 
+type HistoryTurn = { runId: string; at: string | null; request: string; reply: string; document: { title: string; content: string } | null; blocks?: CoworkBlock[]; observations: unknown[]; actions?: Array<{ kind: string; label: string; outcome: string; result?: unknown }> };
+
+/**
+ * The parent turn with its long lists cut to their first rows, each saying how many it left out (itemsOmitted), or null
+ * when even without rows it does not fit. A search of 100 people must not cost the next turn its parent.
+ */
+function trimTurnLists(turn: HistoryTurn, budget: number): HistoryTurn | null {
+  const cut = (keep: number): HistoryTurn => ({ ...turn, observations: turn.observations.map(observation => {
+    const payload = observation as Record<string, unknown> | null;
+    const result = payload?.result as Record<string, unknown> | null | undefined;
+    if (!payload || !result || typeof result !== 'object' || !Array.isArray(result.items) || result.items.length <= keep) return observation;
+    return { ...payload, result: { ...result, items: result.items.slice(0, keep), itemsOmitted: result.items.length - keep } };
+  }) });
+  const longest = Math.max(0, ...turn.observations.map(observation => {
+    const items = ((observation as { result?: { items?: unknown } } | null)?.result)?.items;
+    return Array.isArray(items) ? items.length : 0;
+  }));
+  let best: HistoryTurn | null = null;
+  for (let low = 0, high = longest; low <= high;) {
+    const keep = Math.floor((low + high) / 2);
+    const candidate = cut(keep);
+    if (JSON.stringify(candidate).length <= budget) { best = candidate; low = keep + 1; } else high = keep - 1;
+  }
+  return best;
+}
+
 export async function loadCoworkHistory(
   client: SupabaseClient,
   scope: { userId: string; organizationId: string },
   parentId: string | null,
 ) {
-  const history: Array<{ runId: string; at: string | null; request: string; reply: string; document: { title: string; content: string } | null; blocks?: CoworkBlock[]; observations: unknown[]; actions?: Array<{ kind: string; label: string; outcome: string; result?: unknown }> }> = [];
+  const history: HistoryTurn[] = [];
   const visited = new Set<string>();
   let remaining = 60000;
   let cursor = parentId;
@@ -60,13 +86,16 @@ export async function loadCoworkHistory(
         result: { leadId: row.payload?.leadId ?? null, providerId: row.payload?.providerId ?? null, reused: row.payload?.reused === true } };
     });
     const actions = [...effects, ...saved];
-    const turn = { runId: cursor, at: typeof run.created_at === 'string' ? run.created_at : null, request: run.message, reply: result.reply, document: result.document,
+    let turn: HistoryTurn = { runId: cursor, at: typeof run.created_at === 'string' ? run.created_at : null, request: run.message, reply: result.reply, document: result.document,
       ...(blocks.length ? { blocks } : {}), observations: observedPayloads, ...(actions.length ? { actions } : {}) };
-    const size = JSON.stringify(turn).length;
+    let size = JSON.stringify(turn).length;
     if (size > remaining) {
-      // Preserve the immediate parent rather than silently editing a truncated document.
-      if (history.length === 0) throw new Error('Previous result exceeds context budget');
-      break;
+      if (history.length > 0) break;
+      // Preserve the immediate parent rather than silently editing a truncated document: only its lists get shorter.
+      const trimmed = trimTurnLists(turn, remaining);
+      if (!trimmed) throw new Error('Previous result exceeds context budget');
+      turn = trimmed;
+      size = JSON.stringify(turn).length;
     }
     history.unshift(turn);
     remaining -= size;

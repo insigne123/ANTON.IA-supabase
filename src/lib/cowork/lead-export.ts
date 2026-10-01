@@ -5,11 +5,14 @@ const optionalUrl = z.string().url().max(2048).refine(value => /^https?:\/\//i.t
 const rowSchema = z.object({ id: z.string().min(1).max(215), name: cell, title: cell, company: cell, email: cell, status: cell, industry: cell, location: cell,
   domain: cell, employees: cell,
   linkedin_url: optionalUrl, company_website: optionalUrl, company_linkedin: optionalUrl,
+  // Why a person of an external search is on the list (search-ranking.ts).
+  fit: cell,
 }).strip();
 const resultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().uuid() })).max(20), scope: z.literal('own_saved_contacts') });
-const externalResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo:').max(207) })).max(25), scope: z.literal('external_search') });
-const companyResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo-company:').max(215), website: optionalUrl })).max(25), scope: z.literal('external_company_search') });
-export const coworkLeadColumns = ['id', 'name', 'title', 'company', 'email', 'status', 'industry', 'location', 'domain', 'employees', 'company_website'] as const;
+// Up to 100 per search (COWORK_SEARCH_MAX); older results had up to 25.
+const externalResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo:').max(207) })).max(100), scope: z.literal('external_search') });
+const companyResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo-company:').max(215), website: optionalUrl })).max(100), scope: z.literal('external_company_search') });
+export const coworkLeadColumns = ['id', 'name', 'title', 'company', 'email', 'status', 'industry', 'location', 'domain', 'employees', 'company_website', 'fit'] as const;
 
 export function csvCell(value: unknown) {
   const text = String(value ?? '');

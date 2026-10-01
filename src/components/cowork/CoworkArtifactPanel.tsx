@@ -94,7 +94,7 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
       </article>}
       {artifact.kind === 'contacts' && <div className="px-4 py-5 sm:px-6">
         <ContactResults key={artifact.runId} runId={artifact.runId} events={events} onError={onError} onAccessDenied={onAccessDenied}
-          canResearch={canResearch} onUseReport={onUseReport} showHeader={false} />
+          canResearch={canResearch} onUseReport={onUseReport} showHeader={false} onSend={onSend} sendHint={sendHint} />
       </div>}
       {artifact.kind === 'file' && <div className="px-4 py-5 sm:px-6">
         <ArtifactPreview key={artifact.id} runId={artifact.runId} name={artifact.name} size={artifact.size ?? undefined} defaultOpen />
