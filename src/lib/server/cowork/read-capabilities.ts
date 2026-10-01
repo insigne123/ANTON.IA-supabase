@@ -147,6 +147,11 @@ export function coworkReadCapabilities(
       input: z.string().max(120), output: z.unknown(), execute: input => readDeliverabilityCheck(client, scope, input as string),
     },
     {
+      name: 'site.read', version: 1, effect: 'read', description: 'Texto público del sitio web de la empresa (el de Perfil si no se da uno)',
+      input: z.string().max(200), output: z.unknown(),
+      execute: async input => (await import('./site-read')).readCoworkSite(client, scope, input as string),
+    },
+    {
       name: 'deliverability.bounces', version: 1, effect: 'read', description: 'Causas de rebote contra el umbral del 2%',
       input: z.literal(''), output: z.unknown(), execute: () => readDeliverabilityBounces(client, scope),
     },

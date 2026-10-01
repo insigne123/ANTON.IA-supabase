@@ -40,7 +40,8 @@ function HomeFigures({ overview, loading }: { overview: CoworkOverview | null; l
 /**
  * «Cuéntame qué vendes»: without an offer Cowork writes generic emails. What you write here goes to
  * Cowork as a message; it proposes saving it in your profile (profile.update), and nothing is
- * saved until you approve that card.
+ * saved until you approve that card. With only your website, Cowork reads it and proposes who to
+ * aim at before it asks to save anything.
  */
 function OfferCard({ draft, onDraftChange, onSave, onHide }: {
   draft: CoworkOfferDraft; onDraftChange: (draft: CoworkOfferDraft) => void; onSave: (message: string) => Promise<boolean>; onHide: () => void;
@@ -50,7 +51,7 @@ function OfferCard({ draft, onDraftChange, onSave, onHide }: {
   const [sending, setSending] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!offer.trim() || sending) return;
+    if ((!offer.trim() && !website.trim()) || sending) return;
     setSending(true);
     // Sending opens the conversation and this card leaves; the draft lives in the workspace, so a
     // failed send brings the card back with what was written.
@@ -64,24 +65,24 @@ function OfferCard({ draft, onDraftChange, onSave, onHide }: {
       </span>
       <div className="min-w-0 flex-1">
         <h2 id={`${id}-title`} className="text-[14.5px] font-semibold text-cw-text">Cuéntame qué vendes</h2>
-        <p className="mt-0.5 text-[13px] leading-5 text-cw-muted">Con eso escribo tus correos y elijo a quién escribirle. Lo guardo en tu perfil cuando lo apruebes.</p>
+        <p className="mt-0.5 text-[13px] leading-5 text-cw-muted">Pega tu web y la leo, o cuéntamelo con tus palabras. Con eso escribo tus correos y elijo a quién escribirle; lo guardo en tu perfil cuando lo apruebes.</p>
       </div>
       <CwButton size="icon-sm" variant="ghost" onClick={onHide} aria-label="Ocultar por ahora" title="Ocultar por ahora"><X aria-hidden="true" /></CwButton>
     </div>
     <form onSubmit={event => void submit(event)} className="mt-3 space-y-3 sm:pl-11">
       <div>
-        <label htmlFor={`${id}-offer`} className="mb-1 block text-[12px] font-medium text-cw-muted">Qué vendes y a quién</label>
+        <label htmlFor={`${id}-web`} className="mb-1 block text-[12px] font-medium text-cw-muted">Tu sitio web</label>
+        <input id={`${id}-web`} type="text" inputMode="url" autoComplete="url" autoCapitalize="none" spellCheck={false} value={website} onChange={event => onDraftChange({ ...draft, website: event.target.value })}
+          maxLength={200} disabled={sending} placeholder="tuempresa.cl" className={cn(FIELD, 'h-10')} />
+      </div>
+      <div>
+        <label htmlFor={`${id}-offer`} className="mb-1 block text-[12px] font-medium text-cw-muted">O cuéntame qué vendes y a quién</label>
         <textarea id={`${id}-offer`} value={offer} onChange={event => onDraftChange({ ...draft, offer: event.target.value })} maxLength={600} rows={3} disabled={sending}
           placeholder="Ej.: revisión de antecedentes laborales en minutos, para equipos de RR. HH. en Chile"
           className={cn(FIELD, 'resize-y py-2 leading-6')} />
       </div>
-      <div>
-        <label htmlFor={`${id}-web`} className="mb-1 block text-[12px] font-medium text-cw-muted">Tu sitio web (opcional)</label>
-        <input id={`${id}-web`} type="url" inputMode="url" autoComplete="url" value={website} onChange={event => onDraftChange({ ...draft, website: event.target.value })}
-          maxLength={200} disabled={sending} placeholder="https://tuempresa.cl" className={cn(FIELD, 'h-10')} />
-      </div>
       <div className="flex items-center justify-end gap-2">
-        <CwButton type="submit" size="sm" variant="secondary" disabled={!offer.trim() || sending}>{sending ? 'Enviando…' : 'Guardar en mi perfil'}</CwButton>
+        <CwButton type="submit" size="sm" variant="secondary" disabled={(!offer.trim() && !website.trim()) || sending}>{sending ? 'Enviando…' : offer.trim() ? 'Guardar en mi perfil' : 'Leer mi web'}</CwButton>
       </div>
     </form>
   </section>;

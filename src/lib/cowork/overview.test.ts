@@ -30,4 +30,6 @@ test('the «Cuéntame qué vendes» message carries what was written and the sit
   assert.equal(coworkOfferMessage('  revisión de antecedentes   en minutos. ', ''), 'Guarda en mi perfil lo que vendo: revisión de antecedentes en minutos.');
   assert.equal(coworkOfferMessage('software de RR. HH.', ' https://yago.cl '),
     'Guarda en mi perfil lo que vendo: software de RR. HH. Mi sitio web es https://yago.cl.');
+  // Only the site: Cowork reads it and proposes who to aim at, instead of asking to save an offer that was never written.
+  assert.equal(coworkOfferMessage('  ', ' https://contafacil.cl '), 'Mi web es https://contafacil.cl, ayúdame a partir');
 });
