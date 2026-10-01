@@ -226,12 +226,12 @@ Medida el 30 de septiembre de 2026 con el modelo real: las 44 operaciones por 3 
   2. **Una aprobación por persona:** en A4 serían unas 150 tarjetas.
   3. **Cowork no responde dentro del hilo** (`email.send` siempre abre un correo nuevo) **ni lee el cuerpo de los correos:** C3, C5, D5, G2 y G7.
   4. **No hay tope de una empresa por día sumando correo y LinkedIn:** B4, D1, E3 y E4.
-  5. **Teléfono y créditos:** revelar teléfonos está apagado en Cowork y no hay saldo de créditos por tipo: A4 y F1.
-  6. **El cupo de LinkedIn no ve las invitaciones pendientes reales:** E3.
-  7. **Un segmento no se puede contar con las lecturas de hoy:** `audience.analyze` trae los primeros 100 contactos con su rol y `leads.search` se corta en 20, así que «cuántos reclutadores hay entre 2.512 contactos» (A1) o clasificar a todos (A6) piden un archivo o una lectura nueva.
+  5. **Teléfono y créditos:** revelar teléfonos está apagado en Cowork y no hay saldo de créditos por tipo: A4 y F1. *Acotada en este PR:* `credits.balance` da el saldo, lo que cuesta cada tipo (un crédito el correo, diez el teléfono) y cuántos alcanzan de cada uno. **Revelar el teléfono sigue pendiente**: es un efecto nuevo con costo (diez créditos por persona), resultado asíncrono y su propia tabla de propuestas (una migración), y se diseña aparte.
+  6. **El cupo de LinkedIn no ve las invitaciones pendientes reales:** E3. *Acotada en este PR:* `linkedin.quota` suma `awaitingAcceptance`, las enviadas desde ANTON.IA que siguen sin aceptar (confirmadas en 30 días cuyo perfil no está entre las conexiones observadas, con `networkSynced`). Es un mínimo: lo enviado directo en LinkedIn no se ve desde el servidor, y la respuesta lo dice y pide el número que el usuario ve en LinkedIn.
+  7. **Un segmento no se puede contar con las lecturas de hoy:** `audience.analyze` trae los primeros 100 contactos con su rol y `leads.search` se corta en 20, así que «cuántos reclutadores hay entre 2.512 contactos» (A1) o clasificar a todos (A6) piden un archivo o una lectura nueva. *Resuelta en este PR:* `leads.count` cuenta exacto (total, con correo, con perfil de LinkedIn) los contactos guardados que calzan con uno o varios términos en cargo, empresa o sector, y `audience.analyze` suma `totalLeads` y `roleCounts` sobre todos los contactos escaneados, no solo los 100 listados.
   8. **Cowork no tiene una acción para reintentar envíos fallidos** (D4): lee y separa lo reintentable de lo terminal, pero el reintento no está entre sus efectos.
   9. **No abre perfiles de LinkedIn ni activa cuentas del producto:** A8 y G5.
-  10. **Los candidatos a segundo contacto de LinkedIn no traen la empresa** (`linkedin.followups`): para cumplir «no contactes a esa empresa» (E5) hay que cruzarlos con la base.
+  10. **Los candidatos a segundo contacto de LinkedIn no traen la empresa** (`linkedin.followups`): para cumplir «no contactes a esa empresa» (E5) hay que cruzarlos con la base. *Resuelta en este PR:* cada candidato trae `company`, la del contacto guardado con ese perfil, o `null` si no hay (nunca se adivina).
 
 ## Límites
 
