@@ -1,4 +1,5 @@
 import {
+  hasUsableDraftSellerOfferV2,
   normalizeDraftSellerProfileV2,
   type DraftSellerProfileV2,
 } from '@/lib/server/draft-context-v2';
@@ -126,19 +127,77 @@ export function normalizeSellerProfile(value: unknown): DraftSellerProfileV2 {
   });
 }
 
-export async function loadSellerProfile(userId: string): Promise<DraftSellerProfileV2> {
+const SELLER_PROFILE_COLUMNS = 'full_name,job_title,company_name,company_domain,signatures';
+
+/**
+ * The person's own offer, or, while they have not written one, the offer of an owner or admin of the same organization.
+ * A draft without an offer is blocked (draft-context-v2.ts, `seller_profile_incomplete`): in production 25 of 28 people
+ * of the main organization had none, so nobody but the admin could draft. The sender stays the person: name and role are
+ * always theirs, and filling «Perfil» replaces the borrowed offer (docs/ia-medida.md).
+ */
+export async function loadSellerProfile(
+  userId: string,
+  organizationId?: string | null,
+  admin: any = null,
+): Promise<DraftSellerProfileV2> {
+  let personal: DraftSellerProfileV2;
   try {
-    const { data, error } = await getSupabaseAdminClient()
+    const client = admin || getSupabaseAdminClient();
+    const { data, error } = await client
       .from('profiles')
-      .select('full_name,job_title,company_name,company_domain,signatures')
+      .select(SELLER_PROFILE_COLUMNS)
       .eq('id', userId)
       .maybeSingle();
     if (error) throw error;
-    return normalizeSellerProfile(data || {});
+    personal = normalizeSellerProfile(data || {});
   } catch (error) {
     console.warn('[seller-profile] profile unavailable; using a neutral profile:', error);
     return normalizeSellerProfile({});
   }
+  if (!organizationId || hasUsableDraftSellerOfferV2(personal)) return personal;
+
+  try {
+    const organizationOffer = await loadOrganizationOffer(admin || getSupabaseAdminClient(), organizationId, userId);
+    if (!organizationOffer) return personal;
+    return normalizeDraftSellerProfileV2({
+      ...organizationOffer,
+      name: personal.name,
+      jobTitle: personal.jobTitle,
+      companyName: personal.companyName !== 'Mi empresa' ? personal.companyName : organizationOffer.companyName,
+      companyDomain: personal.companyDomain || organizationOffer.companyDomain,
+      sector: personal.sector || organizationOffer.sector,
+    });
+  } catch (error) {
+    console.warn('[seller-profile] organization offer unavailable:', error);
+    return personal;
+  }
+}
+
+/** The first owner or admin of the organization (oldest first) whose profile has a usable offer. */
+async function loadOrganizationOffer(admin: any, organizationId: string, userId: string): Promise<DraftSellerProfileV2 | null> {
+  const { data: leaders, error: leadersError } = await admin
+    .from('organization_members')
+    .select('user_id, role, created_at')
+    .eq('organization_id', organizationId)
+    .in('role', ['owner', 'admin'])
+    .order('created_at', { ascending: true })
+    .limit(10);
+  if (leadersError) throw leadersError;
+  const ids = ((leaders || []) as Array<{ user_id: string }>).map((leader) => text(leader.user_id)).filter((id) => id && id !== userId);
+  if (ids.length === 0) return null;
+  const { data: profiles, error: profilesError } = await admin
+    .from('profiles')
+    .select(`id,${SELLER_PROFILE_COLUMNS}`)
+    .in('id', ids);
+  if (profilesError) throw profilesError;
+  const byId = new Map(((profiles || []) as Array<Record<string, unknown>>).map((profile) => [text(profile.id), profile]));
+  for (const id of ids) {
+    const candidate = byId.get(id);
+    if (!candidate) continue;
+    const normalized = normalizeSellerProfile(candidate);
+    if (hasUsableDraftSellerOfferV2(normalized)) return normalized;
+  }
+  return null;
 }
 
 export async function loadReportV2SellerConfiguration(input: {

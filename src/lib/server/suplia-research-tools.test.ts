@@ -152,3 +152,28 @@ test('premium brand research fails closed when no credit boundary is available',
     (globalThis as any).fetch = originalFetch;
   }
 });
+
+test('a research job searches the web with the credit it already paid, instead of failing every search', async () => {
+  const { nativeResearchSearchContext } = await import('./native-research-search-context');
+  const { researchSerpCompanyNews } = await import('./suplia-research-tools');
+  const originalApiKey = process.env.SERPER_API_KEY;
+  process.env.SERPER_API_KEY = 'test-serper-key';
+  let providerCalls = 0;
+  (globalThis as any).fetch = async () => {
+    providerCalls += 1;
+    return new Response(JSON.stringify({ news: [{ title: 'Acme abre nueva planta', link: 'https://news.example.cl/acme', snippet: 'Expansión', date: '2026-09-20' }] }), { status: 200 });
+  };
+  try {
+    const context = nativeResearchSearchContext('e73dd11f-c8db-4ffc-9711-47dc74295064', 'lead-1', {});
+    const result: any = await researchSerpCompanyNews({ company: 'Acme', domain: 'acme.cl', cache: false }, context);
+    assert.equal(result.status, 'completed');
+    assert.equal(providerCalls, 1);
+    // Without the hook, the same call is refused before reaching the provider: what production saw in 23 of 41 reports.
+    await assert.rejects(researchSerpCompanyNews({ company: 'Acme', domain: 'acme.cl', cache: false }, { ...context, consumeResearchCredit: undefined }), /RESEARCH_CREDIT_RESERVATION_REQUIRED/);
+    assert.equal(providerCalls, 1);
+  } finally {
+    if (originalApiKey == null) delete process.env.SERPER_API_KEY;
+    else process.env.SERPER_API_KEY = originalApiKey;
+    (globalThis as any).fetch = originalFetch;
+  }
+});
