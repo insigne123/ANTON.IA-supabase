@@ -122,3 +122,27 @@ test('history tells the model which approved actions already ran and how they en
   const history = await loadCoworkHistory(client, { userId: 'owner', organizationId: 'org' }, 'a');
   assert.deepEqual(history.turns[0].actions, [{ kind: 'enrich_contact', label: 'Enriquecer contacto Carlos A. (Minera Centinela)', outcome: 'ejecutada', result: { found: false, email: null } }]);
 });
+
+test('a parent turn with a long list keeps its first rows and says how many it left out instead of failing the next turn', async () => {
+  const items = Array.from({ length: 100 }, (_, index) => ({ id: `apollo:person-${index}`, name: 'Persona', title: 'Gerente de Personas',
+    company: `Empresa ${index}`, fit: 'Posible comprador: cargo con «gerente de personas» · outsourcing, 120 empleados', notes: 'x'.repeat(600) }));
+  const client = { from(table: string) {
+    const where: Record<string, string> = {};
+    const chain = {
+      select: () => chain, order: () => chain, limit: () => chain, in: () => chain,
+      eq: (key: string, value: string) => { where[key] = value; return chain; },
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: where.kind === 'tool.completed'
+        ? [{ payload: { action: 'prospecting.search', result: { scope: 'external_search', items, next: { page: 1, offset: 25 } } } }] : [], error: null })),
+      maybeSingle: async () => ({ data: table === 'cowork_runs'
+        ? { id: where.id, message: 'Busca gerentes de personas', status: 'completed', parent_run_id: null }
+        : { payload: { reply: 'Encontré 100 personas.', document: null } }, error: null }),
+    };
+    return chain;
+  } } as unknown as SupabaseClient;
+  const history = await loadCoworkHistory(client, { userId: 'owner', organizationId: 'org' }, 'search-turn');
+  const result = (history.turns[0].observations[0] as { result: { items: unknown[]; itemsOmitted: number; next: unknown } }).result;
+  assert.ok(result.items.length > 0 && result.items.length < 100);
+  assert.equal(result.items.length + result.itemsOmitted, 100);
+  assert.deepEqual(result.next, { page: 1, offset: 25 });
+  assert.ok(JSON.stringify(history.turns[0]).length <= 60000);
+});

@@ -682,3 +682,41 @@ test('LinkedIn match accepts the same slug with or without accents, and a missin
       (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('a people search inside the companies a search chose sends their ids in groups of 50 and its own page', async () => {
+  const requests: URL[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requests.push(url);
+    const ids = url.searchParams.getAll('organization_ids[]');
+    return Response.json({ people: ids.slice(0, 2).map(id => ({ id: `${id}-person`, first_name: 'Ana', title: 'HR Director', organization: { id } })) });
+  };
+  try {
+    const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
+    const ids = Array.from({ length: 50 }, (_, index) => `org-${index}`);
+    const parsed = validateLeadSearchInput({
+      provider: 'apollo', search_mode: 'batch', organization_ids: ids, titles: ['HR Director'], include_similar_titles: true, max_results: 100, per_page: 100,
+    }, config);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].searchParams.getAll('organization_ids[]'), ids);
+    assert.equal(requests[0].searchParams.get('include_similar_titles'), 'true');
+    assert.equal(requests[0].searchParams.get('per_page'), '100');
+    assert.deepEqual(result.leads.map((lead: { id: string }) => lead.id), ['org-0-person', 'org-1-person']);
+    assert.equal(result.organization_search_credits, 0);
+
+    // «Traer más» on a single people search asks the provider for that page.
+    requests.length = 0;
+    const paged = validateLeadSearchInput({ provider: 'apollo', search_mode: 'batch', titles: ['HR Director'], max_results: 25, page: 3 }, config);
+    assert.equal(paged.ok, true);
+    if (!paged.ok) return;
+    await executeProviderLeadSearch(paged.value, config, { APOLLO_API_KEY: 'apollo-test-key' });
+    assert.equal(requests[0].searchParams.get('page'), '3');
+    assert.deepEqual(requests[0].searchParams.getAll('organization_ids[]'), []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

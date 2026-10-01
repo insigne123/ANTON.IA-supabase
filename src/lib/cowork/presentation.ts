@@ -1,5 +1,6 @@
 import { coworkSpecialistFor, type CoworkSpecialistInfo } from './agents';
 import { collectCoworkLeadRows } from './lead-export';
+import { coworkSearchCriteriaSchema, coworkSearchStrategy } from './search-proposal';
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
@@ -323,7 +324,13 @@ export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' 
   if (proposal.type === 'search') {
     const criteria = (proposal.payload.criteria || {}) as { target?: string; limit?: number };
     const companies = criteria.target === 'companies';
-    return { happens: `Se buscan hasta ${criteria.limit ?? 25} ${companies ? 'empresas' : 'contactos nuevos'} en el proveedor (1 búsqueda de tu cuota).`,
+    const parsed = coworkSearchCriteriaSchema.safeParse(proposal.payload.criteria);
+    const more = parsed.success && ((parsed.data.page || 1) > 1 || Boolean(parsed.data.offset)) ? ' más' : '';
+    if (parsed.success && coworkSearchStrategy(parsed.data) === 'companies_first') {
+      return { happens: `Se buscan empresas de esos rubros y, dentro de ellas, hasta ${parsed.data.limit} contactos nuevos${more} en el proveedor (1 búsqueda de tu cuota).`,
+        not: 'No se revelan correos ni se guardan contactos, y no se envía nada.' };
+    }
+    return { happens: `Se buscan hasta ${criteria.limit ?? 25} ${companies ? 'empresas' : 'contactos nuevos'}${more} en el proveedor (1 búsqueda de tu cuota).`,
       not: 'No se revelan correos ni se guardan contactos, y no se envía nada.' };
   }
   if (proposal.type === 'note') {

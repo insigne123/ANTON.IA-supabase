@@ -3,7 +3,7 @@ import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocum
 import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
-import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
+import { coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
 import { coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
@@ -526,8 +526,19 @@ function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
   const places = unique([...(criteria.locations || []), ...(criteria.companyLocations || [])]).slice(0, 2);
   const industries = unique(criteria.industries || []).slice(0, 2);
   const list = (items: string[], last: string) => items.length > 1 ? `${items.slice(0, -1).join(', ')} ${last} ${items[items.length - 1]}` : items[0];
+  // «Traer más» continues the same search: a later page, or the next people of the same companies.
+  const verb = (criteria.page || 1) > 1 || criteria.offset ? 'seguir buscando' : 'buscar';
+  if (coworkSearchStrategy(criteria) === 'companies_first') return [
+    `Propongo ${verb} empresas`,
+    industries.length ? ` del rubro ${list(industries, 'y')}` : '',
+    ` y, dentro de ellas, hasta ${criteria.limit} personas`,
+    titles.length ? ` con cargos como ${list(titles, 'o')}` : '',
+    places.length ? `, en ${list(places, 'y')}` : '',
+    '. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.',
+    LATER_STEP.test(request) ? ' Cuando veas los resultados y guardes a quienes te sirvan, sigo con la campaña.' : '',
+  ].join('');
   return [
-    `Propongo buscar hasta ${criteria.limit || 25} ${criteria.target === 'companies' ? 'empresas' : 'personas'}`,
+    `Propongo ${verb} hasta ${criteria.limit || 25} ${criteria.target === 'companies' ? 'empresas' : 'personas'}`,
     titles.length ? ` con cargos como ${list(titles, 'o')}` : '',
     industries.length ? `, del rubro ${list(industries, 'y')}` : '',
     places.length ? `, en ${list(places, 'y')}` : '',
