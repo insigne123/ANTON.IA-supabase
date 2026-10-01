@@ -364,7 +364,8 @@ function savedDraft(block: Extract<CoworkBlock, { type: 'email_draft' | 'sequenc
   return block;
 }
 
-const FIELD = 'w-full rounded-[10px] border border-cw-border bg-cw-elevated px-3 text-cw-text placeholder:text-cw-faint focus-visible:border-cw-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]';
+/** The text field of Cowork's cards, shared by the forms that edit an email. */
+export const FIELD = 'w-full rounded-[10px] border border-cw-border bg-cw-elevated px-3 text-cw-text placeholder:text-cw-faint focus-visible:border-cw-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]';
 
 /** Subject and body of one email, editable; shared by the panel and the campaign review. */
 export function CoworkEmailFields<T extends { subject: string; body: string }>({ step, index, total, idPrefix, onChange }: {

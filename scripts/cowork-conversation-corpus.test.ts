@@ -328,7 +328,7 @@ test('with the Writer on, a drafting turn hands the emails over and still passes
   const decide: CorpusDecider = async context => context.observations.length === 0
     ? read('message.context')
     : coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
-  const signed = (body: string) => `Hola,\n${body}\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Y.\nGerente Comercial, Yago SpA`;
+  const signed = (body: string) => `Hola {{nombre}},\n${body}\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Y.\nGerente Comercial, Yago SpA`;
   // The real pipeline with scripted models: the first draft offers something «gratis», the checks catch it and the Writer fixes it.
   const drafts = [['AXIS es gratis el primer mes.', 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.'],
     ['AXIS revisa antecedentes en el Poder Judicial.', 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.']];

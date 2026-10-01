@@ -246,7 +246,7 @@ test('each email or sequence card knows what happened to it later in the thread'
   assert.deepEqual(coworkCardStatuses([first, { run: run('b', 2, { message: campaign, status: 'waiting_approval' }), events: [request] }]).get('a:block:0'),
     { label: 'Campaña propuesta · espera tu aprobación', tone: 'attention' });
   const created = coworkCardStatuses([first, { run: run('b', 2, { message: campaign }), events: [request, event('effect.approved'), event('effect.started'), event('effect.completed')] }]);
-  assert.deepEqual(created.get('a:block:0'), { label: 'Campaña creada · pausada', tone: 'success' });
+  assert.deepEqual(created.get('a:block:0'), { label: 'Campaña creada · guardada sin enviar', tone: 'success' });
   assert.equal(created.has('a:block:1'), false);
   assert.deepEqual(coworkCardStatuses([first, { run: run('b', 2, { message: campaign }), events: [request, event('run.completed', { reply: 'Descartada.', document: null })] }]).get('a:block:0'),
     { label: 'Campaña descartada · no se creó', tone: 'neutral' });
@@ -267,7 +267,7 @@ test('each email or sequence card knows what happened to it later in the thread'
 
 test('an approval says what happens and what does not, and where the proposal stands', () => {
   const effect = (kind: string) => ({ type: 'effect' as const, payload: { kind } });
-  assert.deepEqual(coworkProposalOutcome(effect('campaign_create')), { happens: 'Se crea la campaña con estos correos, pausada.', not: 'No se envía nada: activarla pide otra aprobación.' });
+  assert.deepEqual(coworkProposalOutcome(effect('campaign_create')), { happens: 'Se guarda la campaña con el correo de cada persona, sin enviar (pausada).', not: 'No sale nada hasta que la actives, y activarla pide otra aprobación.' });
   assert.match(coworkProposalOutcome({ type: 'search', payload: { criteria: { target: 'companies', limit: 10 } } }).happens, /hasta 10 empresas/);
   assert.match(coworkProposalOutcome({ type: 'search', payload: { criteria: { limit: 5 } } }).happens, /hasta 5 contactos nuevos/);
   assert.match(coworkProposalOutcome({ type: 'note', payload: { leadName: 'Ana Soto' } }).happens, /nota de Ana Soto/);

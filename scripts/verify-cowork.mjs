@@ -12,6 +12,7 @@ const checks = [
   ['scripts/test-cowork-search-results-ui.mjs'],
   ['scripts/test-cowork-research-notice.mjs'],
   ['scripts/test-cowork-research-progress-ui.mjs'],
+  ['scripts/test-cowork-campaign-people-ui.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-send-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-batch-corpus.test.ts'],

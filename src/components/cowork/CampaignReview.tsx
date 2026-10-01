@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { ReviewActions, ReviewChips, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote } from './ReviewParts';
 import { CoworkEmailFields } from './CoworkBlocks';
+import { CampaignPeople, type CampaignPerson } from './CampaignPeople';
 import { CwButton } from './ui';
 
 type Preview = {
@@ -13,14 +14,17 @@ type Preview = {
   emails?: string[]; matched?: number; edits?: number;
   status?: string; revision?: number; recipients?: number; matches?: boolean;
   definitionHash?: string;
+  /** Each recipient with the first email they will receive (servers before Plan 5 PR-6 send only `emails`). */
+  people?: CampaignPerson[];
+  relationship?: 'never_contacted' | 'previously_contacted';
 };
 
 const STATUS: Record<string, string> = {
-  draft: 'Borrador', paused: 'Pausada', active: 'Activa', approved: 'Aprobada', completed: 'Terminada', cancelled: 'Cancelada',
+  draft: 'Borrador · no envía nada', paused: 'Pausada · no envía nada', active: 'Activa', approved: 'Aprobada', completed: 'Terminada', cancelled: 'Cancelada',
 };
 
-/** Campaign review card: staged definition with live audience for creation,
- * current state with hash match for activate/pause. */
+/** Campaign review card: staged definition with each person's first email and the
+ * live audience for creation, current state with hash match for activate/pause. */
 export function CampaignReview({ runId, onApprove, onReject, resolving }: {
   runId: string; onApprove: () => void; onReject: () => void; resolving: boolean;
 }) {
@@ -31,6 +35,8 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saved, setSaved] = useState(false);
+  // One person's first email open for editing (CampaignPeople): approving waits for it.
+  const [editingPerson, setEditingPerson] = useState(false);
   const load = useCallback(async () => {
     const response = await fetch(`/api/cowork/runs/${runId}/campaign-preview`, { cache: 'no-store' });
     const data = await response.json();
@@ -63,9 +69,14 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
   if (error) return <ReviewError message={error} />;
   if (!preview) return <ReviewLoading label="Cargando propuesta de campaña…" />;
   const complete = !draft || draft.every(item => item.subject.trim() && item.body.trim());
-  const approveLabel = preview.kind === 'campaign_create' ? 'Crear borrador pausado'
+  const approveLabel = preview.kind === 'campaign_create' ? 'Crear campaña sin enviar'
     : preview.kind === 'campaign_activate' ? 'Aprobar y activar' : 'Pausar campaña';
   const blocked = preview.kind !== 'campaign_create' && preview.matches === false;
+  const channel = preview.provider === 'outlook' ? 'Outlook' : 'Gmail';
+  const people = preview.people;
+  const total = (preview.emails || []).length;
+  const unavailable = people ? people.filter(person => !person.available || !person.first).length : total - (preview.matched ?? total);
+  const own = (people || []).filter(person => person.personal).length;
   let day = 1;
   return <div className="space-y-4">
     <div>
@@ -74,9 +85,14 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
     </div>
     {preview.kind === 'campaign_create' ? <>
       <ReviewFields>
-        <ReviewField label={`Destinatarios (${preview.matched} de ${(preview.emails || []).length})`}><ReviewChips values={preview.emails} empty="Sin destinatarios" /></ReviewField>
-        <ReviewField label="Canal">{preview.provider === 'outlook' ? 'Outlook' : 'Gmail'}</ReviewField>
+        {people
+          ? <ReviewField label="Para">{total === 1 ? '1 persona' : `${total} personas`}{unavailable ? ` · ${unavailable === 1 ? '1 necesita' : `${unavailable} necesitan`} revisión` : ''}</ReviewField>
+          : <ReviewField label={`Destinatarios (${preview.matched} de ${total})`}><ReviewChips values={preview.emails} empty="Sin destinatarios" /></ReviewField>}
+        <ReviewField label="Canal">{channel}</ReviewField>
       </ReviewFields>
+      {people && people.length > 0 && <CampaignPeople runId={runId} people={people} objective={preview.objective || ''}
+        relationship={preview.relationship || 'never_contacted'} definitionHash={preview.definitionHash} locked={Boolean(draft)}
+        onSaved={async () => { setPreview(await load()); }} onEditingChange={setEditingPerson} />}
       {draft
         ? <div className="space-y-4">
           {draft.map((item, index) => <div key={index} className="rounded-xl border border-cw-border bg-cw-panel p-3.5">
@@ -92,11 +108,18 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
         </div>
         : <>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[12.5px] font-medium text-cw-muted">{(preview.messages || []).length === 1 ? 'Correo' : `${(preview.messages || []).length} correos`}{preview.edits ? ' · editados por ti' : ''}</p>
-          <CwButton variant="secondary" size="xs" onClick={() => { setSaved(false); setDraft((preview.messages || []).map(message => ({ subject: message.subject, body: message.body }))); }}>
-            <Pencil aria-hidden="true" />Editar correos
+          <h3 className="text-[12.5px] font-medium text-cw-muted">{people
+            ? `Secuencia para todos · ${(preview.messages || []).length === 1 ? '1 correo' : `${(preview.messages || []).length} correos`}`
+            : (preview.messages || []).length === 1 ? 'Correo' : `${(preview.messages || []).length} correos`}{preview.edits ? ' · editada por ti' : ''}</h3>
+          <CwButton variant="secondary" size="xs" disabled={editingPerson} onClick={() => { setSaved(false); setDraft((preview.messages || []).map(message => ({ subject: message.subject, body: message.body }))); }}>
+            <Pencil aria-hidden="true" />{people ? 'Editar secuencia' : 'Editar correos'}
           </CwButton>
         </div>
+        {people && <p className="text-[12.5px] leading-5 text-cw-muted">
+          {'{{nombre}}, {{empresa}} y {{cargo}} se completan con los datos de cada persona.'}
+          {own === 0 ? '' : own === people.length ? ' Cada persona tiene su propio correo 1, así que el de la secuencia no se usa.'
+            : ' El correo 1 de la secuencia va solo a quienes no tienen uno propio.'}
+        </p>}
       <ol className="space-y-2">
         {(preview.messages || []).map((message, index) => {
           if (index > 0) day += message.delayDays;
@@ -114,7 +137,7 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
       </ol>
       {saved && <p role="status" className="text-[12.5px] text-cw-muted">Guardaste tus cambios: la campaña se crea con esta versión.</p>}
       </>}
-      <ReviewNote>Se crea pausada como borrador en {preview.provider === 'outlook' ? 'Outlook' : 'Gmail'}. Activarla requiere otra revisión.</ReviewNote>
+      <ReviewNote>Al aprobar, la campaña queda guardada sin enviar en {channel}: nada sale hasta que la actives, y activarla pide otra aprobación.</ReviewNote>
     </> : <>
       <ReviewFields>
         <ReviewField label="Estado actual">{STATUS[String(preview.status)] || preview.status} · revisión {preview.revision}</ReviewField>
@@ -123,9 +146,11 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
       </ReviewFields>
       <ReviewNote ok={!blocked}>{blocked
         ? 'La campaña cambió desde la propuesta. Descártala y pide una nueva revisión.'
-        : 'Al aprobar se verifican de nuevo audiencia, bajas y cada mensaje.'}</ReviewNote>
+        : preview.kind === 'campaign_activate'
+          ? 'Al aprobar empiezan los envíos según su calendario. Antes se verifican de nuevo audiencia, bajas y cada mensaje.'
+          : 'Al aprobar se detienen los envíos que faltan. Lo que ya se envió no se revierte.'}</ReviewNote>
     </>}
-    {draft && <p className="text-right text-[12px] text-cw-muted">Guarda o cancela tus cambios antes de aprobar.</p>}
-    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel={approveLabel} disabled={blocked || Boolean(draft)} resolving={resolving} resolvingLabel="Guardando…" />
+    {(draft || editingPerson) && <p className="text-right text-[12px] text-cw-muted">Guarda o cancela tus cambios antes de aprobar.</p>}
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel={approveLabel} disabled={blocked || Boolean(draft) || editingPerson} resolving={resolving} resolvingLabel="Guardando…" />
   </div>;
 }

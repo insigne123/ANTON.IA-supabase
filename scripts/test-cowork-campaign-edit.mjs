@@ -1,6 +1,6 @@
-// Isolated test of editCoworkCampaignMessages: with M4 applied, the edit is one call to
-// cowork_edit_campaign_definition (atomic with the approval); without it, the two steps of before.
-// In-memory client, no environment, database or provider access.
+// Isolated test of editCoworkCampaignMessages and editCoworkCampaignPerson: with M4 applied, the edit is one call
+// to cowork_edit_campaign_definition (atomic with the approval); without it, the two steps of before. Also the
+// staging of a proposal with a first email per person. In-memory client, no environment, database or provider access.
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
@@ -23,9 +23,10 @@ globalThis.__campaignEditAdmin = {
     const builder = {
       select: () => builder, eq: () => builder,
       update: values => { query.op = 'update'; query.values = values; return builder; },
+      upsert: values => { query.op = 'upsert'; query.values = values; return builder; },
       insert: async values => { state.writes.push({ table, op: 'insert', values }); return { error: null }; },
       maybeSingle: async () => {
-        if (query.op === 'update') { state.writes.push({ table, op: 'update', values: query.values }); return { data: { run_id: RUN }, error: null }; }
+        if (query.op === 'update' || query.op === 'upsert') { state.writes.push({ table, op: query.op, values: query.values }); return { data: { run_id: RUN }, error: null }; }
         return { data: { definition: structuredClone(state.definition) }, error: null };
       },
     };
@@ -33,7 +34,7 @@ globalThis.__campaignEditAdmin = {
   },
 };
 const result = await build({
-  stdin: { contents: 'export { editCoworkCampaignMessages } from "./src/lib/server/cowork/campaign-ops"; export { canonicalSha256 } from "./src/lib/messaging-contracts";',
+  stdin: { contents: 'export { editCoworkCampaignMessages, editCoworkCampaignPerson, stageCoworkCampaignDefinition } from "./src/lib/server/cowork/campaign-ops"; export { canonicalSha256 } from "./src/lib/messaging-contracts";',
     resolveDir: process.cwd(), sourcefile: 'campaign-edit-test.ts', loader: 'ts' },
   bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
   plugins: [{ name: 'isolated-dependencies', setup(build) {
@@ -44,13 +45,13 @@ const result = await build({
         { sequence: 1, kind: "approval.requested", payload: { action: "cowork.effect", kind: "campaign_create", targetId: "new-campaign", label: "Crear campaña pausada" } }] }; }` };
       if (args.path === './access') return { contents: 'export async function requireCoworkWorkerAccess(){}' };
       if (args.path.endsWith('supabase-admin')) return { contents: 'export function getSupabaseAdminClient(){ return globalThis.__campaignEditAdmin; }' };
-      return { contents: 'export async function loadAudience(){ return []; } export async function saveBulkCampaign(){} export async function reviewBulkCampaign(){}' };
+      return { contents: 'export async function loadAudience(){ return globalThis.__campaignEditAudience || []; } export async function saveBulkCampaign(){} export async function reviewBulkCampaign(){}' };
     });
   } }],
 });
 const loaded = { exports: {} };
 new Function('require', 'module', 'exports', result.outputFiles[0].text)(require, loaded, loaded.exports);
-const { editCoworkCampaignMessages, canonicalSha256 } = loaded.exports;
+const { editCoworkCampaignMessages, editCoworkCampaignPerson, stageCoworkCampaignDefinition, canonicalSha256 } = loaded.exports;
 const expectedHash = canonicalSha256(stored);
 const auth = { user: { id: USER }, organizationId: ORG };
 const edits = [{ subject: 'AXIS: antecedentes en minutos', body: stored.messages[0].body }, { subject: stored.messages[1].subject, body: stored.messages[1].body }];
@@ -101,7 +102,41 @@ try {
   assert.deepEqual(await editCoworkCampaignMessages(auth, RUN, stored.messages.map(({ subject, body }) => ({ subject, body })), expectedHash), { changed: [] });
   assert.equal(state.calls.length, 0);
   console.log('PASS: a campaign edit is one atomic call with the version read (stale or no longer pending: refused, nothing written); without M4, the two steps of before; any other failure writes nothing.');
+
+  // The first email of one person: the same call, with that person's own version and the rest as it was.
+  reset({ data: 'edited', error: null });
+  const felipe = { email: 'felipe@securitas.cl', subject: 'Felipe, AXIS para Securitas', body: 'Hola Felipe,\nvi que Securitas abrió turnos en Antofagasta.' };
+  assert.deepEqual(await editCoworkCampaignPerson(auth, RUN, felipe, expectedHash), { changed: [0] });
+  const [personCall, personArgs] = state.calls[0];
+  assert.equal(personCall, 'cowork_edit_campaign_definition');
+  assert.deepEqual(personArgs.p_changed, [1]);
+  assert.deepEqual(personArgs.p_definition.overrides, [{ ...felipe, messageIndex: 0 }]);
+  assert.deepEqual({ ...personArgs.p_definition, overrides: null }, { ...stored, overrides: null }, 'the template and the recipients stay');
+  reset({ data: 'edited', error: null });
+  await assert.rejects(editCoworkCampaignPerson(auth, RUN, { ...felipe, email: 'otra@x.cl' }, expectedHash), error => error.status === 400);
+  assert.equal(state.calls.length, 0);
+  console.log('PASS: editing one person\'s first email is the same atomic call, with only that person\'s version; someone outside the campaign is refused.');
+
+  // Staging a proposal: each person's first email becomes their own version, and every email is built before the card.
+  const scope = { userId: USER, organizationId: ORG };
+  const person = (email, name) => ({ email, name, company: 'Securitas', title: 'Jefe de Personas', blockedReason: null });
+  const proposal = { name: 'AXIS', objective: 'Reuniones', criteria: stored.criteria, emails: stored.emails, provider: 'google',
+    messages: [{ subject: 'AXIS', body: 'Hola {{nombre}},\nte escribo por AXIS.', delayDays: 0 }, { subject: 'Seguimiento', body: 'Hola {{nombre}},\n¿lo pudiste ver?', delayDays: 3 }],
+    firstEmails: [felipe] };
+  reset(null);
+  globalThis.__campaignEditAudience = [person('marcela@sodexo.cl', 'Marcela Soto'), person('felipe@securitas.cl', 'Felipe Muñoz')];
+  assert.deepEqual(await stageCoworkCampaignDefinition(scope, RUN, proposal), { recipients: 2 });
+  const staged = state.writes.find(write => write.op === 'upsert').values.definition;
+  assert.deepEqual(staged.overrides, [{ ...felipe, messageIndex: 0 }]);
+  assert.deepEqual(staged.messages.map(message => message.body.split('\n')[0]), ['Hola {{nombre}},', 'Hola {{nombre}},']);
+  // Someone without a first name never gets «Hola ,»: the proposal goes back to the model and nothing is staged.
+  reset(null);
+  globalThis.__campaignEditAudience = [person('marcela@sodexo.cl', 'Ma***a Soto'), person('felipe@securitas.cl', 'Felipe Muñoz')];
+  await assert.rejects(stageCoworkCampaignDefinition(scope, RUN, proposal), /marcela@sodexo\.cl no tiene un nombre de pila guardado/);
+  assert.equal(state.writes.length, 0);
+  console.log('PASS: staging keeps each person\'s first email as their own version and refuses, before the card, someone without a first name.');
 } finally {
   delete globalThis.__campaignEdit;
   delete globalThis.__campaignEditAdmin;
+  delete globalThis.__campaignEditAudience;
 }

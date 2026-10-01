@@ -9,7 +9,11 @@ import { loadAudience } from '@/lib/server/bulk-campaign-audience';
 import { reviewBulkCampaign, saveBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { canonicalSha256, deterministicMessagingUuid } from '@/lib/messaging-contracts';
 import { coworkProposalView } from '@/lib/cowork/presentation';
-import { CoworkCampaignEditRefused, coworkEditedCampaignDefinition, type CoworkCampaignEdit } from '@/lib/cowork/campaign-edit';
+import {
+  CoworkCampaignEditRefused, coworkEditedCampaignDefinition, coworkEditedCampaignPerson, type CoworkCampaignEdit, type CoworkCampaignPersonEdit,
+} from '@/lib/cowork/campaign-edit';
+import { coworkCampaignRenderProblem } from '@/lib/cowork/campaign-people';
+import type { CampaignInput } from '@/lib/bulk-campaigns';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 
 /** Fase 2D: campaign effects on bulk campaigns. Creation stages the reviewed
@@ -41,11 +45,17 @@ export async function stageCoworkCampaignDefinition(
       throw new Error(`El destinatario ${email} ya no está disponible para esta audiencia.`);
     }
   }
+  // The first email written for a person replaces the template's first email for them only.
   const full = CampaignInputSchema.parse({
     name: parsed.name, description: parsed.objective, objective: parsed.objective,
     criteria: parsed.criteria, emails: parsed.emails, messages: parsed.messages,
-    provider: parsed.provider, overrides: [],
+    provider: parsed.provider,
+    overrides: parsed.firstEmails.map(item => ({ email: item.email, messageIndex: 0, subject: item.subject, body: item.body })),
   });
+  // Every email of every person is built here, with their data, before the card exists: a missing first name or
+  // an unknown variable goes back to the model instead of failing when the campaign is created.
+  const problem = coworkCampaignRenderProblem(full, audience);
+  if (problem) throw new Error(problem);
   const staged = await client.from('cowork_campaign_definitions').upsert(
     { run_id: runId, user_id: scope.userId, organization_id: scope.organizationId, definition: full },
     { onConflict: 'run_id', ignoreDuplicates: true }).select('run_id').maybeSingle();
@@ -72,6 +82,24 @@ export async function stageCoworkCampaignDefinition(
 export async function editCoworkCampaignMessages(
   auth: AuthContext, runId: string, edits: CoworkCampaignEdit, expectedHash?: string,
 ): Promise<{ changed: number[] }> {
+  return saveCoworkCampaignEdit(auth, runId, expectedHash, definition => coworkEditedCampaignDefinition(definition, edits));
+}
+
+/**
+ * The person edits the first email of one recipient (by hand, or applying what the AI proposed for them). It is
+ * stored as that person's own version (an override at the first step), with the same guarantees as the sequence:
+ * only while the proposal is pending, only over the version they saw, recorded without the text.
+ */
+export async function editCoworkCampaignPerson(
+  auth: AuthContext, runId: string, person: CoworkCampaignPersonEdit, expectedHash?: string,
+): Promise<{ changed: number[] }> {
+  return saveCoworkCampaignEdit(auth, runId, expectedHash, definition => coworkEditedCampaignPerson(definition, person));
+}
+
+async function saveCoworkCampaignEdit(
+  auth: AuthContext, runId: string, expectedHash: string | undefined,
+  apply: (definition: unknown) => { next: CampaignInput; changed: number[] },
+): Promise<{ changed: number[] }> {
   requireBulkEnabled();
   const state = await getCoworkRun(auth, runId);
   if (!state) throw new CoworkCampaignEditRefused('Trabajo no encontrado.', 404);
@@ -88,7 +116,7 @@ export async function editCoworkCampaignMessages(
   if (!expectedHash || canonicalSha256(row.data.definition) !== expectedHash) {
     throw new CoworkCampaignEditRefused('La campaña cambió mientras la editabas: vuelve a abrirla y repite el cambio.', 409);
   }
-  const { next, changed } = coworkEditedCampaignDefinition(row.data.definition, edits);
+  const { next, changed } = apply(row.data.definition);
   if (!changed.length) return { changed };
   // One transaction with the approval (M4, cowork_edit_campaign_definition): the edit lands only while the
   // proposal is pending and only over the version read above, and records its event. Until that migration
