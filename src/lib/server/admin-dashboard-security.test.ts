@@ -8,19 +8,36 @@ const groupsRoute = readFileSync('src/app/api/dashboard/admin/groups/route.ts', 
 const creditsRoute = readFileSync('src/app/api/dashboard/admin/credits/route.ts', 'utf8');
 const userProfileRoute = readFileSync('src/app/api/dashboard/admin/users/[userId]/route.ts', 'utf8');
 const userProfileData = readFileSync('src/lib/server/admin-user-profile-data.ts', 'utf8');
+const valueRoute = readFileSync('src/app/api/dashboard/admin/value/route.ts', 'utf8');
+const dashboardData = readFileSync('src/lib/server/admin-dashboard-data.ts', 'utf8');
+const creditData = readFileSync('src/lib/server/admin-credit-data.ts', 'utf8');
+const valueData = readFileSync('src/lib/server/admin-value-data.ts', 'utf8');
 const sidebarSource = readFileSync('src/components/app-sidebar.tsx', 'utf8');
 const hostingConfig = readFileSync('apphosting.yaml', 'utf8');
 const peoplePage = readFileSync('src/app/(app)/dashboard/admin/users/page.tsx', 'utf8');
 const teamsPage = readFileSync('src/app/(app)/dashboard/admin/teams/page.tsx', 'utf8');
 
-test('admin dashboard authorization fails closed on the configured tenant and privileged roles', () => {
-  assert.match(authSource, /process\.env\.ADMIN_DASHBOARD_ORGANIZATION_ID/);
-  assert.match(authSource, /process\.env\.ADMIN_DASHBOARD_ALLOWED_EMAILS/);
-  assert.match(authSource, /if \(!configuredId\)[\s\S]*El panel administrativo no está configurado/);
-  assert.match(authSource, /Tu cuenta no está autorizada para abrir este panel/);
-  assert.match(authSource, /\.eq\('organization_id', configuredOrganizationId\)/);
+test('admin dashboard opens for owners and admins of the active organization only, checked again on the server', () => {
+  assert.match(authSource, /resolveActiveOrganization\(sessionClient, user\.id\)/);
+  assert.match(authSource, /\.eq\('organization_id', activeOrganizationId\)/);
   assert.match(authSource, /\.in\('role', \['owner', 'admin'\]\)/);
-  assert.doesNotMatch(authSource, /ADMIN_DASHBOARD_ORGANIZATION_NAME/);
+  assert.match(authSource, /Necesitas un rol de owner o admin para abrir este panel/);
+  assert.doesNotMatch(authSource, /ADMIN_DASHBOARD_ORGANIZATION_ID/, 'no single hard-coded organization any more');
+});
+
+test('credit limits cost the platform money: only the ANTON.IA operators change them', () => {
+  assert.match(authSource, /process\.env\.ADMIN_DASHBOARD_ALLOWED_EMAILS/);
+  assert.match(authSource, /options\.manageCredits && !canManageCredits/);
+  assert.equal((creditsRoute.match(/requireAdminDashboardAccess\(\{ manageCredits: true \}\)/g) || []).length, 2, 'PUT and DELETE');
+  assert.match(creditsRoute, /canManage: auth\.canManageCredits/);
+});
+
+test('the value summary reads only the authorized organization and never lists every platform account', () => {
+  assert.match(valueRoute, /requireAdminDashboardAccess\(\)/);
+  assert.match(valueRoute, /loadAdminValue\(auth\.supabase, auth\.organizationId/);
+  assert.match(valueRoute, /groupId && !UUID_RE\.test\(groupId\)/);
+  for (const source of [dashboardData, creditData, valueData]) assert.doesNotMatch(source, /listUsers/);
+  assert.match(valueData, /\.from\('organization_members'\)[\s\S]*?\.eq\('organization_id', organizationId\)/);
 });
 
 test('credit and user profile routes keep service-role reads inside the authorized organization', () => {
@@ -52,17 +69,13 @@ test('admin routes derive tenant scope from authorization instead of request inp
   assert.match(groupsRoute, /Grupo o usuario no pertenece a esta organización/);
 });
 
-test('admin navigation and hosting configuration use the same production organization', () => {
-  const organizationId = 'e73dd11f-c8db-4ffc-9711-47dc74295064';
-  assert.match(sidebarSource, /label: 'Administración'/);
+test('admin navigation shows the panel to owners and admins, and hosting keeps only the credit operators', () => {
   assert.match(sidebarSource, /href: '\/dashboard\/admin'.*label: 'Administración'/);
-  assert.match(sidebarSource, /process\.env\.NEXT_PUBLIC_ADMIN_DASHBOARD_ORGANIZATION_ID/);
-  assert.match(sidebarSource, /process\.env\.NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS/);
   assert.match(sidebarSource, /organizationRole === 'owner' \|\| organizationRole === 'admin'/);
-  assert.match(hostingConfig, new RegExp(`ADMIN_DASHBOARD_ORGANIZATION_ID[\\s\\S]*${organizationId}`));
-  assert.match(hostingConfig, new RegExp(`NEXT_PUBLIC_ADMIN_DASHBOARD_ORGANIZATION_ID[\\s\\S]*${organizationId}`));
-  assert.match(hostingConfig, /ADMIN_DASHBOARD_ALLOWED_EMAILS[\s\S]*gmeneses@grupoexpro\.com,nicolas\.yarur\.g@yago\.cl/);
-  assert.match(hostingConfig, /NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS[\s\S]*gmeneses@grupoexpro\.com,nicolas\.yarur\.g@yago\.cl/);
+  assert.doesNotMatch(sidebarSource, /NEXT_PUBLIC_ADMIN_DASHBOARD/);
+  assert.doesNotMatch(hostingConfig, /ADMIN_DASHBOARD_ORGANIZATION_ID/);
+  assert.match(hostingConfig, /- variable: ADMIN_DASHBOARD_ALLOWED_EMAILS/);
+  assert.doesNotMatch(hostingConfig, /NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS/);
 });
 
 test('people management derives the actor role from the dashboard organization roster', () => {

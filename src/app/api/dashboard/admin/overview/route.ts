@@ -5,6 +5,7 @@ import {
   requireAdminDashboardAccess,
 } from '@/lib/server/admin-dashboard-auth';
 import { loadAdminDashboardOverview } from '@/lib/server/admin-dashboard-data';
+import { lastDaysInZone } from '@/lib/admin/chile-time';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,20 +17,10 @@ function dateOnly(value: string | null) {
   return value && DATE_RE.test(value) ? value : null;
 }
 
-function defaultRange() {
-  const to = new Date();
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - 29);
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
-}
-
 export async function GET(req: NextRequest) {
   try {
     const auth = await requireAdminDashboardAccess();
-    const defaults = defaultRange();
+    const defaults = lastDaysInZone(30);
     const from = dateOnly(req.nextUrl.searchParams.get('from')) || defaults.from;
     const to = dateOnly(req.nextUrl.searchParams.get('to')) || defaults.to;
     const fromDate = new Date(`${from}T00:00:00.000Z`);

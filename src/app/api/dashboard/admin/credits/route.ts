@@ -26,7 +26,7 @@ export async function GET() {
       auth.organizationId,
       auth.organizationName,
     );
-    return NextResponse.json(overview, { headers: { 'Cache-Control': 'private, no-store' } });
+    return NextResponse.json({ ...overview, canManage: auth.canManageCredits }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     return adminDashboardAuthErrorResponse(error)
       || NextResponse.json({ error: 'No pudimos cargar la configuración de créditos.' }, { status: 500 });
@@ -35,7 +35,7 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
-    const auth = await requireAdminDashboardAccess();
+    const auth = await requireAdminDashboardAccess({ manageCredits: true });
     const body = await request.json().catch(() => ({}));
     const subjectType = String(body.subjectType || '').trim();
     const subjectId = subjectType === 'organization'
@@ -117,7 +117,7 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const auth = await requireAdminDashboardAccess();
+    const auth = await requireAdminDashboardAccess({ manageCredits: true });
     const body = await request.json().catch(() => ({}));
     const subjectType = String(body.subjectType || '').trim();
     const subjectId = String(body.subjectId || '').trim();
