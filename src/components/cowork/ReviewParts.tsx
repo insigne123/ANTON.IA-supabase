@@ -56,6 +56,21 @@ export function ReviewNote({ ok = true, children }: { ok?: boolean; children: Re
   </p>;
 }
 
+/** The automatic read of an email before approving (COWORK_EMAIL_REVIEW): what it found to look at, or that it found nothing. It
+ * advises and never blocks; without a review (off, or it did not answer) the card shows nothing here. */
+export type EmailReview = { checked: boolean; issues: Array<{ id: string; text: string }> };
+export function EmailReviewNote({ review, against }: { review: EmailReview | null | undefined; against: string }) {
+  if (!review?.checked) return null;
+  if (!review.issues.length) return <ReviewNote>Revisado {against}: sin contradicciones ni promesas nuevas.</ReviewNote>;
+  return <div role="note" className="flex items-start gap-2 rounded-lg bg-cw-warning-soft px-2.5 py-2 text-[12.5px] leading-5 text-cw-warning">
+    <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <div>
+      <p className="font-medium">Antes de aprobar, mira esto (la revisión automática puede equivocarse):</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4">{review.issues.map(item => <li key={item.id}>{item.text}</li>)}</ul>
+    </div>
+  </div>;
+}
+
 export function ReviewActions({ onReject, onApprove, approveLabel, rejectLabel = 'Descartar', disabled = false, resolving, resolvingLabel = 'Guardando aprobación…' }: {
   onReject: () => void; onApprove: () => void; approveLabel: string; rejectLabel?: string;
   disabled?: boolean; resolving: boolean; resolvingLabel?: string;

@@ -7,6 +7,8 @@ import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 import { parseCoworkSendTarget } from '@/lib/server/cowork/send-email';
 import { resolveCoworkSender } from '@/lib/server/cowork/sender';
 import { stripHtmlToText } from '@/lib/email-outbound';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { coworkEmailReviewMode, loadCoworkEmailReviewSeller, reviewCoworkEmail } from '@/lib/server/cowork/email-review';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
@@ -43,9 +45,16 @@ export async function GET(req: NextRequest, context: Context) {
     const contentHash = hashMessagingDraftContent(draft);
     const sender = await resolveCoworkSender({ userId: auth.user.id, organizationId: auth.organizationId }, approved.provider);
     const matches = draft.versionId === approved.versionId && contentHash === approved.contentHash && sender.identityHash === approved.senderHash;
+    const text = draft.content.text || stripHtmlToText(draft.content.html || '');
+    // A read of the exact email against the offer (COWORK_EMAIL_REVIEW); it advises and never blocks, and any failure is no review.
+    const review = matches && coworkEmailReviewMode() !== 'off'
+      ? await reviewCoworkEmail({
+        seller: await loadCoworkEmailReviewSeller(getSupabaseAdminClient(), { userId: auth.user.id, organizationId: auth.organizationId }),
+        conversation: null, draft: { subject: draft.content.subject || null, body: text },
+      }).catch(() => null) : null;
     return NextResponse.json({
       to: draft.recipient.email, toName: draft.recipient.displayName,
-      subject: draft.content.subject, text: draft.content.text || stripHtmlToText(draft.content.html || ''),
+      subject: draft.content.subject, text, review,
       from: sender.email, provider: sender.provider,
       revision: draft.revision, versionId: draft.versionId, matches,
       label: String(proposal.label || ''),
