@@ -23,11 +23,11 @@ const PROVIDER_COLORS: Record<string, string> = {
 function classifyLevel(role?: string) {
     if (!role) return 'Desconocido';
     const r = role.toLowerCase();
-    if (r.match(/founder|owner|socio|fundador|dueño|ceo|cto|cfo|cmo|coo|president|presidente|director general/)) return 'C-Level / Founder';
-    if (r.match(/vp|vice president|vicepresidente/)) return 'VP';
-    if (r.match(/director|head|jefe|gerente|manager|lead/)) return 'Manager / Director';
-    if (r.match(/senior|sr|principal/)) return 'Senior IC';
-    return 'Individual Contributor';
+    if (r.match(/founder|owner|socio|fundador|dueño|ceo|cto|cfo|cmo|coo|president|presidente|director general/)) return 'Alta dirección';
+    if (r.match(/vp|vice president|vicepresidente/)) return 'Vicepresidencia';
+    if (r.match(/director|head|jefe|gerente|manager|lead/)) return 'Gerencia y jefaturas';
+    if (r.match(/senior|sr|principal/)) return 'Especialista sénior';
+    return 'Especialista';
 }
 
 function classifyArea(role?: string) {

@@ -15,7 +15,7 @@ Desde la versión 2 (1 oct 2026) hay **dos capas**:
 2. **Recorrido.** Se oscurece la pantalla y se resalta una entrada del menú a la vez. Una tarjeta al lado muestra «Paso X de Y», un título, una frase y los botones «Atrás», «Siguiente» y «Omitir».
 3. **Final.** El último paso resalta «Ver tutorial» y ofrece «Ir a mi perfil» (principal) o «Terminar».
 
-Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Conexiones → Búsqueda de Leads → Guardados · Leads → Leads Contactados → Campañas → Ver tutorial. Siguen el camino real hasta el primer correo y terminan donde vive la ayuda. En escritorio son 8. En el teléfono son 9, porque el primero muestra el botón del menú: las entradas viven en el menú plegado, así que ese botón queda resaltado y la tarjeta dice dónde está cada entrada («En el menú: Perfil»).
+Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Conexiones → Buscar prospectos → Por escribir → Conversaciones → Campañas → Ver tutorial. Siguen el camino real hasta el primer correo y terminan donde vive la ayuda. En escritorio son 8. En el teléfono son 9, porque el primero muestra el botón del menú: las entradas viven en el menú plegado, así que ese botón queda resaltado y la tarjeta dice dónde está cada entrada («En el menú: Perfil»).
 
 ## Guías por pantalla
 
@@ -23,15 +23,15 @@ Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Co
 |---|---|
 | Hoy (`/dashboard`) | Lo primero (`today`), Prepara tu cuenta (`setup`) |
 | Búsqueda (`/search`) | Tres formas de buscar (`search-modes`), Puntos de partida (`search-starters`), Busca y guarda (`search-run`) |
-| Guardados (`/saved/leads`) | Contactos sin correo (`saved-list`), Enriquecidos (`saved-enriched-link`) |
-| Enriquecidos (`/saved/leads/enriched`) | Investigar (`enriched-research`), Contactar (`enriched-contact`) |
+| Por completar (`/saved/leads`) | Contactos sin correo (`saved-list`), ir a «Por escribir» (`saved-enriched-link`) |
+| Por escribir (`/saved/leads/enriched`) | Investigar (`enriched-research`), Contactar (`enriched-contact`) |
 | Conversaciones (`/contacted`) | Por responder (`conv-views`), Traer respuestas (`conv-sync`) |
 | Campañas (`/campaigns`) | Masivas o una por una (`campaigns-tabs`) |
 | Pipeline (`/crm`) | Etapas (`crm-board`) |
 | Perfil (`/profile`) | Empresa (`profile-company`), Lo que vendes (`profile-offer`) |
 | Conexiones (`/connections`) | Gmail u Outlook (`connections-list`) |
 
-- **Solo puntos visibles:** una guía muestra solo los puntos cuyo control está en pantalla. Si no hay ninguno (por ejemplo, Enriquecidos sin contactos), no se ofrece, y «Ayuda» dice «Aún no hay nada que mostrar aquí» en vez de abrir una guía vacía.
+- **Solo puntos visibles:** una guía muestra solo los puntos cuyo control está en pantalla. Si no hay ninguno (por ejemplo, «Por escribir» sin contactos), no se ofrece, y «Ayuda» dice «Aún no hay nada que mostrar aquí» en vez de abrir una guía vacía.
 - **Visibilidad:** cada punto se desplaza hasta quedar a la vista y se resalta con el mismo foco del recorrido. La tarjeta dice «Cerrar» y termina con «Entendido».
 - **Ofrecerla de nuevo:** «Ver guía» o «Ahora no» la marcan como vista y no se vuelve a ofrecer sola. Sigue disponible en «Ayuda».
 - **Prueba:** la unitaria exige que cada ancla exista en el código (`data-tour="…"` en `src/**/*.tsx`). Si se borra un control, la prueba lo dice.
@@ -84,3 +84,16 @@ Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Co
   La que falló fue «sin errores en consola». Esos errores no vienen del tutorial:
   - `/icon.png` responde 500 en desarrollo porque existe a la vez en `public/` y en `src/app/`;
   - el dashboard recibe 403 de `opportunities` y `campaigns` en la base local.
+## Menú por tarea (1 oct)
+
+El menú se ordena por lo que la persona quiere hacer, y cada pantalla se llama igual que su entrada, en el tutorial y en los avisos:
+
+| Grupo | Entradas |
+|---|---|
+| Centro de mando | Hoy, Cowork |
+| Prospectar | Buscar prospectos, Oportunidades |
+| Contactos | Por escribir (con correo, `/saved/leads/enriched`), Por completar (sin correo, `/saved/leads`), Empresas guardadas, Tabla de datos |
+| Seguimiento | Conversaciones (`/contacted`), Campañas, Pipeline |
+| Configuración | Perfil, Conexiones, Firmas y estilo, Privacidad |
+
+Las rutas no cambian, así que los enlaces guardados siguen funcionando. «Por completar» se marca solo en su ruta exacta, para no quedar activa también en «Por escribir».

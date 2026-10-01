@@ -75,7 +75,7 @@ export default function ProfilePage() {
         setSavedProfile(form);
       } catch (error) {
         console.error('Error loading profile:', error);
-        setLoadError('No pudimos cargar tu perfil guardado. Recarga la pagina antes de editar para evitar perder cambios.');
+        setLoadError('No pudimos cargar tu perfil guardado. Recarga la página antes de editar para evitar perder cambios.');
       } finally {
         setIsLoading(false);
       }
@@ -191,7 +191,7 @@ export default function ProfilePage() {
       if (!hasSuggestions) {
         toast({
           title: 'No encontramos datos confiables',
-          description: 'Agrega el sitio web oficial o completa el perfil manualmente. No inventamos informacion incierta.',
+          description: 'Agrega el sitio web oficial o completa el perfil manualmente. No inventamos información incierta.',
         });
         return;
       }
@@ -240,7 +240,7 @@ export default function ProfilePage() {
       {loadError ? (
         <Alert className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
           <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
-          <AlertTitle>El perfil no esta disponible</AlertTitle>
+          <AlertTitle>El perfil no está disponible</AlertTitle>
           <AlertDescription className="text-amber-800 dark:text-amber-100/80">
             <p>{loadError}</p>
             <Button type="button" variant="outline" size="sm" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className="mt-3 rounded-xl border-amber-300 bg-amber-50 shadow-none hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:hover:bg-amber-500/10">
@@ -255,7 +255,7 @@ export default function ProfilePage() {
           <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/90 shadow-[0_18px_45px_-36px_rgba(15,23,42,0.45)] dark:bg-card/75">
           <CardHeader className="border-b border-border/60 bg-muted/15 px-5 py-5 sm:px-7">
             <CardTitle className="text-xl tracking-tight">Perfil comercial</CardTitle>
-            <CardDescription>Usaremos estos datos para personalizar mensajes y propuestas sin cambiar tu contenido automaticamente.</CardDescription>
+            <CardDescription>Usaremos estos datos para personalizar mensajes y propuestas sin cambiar tu contenido automáticamente.</CardDescription>
           </CardHeader>
 
           <CardContent className="p-0">
@@ -404,7 +404,7 @@ export default function ProfilePage() {
         <DialogContent className="max-h-[88vh] w-[calc(100%-1.5rem)] max-w-2xl overflow-y-auto rounded-3xl border-border/70 p-0">
           <DialogHeader className="border-b border-border/60 px-5 py-5 pr-12 text-left sm:px-6">
             <DialogTitle>Revisar sugerencias</DialogTitle>
-            <DialogDescription>Selecciona que informacion quieres llevar al formulario. Los campos con contenido no se reemplazan por defecto.</DialogDescription>
+            <DialogDescription>Selecciona qué información quieres llevar al formulario. Los campos con contenido no se reemplazan por defecto.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 px-5 py-1 sm:px-6">
             {suggestion && suggestionSelection ? PROFILE_SUGGESTION_FIELDS.map((field) => {

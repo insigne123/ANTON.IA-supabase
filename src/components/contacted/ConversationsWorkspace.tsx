@@ -203,7 +203,7 @@ export default function ConversationsWorkspace({ initialView = 'reply' }: { init
   }
 
   return <div className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
-    <PageHeader title="Contactados" description="Cada conversación, su estado y el próximo paso." />
+    <PageHeader title="Conversaciones" description="Cada conversación, su estado y el próximo paso." />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div data-tour="conv-views" role="group" aria-label="Ver conversaciones" className="flex flex-wrap gap-1">{views.map(([key, label]) => <Button key={key} variant={view === key ? 'default' : 'ghost'} aria-pressed={view === key} onClick={() => setView(key)}>{label}</Button>)}</div>
       <Button data-tour="conv-sync" variant="outline" disabled={syncing} onClick={() => void sync()}>{syncing ? 'Actualizando…' : 'Actualizar mis respuestas'}</Button>

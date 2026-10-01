@@ -23,7 +23,7 @@ test('mail connection pages use server-owned OAuth and distinguish load failure 
     const source = readFileSync(`src/app/(app)/${page}/page.tsx`, 'utf8');
     assert.match(source, /\/api\/auth\/connect\//);
     assert.doesNotMatch(source, /response_type: 'code'|accounts.google.com/);
-    assert.match(source, /No pudimos consultar la conexion/);
+    assert.match(source, /No pudimos consultar la conexión/);
     assert.match(source, /credenciales guardadas/);
   }
 });

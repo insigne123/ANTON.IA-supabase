@@ -32,7 +32,7 @@ function OutlookConnectPageInner() {
       const connections = await response.json();
       setAutomationConnected(Boolean(connections?.outlook));
     } catch {
-      setStatusError('No pudimos consultar la conexion. Intenta nuevamente.');
+      setStatusError('No pudimos consultar la conexión. Intenta nuevamente.');
     } finally {
       setLoading(false);
     }
@@ -83,7 +83,7 @@ function OutlookConnectPageInner() {
     } catch (error: any) {
       toast({
         variant: 'destructive',
-        title: 'No se pudo activar la sesion',
+        title: 'No se pudo activar la sesión',
         description: error?.message || 'Microsoft solicito validacion adicional.',
       });
     } finally {
@@ -95,12 +95,12 @@ function OutlookConnectPageInner() {
     <div className="container mx-auto max-w-3xl space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Conexion con Outlook (Microsoft 365)</CardTitle>
+          <CardTitle>Conexión con Outlook (Microsoft 365)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-3">
             {loading ? (
-              <div className="text-sm text-muted-foreground">Verificando conexion...</div>
+              <div className="text-sm text-muted-foreground">Verificando conexión…</div>
             ) : statusError ? (
               <div role="alert" className="text-sm text-destructive">{statusError}<Button variant="ghost" onClick={() => void checkConnection()}>Reintentar</Button></div>
             ) : (
@@ -111,7 +111,7 @@ function OutlookConnectPageInner() {
                 </div>
                 <div className={`flex items-center font-medium ${browserReady ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`}>
                   {browserReady ? <CheckCircle2 className="mr-2 h-5 w-5" /> : <XCircle className="mr-2 h-5 w-5" />}
-                  {browserReady ? 'Hay una sesion de Microsoft en este navegador' : 'Este navegador puede pedir inicio de sesion al enviar manualmente'}
+                  {browserReady ? 'Hay una sesión de Microsoft en este navegador' : 'Este navegador puede pedir inicio de sesión al enviar manualmente'}
                 </div>
               </>
             )}
@@ -123,19 +123,19 @@ function OutlookConnectPageInner() {
             </Button>
             <Button variant="outline" onClick={handleActivateBrowser} disabled={activatingBrowser}>
               {activatingBrowser ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Activar sesion en este navegador
+              Activar sesión en este navegador
             </Button>
           </div>
 
           {automationConnected && !loading && !statusError ? <p className="text-sm text-muted-foreground">Hay credenciales guardadas. Su vigencia se comprueba al usarlas; reconecta si el proveedor revoco el acceso.</p> : null}
 
           <div className="rounded-md border p-3 text-sm leading-relaxed bg-muted/50">
-            <p className="font-medium">Que permite esta conexion?</p>
+            <p className="font-medium">¿Qué permite esta conexión?</p>
             <ul className="list-disc pl-5 mt-2 space-y-1">
-              <li>Envio de correos manuales desde la plataforma.</li>
-              <li><strong>Envio automatico</strong> de campanas en segundo plano (24/7).</li>
+              <li>Envío de correos manuales desde la plataforma.</li>
+              <li><strong>Envío automático</strong> de campañas en segundo plano (24/7).</li>
               <li>Lectura de hilos para detectar respuestas y acuses cuando sincronizas la bandeja.</li>
-              <li>Almacenamiento seguro de credenciales (Refresh Token).</li>
+              <li>Almacenamiento seguro de credenciales (token de acceso cifrado).</li>
             </ul>
             <p className="mt-3 text-muted-foreground">
               La automatizacion y el envio manual usan mecanismos distintos. Si la automatizacion esta conectada pero este navegador no,
@@ -150,7 +150,7 @@ function OutlookConnectPageInner() {
 
 export default function OutlookConnectPage() {
   return (
-    <Suspense fallback={<div className="container mx-auto max-w-3xl text-sm text-muted-foreground">Verificando conexion...</div>}>
+    <Suspense fallback={<div className="container mx-auto max-w-3xl text-sm text-muted-foreground">Verificando conexión…</div>}>
       <OutlookConnectPageInner />
     </Suspense>
   );

@@ -193,13 +193,13 @@ export default function PrivacyRequestsSettingsPage() {
       const response = await fetch(`/api/privacy/subject-lookup?email=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data?.error || 'No se pudo consultar la informacion del titular.');
+        throw new Error(data?.error || 'No se pudo consultar la información del titular.');
       }
 
       setLookupResult(data as SubjectLookupResponse);
     } catch (lookupFetchError: any) {
       setLookupResult(null);
-      setLookupError(lookupFetchError?.message || 'No se pudo consultar la informacion del titular.');
+      setLookupError(lookupFetchError?.message || 'No se pudo consultar la información del titular.');
     } finally {
       setLookupLoading(false);
     }
@@ -246,7 +246,7 @@ export default function PrivacyRequestsSettingsPage() {
       }
 
       if (!response.ok) {
-        throw new Error(data?.error || 'No se pudo ejecutar la accion.');
+        throw new Error(data?.error || 'No se pudo ejecutar la acción.');
       }
 
       if (action === 'export') {
@@ -276,7 +276,7 @@ export default function PrivacyRequestsSettingsPage() {
         await runLookup(targetEmail);
       }
     } catch (actionError: any) {
-      setError(actionError?.message || 'No se pudo ejecutar la accion.');
+      setError(actionError?.message || 'No se pudo ejecutar la acción.');
     } finally {
       setActionLoadingId(null);
     }
@@ -507,7 +507,7 @@ export default function PrivacyRequestsSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Busqueda por email</CardTitle>
+          <CardTitle>Búsqueda por email</CardTitle>
           <CardDescription>
             Usa esta herramienta para revisar rapidamente que registros existen para un correo antes de responder una solicitud de acceso, supresion u oposicion.
           </CardDescription>

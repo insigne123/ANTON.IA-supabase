@@ -74,7 +74,7 @@ const SEARCH = ['search-modes', 'search-starters', 'search-run'];
 {
   const app = await open({ pathname: '/search', anchors: SEARCH });
   try {
-    await app.waitFor(() => app.text().includes('¿Primera vez en Búsqueda de leads?'), 'the offer');
+    await app.waitFor(() => app.text().includes('¿Primera vez en Buscar prospectos?'), 'the offer');
     assert.match(app.text(), /en 3 pasos/);
     assert.equal(app.card(), null, 'the offer is not a modal');
     app.button('Ver guía').click();
