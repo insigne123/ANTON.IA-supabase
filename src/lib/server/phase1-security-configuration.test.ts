@@ -9,7 +9,6 @@ const tokenService = readFileSync('src/lib/services/token-service.ts', 'utf8');
 const tokenStatusRoute = readFileSync('src/app/api/integrations/store-token/route.ts', 'utf8');
 const gmailPage = readFileSync('src/app/(app)/gmail/page.tsx', 'utf8');
 const outlookPage = readFileSync('src/app/(app)/outlook/page.tsx', 'utf8');
-const antoniaPage = readFileSync('src/app/(app)/antonia/page.tsx', 'utf8');
 
 test('phase 1 migration scopes tenant reads and keeps sensitive writes server-only', () => {
   assert.match(migration, /create or replace function public\.current_user_shares_organization/);
@@ -36,7 +35,7 @@ test('provider connection checks use the authenticated server boundary', () => {
   assert.match(tokenService, /getSupabaseAdminClient/);
   assert.match(tokenStatusRoute, /getSupabaseAdminClient\(\)/);
 
-  for (const source of [gmailPage, outlookPage, antoniaPage]) {
+  for (const source of [gmailPage, outlookPage]) {
     assert.doesNotMatch(source, /\.from\('provider_tokens'\)/);
     assert.match(source, /\/api\/integrations\/store-token/);
   }

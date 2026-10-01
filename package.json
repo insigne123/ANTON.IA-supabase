@@ -45,7 +45,6 @@
     "db:push:dry-run": "node scripts/supabase-nonprod.mjs db push --linked --dry-run",
     "db:push:nonprod": "node scripts/supabase-nonprod.mjs db push --linked --yes",
     "verify:prod-config": "node scripts/verify-production-config.mjs",
-    "verify:antonia-cron": "node scripts/verify-antonia-cron.mjs",
     "verify:scheduler-ownership": "node --loader ./scripts/ts-test-loader.mjs --test functions/scheduler-ownership.test.ts functions/native-research-scheduler.test.ts",
     "backfill:research-report-fallbacks": "node scripts/backfill-fallback-research-reports.mjs",
     "repair:contacted-history": "node scripts/repair-contacted-history.mjs",

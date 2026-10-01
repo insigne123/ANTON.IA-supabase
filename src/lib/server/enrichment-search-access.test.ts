@@ -12,8 +12,6 @@ import {
 
 const quotaStoreSource = readFileSync(new URL('./daily-quota-store.ts', import.meta.url), 'utf8');
 const quotaClientSource = readFileSync(new URL('../quota-client.ts', import.meta.url), 'utf8');
-const workerSource = readFileSync(new URL('../../../functions/index.ts', import.meta.url), 'utf8');
-const backupWorkerSource = readFileSync(new URL('../../app/api/cron/antonia/route.ts', import.meta.url), 'utf8');
 const protectedRouteSources = [
   readFileSync(new URL('../../app/api/opportunities/enrich-apollo/route.ts', import.meta.url), 'utf8'),
   readFileSync(new URL('../../app/api/opportunities/search/route.ts', import.meta.url), 'utf8'),
@@ -51,10 +49,6 @@ test('search and enrichment keep authentication gates and shared quota controls 
   assert.match(quotaStoreSource, /leadSearch: credits\.limit/);
   assert.match(quotaStoreSource, /resource === 'search' \|\| resource === 'leadSearch'/);
   assert.match(quotaClientSource, /params\.limit >= 0/);
-  assert.match(workerSource, /hasUserEnrichmentSearchCreditAccess\(supabase, userId\)/);
-  assert.match(workerSource, /internal_search_failed:429:[\s\S]*throw e/);
-  assert.match(backupWorkerSource, /hasUserEnrichmentSearchCreditAccess\(userId\)/);
-  assert.match(backupWorkerSource, /internal_search_failed:429:[\s\S]*throw internalErr/);
 
   for (const source of protectedRouteSources) {
     const handlerStart = source.indexOf('export async function ');

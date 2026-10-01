@@ -4,7 +4,6 @@ import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 
 const routeSource = await readFile(new URL('./route.ts', import.meta.url), 'utf8');
-const initialSendSource = await readFile(new URL('../antonia/route.ts', import.meta.url), 'utf8');
 const sourceFile = ts.createSourceFile('route.ts', routeSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const helperNode = sourceFile.statements.find((statement) => (
     ts.isFunctionDeclaration(statement) && statement.name?.text === 'doesLeadBelongToCampaignAudience'
@@ -100,8 +99,4 @@ test('campaign processing applies the audience guard before eligibility work', (
 
 test('campaign processing syncs replies before live eligibility but keeps dry runs non-mutating', () => {
     assert.match(routeSource, /if \(!dryRun\) \{[\s\S]*?syncRepliesForOrganization/);
-});
-
-test('generated initial campaign sends persist durable campaign lineage', () => {
-    assert.match(initialSendSource, /campaign_id: campaign\.id,[\s\S]*?data: \{\s*campaign_id: campaign\.id,/);
 });
