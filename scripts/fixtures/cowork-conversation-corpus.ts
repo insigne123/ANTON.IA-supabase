@@ -214,6 +214,8 @@ export type CorpusCase = {
   replyThread?: boolean;
   /** Runs with the LinkedIn batches available (COWORK_LINKEDIN_BATCH_ENABLED). */
   linkedinBatch?: boolean;
+  /** Runs with campaign.retry available (COWORK_CAMPAIGN_RETRY_ENABLED). */
+  campaignRetry?: boolean;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
 };
 

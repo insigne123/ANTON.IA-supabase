@@ -46,6 +46,7 @@ import { stageCoworkEnrichBatch } from './enrich-batch';
 import { stageCoworkSendBatch } from './send-batch';
 import { coworkContactsImportEnabled, stageCoworkContactsImport } from './contacts-import';
 import { stageCoworkReplyThread } from './reply-thread-effect';
+import { coworkCampaignRetryEnabled, stageCoworkCampaignRetry } from './campaign-retry';
 import { coworkReplyThreadEnabled } from './thread-read';
 import { coworkLinkedinBatchEnabled, stageCoworkLinkedinBatch } from './linkedin-batch';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
@@ -162,6 +163,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const contactsImportEnabled = coworkContactsImportEnabled();
     // Sending a reply in the thread needs its staging table (reply_thread migration, applied in production) and the flag.
     const replyThreadEnabled = coworkReplyThreadEnabled();
+    // Retrying failed sends needs the campaign_retry effect in the database (migration 20260930170000) and the flag.
+    const campaignRetryEnabled = coworkCampaignRetryEnabled();
     // A batch of LinkedIn invitations or messages needs its staging table (batch migration, applied in production) and the flag.
     const linkedinBatchEnabled = coworkLinkedinBatchEnabled();
     const instructions = coworkAgentInstructions({
@@ -169,6 +172,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       writer: writerEnabled,
       contactsImport: contactsImportEnabled,
       replyThread: replyThreadEnabled,
+      campaignRetry: campaignRetryEnabled,
       linkedinBatch: linkedinBatchEnabled,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
@@ -258,6 +262,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       judge: judgeTurn?.review,
       contactsImport: contactsImportEnabled,
       replyThread: replyThreadEnabled,
+      campaignRetry: campaignRetryEnabled,
       linkedinBatch: linkedinBatchEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       userContext,
@@ -420,6 +425,12 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.contactsImport) throw new Error('Missing import file');
           const staged = await stageCoworkContactsImport(scope, run.id, proposal.contactsImport);
           targetId = `contactsimport:${staged.hash}`;
+          label = staged.label;
+        }
+        if (proposal.kind === 'campaign_retry') {
+          if (!campaignRetryEnabled) throw new Error('Reintentar envíos no está disponible.');
+          const staged = await stageCoworkCampaignRetry(scope, run.id, proposal.targetId);
+          targetId = staged.targetId;
           label = staged.label;
         }
         if (proposal.kind === 'reply_thread') {

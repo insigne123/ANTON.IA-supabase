@@ -30,7 +30,7 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
-  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch']);
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
@@ -38,7 +38,7 @@ export const coworkDecisionSchema = z.object({
     'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'replies.attention', 'replies.stalled', 'metrics.overview', 'metrics.rates', 'metrics.diagnose', 'metrics.channels', 'metrics.incidents', 'deliverability.check', 'site.read', 'leads.count', 'deliverability.bounces', 'deliverability.sender', 'compliance.check', 'compliance.law', 'compliance.obligation', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'files.read', 'saved_searches.list', 'profile.get',
     'privacy.contactability_batch', 'lists.review_batch',
     'crm.propose_note', 'prospecting.propose_search',
-    'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send', 'email.reply_thread',
+    'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send', 'email.reply_thread', 'campaign.retry',
     'campaign.create', 'campaign.activate', 'campaign.pause', 'code.execute',
     'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
     'crm.update_record', 'campaign.prepare_draft_v2',
@@ -93,7 +93,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'profile.update' | 'saved_search.create' | 'saved_search.update' | 'saved_search.delete' | 'campaign.stop_v2'
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
-  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread';
+  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry';
 export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
@@ -217,6 +217,13 @@ function effectTargetRun(
       && (payload.result as { contactedId?: string } | null)?.contactedId === targetId
       && (payload.result as { advice?: string } | null)?.advice === 'reply');
   }
+  if (action === 'campaign.retry') {
+    // Only a campaign whose failed sends were read with campaigns.retry_review, and one that has something to retry: the code's count, not the model's.
+    return observationRunId(observations, history, currentRunId, payload =>
+      payload.action === 'campaigns.retry_review'
+      && (payload.result as { campaignId?: string } | null)?.campaignId === targetId
+      && Number((payload.result as { summary?: { retryable?: number } } | null)?.summary?.retryable) > 0);
+  }
   if (action === 'linkedin.invite' || action === 'linkedin.message' || action === 'linkedin.invite_batch' || action === 'linkedin.message_batch') {
     return observationRunId(observations, history, currentRunId, payload =>
       (payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'
@@ -332,6 +339,7 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'linkedin.message_batch') return 'Proponer mensajes en LinkedIn para varias personas';
   if (action === 'contacts.import') return 'Importar contactos de un archivo';
   if (action === 'email.reply_thread') return targetName ? `Responder a ${targetName} en su hilo` : 'Responder en el hilo de una conversación';
+  if (action === 'campaign.retry') return 'Reintentar los envíos fallidos de una campaña';
   return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
 }
 
@@ -379,7 +387,7 @@ const PROPOSAL_ACTIONS = new Set<string>(['crm.propose_note', 'prospecting.propo
   'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
   'crm.update_record', 'campaign.prepare_draft_v2',
   'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
-  'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'linkedin.invite_batch', 'linkedin.message_batch', 'contacts.import', 'email.reply_thread']);
+  'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'linkedin.invite_batch', 'linkedin.message_batch', 'contacts.import', 'email.reply_thread', 'campaign.retry']);
 const USE_VERSION_ONLY = 'El usuario tocó «Usar esta versión»: solo fija su texto y todavía no quiere crear nada. No propongas acciones: responde en una frase que usarás su versión tal cual (sin reescribirla) y pregunta el siguiente paso, por ejemplo crear la campaña pausada con ella.';
 const VERSION_KEPT_ANSWER = {
   reply: 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.', document: null, question: '¿Creo la campaña pausada con ella?',
@@ -463,6 +471,7 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
   if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
   if (action === 'contacts.import') return 'Propongo guardar en tus contactos a las personas del archivo que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.';
+  if (action === 'campaign.retry') return 'Propongo reintentar los envíos de esa campaña que fallaron por un motivo que se puede reintentar. En la tarjeta ves cuáles son; si la apruebas, vuelven a la cola y salen con los frenos de siempre, sin enviarse dos veces.';
   if (action === 'email.reply_thread') return `Preparé la respuesta para ${who} y la propongo enviar en su hilo. Revisa el texto en la tarjeta antes de aprobarla: si la apruebas, sale tal cual.`;
   return null;
 }
@@ -612,6 +621,8 @@ async function runCoworkLoop(input: {
   contactsImport?: boolean;
   /** email.reply_thread may be proposed (COWORK_REPLY_THREAD_ENABLED; its reply_thread migration is applied in production). */
   replyThread?: boolean;
+  /** campaign.retry may be proposed (COWORK_CAMPAIGN_RETRY_ENABLED; its campaign_retry effect is in the migration 20260930170000). */
+  campaignRetry?: boolean;
   /** linkedin.invite_batch / linkedin.message_batch may be proposed (COWORK_LINKEDIN_BATCH_ENABLED; its migration is applied in production). */
   linkedinBatch?: boolean;
   /** The judge (plan 2, G2): reads the coordinator's final answer before it is shown and returns
@@ -826,7 +837,7 @@ async function runCoworkLoop(input: {
         || decision.action === 'campaign.schedule_batch'
         || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message'
         || decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch'
-        || decision.action === 'contacts.import' || decision.action === 'email.reply_thread') {
+        || decision.action === 'contacts.import' || decision.action === 'email.reply_thread' || decision.action === 'campaign.retry') {
         if (!input.proposeEffect) throw rejected('Effect proposals unavailable', 'En este contexto no puedes proponer acciones: responde con lo observado.');
         const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
           : decision.action === 'research.start' ? 'start_research'
@@ -854,7 +865,8 @@ async function runCoworkLoop(input: {
           : decision.action === 'linkedin.invite_batch' ? 'linkedin_invite_batch'
           : decision.action === 'linkedin.message_batch' ? 'linkedin_message_batch'
           : decision.action === 'contacts.import' ? 'contacts_import'
-          : decision.action === 'email.reply_thread' ? 'reply_thread' : 'request_draft';
+          : decision.action === 'email.reply_thread' ? 'reply_thread'
+          : decision.action === 'campaign.retry' ? 'campaign_retry' : 'request_draft';
         const targetId = decision.action === 'leads.save_contact' ? decision.providerId
           : decision.action === 'draft.request' ? decision.snapshotId
           : decision.action === 'email.send' ? decision.draftId
@@ -873,7 +885,7 @@ async function runCoworkLoop(input: {
           : decision.action === 'mission.control' ? decision.missionControl?.missionId ?? null
           : decision.action === 'message_context.update' ? 'own-message-context'
           : decision.action === 'lead.enrich_batch' ? 'new-enrich-batch'
-          : decision.action === 'campaign.schedule_batch' ? decision.campaignId
+          : decision.action === 'campaign.schedule_batch' || decision.action === 'campaign.retry' ? decision.campaignId
           : decision.action === 'linkedin.invite' || decision.action === 'linkedin.message' ? 'new-linkedin-job'
           : decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch' ? 'new-linkedin-batch'
           : decision.action === 'contacts.import' ? 'new-contacts-import'
@@ -939,6 +951,10 @@ async function runCoworkLoop(input: {
         if (decision.action === 'email.reply_thread' && !input.replyThread) {
           throw rejected('Reply in thread unavailable', 'Enviar una respuesta dentro del hilo desde Cowork todavía no está disponible: entrega el borrador en un bloque email_draft y di que se envía desde Contactados (Respuestas).');
         }
+        if (decision.action === 'campaign.retry' && !input.campaignRetry) {
+          throw rejected('Campaign retry unavailable', 'Reintentar envíos desde Cowork todavía no está disponible: di qué envíos se pueden reintentar (campaigns.retry_review) y que se reintentan desde la campaña en la app; los que necesitan conciliar no se reintentan.');
+        }
+        if (decision.action === 'campaign.retry' && !decision.campaignId) throw rejected('Missing campaign', MISSING_PROPOSAL_FIELDS);
         const replyThread = decision.action === 'email.reply_thread' ? decision.replyThread ?? undefined : undefined;
         if (decision.action === 'email.reply_thread' && !replyThread) throw rejected('Missing reply', MISSING_PROPOSAL_FIELDS);
         const effectAction = decision.action;
@@ -974,6 +990,9 @@ async function runCoworkLoop(input: {
           originRunId = originOf();
         }
         if (!originRunId) {
+          if (decision.action === 'campaign.retry') {
+            throw rejected('Retry campaign must be reviewed first', 'Esa campaña no aparece leída con campaigns.retry_review en este hilo, o no tiene envíos reintentables (summary.retryable es 0): léela primero con campaigns.retry_review y usa su campaignId exacto; lo que está terminal o por conciliar no se reintenta.');
+          }
           if (decision.action === 'email.reply_thread') {
             throw rejected('Reply conversation must be read first', 'La conversación no aparece leída con replies.thread en este hilo, o su consejo (advice) no es «reply»: léela primero con replies.thread y usa su contactedId exacto; si el consejo es otro, sigue ese consejo y no propongas enviar nada.');
           }
