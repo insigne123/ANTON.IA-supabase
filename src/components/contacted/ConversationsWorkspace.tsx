@@ -107,6 +107,17 @@ export default function ConversationsWorkspace({ initialView = 'reply' }: { init
     finally { if (version === request.current) setDetailLoading(false); }
   }, []);
 
+  // «Hoy» links to one conversation (?c=<id>): open it once, in the view that shows it.
+  const deepLinked = useRef(false);
+  useEffect(() => {
+    if (deepLinked.current || loading) return;
+    const target = new URLSearchParams(window.location.search).get('c');
+    if (!target) { deepLinked.current = true; return; }
+    const row = rows.find(item => item.id === target);
+    if (row) { deepLinked.current = true; setView(needsReply(row) ? 'reply' : 'all'); void open(row); }
+    else if (nextOffset === null) deepLinked.current = true;
+  }, [rows, loading, nextOffset, open]);
+
   const groups = useMemo(() => groupConversations(rows), [rows]);
   const plansFor = useCallback((row: ConversationRow) => touches.filter(t => t.email.toLowerCase() === row.email?.toLowerCase() && t.ownerId === row.user_id && activeTouch(t)), [touches]);
   const visible = groups.filter(({ row }) => {

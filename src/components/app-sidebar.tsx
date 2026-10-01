@@ -45,7 +45,7 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
   {
     label: 'Centro de mando',
     items: [
-      { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+      { href: '/dashboard', icon: LayoutDashboard, label: 'Hoy' },
       { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork' },
       { href: '/profile', icon: User, label: 'Perfil', tour: 'profile' },
     ],
