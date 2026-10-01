@@ -17,7 +17,7 @@ export default function ConnectionsPage() {
           <CardTitle className="text-lg">Correo</CardTitle>
           <CardDescription>Elige un proveedor para revisar su estado o actualizar permisos.</CardDescription>
         </CardHeader>
-        <CardContent className="divide-y divide-border/60 p-2">
+        <CardContent data-tour="connections-list" className="divide-y divide-border/60 p-2">
           <SettingsLinkRow
             href="/gmail"
             icon={Mail}

@@ -1447,7 +1447,7 @@ export default function EnrichedLeadsClient() {
             <Table className="min-w-[1040px]">
               <TableHeader>
                 <TableRow className="bg-muted/20 hover:bg-muted/20">
-                  <TableHead className="w-24 bg-muted/20 text-center" title="Marcar para investigar">
+                  <TableHead data-tour="enriched-research" className="w-24 bg-muted/20 text-center" title="Marcar para investigar">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] uppercase text-muted-foreground">Invest.</span>
                       <Checkbox
@@ -1458,7 +1458,7 @@ export default function EnrichedLeadsClient() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="w-24 bg-muted/20 text-center" title="Marcar para contactar contactos investigados">
+                  <TableHead data-tour="enriched-contact" className="w-24 bg-muted/20 text-center" title="Marcar para contactar contactos investigados">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] uppercase text-muted-foreground">Contacto</span>
                       <Checkbox

@@ -293,7 +293,7 @@ export default function ProfilePage() {
                   </div>
                 </section>
 
-                <section className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby="company-heading">
+                <section data-tour="profile-company" className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby="company-heading">
                   <div>
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -346,7 +346,7 @@ export default function ProfilePage() {
                   </div>
                 </section>
 
-                <section className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby="message-heading">
+                <section data-tour="profile-offer" className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby="message-heading">
                   <div>
                     <div className="flex items-center gap-2 text-sm font-semibold">
                       <Sparkles className="h-4 w-4 text-muted-foreground" />

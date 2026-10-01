@@ -116,7 +116,7 @@ export default function CRMPage() {
                 </Alert>
             )}
 
-            <main className="min-h-0 flex-1">
+            <main data-tour="crm-board" className="min-h-0 flex-1">
                 {loading && rows.length === 0 ? (
                     <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground" aria-live="polite">
                         <Loader2 className="h-5 w-5 animate-spin" />

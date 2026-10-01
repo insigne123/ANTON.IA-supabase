@@ -146,7 +146,7 @@ export function BulkCampaignWorkspace() {
     {error && <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">{error}<Button className="ml-3" size="sm" variant="outline" disabled={busy} onClick={() => void run(refresh)}>Actualizar</Button></div>}
     {feedback && <p role="status" className="text-sm text-muted-foreground">{feedback}</p>}
     <Tabs defaultValue="campaigns">
-      <TabsList className="grid h-auto w-full grid-cols-2 sm:w-fit"><TabsTrigger value="campaigns">Campañas masivas</TabsTrigger><TabsTrigger value="followups">Seguimientos individuales</TabsTrigger></TabsList>
+      <TabsList data-tour="campaigns-tabs" className="grid h-auto w-full grid-cols-2 sm:w-fit"><TabsTrigger value="campaigns">Campañas masivas</TabsTrigger><TabsTrigger value="followups">Seguimientos individuales</TabsTrigger></TabsList>
       <TabsContent value="followups"><CampaignReviewInbox /></TabsContent>
       <TabsContent value="campaigns" className="space-y-5">
         {!editing ? <>

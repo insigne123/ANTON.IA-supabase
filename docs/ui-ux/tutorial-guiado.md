@@ -1,6 +1,13 @@
-# Tutorial guiado para cuentas nuevas
+# Tutorial guiado: recorrido por la app y guías por pantalla
 
-Recorrido corto por el menú para que una persona nueva sepa dónde está cada cosa. Se ofrece solo una vez, se puede omitir en cualquier paso y se vuelve a ver cuando se quiera desde «Ver tutorial», al final del menú.
+Desde la versión 2 (1 oct 2026) hay **dos capas**:
+
+1. **El recorrido** por el menú, para que una persona nueva sepa dónde está cada cosa. Se ofrece una vez, se puede omitir en cualquier paso y se vuelve a ver desde «Ver tutorial», al final del menú.
+2. **Las guías por pantalla** (nuevo): dos a cuatro puntos sobre controles reales de cada pantalla.
+   - Se ofrecen una vez, en la primera visita, en una tarjeta discreta abajo a la derecha («¿Primera vez en Búsqueda de leads?»), que no es un modal: se puede seguir trabajando e ignorarla.
+   - Se repiten cuando se quiera desde el botón «Ayuda» (?) de la barra superior.
+
+**Por qué:** el recorrido v1 solo iluminaba entradas del menú, no enseñaba nada dentro de las pantallas y decía que en Campañas se «escribe y envía», cuando el primer contacto real pasa por Enriquecidos. En producción, 2 de 28 personas de la organización principal lo terminaron y nadie había enviado un correo.
 
 ## Cómo se ve
 
@@ -8,7 +15,26 @@ Recorrido corto por el menú para que una persona nueva sepa dónde está cada c
 2. **Recorrido.** Se oscurece la pantalla y se resalta una entrada del menú a la vez. Una tarjeta al lado muestra «Paso X de Y», un título, una frase y los botones «Atrás», «Siguiente» y «Omitir».
 3. **Final.** El último paso resalta «Ver tutorial» y ofrece «Ir a mi perfil» (principal) o «Terminar».
 
-Pasos (textos en `src/lib/onboarding/product-tour.ts`): Perfil → Conexiones → Búsqueda de Leads → Guardados · Leads → Campañas → Leads Contactados → Ver tutorial. En escritorio son 7. En el teléfono son 8, porque el primero muestra el botón del menú: las entradas viven en el menú plegado, así que ese botón queda resaltado y la tarjeta dice dónde está cada entrada («En el menú: Perfil»).
+Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Conexiones → Búsqueda de Leads → Guardados · Leads → Leads Contactados → Campañas → Ver tutorial. Siguen el camino real hasta el primer correo y terminan donde vive la ayuda. En escritorio son 8. En el teléfono son 9, porque el primero muestra el botón del menú: las entradas viven en el menú plegado, así que ese botón queda resaltado y la tarjeta dice dónde está cada entrada («En el menú: Perfil»).
+
+## Guías por pantalla
+
+| Pantalla | Puntos (ancla `data-tour`) |
+|---|---|
+| Hoy (`/dashboard`) | Lo primero (`today`), Prepara tu cuenta (`setup`) |
+| Búsqueda (`/search`) | Tres formas de buscar (`search-modes`), Puntos de partida (`search-starters`), Busca y guarda (`search-run`) |
+| Guardados (`/saved/leads`) | Contactos sin correo (`saved-list`), Enriquecidos (`saved-enriched-link`) |
+| Enriquecidos (`/saved/leads/enriched`) | Investigar (`enriched-research`), Contactar (`enriched-contact`) |
+| Conversaciones (`/contacted`) | Por responder (`conv-views`), Traer respuestas (`conv-sync`) |
+| Campañas (`/campaigns`) | Masivas o una por una (`campaigns-tabs`) |
+| Pipeline (`/crm`) | Etapas (`crm-board`) |
+| Perfil (`/profile`) | Empresa (`profile-company`), Lo que vendes (`profile-offer`) |
+| Conexiones (`/connections`) | Gmail u Outlook (`connections-list`) |
+
+- **Solo puntos visibles:** una guía muestra solo los puntos cuyo control está en pantalla. Si no hay ninguno (por ejemplo, Enriquecidos sin contactos), no se ofrece, y «Ayuda» dice «Aún no hay nada que mostrar aquí» en vez de abrir una guía vacía.
+- **Visibilidad:** cada punto se desplaza hasta quedar a la vista y se resalta con el mismo foco del recorrido. La tarjeta dice «Cerrar» y termina con «Entendido».
+- **Ofrecerla de nuevo:** «Ver guía» o «Ahora no» la marcan como vista y no se vuelve a ofrecer sola. Sigue disponible en «Ayuda».
+- **Prueba:** la unitaria exige que cada ancla exista en el código (`data-tour="…"` en `src/**/*.tsx`). Si se borra un control, la prueba lo dice.
 
 ## Reglas
 
@@ -20,7 +46,8 @@ Pasos (textos en `src/lib/onboarding/product-tour.ts`): Perfil → Conexiones �
 
 ## Dónde se guarda
 
-- En la cuenta: `user_metadata.anton_tour = { version, status: 'completed' | 'skipped', updatedAt }`, escrito por `POST /api/onboarding/tour` con la sesión de la propia persona. `GET` responde `{ record, offer }`. No requiere migración.
+- En la cuenta: `user_metadata.anton_tour = { version, status: 'completed' | 'skipped', updatedAt }` y `user_metadata.anton_guides = { <guía>: true }`. Ambos los escribe `POST /api/onboarding/tour` (`{ status }` o `{ guide }`) con la sesión de la propia persona. `GET` responde `{ record, offer, guides }`. No requiere migración.
+- En el navegador: `localStorage['antonia:guides:<userId>']` guarda las guías vistas. Con el recorrido y las guías ya conocidos, no se consulta el servidor en cada carga.
 - En el navegador: `localStorage['antonia:tour:<userId>']`, para no consultar el servidor cada vez que se carga una página.
 - Se guarda desde el servidor a propósito: si el navegador actualiza el usuario, emite `USER_UPDATED` y el contexto de sesión recarga la organización y muestra su estado de carga.
 

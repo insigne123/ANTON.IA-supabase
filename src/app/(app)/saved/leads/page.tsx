@@ -397,7 +397,7 @@ export default function SavedLeadsPage() {
           </div>
           <p className="mt-1 text-sm text-muted-foreground">Filtra, selecciona y enriquece los contactos que quieras trabajar.</p>
         </div>
-        <Button className="w-full rounded-full sm:w-auto" onClick={() => router.push('/saved/leads/enriched')}>
+        <Button data-tour="saved-enriched-link" className="w-full rounded-full sm:w-auto" onClick={() => router.push('/saved/leads/enriched')}>
           Ver enriquecidos
           <ArrowRight className="h-4 w-4" />
         </Button>
@@ -517,7 +517,7 @@ export default function SavedLeadsPage() {
             </Alert>
           ) : (
           <div className="overflow-x-auto rounded-2xl border border-border/60 bg-background/60">
-            <Table className="min-w-[780px]">
+            <Table data-tour="saved-list" className="min-w-[780px]">
               <TableHeader>
                 <TableRow className="bg-muted/20 hover:bg-muted/20">
                   <TableHead className="w-10">
