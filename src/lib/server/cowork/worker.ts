@@ -50,6 +50,7 @@ import { coworkCampaignRetryEnabled, stageCoworkCampaignRetry } from './campaign
 import { coworkPhoneRevealEnabled, stageCoworkPhoneReveal } from './enrich-phone';
 import { coworkReplyThreadEnabled } from './thread-read';
 import { coworkLinkedinBatchEnabled, stageCoworkLinkedinBatch } from './linkedin-batch';
+import { coworkEffectAlreadyDone, coworkPrepareBatchEnabled, stageCoworkPrepareBatch } from './prepare-batch';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -170,6 +171,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const phoneRevealEnabled = coworkPhoneRevealEnabled();
     // A batch of LinkedIn invitations or messages needs its staging table (batch migration, applied in production) and the flag.
     const linkedinBatchEnabled = coworkLinkedinBatchEnabled();
+    // «Preparar contactos» (save, look up the email, research several people with one approval) needs its kind in the database
+    // (migration 20261001210000); on unless COWORK_PREPARE_BATCH_ENABLED=false.
+    const prepareBatchEnabled = coworkPrepareBatchEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
@@ -178,6 +182,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       campaignRetry: campaignRetryEnabled,
       phoneReveal: phoneRevealEnabled,
       linkedinBatch: linkedinBatchEnabled,
+      prepareBatch: prepareBatchEnabled,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
@@ -269,6 +274,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       campaignRetry: campaignRetryEnabled,
       phoneReveal: phoneRevealEnabled,
       linkedinBatch: linkedinBatchEnabled,
+      prepareBatch: prepareBatchEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       userContext,
       proposeNote: async (leadId, note) => {
@@ -302,6 +308,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // so execution refuses anything else, even if the draft changed since.
         let targetId = proposal.targetId;
         let label = proposal.label;
+        // Saving someone already saved, looking up an email already looked up or researching someone already researched never
+        // reaches the person as an approval: the model is told and moves on.
+        const alreadyDone = await coworkEffectAlreadyDone(scope, proposal.kind, proposal.targetId);
+        if (alreadyDone) throw new Error(alreadyDone);
         if (proposal.kind === 'send_email') {
           const draft = await getCurrentNativeDraft({ userId: scope.userId, organizationId: scope.organizationId, draftId: proposal.targetId });
           if (!draft || draft.channel !== 'email') throw new Error('Send target unavailable');
@@ -457,6 +467,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           const staged = await stageCoworkLinkedinBatch(scope, run.id, proposal.originRunId,
             proposal.kind === 'linkedin_invite_batch' ? 'invite' : 'message', proposal.linkedinBatch);
           targetId = `linkedinbatch:${staged.hash}`;
+          label = staged.label;
+        }
+        if (proposal.kind === 'lead_prepare_batch') {
+          if (!prepareBatchEnabled) throw new Error('Preparar contactos en lote no está disponible.');
+          if (!proposal.prepareBatch) throw new Error('Missing batch people');
+          const staged = await stageCoworkPrepareBatch(scope, run.id, proposal.prepareBatch);
+          targetId = `preparebatch:${staged.hash}`;
           label = staged.label;
         }
         const proposed = await client.rpc('cowork_propose_effect', {

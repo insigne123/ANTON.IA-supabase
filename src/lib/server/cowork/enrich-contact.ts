@@ -84,7 +84,6 @@ export async function enrichCoworkContact(
   auth: AuthContext, runId: string, leadId: string,
 ): Promise<CoworkEnrichResult> {
   z.string().uuid().parse(leadId);
-  const client = getSupabaseAdminClient();
   const state = await getCoworkRun(auth, runId);
   if (!state || (state.run.status !== 'completed' && state.run.status !== 'waiting_approval')) {
     throw new Error('El contacto a enriquecer ya no está disponible en este trabajo.');
@@ -100,6 +99,16 @@ export async function enrichCoworkContact(
       && ((payload as { result: { items: Array<{ leadId?: string }> } }).result.items
         .some(item => item.leadId === leadId)));
   if (!observed) throw new Error('El contacto a enriquecer debe haberse observado primero en esta conversación.');
+  return enrichCoworkSavedLead(auth, runId, leadId);
+}
+
+/** The lookup itself, for a saved contact the caller already tied to this work (a batch checks who is in it). Same quota and
+ * the same operation id per work and contact, so running it again reuses the result instead of paying twice. */
+export async function enrichCoworkSavedLead(
+  auth: AuthContext, runId: string, leadId: string,
+): Promise<CoworkEnrichResult> {
+  z.string().uuid().parse(leadId);
+  const client = getSupabaseAdminClient();
   const leadRow = await auth.supabase.from('leads')
     .select('id,name,title,company,company_website,linkedin_url,email,source_provider,source_provider_id')
     .eq('id', leadId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();

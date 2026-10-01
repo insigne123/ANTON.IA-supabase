@@ -6,6 +6,16 @@ import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 
 export const coworkSaveContactSchema = z.object({ providerId: z.string().regex(/^apollo:[A-Za-z0-9_-]{1,200}$/) }).strict();
 
+/** A search result as the conversation saw it: what saving it keeps. */
+export type CoworkObservedContact = {
+  name?: unknown; company?: unknown; title?: unknown; industry?: unknown; location?: unknown;
+  linkedin_url?: unknown; company_website?: unknown; company_linkedin?: unknown;
+};
+
+/** The id a search result gets when Cowork saves it: the same for the same person, account and organization. */
+export const coworkSavedContactId = (organizationId: string, userId: string, providerId: string) =>
+  deterministicMessagingUuid(`cowork-apollo:${organizationId}:${userId}:${providerId.slice(7)}`);
+
 /** Insert only; retries never overwrite an existing contact or change its owner. */
 export async function saveCoworkContact(auth: AuthContext, runId: string, input: unknown) {
   const { providerId } = coworkSaveContactSchema.parse(input);
@@ -16,6 +26,12 @@ export async function saveCoworkContact(auth: AuthContext, runId: string, input:
   const observed = collectCoworkLeadRows(state.events.filter((event: { kind: string }) => event.kind === 'tool.completed')
     .map((event: { payload: unknown }) => event.payload)).find(row => row.id === providerId);
   if (!observed) throw new Error('COWORK_CONTACT_NOT_OBSERVED');
+  return insertCoworkContact(auth, providerId, observed);
+}
+
+/** Save a search result the caller already tied to this work (a batch checks who is in it), as it was seen. Insert only, like above. */
+export async function insertCoworkContact(auth: AuthContext, providerId: string, observed: CoworkObservedContact) {
+  coworkSaveContactSchema.parse({ providerId });
   const apolloId = providerId.slice(7);
   const fields = 'id,name,title,company,email,status,industry,location';
   const existing = await auth.supabase.from('leads').select(fields)
@@ -23,7 +39,7 @@ export async function saveCoworkContact(auth: AuthContext, runId: string, input:
     .order('created_at', { ascending: true }).limit(1).maybeSingle();
   if (existing.error) throw existing.error;
   if (existing.data) return { lead: existing.data, reused: true };
-  const id = deterministicMessagingUuid(`cowork-apollo:${auth.organizationId}:${auth.user.id}:${apolloId}`);
+  const id = coworkSavedContactId(auth.organizationId, auth.user.id, providerId);
   const result = await auth.supabase.from('leads').upsert({
     id, user_id: auth.user.id, organization_id: auth.organizationId,
     apollo_id: apolloId, source_provider: 'apollo', source_provider_id: apolloId,

@@ -17,7 +17,11 @@ const module={exports:{}};new Function('require','module','exports',bundle.outpu
 const filters=[];
 // Without an email, research needs an enrichment already attempted (found or not).
 const auth={user:{id:'owner'},organizationId:'org',supabase:{from(table){const where={};filters.push(where);const q={select:()=>q,eq:(k,v)=>{where[k]=v;return q;},filter:()=>q,limit:()=>q,
-  maybeSingle:async()=>table==='enriched_leads'?{data:fixture.attempted?{id:'enriched-1'}:null,error:null}:{data:{id,name:'Ana',company:'Empresa',email:null},error:null}};return q;}}};
+  in:(k,v)=>{where[k]=v;return q;},
+  maybeSingle:async()=>table==='enriched_leads'
+    // A lookup from the app is tied by the provider's id (source_provider_id), not by the saved contact.
+    ?{data:where.source_provider_id?(fixture.byProvider&&where.source_provider_id.includes('ap-1')?{id:'enriched-app',email:'ana@empresa.cl'}:null):(fixture.attempted?{id:'enriched-1'}:null),error:null}
+    :{data:{id,name:'Ana',company:'Empresa',email:null,apollo_id:fixture.apolloId||null,source_provider_id:fixture.apolloId||null},error:null}};return q;}}};
 try{
   fixture.observed=false;await assert.rejects(module.exports.startCoworkResearch(auth,'run',id),/UNAVAILABLE/);assert.equal(fixture.calls.length,0);
   fixture.observed=true;fixture.attempted=false;await assert.rejects(module.exports.startCoworkResearch(auth,'run',id),/EMAIL_REQUIRED/);assert.equal(fixture.calls.length,0);
@@ -27,5 +31,11 @@ try{
   assert.equal(fixture.calls[0].lead.email,null);assert.equal(fixture.calls[0].options.refresh,false);
   assert.deepEqual(fixture.calls[0].access,{userId:'owner',organizationId:'org'});
   assert.ok(filters.every(f=>f.user_id==='owner'&&f.organization_id==='org'));
-  console.log('PASS: observed target, owner/org scope, fresh access, stable research identity, no forced refresh; without an email, an attempted enrichment is enough.');
+  // A contact whose email was looked up from the app: the lookup counts, and its email reaches the research.
+  fixture.attempted=false;fixture.apolloId='ap-1';fixture.byProvider=true;fixture.calls.length=0;
+  await module.exports.startCoworkResearchForLead(auth,'run',id);
+  assert.equal(fixture.calls[0].lead.email,'ana@empresa.cl');
+  fixture.byProvider=false;await assert.rejects(module.exports.startCoworkResearchForLead(auth,'run',id),/EMAIL_REQUIRED/);
+  assert.ok(filters.every(f=>f.user_id==='owner'&&f.organization_id==='org'));
+  console.log('PASS: observed target, owner/org scope, fresh access, stable research identity, no forced refresh; without an email, an attempted enrichment is enough, also one made from the app.');
 }finally{delete globalThis.__researchFixture;}

@@ -380,6 +380,46 @@ test('a LinkedIn batch is proposed only when it is on, for saved contacts seen i
   assert.equal(proposals.length, 3);
 });
 
+test('preparing several people is one proposal: search results and saved contacts seen in this thread, with the goal', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const lead = (n: number) => `00000000-0000-4000-8000-0000000000b${n}`;
+  const proposals: Array<Record<string, unknown>> = [];
+  const notes: string[] = [];
+  const found = { scope: 'external_search', items: [1, 2].map(n => ({ id: `apollo:p${n}`, name: `Persona ${n}`, company: `Empresa ${n}` })) };
+  const base = { message: 'Guarda a los dos, busca sus correos e investígalos', runId, signal: new AbortController().signal, authorize: async () => {},
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: Record<string, unknown>) => { proposals.push(proposal); } };
+  const prepare = (prepareBatch: unknown) => ({ action: 'contacts.prepare_batch' as const, query: null, leadId: null, answer: null, prepareBatch: prepareBatch as never });
+  const people = { goal: 'research', people: [{ providerId: 'apollo:p1' }, { providerId: 'apollo:p2' }, { leadId: lead(1) }] };
+  // Read in the previous turn: that turn anchors the proposal; the server checks each person against the whole conversation.
+  const history = [{ runId: parentId, observations: [{ action: 'prospecting.search', input: '', result: found }] }];
+  // Off: refused with the way out, never proposed.
+  await assert.rejects(runCoworkReadLoop({ ...base, history, execute: async () => found, decide: async () => prepare(people) as never }), /Prepare batch unavailable/);
+  assert.equal(proposals.length, 0);
+  await runCoworkReadLoop({ ...base, prepareBatch: true, history, execute: async () => found, decide: async () => prepare(people) as never });
+  assert.deepEqual(proposals[0], { kind: 'lead_prepare_batch', targetId: 'new-prepare-batch', label: 'Preparar contactos', originRunId: parentId, prepareBatch: people });
+  assert.match(notes[0], /Preparé un lote para dejar listas a estas personas con una sola aprobación/);
+  // What the batch cannot take is refused with the reason, before it reaches a card.
+  for (const [decision, pattern] of [
+    [prepare({ goal: 'save', people: [{ providerId: 'apollo:p1' }, { providerId: 'apollo:p1' }] }), /repetidas/],
+    [prepare({ goal: 'email', people: [{ providerId: 'apollo:p1', leadId: lead(1) }] }), /una de las dos/],
+    [prepare({ goal: 'email', people: Array.from({ length: 11 }, (_, n) => ({ providerId: `apollo:x${n}` })) }), /hasta 10 personas/],
+    [prepare(null), /Faltan datos de la propuesta/],
+  ] as const) {
+    const feedback: string[] = [];
+    await assert.rejects(runCoworkReadLoop({ ...base, prepareBatch: true, history, execute: async () => found,
+      decide: async (_observations, _mustAnswer, rejections) => { if (rejections?.length) feedback.push(JSON.stringify(rejections)); return decision as never; } }),
+    /Invalid prepare batch|Missing/);
+    assert.match(feedback.join(' '), pattern);
+  }
+  // Nobody seen in the conversation: no proposal.
+  await assert.rejects(runCoworkReadLoop({ ...base, prepareBatch: true, execute: async () => ({}), decide: async () => prepare(people) as never }), /observed first/);
+  assert.equal(proposals.length, 1);
+});
+
 test('replying in a thread is proposed only when it is on, for a conversation read with replies.thread whose advice is reply', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const parentId = '00000000-0000-4000-8000-000000000011';
