@@ -4,15 +4,18 @@ import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-hel
 import { encryptStoredToken } from '@/lib/server/token-crypto';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkMailboxIdentity, type CoworkMailProvider } from './sender-identity';
+import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 
 export type { CoworkMailProvider };
 
 export async function resolveCoworkSender(scope: { userId: string; organizationId: string }, preferred?: CoworkMailProvider) {
   const client = getSupabaseAdminClient();
   await requireCoworkWorkerAccess(client, scope);
-  let provider: CoworkMailProvider = preferred || 'google';
+  // Without a named mailbox: the one chosen in Conexiones (or the only connected one), then Gmail, then Outlook.
+  const chosen = preferred || (await readMailSenderPreference(client, scope.userId).catch(() => null))?.resolved || undefined;
+  let provider: CoworkMailProvider = chosen || 'google';
   let token = await tokenService.getToken(client, scope.userId, provider);
-  if (!preferred && !token?.refresh_token) {
+  if (!chosen && !token?.refresh_token) {
     provider = 'outlook';
     token = await tokenService.getToken(client, scope.userId, provider);
   }

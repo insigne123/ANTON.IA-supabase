@@ -270,3 +270,14 @@ export const sellerProfileInternals = {
   reportQuestionnaireMode,
   reportV2ProfileFromPersonal,
 };
+
+/**
+ * The seller of a draft written inside a Cowork conversation where the person asked to promote a specific product
+ * (the thread memory's offer, Plan 5 decision 3): that product is what the email offers. Name, role, company and the
+ * rest of «Perfil» stay theirs. Without an offer in play, the profile as it is.
+ */
+export function sellerWithOfferInPlay(seller: DraftSellerProfileV2, offer: string | null | undefined): DraftSellerProfileV2 {
+  const product = String(offer || '').replace(/\s+/g, ' ').trim();
+  if (!product) return seller;
+  return normalizeDraftSellerProfileV2({ ...seller, valueProposition: product, services: [product] });
+}

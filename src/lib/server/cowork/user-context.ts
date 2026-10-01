@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CoworkUserContext } from '@/lib/cowork/decision-context';
 import { memoryValueText, profileOffer, profileOfferDetails, readOrganizationOffer } from '@/lib/server/suplia-context';
+import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
+import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -82,14 +84,17 @@ export async function loadCoworkUserContext(client: SupabaseClient, scope: Scope
     if (error) return null;
     const profile = (data as Record<string, unknown> | null) || null;
     if (profile && profile.id !== userId) return null;
-    const [organization, memories] = await Promise.all([
+    const [organization, memories, mailbox] = await Promise.all([
       profileOffer(profile) ? null : readOrganizationOffer(client, scope.organizationId),
       options.memories === false ? [] : loadCoworkMemories(client, { userId, organizationId: scope.organizationId }),
+      readMailSenderPreference(client, userId).catch(() => null),
     ]);
     return {
       ...coworkUserContextFromProfile(profile, organization),
       // Only when there are some, so a turn without memories reads exactly as before (plan 2, V7).
       ...(memories.length ? { memories } : {}),
+      // The mailbox that sends, so Cowork never asks Gmail or Outlook (Plan 5, PR-6b).
+      ...(mailbox?.resolved ? { sender: MAIL_PROVIDER_LABEL[mailbox.resolved] } : {}),
     };
   } catch {
     return null;

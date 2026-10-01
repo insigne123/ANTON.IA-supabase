@@ -13,6 +13,8 @@ import {
   CoworkCampaignEditRefused, coworkEditedCampaignDefinition, coworkEditedCampaignPerson, type CoworkCampaignEdit, type CoworkCampaignPersonEdit,
 } from '@/lib/cowork/campaign-edit';
 import { coworkCampaignRenderProblem } from '@/lib/cowork/campaign-people';
+import { coworkCampaignProvider } from '@/lib/mail-sender';
+import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import type { CampaignInput } from '@/lib/bulk-campaigns';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 
@@ -29,7 +31,9 @@ export async function stageCoworkCampaignDefinition(
   scope: { userId: string; organizationId: string },
   runId: string,
   definition: CoworkCampaignDraft,
-): Promise<{ recipients: number }> {
+  /** The person's request: a mailbox they name («desde Outlook») wins over the default one. */
+  request = '',
+): Promise<{ recipients: number; provider: 'google' | 'outlook' }> {
   requireBulkEnabled();
   const parsed = coworkCampaignDraftSchema.parse(definition);
   const client = getSupabaseAdminClient();
@@ -45,11 +49,14 @@ export async function stageCoworkCampaignDefinition(
       throw new Error(`El destinatario ${email} ya no está disponible para esta audiencia.`);
     }
   }
+  // The mailbox that sends: the one named in the request if connected, else the default one (Conexiones), else the model's.
+  const mailbox = await readMailSenderPreference(client, scope.userId);
+  const provider = coworkCampaignProvider({ message: request, connected: mailbox.connected, preferred: mailbox.preferred, proposed: parsed.provider });
   // The first email written for a person replaces the template's first email for them only.
   const full = CampaignInputSchema.parse({
     name: parsed.name, description: parsed.objective, objective: parsed.objective,
     criteria: parsed.criteria, emails: parsed.emails, messages: parsed.messages,
-    provider: parsed.provider,
+    provider,
     overrides: parsed.firstEmails.map(item => ({ email: item.email, messageIndex: 0, subject: item.subject, body: item.body })),
   });
   // Every email of every person is built here, with their data, before the card exists: a missing first name or
@@ -67,7 +74,7 @@ export async function stageCoworkCampaignDefinition(
       throw new Error('Este trabajo ya tiene otra definición de campaña.');
     }
   }
-  return { recipients: parsed.emails.length };
+  return { recipients: parsed.emails.length, provider };
 }
 
 /**
