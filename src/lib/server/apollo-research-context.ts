@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { isMaskedName, preferredFullName } from '@/lib/lead-name';
 import { canonicalJson } from '@/lib/messaging-contracts';
 import { NativeResearchLeadSchema, type NativeResearchLead } from '@/lib/native-research-contracts';
 import { publicCompanyCandidate, type PublicCompanyIdentity } from '@/lib/public-company-research-contracts';
@@ -222,7 +223,10 @@ function buildApolloResearchContextFromObservations(observationsValue: ApolloObs
   const person: ApolloResearchContext['person'] = {};
   const company: ApolloResearchContext['company'] = {};
   for (const observation of observations) {
+    const previousName = person.fullName;
     Object.assign(person, Object.fromEntries(Object.entries(observation.person).filter(([, value]) => value != null)));
+    // A hidden surname («Du***n») never replaces a complete name seen in another row.
+    if (previousName && person.fullName && isMaskedName(person.fullName) && !isMaskedName(previousName)) person.fullName = previousName;
     // An organization ID must never survive a domain change from another row.
     if (observation.company.domain && observation.company.domain !== company.domain) delete company.apolloOrganizationId;
     Object.assign(company, Object.fromEntries(Object.entries(observation.company).filter(([, value]) => value != null)));
@@ -308,7 +312,8 @@ export function mergeApolloResearchContextIntoLead(
   if (!context) return NativeResearchLeadSchema.parse(lead);
   return NativeResearchLeadSchema.parse({
     ...lead,
-    fullName: context.person.fullName || lead.fullName,
+    // The search hides surnames («Du***n»): a complete name, from either side, always wins.
+    fullName: preferredFullName(context.person.fullName, lead.fullName),
     title: context.person.title || lead.title,
     headline: context.person.headline || lead.headline,
     seniority: context.person.seniority || lead.seniority,
@@ -364,8 +369,31 @@ export async function loadApolloResearchContext(input: {
     if (error) return null;
     return data ? { table, row: data } : null;
   })) : [];
-  const observations: ApolloObservation[] = rows
-    .filter((value): value is NonNullable<typeof value> => Boolean(value))
+  const found = rows.filter((value): value is NonNullable<typeof value> => Boolean(value));
+  // A saved contact and its email lookup live in different rows: the lookup has the real name and LinkedIn that the
+  // search hid. Bring it in when the saved contact is the one being researched.
+  const saved = found.find((value) => value.table === 'leads')?.row as JsonRecord | undefined;
+  if (saved) {
+    const providerId = text(saved.source_provider_id || saved.apollo_id, 255);
+    const linked = await Promise.all([
+      admin.from('enriched_leads').select(TABLE_SELECTS.enriched_leads)
+        .eq('organization_id', organizationId).eq('user_id', userId)
+        .filter('data->>sourceSavedLeadId', 'eq', leadId).limit(3),
+      providerId ? admin.from('enriched_leads').select(TABLE_SELECTS.enriched_leads)
+        .eq('organization_id', organizationId).eq('user_id', userId)
+        .eq('source_provider_id', providerId).limit(3) : Promise.resolve({ data: [] }),
+    ]).catch(() => [] as Array<{ data?: unknown[] | null }>);
+    const seen = new Set(found.map((value) => `${value.table}:${text((value.row as JsonRecord).id, 500)}`));
+    for (const result of linked) {
+      for (const row of (result?.data || []) as JsonRecord[]) {
+        const key = `enriched_leads:${text(row.id, 500)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        found.push({ table: 'enriched_leads', row });
+      }
+    }
+  }
+  const observations: ApolloObservation[] = found
     .map(({ table, row }) => rowObservation(table, row))
     .filter((value): value is NonNullable<typeof value> => Boolean(value));
   const companyDomain = requestedCompanyDomain

@@ -26,6 +26,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { CommentsSection } from '@/components/comments-section';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { LeadName } from '@/components/leads/LeadName';
 import { retainVisibleSelection } from '@/lib/leads-workspace/selection';
 import { v4 as uuid } from 'uuid';
 
@@ -565,7 +566,7 @@ export default function SavedLeadsPage() {
                           <AvatarFallback>{(l.name || 'L').charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div className="min-w-0">
-                          <div className="max-w-[210px] truncate font-medium">{l.name}</div>
+                          <div className="max-w-[260px] truncate font-medium"><LeadName name={l.name} /></div>
                           <div className="max-w-[220px] truncate text-xs text-muted-foreground">{l.title || 'Sin cargo'}</div>
                         </div>
                       </div>

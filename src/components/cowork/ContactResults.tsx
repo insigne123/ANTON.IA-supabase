@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Building2, ExternalLink, Search } from 'lucide-react';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { displayLeadName } from '@/lib/lead-name';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import { coworkContactsTitle } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
@@ -86,6 +87,8 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
         {filtered.map(row => {
           const company = row.id.startsWith('apollo-company:');
           const name = String(row.name || (company ? 'Empresa sin nombre' : 'Nombre no disponible'));
+          // The search hides surnames («Du***n»): show «Rafael D.» and say when the full name arrives.
+          const shown = company ? { text: name, masked: false } : displayLeadName(name);
           const profile = safeUrl(row.linkedin_url) || safeUrl(row.company_website) || safeUrl(row.company_linkedin);
           const subtitle = company ? String(row.industry || 'Sector no informado')
             : [row.title, row.company].filter(Boolean).join(' · ') || 'Cargo y empresa no disponibles';
@@ -99,7 +102,8 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
               </span>
               <div className="min-w-0">
                 <p className="flex min-w-0 items-center gap-1.5 text-[14px] font-medium">
-                  <span className="truncate">{name}</span>
+                  <span className="truncate" title={shown.masked ? 'El proveedor oculta el apellido hasta que buscas el correo.' : undefined}>{shown.text || name}</span>
+                  {shown.masked && <span className="shrink-0 text-[11.5px] font-normal text-cw-muted">apellido al buscar el correo</span>}
                   {profile && <a href={profile} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded text-cw-faint hover:text-cw-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]" aria-label={`Abrir perfil de ${name}`}><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>}
                 </p>
                 <p className="truncate text-[12.5px] text-cw-muted">{subtitle}</p>

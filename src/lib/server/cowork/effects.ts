@@ -161,9 +161,10 @@ async function executeEffect(
     return { reply: enriched.reused
       ? 'Ese contacto ya estaba enriquecido y se reutilizó el resultado.'
       : enriched.found
-        ? `Encontramos ${enriched.email} (${enriched.emailStatus || 'estado sin confirmar'}). Quedó guardado en el contacto enriquecido.`
+        ? `Encontramos ${enriched.email} (${enriched.emailStatus || 'estado sin confirmar'}). Quedó guardado en el contacto enriquecido${enriched.fullName ? `, con su nombre completo: ${enriched.fullName}` : ''}.${enriched.emailWarning ? ` ${enriched.emailWarning}` : ''}`
         : 'El proveedor no encontró su correo. No inventé ninguno: puedo investigarlo igual o buscar otra persona de la misma empresa.',
-      result: { email: enriched.email, emailStatus: enriched.emailStatus, found: enriched.found, reused: enriched.reused, enrichedLeadId: enriched.enrichedLeadId } };
+      result: { email: enriched.email, emailStatus: enriched.emailStatus, found: enriched.found, reused: enriched.reused, enrichedLeadId: enriched.enrichedLeadId,
+        fullName: enriched.fullName || null, linkedinUrl: enriched.linkedinUrl || null, emailWarning: enriched.emailWarning || null } };
   }
   if (proposal.kind === 'send_email') {
     const sent = await sendCoworkEmail(auth, proposal.run_id, proposal.target_id);

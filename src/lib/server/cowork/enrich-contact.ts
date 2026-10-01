@@ -21,6 +21,8 @@ import {
 } from '@/lib/server/apollo-enrichment-callbacks';
 import { submitApolloEnrichment } from '@/lib/server/apollo-enrichment';
 import { verifiedEmailEvidence } from '@/lib/cowork/list-quality';
+import { applyEnrichedIdentity, identityFromProvider, providerFullName } from '@/lib/server/lead-identity';
+import { checkEmailAgainstName, isMaskedName } from '@/lib/lead-name';
 
 /** Fase 2B: enrich one own saved lead (email-basic only) through the same shared
  * primitives as the app's enrich flow: quota claim lifecycle, callback row for
@@ -31,6 +33,18 @@ function text(value: unknown, maxLength: number) {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined;
   const normalized = String(value).trim();
   return normalized && normalized.length <= maxLength ? normalized : undefined;
+}
+
+/** What the person reads after the lookup: the complete name (when the search had hidden it), the LinkedIn and, when the
+ * address seems to be someone else's, a warning. */
+function identitySummary(fullName: unknown, linkedinUrl: unknown, email: unknown) {
+  const name = text(fullName, 200);
+  const check = checkEmailAgainstName(email, name);
+  return {
+    fullName: name && !isMaskedName(name) ? name : null,
+    linkedinUrl: normalizeLinkedin(linkedinUrl) || null,
+    emailWarning: check.verdict === 'mismatch' ? check.reason : null,
+  };
 }
 
 function splitName(fullName: string) {
@@ -59,6 +73,11 @@ export type CoworkEnrichResult = {
   email: string | null; emailStatus: string | null; found: boolean;
   verifiedForList: boolean;
   creditsConsumed?: number; reused: boolean; enrichedLeadId: string;
+  /** The complete name the lookup returned (the search had hidden the surname), or null. */
+  fullName?: string | null;
+  linkedinUrl?: string | null;
+  /** When the address seems to be someone else's: the sentence to show. */
+  emailWarning?: string | null;
 };
 
 export async function enrichCoworkContact(
@@ -106,7 +125,7 @@ export async function enrichCoworkContact(
       .eq('operation_id', operationId).eq('user_id', userId).eq('organization_id', organizationId)
       .eq('target_table', 'enriched_leads').maybeSingle();
     if (callback.error || !callback.data) throw new Error('No se pudo recuperar el resultado del enriquecimiento.');
-    const persisted = await client.from('enriched_leads').select('id,email,email_status,enrichment_status')
+    const persisted = await client.from('enriched_leads').select('id,email,email_status,enrichment_status,full_name,linkedin_url')
       .eq('id', callback.data.target_lead_id).eq('user_id', userId).eq('organization_id', organizationId).maybeSingle();
     if (persisted.error || !persisted.data || persisted.data.enrichment_status === 'suppressed') {
       throw new Error('El resultado del enriquecimiento ya no está disponible.');
@@ -117,6 +136,7 @@ export async function enrichCoworkContact(
       found: Boolean(persisted.data.email),
       verifiedForList: verifiedEmailEvidence(persisted.data.email, persisted.data.email_status),
       reused: true, enrichedLeadId: persisted.data.id,
+      ...identitySummary(persisted.data.full_name, persisted.data.linkedin_url, persisted.data.email),
     };
   }
   if (existing) {
@@ -182,8 +202,11 @@ export async function enrichCoworkContact(
     const emailStatus = text(result.extractedData?.email_status as unknown, 64);
     const found = result.success && Boolean(email);
     const providerId = text((result.extractedData?.source_provider_id || result.extractedData?.apollo_id) as unknown, 255) || apolloPersonId;
+    const providerIdentity = identityFromProvider(result.extractedData as Record<string, unknown> | undefined);
     const persisted = await client.from('enriched_leads').update({
       email: email || undefined, email_status: emailStatus || undefined,
+      // The search hides the surname («Du***n»); the lookup returns the real one.
+      full_name: providerFullName(providerIdentity) || undefined,
       title: text(result.extractedData?.title as unknown, 160) || undefined,
       linkedin_url: normalizeLinkedin(result.extractedData?.linkedin_url) || undefined,
       source_provider: 'apollo', ...(providerId ? { source_provider_id: providerId } : {}),
@@ -211,7 +234,12 @@ export async function enrichCoworkContact(
       await client.from('leads').update({ email, last_enriched_at: new Date().toISOString() })
         .eq('id', leadId).eq('user_id', userId).eq('organization_id', organizationId);
     }
-    const summary = { email: email || null, emailStatus: emailStatus || null, found, verifiedForList: found && verifiedEmailEvidence(email, emailStatus), creditsConsumed: result.creditsConsumed, enrichedLeadId: targetId };
+    // The saved contact gets the real name, LinkedIn and title too (only its gaps), so screens, research and drafts
+    // stop seeing a hidden surname. Best effort: the email result above already stands on its own.
+    await applyEnrichedIdentity(client, { userId, organizationId, savedLeadId: leadId, providerId: providerId || null, identity: providerIdentity })
+      .catch(() => undefined);
+    const summary = { email: email || null, emailStatus: emailStatus || null, found, verifiedForList: found && verifiedEmailEvidence(email, emailStatus), creditsConsumed: result.creditsConsumed, enrichedLeadId: targetId,
+      ...identitySummary(providerFullName(providerIdentity) || name.fullName, result.extractedData?.linkedin_url, email) };
     // Callback settlement owns quota completion; do not complete the same claim twice.
     return { ...summary, reused: false };
   } catch (error) {

@@ -1,4 +1,5 @@
 import type { NativeResearchLead, NativeResearchOptions } from '@/lib/native-research-contracts';
+import { firstNameOf, isMaskedName, textNamesPerson } from '@/lib/lead-name';
 import { isHardRejectedResearchText } from '@/lib/research-fact-eligibility';
 import { searchSerper, type SerperSearchItem } from '@/lib/server/serper-search';
 
@@ -65,6 +66,16 @@ export function buildPublicPersonSearchQueries(lead: NativeResearchLead) {
   if (!fullName || !company) return [];
   const role = text(lead.title);
   const domain = normalizeDomain(lead.companyDomain || lead.companyWebsite);
+  if (isMaskedName(fullName)) {
+    // The provider hid the surname («Rafael Du***n»): a search engine finds nothing with the asterisks. Search by the
+    // first name, the company and the role; the identity check below still needs the visible ends of the surname.
+    const first = firstNameOf(fullName);
+    if (!first) return [];
+    return [...new Set([
+      [quoted(first), quoted(company), role ? quoted(role) : ''].filter(Boolean).join(' '),
+      [quoted(first), quoted(company), 'linkedin'].join(' '),
+    ])];
+  }
   return [...new Set([
     [quoted(fullName), quoted(company), role ? quoted(role) : ''].filter(Boolean).join(' '),
     [quoted(fullName), quoted(company)].join(' '),
@@ -86,7 +97,11 @@ export function scorePublicPersonIdentityMatch(input: {
   if (!fullName || (!companyName && !companyDomain)) return 0;
 
   const statement = normalizeIdentityText(rawStatement);
-  if (!containsExactTokenSequence(statement, fullName)) return 0;
+  // A hidden surname matches a word with the same visible ends («Durán» for «Du***n»); a complete name, its exact tokens.
+  const namesPerson = isMaskedName(input.lead.fullName)
+    ? textNamesPerson(rawStatement, input.lead.fullName)
+    : containsExactTokenSequence(statement, fullName);
+  if (!namesPerson) return 0;
   const resultDomain = normalizeDomain(input.item.link);
   const companyNameMatches = Boolean(companyName && containsExactTokenSequence(statement, companyName));
   const companySiteMatches = Boolean(companyDomain && (resultDomain === companyDomain || resultDomain.endsWith(`.${companyDomain}`)));

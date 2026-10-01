@@ -189,3 +189,30 @@ test('Apollo context loader scopes every exact reference by record, organization
     ['normalized_domain', 'acme.example'],
   ]);
 });
+
+test('a saved contact with a hidden surname is researched with the real name of its email lookup', async () => {
+  const saved = { id: 'lead-9', name: 'Rafael Du***n', title: 'Jefe de Operaciones', company: 'R&D Montajes', source_provider: 'apollo',
+    source_provider_id: 'apollo-person-9', created_at: '2026-10-01T15:00:00.000Z' };
+  const lookup = apolloRow({ id: 'enriched-9', full_name: 'Rafael Durán', source_provider_id: 'apollo-person-9', linkedin_url: 'https://www.linkedin.com/in/rafael-duran',
+    updated_at: '2026-09-30T12:00:00.000Z', data: { sourceSavedLeadId: 'lead-9', providerObservedAt: '2026-09-30T12:00:00.000Z' } });
+  const filters: string[] = [];
+  const admin = {
+    from(table: string) {
+      const query: any = {
+        select: () => query,
+        eq: (column: string, value: string) => { filters.push(`${table}.${column}=${value}`); return query; },
+        filter: (column: string, _operator: string, value: string) => { filters.push(`${table}.${column}=${value}`); return query; },
+        limit: async () => ({ data: table === 'enriched_leads' ? [lookup] : [], error: null }),
+        maybeSingle: async () => ({ data: table === 'leads' ? saved : null, error: null }),
+      };
+      return query;
+    },
+  };
+  const context = await loadApolloResearchContext({ organizationId: 'org', userId: 'user', leadId: 'lead-9' }, admin);
+  assert.equal(context?.person.fullName, 'Rafael Durán', 'the newer hidden name never replaces the complete one');
+  assert.equal(context?.person.linkedinUrl, 'https://www.linkedin.com/in/rafael-duran');
+  assert.ok(filters.includes('enriched_leads.data->>sourceSavedLeadId=lead-9'));
+  assert.ok(filters.includes('enriched_leads.user_id=user') && filters.includes('enriched_leads.organization_id=org'), 'scoped to the person');
+  const lead = mergeApolloResearchContextIntoLead({ id: 'lead-9', fullName: 'Rafael Du***n', companyName: 'R&D Montajes' }, context);
+  assert.equal(lead.fullName, 'Rafael Durán');
+});

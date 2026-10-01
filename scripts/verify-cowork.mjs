@@ -6,6 +6,7 @@ const suites = ['src/lib/cowork', 'src/lib/server/cowork'].flatMap(directory =>
 const checks = [
   ['--test', 'scripts/compare-cowork-evals.test.mjs'],
   ['scripts/test-cowork-company-results.mjs'],
+  ['scripts/test-cowork-contact-names.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-send-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-batch-corpus.test.ts'],
