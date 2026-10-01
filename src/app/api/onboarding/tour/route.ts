@@ -11,7 +11,12 @@ export const dynamic = 'force-dynamic';
 
 const noStore = { 'Cache-Control': 'private, no-store' };
 const TourStatusSchema = z.object({ status: z.enum(['completed', 'skipped']) }).strict();
-const GuideSeenSchema = z.object({ guide: z.enum(PAGE_GUIDES.map((guide) => guide.id) as [string, ...string[]]) }).strict();
+const GuideId = z.enum(PAGE_GUIDES.map((guide) => guide.id) as [string, ...string[]]);
+/** One guide seen or declined, or several at once (the ones the app tour walked through). */
+const GuideSeenSchema = z.union([
+  z.object({ guide: GuideId }).strict(),
+  z.object({ guides: z.array(GuideId).min(1).max(PAGE_GUIDES.length) }).strict(),
+]);
 
 /** Whether the guided tour opens on its own for the signed-in person. */
 export async function GET() {
@@ -35,7 +40,8 @@ export async function POST(request: Request) {
     const guide = GuideSeenSchema.safeParse(raw);
     if (guide.success) {
       // A screen guide seen or declined: it is not offered on its own again (it stays in «?»).
-      const guides = { ...seenPageGuides(auth.user.user_metadata), [guide.data.guide]: true };
+      const ids = 'guide' in guide.data ? [guide.data.guide] : guide.data.guides;
+      const guides = { ...seenPageGuides(auth.user.user_metadata), ...Object.fromEntries(ids.map((id) => [id, true])) };
       const { error } = await auth.supabase.auth.updateUser({ data: { [PAGE_GUIDES_METADATA_KEY]: guides } });
       if (error) throw error;
       return NextResponse.json({ guides }, { headers: noStore });

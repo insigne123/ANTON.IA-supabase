@@ -20,7 +20,8 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2, CircleHelp, Megaphone
+  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2, CircleHelp, Megaphone,
+  BookOpen,
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
@@ -190,6 +191,21 @@ export function AppSidebar() {
           <div className="mt-1 text-sm font-medium text-sidebar-foreground/85">{APP_VERSION}</div>
         </div>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={pathname === '/ayuda'}
+              className={cn(
+                'h-10 rounded-2xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/82 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground',
+                pathname === '/ayuda' && 'bg-sidebar-accent/95 text-sidebar-accent-foreground',
+              )}
+            >
+              <Link href="/ayuda" data-tour="help-center" aria-current={pathname === '/ayuda' ? 'page' : undefined}>
+                <BookOpen />
+                <span>Centro de ayuda</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               data-tour="tour-help"
