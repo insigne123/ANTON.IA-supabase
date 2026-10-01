@@ -7,12 +7,9 @@ const operationMigrationPath = 'supabase/migrations/20260813120000_idempotent_en
 const sharedCreditsMigrationPath = 'supabase/migrations/20260904220304_shared_daily_account_credits.sql';
 const organizationCreditsMigrationPath = 'supabase/migrations/20260907121351_organization_credit_policies.sql';
 const sourcePath = 'src/lib/server/daily-quota-store.ts';
-const functionsPath = 'functions/index.ts';
 const leadResearchRoutePath = 'src/app/api/lead-research/route.ts';
 const leadSearchRoutePath = 'src/app/api/leads/search/route.ts';
 const quotaStatusRoutePath = 'src/app/api/quota/status/route.ts';
-const antoniaQuotaRoutePath = 'src/app/api/antonia/quota/route.ts';
-const backupCronRoutePath = 'src/app/api/cron/antonia/route.ts';
 const enrichmentRoutePath = 'src/app/api/opportunities/enrich-apollo/route.ts';
 const supliaRunnerPath = 'src/lib/server/suplia-tool-runner.ts';
 const supliaResearchPath = 'src/lib/server/suplia-research-tools.ts';
@@ -20,12 +17,9 @@ const operationSql = readFileSync(operationMigrationPath, 'utf8');
 const sharedCreditsSql = readFileSync(sharedCreditsMigrationPath, 'utf8');
 const organizationCreditsSql = readFileSync(organizationCreditsMigrationPath, 'utf8');
 const source = readFileSync(sourcePath, 'utf8');
-const functionsSource = readFileSync(functionsPath, 'utf8');
 const leadResearchRoute = readFileSync(leadResearchRoutePath, 'utf8');
 const leadSearchRoute = readFileSync(leadSearchRoutePath, 'utf8');
 const quotaStatusRoute = readFileSync(quotaStatusRoutePath, 'utf8');
-const antoniaQuotaRoute = readFileSync(antoniaQuotaRoutePath, 'utf8');
-const backupCronRoute = readFileSync(backupCronRoutePath, 'utf8');
 const enrichmentRoute = readFileSync(enrichmentRoutePath, 'utf8');
 const supliaRunner = readFileSync(supliaRunnerPath, 'utf8');
 const supliaResearch = readFileSync(supliaResearchPath, 'utf8');
@@ -85,13 +79,6 @@ test('effective credit limits come from the organization policy boundary', () =>
   assert.match(resolver, /status\.binding === 'team'/);
   assert.doesNotMatch(resolver, /profiles|signatures|quota_overrides\?\.|antonia\?\./);
 
-  const workerResolverStart = functionsSource.indexOf('async function getEffectiveDailyContactQuota');
-  const workerResolverEnd = functionsSource.indexOf('function sleep', workerResolverStart);
-  const workerResolver = functionsSource.slice(workerResolverStart, workerResolverEnd);
-  assert.match(workerResolver, /rpc\('get_antonia_credit_status_v2'/);
-  assert.match(workerResolver, /p_organization_id: params\.organizationId/);
-  assert.match(workerResolver, /status\.binding === 'team'/);
-  assert.doesNotMatch(workerResolver, /\.from\('profiles'\)|signatures|quota_overrides\?\.|antonia\?\./);
 
   assert.match(sharedCreditsSql, /add column if not exists daily_credit_limit integer/);
   assert.match(sharedCreditsSql, /daily_credit_limit between 1 and 50/);
@@ -179,15 +166,6 @@ test('all metered resources use the same user-scoped atomic credit boundary', ()
   assert.match(supliaResearch, /needEnv\('BRANDDEV_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*fetchJsonWithTimeout/);
 });
 
-test('Firebase search cannot bypass the central account credit reservation', () => {
-  const start = functionsSource.indexOf('async function executeSearch');
-  const end = functionsSource.indexOf('async function executeEnrichment', start);
-  const search = functionsSource.slice(start, end);
-  assert.match(search, /fetch\(internalUrl/);
-  assert.match(search, /DAILY_SEARCH_QUOTA_EXCEEDED/);
-  assert.doesNotMatch(search, /getLeadSearchUrl|fallbackUrl|x-api-secret-key/);
-});
-
 test('quota resolution fails closed when callers omit an ambiguous organization', () => {
   const resolverStart = source.indexOf('async function resolveOrganizationIdForQuota');
   const resolverEnd = source.indexOf('async function resolveUserScopedQuotaContext', resolverStart);
@@ -201,8 +179,6 @@ test('quota status routes use the active organization instead of the oldest memb
   assert.match(quotaStatusRoute, /requireSessionOrTrustedInternalRequest\(req\)/);
   assert.match(quotaStatusRoute, /getEffectiveDailyQuotaLimits\(\{ userId, organizationId \}\)/);
   assert.match(quotaStatusRoute, /getDailyQuotaStatus\(\{ userId, organizationId, resource: 'search'/);
-  assert.match(antoniaQuotaRoute, /requireAuth\(\)/);
-  assert.doesNotMatch(antoniaQuotaRoute, /\.order\('created_at'/);
 });
 
 test('lead searches reserve the account quota before reaching an external provider', () => {
@@ -211,44 +187,6 @@ test('lead searches reserve the account quota before reaching an external provid
   assert.ok(reserve >= 0 && externalCall > reserve);
   assert.match(leadSearchRoute, /resource: 'search'/);
   assert.match(leadSearchRoute, /DAILY_SEARCH_QUOTA_EXCEEDED/);
-});
-
-test('Firebase investigate reserves exact-scope quota before research and defers unstarted leads', () => {
-  const start = functionsSource.indexOf('async function executeInvestigate');
-  const end = functionsSource.indexOf('async function executeInitialContact', start);
-  const investigate = functionsSource.slice(start, end);
-  const reservation = investigate.indexOf('await consumeLeadProcessingQuota');
-  const leadResearch = investigate.indexOf('fetch(getLeadResearchUrl()');
-  const n8nResearch = investigate.indexOf('fetch(N8N_WEBHOOK_URL');
-
-  if (reservation >= 0) {
-    assert.ok(reservation < leadResearch);
-    assert.ok(reservation < n8nResearch);
-    assert.match(investigate, /organizationId: task\.organization_id/);
-    assert.match(investigate, /scope: quota\.scope/);
-    assert.match(investigate, /resource: 'investigate'/);
-    assert.match(investigate, /deferredLeadsForQuota = leads\.slice\(investigateIndex - 1\)/);
-    assert.match(investigate, /reason: 'daily_limit_reached'/);
-    assert.match(investigate, /retryAt: getNextUtcDayStartIso\(\)/);
-    assert.match(investigate, /task\.payload = \{ \.\.\.task\.payload, userId, leads: deferredLeadsForQuota \}/);
-    assert.doesNotMatch(investigate, /incrementUsage\([^\n]*'investigate'/);
-  }
-
-  const processStart = functionsSource.indexOf('async function processTask(');
-  const processEnd = functionsSource.indexOf('async function runAntoniaTick', processStart);
-  const processTask = functionsSource.slice(processStart, processEnd);
-  assert.match(processTask, /scheduled_for: retryAt,[\s\S]*payload: task\.payload,[\s\S]*result: result/);
-
-  if (reservation >= 0) {
-    const helperStart = functionsSource.indexOf('async function consumeLeadProcessingQuota');
-    const helperEnd = functionsSource.indexOf('function sleep', helperStart);
-    const helper = functionsSource.slice(helperStart, helperEnd);
-    assert.equal((helper.match(/rpc\('consume_antonia_daily_quota_v1'/g) || []).length, 1);
-    assert.match(helper, /p_organization_id: params\.organizationId/);
-    assert.match(helper, /p_user_id: params\.userId/);
-    assert.match(helper, /p_scope: params\.scope/);
-    assert.match(helper, /p_limit: params\.limit/);
-  }
 });
 
 test('lead research claims request identity before atomically consuming quota and calling the provider', () => {
@@ -396,21 +334,4 @@ test('profile enrichment has stable targets and recoverable idempotent replays',
   assert.match(enrichmentRoute, /async function markTargetsFailed/);
   assert.match(enrichmentRoute, /stableTargetIds/);
   assert.match(enrichmentRoute, /claimToken: claim\.claimToken/);
-});
-
-test('backup enrichment delegates atomic quota authority and preserves unrelated usage increments', () => {
-  const start = backupCronRoute.indexOf('async function executeEnrichment');
-  const end = backupCronRoute.indexOf('async function executeContact', start);
-  const enrichment = backupCronRoute.slice(start, end);
-
-  assert.match(enrichment, /\/api\/opportunities\/enrich-apollo/);
-  assert.match(enrichment, /mode: isDeep \? 'deep' : 'normal'/);
-  assert.match(enrichment, /'x-organization-id': task\.organization_id/);
-  assert.match(enrichment, /'Idempotency-Key': `antonia-task:\$\{task\.id\}:enrich`/);
-  assert.match(enrichment, /response\.status === 429/);
-  assert.doesNotMatch(enrichment, /incrementUsage\(/);
-  assert.doesNotMatch(enrichment, /getDailyUsage|getDailyQuotaStatus|getUserScopedAntoniaQuotaStatus/);
-  assert.match(backupCronRoute, /incrementUsage\(supabase, task\.organization_id, 'search'/);
-  assert.match(backupCronRoute, /incrementUsage\(supabase, task\.organization_id, 'search_run'/);
-  assert.match(backupCronRoute, /incrementUsage\(supabase, task\.organization_id, 'contact'/);
 });

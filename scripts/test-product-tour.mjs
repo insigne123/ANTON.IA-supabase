@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 
 const USER = '00000000-0000-4000-8000-0000000000aa';
-const MENU_TARGETS = ['antonia', 'profile', 'search', 'campaigns', 'saved-leads', 'contacted', 'connections'];
+const MENU_TARGETS = ['profile', 'search', 'campaigns', 'saved-leads', 'contacted', 'connections'];
 const bundle = await build({
   stdin: {
     contents: `import React from 'react'; import {createRoot} from 'react-dom/client';

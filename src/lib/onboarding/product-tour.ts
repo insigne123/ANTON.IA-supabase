@@ -38,8 +38,6 @@ export const PRODUCT_TOUR_STEPS: ProductTourStep[] = [
     body: 'Arma tus secuencias de correo, revisa a quién le llegan y decide cuándo activarlas.' },
   { id: 'contacted', target: 'contacted', menuLabel: 'Leads Contactados', title: 'Sigue las respuestas',
     body: 'Mira quién respondió y qué seguimiento toca con cada persona.' },
-  { id: 'antonia', target: 'antonia', menuLabel: 'Agente ANTON.IA', title: 'Deja que el agente trabaje',
-    body: 'Crea misiones para que ANTON.IA busque, investigue y contacte por ti, con los límites diarios que tú fijes.' },
   { id: 'help', target: 'tour-help', menuLabel: 'Ver tutorial', title: 'Listo para empezar',
     body: 'Te recomendamos partir por tu perfil. Si quieres repasar, vuelve a ver este recorrido desde aquí.' },
 ];

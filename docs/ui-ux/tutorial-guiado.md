@@ -8,7 +8,7 @@ Recorrido corto por el menú para que una persona nueva sepa dónde está cada c
 2. **Recorrido.** Se oscurece la pantalla y se resalta una entrada del menú a la vez. Una tarjeta al lado muestra «Paso X de Y», un título, una frase y los botones «Atrás», «Siguiente» y «Omitir».
 3. **Final.** El último paso resalta «Ver tutorial» y ofrece «Ir a mi perfil» (principal) o «Terminar».
 
-Pasos (textos en `src/lib/onboarding/product-tour.ts`): Perfil → Conexiones → Búsqueda de Leads → Guardados · Leads → Campañas → Leads Contactados → Agente ANTON.IA → Ver tutorial. En escritorio son 8. En el teléfono son 9, porque el primero muestra el botón del menú: las entradas viven en el menú plegado, así que ese botón queda resaltado y la tarjeta dice dónde está cada entrada («En el menú: Perfil»).
+Pasos (textos en `src/lib/onboarding/product-tour.ts`): Perfil → Conexiones → Búsqueda de Leads → Guardados · Leads → Campañas → Leads Contactados → Ver tutorial. En escritorio son 7. En el teléfono son 8, porque el primero muestra el botón del menú: las entradas viven en el menú plegado, así que ese botón queda resaltado y la tarjeta dice dónde está cada entrada («En el menú: Perfil»).
 
 ## Reglas
 

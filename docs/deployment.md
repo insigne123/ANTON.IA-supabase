@@ -69,7 +69,6 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 
 | Carga | Function | Cadencia | Notas |
 | --- | --- | --- | --- |
-| ANTON.IA | `antoniaTick` | cada minuto | Worker primario. |
 | Native research | `nativeResearchTick` | cada minuto | No hace trabajo hasta que `NATIVE_RESEARCH_SCHEDULER_ENABLED=true`. |
 | Preparación de secuencias | `researchSequencePreparationTick` | cada minuto | Bridge `/api/cron/research-sequences`; requiere la migración de preparaciones. Genera borradores, no envía. |
 | Campanas | `campaignProcessingTick` | cada 5 minutos | Invoca el bridge privado `/api/cron/process-campaigns`. |
@@ -82,20 +81,20 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 
 No agregues estas cargas a Vercel, App Hosting ni a un Cloud Scheduler HTTP externo. `vercel.json` conserva exclusivamente el cron de SUPL.IA, que no forma parte de este traspaso.
 
-`GET /api/cron/antonia` y el worker legacy `antoniaWorker` se conservan temporalmente como compatibilidad y responden `410`; no procesan tareas ni reenvian a Firebase. `antoniaWorker` es IAM-private. Los nueve ticks usan `onSchedule`, por lo que Firebase configura su binding IAM con Cloud Scheduler al desplegar; verificarla antes de habilitarlos. El bridge `/api/cron/native-research` acepta solo `LEAD_RESEARCH_WORKER_SECRET`. Los bridges de campanas, reconciliacion, uso Apollo, replies, privacidad y rollups aceptan solo `FIREBASE_SCHEDULER_SECRET` en `x-firebase-scheduler-secret` junto con `x-scheduler-owner: firebase-functions`; no aceptan `CRON_SECRET` ni `x-cron-secret`.
+El agente de misiones (`antoniaTick`, `antoniaTickHttp`, el worker legacy y `GET /api/cron/antonia`) se retiró el 1 de octubre de 2026; su trabajo lo asume Cowork (`docs/retiro-agente-antonia.md`). Los ticks restantes usan `onSchedule`, por lo que Firebase configura su binding IAM con Cloud Scheduler al desplegar; verificarla antes de habilitarlos. El bridge `/api/cron/native-research` acepta solo `LEAD_RESEARCH_WORKER_SECRET`. Los bridges de campanas, reconciliacion, uso Apollo, replies, privacidad y rollups aceptan solo `FIREBASE_SCHEDULER_SECRET` en `x-firebase-scheduler-secret` junto con `x-scheduler-owner: firebase-functions`; no aceptan `CRON_SECRET` ni `x-cron-secret`.
 
 `replySyncTick` solo procesa pares organizacion/usuario presentes en `contacted_leads` con `organization_id`; no infiere una organizacion para datos legacy sin scope. Esas filas requieren una reparacion de datos separada antes de poder reconciliarse de forma segura.
 
-Los endpoints manuales `antoniaTickHttp` y `nativeResearchTickHttp` son IAM-private. Un trigger manual debe tener `roles/run.invoker`, presentar un ID token con la audiencia del servicio en `Authorization` y enviar su secreto manual dedicado en `x-manual-trigger-secret`. App Hosting y Vercel no deben invocarlos.
+El endpoint manual `nativeResearchTickHttp` es IAM-private. Un trigger manual debe tener `roles/run.invoker`, presentar un ID token con la audiencia del servicio en `Authorization` y enviar su secreto manual dedicado en `x-manual-trigger-secret`. App Hosting y Vercel no deben invocarlos.
 
 Pasos de plataforma antes del deploy:
 
-1. Crear o rotar `LEAD_RESEARCH_WORKER_SECRET`, `FIREBASE_SCHEDULER_SECRET`, `ANTONIA_MANUAL_TICK_SECRET` y `NATIVE_RESEARCH_MANUAL_TICK_SECRET` en Firebase Secret Manager. Ninguno debe reutilizar `CRON_SECRET` ni `INTERNAL_API_SECRET`.
+1. Crear o rotar `LEAD_RESEARCH_WORKER_SECRET`, `FIREBASE_SCHEDULER_SECRET` y `NATIVE_RESEARCH_MANUAL_TICK_SECRET` en Firebase Secret Manager. Ninguno debe reutilizar `CRON_SECRET` ni `INTERNAL_API_SECRET`.
 2. Entregar `FIREBASE_SCHEDULER_SECRET` tambien al runtime Next de destino (App Hosting o Vercel). `scripts/apphosting-sync-secrets.sh` lo solicita y concede acceso para App Hosting.
 3. Configurar `ANTONIA_APP_URL` o `APP_URL` en Functions con la URL HTTPS del runtime Next de destino para que todos los ticks alcancen sus bridges autenticados.
-4. Desplegar primero las rutas Next y la eliminacion de cron de Vercel, y despues `firebase deploy --only functions`. Verificar que Firebase cree o actualice los nueve jobs de Cloud Scheduler y que Vercel no conserve los jobs retirados.
+4. Desplegar primero las rutas Next y la eliminacion de cron de Vercel, y despues `firebase deploy --only functions`. Verificar que Firebase cree o actualice los jobs de Cloud Scheduler (y que borre `antoniaTick`, `antoniaTickHttp` y `antoniaWorker`, retirados) y que Vercel no conserve los jobs retirados.
 5. Conceder `roles/run.invoker` solo a la cuenta de servicio operativa que pueda disparar manualmente los endpoints privados. Los ticks `onSchedule` no exponen endpoints HTTP publicos: dejar que Firebase gestione la binding del job de Cloud Scheduler y, si una politica de organizacion la bloquea, concederla solo a la identidad del job correspondiente, nunca a `allUsers`.
-6. Retirar en un cambio separado las bindings de App Hosting `ANTONIA_FIREBASE_TICK_URL` y `ANTONIA_FIREBASE_TICK_SECRET`, y rotar el secreto historico `ANTONIA_TICK_SECRET`. Este cambio no modifica `apphosting.yaml`.
+6. Las bindings de App Hosting `ANTONIA_FIREBASE_TICK_URL` y `ANTONIA_FIREBASE_TICK_SECRET` ya se retiraron de `apphosting.yaml` junto con el agente. El secreto histórico `ANTONIA_TICK_SECRET` sigue en uso como `CRON_SECRET`: rotarlo es un paso aparte.
 
 ## Verificaciones previas al release
 

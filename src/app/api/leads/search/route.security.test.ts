@@ -9,7 +9,6 @@ const searchPageSource = readFileSync(new URL('../../../(app)/search/page.tsx', 
 const profileStatusSource = readFileSync(new URL('../profile-status/route.ts', import.meta.url), 'utf8');
 const enrichmentSource = readFileSync(new URL('../../opportunities/enrich-apollo/route.ts', import.meta.url), 'utf8');
 const organizationEnrichmentSource = readFileSync(new URL('../../organizations/enrich-apollo/route.ts', import.meta.url), 'utf8');
-const workerSource = readFileSync(new URL('../../cron/antonia/route.ts', import.meta.url), 'utf8');
 
 test('lead-search BFF keeps the Apollo provider key server-only and in-process', () => {
   assert.match(source, /process\.env\.APOLLO_API_KEY/);
@@ -80,7 +79,6 @@ test('Apollo search, enrichment, and polling stay inside the active tenant and a
   assert.match(organizationEnrichmentSource, /const \{ user, organizationId \} = auth/);
   assert.doesNotMatch(organizationEnrichmentSource, /resolveOrganizationIdForUser/);
   assert.match(profileStatusSource, /\.eq\('organization_id', ctx\.organizationId\)[\s\S]*\.eq\('user_id', ctx\.user\.id\)/);
-  assert.match(workerSource, /'x-user-id': String\(task\.payload\.userId \|\| ''\),[\s\S]*'x-organization-id': String\(task\.organization_id \|\| ''\)/);
 });
 
 test('immediate Apollo data is rejected when provider identity binding disagrees', () => {

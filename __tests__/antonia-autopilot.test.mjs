@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const autopilot = await import('../src/lib/antonia-autopilot.ts');
-const playbooks = await import('../src/lib/antonia-playbooks.ts');
 
 test('scoreLeadForMission prioritizes strong outsourcing matches', () => {
   const result = autopilot.scoreLeadForMission(
@@ -144,19 +143,4 @@ test('buildSuggestedMeetingReply includes booking link when available', () => {
   assert.match(reply, /Camila/i);
   assert.match(reply, /https:\/\/calendly\.com\/antonia\/demo/i);
   assert.match(reply, /20 minutos/i);
-});
-
-test('outsourcing playbooks expose valid defaults', () => {
-  assert.ok(playbooks.ANTONIA_OUTSOURCING_PLAYBOOKS.length >= 5);
-
-  const ids = new Set(playbooks.ANTONIA_OUTSOURCING_PLAYBOOKS.map((item) => item.id));
-  assert.equal(ids.size, playbooks.ANTONIA_OUTSOURCING_PLAYBOOKS.length);
-
-  for (const playbook of playbooks.ANTONIA_OUTSOURCING_PLAYBOOKS) {
-    assert.ok(playbook.defaults.jobTitle);
-    assert.ok(playbook.defaults.location);
-    assert.ok(playbook.defaults.industry);
-    assert.ok(playbook.defaults.missionName);
-    assert.ok(playbook.defaults.dailyContactLimit > 0);
-  }
 });

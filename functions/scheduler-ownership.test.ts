@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const functionsSource = readFileSync('functions/index.ts', 'utf8');
-const legacyCronRoute = readFileSync('src/app/api/cron/antonia/route.ts', 'utf8');
-const legacyWorkerSource = readFileSync('functions/src/antonia-worker.ts', 'utf8');
+const appHosting = readFileSync('apphosting.yaml', 'utf8');
 const firebaseSchedulerAuth = readFileSync('src/app/api/cron/_firebase-scheduler-auth.ts', 'utf8');
 const deploymentDocs = readFileSync('docs/deployment.md', 'utf8');
 const vercelConfig = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons?: Array<{ path?: string }> };
@@ -31,34 +30,13 @@ function sourceBlock(startMarker: string, endMarker: string) {
     return functionsSource.slice(start, end);
 }
 
-test('Firebase scheduled Functions own the Antonia worker and its private manual trigger', () => {
-    const scheduledTick = sourceBlock('export const antoniaTick =', '// Manual use is IAM-restricted before it reaches this defense-in-depth secret check.');
-    const manualTick = sourceBlock('export const antoniaTickHttp =', '// Helper for grouping');
-
-    assert.match(scheduledTick, /functions\.scheduler\.onSchedule/);
-    assert.match(scheduledTick, /schedule: 'every 1 minutes'/);
-    assert.match(manualTick, /invoker: 'private'/);
-    assert.match(manualTick, /ANTONIA_MANUAL_TICK_SECRET/);
-    assert.match(scheduledTick, /ENRICHMENT_SERVICE_SECRET/);
-    assert.match(manualTick, /ENRICHMENT_SERVICE_SECRET/);
-    assert.match(manualTick, /hasManualTickAuthorization/);
+test('the retired mission agent has no scheduler, manual trigger, legacy worker or cron left', () => {
+    assert.doesNotMatch(functionsSource, /export const antoniaTick\b|export const antoniaTickHttp\b|antoniaWorker|runAntoniaTick/);
+    assert.doesNotMatch(functionsSource, /from\('antonia_tasks'\)|from\('antonia_missions'\)/);
+    assert.equal(existsSync('src/app/api/cron/antonia/route.ts'), false);
+    assert.equal(existsSync('functions/src/antonia-worker.ts'), false);
+    assert.doesNotMatch(appHosting, /ANTONIA_FIREBASE_TICK_URL|ANTONIA_FIREBASE_TICK_SECRET/);
     assert.match(functionsSource, /x-manual-trigger-secret/);
-    assert.doesNotMatch(manualTick, /\bANTONIA_TICK_SECRET\b|invoker: 'public'|x-cron-secret/);
-});
-
-test('retired Antonia entrypoints cannot forward or process work', () => {
-    assert.match(functionsSource, /export \{ antoniaWorker \} from '\.\/src\/antonia-worker';/);
-    assert.match(legacyCronRoute, /LEGACY_ANTONIA_CRON_DEPRECATED/);
-    assert.match(legacyCronRoute, /status: 410/);
-    assert.match(legacyCronRoute, /'X-Scheduler-Owner': 'firebase-functions'/);
-    assert.doesNotMatch(
-        legacyCronRoute,
-        /ANTONIA_FIREBASE_TICK_URL|ANTONIA_FIREBASE_TICK_SECRET|antoniaTickHttp|skipFirebaseForward|forceBackupProcessing/,
-    );
-    assert.match(legacyWorkerSource, /LEGACY_ANTONIA_WORKER_DEPRECATED/);
-    assert.match(legacyWorkerSource, /status\(410\)/);
-    assert.match(legacyWorkerSource, /invoker: 'private'/);
-    assert.doesNotMatch(legacyWorkerSource, /functions\.config\(|ANTONIA_FIREBASE_TICK_SECRET|ANTONIA_LEGACY_WORKER_SECRET|\/api\/cron\/antonia/);
 });
 
 test('Firebase owns all production scheduler bridges and Vercel only schedules Suplia', () => {
@@ -119,11 +97,11 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
     assert.doesNotMatch(replySyncSource, /ownerOffset/);
 
     assert.match(deploymentDocs, /Firebase Scheduled Functions es la [^\n]+ propietaria/);
-    assert.match(deploymentDocs, /`antoniaTick`/);
+    assert.doesNotMatch(deploymentDocs, /`antoniaTick`/);
     assert.match(deploymentDocs, /`nativeResearchTick`/);
     assert.match(deploymentDocs, /`campaignProcessingTick`/);
     assert.match(deploymentDocs, /`FIREBASE_SCHEDULER_SECRET`/);
     assert.match(deploymentDocs, /roles\/run\.invoker/);
     assert.match(deploymentDocs, /Firebase gestione la binding del job de Cloud Scheduler/);
-    assert.match(deploymentDocs, /Retirar en un cambio separado las bindings de App Hosting/);
+    assert.match(deploymentDocs, /ya se retiraron de `apphosting.yaml` junto con el agente/);
 });
