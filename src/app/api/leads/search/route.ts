@@ -246,7 +246,12 @@ type SearchAuditContext = {
 
 async function auditSearchResponse(response: NextResponse, context: SearchAuditContext) {
   const succeeded = response.status >= 200 && response.status < 400;
+  // The failure code (never the body) so the admin panel can tell a provider outage from a bad filter.
+  const errorCode = succeeded ? null : await response.clone().json()
+    .then((body: any) => (typeof body?.error === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(body.error) ? body.error : null))
+    .catch(() => null);
   await safeAppendAntoniaEvent({
+    errorCode,
     eventKey: `search:${context.requestId}:${succeeded ? 'completed' : 'failed'}`,
     eventType: succeeded ? 'search.completed' : 'search.failed',
     organizationId: context.organizationId,

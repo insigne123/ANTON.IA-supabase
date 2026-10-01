@@ -13,7 +13,10 @@ import type {
 } from '@/lib/schemas/leads';
 import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
-import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { linkedinProfilesMatch, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import {
+  ProfileSearchProblemError, profileProblemFromHttp, profileProblemFromProviderCode, profileUrlProblem,
+} from '@/lib/search/profile-search-outcome';
 
 const PATH = '/api/leads/search';
 const PROFILE_STATUS_PATH = '/api/leads/profile-status';
@@ -176,7 +179,7 @@ export async function searchLinkedInProfileLead(
   const linkedinUrl = normalizeLinkedinProfileUrl(
     body.linkedin_url || body.linkedin_profile_url || body.linkedinUrl,
   );
-  if (!linkedinUrl) throw new Error('La URL de LinkedIn no es válida.');
+  if (!linkedinUrl) throw new ProfileSearchProblemError(profileUrlProblem(body.linkedin_url || body.linkedin_profile_url || body.linkedinUrl) || 'invalid_url', 'La URL de LinkedIn no es válida.');
   const revealEmail = body.reveal_email ?? body.revealEmail ?? false;
   const revealPhone = body.reveal_phone ?? body.revealPhone ?? false;
   const requestProfile = (reveal: { revealEmail: boolean; revealPhone: boolean }) => enrichLinkedInProfileLead({
@@ -192,20 +195,12 @@ export async function searchLinkedInProfileLead(
   const result = await requestProfile({ revealEmail, revealPhone });
   let enriched = result.enriched?.[0] as any;
   if (enriched?.errorCode === 'APOLLO_PERSON_IDENTITY_MISMATCH') {
-    throw new Error('No pudimos confirmar que el perfil devuelto corresponda a la URL solicitada. No mostraremos datos de otra persona.');
+    throw new ProfileSearchProblemError('identity_mismatch', 'No pudimos confirmar que el perfil devuelto corresponda a la URL solicitada. No mostraremos datos de otra persona.');
   }
-  if (enriched?.linkedinUrl && normalizeLinkedinProfileUrl(enriched.linkedinUrl).toLowerCase() !== linkedinUrl.toLowerCase()) {
-    throw new Error('El proveedor devolvió un perfil distinto al solicitado. No mostraremos datos de otra persona.');
+  if (enriched?.linkedinUrl && !linkedinProfilesMatch(enriched.linkedinUrl, linkedinUrl)) {
+    throw new ProfileSearchProblemError('identity_mismatch', 'El proveedor devolvió un perfil distinto al solicitado. No mostraremos datos de otra persona.');
   }
-  if (!enriched) {
-    return {
-      count: 0,
-      leads_count: 0,
-      leads: [],
-      search_mode: 'linkedin_profile',
-      phone_enrichment: result.phone_enrichment,
-    } as LeadSearchResponse;
-  }
+  if (!enriched) throw new ProfileSearchProblemError('not_found');
   let lead: Lead = toProfileLead(enriched, linkedinUrl);
   // A profile is only pending while the provider still owns the outcome:
   // queued phone enrichment or a pending enrichment status. The top-level
@@ -214,18 +209,17 @@ export async function searchLinkedInProfileLead(
   let pendingProfile = result.phone_enrichment?.status === 'queued'
     || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending')
     || result.providerState === 'unknown' || result.providerState === 'processing';
-  if (enriched.errorCode === 'APOLLO_CREDITS_EXHAUSTED') {
-    throw new Error('La cuenta de Apollo no tiene créditos disponibles. Recarga créditos o espera al próximo ciclo de facturación.');
+  const providerProblem = profileProblemFromProviderCode(enriched.errorCode);
+  if (providerProblem === 'credits_exhausted') {
+    throw new ProfileSearchProblemError('credits_exhausted', 'La cuenta de Apollo no tiene créditos disponibles. Recarga créditos o espera al próximo ciclo de facturación.');
+  }
+  // The provider did not answer: asking again without contact data would only fail again and end in a false «no data».
+  if (providerProblem === 'provider_unavailable' && !hasUsableLinkedInProfileData(lead)) {
+    throw new ProfileSearchProblemError('provider_unavailable');
   }
   if (!hasUsableLinkedInProfileData(lead) && !pendingProfile) {
-    if (enriched.enrichmentStatus === 'not_found') {
-      return {
-        count: 0,
-        leads_count: 0,
-        leads: [],
-        search_mode: 'linkedin_profile',
-        phone_enrichment: result.phone_enrichment,
-      } as LeadSearchResponse;
+    if (enriched.enrichmentStatus === 'not_found' || providerProblem === 'not_found') {
+      throw new ProfileSearchProblemError('not_found');
     }
     if (revealEmail || revealPhone) {
       // Reintento automático solo con datos profesionales (matchOnly en el
@@ -235,7 +229,7 @@ export async function searchLinkedInProfileLead(
         const retry = await requestProfile({ revealEmail: false, revealPhone: false });
         const fallback = retry.enriched?.[0] as any;
         if (fallback && !fallback.errorCode
-          && (!fallback.linkedinUrl || normalizeLinkedinProfileUrl(fallback.linkedinUrl).toLowerCase() === linkedinUrl.toLowerCase())) {
+          && (!fallback.linkedinUrl || linkedinProfilesMatch(fallback.linkedinUrl, linkedinUrl))) {
           const fallbackLead = toProfileLead(fallback, linkedinUrl);
           if (hasUsableLinkedInProfileData(fallbackLead)) {
             return {
@@ -255,7 +249,7 @@ export async function searchLinkedInProfileLead(
         // El reintento no debe ocultar el diagnóstico original.
       }
     }
-    throw new Error('APOLLO_PROFILE_NO_USABLE_DATA');
+    throw new ProfileSearchProblemError('no_usable_data', 'APOLLO_PROFILE_NO_USABLE_DATA');
   }
   return {
     count: hasUsableLinkedInProfileData(lead) ? 1 : 0,
@@ -320,14 +314,15 @@ export async function enrichLinkedInProfileLead(input: {
     && Array.isArray(json?.enriched)
     && Boolean(json.enriched[0]?.id);
   if (!res.ok && !recoverablePending) {
+    const problem = profileProblemFromHttp(res.status, json?.error);
     if (res.status === 429) {
-      throw new Error('Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
+      throw new ProfileSearchProblemError(problem, 'Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
     }
-    throw new Error('No pudimos iniciar la búsqueda de datos de contacto. Inténtalo nuevamente.');
+    throw new ProfileSearchProblemError(problem, 'No pudimos iniciar la búsqueda de datos de contacto. Inténtalo nuevamente.');
   }
   if ((!json?.queued && json?.operationStatus !== 'completed' && !recoverablePending)
     || !Array.isArray(json?.enriched) || !json.enriched[0]?.id) {
-    throw new Error('No pudimos confirmar la búsqueda de datos de contacto. Inténtalo nuevamente.');
+    throw new ProfileSearchProblemError('provider_unavailable', 'No pudimos confirmar la búsqueda de datos de contacto. Inténtalo nuevamente.');
   }
 
   return {
