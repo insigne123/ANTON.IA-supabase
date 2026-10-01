@@ -84,6 +84,14 @@ env:
   - variable: COWORK_JUDGE_ENABLED
     value: "false"
     availability: [RUNTIME]
+  # Jev en sombra (docs/cowork-jev.md): requiere el secreto TYPESAFE_API_KEY
+  # creado en Secret Manager con acceso de la app. Solo registra, no corrige.
+  - variable: TYPESAFE_API_KEY
+    secret: TYPESAFE_API_KEY
+    availability: [RUNTIME]
+  - variable: COWORK_JEV_SHADOW
+    value: "true"
+    availability: [RUNTIME]
   # Reintento de envíos fallidos de campaña (docs/cowork-reintentar-envios.md).
   # Requiere la migración 20260930170000 ya aplicada en producción.
   # Apagarlo también detiene un reintento ya aprobado.
