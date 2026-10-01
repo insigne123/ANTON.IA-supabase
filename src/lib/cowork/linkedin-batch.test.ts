@@ -114,7 +114,7 @@ test('the label and the reply count people and say what is left to do', () => {
     { id: id(3), name: 'Eva', status: 'skipped' as const, reason: 'La empresa ya respondió.' }, { id: id(4), name: 'Teo', status: 'removed' as const },
   ];
   assert.equal(coworkLinkedinBatchSummary('invite', results),
-    'Quedaron en cola 2 de 4 invitaciones. Ejecútalas desde la extensión ante cada perfil; vencen en 7 días. 1 no salió: el motivo está en cada persona. Quitaste a 1 persona de la lista.');
-  assert.match(coworkLinkedinBatchSummary('message', results.slice(0, 2)), /^Quedaron en cola 2 de 2 mensajes\. Ejecútalos desde la extensión/);
-  assert.equal(coworkLinkedinBatchSummary('invite', [results[2]]), 'Quedaron en cola 0 de 1 invitaciones. 1 no salió: el motivo está en cada persona.');
+    'Quedaron listas 2 de 4 invitaciones. Para enviar cada invitación: abre cada perfil en LinkedIn, abre la extensión de ANTON.IA, toca «Consultar trabajos» y luego «Ejecutar». Nada sale solo; vence en 7 días si no lo ejecutas. 1 no salió: el motivo está en cada persona. Quitaste a 1 persona de la lista.');
+  assert.match(coworkLinkedinBatchSummary('message', results.slice(0, 2)), /^Quedaron listas 2 de 2 mensajes\. Para enviar cada mensaje: abre cada perfil en LinkedIn, abre la extensión de ANTON\.IA/);
+  assert.equal(coworkLinkedinBatchSummary('invite', [results[2]]), 'Quedaron listas 0 de 1 invitaciones. 1 no salió: el motivo está en cada persona.');
 });
