@@ -149,7 +149,7 @@ async function executeEffect(
       const started = await startCoworkResearch(auth, proposal.origin_run_id, proposal.target_id);
       return { reply: started.status === 'completed'
         ? 'La investigación ya estaba disponible y quedó vinculada al trabajo.'
-        : 'La investigación quedó en curso y suele tardar unos minutos. Cuando esté lista, pídeme el resumen o el borrador del correo.',
+        : 'La investigación quedó en curso y suele tardar unos minutos. Cuando termine, te aviso en esta conversación con lo más útil para escribirle.',
       result: { reportId: started.reportId, status: started.status, reused: started.reused } };
     } catch (error) {
       if (error instanceof Error && error.message === 'COWORK_RESEARCH_EMAIL_REQUIRED') {

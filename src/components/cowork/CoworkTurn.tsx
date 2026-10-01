@@ -277,7 +277,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
 
   return <article className="space-y-4" aria-label={run.automatic ? 'Continuación automática' : 'Turno'}>
     {run.automatic
-      ? <p className="flex items-center gap-2 text-[12.5px] text-cw-muted"><CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />Continuó automáticamente con el resultado</p>
+      ? <p className="flex items-center gap-2 text-[12.5px] text-cw-muted"><CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />
+        {run.automaticReason === 'research' ? 'Terminaron las investigaciones que pediste' : 'Continuó automáticamente con el resultado'}</p>
       : <div className="flex justify-end">
         {version ? <VersionMessage message={run.message} emails={version} /> : <CoworkUserMessage message={run.message} />}
       </div>}
