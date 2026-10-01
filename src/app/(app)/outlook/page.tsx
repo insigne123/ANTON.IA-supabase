@@ -9,6 +9,7 @@ import { providerConnectionError } from '@/lib/provider-connection-feedback';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { PageHeader } from '@/components/page-header';
 
 function OutlookConnectPageInner() {
   const { toast } = useToast();
@@ -93,9 +94,10 @@ function OutlookConnectPageInner() {
 
   return (
     <div className="container mx-auto max-w-3xl space-y-6">
+      <PageHeader title="Outlook" description="Envía desde tu cuenta de Microsoft 365 y recibe las respuestas en ANTON.IA." />
       <Card>
         <CardHeader>
-          <CardTitle>Conexión con Outlook (Microsoft 365)</CardTitle>
+          <CardTitle>Estado de la conexión</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-3">

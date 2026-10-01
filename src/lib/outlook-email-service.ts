@@ -179,7 +179,7 @@ export async function openSentMessageWebLink(opts: {
   } catch (e: any) {
     throw new Error(
       e?.errorMessage?.includes('consent_required') || e?.message?.includes('consent_required')
-        ? 'Se requiere Mail.Read para ver el email. Actívalo en “Conexión con Outlook”.'
+        ? 'Se requiere Mail.Read para ver el email. Actívalo en Conexiones › Outlook.'
         : e?.message || 'No se pudo abrir el email.'
     );
   }

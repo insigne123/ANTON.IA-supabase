@@ -14,7 +14,8 @@ import { supabaseService } from '@/lib/supabase-service';
 import type { Lead, EnrichedLead } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, ArrowRight, ChevronDown, Download, ListFilter, MessageSquare, Search, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowRight, ChevronDown, Download, ListFilter, MessageSquare, Search, Trash2, UserSearch } from 'lucide-react';
+import { EmptyState } from '@/components/ui/empty-state';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import * as Quota from '@/lib/quota-client';
@@ -607,22 +608,17 @@ export default function SavedLeadsPage() {
                 )) : (
                   <TableRow>
                     <TableCell colSpan={6} className="h-52 text-center">
-                      <div className="mx-auto flex max-w-md flex-col items-center gap-3 px-4">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-muted/40">
-                          <Search className="h-5 w-5 text-muted-foreground" />
-                        </div>
-                        <div>
-                          <p className="font-medium">{savedLeads.length === 0 ? 'Aún no hay leads guardados' : 'No hay leads con esos filtros'}</p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {savedLeads.length === 0
-                              ? 'Guarda leads desde la búsqueda para revisarlos y enriquecerlos después.'
-                              : 'Prueba limpiar algun filtro para volver a ver tu base guardada.'}
-                          </p>
-                        </div>
-                        {savedLeads.length === 0 ? (
-                          <Button size="sm" onClick={() => router.push('/search')}>Buscar leads</Button>
-                        ) : <Button size="sm" variant="outline" onClick={clearFilters}>Limpiar filtros</Button>}
-                      </div>
+                      <EmptyState
+                        icon={savedLeads.length === 0 ? UserSearch : Search}
+                        headingLevel="p"
+                        title={savedLeads.length === 0 ? 'Aún no tienes contactos por completar' : 'No hay contactos con esos filtros'}
+                        description={savedLeads.length === 0
+                          ? 'Guarda prospectos desde «Buscar prospectos». Los que aún no tienen correo esperan aquí hasta que lo busques.'
+                          : 'Prueba quitar algún filtro para volver a ver tus contactos.'}
+                        action={savedLeads.length === 0
+                          ? <Button size="sm" onClick={() => router.push('/search')}>Buscar prospectos</Button>
+                          : <Button size="sm" variant="outline" onClick={clearFilters}>Limpiar filtros</Button>}
+                      />
                     </TableCell>
                   </TableRow>
                 )}

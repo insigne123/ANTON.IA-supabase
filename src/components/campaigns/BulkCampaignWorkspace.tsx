@@ -1,5 +1,6 @@
 'use client';
 
+import { PageHeader } from '@/components/page-header';
 import { useEffect, useState } from 'react';
 import { CampaignSequenceEditor } from './CampaignSequenceEditor';
 import Link from 'next/link';
@@ -142,7 +143,7 @@ export function BulkCampaignWorkspace() {
     : false;
 
   return <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6 p-4 sm:p-6 [&_button]:h-auto [&_button]:min-h-11 [&_button]:max-w-full [&_button]:whitespace-normal [&_button]:py-2 [&_select]:min-w-0">
-    <header><h1 className="text-3xl font-semibold tracking-tight">Campañas</h1><p className="mt-2 text-muted-foreground">Contacta a un grupo o continúa una conversación.</p></header>
+    <PageHeader title="Campañas" description="Escribe a un grupo con una sola aprobación o revisa los seguimientos uno por uno." />
     {error && <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">{error}<Button className="ml-3" size="sm" variant="outline" disabled={busy} onClick={() => void run(refresh)}>Actualizar</Button></div>}
     {feedback && <p role="status" className="text-sm text-muted-foreground">{feedback}</p>}
     <Tabs defaultValue="campaigns">
