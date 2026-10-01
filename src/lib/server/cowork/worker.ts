@@ -7,6 +7,8 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkWorkerConfigured } from './runs';
 import { loadCoworkHistory } from './conversation-context';
+import { loadCoworkThreadMemory, saveCoworkThreadMemory } from './thread-memory';
+import { coworkThreadMemoryContext } from '@/lib/cowork/thread-memory';
 import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
 import { coworkExecutionPolicy, coworkEffectCanAutoApprove } from '@/lib/cowork/execution-policy';
@@ -132,6 +134,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const telemetry: Array<{ model: string; durationMs: number }> = [];
     await authorize();
     const history = await loadCoworkHistory(client, scope, run.parent_run_id || null);
+    // The whole conversation beyond the last turns: its first request and the memory the previous turns kept.
+    const threadMemory = coworkThreadMemoryContext(await loadCoworkThreadMemory(client, scope, run)
+      .catch(() => ({ firstRequest: null, memory: null })));
     // Name, company and offer once per run: drafts get signed and pitched without spending reads.
     const userContext = await loadCoworkUserContext(client, scope);
     let waitingApproval = false;
@@ -238,6 +243,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
             : 'specialists.review está deshabilitado.'}`,
           prompt: JSON.stringify(coworkDecisionContext(instructions, {
             history, request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
+            ...(threadMemory ? { threadMemory } : {}),
             ...(rejections.length ? { rejectedDecisions: rejections } : {}),
           })),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
@@ -277,6 +283,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       prepareBatch: prepareBatchEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       userContext,
+      remember: async memory => { await saveCoworkThreadMemory(client, scope, run, memory); },
       proposeNote: async (leadId, note) => {
         const proposed = await client.rpc('cowork_propose_note', {
           p_run_id: run.id, p_token: run.lease_token, p_lead_id: leadId, p_note: note,

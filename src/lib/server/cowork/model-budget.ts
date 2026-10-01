@@ -16,6 +16,9 @@ export async function reserveCoworkModelCall(client: SupabaseClient, runId: stri
   // Until the ledger knows the in-turn agents (20260928030000), their calls count as the
   // coordinator's: the same lease, and the same caps per turn and per conversation.
   if (error && IN_TURN_AGENTS.has(role) && /Specialist attempt unavailable/.test(error.message || '')) ({ data, error } = await reserve('coordinator'));
+  // Which cap was reached says what the person can do (failure-messages.ts): wait for tomorrow, or just write again.
+  if (error && /Daily model budget exhausted/.test(error.message || '')) throw new Error('COWORK_DAILY_MODEL_BUDGET: No se pudo reservar presupuesto para continuar este trabajo.');
+  if (error && /Conversation model budget exhausted/.test(error.message || '')) throw new Error('COWORK_CONVERSATION_MODEL_BUDGET: No se pudo reservar presupuesto para continuar este trabajo.');
   if (error || typeof data !== 'string') throw new Error('No se pudo reservar presupuesto para continuar este trabajo.');
   return data;
 }

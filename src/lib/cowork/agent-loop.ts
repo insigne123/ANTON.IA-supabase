@@ -24,6 +24,7 @@ import { coworkContactsImportSchema, type CoworkContactsImportInput } from './co
 import { coworkReplyThreadSchema, type CoworkReplyThreadInput } from './reply-proposal';
 import { coworkLinkedinBatchLeads, coworkLinkedinBatchSchema, type CoworkLinkedinBatchInput } from './linkedin-batch';
 import { coworkPrepareBatchPeople, coworkPrepareBatchSchema, type CoworkPrepareBatchInput } from './prepare-batch';
+import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memory';
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
@@ -87,6 +88,8 @@ export const coworkDecisionSchema = z.object({
   linkedinBatch: coworkLinkedinBatchSchema.nullable().optional(),
   /** contacts.prepare_batch: the goal (save, email or research) and the people seen in this thread, approved with one decision (prepare-batch.ts). */
   prepareBatch: coworkPrepareBatchSchema.nullable().optional(),
+  /** The summary of the whole conversation, updated with the final decision of a turn (thread-memory.ts); null on reads. */
+  memory: coworkThreadMemorySchema.nullable().optional(),
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
@@ -666,12 +669,18 @@ async function runCoworkLoop(input: {
   onCorrection?: (verdict: CoworkCorrectionVerdict) => void;
   /** Who the person is and what they sell: figures from it are not new when a correction uses them. */
   userContext?: unknown;
+  /** Keeps the summary of the conversation a decision carries (thread-memory.ts). Best effort: it never fails the turn. */
+  remember?: (memory: CoworkThreadMemory) => Promise<void>;
 }, observations: CoworkObservation[]) {
+  const remember = async (decision: Decision) => {
+    if (decision.memory && input.remember) await input.remember(decision.memory).catch(() => undefined);
+  };
   if (observations.length) {
     // The pre-queue phase already spent reads/model decisions. Resume only
     // synthesis, never a second tool or specialist budget in the same run.
     input.signal.throwIfAborted(); await input.authorize();
     const decision = coworkDecisionSchema.parse(await input.decide(observations, true));
+    await remember(decision);
     input.signal.throwIfAborted(); await input.authorize();
     if (decision.action === 'draft.write' && decision.write && input.write) return input.write(decision.write, observations);
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
@@ -742,6 +751,7 @@ async function runCoworkLoop(input: {
       continue;
     }
     input.signal.throwIfAborted();
+    await remember(decision);
     try {
       if (decision.action === 'draft.write') {
         // «Usar esta versión» keeps the person's text as it is: nobody rewrites it.

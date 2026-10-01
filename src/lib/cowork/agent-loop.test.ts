@@ -24,6 +24,24 @@ test('read loop gives observed results to the next decision and records real que
   assert.equal(recorded.length, 1);
 });
 
+test('the decision that closes the turn hands its summary of the conversation to remember, and a failure to keep it never fails the turn', async () => {
+  const memory = { offer: 'Revisión de antecedentes (AXIS)', audience: 'Jefes de RR. HH.', people: [], decisions: [], pending: ['Escribir a Rafael'] };
+  const remembered: unknown[] = [];
+  let decisions = 0;
+  const base = { message: 'Busca logística', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ name: 'Ejemplo' }] }), record: async () => {} };
+  const result = await runCoworkReadLoop({ ...base,
+    decide: async () => (decisions++ === 0 ? { ...search, memory: null } : { ...answer, memory }) as never,
+    remember: async value => { remembered.push(value); } });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  // Reads carry no memory; the closing decision does (twice here: the closing correction asks for the answer again, the last one wins).
+  assert.ok(remembered.length >= 1);
+  for (const value of remembered) assert.deepEqual(value, memory);
+  const kept = await runCoworkReadLoop({ ...base, decide: async () => ({ ...answer, memory }) as never,
+    remember: async () => { throw new Error('table missing'); } });
+  assert.equal(kept.reply, 'Un contacto encontrado.');
+});
+
 test('lead-scoped effect labels use the observed contact name, never raw IDs', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const leadId = '00000000-0000-4000-8000-000000000021';

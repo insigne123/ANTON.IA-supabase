@@ -113,36 +113,37 @@ select throws_ok(
 select isnt(public.cowork_reserve_model_call('c2000000-0000-4000-8000-000000000013', 'c4000000-0000-4000-8000-000000000013', 'reviewer'), null,
   'a reviewer call that still fits is admitted');
 
--- 40 calls per conversation, across its turns.
+-- 200 calls per conversation, across its turns: a guard against a loop since 20261001220000 (it was 40, and a long
+-- conversation reached it). The conversation is read through root_run_id, with its own reason.
 insert into public.cowork_model_calls (run_id, user_id, organization_id, role, output_reserved)
 select 'c2000000-0000-4000-8000-000000000014', 'c0000000-0000-4000-8000-000000000011', 'c1000000-0000-4000-8000-000000000011', 'coordinator', 100
-from generate_series(1, 39);
+from generate_series(1, 199);
 select isnt(public.cowork_reserve_model_call('c2000000-0000-4000-8000-000000000015', 'c4000000-0000-4000-8000-000000000015', 'writer'), null,
-  'the fortieth call of a conversation fits');
+  'the two hundredth call of a conversation fits');
 select throws_ok(
   $$select public.cowork_reserve_model_call('c2000000-0000-4000-8000-000000000015', 'c4000000-0000-4000-8000-000000000015', 'reviewer')$$,
-  'P0001', 'Model budget exhausted', 'the forty-first call of a conversation is refused'
+  'P0001', 'Conversation model budget exhausted', 'the two hundred and first call of a conversation is refused'
 );
 
--- 180 000 reserved tokens per conversation.
+-- 1 000 000 reserved tokens per conversation (it was 180 000).
 delete from public.cowork_model_calls where run_id in ('c2000000-0000-4000-8000-000000000014', 'c2000000-0000-4000-8000-000000000015');
 insert into public.cowork_model_calls (run_id, user_id, organization_id, role, output_reserved)
-values ('c2000000-0000-4000-8000-000000000014', 'c0000000-0000-4000-8000-000000000011', 'c1000000-0000-4000-8000-000000000011', 'coordinator', 175000);
+values ('c2000000-0000-4000-8000-000000000014', 'c0000000-0000-4000-8000-000000000011', 'c1000000-0000-4000-8000-000000000011', 'coordinator', 995000);
 select throws_ok(
   $$select public.cowork_reserve_model_call('c2000000-0000-4000-8000-000000000015', 'c4000000-0000-4000-8000-000000000015', 'writer')$$,
-  'P0001', 'Model budget exhausted', 'a writer call over 180 000 tokens in the conversation is refused'
+  'P0001', 'Conversation model budget exhausted', 'a writer call over 1 000 000 tokens in the conversation is refused'
 );
 
 -- The usage of an in-turn call is recorded under the run's lease, once.
 select is(public.cowork_record_model_usage(
-    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at limit 1),
+    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at, id limit 1),
     'c4000000-0000-4000-8000-00000000001f', '{"output_tokens": 812}'),
   false, 'a wrong token records no usage');
 select is(public.cowork_record_model_usage(
-    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at limit 1),
+    (select id from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at, id limit 1),
     'c4000000-0000-4000-8000-000000000011', '{"output_tokens": 812}'),
   true, 'the lease holder records the writer usage');
-select is((select usage from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at limit 1),
+select is((select usage from public.cowork_model_calls where run_id = 'c2000000-0000-4000-8000-000000000011' and role = 'writer' order by created_at, id limit 1),
   '{"output_tokens": 812}'::jsonb, 'the usage is stored');
 
 select ok(not has_function_privilege('authenticated', 'public.cowork_reserve_model_call(uuid, uuid, text, uuid)', 'execute')

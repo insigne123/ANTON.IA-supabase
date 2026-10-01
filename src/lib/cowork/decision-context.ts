@@ -141,7 +141,9 @@ export function coworkDecisionContext(
     userContext?: CoworkUserContext | null;
     /** What the loop has left for this turn; without it, reads are counted from the observations.
      * Decisions stay the loop's business: it asks for the answer with mustAnswer. */
-    turnBudget?: CoworkTurnBudget },
+    turnBudget?: CoworkTurnBudget;
+    /** The whole conversation beyond the last turns of history: its first request and its memory (thread-memory.ts). */
+    threadMemory?: unknown },
   now = new Date(),
   timeZone = coworkTimeZone(),
 ) {
