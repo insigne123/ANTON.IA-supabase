@@ -109,13 +109,55 @@ test('missing core prose is a retryable editorial failure, not a permanently inc
   await assert.rejects(synthesizeReportV2(input, { reason, write: async () => ({ sections: sections().slice(0, 1), telemetry }), audit: cleanAudit }), /CORE_SECTIONS_INCOMPLETE/);
 });
 
-test('a disputed factual citation never resurfaces in the published evidence graph', async () => {
-  const citedSections = sections();
-  citedSections[3].paragraphs[0].claimIds = ['c01'];
-  await assert.rejects(synthesizeReportV2(input, {
-    reason, write: async () => ({ sections: citedSections, telemetry }),
-    audit: async () => ({ model: 'gpt-5.6-terra', issues: [{ section: 'fit', paragraphIndex: 0, type: 'invalid_citation', severity: 'block', fragment: 'disputed fact' }], blockingSections: ['fit'], telemetry }),
-  }), /EVIDENCE_REVIEW_REQUIRED/);
+test('a disputed factual citation never resurfaces in the published evidence graph, and the rest arrives with a caveat', async () => {
+  // In the 1 Oct test the reviewer rejected a cited paragraph twice and the whole research was lost after 303 s. Now the
+  // disputed claim leaves the report with everything that rests on it, and the rest is delivered «con salvedades».
+  const claims = [
+    { id: 'c01', internalId: null, type: 'fact' as const, dimension: 'signal' as const, statement: 'Acme abrió una planta en Arequipa.',
+      evidenceIds: ['f_aaaaaaaaaa'], observedAt: '2026-09-01T00:00:00.000Z', freshnessDays: 30, jurisdiction: 'PE' as const, confidence: 0.6 },
+    { id: 'c02', internalId: null, type: 'derived' as const, dimension: 'company_size' as const, statement: 'Acme duplicaría su dotación.',
+      evidenceIds: [], observedAt: null, freshnessDays: null, jurisdiction: 'PE' as const, confidence: 0.4, inputs: ['c01'], formula: 'planta nueva',
+      assumptions: [{ id: 'asm_aaaaaaaaaa', label: 'Ritmo', value: 2, rationale: 'Supuesto del analista.', editable: true }] },
+    { id: 'c03', internalId: null, type: 'fact' as const, dimension: 'company_overview' as const, statement: 'Acme presta servicios de seleccion.',
+      evidenceIds: ['f_bbbbbbbbbb'], observedAt: null, freshnessDays: null, jurisdiction: 'PE' as const, confidence: 0.9 },
+  ];
+  const evidence = {
+    claims, shortIdMap: { c01: null, c02: null, c03: null },
+    sources: [{ id: 'src_aaaaaaaaaa', url: 'https://acme.example/', canonicalUrl: 'https://acme.example/', title: 'Acme', sourceType: 'corporate' as const,
+      jurisdiction: 'PE' as const, publishedAt: null, modifiedAt: null, retrievedAt: '2026-10-01T00:00:00.000Z', ownDomain: true, contentHash: 'a'.repeat(64) }],
+    facts: [
+      { id: 'f_aaaaaaaaaa', sourceId: 'src_aaaaaaaaaa', text: 'Planta en Arequipa', observedAt: null, jurisdiction: 'PE' as const, locator: null },
+      { id: 'f_bbbbbbbbbb', sourceId: 'src_aaaaaaaaaa', text: 'Servicios de seleccion', observedAt: null, jurisdiction: 'PE' as const, locator: null },
+    ],
+  };
+  const cited = sections();
+  cited[1].paragraphs[0] = { ...cited[1].paragraphs[0], claimIds: ['c02'] };
+  cited[2].paragraphs[0] = { ...cited[2].paragraphs[0], claimIds: ['c03'] };
+  cited[3].paragraphs[0] = { ...cited[3].paragraphs[0], claimIds: ['c01'] };
+  const reasonWithClaims = async () => ({ ...(await reason()), analysis: { ...analysis, riskClaimIds: ['c01', 'c03'],
+    discoveryQuestions: [{ question: 'Abrieron la planta de Arequipa?', validatesClaimId: 'c01' }],
+    objections: [{ objection: 'Ya tienen proveedor.', derivedFrom: ['c01', 'c03'], response: 'Comparar tiempos.' }] } });
+  let audits = 0;
+  const result = await synthesizeReportV2({ ...input, ...evidence }, {
+    reason: reasonWithClaims, write: async () => ({ sections: cited, telemetry }),
+    audit: async () => { audits++; return { model: 'gpt-5.6-terra', issues: [{ section: 'fit', paragraphIndex: 0, type: 'invalid_citation', severity: 'block', fragment: 'disputed fact' }], blockingSections: ['fit'], telemetry }; },
+  });
+  assert.equal(audits, 2, 'one repair, reviewed again, still disputed');
+  const document = result.document;
+  assert.equal(document.synthesis.status, 'partial');
+  assert.deepEqual(document.evidenceGraph.claims.map((claim) => claim.id), ['c03'], 'the disputed claim and what derives from it leave the graph');
+  assert.deepEqual(Object.keys(document.evidenceGraph.shortIdMap), ['c03']);
+  assert.equal(document.evidenceGraph.signals.length, 0, 'its signal goes with it');
+  const citing = document.sections.flatMap((section) => section.paragraphs.flatMap((paragraph) => paragraph.claimIds));
+  assert.deepEqual(citing, ['c03'], 'no paragraph rests on it, also the one that only cited what derives from it');
+  assert.equal(document.sections.find((section) => section.key === 'contact')?.paragraphs.length, 1, 'the rest is delivered');
+  assert.deepEqual(document.analysis.riskClaimIds, ['c03']);
+  assert.equal(document.analysis.discoveryQuestions[0].validatesClaimId, null);
+  assert.deepEqual(document.analysis.objections[0].derivedFrom, ['c03']);
+  assert.ok(document.audit.issues.some((issue) => /Informe con salvedades: se retiraron 2 afirmaciones/.test(issue.fragment)));
+  assert.equal(result.metadata.errorCode, 'report_v2_content_withheld');
+  assert.equal(result.metadata.retryable, false);
+  assert.doesNotThrow(() => validateReportV2CoverageGapConsistency(document));
 });
 
 test('unresolved invented seller traction is repaired once then withheld, never published as a suggested opening', async () => {

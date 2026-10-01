@@ -70,6 +70,19 @@ export async function fetchReportV2Source(input: { url: string; domain: string; 
   throw new Error('REPORT_V2_REDIRECT_LIMIT');
 }
 
+/** fn over every item, at most `limit` at a time; the results keep the order of the items. */
+async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  }));
+  return results;
+}
+
 export async function gatherReportV2Research(input: {
   projection: ReportV2SnapshotProjection;
   sellerProfile: SellerProfileContextV2;
@@ -153,16 +166,14 @@ export async function gatherReportV2Research(input: {
     depth,
     maxQueries: depthBudget.maxQueries,
   }, { generate });
-  const searches = [];
-  for (let offset = 0; offset < Math.min(plan.queries.length, depthBudget.maxQueries); offset += 3) {
-    if (signal.aborted) break;
-    searches.push(...await Promise.all(plan.queries.slice(offset, Math.min(offset + 3, depthBudget.maxQueries)).map(async (query) => {
-      const after = query.recencyDays ? ` after:${new Date(Date.now() - query.recencyDays * 86_400_000).toISOString().slice(0, 10)}` : '';
-      try {
-        return await (dependencies.search || searchSerper)({ organizationId: input.organizationId, kind: 'organic', query: `${query.query}${after}`, language: input.language, countryCode: entity.contactCountry === 'OTHER' ? 'cl' : entity.contactCountry.toLowerCase(), limit: 4 }, { maxRetries: 0 });
-      } catch { warnings.push('search_unavailable'); return null; }
-    })));
-  }
+  // Five searches at a time (it was three per round, one round after another).
+  const searches = await mapLimited(plan.queries.slice(0, depthBudget.maxQueries), 5, async (query) => {
+    if (signal.aborted) return null;
+    const after = query.recencyDays ? ` after:${new Date(Date.now() - query.recencyDays * 86_400_000).toISOString().slice(0, 10)}` : '';
+    try {
+      return await (dependencies.search || searchSerper)({ organizationId: input.organizationId, kind: 'organic', query: `${query.query}${after}`, language: input.language, countryCode: entity.contactCountry === 'OTHER' ? 'cl' : entity.contactCountry.toLowerCase(), limit: 4 }, { maxRetries: 0 });
+    } catch { warnings.push('search_unavailable'); return null; }
+  });
   const candidates: string[] = [];
   for (let rank = 0; rank < 4; rank += 1) {
     for (const search of searches) {
@@ -181,10 +192,12 @@ export async function gatherReportV2Research(input: {
   }
   const sources = [...fetched.values()].slice(0, depthBudget.maxPages);
   if (!sources.length) return { ...input.projection, entity, researchWarnings: [...warnings, 'web_context_unavailable'], researchMetrics: { queries: searches.length, pages: 0, elapsedMs: Date.now() - started } };
-  const results: Awaited<ReturnType<typeof extractClaimsFromSourcesV2>>[] = [];
-  for (let offset = 0; offset < sources.length && !signal.aborted; offset += 3) {
-    results.push(await (dependencies.extract || extractClaimsFromSourcesV2)({ companyName: entity.companyName, companyDomain: domain, sources: sources.slice(offset, offset + 3), providerContext: entity.contact, capturedAt: input.generatedAt || new Date().toISOString() }, { generate }));
-  }
+  // Three sources per extraction and three extractions at a time: with 18 pages that is two rounds instead of six model
+  // calls in a row, the longest part of a research (1 Oct: 22 to 303 s). Results keep the order of the sources.
+  const chunks = Array.from({ length: Math.ceil(sources.length / 3) }, (_, index) => sources.slice(index * 3, index * 3 + 3));
+  const results = (await mapLimited(chunks, 3, (chunk) => signal.aborted ? Promise.resolve(null)
+    : (dependencies.extract || extractClaimsFromSourcesV2)({ companyName: entity.companyName, companyDomain: domain, sources: chunk, providerContext: entity.contact, capturedAt: input.generatedAt || new Date().toISOString() }, { generate })))
+    .filter((result): result is Awaited<ReturnType<typeof extractClaimsFromSourcesV2>> => result !== null);
   const facts = results.flatMap((result) => result.facts);
   const consolidated = consolidateReportV2Claims({ drafts: results.flatMap((result) => result.claimDrafts), facts });
   if (results.some((result) => result.failedSourceIds.length)) warnings.push('some_claims_unavailable');
