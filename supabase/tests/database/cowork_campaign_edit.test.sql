@@ -42,7 +42,7 @@ returns jsonb language sql as $$ select jsonb_set(pg_temp.def(), '{overrides}', 
 create function pg_temp.marcela(p_extra jsonb default '[]'::jsonb)
 returns jsonb language sql as $$
   select jsonb_build_array(jsonb_build_object('email', 'marcela@sodexo.cl', 'messageIndex', 0,
-    'subject', 'Marcela, AXIS para Sodexo', 'body', E'Hola Marcela,\nvi que Sodexo contrata en regiones.') || p_extra);
+    'subject', 'Marcela, AXIS para Sodexo', 'body', E'Hola Marcela,\nvi que Sodexo contrata en regiones.')) || p_extra;
 $$;
 
 -- Five turns waiting for approval: four campaigns and a contact to save.
