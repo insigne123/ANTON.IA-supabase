@@ -16,8 +16,8 @@ import { useSidebar } from '@/components/ui/sidebar';
 import { toast } from '@/hooks/use-toast';
 import { getBrowserStorage } from '@/lib/browser-storage';
 import {
-  PAGE_GUIDES, PAGE_GUIDES_METADATA_KEY, PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, pageGuideFor, productTourRecord,
-  productTourSteps, seenPageGuides,
+  PAGE_GUIDES, PAGE_GUIDES_METADATA_KEY, PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, onTourRoute, pageGuideFor, pageGuidesInTour,
+  productTourRecord, productTourSteps, seenPageGuides,
   type PageGuide, type ProductTourRecord, type ProductTourStatus, type ProductTourStep,
 } from '@/lib/onboarding/product-tour';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,8 @@ const SCREEN_INSET = 3;
 const SETTLE_MS = 320;
 /** A screen gets this long to render its controls before its guide is offered. */
 const GUIDE_OFFER_DELAY_MS = 900;
+/** A tour step whose control is still not on screen after this long says so (an empty list, for example). */
+const MISSING_TARGET_MS = 2500;
 
 type ProductTourContextValue = {
   start: () => void;
@@ -52,7 +54,7 @@ type Phase = 'idle' | 'welcome' | 'touring' | 'guide';
 
 type ProductTourProviderProps = {
   userId?: string | null;
-  /** Client-side navigation, used by the last step to open the profile. */
+  /** Client-side navigation: the tour opens the screen of each step. */
   onNavigate: (href: string) => void;
   children: ReactNode;
 };
@@ -72,8 +74,38 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
   const collapseSidebarAfter = useRef(false);
   const scrolledAreas = useRef(new Map<HTMLElement, number>());
   const startTimer = useRef<number | undefined>(undefined);
+  const navigatedFor = useRef<string | null>(null);
+  const seenGuidesRef = useRef(seenGuides);
+  seenGuidesRef.current = seenGuides;
 
   useEffect(() => () => window.clearTimeout(startTimer.current), []);
+
+  // A tour interrupted by a reload goes on from the same step (this tab only).
+  useEffect(() => {
+    if (!userId) return;
+    const saved = readProgress(userId);
+    if (saved === null) return;
+    const tourSteps = productTourSteps(sidebar.isMobile);
+    setSteps(tourSteps);
+    setIndex(Math.min(saved, tourSteps.length - 1));
+    setPhase('touring');
+    // Only on load: later changes of the menu do not restart it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  // Each step opens its screen; the step's control is highlighted once that screen renders it.
+  useEffect(() => {
+    if (phase !== 'touring') {
+      navigatedFor.current = null;
+      return;
+    }
+    const step = steps[index];
+    if (!step?.route || onTourRoute(pathname, step.route)) return;
+    const key = `${index}:${step.route}`;
+    if (navigatedFor.current === key) return;
+    navigatedFor.current = key;
+    onNavigate(step.route);
+  }, [index, onNavigate, pathname, phase, steps]);
 
   // Opens on its own once, for new accounts that have not finished or skipped this version.
   useEffect(() => {
@@ -105,21 +137,22 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     return () => controller.abort();
   }, [userId]);
 
-  const markGuideSeen = useCallback((id: string) => {
-    if (!userId) return;
+  const markGuidesSeen = useCallback((ids: string[]) => {
+    const fresh = ids.filter((id) => !seenGuidesRef.current[id]);
+    if (!userId || fresh.length === 0) return;
     setSeenGuides((current) => {
-      if (current[id]) return current;
-      const next = { ...current, [id]: true as const };
+      const next = { ...current, ...Object.fromEntries(fresh.map((id) => [id, true as const])) };
       storeGuides(userId, next);
       return next;
     });
     fetch(TOUR_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guide: id }),
+      body: JSON.stringify(fresh.length === 1 ? { guide: fresh[0] } : { guides: fresh }),
       keepalive: true,
     }).catch(() => {});
   }, [userId]);
+  const markGuideSeen = useCallback((id: string) => markGuidesSeen([id]), [markGuidesSeen]);
 
   // A screen with a guide the person has not seen offers it once, quietly, after its controls are on screen.
   useEffect(() => {
@@ -172,7 +205,8 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     setIndex(0);
     setAnnouncement('');
     setPhase('touring');
-  }, [sidebar]);
+    if (userId) storeProgress(userId, 0);
+  }, [sidebar, userId]);
 
   const start = useCallback(() => {
     window.clearTimeout(startTimer.current);
@@ -198,6 +232,9 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     }
     setPhase('idle');
     save(status);
+    if (userId) clearProgress(userId);
+    // The tour already showed these screens: their guides stay in «?» instead of being offered again.
+    if (status === 'completed') markGuidesSeen(pageGuidesInTour(steps));
     if (collapseSidebarAfter.current) {
       collapseSidebarAfter.current = false;
       sidebar.setOpen(false);
@@ -209,14 +246,15 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
       toast({ title: 'Recorrido omitido', description: 'Puedes verlo cuando quieras desde «Ver tutorial», al final del menú.' });
     }
     if (navigateTo) onNavigate(navigateTo);
-  }, [onNavigate, phase, save, sidebar]);
+  }, [markGuidesSeen, onNavigate, phase, save, sidebar, steps, userId]);
 
   const goTo = useCallback((next: number) => {
     const step = steps[next];
     if (!step) return;
     setIndex(next);
-    setAnnouncement(`Paso ${next + 1} de ${steps.length}: ${step.title}. ${step.body}`);
-  }, [steps]);
+    if (phase === 'touring' && userId) storeProgress(userId, next);
+    setAnnouncement(`Paso ${next + 1} de ${steps.length}${step.section ? ` · ${step.section}` : ''}: ${step.title}. ${step.body}`);
+  }, [phase, steps, userId]);
 
   const value = useMemo(() => ({ start, active: phase !== 'idle', guide: currentGuide, startGuide }), [currentGuide, phase, start, startGuide]);
 
@@ -283,7 +321,7 @@ function WelcomeDialog({ open, stepCount, onStart, onDecline }: {
           </span>
           <DialogTitle className="text-xl tracking-tight">Te damos la bienvenida a ANTON.IA</DialogTitle>
           <DialogDescription className="leading-relaxed">
-            En {stepCount} pasos cortos te mostramos dónde está cada cosa para que empieces a prospectar.
+            En {stepCount} pasos te llevamos por cada pantalla: para qué sirve y cómo se usa. Puedes salir cuando quieras.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2 sm:space-x-0">
@@ -322,14 +360,10 @@ function TourStep({ kind, steps, index, isMobile, announcement, scrolledAreas, o
   const step = steps[index];
   const last = index === steps.length - 1;
   const guide = kind === 'guide';
-  const layout = useTargetLayout(step.target, isMobile && !guide, scrolledAreas);
-
-  // Page controls can be below the fold: bring each one into view (the menu has its own scrolling).
-  useEffect(() => {
-    if (!guide) return;
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    visibleElement(step.target)?.scrollIntoView?.({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
-  }, [guide, step.target]);
+  // Menu entries live in the folded menu on phones: its button stands in for them. Page controls are on the page.
+  const inMenu = !guide && (Boolean(step.menuLabel) || step.target === 'menu');
+  const layout = useTargetLayout(step.target, isMobile && inMenu, scrolledAreas, !inMenu);
+  const missing = useMissingTarget(layout.onTarget, `${index}:${step.target}`, !inMenu);
   const cardRef = useRef<HTMLDivElement>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
 
@@ -375,6 +409,7 @@ function TourStep({ kind, steps, index, isMobile, announcement, scrolledAreas, o
           <div className="flex min-h-8 items-center justify-between gap-3">
             <p className="text-xs font-medium tabular-nums text-muted-foreground">
               Paso {index + 1} de {steps.length}
+              {step.section && <span className="font-normal"> · <span className="text-foreground">{step.section}</span></span>}
             </p>
             {!last && (
               <Button
@@ -395,6 +430,11 @@ function TourStep({ kind, steps, index, isMobile, announcement, scrolledAreas, o
               {step.body}
             </DialogPrimitive.Description>
           </div>
+          {missing && (
+            <p className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
+              Esta pantalla aún no muestra este control: aparece cuando hay datos aquí.
+            </p>
+          )}
           {step.menuLabel && (
             // Where to find it when the entry itself is not on screen (the folded menu on phones).
             <p className={layout.onTarget ? 'sr-only' : 'w-fit rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground'}>
@@ -408,9 +448,9 @@ function TourStep({ kind, steps, index, isMobile, announcement, scrolledAreas, o
               <Button
                 ref={primaryRef}
                 size="sm"
-                onClick={last ? () => (guide ? onClose('completed') : onClose('completed', '/profile')) : onNext}
+                onClick={last ? () => (guide ? onClose('completed') : onClose('completed', '/dashboard')) : onNext}
               >
-                {last ? (guide ? 'Entendido' : 'Ir a mi perfil') : 'Siguiente'}
+                {last ? (guide ? 'Entendido' : 'Empezar en Hoy') : 'Siguiente'}
               </Button>
             </div>
           </div>
@@ -448,19 +488,6 @@ function GuideOffer({ guide, onStart, onDecline }: { guide: PageGuide; onStart: 
   );
 }
 
-/** «?» in the top bar: the guide of the screen on view, any time. Nothing when the screen has no guide. */
-export function PageHelpButton({ className }: { className?: string }) {
-  const { guide, startGuide, active } = useProductTour();
-  if (!guide) return null;
-  return (
-    <Button variant="ghost" size="sm" className={cn('h-8 gap-1.5 px-2 text-muted-foreground', className)} disabled={active}
-      onClick={() => startGuide(guide.id)} aria-label={`Cómo usar ${guide.title}`} data-tour="page-help">
-      <CircleHelp className="size-4" aria-hidden />
-      <span className="hidden sm:inline">Ayuda</span>
-    </Button>
-  );
-}
-
 /** Dims the screen around the highlighted entry. Radix portals hand their children a ref. */
 const Spotlight = forwardRef<HTMLDivElement, { layout: Layout }>(({ layout }, ref) => {
   const { box, viewportWidth, viewportHeight } = layout;
@@ -488,20 +515,27 @@ Spotlight.displayName = 'Spotlight';
 type Box = { top: number; left: number; width: number; height: number };
 type Layout = { box: Box | null; onTarget: boolean; viewportWidth: number; viewportHeight: number };
 
-/** Where the highlighted element is. On phones the entries live in the folded menu, so its button stands in. */
-function useTargetLayout(target: string, isMobile: boolean, scrolledAreas: Map<HTMLElement, number>): Layout {
+/** Where the highlighted element is. On phones the entries live in the folded menu, so its button stands in
+ * (`menuFallback`). Page controls are scrolled into view once, when they first appear (the screen may still be loading). */
+function useTargetLayout(target: string, menuFallback: boolean, scrolledAreas: Map<HTMLElement, number>, onPage = false): Layout {
   const [layout, setLayout] = useState<Layout>(() => ({
     box: null, onTarget: false, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
   }));
 
   useLayoutEffect(() => {
     let frame = 0;
-    // Followed on every frame while the step is open: the menu keeps moving after it
-    // renders (the workspace switcher loads, the sidebar slides in, the window resizes).
+    let revealed = false;
+    // Followed on every frame while the step is open: the menu keeps moving after it renders (the workspace switcher
+    // loads, the sidebar slides in, the window resizes), and a screen opened by the tour renders its controls later.
     const track = () => {
       const element = visibleElement(target);
-      if (element) revealInScrollArea(element, scrolledAreas);
-      const rect = (element || (isMobile ? visibleElement('menu') : null))?.getBoundingClientRect();
+      if (element && onPage && !revealed) {
+        revealed = true;
+        const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+        element.scrollIntoView?.({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+      }
+      if (element && !onPage) revealInScrollArea(element, scrolledAreas);
+      const rect = (element || (menuFallback ? visibleElement('menu') : null))?.getBoundingClientRect();
       const next: Layout = {
         box: rect ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height } : null,
         onTarget: Boolean(element),
@@ -513,9 +547,21 @@ function useTargetLayout(target: string, isMobile: boolean, scrolledAreas: Map<H
     };
     track();
     return () => window.cancelAnimationFrame(frame);
-  }, [target, isMobile, scrolledAreas]);
+  }, [target, menuFallback, scrolledAreas, onPage]);
 
   return layout;
+}
+
+/** True once a page control has not shown up for a while: the card says so instead of pointing at nothing. */
+function useMissingTarget(onTarget: boolean, stepKey: string, enabled: boolean) {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    setLate(false);
+    if (!enabled) return;
+    const timer = window.setTimeout(() => setLate(true), MISSING_TARGET_MS);
+    return () => window.clearTimeout(timer);
+  }, [enabled, stepKey]);
+  return enabled && late && !onTarget;
 }
 
 function visibleElement(target: string): HTMLElement | null {
@@ -587,6 +633,35 @@ function storeRecord(userId: string, record: ProductTourRecord) {
     getBrowserStorage()?.setItem(storageKey(userId), JSON.stringify(record));
   } catch {
     // Storage full or blocked: the account keeps its own copy.
+  }
+}
+
+const progressKey = (userId: string) => `antonia:tour-progress:${userId}`;
+
+/** The step a tour in progress was on, in this tab; null when there is none. */
+function readProgress(userId: string): number | null {
+  try {
+    const raw = window.sessionStorage?.getItem(progressKey(userId));
+    const value = raw ? JSON.parse(raw) : null;
+    return value?.version === PRODUCT_TOUR_VERSION && Number.isInteger(value.index) && value.index >= 0 ? value.index : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeProgress(userId: string, index: number) {
+  try {
+    window.sessionStorage?.setItem(progressKey(userId), JSON.stringify({ version: PRODUCT_TOUR_VERSION, index }));
+  } catch {
+    // Blocked storage: a reload starts the tour over from «Ver tutorial».
+  }
+}
+
+function clearProgress(userId: string) {
+  try {
+    window.sessionStorage?.removeItem(progressKey(userId));
+  } catch {
+    // Nothing stored.
   }
 }
 

@@ -1,8 +1,9 @@
-/** Guided first-run tour: its steps, the status stored per person and when it
- * is offered on its own. Anyone can replay it from «Ver tutorial». */
+/** Guided first-run tour: it walks the person through every screen of the app, opening each one and pointing at its real
+ * controls. Its steps, the status stored per person and when it is offered on its own. Anyone can replay it from «Ver
+ * tutorial» (docs/ui-ux/ayuda-y-manual.md). */
 
 /** Bump when the steps change enough to offer the tour again to new accounts. */
-export const PRODUCT_TOUR_VERSION = 2;
+export const PRODUCT_TOUR_VERSION = 3;
 /** Accounts younger than this are offered the tour once. */
 export const PRODUCT_TOUR_NEW_ACCOUNT_DAYS = 30;
 /** Key inside the Supabase user metadata. */
@@ -15,7 +16,11 @@ export type ProductTourStep = {
   id: string;
   /** `data-tour` value of the element to highlight. */
   target: string;
-  /** Name of the menu entry, shown when the element is not on screen (mobile). */
+  /** Screen the step is on: the tour opens it first. Without one, the step stays on the screen on view. */
+  route?: string;
+  /** Part of the app the step is in, shown next to the progress («Paso 3 de 15 · Perfil»). */
+  section?: string;
+  /** Name of the menu entry, shown when the element is not on screen (the folded menu on phones). */
   menuLabel?: string;
   title: string;
   body: string;
@@ -23,29 +28,60 @@ export type ProductTourStep = {
   mobileOnly?: boolean;
 };
 
+/** The path to a first email, screen by screen, and then where help lives. Each page step is anchored on a real control. */
 export const PRODUCT_TOUR_STEPS: ProductTourStep[] = [
-  { id: 'menu', target: 'menu', mobileOnly: true, title: 'Todo está en este menú',
-    body: 'Desde aquí llegas a cada parte de ANTON.IA. Te mostramos las más importantes.' },
-  { id: 'home', target: 'home', menuLabel: 'Hoy', title: 'Empieza cada día aquí',
-    body: '«Hoy» te dice qué hacer primero, quién te respondió y qué te falta para enviar tu primer correo.' },
-  { id: 'profile', target: 'profile', menuLabel: 'Perfil', title: 'Cuéntanos qué vendes',
-    body: 'Pega el sitio de tu empresa y la IA completa lo que vendes y a quién. ANTON.IA lo usa para buscar y escribir a tu medida.' },
-  { id: 'connections', target: 'connections', menuLabel: 'Conexiones', title: 'Conecta tu correo',
-    body: 'Vincula Gmail u Outlook para enviar desde tu propia cuenta y recibir las respuestas.' },
-  { id: 'search', target: 'search', menuLabel: 'Buscar prospectos', title: 'Encuentra prospectos',
-    body: 'Elige un punto de partida según lo que vendes, o pega un perfil de LinkedIn. Guarda a quienes te interesen.' },
-  { id: 'saved-leads', target: 'saved-leads', menuLabel: 'Por escribir', title: 'Escríbeles',
-    body: 'Aquí están tus contactos con correo: la IA prepara el borrador y tú lo revisas. Los que aún no tienen correo esperan en «Por completar».' },
-  { id: 'contacted', target: 'contacted', menuLabel: 'Conversaciones', title: 'Sigue las respuestas',
-    body: 'Quien responde aparece aquí y en «Hoy». Contestas en el mismo hilo, desde la app.' },
-  { id: 'campaigns', target: 'campaigns', menuLabel: 'Campañas', title: 'Seguimientos y campañas',
-    body: 'Programa seguimientos o una campaña para varios contactos a la vez. Nada sale sin tu aprobación.' },
-  { id: 'help', target: 'tour-help', menuLabel: 'Ver tutorial', title: 'Ayuda en cada pantalla',
-    body: 'El botón «?» de arriba te enseña a usar la pantalla en la que estás. Y aquí repites este recorrido.' },
+  { id: 'menu', target: 'menu', mobileOnly: true, section: 'Menú', title: 'Todo está en este menú',
+    body: 'Desde aquí llegas a cada pantalla. Ahora te llevamos por cada una y te mostramos cómo se usa.' },
+  { id: 'today', target: 'today', route: '/dashboard', section: 'Hoy', title: 'Empieza cada día aquí',
+    body: 'Una sola acción, la más importante: a quién responder, qué te falta para enviar o a quién escribir hoy.' },
+  { id: 'setup', target: 'setup', route: '/dashboard', section: 'Hoy', title: 'Prepara tu cuenta',
+    body: 'Cuatro pasos comprobados: perfil, correo conectado, primeros contactos y primer envío. Cada uno trae su enlace.' },
+  { id: 'profile-ai', target: 'profile-ai', route: '/profile', section: 'Perfil', title: 'Cuéntanos qué vendes',
+    body: 'Escribe el sitio de tu empresa: la IA propone qué vendes y a quién, con su fuente. Tú eliges qué guardar.' },
+  { id: 'profile-offer', target: 'profile-offer', route: '/profile', section: 'Perfil', title: 'La IA solo dice lo que está aquí',
+    body: 'Servicios, propuesta de valor, problemas que resuelves y pruebas. Sin tu oferta, la IA no puede redactar.' },
+  { id: 'connections', target: 'connections-list', route: '/connections', section: 'Conexiones', title: 'Conecta tu correo',
+    body: 'Gmail u Outlook: los correos salen desde tu cuenta y las respuestas vuelven solas a la app.' },
+  { id: 'search-modes', target: 'search-modes', route: '/search', section: 'Buscar prospectos', title: 'Tres formas de buscar',
+    body: 'Por filtros (cargo, sector, tamaño), dentro de una empresa o pegando un perfil de LinkedIn.' },
+  { id: 'search-starters', target: 'search-starters', route: '/search', section: 'Buscar prospectos', title: 'Parte de lo que vendes',
+    body: 'Un punto de partida rellena cargos e industrias. Busca, marca a quienes te interesan y guárdalos.' },
+  { id: 'saved', target: 'saved-list', route: '/saved/leads', section: 'Por completar', title: 'Busca su correo',
+    body: 'Aquí llegan tus guardados sin correo. Selecciónalos y pulsa «Buscar correo»: pasan a «Por escribir».' },
+  { id: 'enriched-research', target: 'enriched-research', route: '/saved/leads/enriched', section: 'Por escribir',
+    title: 'Investiga antes de escribir',
+    body: 'Marca a quién investigar: la IA lee su empresa y su rol para que el correo no sea genérico.' },
+  { id: 'enriched-contact', target: 'enriched-contact', route: '/saved/leads/enriched', section: 'Por escribir',
+    title: 'La IA prepara, tú envías',
+    body: '«Contactar» prepara el correo y sus seguimientos. Los revisas, confirmas y pulsas «Enviar ahora».' },
+  { id: 'conversations', target: 'conv-views', route: '/contacted', section: 'Conversaciones', title: 'Responde a quien te escribió',
+    body: '«Por responder» junta a quienes esperan tu respuesta. Contestas en el mismo hilo, desde la app.' },
+  { id: 'campaigns', target: 'campaigns-tabs', route: '/campaigns', section: 'Campañas', title: 'Escribe a un grupo',
+    body: 'Hasta 100 contactos con una sola aprobación. Los seguimientos se detienen si la persona responde.' },
+  { id: 'pipeline', target: 'crm-board', route: '/crm', section: 'Pipeline', title: 'Cada contacto, en su etapa',
+    body: 'Mueve a cada contacto según avanza: contactado, interesado, reunión, negociación y ganado.' },
+  { id: 'page-help', target: 'page-help', section: 'Ayuda', title: 'Ayuda en cada pantalla',
+    body: 'El botón «?» explica la pantalla en la que estás, con preguntas frecuentes y una IA que responde tus dudas.' },
+  { id: 'help-center', target: 'help-center', menuLabel: 'Centro de ayuda', section: 'Ayuda', title: 'El manual completo',
+    body: 'En «Centro de ayuda» está todo, con buscador. «Ver tutorial» repite este recorrido cuando quieras.' },
 ];
 
 export function productTourSteps(isMobile: boolean): ProductTourStep[] {
   return PRODUCT_TOUR_STEPS.filter(step => isMobile || !step.mobileOnly);
+}
+
+/** Whether the screen on view is the one a step is on. */
+export function onTourRoute(pathname: string | null | undefined, route: string) {
+  const clean = (value: string) => value.split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+  return clean(String(pathname || '')) === clean(route);
+}
+
+/** The screen guides the tour walks through: after finishing it, they are not offered again on their own. */
+export function pageGuidesInTour(steps: ProductTourStep[] = PRODUCT_TOUR_STEPS): string[] {
+  return [...new Set(steps.flatMap((step) => {
+    const guide = step.route ? pageGuideFor(step.route) : null;
+    return guide ? [guide.id] : [];
+  }))];
 }
 
 /** The stored record, or null when the person has not finished or skipped it. */

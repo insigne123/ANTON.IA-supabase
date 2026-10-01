@@ -1,5 +1,7 @@
 # Tutorial guiado: recorrido por la app y guías por pantalla
 
+> **Actualizado el 1 oct (v3):** el recorrido ahora abre cada pantalla y resalta sus controles, y «Ayuda» abre el panel de ayuda de la pantalla (guía, preguntas frecuentes y «Pregúntale a la IA»). Lo vigente está en `docs/ui-ux/ayuda-y-manual.md`. Lo que sigue describe la v2: las reglas de cuándo se ofrece, cómo se omite y dónde se guarda no cambiaron.
+
 Desde la versión 2 (1 oct 2026) hay **dos capas**:
 
 1. **El recorrido** por el menú, para que una persona nueva sepa dónde está cada cosa. Se ofrece una vez, se puede omitir en cualquier paso y se vuelve a ver desde «Ver tutorial», al final del menú.
