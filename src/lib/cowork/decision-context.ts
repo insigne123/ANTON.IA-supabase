@@ -193,6 +193,7 @@ export function coworkDecisionContext(
     ...(instructions.writerCapability ? { writerCapability: instructions.writerCapability, writerAvailable: (turnBudget?.decisionsLeft ?? 1) > 0 } : {}),
     ...(instructions.contactsImportCapability ? { contactsImportCapability: instructions.contactsImportCapability } : {}),
     ...(instructions.linkedinBatchCapability ? { linkedinBatchCapability: instructions.linkedinBatchCapability } : {}),
+    ...(instructions.campaignRetryCapability ? { campaignRetryCapability: instructions.campaignRetryCapability } : {}),
     threadBudgetCapability: instructions.threadBudgetCapability,
   };
 }

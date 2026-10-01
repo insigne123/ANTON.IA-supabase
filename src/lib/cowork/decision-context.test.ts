@@ -170,6 +170,18 @@ test('replying in a conversation is described as a proposal with a card only whe
   }
 });
 
+test('retrying failed sends is described only when it is on, and says what never goes in and that nothing leaves now', () => {
+  const base = { history: { turns: [] }, request: 'Reintenta los fallidos', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  assert.equal('campaignRetryCapability' in off, false);
+  const on = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, campaignRetry: true }), base);
+  const text = String(on.campaignRetryCapability);
+  assert.match(text, /primero lee campaigns\.retry_review con el campaignId UUID; si summary\.retryable es mayor que 0, propón campaign\.retry con campaignId/);
+  assert.match(text, /los terminales y los que hay que conciliar en Contactados nunca entran y debes decirlo aparte con su conteo/);
+  assert.match(text, /No prometas que saldrán hoy: vuelven a la cola y salen con los frenos de siempre/);
+  assert.match(text, /Si summary\.retryable es 0, dilo y no propongas nada/);
+});
+
 test('LinkedIn batches are described only when they are on, say who the server leaves for another day and that each card needs approval', () => {
   const base = { history: { turns: [] }, request: 'Invita a los de la lista', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
   const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
