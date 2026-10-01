@@ -499,7 +499,8 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
 
 /** A campaign asked for with the person's exact emails («Crea una campaña pausada
  * con esta versión…») carries that text word for word: the loop copies it over
- * whatever the model wrote, and spaces the emails by the days they came with. */
+ * whatever the model wrote, and spaces the emails by the days they came with.
+ * First emails the model wrote per person would replace that text, so they go. */
 export function coworkCampaignWithExactEmails(campaign: z.infer<typeof coworkCampaignDraftSchema>, emails: CoworkEditedEmail[]) {
   const messages = emails.slice(0, 7).map((email, index) => {
     const previous = index > 0 ? emails[index - 1] : null;
@@ -507,14 +508,16 @@ export function coworkCampaignWithExactEmails(campaign: z.infer<typeof coworkCam
     const delayDays = index === 0 ? 0 : Math.max(1, Math.min(90, fromDays ?? campaign.messages[index]?.delayDays ?? 3));
     return { subject: email.subject, body: email.body, delayDays };
   });
-  return { ...campaign, messages };
+  return { ...campaign, messages, firstEmails: [] };
 }
 
 /** What a proposed campaign does, when the model left no explanation of its own. */
 function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): string {
   const people = campaign.emails.length;
   const emails = campaign.messages.length;
-  return `Preparé la campaña «${campaign.name}» para ${people} ${people === 1 ? 'contacto' : 'contactos'}, con ${emails} ${emails === 1 ? 'correo' : 'correos'}. Queda pausada: revísala y, cuando la apruebes, se crea sin enviar nada todavía.`;
+  const own = campaign.firstEmails.length;
+  const first = own ? ` El primer correo va escrito para ${own === people ? (people === 1 ? 'esa persona' : 'cada una') : `${own} de ${people === 1 ? 'esa persona' : 'ellas'}`}.` : '';
+  return `Preparé la campaña «${campaign.name}» para ${people} ${people === 1 ? 'contacto' : 'contactos'}, con ${emails} ${emails === 1 ? 'correo' : 'correos'}.${first} Al aprobarla queda guardada sin enviar: nada sale hasta que la actives, y activarla pide otra aprobación.`;
 }
 
 /** A search asked as the first step of a longer request («busca… y después armame

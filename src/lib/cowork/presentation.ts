@@ -204,11 +204,11 @@ export type CoworkEffectCopy = { title: string; help: string; icon: CoworkIconKe
 
 const EFFECTS: Record<string, CoworkEffectCopy> = {
   save_contact: { title: 'Guardar contacto', icon: 'user-plus', help: 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' },
-  start_research: { title: 'Investigar contacto', icon: 'research', help: 'Se encolará la investigación con tu cuota disponible. Suele tardar unos minutos; después puedes pedirme el resumen o el borrador.' },
+  start_research: { title: 'Investigar contacto', icon: 'research', help: 'Se encolará la investigación con tu cuota disponible. Suele tardar unos minutos; cuando termine te aviso en esta conversación con lo útil para escribirle.' },
   enrich_contact: { title: 'Enriquecer contacto', icon: 'sparkles', help: 'Se consultará el correo al proveedor (solo email, sin teléfono). Consume 1 crédito de enriquecimiento y no inventa datos.' },
   request_draft: { title: 'Preparar borrador', icon: 'draft', help: 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.' },
   send_email: { title: 'Enviar correo', icon: 'send', help: 'Se enviará exactamente la versión mostrada.' },
-  campaign_create: { title: 'Crear campaña', icon: 'campaign', help: 'Se crea pausada como borrador. Activarla requiere otra revisión.' },
+  campaign_create: { title: 'Crear campaña', icon: 'campaign', help: 'Queda guardada sin enviar: nada sale hasta que la actives, y activarla pide otra aprobación.' },
   campaign_activate: { title: 'Activar campaña', icon: 'play', help: 'Al aprobar se verifican de nuevo audiencia, bajas y cada mensaje.' },
   campaign_pause: { title: 'Pausar campaña', icon: 'pause', help: 'Los envíos que ya estaban en curso podrían completarse.' },
   enrich_phone: { title: 'Revelar teléfono', icon: 'user-check', help: 'Se pedirá el teléfono de esta persona al proveedor. Cuesta 10 créditos y llega en unos minutos a tus contactos enriquecidos.' },
@@ -292,7 +292,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   enrich_contact: { happens: 'Se busca su correo en el proveedor (1 crédito).', not: 'No se le escribe ni se inventan datos.' },
   request_draft: { happens: 'Se prepara un borrador en segundo plano.', not: 'No se envía nada.' },
   send_email: { happens: 'Se envía este correo, tal cual, desde tu cuenta.', not: 'No se envía a nadie más ni se cambia el texto.' },
-  campaign_create: { happens: 'Se crea la campaña con estos correos, pausada.', not: 'No se envía nada: activarla pide otra aprobación.' },
+  campaign_create: { happens: 'Se guarda la campaña con el correo de cada persona, sin enviar (pausada).', not: 'No sale nada hasta que la actives, y activarla pide otra aprobación.' },
   campaign_activate: { happens: 'Se activa la campaña y empieza a enviar según su calendario.', not: 'No cambian los correos ni los destinatarios.' },
   campaign_pause: { happens: 'Se pausa la campaña.', not: 'Lo que ya se envió no se revierte.' },
   enrich_phone: { happens: 'Se pide su teléfono al proveedor (10 créditos).', not: 'No se le llama ni se le escribe, y no se pide nada de otras personas.' },
@@ -451,7 +451,7 @@ const CAMPAIGN_STATUS: Record<CoworkProposalState, CoworkCardStatus> = {
   pending: { label: 'Campaña propuesta · espera tu aprobación', tone: 'attention' },
   approved: { label: 'Creando la campaña…', tone: 'accent' },
   running: { label: 'Creando la campaña…', tone: 'accent' },
-  done: { label: 'Campaña creada · pausada', tone: 'success' },
+  done: { label: 'Campaña creada · guardada sin enviar', tone: 'success' },
   discarded: { label: 'Campaña descartada · no se creó', tone: 'neutral' },
   failed: { label: 'No se pudo crear la campaña', tone: 'danger' },
 };

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkDecisionSchema, runCoworkReadLoop } from './agent-loop';
+import { coworkCampaignWithExactEmails, coworkDecisionSchema, runCoworkReadLoop } from './agent-loop';
+import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 import { COWORK_NOTE_ACTION } from './contracts';
 
@@ -900,7 +901,7 @@ test('a campaign proposed before listing campaigns gets the list read by the loo
     execute: async () => ({ scope: 'own', campaigns: [] }), proposeEffect: async () => {},
     decide: async () => coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign, answer: null }),
   });
-  assert.equal(silent.reply, 'Preparé la campaña «AXIS · RR. HH.» para 1 contacto, con 1 correo. Queda pausada: revísala y, cuando la apruebes, se crea sin enviar nada todavía.');
+  assert.equal(silent.reply, 'Preparé la campaña «AXIS · RR. HH.» para 1 contacto, con 1 correo. Al aprobarla queda guardada sin enviar: nada sale hasta que la actives, y activarla pide otra aprobación.');
   assert.equal((notes.at(-1) as { action: string }).action, 'assistant.note');
 });
 
@@ -987,6 +988,28 @@ test('a campaign asked with the exact emails carries them word for word, spaced 
     { subject: 'Antecedentes sin trámites', body: 'Hola,\nEscribí esto yo.\nNicolás', delayDays: 0 },
     { subject: '¿Lo vemos?', body: 'Hola,\n¿Te sirve el jueves?\nNicolás', delayDays: 4 },
   ]);
+});
+
+test('a campaign keeps the first email of each person; the person\'s exact version stays word for word without them', async () => {
+  let proposed: { messages: Array<{ body: string }>; firstEmails: Array<{ email: string; body: string }> } | undefined;
+  const campaign = { name: 'AXIS · RR. HH.', objective: 'Primera conversación',
+    criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false },
+    emails: ['fmunoz@securitas.cl', 'cfuentes@adecco.cl'], provider: 'google',
+    messages: [{ subject: 'AXIS', body: 'Hola {{nombre}},\nTe escribo por AXIS.\nNicolás', delayDays: 0 }, { subject: '¿Lo vemos?', body: 'Hola {{nombre}},\n¿Te sirve?\nNicolás', delayDays: 2 }],
+    firstEmails: [{ email: 'cfuentes@adecco.cl', subject: 'Camila, AXIS para Adecco', body: 'Hola Camila,\nvi que Adecco abrió 40 vacantes.\nNicolás' }] };
+  const reply = await runCoworkReadLoop({
+    message: 'Arma la campaña para Felipe y Camila', runId: '00000000-0000-4000-8000-0000000000aa', signal: new AbortController().signal,
+    authorize: async () => {}, record: async () => {}, execute: async () => ({ scope: 'own', campaigns: [] }),
+    proposeEffect: async proposal => { proposed = proposal.campaign; },
+    decide: async () => coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign, answer: null }),
+  });
+  assert.deepEqual(proposed?.messages.map(message => message.body.split('\n')[0]), ['Hola {{nombre}},', 'Hola {{nombre}},']);
+  assert.deepEqual(proposed?.firstEmails.map(item => [item.email, item.body.split('\n')[0]]), [['cfuentes@adecco.cl', 'Hola Camila,']]);
+  assert.match(reply.reply, /El primer correo va escrito para 1 de ellas\. Al aprobarla queda guardada sin enviar/);
+  // The person's exact version is never rewritten, and first emails the model wrote would replace it, so they go.
+  const exact = coworkCampaignWithExactEmails(coworkCampaignDraftSchema.parse(campaign),
+    [{ subject: 'Antecedentes', body: 'Hola,\nEscribí esto yo.', day: 1 }]);
+  assert.deepEqual([exact.messages[0].body, exact.firstEmails], ['Hola,\nEscribí esto yo.', []]);
 });
 
 test('«Usar esta versión» proposes nothing: a proposal comes back as a correction, and the last decision confirms instead of failing', async () => {

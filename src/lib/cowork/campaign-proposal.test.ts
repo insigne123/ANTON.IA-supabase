@@ -72,3 +72,22 @@ test('multi-recipient campaigns reject a fixed greeting with one person’s name
   assert.equal(coworkCampaignDraftSchema.safeParse({ ...multi, messages: [{ subject: 'Tema', body: 'Hola Ana, una consulta.', delayDays: 0 }] }).success, false);
   assert.equal(coworkCampaignDraftSchema.safeParse({ ...multi, messages: [{ subject: 'Tema', body: 'Hola, una consulta.', delayDays: 0 }] }).success, true);
 });
+
+test('the first email of each person goes to a recipient, once', () => {
+  const multi = { ...base, emails: ['ana@example.com', 'luis@example.com'] };
+  const own = { email: 'Luis@Example.com', subject: 'Luis, una idea', body: 'Hola Luis, vi su apertura en Talca.' };
+  const parsed = coworkCampaignDraftSchema.parse({ ...multi, firstEmails: [own] });
+  assert.deepEqual(parsed.firstEmails, [{ ...own, email: 'luis@example.com' }]);
+  // A greeting with the person's own name is right in their own email.
+  assert.equal(coworkCampaignDraftSchema.parse({ ...multi, firstEmails: null }).firstEmails.length, 0);
+  assert.match(String(coworkCampaignDraftSchema.safeParse({ ...multi, firstEmails: [{ ...own, email: 'otra@example.com' }] }).error), /no está entre los destinatarios/);
+  assert.match(String(coworkCampaignDraftSchema.safeParse({ ...multi, firstEmails: [own, own] }).error), /dos primeros correos/);
+});
+
+test('only the campaign variables: nombre, empresa and cargo', () => {
+  const body = (text: string) => coworkCampaignDraftSchema.safeParse({ ...base, messages: [{ subject: 'Tema', body: text, delayDays: 0 }] });
+  assert.equal(body('Hola {{nombre}}, ¿cómo va {{ empresa }} con {{cargo}}?').success, true);
+  assert.match(String(body('Hola {{Nombre}},').error), /\{\{Nombre\}\} no existe/);
+  assert.match(String(body('Hola {{first_name}},').error), /usa solo \{\{nombre\}\}/);
+  assert.equal(coworkCampaignDraftSchema.safeParse({ ...base, firstEmails: [{ email: 'ana@example.com', subject: '{{rubro}}', body: 'Hola Ana' }] }).success, false);
+});
