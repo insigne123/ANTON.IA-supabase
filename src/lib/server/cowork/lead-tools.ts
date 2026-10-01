@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { normalizeLockEmail, teamLockNotice } from '@/lib/team-lock';
+import { readTeamLocks } from '@/lib/server/team-locks';
 
 // Email is searchable too: people often look a contact up by the address they know.
 const SEARCH_FIELDS = ['name', 'title', 'company', 'email', 'location', 'city', 'country'] as const;
@@ -10,6 +12,23 @@ const SEARCH_FIELDS = ['name', 'title', 'company', 'email', 'location', 'city', 
  * cannot make the whole result unreadable for the exports and batches that validate it. */
 function withProfile<Row extends { linkedin_url?: unknown }>(row: Row): Omit<Row, 'linkedin_url'> & { linkedin_url: string | null } {
   return { ...row, linkedin_url: normalizeLinkedinProfileUrl(typeof row.linkedin_url === 'string' ? row.linkedin_url : null) || null };
+}
+
+/** «En conversación con Ana» on each contact another member holds (Plan 5, PR-9b), so Cowork does not propose writing to
+ * them. Without collaboration, or if the read fails, the rows go as they are: sending is still checked by the database. */
+async function withTeamLocks<Row extends { email?: unknown }>(client: SupabaseClient, scope: { userId: string; organizationId: string }, rows: Row[]) {
+  const emails = rows.map(row => normalizeLockEmail(row.email)).filter(email => email.includes('@'));
+  if (!emails.length) return rows;
+  try {
+    const locks = await readTeamLocks(client as any, scope, { emails });
+    if (!locks.enabled) return rows;
+    return rows.map(row => {
+      const notice = teamLockNotice(locks.byEmail[normalizeLockEmail(row.email)]);
+      return notice ? { ...row, teamLock: notice.text } : row;
+    });
+  } catch {
+    return rows;
+  }
 }
 
 function searchTerms(raw: string) {
@@ -49,7 +68,7 @@ export async function queryCoworkLeads(
   const { data, error } = await query;
   if (error) throw new Error('No se pudieron consultar los contactos guardados.');
   if (action === 'leads.get' || !data) {
-    const rows = (data || []).map(withProfile);
+    const rows = await withTeamLocks(client, scope, (data || []).map(withProfile));
     return { items: rows, returned: rows.length, limit: action === 'leads.get' ? 1 : 20, scope: 'own_saved_contacts', truncated: action === 'leads.search' && rows.length === 20 };
   }
   const ranked = data.map(row => {
@@ -58,7 +77,7 @@ export async function queryCoworkLeads(
     return { row, matched };
   }).sort((left, right) => right.matched - left.matched);
   const best = ranked[0]?.matched || 0;
-  const items = ranked.slice(0, 20).map(entry => withProfile(entry.row));
+  const items = await withTeamLocks(client, scope, ranked.slice(0, 20).map(entry => withProfile(entry.row)));
   return {
     items, returned: items.length, limit: 20, scope: 'own_saved_contacts',
     truncated: ranked.length > 20,
