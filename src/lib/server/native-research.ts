@@ -151,7 +151,7 @@ type NativeResearchJob = {
   errorMessage: string | null;
 };
 
-type OfficialSitePage = {
+export type OfficialSitePage = {
   url: string;
   title: string | null;
   description: string | null;
@@ -689,11 +689,13 @@ async function fetchOfficialPage(input: {
   url: URL;
   domain: string;
   signal: AbortSignal;
-}): Promise<{ page: OfficialSitePage | null; html: string; warning?: string }> {
+  /** Redirects to follow within the company domain. Research keeps one; the profile reader allows a few more. */
+  maxRedirects?: number;
+}): Promise<{ page: OfficialSitePage | null; html: string; warning?: string; redirectedTo?: string }> {
   let currentUrl = input.url;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt <= (input.maxRedirects ?? 1); attempt += 1) {
     if (!isSafeOfficialSiteUrl(currentUrl) || !isSameResearchCompanyDomain(currentUrl.toString(), input.domain)) {
-      return { page: null, html: '', warning: 'official_site_redirect_rejected' };
+      return { page: null, html: '', warning: 'official_site_redirect_rejected', redirectedTo: currentUrl.toString() };
     }
     const resolved = await resolvePublicAddress(currentUrl.hostname);
     if (!resolved) return { page: null, html: '', warning: 'official_site_dns_rejected' };
@@ -759,6 +761,70 @@ export async function fetchOfficialSite(input: {
       value: null,
       warning: error?.name === 'AbortError' ? 'official_site_timeout' : 'official_site_fetch_failed',
     };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * The pages of a company site that describe it, for «Perfil» (src/ai/flows/generate-company-profile.ts). Same safety as
+ * fetchOfficialSite (public DNS only, redirects within the company, a fixed time budget). A home page that only asks for the
+ * country is followed into the country page, and the offer, company and proof pages are read from both
+ * (src/lib/profile/site-pages.ts). Nothing is cached or written.
+ */
+export async function fetchCompanyProfileSite(input: {
+  domain: string;
+  country?: string | null;
+  maxPages?: number;
+}): Promise<{ pages: OfficialSitePage[]; warning?: string; domain?: string }> {
+  if (!isSafePublicDomain(input.domain)) return { pages: [], warning: 'official_site_domain_rejected' };
+  const { countryLandingUrl, profilePageCandidates, readableProfilePage } = await import('@/lib/profile/site-pages');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 14_000);
+  let domain = input.domain;
+  const read = async (url: string) => {
+    try {
+      return await fetchOfficialPage({ url: new URL(url), domain, signal: controller.signal, maxRedirects: 4 });
+    } catch {
+      return { page: null, html: '', warning: 'official_site_fetch_failed' };
+    }
+  };
+  try {
+    let first = await read(`https://${domain}`);
+    // A brand that moved (psol.cl → psol-latam.com) redirects its old domain to the new one. The person typed the old
+    // one, so that single move is followed, and every later page must belong to the new domain.
+    const moved = first.warning === 'official_site_redirect_rejected' && first.redirectedTo
+      ? new URL(first.redirectedTo).hostname.toLowerCase().replace(/^www\./, '')
+      : '';
+    if (moved && moved !== domain && isSafePublicDomain(moved)) {
+      domain = moved;
+      first = await read(`https://${domain}`);
+    }
+    if (!first.page) return { pages: [], warning: first.warning };
+    const maxPages = Math.max(1, Math.min(10, Math.floor(input.maxPages || 8)));
+    const fetched: Array<{ page: OfficialSitePage; html: string }> = [{ page: first.page, html: first.html }];
+    const landing = countryLandingUrl(first.html, new URL(first.page.url), domain, input.country || 'Chile');
+    if (landing && landing.replace(/\/$/, '') !== first.page.url.replace(/\/$/, '')) {
+      const country = await read(landing);
+      if (country.page) fetched.push({ page: country.page, html: country.html });
+    }
+    const candidates = profilePageCandidates({
+      pages: fetched.map((item) => ({ html: item.html, url: item.page.url })),
+      domain,
+      exclude: fetched.map((item) => item.page.url),
+      limit: Math.max(0, maxPages - fetched.length),
+    });
+    const followUps = await Promise.all(candidates.map(read));
+    // Marketing copy is what a profile needs, so the research filter for «generic» statements does not apply here: each
+    // page is re-read leniently from its HTML and only has to be readable and not a challenge or block page.
+    const pages = [...fetched, ...followUps.flatMap((result) => (result.page ? [{ page: result.page, html: result.html }] : []))]
+      .map((item) => readableProfilePage(item.page.url, item.html))
+      .filter((page) => !isHardRejectedResearchUrl(page.url)
+        && !isHardRejectedResearchText(`${page.title || ''} ${page.description || ''} ${page.text.slice(0, 1_500)}`)
+        && (page.text.length >= 120 || (page.description || '').length >= 40));
+    return pages.length > 0 ? { pages, domain } : { pages: [], domain, warning: 'official_site_content_generic' };
+  } catch (error: any) {
+    return { pages: [], warning: error?.name === 'AbortError' ? 'official_site_timeout' : 'official_site_fetch_failed' };
   } finally {
     clearTimeout(timeout);
   }

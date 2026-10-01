@@ -57,6 +57,8 @@ export function rankOutreachEvidence(context: DraftContextV2): RankedOutreachEvi
     ...materialTerms(context.seller.services.join(' ')),
     ...materialTerms(context.seller.valueProposition),
     ...materialTerms(context.seller.proofPoints.join(' ')),
+    ...materialTerms((context.seller.painPoints || []).join(' ')),
+    ...materialTerms((context.seller.targetIndustries || []).join(' ')),
   ]);
   return context.evidence
     .filter((evidence) => evidence.supportedFactClaimIds.length > 0)

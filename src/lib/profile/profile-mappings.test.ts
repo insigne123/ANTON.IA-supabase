@@ -92,15 +92,66 @@ test('AI suggestions select empty fields only and never apply empty values', () 
     description: 'Empresa de software',
     services: '',
     valueProposition: 'Automatizacion simple',
+    targetRoles: 'Gerente de Operaciones',
   };
   const selection = getDefaultSuggestionSelection(form, suggestion);
 
   assert.equal(selection.sector, false);
   assert.equal(selection.website, true);
   assert.equal(selection.services, false);
+  assert.equal(selection.targetRoles, true, 'new fields are proposed like the old ones');
+  assert.equal(selection.painPoints, false, 'nothing to apply, nothing selected');
 
   const applied = applyProfileSuggestion(form, suggestion, { ...selection, services: true });
   assert.equal(applied.sector, 'Sector escrito por usuario');
   assert.equal(applied.website, 'https://acme.com');
   assert.equal(applied.services, '');
+});
+
+test('the new profile fields round-trip, and a profile that never used them is written back unchanged', async () => {
+  const { profileCompleteness, websiteFromWorkEmail } = await import('@/lib/profile/profile-mappings');
+  const stored = {
+    full_name: 'Ana', job_title: 'Ejecutiva', company_name: 'Acme', company_domain: 'acme.cl',
+    signatures: { profile_extended: { role: 'Ejecutiva', sector: 'Outsourcing', description: 'D', services: 'S', valueProposition: 'V', proofPoints: ['P'] } },
+  };
+  const untouched = buildProfileUpdate(mapProfileToForm(stored), stored);
+  assert.deepEqual(untouched.signatures.profile_extended, stored.signatures.profile_extended,
+    'no empty new keys: Cowork compares the stored JSON to name what changed');
+
+  const form = {
+    ...mapProfileToForm(stored),
+    painPoints: 'Rotación alta\n\nProcesos lentos ',
+    differentiators: 'Cobertura nacional',
+    referenceClients: 'Falabella, Sodimac',
+    targetRoles: 'Gerente de Personas, Jefe de Operaciones',
+    targetIndustries: 'Retail, Logística',
+    targetCompanySize: '201-500',
+    targetLocations: 'Chile',
+  };
+  const update = buildProfileUpdate(form, stored);
+  const extended = update.signatures.profile_extended as Record<string, unknown>;
+  assert.deepEqual(extended.painPoints, ['Rotación alta', 'Procesos lentos']);
+  assert.deepEqual(extended.targetRoles, ['Gerente de Personas', 'Jefe de Operaciones']);
+  assert.equal(extended.targetCompanySize, '201-500');
+  const back = mapProfileToForm({ ...stored, signatures: update.signatures });
+  assert.equal(back.painPoints, 'Rotación alta\nProcesos lentos');
+  assert.equal(back.referenceClients, 'Falabella, Sodimac');
+  assert.equal(back.targetCompanySize, '201-500');
+
+  const cleared = buildProfileUpdate({ ...back, painPoints: '', targetCompanySize: 'enorme' }, { ...stored, signatures: update.signatures });
+  assert.deepEqual((cleared.signatures.profile_extended as Record<string, unknown>).painPoints, [], 'a field that existed is cleared, not left behind');
+  assert.equal((cleared.signatures.profile_extended as Record<string, unknown>).targetCompanySize, '', 'only known sizes are kept');
+
+  assert.equal(websiteFromWorkEmail('Ana@GrupoExpro.com'), 'grupoexpro.com');
+  assert.equal(websiteFromWorkEmail('ana@gmail.com'), '');
+  assert.equal(websiteFromWorkEmail('sin-arroba'), '');
+
+  const empty = profileCompleteness(createEmptyProfileForm());
+  assert.equal(empty.done, 0);
+  assert.equal(empty.canDraft, false);
+  assert.equal(empty.missing[0].id, 'services', 'what unblocks drafting comes first');
+  const full = profileCompleteness({ ...form, name: 'Ana', role: 'Ejecutiva', website: 'https://acme.cl', description: 'Empresa', services: 'Outsourcing', valueProposition: 'Personal listo en 48 horas', proofPoints: '' });
+  assert.equal(full.done, 10, 'a named client counts as proof');
+  assert.equal(full.percent, 100);
+  assert.equal(full.canDraft, true);
 });

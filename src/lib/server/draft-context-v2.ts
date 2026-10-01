@@ -150,6 +150,12 @@ export const DraftSellerProfileV2Schema = z.object({
   services: StringListSchema,
   valueProposition: NullableTextSchema,
   proofPoints: StringListSchema,
+  /** Declared in «Perfil» (docs/perfil-comercial.md). Present only when filled, so older profiles keep their hash. */
+  painPoints: StringListSchema.optional(),
+  differentiators: StringListSchema.optional(),
+  referenceClients: StringListSchema.optional(),
+  targetRoles: StringListSchema.optional(),
+  targetIndustries: StringListSchema.optional(),
 }).strict();
 export type DraftSellerProfileV2 = z.infer<typeof DraftSellerProfileV2Schema>;
 
@@ -418,7 +424,17 @@ export function normalizeDraftSellerProfileV2(value: unknown): DraftSellerProfil
     services: list(profile.services),
     valueProposition: nullableText(profile.valueProposition),
     proofPoints: list(profile.proofPoints),
+    ...optionalList('painPoints', profile.painPoints),
+    ...optionalList('differentiators', profile.differentiators),
+    ...optionalList('referenceClients', profile.referenceClients),
+    ...optionalList('targetRoles', profile.targetRoles),
+    ...optionalList('targetIndustries', profile.targetIndustries),
   });
+}
+
+function optionalList(key: string, value: unknown) {
+  const items = list(value);
+  return items.length > 0 ? { [key]: items } : {};
 }
 
 export function hasUsableDraftSellerOfferV2(seller: DraftSellerProfileV2) {

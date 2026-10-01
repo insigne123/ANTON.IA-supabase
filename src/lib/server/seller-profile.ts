@@ -7,6 +7,7 @@ import type { SellerProfileContextV2, SellerProductContextV2 } from '@/ai/flows/
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import { IcpRulesV2Schema, type IcpRulesV2 } from '@/qualification/icp-gate';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { commaItems, lineItems, offerItems } from '@/lib/profile/profile-lists';
 
 export const REPORT_V2_SELLER_CONFIGURATION_VERSION = 'report-v2/seller-configuration/1';
 
@@ -117,13 +118,19 @@ export function normalizeSellerProfile(value: unknown): DraftSellerProfileV2 {
     companyDomain: profile.companyDomain || profile.company_domain || null,
     sector: profile.sector || extended.sector || extended.industry || null,
     description: profile.description || extended.description || null,
-    services: list(profile.services ?? extended.services),
+    // One service per line; a sentence with commas stays one service (src/lib/profile/profile-lists.ts).
+    services: offerItems(profile.services ?? extended.services),
     valueProposition: profile.valueProposition
       || profile.value_proposition
       || extended.valueProposition
       || extended.value_proposition
       || null,
     proofPoints: list(profile.proofPoints ?? profile.proof_points ?? extended.proofPoints ?? extended.proof_points),
+    painPoints: lineItems(profile.painPoints ?? extended.painPoints),
+    differentiators: lineItems(profile.differentiators ?? extended.differentiators),
+    referenceClients: commaItems(profile.referenceClients ?? extended.referenceClients),
+    targetRoles: commaItems(profile.targetRoles ?? extended.targetRoles),
+    targetIndustries: commaItems(profile.targetIndustries ?? extended.targetIndustries),
   });
 }
 

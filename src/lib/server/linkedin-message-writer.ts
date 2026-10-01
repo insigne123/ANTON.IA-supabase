@@ -24,7 +24,9 @@ export function linkedinSellerContext(seller: any) {
   return { name: clean(seller?.name), companyName: clean(seller?.companyName), jobTitle: clean(seller?.jobTitle),
     description: clean(seller?.description), valueProposition: clean(seller?.valueProposition),
     services: (Array.isArray(seller?.services) ? seller.services : []).map(clean).filter(Boolean).slice(0, 12),
-    proofPoints: (Array.isArray(seller?.proofPoints) ? seller.proofPoints : []).map(clean).filter(Boolean).slice(0, 6) };
+    proofPoints: (Array.isArray(seller?.proofPoints) ? seller.proofPoints : []).map(clean).filter(Boolean).slice(0, 6),
+    differentiators: (Array.isArray(seller?.differentiators) ? seller.differentiators : []).map(clean).filter(Boolean).slice(0, 4),
+    problemsSolved: (Array.isArray(seller?.painPoints) ? seller.painPoints : []).map(clean).filter(Boolean).slice(0, 4) };
 }
 export function linkedinMessageIssues(message: string) {
   const issues: string[] = [];

@@ -82,6 +82,10 @@ export type ProfileOfferDetails = {
   sector: string | null;
   services: string[];
   proofPoints: string[];
+  /** Only when filled in «Perfil». */
+  differentiators?: string[];
+  targetRoles?: string[];
+  targetIndustries?: string[];
 };
 
 const OFFER_LENGTH = 600;
@@ -139,6 +143,9 @@ export function profileOfferDetails(profile: Record<string, unknown> | null): Pr
       sector: seller.sector,
       services: seller.services,
       proofPoints: seller.proofPoints,
+      ...(seller.differentiators?.length ? { differentiators: seller.differentiators } : {}),
+      ...(seller.targetRoles?.length ? { targetRoles: seller.targetRoles } : {}),
+      ...(seller.targetIndustries?.length ? { targetIndustries: seller.targetIndustries } : {}),
     };
   } catch {
     return none;

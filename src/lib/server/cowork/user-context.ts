@@ -54,6 +54,9 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
   const services = items(details.services, 6, 120);
   const proofPoints = items(details.proofPoints, 4, 200);
   const sector = text(details.sector);
+  const differentiators = items(details.differentiators || [], 4, 200);
+  const roles = items(details.targetRoles || [], 6, 80);
+  const industries = items(details.targetIndustries || [], 6, 80);
   return {
     fullName: text(profile?.full_name), jobTitle: text(profile?.job_title) || text(details.role),
     companyName: text(profile?.company_name), companyDomain: text(profile?.company_domain),
@@ -61,6 +64,10 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
     ...(services.length ? { services } : {}),
     ...(proofPoints.length ? { proofPoints } : {}),
     ...(sector ? { sector } : {}),
+    ...(differentiators.length ? { differentiators } : {}),
+    ...(roles.length || industries.length
+      ? { idealCustomer: { ...(roles.length ? { roles } : {}), ...(industries.length ? { industries } : {}) } }
+      : {}),
   };
 }
 

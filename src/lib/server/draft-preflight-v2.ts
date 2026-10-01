@@ -389,6 +389,8 @@ function sellerOfferTerms(context: DraftContextV2) {
     context.seller.valueProposition,
     ...context.seller.services,
     ...context.seller.proofPoints,
+    ...(context.seller.differentiators || []),
+    ...(context.seller.painPoints || []),
   ];
   return [...new Set(values.flatMap((value) => normalizeForMatch(value).split(' ')))]
     .filter((term) => term.length >= 5 && !sellerOfferStopWords.has(term));
@@ -586,8 +588,13 @@ export function validateDraftPreflightV2(
   const citedEvidence = output.personalization.flatMap((item) => context.evidence.filter((evidence) => (
     evidence.evidenceId === item.evidenceId && evidence.supportedFactClaimIds.includes(item.claimId)
   )));
-  const sellerStatements = [context.seller.valueProposition, ...context.seller.services, ...context.seller.proofPoints]
-    .filter((statement): statement is string => Boolean(statement));
+  const sellerStatements = [
+    context.seller.valueProposition,
+    ...context.seller.services,
+    ...context.seller.proofPoints,
+    ...(context.seller.differentiators || []),
+    ...(context.seller.referenceClients || []),
+  ].filter((statement): statement is string => Boolean(statement));
   const materialContent = `${subject}\n\n${requiredCta ? rawBody.split(context.constraints.cta.exactText).join(' ') : rawBody}`;
   const claimCheckContent = modelClosingQuestion ? materialContent.split(modelClosingQuestion).join(' ') : materialContent;
   // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.

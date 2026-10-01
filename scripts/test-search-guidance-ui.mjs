@@ -14,7 +14,7 @@ const bundle = await build({
       import { ProfileSearchProblemAlert } from './src/components/search/ProfileSearchProblemAlert';
       import { SearchStarters, FilterRelaxHint } from './src/components/search/SearchGuidance';
       import { profileSearchMessage } from './src/lib/search/profile-search-outcome';
-      import { searchStartersFor, activeFilterChips } from './src/lib/search/search-guidance';
+      import { searchStartersFor, activeFilterChips, idealCustomerStarter } from './src/lib/search/search-guidance';
       import { DEFAULT_LEAD_SEARCH_FILTERS } from './src/lib/search/saved-search-criteria';
       window.__render = (kind, arg) => {
         const root = createRoot(document.getElementById('root'));
@@ -22,6 +22,7 @@ const bundle = await build({
         flushSync(() => {
           if (kind === 'problem') root.render(<ProfileSearchProblemAlert message={profileSearchMessage(arg.problem, { url: arg.url })} onAction={(a) => calls.push(a)} onDismiss={() => calls.push('dismiss')} />);
           if (kind === 'starters') root.render(<SearchStarters starters={searchStartersFor(arg)} onPick={(s) => calls.push(s.id)} />);
+          if (kind === 'ideal') root.render(<SearchStarters starters={[idealCustomerStarter(arg), ...searchStartersFor('Acme')].filter(Boolean).slice(0, 4)} onPick={(s) => calls.push(s.id)} missingIdealCustomer={!idealCustomerStarter(arg)} />);
           if (kind === 'relax') root.render(<FilterRelaxHint chips={activeFilterChips({ ...DEFAULT_LEAD_SEARCH_FILTERS, ...arg })} onRemove={(c) => calls.push(c.field)} />);
         });
         return { calls, unmount: () => root.unmount() };
@@ -34,6 +35,7 @@ const bundle = await build({
 
 const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/search', runScripts: 'outside-only', pretendToBeVisual: true });
 const { window } = dom;
+window.process = { env: { NODE_ENV: 'test' } }; // next/link reads process.env in the browser bundle
 window.eval(bundle.outputFiles[0].text);
 const doc = window.document;
 const buttons = () => [...doc.querySelectorAll('button')].map((button) => button.textContent.trim());
@@ -77,6 +79,18 @@ try {
   view = window.__render('starters', 'PSOL');
   assert.equal(doc.querySelectorAll('button').length, 3);
   assert.match(doc.body.textContent, /Evaluaciones psicolaborales/);
+  view.unmount();
+
+  // «Tu cliente ideal» from «Perfil» comes first; without it, the starters say where to define it.
+  view = window.__render('ideal', { targetRoles: 'Gerente de Personas, Jefe de Operaciones', targetIndustries: 'Retail' });
+  assert.match(buttons()[0], /^Tu cliente idealDesde tu perfil: Gerente de Personas y Jefe de Operaciones en Retail\.$/);
+  assert.doesNotMatch(doc.body.textContent, /Define tu cliente ideal/);
+  click('Tu cliente ideal');
+  assert.deepEqual([...view.calls], ['profile-ideal-customer']);
+  view.unmount();
+  view = window.__render('ideal', {});
+  assert.match(doc.body.textContent, /Define tu cliente ideal en Perfil/);
+  assert.equal(doc.querySelector('a[href="/profile"]')?.textContent, 'Perfil');
   view.unmount();
 
   // Nothing found: the filters to drop, each one a button.

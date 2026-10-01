@@ -48,3 +48,24 @@ test('an empty search names the filters to drop, broadest-first', () => {
   assert.deepEqual(chips.map((chip) => chip.field), ['sizeRange', 'seniorities', 'title', 'location']);
   assert.equal(chips[1]?.value, 'director, manager');
 });
+
+test('«Tu cliente ideal» from «Perfil» becomes the first starting point', async () => {
+  const { idealCustomerStarter } = await import('./search-guidance');
+  assert.equal(idealCustomerStarter({ targetRoles: '', targetIndustries: ' ' }), null);
+  const starter = idealCustomerStarter({
+    targetRoles: 'Gerente de Personas, Jefe de Operaciones, Gerente de Finanzas',
+    targetIndustries: 'Retail, Logística',
+    targetCompanySize: '201-500',
+    targetLocations: 'Perú, Chile',
+  });
+  assert.equal(starter?.label, 'Tu cliente ideal');
+  assert.equal(starter?.description, 'Desde tu perfil: Gerente de Personas y Jefe de Operaciones en Retail y Logística.');
+  assert.deepEqual(starter?.filters, {
+    companyKeywords: 'Retail, Logística',
+    location: 'Perú',
+    title: 'Gerente de Personas, Jefe de Operaciones, Gerente de Finanzas',
+    sizeRange: '201-500',
+    seniorities: [],
+  });
+  assert.equal(idealCustomerStarter({ targetIndustries: 'Minería' })?.filters.location, 'Chile');
+});

@@ -1,3 +1,5 @@
+import { commaItems, joinComma, joinLines, lineItems } from '@/lib/profile/profile-lists';
+
 export type ProfileFormValues = {
   name: string;
   role: string;
@@ -8,21 +10,44 @@ export type ProfileFormValues = {
   services: string;
   valueProposition: string;
   proofPoints: string;
+  /** Problems the offer solves, one per line. */
+  painPoints: string;
+  /** Why choose this company, one per line. */
+  differentiators: string;
+  /** Clients the person may name, separated by commas. */
+  referenceClients: string;
+  /** Ideal customer: roles, industries, company size and places to prospect. */
+  targetRoles: string;
+  targetIndustries: string;
+  targetCompanySize: string;
+  targetLocations: string;
 };
 
 export const PROFILE_SUGGESTION_FIELDS = [
+  'companyName',
   'sector',
   'website',
   'description',
   'services',
   'valueProposition',
+  'painPoints',
+  'differentiators',
+  'proofPoints',
+  'referenceClients',
+  'targetRoles',
+  'targetIndustries',
+  'targetCompanySize',
+  'targetLocations',
 ] as const;
 
 export type ProfileSuggestionField = (typeof PROFILE_SUGGESTION_FIELDS)[number];
 
-export type CompanyProfileSuggestion = Record<ProfileSuggestionField, string>;
+export type CompanyProfileSuggestion = Partial<Record<ProfileSuggestionField, string>>;
 
-export type ProfileSuggestionSelection = Record<ProfileSuggestionField, boolean>;
+export type ProfileSuggestionSelection = Partial<Record<ProfileSuggestionField, boolean>>;
+
+/** Company sizes, as «Buscar prospectos» filters them (src/lib/data.ts). */
+export const PROFILE_COMPANY_SIZES = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5001+'] as const;
 
 type ProfileLike = {
   full_name?: string | null;
@@ -50,7 +75,19 @@ const EMPTY_PROFILE: ProfileFormValues = {
   services: '',
   valueProposition: '',
   proofPoints: '',
+  painPoints: '',
+  differentiators: '',
+  referenceClients: '',
+  targetRoles: '',
+  targetIndustries: '',
+  targetCompanySize: '',
+  targetLocations: '',
 };
+
+/** Fields added after the first profile: written only when they have content or already existed, so a profile that never
+ * used them round-trips byte for byte (Cowork compares the stored JSON to name what changed). */
+const LINE_LIST_FIELDS = ['painPoints', 'differentiators'] as const;
+const COMMA_LIST_FIELDS = ['referenceClients', 'targetRoles', 'targetIndustries', 'targetLocations'] as const;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -72,6 +109,11 @@ function asMultilineText(value: unknown): string {
 
 function multilineItems(value: string): string[] {
   return value.split(/\r?\n/g).map((item) => item.trim()).filter(Boolean);
+}
+
+function companySize(value: unknown) {
+  const size = asText(value);
+  return (PROFILE_COMPANY_SIZES as readonly string[]).includes(size) ? size : '';
 }
 
 export function createEmptyProfileForm(): ProfileFormValues {
@@ -124,6 +166,20 @@ export function normalizeCompanyWebsite(value?: string | null): { website: strin
   }
 }
 
+/** Free mailboxes say nothing about the company; any other address domain is a good first guess for its website. */
+const PERSONAL_MAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.es', 'hotmail.cl', 'outlook.com', 'outlook.es', 'outlook.cl', 'live.com',
+  'live.cl', 'msn.com', 'yahoo.com', 'yahoo.es', 'yahoo.cl', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me',
+  'protonmail.com', 'gmx.com', 'zoho.com', 'yandex.com', 'mail.com', 'vtr.net', 'entelchile.net', 'terra.cl',
+]);
+
+/** The company website suggested by a work email (ana@grupoexpro.com → grupoexpro.com), or '' for personal mailboxes. */
+export function websiteFromWorkEmail(email?: string | null) {
+  const domain = String(email ?? '').trim().toLowerCase().split('@')[1] || '';
+  if (!domain || PERSONAL_MAIL_DOMAINS.has(domain)) return '';
+  return normalizeCompanyWebsite(domain).domain;
+}
+
 export function mapProfileToForm(profile?: ProfileLike | null): ProfileFormValues {
   if (!profile) return createEmptyProfileForm();
 
@@ -141,6 +197,13 @@ export function mapProfileToForm(profile?: ProfileLike | null): ProfileFormValue
     services: asText(extended.services),
     valueProposition: asText(extended.valueProposition || extended.value_proposition),
     proofPoints: asMultilineText(extended.proofPoints || extended.proof_points),
+    painPoints: joinLines(lineItems(extended.painPoints)),
+    differentiators: joinLines(lineItems(extended.differentiators)),
+    referenceClients: joinComma(commaItems(extended.referenceClients)),
+    targetRoles: joinComma(commaItems(extended.targetRoles)),
+    targetIndustries: joinComma(commaItems(extended.targetIndustries)),
+    targetCompanySize: companySize(extended.targetCompanySize),
+    targetLocations: joinComma(commaItems(extended.targetLocations)),
   };
 }
 
@@ -148,6 +211,20 @@ export function buildProfileUpdate(form: ProfileFormValues, currentProfile?: Pro
   const signatures = asRecord(currentProfile?.signatures);
   const extended = asRecord(signatures.profile_extended);
   const normalizedWebsite = normalizeCompanyWebsite(form.website);
+  const added: Record<string, unknown> = {};
+  const keep = (key: string, value: unknown, empty: boolean) => {
+    if (!empty || key in extended) added[key] = value;
+  };
+  for (const field of LINE_LIST_FIELDS) {
+    const items = lineItems(form[field] ?? '');
+    keep(field, items, items.length === 0);
+  }
+  for (const field of COMMA_LIST_FIELDS) {
+    const items = commaItems(form[field] ?? '');
+    keep(field, items, items.length === 0);
+  }
+  const size = companySize(form.targetCompanySize);
+  keep('targetCompanySize', size, !size);
 
   return {
     full_name: form.name.trim(),
@@ -164,6 +241,7 @@ export function buildProfileUpdate(form: ProfileFormValues, currentProfile?: Pro
         services: form.services.trim(),
         valueProposition: form.valueProposition.trim(),
         proofPoints: multilineItems(form.proofPoints),
+        ...added,
       },
     },
   };
@@ -174,7 +252,7 @@ export function getDefaultSuggestionSelection(
   suggestion: CompanyProfileSuggestion
 ): ProfileSuggestionSelection {
   return PROFILE_SUGGESTION_FIELDS.reduce((selection, field) => {
-    selection[field] = !form[field].trim() && Boolean(suggestion[field].trim());
+    selection[field] = !String(form[field] ?? '').trim() && Boolean(String(suggestion[field] ?? '').trim());
     return selection;
   }, {} as ProfileSuggestionSelection);
 }
@@ -186,8 +264,57 @@ export function applyProfileSuggestion(
 ): ProfileFormValues {
   const next = { ...form };
   for (const field of PROFILE_SUGGESTION_FIELDS) {
-    const value = suggestion[field].trim();
+    const value = String(suggestion[field] ?? '').trim();
     if (selection[field] && value) next[field] = value;
   }
   return next;
+}
+
+export type ProfileCheck = {
+  id: 'identity' | 'company' | 'description' | 'services' | 'valueProposition' | 'painPoints' | 'differentiators'
+    | 'proofPoints' | 'targetRoles' | 'targetIndustries';
+  label: string;
+  /** What the person gains, in one line: the reason to fill it. */
+  why: string;
+  done: boolean;
+  /** Field to focus when the person asks to complete it. */
+  field: keyof ProfileFormValues;
+};
+
+const filled = (value: string) => value.trim().length > 0;
+
+/** Ten checks, in the order that most changes what the AI writes and searches. Drafting needs services or a value proposition. */
+export function profileCompleteness(form: ProfileFormValues) {
+  const checks: ProfileCheck[] = [
+    { id: 'services', label: 'Productos y servicios', field: 'services', done: filled(form.services),
+      why: 'Sin esto ni propuesta de valor, la IA no puede redactar correos.' },
+    { id: 'valueProposition', label: 'Propuesta de valor', field: 'valueProposition', done: filled(form.valueProposition),
+      why: 'Es el motivo para responderte: qué resultado consigue tu cliente.' },
+    { id: 'targetRoles', label: 'Cargos que buscas', field: 'targetRoles', done: filled(form.targetRoles),
+      why: '«Buscar prospectos» arma tu búsqueda con estos cargos.' },
+    { id: 'targetIndustries', label: 'Industrias de tus clientes', field: 'targetIndustries', done: filled(form.targetIndustries),
+      why: 'Acota la búsqueda a empresas donde tu oferta encaja.' },
+    { id: 'painPoints', label: 'Problemas que resuelves', field: 'painPoints', done: filled(form.painPoints),
+      why: 'La IA conecta lo que investiga de cada empresa con un problema real.' },
+    { id: 'differentiators', label: 'Por qué elegirte', field: 'differentiators', done: filled(form.differentiators),
+      why: 'Distingue tu correo de los de la competencia.' },
+    { id: 'proofPoints', label: 'Pruebas y resultados', field: 'proofPoints', done: filled(form.proofPoints) || filled(form.referenceClients),
+      why: 'Un dato o un cliente conocido hace creíble el seguimiento.' },
+    { id: 'company', label: 'Empresa y sitio web', field: 'companyName', done: filled(form.companyName) && filled(form.website),
+      why: 'La IA sabe a quién representas y puede leer tu sitio.' },
+    { id: 'description', label: 'Descripción de la empresa', field: 'description', done: filled(form.description),
+      why: 'Contexto para presentarte en una línea.' },
+    { id: 'identity', label: 'Tu nombre y cargo', field: 'name', done: filled(form.name) && filled(form.role),
+      why: 'Firman tus correos y mensajes.' },
+  ];
+  const done = checks.filter((check) => check.done).length;
+  return {
+    checks,
+    done,
+    total: checks.length,
+    percent: Math.round((done / checks.length) * 100),
+    // Same bar as the server (hasUsableDraftSellerOfferV2): a real service name or a value proposition sentence.
+    canDraft: form.services.trim().length >= 3 || form.valueProposition.trim().length >= 12,
+    missing: checks.filter((check) => !check.done),
+  };
 }

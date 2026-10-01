@@ -26,7 +26,11 @@ export async function readCoworkProfile(client: SupabaseClient, scope: { userId:
   const form = mapProfileToForm(data);
   const commercialEntries = (['role', 'sector', 'description', 'services', 'valueProposition', 'proofPoints'] as const)
     .map(field => [field, form[field].trim() ? form[field].trim().slice(0, 500) : null] as const);
-  const commercial = commercialEntries.some(([, value]) => value) ? Object.fromEntries(commercialEntries) : null;
+  // Fields added to «Perfil» later are listed only when filled, so older profiles read exactly as before.
+  const addedEntries = (['painPoints', 'differentiators', 'referenceClients', 'targetRoles', 'targetIndustries', 'targetCompanySize', 'targetLocations'] as const)
+    .flatMap(field => (form[field].trim() ? [[field, form[field].trim().slice(0, 500)] as const] : []));
+  const allEntries = [...commercialEntries, ...addedEntries];
+  const commercial = allEntries.some(([, value]) => value) ? Object.fromEntries(allEntries) : null;
   return { scope: 'own_profile', profile: {
     fullName: text(data.full_name), email: text(data.email), companyName: text(data.company_name),
     companyDomain: text(data.company_domain), jobTitle: text(data.job_title), updatedAt: text(data.updated_at),
