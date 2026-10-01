@@ -11,6 +11,7 @@ import { loadCoworkThreadMemory, saveCoworkThreadMemory } from './thread-memory'
 import { coworkThreadMemoryContext } from '@/lib/cowork/thread-memory';
 import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
+import { processCoworkResearchNotices } from './research-notice';
 import { coworkExecutionPolicy, coworkEffectCanAutoApprove } from '@/lib/cowork/execution-policy';
 import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { loadCoworkThreadStats } from './thread-stats';
@@ -80,6 +81,8 @@ async function servedQueueRecently(
 export async function processCoworkQueue() {
   if (process.env.COWORK_ENABLED !== 'true' || !coworkWorkerConfigured()) return { processed: 0 };
   const client = getSupabaseAdminClient();
+  // Research that finished goes back to its conversation as a new turn, which this same pass can take.
+  await processCoworkResearchNotices({ client });
   if (await servedQueueRecently(client)) {
     const conversation = await processCoworkConversationRun();
     if (conversation.claimed) return { processed: conversation.processed };

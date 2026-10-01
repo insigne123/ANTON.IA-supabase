@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { CoworkArtifactPanel } from './CoworkArtifactPanel';
 import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
+import { ResearchProgress } from './ResearchProgress';
 import { CoworkQuickActions } from './CoworkQuickActions';
 import type { CoworkContactOption } from './ComposerShortcuts';
 import { CoworkHome, type CoworkOfferDraft } from './CoworkHome';
@@ -802,6 +803,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           </AnimatePresence>
           <div className="shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-4">
             <div className="mx-auto w-full max-w-[46rem]">
+              {latest && state?.canResearch && <ResearchProgress runId={latest.run.id} onAccessDenied={clearPrivateResults} />}
               {canFollowUp && !message.trim() && attach.files.length === 0 && <CoworkQuickActions id="cowork-quick-actions" onPick={followUp} />}
               <CoworkComposer ref={composer} id="cowork-followup" value={message} onChange={setMessage} onSubmit={() => void submit()}
                 placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"

@@ -10,13 +10,13 @@ export function coworkWorkerConfigured() {
   return resolveCoworkRuntime(process.env).ready;
 }
 
-/** Worker continuations use a request id derived from their parent run. The
- * id itself never leaves the server; the UI only learns the boolean. */
+/** Worker continuations use a request id derived from their parent run, and so does the notice that research finished
+ * (research-notice.ts). The id itself never leaves the server; the UI only learns the boolean and, for a notice, why. */
 function withAutomaticFlag<T extends { parent_run_id?: string | null; request_id?: string | null }>(run: T) {
   const { request_id: requestId, ...rest } = run;
-  const automatic = Boolean(run.parent_run_id && requestId
-    && requestId === deterministicCoworkUuid(`cowork:continuation:${run.parent_run_id}`));
-  return { ...rest, automatic };
+  const derived = (seed: string) => Boolean(run.parent_run_id && requestId && requestId === deterministicCoworkUuid(`${seed}:${run.parent_run_id}`));
+  const research = derived('cowork:research-notice');
+  return { ...rest, automatic: research || derived('cowork:continuation'), ...(research ? { automaticReason: 'research' as const } : {}) };
 }
 
 export async function listCoworkRuns(auth: AuthContext) {
