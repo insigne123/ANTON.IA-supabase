@@ -106,6 +106,8 @@ export type AdminCreditPolicy = {
 
 export type AdminCreditOverview = {
   organization: { id: string; name: string };
+  /** False for organization admins: they see usage and limits, and the ANTON.IA team changes them. */
+  canManage?: boolean;
   quotaDay: string;
   nextResetAt: string;
   defaultPolicy: {

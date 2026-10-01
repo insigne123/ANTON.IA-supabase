@@ -12,10 +12,7 @@ import {
   Mail,
   Phone,
   RefreshCw,
-  Search,
-  Send,
   UsersRound,
-  type LucideIcon,
 } from 'lucide-react';
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -30,7 +27,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { AdminValueSection } from '@/components/admin/AdminValueSection';
 import type { AdminDashboardOverview, AdminReportingUser } from '@/lib/admin-dashboard-types';
+import { lastDaysInZone } from '@/lib/admin/chile-time';
 import { cn } from '@/lib/utils';
 
 type Period = '7' | '30' | '90' | 'custom';
@@ -44,15 +43,8 @@ const chartConfig = {
 const EMPTY_USERS: AdminReportingUser[] = [];
 const EMPTY_TEAMS: AdminDashboardOverview['groups'] = [];
 
-function dateInput(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
 function rangeFor(days: number) {
-  const to = new Date();
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - (days - 1));
-  return { from: dateInput(from), to: dateInput(to) };
+  return lastDaysInZone(days);
 }
 
 function formatNumber(value: number) {
@@ -86,29 +78,6 @@ function primaryTeam(user: AdminReportingUser) {
   return user.groups.find((group) => group.primary) || user.groups[0] || null;
 }
 
-function MetricCard({ label, value, note, icon: Icon, accent }: {
-  label: string;
-  value: string;
-  note: string;
-  icon: LucideIcon;
-  accent: string;
-}) {
-  return (
-    <Card className="rounded-2xl border-border/60 bg-card/90 shadow-[0_16px_34px_-30px_rgba(15,23,42,0.45)] dark:bg-card/75">
-      <CardContent className="p-4 sm:p-5">
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-medium text-muted-foreground">{label}</p>
-          <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl bg-muted/65', accent)}>
-            <Icon className="h-4 w-4" aria-hidden="true" />
-          </span>
-        </div>
-        <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] tabular-nums">{value}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{note}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
 function OverviewLoading() {
   return (
     <div className="space-y-5" aria-busy="true" aria-label="Cargando resumen administrativo">
@@ -140,6 +109,7 @@ function AdminOverview() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     if (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to) return;
@@ -224,9 +194,9 @@ function AdminOverview() {
     <div className="mx-auto w-full max-w-[1320px] pb-10">
       <PageHeader
         title="Resumen"
-        description={`${overview?.organization.name || 'Organización'} · Actividad, resultados y señales del equipo en un solo lugar.`}
+        description={`${overview?.organization.name || 'Organización'} · Qué está logrando el equipo, quién necesita ayuda y cómo va cada persona.`}
       >
-        <Button type="button" variant="ghost" onClick={() => void loadOverview({ silent: true })} disabled={loading || refreshing} className="rounded-xl">
+        <Button type="button" variant="ghost" onClick={() => { setRefreshToken((value) => value + 1); void loadOverview({ silent: true }); }} disabled={loading || refreshing} className="rounded-xl">
           <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
           {refreshing ? 'Actualizando' : 'Actualizar'}
         </Button>
@@ -309,12 +279,8 @@ function AdminOverview() {
             </div>
           ) : null}
 
-          <section aria-label="Indicadores principales" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Leads capturados" value={formatNumber(summary?.leadsCaptured || 0)} note="Nuevos en el período" icon={Search} accent="text-primary" />
-            <MetricCard label="Leads contactados" value={formatNumber(summary?.leadsContacted || 0)} note="Con envío confirmado" icon={Send} accent="text-sky-600 dark:text-sky-300" />
-            <MetricCard label="Respuestas" value={formatNumber(summary?.replies || 0)} note={`${formatNumber(summary?.emailsSent || 0)} emails enviados`} icon={Mail} accent="text-emerald-600 dark:text-emerald-300" />
-            <MetricCard label="Tasa de respuesta" value={formatPercent(summary?.responseRate || 0)} note="Respuestas sobre emails enviados" icon={CheckCircle2} accent="text-amber-600 dark:text-amber-300" />
-          </section>
+          <AdminValueSection from={overview.dateRange.from} to={overview.dateRange.to} groupId={groupId} userId={userId} refreshToken={refreshToken} />
+
 
           <section className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(290px,0.65fr)]" aria-label="Tendencia y atención">
             <Card className="overflow-hidden rounded-[24px] border-border/60 bg-card/90 dark:bg-card/75">

@@ -105,13 +105,8 @@ export function AppSidebar() {
     return () => controller.abort();
   }, [currentScope, user?.email]);
   const canAccessOpportunities = isOpportunitiesEnabled();
-  const adminAllowedEmails = String(process.env.NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS || '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  const canAccessAdminDashboard = organizationId === process.env.NEXT_PUBLIC_ADMIN_DASHBOARD_ORGANIZATION_ID
-    && (organizationRole === 'owner' || organizationRole === 'admin')
-    && adminAllowedEmails.includes(String(user?.email || '').trim().toLowerCase());
+  // Every organization's owners and admins see its panel; the server checks the role again (admin-dashboard-auth.ts).
+  const canAccessAdminDashboard = Boolean(organizationId) && (organizationRole === 'owner' || organizationRole === 'admin');
 
   const isActiveRoute = (item: NavItem) => [item.href, ...(item.aliases || [])]
     .some((href) => pathname === href || (href !== '/dashboard' && pathname.startsWith(`${href}/`)));

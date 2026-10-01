@@ -82,21 +82,20 @@ function dashboardClient(overrides: Record<string, any> = {}, failedTables: stri
     },
     auth: {
       admin: {
-        listUsers: async () => ({
-          data: failedTables.includes('auth.users') ? null : {
-            users: [
-              {
-                id: userOne,
-                email: 'owner@grupoexpro.com',
-                email_confirmed_at: '2026-08-01T00:00:00.000Z',
-                last_sign_in_at: '2026-09-06T07:00:00.000Z',
-                user_metadata: { full_name: 'Owner', avatar_url: 'https://example.com/owner.png' },
-              },
-              { id: userTwo, email: 'member@grupoexpro.com', user_metadata: { full_name: 'Member' } },
-            ],
-          },
-          error: failedTables.includes('auth.users') ? { message: 'Unavailable' } : null,
-        }),
+        getUserById: async (id: string) => {
+          if (failedTables.includes('auth.users')) return { data: null, error: { message: 'Unavailable', status: 500 } };
+          const users: Record<string, any> = {
+            [userOne]: {
+              id: userOne,
+              email: 'owner@grupoexpro.com',
+              email_confirmed_at: '2026-08-01T00:00:00.000Z',
+              last_sign_in_at: '2026-09-06T07:00:00.000Z',
+              user_metadata: { full_name: 'Owner', avatar_url: 'https://example.com/owner.png' },
+            },
+            [userTwo]: { id: userTwo, email: 'member@grupoexpro.com', user_metadata: { full_name: 'Member' } },
+          };
+          return users[id] ? { data: { user: users[id] }, error: null } : { data: { user: null }, error: { message: 'User not found', status: 404 } };
+        },
       },
     },
   };
@@ -251,4 +250,43 @@ test('person response rates use event and ledger send counts when contact histor
     assert.equal(overview.users[0].metrics.responseRate, 50, source);
     assert.equal(overview.users[0].metrics.responseRate, overview.summary.responseRate, source);
   }
+});
+
+test('sends written as contact.sent count, and automatic replies or bounces never count as a reply', async () => {
+  const overview = await loadAdminDashboardOverview(
+    dashboardClient({
+      contacted_leads: [
+        { id: 'c-1', user_id: userOne, lead_id: 'l-1', sent_at: '2026-09-06T10:00:00.000Z', replied_at: '2026-09-06T11:00:00.000Z', reply_intent: 'auto_reply', provider: 'gmail', status: 'replied', data: {} },
+        { id: 'c-2', user_id: userOne, lead_id: 'l-2', sent_at: '2026-09-06T10:05:00.000Z', replied_at: '2026-09-06T11:05:00.000Z', reply_intent: 'delivery_failure', provider: 'gmail', status: 'replied', data: {} },
+        { id: 'c-3', user_id: userOne, lead_id: 'l-3', sent_at: '2026-09-06T10:10:00.000Z', replied_at: '2026-09-06T11:10:00.000Z', reply_intent: 'positive', provider: 'gmail', status: 'replied', data: {} },
+      ],
+      email_events: [],
+      antonia_event_ledger: [
+        { id: 'sent-1', actor_user_id: userOne, event_type: 'contact.sent', occurred_at: '2026-09-06T10:00:00.000Z', lead_id: 'l-1' },
+        { id: 'sent-2', actor_user_id: userOne, event_type: 'contact.sent', occurred_at: '2026-09-06T10:05:00.000Z', lead_id: 'l-2' },
+        { id: 'sent-3', actor_user_id: userOne, event_type: 'contact.sent', occurred_at: '2026-09-06T10:10:00.000Z', lead_id: 'l-3' },
+        { id: 'sent-4', actor_user_id: userOne, event_type: 'contact.sent', occurred_at: '2026-09-06T10:15:00.000Z', lead_id: 'l-4' },
+      ],
+    }),
+    organizationId,
+    'GrupoExpro',
+    { from: '2026-09-06', to: '2026-09-06' },
+  );
+
+  assert.equal(overview.summary.emailsSent, 4, 'the four contact.sent events, more than the three rows');
+  assert.equal(overview.summary.replies, 1, 'only the positive reply is a person answering');
+});
+
+test('days are Chile calendar days: a send at 23:30 in Santiago belongs to that day, not the next UTC one', async () => {
+  const overview = await loadAdminDashboardOverview(
+    dashboardClient({
+      leads: [{ id: 'late', user_id: userOne, created_at: '2026-09-07T02:30:00.000Z', company: 'Tarde' }],
+      contacted_leads: [], email_events: [], antonia_event_ledger: [], lead_research_jobs: [], enriched_leads: [], people_search_leads: [],
+    }),
+    organizationId,
+    'GrupoExpro',
+    { from: '2026-09-06', to: '2026-09-06' },
+  );
+  assert.equal(overview.summary.leadsCaptured, 1);
+  assert.deepEqual(overview.trend.map((day) => [day.date, day.leads]), [['2026-09-06', 1]]);
 });

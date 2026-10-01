@@ -288,6 +288,8 @@ export default function AdminCreditsPage() {
     || organizationDraft.teamLimit !== organizationBaseline.teamLimit
   ));
   const isMutating = mutationKey !== null;
+  const readOnly = overview?.canManage === false;
+  const locked = isMutating || readOnly;
 
   async function saveOrganizationPolicy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -492,6 +494,12 @@ export default function AdminCreditsPage() {
 
         {overview ? (
           <div className="mt-4 space-y-4" aria-busy={refreshing || isMutating}>
+            {readOnly ? (
+              <section role="status" className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3.5 text-sm sm:px-5">
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                <p>Aquí ves el uso y los límites de tu organización. Para cambiarlos, escribe al equipo de ANTON.IA: los créditos los paga la plataforma.</p>
+              </section>
+            ) : null}
             <section
               aria-label="Próxima aplicación de cambios"
               className="flex items-start gap-3 rounded-2xl border border-border/60 bg-muted/30 px-4 py-3.5 sm:px-5"
@@ -581,7 +589,7 @@ export default function AdminCreditsPage() {
                             setActionSuccess(null);
                             setActionError(null);
                           }}
-                          disabled={isMutating}
+                          disabled={locked}
                         >
                           <SelectTrigger id="organization-credit-mode" aria-describedby="organization-mode-help" className="rounded-xl">
                             <SelectValue />
@@ -612,7 +620,7 @@ export default function AdminCreditsPage() {
                             setOrganizationErrors((current) => ({ ...current, userLimit: undefined }));
                             setActionSuccess(null);
                           }}
-                          disabled={isMutating}
+                          disabled={locked}
                           aria-invalid={Boolean(organizationErrors.userLimit)}
                           aria-describedby={organizationErrors.userLimit ? 'organization-user-limit-error' : 'organization-user-limit-help'}
                           className={LIMIT_INPUT_CLASS}
@@ -641,7 +649,7 @@ export default function AdminCreditsPage() {
                             setOrganizationErrors((current) => ({ ...current, teamLimit: undefined }));
                             setActionSuccess(null);
                           }}
-                          disabled={isMutating}
+                          disabled={locked}
                           aria-invalid={Boolean(organizationErrors.teamLimit)}
                           aria-describedby={organizationErrors.teamLimit ? 'organization-team-limit-error' : 'organization-team-limit-help'}
                           className={LIMIT_INPUT_CLASS}
@@ -660,7 +668,7 @@ export default function AdminCreditsPage() {
                       <Button
                         type="submit"
                         className="w-full sm:w-auto"
-                        disabled={!organizationDirty || isMutating}
+                        disabled={!organizationDirty || locked}
                       >
                         {mutationKey === 'organization' ? (
                           <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -726,7 +734,7 @@ export default function AdminCreditsPage() {
                             size="sm"
                             className="w-full rounded-xl lg:w-auto"
                             onClick={() => openTeamEditor(team)}
-                            disabled={isMutating}
+                            disabled={locked}
                             aria-label={`Editar límite de ${team.name}`}
                           >
                             <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -827,7 +835,7 @@ export default function AdminCreditsPage() {
                             size="sm"
                             className="w-full rounded-xl xl:w-auto"
                             onClick={() => openUserEditor(user)}
-                            disabled={isMutating}
+                            disabled={locked}
                             aria-label={`Editar política de ${user.name}`}
                           >
                             <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -907,7 +915,7 @@ export default function AdminCreditsPage() {
                       setTeamFieldError(null);
                       setTeamMutationError(null);
                     }}
-                    disabled={isMutating}
+                    disabled={locked}
                     aria-invalid={Boolean(teamFieldError)}
                     aria-describedby={teamFieldError ? 'team-limit-error' : 'team-limit-help'}
                     className={LIMIT_INPUT_CLASS}
@@ -934,7 +942,7 @@ export default function AdminCreditsPage() {
                     variant="ghost"
                     className="h-auto min-h-10 w-full justify-start whitespace-normal rounded-xl px-2 py-2 text-left leading-5 text-muted-foreground hover:text-foreground"
                     onClick={() => void restoreTeamPolicy()}
-                    disabled={isMutating}
+                    disabled={locked}
                   >
                     {mutationKey === `team-restore:${editingTeam.id}` ? (
                       <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -951,9 +959,9 @@ export default function AdminCreditsPage() {
 
               <DialogFooter className="shrink-0 gap-2 border-t border-border/60 bg-background/95 px-5 py-4 sm:flex-row sm:justify-end sm:space-x-0 sm:px-6">
                 <DialogClose asChild>
-                  <Button type="button" variant="ghost" className="w-full rounded-xl sm:w-auto" disabled={isMutating}>Cancelar</Button>
+                  <Button type="button" variant="ghost" className="w-full rounded-xl sm:w-auto" disabled={locked}>Cancelar</Button>
                 </DialogClose>
-                <Button type="submit" className="w-full rounded-xl sm:w-auto" disabled={!teamDraftDirty || isMutating}>
+                <Button type="submit" className="w-full rounded-xl sm:w-auto" disabled={!teamDraftDirty || locked}>
                   {mutationKey === `team:${editingTeam.id}` ? (
                     <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                   ) : (
@@ -1010,7 +1018,7 @@ export default function AdminCreditsPage() {
                       setUserFieldError(null);
                       setUserMutationError(null);
                     }}
-                    disabled={isMutating}
+                    disabled={locked}
                   >
                     <SelectTrigger id="user-credit-mode" aria-describedby="user-mode-help" className="rounded-xl">
                       <SelectValue />
@@ -1041,7 +1049,7 @@ export default function AdminCreditsPage() {
                       setUserFieldError(null);
                       setUserMutationError(null);
                     }}
-                    disabled={isMutating}
+                    disabled={locked}
                     aria-invalid={Boolean(userFieldError)}
                     aria-describedby={userFieldError ? 'user-limit-error' : 'user-limit-help'}
                     className={LIMIT_INPUT_CLASS}
@@ -1070,7 +1078,7 @@ export default function AdminCreditsPage() {
                     variant="ghost"
                     className="h-auto min-h-10 w-full justify-start whitespace-normal rounded-xl px-2 py-2 text-left leading-5 text-muted-foreground hover:text-foreground"
                     onClick={() => void restoreUserPolicy()}
-                    disabled={isMutating}
+                    disabled={locked}
                   >
                     {mutationKey === `user-restore:${editingUser.id}` ? (
                       <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
@@ -1087,9 +1095,9 @@ export default function AdminCreditsPage() {
 
               <DialogFooter className="shrink-0 gap-2 border-t border-border/60 bg-background/95 px-5 py-4 sm:flex-row sm:justify-end sm:space-x-0 sm:px-6">
                 <DialogClose asChild>
-                  <Button type="button" variant="ghost" className="w-full rounded-xl sm:w-auto" disabled={isMutating}>Cancelar</Button>
+                  <Button type="button" variant="ghost" className="w-full rounded-xl sm:w-auto" disabled={locked}>Cancelar</Button>
                 </DialogClose>
-                <Button type="submit" className="w-full rounded-xl sm:w-auto" disabled={!userDraftDirty || isMutating}>
+                <Button type="submit" className="w-full rounded-xl sm:w-auto" disabled={!userDraftDirty || locked}>
                   {mutationKey === `user:${editingUser.id}` ? (
                     <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                   ) : (
