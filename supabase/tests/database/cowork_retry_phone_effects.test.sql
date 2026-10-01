@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(11);
+select plan(10);
 
 -- The verified owner (the only Cowork account today).
 insert into auth.users (id, email, email_confirmed_at)
