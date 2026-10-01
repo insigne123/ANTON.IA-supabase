@@ -5,13 +5,14 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getCoworkRun } from './runs';
 import { requireCoworkWorkerAccess } from './access';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { displayLeadName } from '@/lib/lead-name';
 import {
   LINKEDIN_JOB_EXPIRY_DAYS, LINKEDIN_MESSAGE_MAX, LINKEDIN_WEEKLY_INVITE_LIMIT,
   classifyInviteQuota, inviteIdempotencyKey, jobExpired, messageIdempotencyKey,
   verifyLinkedinIdentity,
 } from '@/lib/cowork/linkedin-bridge';
 import { findCompanyReply, findNegotiationHold } from '@/lib/server/campaign-send-guards';
-import { coworkBatchCompanyKeys } from '@/lib/cowork/linkedin-batch';
+import { coworkBatchCompanyKeys, coworkLinkedinRunSteps } from '@/lib/cowork/linkedin-batch';
 
 export type Scope = { userId: string; organizationId: string };
 
@@ -245,9 +246,9 @@ async function executeJob(auth: AuthContext, runId: string, targetId: string, ki
   if (recomputed !== target.hash) throw new Error('La propuesta cambió desde tu revisión. Pide una nueva revisión.');
   const finalMessage = kind === 'message' ? proposal.message : null;
   const saved = await queueLinkedinJob(client, scope, { runId, kind, lead, canonical, idempotencyKey: proposal.idempotency_key, message: finalMessage });
-  return { reply: kind === 'invite'
-    ? `Invitación en cola para ${lead.name || canonical}. Ejecútala desde la extensión ante ese perfil; vence en ${LINKEDIN_JOB_EXPIRY_DAYS} días.`
-    : `Mensaje en cola para ${lead.name || canonical}. Ejecútalo desde la extensión ante ese perfil; vence en ${LINKEDIN_JOB_EXPIRY_DAYS} días.`,
+  // Nothing is sent by itself: the person runs it from the extension, on that profile (Plan 5, PR-8).
+  const who = displayLeadName(lead.name).text || canonical;
+  return { reply: `${kind === 'invite' ? 'Dejé lista la invitación' : 'Dejé listo el mensaje'} para ${who}. ${coworkLinkedinRunSteps(kind === 'invite' ? 'la invitación' : 'el mensaje', canonical)}`,
     result: { jobId: saved.jobId, reused: saved.reused, kind, canonicalUrl: canonical } };
 }
 
