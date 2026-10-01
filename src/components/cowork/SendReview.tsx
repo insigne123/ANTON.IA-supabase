@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote, ReviewPaper } from './ReviewParts';
+import { EmailReviewNote, ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote, ReviewPaper, type EmailReview } from './ReviewParts';
 
 type Preview = {
   from: string; provider: string;
   to: string | null; toName: string | null; subject: string | null; text: string | null;
   revision: number; versionId: string; matches: boolean; label: string;
+  /** What the automatic read found in the email (COWORK_EMAIL_REVIEW); absent when it is off or did not answer. */
+  review?: EmailReview | null;
 };
 
 /** Version-bound send review: shows the live draft and whether it still
@@ -37,6 +39,7 @@ export function SendReview({ runId, draftId, onApprove, onReject, resolving }: {
       <ReviewField label="Asunto"><span className="font-medium">{preview.subject || 'Sin asunto'}</span></ReviewField>
     </ReviewFields>
     <ReviewPaper>{preview.text || 'Sin contenido'}</ReviewPaper>
+    <EmailReviewNote review={preview.review} against="contra tu oferta" />
     <ReviewNote ok={preview.matches}>Revisión {preview.revision} · {preview.matches
       ? 'Coincide con la versión propuesta. Al aprobar se verificará supresión, dominio, conexión y cuota de nuevo.'
       : 'El borrador cambió desde la propuesta. Descártala y pide una nueva revisión.'}</ReviewNote>

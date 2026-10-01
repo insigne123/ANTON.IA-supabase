@@ -18,6 +18,7 @@ import { resolveContactedReplyTarget, ReplyTargetError } from '@/lib/server/repl
 import { requireCoworkWorkerAccess } from './access';
 import { getCoworkRun } from './runs';
 import { COWORK_THREAD_COLUMNS, coworkReplyThreadEnabled } from './thread-read';
+import { coworkEmailReviewMode, loadCoworkEmailReviewSeller, reviewCoworkEmail } from './email-review';
 
 /**
  * Sending a reply inside the conversation of someone who wrote («responder dentro del hilo»), behind COWORK_REPLY_THREAD_ENABLED and the
@@ -116,10 +117,18 @@ export async function readCoworkReplyThreadPreview(auth: AuthContext, runId: str
   const refusal = conversation ? whyNotReplyable(conversation) : 'Esa conversación ya no está disponible.';
   const theirs = conversation?.replied_at
     ? coworkReplyText(conversation.last_reply_text || conversation.reply_preview || conversation.reply_snippet, 400) : null;
+  // A read of the exact reply next to what they wrote and the offer (COWORK_EMAIL_REVIEW); it advises and never blocks, and any failure is no review.
+  const review = matches && !refusal && coworkEmailReviewMode() !== 'off'
+    ? await reviewCoworkEmail({
+      seller: await loadCoworkEmailReviewSeller(client, scope),
+      conversation: theirs ? { with: conversation?.name ? String(conversation.name) : null, theirLastMessage: theirs.text, ourEarlierSubject: conversation?.subject ? String(conversation.subject) : null } : null,
+      draft: { subject, body },
+    }).catch(() => null) : null;
   return {
     to, name: conversation?.name ? String(conversation.name) : null, company: conversation?.company ? String(conversation.company) : null,
     subject, body, matches,
     theirs: theirs ? { text: theirs.text, complete: theirs.complete } : null,
+    review,
     // Shown on the card before approving, not only on a failed send: what changed since the proposal.
     unavailable: refusal,
   };
