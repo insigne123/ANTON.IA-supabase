@@ -355,15 +355,6 @@ env:
     value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
     availability: [BUILD, RUNTIME]
 
-  # Firebase Functions integration for ANTON.IA worker
-  - variable: ANTONIA_FIREBASE_TICK_URL
-    value: https://antoniatickhttp-2rxibeopja-uc.a.run.app
-    availability: [RUNTIME]
-
-  - variable: ANTONIA_FIREBASE_TICK_SECRET
-    secret: ANTONIA_TICK_SECRET
-    availability: [RUNTIME]
-
   # Cron endpoint protection
   - variable: CRON_SECRET
     secret: ANTONIA_TICK_SECRET

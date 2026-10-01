@@ -4,7 +4,6 @@ import test from 'node:test';
 
 const migration = readFileSync('supabase/migrations/20260907121351_organization_credit_policies.sql', 'utf8');
 const quotaStore = readFileSync('src/lib/server/daily-quota-store.ts', 'utf8');
-const functionsSource = readFileSync('functions/index.ts', 'utf8');
 
 function functionBody(name: string) {
   const start = migration.indexOf(`create or replace function public.${name}`);
@@ -56,7 +55,6 @@ test('all deployed consumption entry points route through the organization bound
     assert.match(functionBody(name), /consume_antonia_organization_credits_v2/);
   }
   assert.match(quotaStore, /'get_antonia_credit_status_v2'/);
-  assert.match(functionsSource, /rpc\('get_antonia_credit_status_v2'/);
 });
 
 test('status preserves policy limits before the daily bucket exists', () => {

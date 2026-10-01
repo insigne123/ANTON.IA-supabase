@@ -499,12 +499,6 @@ export async function POST(req: Request) {
                     }
 
                     if (orgId && missionId && (classification.intent === 'unsubscribe' || classification.intent === 'negative')) {
-                        const { data: orgConfig } = await supabase
-                            .from('antonia_config')
-                            .select('pause_on_negative_reply')
-                            .eq('organization_id', orgId)
-                            .maybeSingle();
-
                         await createAntoniaException(supabase, {
                             organizationId: orgId,
                             missionId,
@@ -527,29 +521,6 @@ export async function POST(req: Request) {
                             autopilotStatus: 'negative_reply',
                             lastAutopilotEvent: classification.intent,
                         });
-
-                        if (orgConfig?.pause_on_negative_reply) {
-                            await supabase
-                                .from('antonia_missions')
-                                .update({ status: 'paused', updated_at: new Date().toISOString() })
-                                .eq('id', missionId)
-                                .eq('status', 'active');
-                            await supabase
-                                .from('antonia_tasks')
-                                .update({
-                                    status: 'completed',
-                                    result: {
-                                        skipped: true,
-                                        reason: 'mission_paused',
-                                        source: 'negative_reply_guardrail',
-                                    },
-                                    error_message: null,
-                                    updated_at: new Date().toISOString(),
-                                } as any)
-                                .eq('mission_id', missionId)
-                                .eq('status', 'pending')
-                                .in('type', ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'INVESTIGATE', 'CONTACT', 'CONTACT_INITIAL', 'CONTACT_CAMPAIGN']);
-                        }
                     }
                 }
 
