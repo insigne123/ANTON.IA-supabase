@@ -298,19 +298,19 @@ function buildLinkedInProfileNotice(params: {
   } else if (emailRequested && emailState === 'missing' && phoneRequested && phoneState === 'missing') {
     tone = 'warning';
     title = 'Perfil sin datos de contacto visibles';
-    description = 'Encontramos el perfil, pero no hay correo ni telefono disponibles para esta URL.';
+    description = 'Encontramos el perfil, pero no hay correo ni teléfono disponibles para esta URL.';
   } else if (emailRequested && emailState === 'missing') {
     tone = 'warning';
     title = 'Perfil encontrado, sin correo disponible';
     description = phoneState === 'ready'
-      ? 'El telefono esta disponible, pero no encontramos un correo para este perfil.'
+      ? 'El teléfono está disponible, pero no encontramos un correo para este perfil.'
       : 'No encontramos un correo disponible para este perfil.';
   } else if (phoneRequested && phoneState === 'missing') {
     tone = 'warning';
     title = 'Telefono no disponible por ahora';
     description = emailState === 'ready'
-      ? 'El perfil y el correo estan listos, pero no encontramos un telefono.'
-      : 'Encontramos el perfil, pero no hay un telefono disponible.';
+      ? 'El perfil y el correo están listos, pero no encontramos un teléfono.'
+      : 'Encontramos el perfil, pero no hay un teléfono disponible.';
   } else if (!emailRequested && !phoneRequested) {
     title = 'Perfil encontrado';
     description = 'Encontramos el perfil sin solicitar datos de contacto.';
@@ -1792,7 +1792,7 @@ export default function SearchPage() {
   return (
     <div className="mx-auto max-w-[1440px] space-y-5 py-2">
       <PageHeader
-        title="Búsqueda de Leads"
+        title="Buscar prospectos"
         description="Define tu audiencia, busca prospectos y guarda criterios para volver a usarlos."
       />
       {checkpointNotice ? <p role="status" className="text-sm text-muted-foreground">{checkpointNotice}</p> : null}
@@ -2088,7 +2088,7 @@ export default function SearchPage() {
                   </div>
                 </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  La búsqueda no enriquece contactos. Puedes enriquecerlos después desde Leads guardados.
+                  La búsqueda no enriquece contactos. Puedes buscar su correo después desde «Por completar».
                 </p>
               </div>
             )}

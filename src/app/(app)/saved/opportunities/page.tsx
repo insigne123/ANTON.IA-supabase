@@ -180,7 +180,7 @@ export default function SavedOpportunitiesPage() {
             toast({ title: 'Búsqueda completada', description: `Encontrados ${data.leads?.length ?? 0} leads.` });
         } catch (e: any) {
             console.error('[saved/opportunities] Lead lookup failed:', e);
-            toast({ title: 'No se pudo completar la busqueda', description: 'No encontramos contactos con esos criterios. Puedes ajustar cargos o ubicacion e intentarlo otra vez.' });
+            toast({ title: 'No se pudo completar la búsqueda', description: 'No encontramos contactos con esos criterios. Puedes ajustar cargos o ubicacion e intentarlo otra vez.' });
         } finally {
             setLoadingLeads(false);
         }
@@ -339,8 +339,8 @@ export default function SavedOpportunitiesPage() {
                                                     <Search className="h-5 w-5 text-muted-foreground" />
                                                 </div>
                                                 <div>
-                                                    <p className="font-medium">Aun no hay oportunidades guardadas</p>
-                                                    <p className="mt-1 text-sm text-muted-foreground">Guarda oportunidades desde la busqueda para encontrar contactos dentro de esas empresas.</p>
+                                                    <p className="font-medium">Aún no hay oportunidades guardadas</p>
+                                                    <p className="mt-1 text-sm text-muted-foreground">Guarda oportunidades desde la búsqueda para encontrar contactos dentro de esas empresas.</p>
                                                 </div>
                                                 <Button size="sm" onClick={() => router.push('/opportunities')}>Buscar oportunidades</Button>
                                             </div>

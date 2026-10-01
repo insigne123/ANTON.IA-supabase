@@ -68,7 +68,7 @@ export function searchStartersFor(organizationName?: string | null): SearchStart
 }
 
 /** Where saved people went and the one button that continues: with an email or phone they can be written to now; without one
- * they wait in «Guardados» for their email. */
+ * they wait in «Por completar» for their email. */
 export function savedLeadsToast(input: { withContact: number; withoutContact: number; duplicates: number }) {
   const { withContact, withoutContact, duplicates } = input;
   const total = withContact + withoutContact;
@@ -79,7 +79,7 @@ export function savedLeadsToast(input: { withContact: number; withoutContact: nu
   }
   const parts: string[] = [];
   if (withContact > 0) parts.push(`${people(withContact)} con correo o teléfono, listos para escribirles`);
-  if (withoutContact > 0) parts.push(`${people(withoutContact)} sin correo: complétalos en «Guardados»`);
+  if (withoutContact > 0) parts.push(`${people(withoutContact)} sin correo: complétalos en «Por completar»`);
   return {
     title: `Guardaste ${people(total)}`,
     description: `${parts.join('. ')}.${duplicateNote}`,

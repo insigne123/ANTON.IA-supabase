@@ -64,7 +64,7 @@ test('password form updates only the signed-in account, handles reauthentication
     assert.deepEqual(updates[1], { password: 'new-password', current_password: 'old-password', nonce: '123456' });
     assert.equal((dom.window.document.getElementById('new-password') as HTMLInputElement).value, '');
     assert.equal((dom.window.document.getElementById('current-password') as HTMLInputElement).value, '');
-    assert.match(dom.window.document.body.textContent!, /Contrasena actualizada/);
+    assert.match(dom.window.document.body.textContent!, /Contraseña actualizada/);
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

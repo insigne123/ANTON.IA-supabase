@@ -71,7 +71,7 @@ function buildDraftState(campaignType: CampaignType = 'reconnection') {
   const isReconnection = campaignType === 'reconnection';
   return {
     campaignType,
-    name: isReconnection ? 'Campaña de reconexion' : 'Campaña de seguimiento',
+    name: isReconnection ? 'Campaña de reconexión' : 'Campaña de seguimiento',
     steps: [buildDraftStep(0, campaignType)],
     excludedLeadIds: [] as string[],
     settings: createDefaultCampaignSettings({ withReactivationAudience: isReconnection, campaignType }),
@@ -392,7 +392,7 @@ export default function CampaignsHistoryPage() {
     ].filter(Boolean);
 
     setAiGoal(goalParts.join('\n'));
-    setAiAudience(reconnectionSettings.brief.audienceHint || 'Leads ya contactados elegibles para reconexion');
+    setAiAudience(reconnectionSettings.brief.audienceHint || 'Leads ya contactados elegibles para reconexión');
     setAiOpen(true);
   }
 
@@ -932,7 +932,7 @@ export default function CampaignsHistoryPage() {
                               id="reconnection-offer-name"
                               value={reconnectionSettings.brief.offerName}
                               onChange={(e) => updateReconnectionBrief({ offerName: e.target.value })}
-                              placeholder="Ej: Auditoria SEO continua"
+                              placeholder="Ej: Auditoría SEO continua"
                             />
                           </div>
                           <div className="grid gap-1.5">
@@ -1692,7 +1692,7 @@ export default function CampaignsHistoryPage() {
       <Dialog open={aiOpen} onOpenChange={setAiOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generar campaña de reconexion con IA</DialogTitle>
+            <DialogTitle>Generar campaña de reconexión con IA</DialogTitle>
             <DialogDescription>
               Describe lo que quieres promocionar y la IA preparara la secuencia base para luego personalizar cada envio lead por lead.
             </DialogDescription>

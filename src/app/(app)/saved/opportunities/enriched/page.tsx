@@ -775,7 +775,7 @@ export default function EnrichedOpportunitiesPage() {
                       });
                     }
                   }} />
-                  Estilo (Email Studio)
+                  Firmas y estilo
                 </label>
               </div>
             </div>
