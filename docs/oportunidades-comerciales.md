@@ -50,7 +50,7 @@ Migración `supabase/migrations/20261002170000_commercial_opportunities.sql`, ad
 
 | Señal | Fuente | Costo |
 |---|---|---|
-| Empresas contratando | JSearch (principal) y LinkedIn Job Search API de Fantastic Jobs | JSearch: gratis hasta 200 consultas al mes, luego US$25 al mes por 10.000. Fantastic Jobs: unos US$1,5 por 1.000 avisos |
+| Empresas contratando | JSearch (principal) y LinkedIn Job Search API de Fantastic Jobs | JSearch: gratis hasta 200 consultas al mes, luego US$25 al mes por 10.000. Fantastic Jobs en Apify: US$5 por 1.000 avisos en los planes gratis y Bronze, 3,5 en Silver y 1,5 desde Gold |
 | Licitaciones | Mercado Público y Compra Ágil (oficiales) | Gratis, con ticket |
 | Proyectos | SEIA (oficial) | Gratis |
 | Decisores y datos de la empresa | Apollo (ya integrado) | Los créditos de siempre, con el costo visible antes |
@@ -65,8 +65,8 @@ Migración `supabase/migrations/20261002170000_commercial_opportunities.sql`, ad
 | Herramienta | Decisión |
 |---|---|
 | JSearch (RapidAPI) | **Principal.** Avisos de Google for Jobs con `country=cl`: empresa, sitio, portal, fecha y enlace |
-| LinkedIn Job Search API de Fantastic Jobs | **Para LinkedIn.** Base actualizada cada hora, con dotación, industria, tamaño y sede de la empresa. Por Apify, donde ya está la cuenta |
-| `curious_coder/linkedin-jobs-scraper` (Apify) | **De reserva.** 98,5 % de corridas OK, US$1 por 1.000. Raspa en vivo: el cambio del buscador de LinkedIn de agosto de 2026 le quitó filtros |
+| LinkedIn Job Search API de Fantastic Jobs | **Para LinkedIn.** Base actualizada cada hora, con dotación, industria, tamaño y sede de la empresa, y un filtro que saca a las agencias de empleo. Por Apify, donde ya está la cuenta |
+| `curious_coder/linkedin-jobs-scraper` (Apify) | **De reserva.** 98,5 % de corridas OK, US$1 a 2 por 1.000. Raspa en vivo: el cambio del buscador de LinkedIn de agosto de 2026 le quitó filtros |
 
 **No se usan:**
 
