@@ -172,6 +172,32 @@ test('segment phrases keep whole phrases, drop noise and stop at six', () => {
   assert.equal(segmentPhrases('a1,b2,c3,d4,e5,f6,g7,h8').length, 6);
 });
 
+test('a contact another member holds comes with its team notice, so Cowork does not propose writing to them', async () => {
+  const data: Record<string, unknown> = {
+    leads: [
+      { id: '1', name: 'Marcela Rojas', title: 'Gerenta de Personas', company: 'Sodexo', email: 'Marcela@Sodexo.cl', created_at: '2026-01-03' },
+      { id: '2', name: 'Rafael Díaz', title: 'Gerente', company: 'Otra', email: 'rafael@otra.cl', created_at: '2026-01-02' },
+    ],
+    organizations: { collaboration_v1_enabled: true },
+    organization_contact_threads: [{ recipient_key: 'marcela@sodexo.cl', status: 'active', opened_by_user_id: 'user-ana', first_contacted_at: '2026-09-01T00:00:00Z', last_contacted_at: '2026-09-20T00:00:00Z', reopened_at: null }],
+    organization_members: [{ user_id: 'user-ana', profiles: { full_name: 'Ana Pérez' } }],
+    contacted_leads: [{ email: 'marcela@sodexo.cl', replied_at: '2026-09-22T00:00:00Z' }],
+  };
+  const db = {
+    from: (table: string) => {
+      const chain: Record<string, unknown> = {};
+      for (const name of ['select', 'eq', 'order', 'limit', 'or', 'in', 'not']) chain[name] = () => chain;
+      chain.maybeSingle = () => Promise.resolve({ data: data[table], error: null });
+      chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: data[table], error: null }));
+      return chain;
+    },
+  } as unknown as SupabaseClient;
+  const result = await queryCoworkLeads(db, { userId: 'user-beto', organizationId: 'org' }, 'leads.search', '');
+  const byName = Object.fromEntries(result.items.map((item: any) => [item.name, item]));
+  assert.equal(byName['Marcela Rojas'].teamLock, 'En conversación con Ana Pérez');
+  assert.equal('teamLock' in byName['Rafael Díaz'], false, 'a free contact carries no notice');
+});
+
 test('the summary by state reads only the person\'s own rows, three bounded lists, and never names', async () => {
   const calls: Array<[string, ...unknown[]]> = [];
   const data: Record<string, unknown[]> = {
