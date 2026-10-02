@@ -246,6 +246,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Abre una conversación para ver el hilo, la actividad del correo y los próximos pasos.',
       'Escribe tu respuesta: se envía en el hilo original. Revisa el texto antes de enviarlo.',
       '«Detener seguimientos» cancela los correos pendientes de esa secuencia; lo enviado y el historial se conservan.',
+      'Cuando termine, toca «Cerrar conversación» y elige cómo terminó: Sin acuerdo, Ganado, No interesado o Lo retomo yo. Ganado, Sin acuerdo y No interesado también cambian la etapa en el pipeline.',
     ],
     tips: [
       'Las respuestas se revisan solas en segundo plano. «Actualizar mis respuestas» las trae en el momento desde tus cuentas.',
@@ -255,6 +256,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     faqs: [
       { q: 'Alguien me respondió y no aparece. ¿Qué hago?', a: 'Pulsa «Actualizar mis respuestas». Si sigue sin aparecer, revisa en «Conexiones» que tu correo esté conectado.' },
       { q: '¿Qué pasa con los seguimientos si la persona responde?', a: 'Se detienen solos.' },
+      { q: '¿Qué pasa al cerrar una conversación si trabajo en equipo?', a: '«Sin acuerdo» la deja libre para que otra persona del equipo la retome; «Ganado» y «No interesado» hacen que nadie más vuelva a contactarla; «Lo retomo yo» la mantiene tuya. Si alguien no responde, queda libre 30 días después del último envío.' },
       { q: '¿Puedo responder desde mi bandeja de correo?', a: 'Sí. «Abrir en correo» abre el hilo en tu cuenta. Al responder desde la app, la respuesta queda en el mismo hilo.' },
     ],
     related: ['hoy', 'campanas', 'pipeline'],
