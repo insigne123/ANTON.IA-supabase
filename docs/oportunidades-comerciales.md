@@ -52,7 +52,7 @@ Migración `supabase/migrations/20261002170000_commercial_opportunities.sql`, ad
 |---|---|---|
 | Empresas contratando | JSearch (principal) y LinkedIn Job Search API de Fantastic Jobs | JSearch: gratis hasta 200 consultas al mes, luego US$25 al mes por 10.000. Fantastic Jobs en Apify: US$5 por 1.000 avisos en los planes gratis y Bronze, 3,5 en Silver y 1,5 desde Gold |
 | Licitaciones | Mercado Público y Compra Ágil (oficiales) | Gratis, con ticket |
-| Proyectos | SEIA (oficial) | Gratis |
+| Proyectos | SEIA (oficial): el archivo exportado del mapa, subido cada mes (`docs/oportunidades-proyectos.md`) | Gratis |
 | Decisores y datos de la empresa | Apollo (ya integrado) | Los créditos de siempre, con el costo visible antes |
 
 - **Jooble queda de reserva:** solo si JSearch no cubre bien Chile.
