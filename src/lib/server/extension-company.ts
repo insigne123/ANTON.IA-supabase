@@ -14,7 +14,8 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 /** The saved contacts shown for one company; the rest are counted. */
 export const COMPANY_CONTACTS_SHOWN = 20;
 const READ_LIMIT = 100;
-const literal = (value: string) => value.replace(/[%,()*\\"_]/g, ' ').replace(/\s+/g, ' ').trim();
+// Safe inside a quoted PostgREST filter. «_» stays: it only widens the match, and every row is compared exactly afterwards.
+const literal = (value: string) => value.replace(/[%,()*\\"]/g, ' ').replace(/\s+/g, ' ').trim();
 
 export type CompanyContact = { name: string; title: string; linkedinUrl: string; hasEmail: boolean; presence: ProfilePresence | null };
 export type CompanyOpportunity = { company: string; ads: number; score: number; status: string; signal: string; page: string };

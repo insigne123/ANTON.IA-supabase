@@ -70,6 +70,13 @@ test('the company: its saved contacts once each, with what the organization know
     assert.deepEqual(call.filters.find(filter => (filter as unknown[])[0] === 'eq'), ['eq', 'organization_id', 'org-1']);
     assert.match(String((call.filters.find(filter => (filter as unknown[])[0] === 'or') as unknown[])[1]), /ilike\."%Minera Norte%"/);
   }
+  const leadFilter = String((calls.find(call => call.table === 'leads')!.filters.find(filter => (filter as unknown[])[0] === 'or') as unknown[])[1]);
+  assert.match(leadFilter, /company_linkedin\.ilike\."%\/company\/minera-norte%"/);
+  // A handle with «_» is looked for as it is.
+  const underscored: Call[] = [];
+  await readExtensionCompany(auth(fakeClient(tables, underscored), 'otra@example.test'), { ...company, linkedinUrl: 'https://www.linkedin.com/company/minera_norte' },
+    { presence: (async () => ({})) as any, admin: () => client as any, allowedEmails: '', now: () => NOW });
+  assert.match(String((underscored.find(call => call.table === 'leads')!.filters.find(filter => (filter as unknown[])[0] === 'or') as unknown[])[1]), /\/company\/minera_norte%/);
 });
 
 test('the pilot account also sees the company hiring, with its signal; another company with the same word is not it', async () => {
@@ -87,7 +94,7 @@ test('the pilot account also sees the company hiring, with its signal; another c
 test('without a name, domain or page to look for, nothing is read but the profile', async () => {
   const calls: Call[] = [];
   const client = fakeClient(tables, calls);
-  const view = await readExtensionCompany(auth(client, 'otra@example.test'), { ...company, name: '%', domain: '', linkedinUrl: 'https://www.linkedin.com/company/' + '_' },
+  const view = await readExtensionCompany(auth(client, 'otra@example.test'), { ...company, name: '%', domain: '', linkedinUrl: 'https://www.linkedin.com/company/' },
     { presence: (async () => ({})) as any, admin: () => client as any, allowedEmails: '', now: () => NOW });
   assert.deepEqual(view.contacts, []);
   assert.deepEqual(calls.map(call => call.table), ['profiles']);
