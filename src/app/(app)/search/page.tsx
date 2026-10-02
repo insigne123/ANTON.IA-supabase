@@ -62,6 +62,9 @@ import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Badge } from '@/components/ui/badge';
+import { TeamLockBadge } from '@/components/collaboration/TeamLockBadge';
+import { useTeamLocks } from '@/hooks/use-team-locks';
+import { normalizeLockEmail, normalizeLockLinkedin } from '@/lib/team-lock';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import {
@@ -494,6 +497,16 @@ export default function SearchPage() {
     () => Object.values(companyWindows).sort((a, b) => a.organization.name.localeCompare(b.organization.name, 'es')),
     [companyWindows],
   );
+  // Results another member already works (Plan 5, PR-9b): matched by email, provider id or LinkedIn; empty without collaboration.
+  const lockPeople = useMemo(() => [...pagedLeads, ...(activeWindow?.leads || [])], [pagedLeads, activeWindow]);
+  const teamLocks = useTeamLocks({
+    emails: lockPeople.map(lead => normalizeLockEmail(lead.email)).filter(email => email.includes('@')),
+    providerIds: lockPeople.map(lead => String(lead.id || '')).filter(Boolean),
+    linkedinUrls: lockPeople.map(lead => normalizeLockLinkedin(lead.linkedinUrl)).filter(Boolean),
+  });
+  const teamLockFor = (lead: UILaed) => teamLocks
+    ? teamLocks.byEmail[normalizeLockEmail(lead.email)] || teamLocks.byProviderId[String(lead.id || '')] || teamLocks.byLinkedin[normalizeLockLinkedin(lead.linkedinUrl)]
+    : undefined;
   const [savedApolloIds, setSavedApolloIds] = useState<Set<string>>(new Set());
 
   const refreshSavedApolloIds = async () => {
@@ -2396,6 +2409,7 @@ export default function SearchPage() {
                                     <div className="min-w-0">
                                       <p className="truncate font-medium">{lead.name}</p>
                                       <p className="line-clamp-2 text-sm text-muted-foreground">{lead.title}</p>
+                                      <TeamLockBadge lock={teamLockFor(lead)} className="mt-1" />
                                     </div>
                                     {already ? <Badge variant="secondary">Guardado</Badge> : contacted ? <Badge variant="outline">Contactado</Badge> : null}
                                   </div>
@@ -2518,6 +2532,7 @@ export default function SearchPage() {
                             <div className="min-w-0">
                               <p className="truncate font-medium">{lead.name}</p>
                               <p className="line-clamp-2 text-sm text-muted-foreground">{lead.title}</p>
+                              <TeamLockBadge lock={teamLockFor(lead)} className="mt-1" />
                             </div>
                             {already ? <Badge variant="secondary">Guardado</Badge> : contacted ? <Badge variant="outline">Contactado</Badge> : null}
                           </div>
@@ -2571,6 +2586,7 @@ export default function SearchPage() {
                             </Avatar>
                             <div>
                               <div className="font-medium">{lead.name}</div>
+                              <TeamLockBadge lock={teamLockFor(lead)} className="mt-0.5" />
                               {(lead.email || filters.searchMode === 'linkedin_profile') ? (
                                 <div className="mt-1 flex flex-col gap-1 text-xs">
                                   {filters.searchMode === 'linkedin_profile' && filters.revealEmail ? (

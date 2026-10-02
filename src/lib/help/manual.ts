@@ -246,6 +246,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Abre una conversación para ver el hilo, la actividad del correo y los próximos pasos.',
       'Escribe tu respuesta: se envía en el hilo original. Revisa el texto antes de enviarlo.',
       '«Detener seguimientos» cancela los correos pendientes de esa secuencia; lo enviado y el historial se conservan.',
+      'Cuando termine, toca «Cerrar conversación» y elige cómo terminó: Sin acuerdo, Ganado, No interesado o Lo retomo yo. Ganado, Sin acuerdo y No interesado también cambian la etapa en el pipeline.',
     ],
     tips: [
       'Las respuestas se revisan solas en segundo plano. «Actualizar mis respuestas» las trae en el momento desde tus cuentas.',
@@ -255,6 +256,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     faqs: [
       { q: 'Alguien me respondió y no aparece. ¿Qué hago?', a: 'Pulsa «Actualizar mis respuestas». Si sigue sin aparecer, revisa en «Conexiones» que tu correo esté conectado.' },
       { q: '¿Qué pasa con los seguimientos si la persona responde?', a: 'Se detienen solos.' },
+      { q: '¿Qué pasa al cerrar una conversación si trabajo en equipo?', a: '«Sin acuerdo» la deja libre para que otra persona del equipo la retome; «Ganado» y «No interesado» hacen que nadie más vuelva a contactarla; «Lo retomo yo» la mantiene tuya. Si alguien no responde, queda libre 30 días después del último envío.' },
       { q: '¿Puedo responder desde mi bandeja de correo?', a: 'Sí. «Abrir en correo» abre el hilo en tu cuenta. Al responder desde la app, la respuesta queda en el mismo hilo.' },
     ],
     related: ['hoy', 'campanas', 'pipeline'],
@@ -294,9 +296,10 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: 'Ordena a tus contactos por etapa de venta y prioriza a quién mover.',
     steps: [
       'Las etapas son: Nuevos, Calificado, Contactado, Interesado, Reunión, Negociación, Ganado y Perdido.',
-      'Arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
+      '«Gráfico» muestra cuántos hay en cada etapa, qué parte pasa a la siguiente, tus cifras y los contactos nuevos por semana. Pasa el mouse por una etapa para ver sus 5 más recientes; tócala para verlos a todos.',
+      'En «Tablero», arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
       'Abre un contacto para ver su actividad, el responsable y la próxima acción registrada.',
-      'Arriba aparecen las sugerencias de etapa: un envío, una respuesta o una reunión pedida proponen mover al contacto. Acéptalas una por una o con «Aceptar todas».',
+      'Arriba aparecen las sugerencias de etapa: un envío, una respuesta o una reunión pedida proponen mover al contacto. Acéptalas una por una o con «Aceptar todas». En «Gráfico», cada etapa marca cuántos cambios esperan tu confirmación.',
     ],
     faqs: [
       { q: '¿Cómo llegan los contactos al pipeline?', a: 'Aparecen cuando guardas o contactas leads.' },

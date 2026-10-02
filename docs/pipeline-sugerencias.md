@@ -29,12 +29,17 @@ Incluso podían retroceder: una apertura después de una reunión dejaba al lead
 - **Pipeline:** arriba aparecen «N sugerencias de etapa», cada una con quién, el cambio y el motivo.
   - Se acepta o descarta una por una, o todas con «Aceptar todas» o «Descartar todas».
   - Si el lead ya se movió a mano más allá de la sugerencia, aceptarla no lo hace retroceder: queda «superada».
+  - En «Gráfico», cada etapa marca los cambios que esperan confirmación («+2 por confirmar»).
 - **SUPL.IA:** su herramienta de etapa dice que el cambio queda como sugerencia hasta que la persona lo acepte.
 
 ## Base de datos
 
-**Migración `20261002005957_crm_stage_suggestions.sql`:**
+Las dos migraciones están aplicadas en producción (2 oct). Cada archivo lleva la versión registrada allá y el mismo SQL, byte a byte.
+
+**`20261002005957_crm_stage_suggestions.sql`:**
 - **Tabla:** `crm_stage_suggestions`, con RLS. Los miembros solo leen las de su organización, y nadie con sesión escribe la tabla directo.
+
+**`20261002010133_crm_stage_suggestion_functions.sql`:**
 - **`suggest_crm_stage_v1`** (solo `service_role`):
   - resuelve la fila del pipeline (`lead_saved|` o `lead_enriched|`);
   - aplica las reglas de avance;
@@ -52,11 +57,13 @@ Incluso podían retroceder: una apertura después de una reunión dejaba al lead
 - **Unitarias:** `crm-stage-suggestions.test.ts` y `crm-autopilot.test.ts`.
 - **DOM:** `scripts/test-stage-suggestions-ui.mjs`.
 
-## Pendiente (PR-10b)
+## Aplicación en producción
 
-- **La vista gráfica:**
-  - nodos por etapa con conteo y conversión;
-  - minitabla al pasar el mouse;
-  - panel al hacer clic;
-  - cifras y tendencia semanal.
-- **El Kanban** quedará como vista «Tablero».
+- **Primeros intentos:** el MCP de Supabase agotó el tiempo sin aplicar nada. La tabla llevaba `drop policy if exists`, una sentencia destructiva que pide una confirmación que este entorno no muestra.
+- **Solución:** en una tabla nueva esa línea sobra. Se quitó y ambas migraciones se aplicaron al primer intento.
+- **Verificación en producción:**
+  - la tabla tiene RLS y una sola política de lectura para miembros;
+  - `authenticated` solo lee y `anon` no tiene permisos;
+  - las dos funciones son `security definer`, con `search_path` vacío;
+  - `suggest_crm_stage_v1` solo la ejecuta `service_role`;
+  - los logs no muestran errores.
