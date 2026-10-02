@@ -26,6 +26,7 @@ import { coworkLinkedinBatchLeads, coworkLinkedinBatchSchema, type CoworkLinkedi
 import { coworkPrepareBatchPeople, coworkPrepareBatchSchema, type CoworkPrepareBatchInput } from './prepare-batch';
 import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memory';
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
+import { withCoworkReports } from './report-document';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -687,7 +688,7 @@ async function runCoworkLoop(input: {
     input.signal.throwIfAborted(); await input.authorize();
     if (decision.action === 'draft.write' && decision.write && input.write) return input.write(decision.write, observations);
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
-    return decision.answer;
+    return withCoworkReports(decision.answer, observations);
   }
   const ceiling = input.ceiling ?? COWORK_TURN_DEFAULTS;
   const now = input.now ?? Date.now;
@@ -785,6 +786,8 @@ async function runCoworkLoop(input: {
       }
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
+        // The reports it names go complete in document, written by the app from what this turn read (report-document.ts).
+        decision.answer = withCoworkReports(decision.answer, observations);
         if (closingFallback) return completeFrom(closingFallback, decision.answer);
         // The judge's correction edits the judged answer: it keeps what the correction dropped, and
         // it is kept only if it is one (not empty, not the same, no figures without support).

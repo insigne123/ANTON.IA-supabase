@@ -169,7 +169,8 @@ db.enriched_leads.push({ id: id(203), user_id: U, organization_id: O, full_name:
 research(10, 60, 203, 'completed', 74);
 assert.deepEqual(await pass(75), { notified: 1 });
 assert.match(admitted.at(-1).p_message, /Marcela Rojas \(Acme Ltda\.\), leadId [0-9a-f-]+: lista\./);
-assert.match(admitted.at(-1).p_message, /entrégalos completos en document/);
+assert.match(admitted.at(-1).p_message, /entrégalos completos con answer\.reports/);
+assert.match(admitted.at(-1).p_message, /no lo copies en document/);
 assert.doesNotMatch(admitted.at(-1).p_message, /pocas líneas/);
 
 // Research started outside Cowork is never told to a conversation; and one pass every 20 seconds at most.

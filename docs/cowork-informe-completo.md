@@ -30,6 +30,8 @@ Puntos 12 y 13: informes «breves» y sin un informe individual por persona y em
   - su investigación se lee igual que la de un guardado;
   - el aviso de fin y la tarjeta en vivo los nombran.
 - **El aviso de fin de investigación** pide entregar los informes completos en un documento, una sección por persona, sin resumirlos. En el chat va una línea por persona con lo más útil para escribirle.
+  - **Desde el 2 oct (Plan 7), el modelo no copia los informes.** Nombra a quién van (`answer.reports`, con `leadId` y «Nombre · Empresa») y la app escribe el documento «Informes de la investigación» con los informes leídos en ese turno, tal como están (`src/lib/cowork/report-document.ts`).
+  - **Por qué:** copiar dos informes de unas 1800 palabras no cabía en la decisión, que tiene 30 s y 6000 tokens de salida. En producción, el primer aviso tras el deploy falló con «El asistente tardó demasiado en responder».
 - **Instrucciones de Cowork:**
   - si el usuario pide ver el informe de una persona, se entrega completo, sección por sección;
   - para correos y seguimientos se usan sus secciones de oportunidades, cómo abrir la conversación y preguntas.
