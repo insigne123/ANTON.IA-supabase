@@ -36,6 +36,7 @@ Corre dentro de la suite unitaria (`__tests__/pruebas-de-app.test.mjs`), así qu
 |---|---|
 | 3, 6 y 7 | Una sola tarjeta para las 2 personas con los 3 pasos (guardar, buscar el correo e investigar). Pedirlo de nuevo no propone ni cobra nada. |
 | 8 y 9 | El resultado y los contactos guardados tienen el nombre real («Valentina Fuentes», no «Valentina Fu***s»), el correo y el LinkedIn. Una búsqueda de correo por persona. |
+| 22 | Cowork ve el LinkedIn de cada una al leer los contactos. |
 | 12 | La investigación se pide con el nombre real. |
 | 10, 11 y 13 | Un solo aviso para la conversación, con los nombres reales y sus empresas, que pide entregar los informes completos. No se repite. |
 | 12 y 13 | Cada informe llega completo, con «Cómo usarlo en el correo y los seguimientos». |
