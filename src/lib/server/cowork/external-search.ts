@@ -12,6 +12,8 @@ import {
 import { COWORK_SEARCH_ROLE_NOTE, rankCoworkSearchPeople } from '@/lib/cowork/search-ranking';
 import { normalizeCompanyName } from '@/lib/cowork/commercial-facts';
 import { admitCoworkContinuation } from './effects';
+import { readTeamLocks } from '@/lib/server/team-locks';
+import { normalizeLockLinkedin, teamLockNotice } from '@/lib/team-lock';
 import type { AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
@@ -196,7 +198,7 @@ export async function processCoworkSearchQueue() {
     await requireCoworkWorkerAccess(client, scope);
     const current = await client.from('cowork_runs').select('status').eq('id', runId).single();
     if (current.error || current.data.status !== 'waiting_approval') throw new Error('Search cancelled');
-    const result = await runCoworkSearch(criteria, scope.userId);
+    const result = await withSearchTeamLocks(client, scope, await runCoworkSearch(criteria, scope.userId));
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_search', { ...args, p_success: true,
       p_payload: { action: 'prospecting.search', input: criteria, result } });
@@ -209,5 +211,31 @@ export async function processCoworkSearchQueue() {
     const failed = await client.rpc('cowork_finish_search', { ...args, p_success: false, p_payload: { reason } });
     if (failed.error) throw failed.error;
     return { processed: 0, claimed: true };
+  }
+}
+
+/**
+ * «Guardado por Ana» and the other team notices on the people a search found (Plan 6, PR-E), by provider id or LinkedIn, so
+ * Cowork says it before proposing to save someone a teammate already has. Best effort: if the read fails, the result goes as it is.
+ */
+async function withSearchTeamLocks<Result extends { items?: unknown[] }>(
+  client: ReturnType<typeof getSupabaseAdminClient>, scope: { userId: string; organizationId: string }, result: Result,
+): Promise<Result> {
+  const people = (result.items || []) as Array<Record<string, unknown>>;
+  const providerIds = people.map(item => String(item.id || '')).filter(id => id.startsWith('apollo:')).map(id => id.slice('apollo:'.length));
+  if (!providerIds.length) return result;
+  try {
+    const locks = await readTeamLocks(client as never, scope, { providerIds, linkedinUrls: people.map(item => String(item.linkedin_url || '')) });
+    if (!locks.enabled) return result;
+    const items = people.map(item => {
+      const id = String(item.id || '');
+      const lock = (id.startsWith('apollo:') ? locks.byProviderId[id.slice('apollo:'.length)] : undefined)
+        || locks.byLinkedin[normalizeLockLinkedin(item.linkedin_url)];
+      const notice = teamLockNotice(lock);
+      return notice ? { ...item, teamLock: notice.text, teamLockBlocks: notice.blocks } : item;
+    });
+    return { ...result, items };
+  } catch {
+    return result;
   }
 }
