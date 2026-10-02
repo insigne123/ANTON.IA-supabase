@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchJSearch } from './jsearch';
-import { searchFantasticJobs } from './fantastic-jobs';
+import { fantasticRunPlan, searchFantasticJobs } from './fantastic-jobs';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -46,10 +46,30 @@ test('Fantastic Jobs runs on Apify for Chile, without agencies or descriptions, 
   assert.ok(url.startsWith('https://api.apify.com/v2/acts/fantastic-jobs~advanced-linkedin-job-search-api/run-sync-get-dataset-items'));
   assert.equal(url.includes('apify-token'), false);
   assert.equal(headers.authorization, 'Bearer apify-token');
+  const params = new URL(url).searchParams;
+  assert.equal(params.get('maxTotalChargeUsd'), '1');
+  assert.equal(params.get('forcePermissionLevel'), 'LIMITED_PERMISSIONS');
+  assert.equal(params.get('restartOnError'), 'false');
   assert.deepEqual(body.titleSearch, ['operari:*', 'auxiliar de aseo', 'conductor:*']);
   assert.deepEqual([body.locationSearch, body.removeAgency, body.descriptionType, body.timeRange, body.limit], [['Chile'], true, '', '7d', 50]);
   assert.equal(result.ads[0].companyDomain, 'tsur.cl');
   assert.ok(!JSON.stringify(result.ads).includes('Ana'));
-  assert.deepEqual([result.fetched, result.costUsd], [1, 0.005]);
+  assert.deepEqual([result.fetched, result.costUsd], [1, 0.015]);
   await assert.rejects(searchFantasticJobs({ titles: ['x'] }, { fetch, token: undefined }), /APIFY_TOKEN/);
+});
+
+test('Apify budget includes startup, reduces the requested jobs to the hard cap, and a zero cap never calls the provider', async () => {
+  assert.deepEqual(fantasticRunPlan(200, 0.005, 1, 0.01), { enabled: true, limit: 198, maxRunUsd: 1, startUsd: 0.01, estimateUsd: 1 });
+  let limit = 0;
+  const fetch = (async (_url: string, init: RequestInit) => { limit = JSON.parse(String(init.body)).limit; return json(200, []); }) as unknown as typeof globalThis.fetch;
+  const result = await searchFantasticJobs({ titles: ['operario'], limit: 1000 }, { fetch, token: 't', usdPerJob: 0.005, maxRunUsd: 1, startUsd: 0.01 });
+  assert.equal(limit, 198);
+  assert.equal(result.costUsd, 0.01, 'an empty run still incurs startup');
+  await assert.rejects(searchFantasticJobs({ titles: ['operario'] }, { token: 't', maxRunUsd: 0,
+    fetch: (async () => assert.fail('zero budget must not call Apify')) as unknown as typeof globalThis.fetch }), /tope por búsqueda/);
+});
+
+test('unexpected Apify responses are unknown outcomes rather than a zero-cost successful empty run', async () => {
+  await assert.rejects(searchFantasticJobs({ titles: ['operario'] }, { token: 't',
+    fetch: (async () => json(200, { error: 'unexpected shape' })) as unknown as typeof globalThis.fetch }), /no entregó una lista/);
 });

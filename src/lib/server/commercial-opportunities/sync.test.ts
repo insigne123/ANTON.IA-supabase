@@ -34,7 +34,7 @@ function memoryStore(initial: { spent?: number; running?: boolean; stored?: JobA
 test('the plan says what each source asks and costs, and which key is missing', () => {
   const plan = hiringSyncPlan({ roles: Array.from({ length: 14 }, (_, index) => `cargo ${index}`) }, { jsearchKey: 'k', usdPerJob: 0.005 });
   assert.deepEqual(plan.sources.map(source => [source.source, source.enabled, source.requests, source.estimateUsd, source.missing]),
-    [['jsearch', true, 10, 0.025, null], ['linkedin', false, 200, 1, 'APIFY_TOKEN']]);
+     [['jsearch', true, 10, 0.025, null], ['linkedin', false, 198, 1, 'APIFY_TOKEN']]);
   assert.equal(plan.estimateUsd, 0.025, 'a source without its key costs nothing');
   assert.equal(monthStart(NOW), '2026-10-01T00:00:00.000Z');
   assert.equal(monthlyCapUsd(undefined), 10);
@@ -126,4 +126,19 @@ test('if saving fails, every run is closed as failed and the error goes up', asy
   }), /guardar las empresas/);
   assert.deepEqual(memory.runs.map(run => run.status), ['failed', 'failed']);
   assert.match(String(memory.runs[0].error), /^No se pudo guardar:/);
+});
+
+test('an uncertain paid Apify run reserves its hard cap in the monthly estimate; daily JSearch-only sync never starts Apify', async () => {
+  const memory = memoryStore();
+  const result = await runHiringSync({ store: memory.store, profile: PROFILE, env: ENV, capUsd: 10, organizationId: ORG, now: NOW,
+    only: ['linkedin'], sources: { jsearch: async () => assert.fail('not selected'), fantastic: async () => { throw Error('Apify timeout'); } } });
+  assert.equal(result.status, 'done');
+  assert.equal(memory.runs[0].status, 'failed');
+  assert.equal(memory.runs[0].costUsd, 1);
+  assert.match(String(memory.runs[0].error), /reserva el tope/);
+  const daily = memoryStore();
+  await runHiringSync({ store: daily.store, profile: PROFILE, env: ENV, capUsd: 10, organizationId: ORG, now: NOW,
+    only: ['jsearch'], sources: { jsearch: async () => ({ ads: [], requests: 1, costUsd: 0.0025 }), fantastic: async () => assert.fail('daily sync never spends on Apify') } });
+  assert.equal(daily.runs.length, 1);
+  assert.equal(daily.runs[0].source, 'jsearch');
 });

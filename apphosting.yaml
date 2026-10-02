@@ -184,6 +184,20 @@ env:
   - variable: OPPORTUNITIES_MONTHLY_USD_CAP
     value: "10"
     availability: [RUNTIME]
+  # Fantastic Jobs, cuenta nicogun123 (Free): US$0.005/aviso + US$0.01/arranque.
+  # Hard cap enviado a Apify en cada corrida; solo «Buscar ahora», no el cron diario.
+  - variable: APIFY_FANTASTIC_USD_PER_JOB
+    value: "0.005"
+    availability: [RUNTIME]
+  - variable: APIFY_FANTASTIC_START_USD
+    value: "0.01"
+    availability: [RUNTIME]
+  - variable: APIFY_FANTASTIC_MAX_RUN_USD
+    value: "1"
+    availability: [RUNTIME]
+  - variable: APIFY_TOKEN
+    secret: APIFY_TOKEN
+    availability: [RUNTIME]
 
   # === Lead provider ===
   # Apollo runs in-process in this service: server runtime only, never BUILD,
