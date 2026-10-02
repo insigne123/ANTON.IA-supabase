@@ -40,11 +40,20 @@ function fail(what: string, error: unknown): never {
   throw new Error(`No se pudo ${what}.`);
 }
 
+const readHiringProfile = (client: SupabaseClient, scope: Scope) => client.from('commercial_opportunity_profiles').select(PROFILE_COLUMNS)
+  .eq('organization_id', scope.organizationId).eq('active', true).contains('sources', ['hiring'])
+  .order('created_at', { ascending: true }).limit(1).maybeSingle();
+
+/** The organization's profile, or null when nobody opened «Oportunidades» yet. Read only: Cowork never creates it. */
+export async function findHiringProfile(client: SupabaseClient, scope: Scope) {
+  const found = await readHiringProfile(client, scope);
+  if (found.error) fail('leer el perfil de búsqueda', found.error);
+  return found.data ? toProfile(found.data as ProfileRow) : null;
+}
+
 /** The organization's «contratando» profile; the first time, the pilot's starting point (editable in the page). */
 export async function ensureHiringProfile(client: SupabaseClient, scope: Scope) {
-  const read = () => client.from('commercial_opportunity_profiles').select(PROFILE_COLUMNS)
-    .eq('organization_id', scope.organizationId).eq('active', true).contains('sources', ['hiring'])
-    .order('created_at', { ascending: true }).limit(1).maybeSingle();
+  const read = () => readHiringProfile(client, scope);
   const found = await read();
   if (found.error) fail('leer el perfil de búsqueda', found.error);
   if (found.data) return toProfile(found.data as ProfileRow);
