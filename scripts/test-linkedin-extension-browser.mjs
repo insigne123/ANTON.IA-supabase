@@ -4,7 +4,8 @@ import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+  ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE, headless: true } : { channel: 'chrome', headless: true });
 const errors = [];
 try {
   for (const colorScheme of ['light', 'dark']) {
@@ -14,9 +15,15 @@ try {
     await page.route(/^https?:/, route => route.abort());
     await page.addInitScript(() => {
       const listeners = [];
+      const profileListeners = [];
       const connection = { origin: 'https://app.antonia.ai', session: { userId: 'test-user', organizationId: 'test-org', organizationName: 'Equipo de pruebas', email: 'seller@example.test', researchEnabled: true, sequencesEnabled: true } };
       const profile = { linkedinUrl: 'https://www.linkedin.com/in/test-person', fullName: 'María Fernández', title: 'Directora de Personas', companyName: 'Empresa de prueba', email: 'maria@example.test', companyDomain: 'example.test', tabId: 12 };
       window.activeProfile = profile;
+      // What LinkedIn's page does when another profile opens: the panel reads it then, not on a timer.
+      window.navigateTo = next => {
+        window.activeProfile = next;
+        profileListeners.forEach(fn => fn({ action: 'ANTONIA_PROFILE_CHANGED' }, { id: 'test-extension', tab: { id: 12, active: true, url: next.linkedinUrl } }));
+      };
       let connected = false;
       let saved = null;
       let researched = false;
@@ -24,7 +31,9 @@ try {
       const row = { id: 'lead', full_name: profile.fullName, company_name: profile.companyName, title: profile.title, email: profile.email, email_status: 'verified', linkedin_url: profile.linkedinUrl };
       const sessionStore = {};
       window.chrome = {
-        runtime: { getManifest: () => ({ host_permissions: [] }), sendMessage: async request => {
+        runtime: { id: 'test-extension', getManifest: () => ({ host_permissions: [] }),
+          onMessage: { addListener: fn => profileListeners.push(fn), removeListener: fn => { const index = profileListeners.indexOf(fn); if (index >= 0) profileListeners.splice(index, 1); } },
+          sendMessage: async request => {
           window.requests.push(request);
           let result;
           switch (request.action) {
@@ -37,6 +46,7 @@ try {
             case 'PROSPECT_OPEN': result = true; break;
             case 'PROSPECT_API':
               if (request.body.action === 'phone-status') result = { phone: '+511234567', status: 'completed' };
+              if (request.body.action === 'quota') result = { credits: { used: 3, limit: 50, remaining: 47 } };
               if (request.body.action === 'enrich') result = { enriched: [{ linkedinUrl: profile.linkedinUrl, fullName: profile.fullName, title: profile.title, companyName: profile.companyName, email: profile.email, companyDomain: profile.companyDomain, city: 'Lima', country: 'Perú', industry: 'Servicios', seniority: 'director' }] };
               if (request.body.action === 'enrich' && request.body.revealPhone && window.requests.filter(item => item.body?.action === 'enrich').length > 1) result = { enriched: [{ id: 'person-id', linkedinUrl: profile.linkedinUrl, enrichmentStatus: 'pending_phone' }] };
               if (request.body.action === 'campaigns') result = { campaigns: [{ id: 'campaign', revision: 1, name: 'Prospección de prueba', editable: true, recipientCount: 2, alreadyAdded: false }] };
@@ -60,12 +70,17 @@ try {
     await page.goto(pathToFileURL(resolve(root, 'chrome-extension/panel.html')).href);
     await page.getByRole('button', { name: 'Conectar Anton.IA' }).click();
     await page.getByRole('heading', { name: 'María Fernández' }).waitFor();
+    await page.getByText('47 créditos hoy', { exact: true }).waitFor();
+    assert.match(await page.locator('.chips').textContent(), /^Sin guardar/);
     assert.equal(await page.getByRole('button', { name: 'Guardar lead', exact: true }).count(), 0);
     await page.getByRole('button', { name: 'Enriquecer perfil', exact: true }).click();
     await page.getByText('Más información profesional', { exact: true }).click();
     await page.getByText('Lima, Perú', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Guardar lead', exact: true }).click();
     await page.getByText('Lead guardado en tu organización.', { exact: true }).waitFor();
+    assert.match(await page.locator('.chips').textContent(), /Guardado.*Correo verificado/);
+    // The next step is researching: the card offers it and the tab does not repeat it.
+    await page.getByRole('button', { name: 'Investigar lead', exact: true }).waitFor();
     assert.equal(await page.getByText('Datos devueltos por Apollo.', { exact: false }).count(), 0);
     assert.equal(await page.getByRole('checkbox', { name: 'Email', exact: true }).count(), 0);
     await page.getByRole('button', { name: 'Buscar teléfono', exact: true }).click();
@@ -78,7 +93,8 @@ try {
     await page.evaluate(() => { window.omitDetails = true; });
     await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
     assert.equal(await page.getByText('Más información profesional', { exact: true }).count(), 0);
-    await page.getByRole('button', { name: 'Investigación', exact: true }).click();
+    await page.getByRole('tab', { name: 'Investigación', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Investigar lead', exact: true }).count(), 1);
     await page.getByRole('button', { name: 'Investigar lead', exact: true }).click();
     let downloads = 0;
     page.on('download', () => downloads++);
@@ -94,7 +110,16 @@ try {
     await page.getByRole('button', { name: 'Descargar PDF', exact: true }).click();
     assert.match((await manualDownload).suggestedFilename(), /AntonIA-investigacion.*\.pdf$/);
     await page.getByText('Análisis comercial de demostración.', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Contactar', exact: true }).click();
+    assert.match(await page.locator('.chips').textContent(), /Investigado/);
+    await page.getByRole('button', { name: 'Escribir mensaje', exact: true }).click();
+    assert.equal(await page.getByRole('tab', { name: 'Mensaje', exact: true }).getAttribute('aria-selected'), 'true');
+    // Arrow keys move between the tabs, and back.
+    await page.getByRole('tab', { name: 'Mensaje', exact: true }).focus();
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.getByRole('tab', { name: 'Más', exact: true }).getAttribute('aria-selected'), 'true');
+    await page.getByRole('button', { name: 'Sincronizar historial de LinkedIn', exact: true }).waitFor();
+    await page.keyboard.press('ArrowLeft');
+    assert.equal(await page.getByRole('tab', { name: 'Mensaje', exact: true }).getAttribute('aria-selected'), 'true');
     await page.getByRole('button', { name: 'Redactar mensaje de LinkedIn' }).click();
     await page.getByRole('button', { name: 'Preparar en LinkedIn', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Preparar en LinkedIn' }).click();
@@ -146,10 +171,10 @@ try {
       await page.screenshot({ path: resolve(process.env.EXTENSION_SCREENSHOT_DIR, `extension-contact-${colorScheme}.png`), fullPage: true });
     }
     const rememberedMessage = await draft.inputValue();
-    await page.evaluate(() => { window.activeProfile = { ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/another-profile', fullName: 'Otro perfil' }; });
+    await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/another-profile', fullName: 'Otro perfil' }); });
     await page.waitForFunction(() => document.querySelector('#profile-url').value === 'https://www.linkedin.com/in/another-profile');
     await page.waitForTimeout(500);
-    await page.evaluate(() => { window.activeProfile = { ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/test-person' }; });
+    await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/test-person' }); });
     await page.waitForFunction(() => document.querySelector('#profile-url').value === 'https://www.linkedin.com/in/test-person');
     await page.waitForTimeout(500);
     assert.equal(await draft.inputValue(), rememberedMessage, 'Returning to a profile restores its draft without AI');
@@ -161,14 +186,18 @@ try {
     assert.equal(afterOptions - beforeOptions, 3);
     await page.getByRole('combobox', { name: /Opciones guardadas/ }).selectOption('0');
     assert.equal(await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_API' && request.body.action === 'message').length), afterOptions);
-    await page.evaluate(() => { window.activeProfile = { ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/another-profile' }; });
+    await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/another-profile' }); });
     await page.waitForFunction(() => document.querySelector('#profile-url').value === 'https://www.linkedin.com/in/another-profile');
     await page.getByLabel('Seguir el perfil abierto en LinkedIn', { exact: true }).uncheck();
-    await page.evaluate(() => { window.activeProfile = { ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/third-profile' }; });
-    await page.waitForTimeout(1800);
+    await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/third-profile' }); });
+    await page.waitForTimeout(500);
     assert.equal(await page.locator('#profile-url').inputValue(), 'https://www.linkedin.com/in/another-profile');
+    // Nothing asks for the profile on a timer: without an announcement, the panel does not query.
+    const asked = await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_PROFILE').length);
+    await page.waitForTimeout(2000);
+    assert.equal(await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_PROFILE').length), asked, 'no polling');
     await context.close();
-    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, keyboard focus, no horizontal overflow (mocked boundary).`);
+    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, no horizontal overflow (mocked boundary).`);
   }
   assert.deepEqual(errors, []);
 } finally { await browser.close(); }
