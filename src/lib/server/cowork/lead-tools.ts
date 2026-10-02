@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { coworkLeadsSummary, type CoworkLeadsSummaryInput } from '@/lib/cowork/leads-summary';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { linkedinProfilesMatch, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { normalizeLockEmail, teamLockNotice } from '@/lib/team-lock';
 import { readTeamLocks } from '@/lib/server/team-locks';
 import { ENRICHED_CONTACT_COLUMNS, mergeOwnContacts, type EnrichedContactRecord } from './own-contacts';
@@ -40,6 +40,18 @@ function searchTerms(raw: string) {
     .split(' ').filter(term => term.length >= 2).slice(0, 6);
 }
 
+/** Match a whole personal path, including stored tracking queries. URL words
+ * never become text filters over names, companies or email addresses. */
+function profileFilter(profile: string) {
+  const path = new URL(profile).pathname;
+  const paths = [...new Set([path, decodeURIComponent(path)])];
+  const quoted = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  return paths.flatMap(value => {
+    const literal = value.replace(/[%_\\]/g, '\\$&');
+    return ['', '/', '?*', '/?*'].map(ending => `linkedin_url.ilike.${quoted(`*linkedin.com${literal}${ending}`)}`);
+  }).join(',');
+}
+
 /**
  * Only records owned by this user in this org: the saved contacts and «Por escribir» (Plan 6, PR-A). A person of «Por escribir»
  * that is also saved shows once, as the saved contact, with the email and LinkedIn the email search found. Each item says its
@@ -59,6 +71,7 @@ export async function queryCoworkLeads(
     .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
     .order('created_at', { ascending: false });
   let terms: string[] = [];
+  let profile = '';
   if (action === 'leads.get') {
     const id = z.string().uuid().parse(value);
     query = query.eq('id', id).limit(1);
@@ -69,9 +82,18 @@ export async function queryCoworkLeads(
     // GrupoExpro Santiago» still finds a recruiter even when the city is
     // unknown. PostgREST OR grammar must never receive raw model-supplied
     // punctuation.
-    const raw = z.string().max(120).parse(value);
-    terms = searchTerms(raw);
-    if (raw.trim() && terms.length === 0) throw new Error('Invalid search term');
+    const raw = z.string().max(500).parse(value);
+    profile = normalizeLinkedinProfileUrl(raw);
+    if (!profile) z.string().max(120).parse(raw);
+    if (/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*linkedin\.com(?:\/|$)/i.test(raw) && !profile) {
+      throw new Error('Usa una URL de perfil personal de LinkedIn (/in/).');
+    }
+    terms = profile ? [] : searchTerms(raw);
+    if (!profile && raw.trim() && terms.length === 0) throw new Error('Invalid search term');
+    if (profile) {
+      query = query.or(profileFilter(profile));
+      enriched = enriched.or(profileFilter(profile));
+    }
     if (terms.length > 0) {
       query = query.or(terms.flatMap(term => SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
       enriched = enriched.or(terms.flatMap(term => ENRICHED_SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
@@ -88,6 +110,17 @@ export async function queryCoworkLeads(
   if (action === 'leads.get') {
     const rows = await withTeamLocks(client, scope, merged.rows.slice(0, 1).map(withProfile));
     return { items: rows, returned: rows.length, limit: 1, scope: 'own_saved_contacts', sources, truncated: false };
+  }
+  if (profile) {
+    const matches = merged.rows.filter(row => linkedinProfilesMatch(typeof row.linkedin_url === 'string' ? row.linkedin_url : null, profile));
+    const items = await withTeamLocks(client, scope, matches.slice(0, 20).map(withProfile));
+    return { items, returned: items.length, limit: 20, scope: 'own_saved_contacts', sources,
+      truncated: matches.length > 20, partial: false, terms: 0, match: 'linkedin_url', profileUrl: profile,
+      sourcesComplete: !porEscribir.error,
+      ...(porEscribir.error ? { notice: 'No se pudo consultar «Por escribir»; no puedo confirmar que este perfil no esté guardado.' }
+        : !items.length ? { profileLookup: { action: 'prospecting.propose_search', searchCriteria: {
+          linkedinUrl: profile, titles: [], industries: [], locations: [], limit: 1,
+        } } } : {}) };
   }
   // Ties keep the most recent first across both lists: ISO timestamps compare as text, like the database orders them.
   const created = (row: Record<string, unknown>) => String(row.created_at || '');

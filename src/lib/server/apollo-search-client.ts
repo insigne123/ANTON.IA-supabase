@@ -1,7 +1,8 @@
-import { ApolloGatewayError } from './apollo-provider/apollo';
+import { ApolloGatewayError, executeApolloEnrichment } from './apollo-provider/apollo';
 import { consumeEndpointRateLimit, getGatewayConfig } from './apollo-provider/gateway';
 import { executeProviderLeadSearch } from './apollo-provider/lead-provider';
 import { validateLeadSearchInput } from './apollo-provider/validation';
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 export class ApolloSearchClientError extends Error {
   constructor(readonly status: 400 | 429 | 502 | 503 | 504, readonly code: string) {
@@ -57,12 +58,41 @@ export async function requestApolloSearch(
 
   // The provider only runs Apollo: force it the same way the former
   // gateway hop did, so retired provider names can never reach Apollo.
-  const input = validateLeadSearchInput({ ...(payload || {}), provider: 'apollo' }, config);
-  if (!input.ok) {
+  const profile = payload.search_mode === 'profile';
+  const linkedinUrl = profile && typeof payload.linkedin_url === 'string'
+    ? normalizeLinkedinProfileUrl(payload.linkedin_url) : '';
+  if (profile && (!linkedinUrl || linkedinUrl.length > 500
+    || payload.reveal_email === true || payload.reveal_phone === true
+    || Number(payload.max_results ?? 1) !== 1 || Number(payload.per_page ?? 1) !== 1 || Number(payload.page ?? 1) !== 1
+    || ['titles', 'industry_keywords', 'person_locations', 'seniorities', 'organization_domains', 'organization_ids',
+      'company_location', 'company_keywords', 'employee_ranges'].some(field => payload[field] != null
+        && (!Array.isArray(payload[field]) || (payload[field] as unknown[]).length > 0)))) {
+    throw new ApolloSearchClientError(400, 'INVALID_REQUEST');
+  }
+  const input = profile ? null : validateLeadSearchInput({ ...(payload || {}), provider: 'apollo' }, config);
+  if (input && !input.ok) {
     throw new ApolloSearchClientError(400, 'INVALID_REQUEST');
   }
 
   try {
+    if (profile) {
+      const found = await withTimeout(executeApolloEnrichment({
+        lead: { linkedinUrl }, revealEmail: false, revealPhone: false, enrichmentLevel: 'basic', matchOnly: true,
+      }, getApolloApiKey(environment), config), timeoutMs(environment));
+      const person = found.extracted_data;
+      if (!found.success || !person) return { leads: [], count: 0, search_mode: 'profile' };
+      const id = person.apollo_id || person.source_provider_id;
+      if (!id || !/^[A-Za-z0-9_-]{1,200}$/.test(id) || !person.full_name?.trim()) {
+        throw new ApolloSearchClientError(502, 'APOLLO_SEARCH_INVALID_RESPONSE');
+      }
+      // Identity was corroborated by executeApolloEnrichment. No contact data
+      // is revealed or kept by this search, even if the provider returns it.
+      return { leads: [{ id, name: person.full_name, title: person.title,
+        linkedin_url: person.linkedin_url || linkedinUrl, organization: person.organization,
+        organization_name: person.organization_name, industry: person.organization_industry,
+        organization_size: person.organization_size, city: person.city, country: person.country }], count: 1, search_mode: 'profile' };
+    }
+    if (!input?.ok) throw new ApolloSearchClientError(400, 'INVALID_REQUEST');
     const body = await withTimeout(
       executeProviderLeadSearch(input.value, config, environment),
       timeoutMs(environment),

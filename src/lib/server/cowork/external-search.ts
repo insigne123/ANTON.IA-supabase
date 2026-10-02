@@ -15,6 +15,7 @@ import { admitCoworkContinuation } from './effects';
 import { readTeamLocks } from '@/lib/server/team-locks';
 import { normalizeLockLinkedin, teamLockNotice } from '@/lib/team-lock';
 import type { AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
+import { linkedinProfilesMatch } from '@/lib/linkedin-url';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
 function text(value: unknown, max = 500) { return typeof value === 'string' ? value.slice(0, max) : null; }
@@ -149,6 +150,18 @@ async function searchCompaniesFirst(criteria: CoworkSearchCriteria, userId: stri
 /** Runs an approved search with the strategy its criteria resolve to (search-proposal.ts). */
 export async function runCoworkSearch(criteria: CoworkSearchCriteria, userId: string, request: SearchRequest = requestApolloSearch) {
   const strategy = coworkSearchStrategy(criteria);
+  if (strategy === 'profile') {
+    const valid = coworkSearchCriteriaSchema.parse(criteria);
+    const payload = z.object({ leads: z.array(providerLead).max(1) }).parse(await request(coworkApolloPayload(valid, userId)));
+    if (payload.leads.some(lead => !linkedinProfilesMatch(webUrl(lead.linkedin_url), valid.linkedinUrl))) {
+      throw new Error('El proveedor devolvió otro perfil de LinkedIn. No se guardó ningún contacto.');
+    }
+    return { ...normalizeCoworkSearchResult(payload, 1), strategy: 'profile', profileUrl: valid.linkedinUrl,
+      truncated: false, hasMore: false, next: null,
+      notice: payload.leads.length
+        ? 'Encontré a la persona del perfil compartido. Puedes guardarla y después preparar la invitación; todavía no se guardó ni se envió nada.'
+        : 'El proveedor no encontró a la persona de este perfil. Puedes abrir su perfil y guardarla desde la extensión de ANTON.IA.' };
+  }
   if (strategy === 'companies_first') return searchCompaniesFirst(criteria, userId, request);
   return normalizeCoworkSearchResult(await request(coworkApolloPayload(criteria, userId)), criteria.limit, strategy === 'companies' ? 'companies' : 'people',
     criteria.rolePolicy, criteria.page || 1);
@@ -174,7 +187,7 @@ export async function admitSearchContinuation(
   runId: string,
 ): Promise<string | null> {
   return admitCoworkContinuation(client, scope, runId,
-    'Continúa a partir del resultado de búsqueda completado del trabajo anterior, dentro del mismo encargo. Presenta lo encontrado agrupado por empresa: cuántas personas y empresas trajo, quiénes parecen decidir la compra según su cargo (role y fit, que son hipótesis) y cualquier aviso (notice). Propón el siguiente paso concreto, por ejemplo guardar a los adecuados en un solo lote. Si result.next no es null, ofrece «Traer más» como respuesta sugerida; al pedirlo, propones los mismos criterios con page y offset de result.next. No repitas la búsqueda externa: ya está completada y su resultado está en el historial.');
+    'Continúa a partir del resultado de búsqueda completado del trabajo anterior, dentro del mismo encargo. Si result.strategy es profile, presenta a la persona de ese perfil exacto y conserva el encargo original: propone guardarla y, después de guardarla, preparar la invitación o mensaje solicitado; no pidas su empresa ni muestres a otras personas. Si no fue un perfil exacto, presenta lo encontrado agrupado por empresa: cuántas personas y empresas trajo, quiénes parecen decidir la compra según su cargo (role y fit, que son hipótesis) y cualquier aviso (notice). Propón el siguiente paso concreto, por ejemplo guardar a los adecuados en un solo lote. Si result.next no es null, ofrece «Traer más» como respuesta sugerida; al pedirlo, propones los mismos criterios con page y offset de result.next. No repitas la búsqueda externa: ya está completada y su resultado está en el historial.');
 }
 /** Only the scheduled worker consumes quota/calls Apollo. Claims are never replayed. */
 export async function processCoworkSearchQueue() {

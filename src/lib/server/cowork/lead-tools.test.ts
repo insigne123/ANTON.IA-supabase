@@ -79,6 +79,9 @@ test('a saved contact can be found by its email address', async () => {
   assert.ok(filter.split(',').includes('email.ilike.%nicogun123@gmail.com%'));
   assert.equal(result.returned, 1);
   assert.equal(result.partial, false);
+  const employee = rowsClient([{ id: '10', name: 'Empleado', email: 'persona@linkedin.com' }]);
+  const linkedinEmail = await queryCoworkLeads(employee.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'persona@linkedin.com');
+  assert.equal(linkedinEmail.returned, 1, 'an email at linkedin.com is still an email query, not a profile');
 });
 
 const ID = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
@@ -281,6 +284,50 @@ test('a search term looks in «Por escribir» with its own columns and no gramma
   assert.ok(filter.split(',').every(part => /^(full_name|title|company_name|email|city|country)\.ilike\.%[^%,()]*%$/.test(part)), filter);
   assert.equal(result.returned, 1);
   assert.equal(result.partial, false);
+});
+
+test('a personal LinkedIn URL finds only that profile, never URL-word overlaps with other contacts', async () => {
+  const profile = 'https://www.linkedin.com/in/contacto-de-prueba-23825746';
+  const f = tablesClient({
+    leads: [
+      { id: SAVED_A, name: 'Otra persona', email: 'otra@empresa.com', company: 'Linkedin Services', linkedin_url: 'https://www.linkedin.com/in/otro-perfil' },
+    ],
+    enriched_leads: [
+      { id: ENRICHED_B, full_name: 'Contacto de Prueba', linkedin_url: 'http://cl.linkedin.com/in/contacto-de-prueba-23825746/?trk=test' },
+      { id: ENRICHED_LINKED, full_name: 'Candidato parecido', linkedin_url: `${profile}-otra-persona` },
+    ],
+  });
+  const result = await queryCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', `${profile}/`);
+  assert.ok('match' in result);
+  assert.equal(result.match, 'linkedin_url');
+  assert.equal(result.partial, false);
+  assert.deepEqual(result.items.map(item => item.id), [ENRICHED_B]);
+  assert.equal(result.items[0].linkedin_url, profile);
+  const filters = f.calls.filter(call => call[0] === 'or').map(call => String(call[2]));
+  assert.equal(filters.length, 2);
+  assert.ok(filters.every(filter => filter.split(',').every(part => part.startsWith('linkedin_url.ilike.'))));
+  assert.ok(f.calls.some(call => call[0] === 'eq' && call[1] === 'leads' && call[2] === 'user_id' && call[3] === 'owner'));
+  assert.ok(f.calls.some(call => call[0] === 'eq' && call[1] === 'enriched_leads' && call[2] === 'organization_id' && call[3] === 'org'));
+});
+
+test('an unsaved exact profile proposes one profile lookup, while an incomplete read never asserts absence', async () => {
+  const profile = 'https://www.linkedin.com/in/contacto-de-prueba-23825746';
+  const empty = await queryCoworkLeads(tablesClient({ leads: [], enriched_leads: [] }).db,
+    { userId: 'owner', organizationId: 'org' }, 'leads.search', profile);
+  assert.equal(empty.returned, 0);
+  assert.ok('sourcesComplete' in empty && 'profileLookup' in empty);
+  assert.equal(empty.sourcesComplete, true);
+  assert.deepEqual(empty.profileLookup, { action: 'prospecting.propose_search', searchCriteria: {
+    linkedinUrl: profile, titles: [], industries: [], locations: [], limit: 1,
+  } });
+  const failed = await queryCoworkLeads(tablesClient({ leads: [], enriched_leads: 'error' }).db,
+    { userId: 'owner', organizationId: 'org' }, 'leads.search', profile);
+  assert.ok('sourcesComplete' in failed && 'notice' in failed);
+  assert.equal(failed.sourcesComplete, false);
+  assert.equal('profileLookup' in failed, false);
+  assert.match(failed.notice || '', /no puedo confirmar/);
+  await assert.rejects(() => queryCoworkLeads(tablesClient({}).db,
+    { userId: 'owner', organizationId: 'org' }, 'leads.search', 'https://www.linkedin.com/company/example'), /perfil personal/);
 });
 
 test('a contact of «Por escribir» is read by its id, and if «Por escribir» fails the saved contacts still answer', async () => {

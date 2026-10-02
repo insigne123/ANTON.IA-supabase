@@ -12,8 +12,12 @@ export const coworkReadTaskSchema = z.object({
     'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'replies.attention', 'replies.stalled', 'metrics.overview', 'metrics.rates', 'metrics.diagnose', 'metrics.channels', 'metrics.incidents', 'deliverability.check', 'site.read', 'leads.count', 'leads.summary', 'deliverability.bounces', 'deliverability.sender', 'compliance.check', 'compliance.law', 'compliance.obligation', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'files.read', 'saved_searches.list', 'profile.get',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
-  input: z.string().max(120),
+  input: z.string().max(500),
 }).strict().transform((task, context) => {
+  if (task.action !== 'leads.search' && task.input.length > 120) {
+    context.addIssue({ code: 'custom', path: ['input'], message: 'La entrada admite hasta 120 caracteres.' });
+    return z.NEVER;
+  }
   if (TEXT_ACTIONS.includes(task.action)) return task;
   // Fixed reads take no input. A stray period («last_30_days», «este mes») is
   // dropped instead of rejecting the decision: the model kept resending it

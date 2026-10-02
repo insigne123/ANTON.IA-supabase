@@ -71,6 +71,17 @@ function SearchDetails({ criteria }: { criteria: unknown }) {
   if (!parsed.success) return <ReviewNote ok={false}>No se pudieron leer los criterios de la búsqueda. Descártala y pide una nueva.</ReviewNote>;
   const data = parsed.data;
   const strategy = coworkSearchStrategy(data);
+  if (strategy === 'profile') return <div className="space-y-4">
+    <ReviewFields>
+      <ReviewField label="Buscar">La persona de este perfil exacto</ReviewField>
+      <ReviewField label="Perfil de LinkedIn"><a href={data.linkedinUrl || undefined} target="_blank" rel="noopener noreferrer"
+        className="break-all rounded text-cw-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+        {data.linkedinUrl}
+      </a></ReviewField>
+      <ReviewField label="Costo">Aproximadamente 1 crédito del proveedor y 1 búsqueda de tu cuota.</ReviewField>
+    </ReviewFields>
+    <ReviewNote>Solo se consulta este perfil. Guardarlo y preparar la invitación son pasos posteriores, con su aprobación.</ReviewNote>
+  </div>;
   const more = (data.page || 1) > 1 || Boolean(data.offset);
   const noun = strategy === 'companies' ? (data.limit === 1 ? 'empresa' : 'empresas') : (data.limit === 1 ? 'persona' : 'personas');
   return <div className="space-y-4">
@@ -192,7 +203,8 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
       body = <div className="space-y-4">
         <SearchDetails criteria={proposal.payload.criteria} />
         <ReviewActions onReject={reject} onApprove={approve} resolving={resolving} rejectLabel="Descartar búsqueda"
-          approveLabel={(proposal.payload.criteria as { target?: string } | undefined)?.target === 'companies' ? 'Buscar empresas' : 'Buscar contactos'} />
+          approveLabel={(proposal.payload.criteria as { linkedinUrl?: string } | undefined)?.linkedinUrl ? 'Consultar perfil'
+            : (proposal.payload.criteria as { target?: string } | undefined)?.target === 'companies' ? 'Buscar empresas' : 'Buscar contactos'} />
       </div>;
     } else if (proposal.type === 'note') {
       body = <div className="space-y-4">

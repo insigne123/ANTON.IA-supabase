@@ -10,6 +10,7 @@ const checks = [
   ['scripts/test-cowork-prepare-batch.mjs'],
   ['scripts/test-cowork-prepare-batch-card.mjs'],
   ['scripts/test-cowork-search-results-ui.mjs'],
+  ['scripts/test-cowork-profile-search-ui.mjs'],
   ['scripts/test-cowork-research-notice.mjs'],
   ['scripts/test-cowork-research-progress-ui.mjs'],
   ['scripts/test-cowork-campaign-people-ui.mjs'],

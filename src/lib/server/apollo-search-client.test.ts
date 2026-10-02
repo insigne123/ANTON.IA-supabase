@@ -95,3 +95,52 @@ test('ambiguous company searches return candidates instead of auto-selecting the
     assert.doesNotMatch(source, /candidates\[0\][\s\S]*selected_organization_id/);
   }
 });
+
+test('an exact profile uses people/match, requires matching identity and never returns email or phone', async () => {
+  const originalFetch = globalThis.fetch;
+  const profile = 'https://www.linkedin.com/in/contacto-de-prueba-23825746';
+  const requests: string[] = [];
+  let wrong = false;
+  globalThis.fetch = async input => {
+    requests.push(String(input));
+    return Response.json({ person: {
+      id: 'person-id', name: wrong ? 'Otra Persona' : 'Contacto De Prueba', first_name: 'Contacto', last_name: 'De Prueba',
+      linkedin_url: wrong ? 'https://www.linkedin.com/in/otra-persona' : profile,
+      email: 'private@example.com', phone_number: '+56900000000',
+      organization: { name: 'Empresa de prueba' },
+    } });
+  };
+  try {
+    const payload = { search_mode: 'profile', linkedin_url: profile, max_results: 1, reveal_email: false, reveal_phone: false };
+    const found = await requestApolloSearch(payload, API_KEY_ENV);
+    assert.equal(found.leads.length, 1);
+    assert.equal(found.leads[0].name, 'Contacto De Prueba');
+    const url = new URL(requests[0]);
+    assert.match(url.pathname, /\/people\/match$/);
+    assert.equal(url.searchParams.get('linkedin_url'), profile);
+    assert.equal(url.searchParams.get('reveal_personal_emails'), 'false');
+    assert.equal(url.searchParams.get('reveal_phone_number'), 'false');
+    assert.doesNotMatch(JSON.stringify(found), /private@example|56900000000/);
+    wrong = true;
+    await assert.rejects(() => requestApolloSearch(payload, API_KEY_ENV),
+      error => error instanceof ApolloSearchClientError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('invalid profile lookups and filter/reveal overrides never reach the provider; not found stays empty', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return Response.json({ person: null }); };
+  const payload = { search_mode: 'profile', linkedin_url: 'https://www.linkedin.com/in/contacto-de-prueba-23825746' };
+  try {
+    for (const extra of [{ linkedin_url: 'https://example.com/in/user' }, { reveal_email: true }, { reveal_phone: true },
+      { max_results: 25 }, { per_page: 25 }, { page: 2 }, { titles: ['Gerente'] }, { titles: 'Gerente' }]) {
+      await assert.rejects(() => requestApolloSearch({ ...payload, ...extra }, API_KEY_ENV),
+        error => error instanceof ApolloSearchClientError && error.code === 'INVALID_REQUEST');
+    }
+    assert.equal(calls, 0);
+    const found = await requestApolloSearch(payload, API_KEY_ENV);
+    assert.equal(calls, 1);
+    assert.deepEqual(found.leads, []);
+  } finally { globalThis.fetch = originalFetch; }
+});

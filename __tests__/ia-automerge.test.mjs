@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 // Execute the real inline workflow against a fake GitHub API. No credentials or network.
-const workflow = readFileSync('.github/workflows/ia-automerge.yml', 'utf8');
+const workflow = readFileSync('.github/workflows/ia-automerge.yml', 'utf8').replace(/\r\n/g, '\n');
 const raw = workflow.split("node --input-type=module <<'NODE'\n")[1]?.split('\n          NODE')[0];
 assert.ok(raw, 'the Node workflow script must be present');
 const source = raw.split('\n').map(line => line.replace(/^          /, '')).join('\n')

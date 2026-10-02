@@ -57,7 +57,7 @@ export const coworkDecisionSchema = z.object({
   /** The steps the person sees while the turn works (rule 12); only the first consulting decision uses it. */
   outline: z.array(z.object({ label: z.string().max(300), read: z.string().max(80).nullable() }).strict()).max(10).nullable().optional(),
   specialists: specialistTasksSchema.nullable().optional(),
-  query: z.string().max(120).nullable(),
+  query: z.string().max(500).nullable(),
   leadId: z.string().uuid().nullable(),
   leadIds: z.array(z.string().uuid()).min(1).max(5).nullable().optional(),
   stepId: z.string().uuid().nullable().optional(),
@@ -526,6 +526,9 @@ function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): stri
 const LATER_STEP = /(?<!\p{L})(?:campa[ñn]as?|secuencias?|escribirles|mandarles|enviarles)(?!\p{L})/iu;
 
 function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
+  if (criteria.linkedinUrl) {
+    return 'Propongo consultar ese perfil exacto de LinkedIn (aproximadamente 1 crédito del proveedor). Revisa el enlace antes de aprobar. Esta consulta no guarda el contacto ni envía una invitación.';
+  }
   // The model sometimes repeats a term («retail», «retail»): each one is named once.
   const unique = (items: string[]) => items.map(item => item.trim())
     .filter((item, index, all) => item && all.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index);

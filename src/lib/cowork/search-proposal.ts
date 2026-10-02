@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { audienceRolePolicySchema } from './audience-analysis';
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 /** Up to 100 people or companies per search; the instructions ask for 25 when the person does not say how many. */
 export const COWORK_SEARCH_MAX = 100;
@@ -13,6 +14,9 @@ export const COWORK_SEARCH_MAX_OFFSET = 199;
 const terms = z.array(z.string().trim().min(1).max(100)).max(5);
 export const coworkSearchCriteriaSchema = z.object({
   target: z.enum(['people', 'companies']).nullish(),
+  linkedinUrl: z.string().trim().min(1).max(500)
+    .refine(value => Boolean(normalizeLinkedinProfileUrl(value)), 'Usa un perfil personal de LinkedIn (/in/).')
+    .transform(value => normalizeLinkedinProfileUrl(value)).nullish(),
   // companies_first: the companies of the offer's industries first, then the people with those roles inside them.
   strategy: z.enum(['people', 'companies_first']).nullish(),
   rolePolicy: audienceRolePolicySchema.nullish(),
@@ -30,6 +34,12 @@ export const coworkSearchCriteriaSchema = z.object({
   page: z.number().int().min(1).max(COWORK_SEARCH_MAX_PAGE).nullish(),
   offset: z.number().int().min(0).max(COWORK_SEARCH_MAX_OFFSET).nullish(),
 }).strict().superRefine((value, context) => {
+  if (value.linkedinUrl && (value.target === 'companies' || value.strategy === 'companies_first'
+    || value.limit !== 1 || (value.page || 1) !== 1 || Boolean(value.offset)
+    || value.titles.length || value.industries.length || value.locations.length || value.seniorities?.length
+    || value.companyLocations?.length || value.employeeRanges?.length || value.companyDomains?.length || value.rolePolicy)) {
+    context.addIssue({ code: 'custom', message: 'El perfil exacto consulta una persona, sin otros filtros ni páginas.' });
+  }
   if (value.target === 'companies' && (value.titles.length || value.locations.length || value.seniorities?.length)) {
     context.addIssue({ code: 'custom', message: 'La búsqueda de empresas usa companyLocations, no filtros de personas.' });
   }
@@ -47,9 +57,9 @@ export const coworkSearchCriteriaSchema = z.object({
   }
 }).refine(value => value.titles.length + value.industries.length + value.locations.length
   + (value.seniorities?.length || 0) + (value.companyLocations?.length || 0)
-  + (value.employeeRanges?.length || 0) + (value.companyDomains?.length || 0) > 0, 'Define al menos un criterio');
+  + (value.employeeRanges?.length || 0) + (value.companyDomains?.length || 0) > 0 || Boolean(value.linkedinUrl), 'Define al menos un criterio');
 export type CoworkSearchCriteria = z.infer<typeof coworkSearchCriteriaSchema>;
-export type CoworkSearchStrategy = 'companies' | 'people' | 'companies_first';
+export type CoworkSearchStrategy = 'companies' | 'people' | 'companies_first' | 'profile';
 
 function companyFilters(value: Pick<CoworkSearchCriteria, 'industries' | 'companyLocations' | 'employeeRanges' | 'companyDomains'>) {
   return value.industries.length + (value.companyLocations?.length || 0) + (value.employeeRanges?.length || 0) + (value.companyDomains?.length || 0) > 0;
@@ -61,8 +71,10 @@ function companyFilters(value: Pick<CoworkSearchCriteria, 'industries' | 'compan
  */
 export function coworkSearchStrategy(criteria: {
   target?: 'people' | 'companies' | null; strategy?: 'people' | 'companies_first' | null;
+  linkedinUrl?: string | null;
   industries: string[]; titles: string[]; seniorities?: string[] | null;
 }): CoworkSearchStrategy {
+  if (criteria.linkedinUrl) return 'profile';
   if (criteria.target === 'companies') return 'companies';
   if (criteria.strategy) return criteria.strategy;
   return criteria.industries.length && (criteria.titles.length || criteria.seniorities?.length) ? 'companies_first' : 'people';
@@ -72,10 +84,11 @@ export function coworkSearchStrategy(criteria: {
 export function coworkApolloPayload(criteria: CoworkSearchCriteria, userId: string) {
   const valid = coworkSearchCriteriaSchema.parse(criteria);
   return {
-    search_mode: valid.target === 'companies' ? 'organization_search' : 'batch', user_id: userId, titles: valid.titles,
+    search_mode: valid.linkedinUrl ? 'profile' : valid.target === 'companies' ? 'organization_search' : 'batch', user_id: userId, titles: valid.titles,
     industry_keywords: valid.industries, person_locations: valid.locations,
     max_results: valid.limit, per_page: valid.limit, page: valid.page || 1,
     reveal_email: false, reveal_phone: false, include_similar_titles: true,
+    ...(valid.linkedinUrl ? { linkedin_url: valid.linkedinUrl } : {}),
     ...(valid.target === 'companies' ? { company_keywords: valid.industries } : {}),
     ...(valid.seniorities?.length ? { seniorities: valid.seniorities } : {}),
     ...(valid.companyLocations?.length ? { company_location: valid.companyLocations } : {}),
