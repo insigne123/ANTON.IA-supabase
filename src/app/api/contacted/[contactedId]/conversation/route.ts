@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { mailboxAccessToken, readMailboxConversation } from '@/lib/server/reply-sync';
 import { loadPlannedTouches } from '@/lib/server/contacted-conversations';
 import { stripHtmlToText } from '@/lib/email-outbound';
+import { readConversationTeamLock } from '@/lib/server/conversation-close';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ contactedId: string }> };
@@ -65,7 +66,10 @@ export async function GET(_req: NextRequest, context: Context) {
       }
     }
     const work = { commitment: row.data?.commitment || null, advice: row.data?.advice?.replyId === row.reply_message_id ? row.data.advice : null, replyDraft: row.user_id === user.id ? row.data?.replyDraft || null : null };
-    return NextResponse.json({ work, messages: messages.sort((a: any, b: any) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt)), plans, providerComplete, providerError, trackingAvailable, trackingEvents, canResolve: row.user_id === user.id }, { headers: { 'Cache-Control': 'private, no-store' } });
+    // The team lock decides what «Cerrar conversación» explains; without it the dialog shows what changes for this person.
+    const team = await readConversationTeamLock(supabase as any, { userId: user.id, organizationId }, row.email)
+      .then(({ enabled, status, mine }) => ({ enabled, status, mine })).catch(() => null);
+    return NextResponse.json({ work, messages: messages.sort((a: any, b: any) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt)), plans, providerComplete, providerError, trackingAvailable, trackingEvents, canResolve: row.user_id === user.id, team }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return handleAuthError(error); }
 }
 

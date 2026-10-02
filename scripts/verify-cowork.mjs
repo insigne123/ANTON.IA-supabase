@@ -16,6 +16,7 @@ const checks = [
   ['scripts/test-team-lock-ui.mjs'],
   ['scripts/test-default-sender-ui.mjs'],
   ['scripts/test-cowork-guide-ui.mjs'],
+  ['scripts/test-conversation-close-ui.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-send-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-batch-corpus.test.ts'],
