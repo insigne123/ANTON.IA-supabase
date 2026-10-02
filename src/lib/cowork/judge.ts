@@ -45,7 +45,7 @@ const judgeRules = (contactsImport: boolean, replyThread = false, linkedinBatch 
   '- comprension: 5 entiende el pedido y su intención (también si es vago o con faltas); 3 entiende a medias o responde otra cosa cercana; 1 no entiende o responde otra cosa.',
   '- veracidad: 5 cada cifra, nombre, fecha y estado coincide con los datos consultados o el contexto; 3 algún dato impreciso o una afirmación sin respaldo; 1 inventa datos, cuenta mal o contradice los datos. Contar mal (por ejemplo «3 de 5 con correo» cuando son 4) es 2 o menos. Si no consultó datos y no afirma nada de la cuenta, 5.',
   '- utilidad: 5 acerca el objetivo (contactos listos, correos o mensajes, envíos, respuestas) y deja un siguiente paso que Cowork puede hacer al tocarlo; 3 útil pero incompleta o genérica; 1 callejón sin salida o devuelve el trabajo al usuario.',
-  '- claridad: 5 breve, directa, bien ordenada, en español simple, sin jerga técnica, códigos, IDs ni horas UTC; 3 se entiende con esfuerzo o sobra texto; 1 confusa. Jerga interna del sistema sin explicar (por ejemplo «cobertura», «barrido», «dominio desnudo», nombres de herramientas o campos) o un cierre técnico la dejan en 3 o menos.',
+  '- claridad: 5 directa (la conclusión primero), bien ordenada, en español simple, sin relleno ni repeticiones, sin jerga técnica, códigos, IDs ni horas UTC; 3 se entiende con esfuerzo, se repite o mete relleno; 1 confusa. Explicar qué se hizo, qué se encontró y por qué se propone algo no es sobrar texto. Jerga interna del sistema sin explicar (por ejemplo «cobertura», «barrido», «dominio desnudo», nombres de herramientas o campos) o un cierre técnico la dejan en 3 o menos.',
   '- friccion: 5 el usuario no tiene que hacer nada extra (no le pide datos que Cowork ya tiene o puede consultar, no lo obliga a pasos innecesarios, no le pregunta lo obvio); 3 una pregunta o paso evitable; 1 lo hace trabajar o esperar para nada. Pedir un dato que Cowork podía deducir o consultar, una decisión que podía tomar con un valor razonable y dejar editable, o detalles de algo que Cowork no puede hacer, es 2 o menos.',
   `Reglas del producto que Cowork debe respetar (no son fricción ni falta de utilidad): crear campañas, enviar correos, buscar prospectos nuevos con el proveedor, buscar el correo de un contacto (gasta un crédito), investigar, guardar contactos, ejecutar código y mensajes o invitaciones de LinkedIn siempre se proponen con una tarjeta de aprobación y no se ejecutan sin ella; las campañas solo van a contactos guardados con correo; Cowork no tiene calendario. Cowork sí entrega archivos de lo que muestra: cada tarjeta trae su botón «Descargar» (tabla, cifras y gráfico en Excel o CSV; correo y secuencia en Word o PDF; el documento del panel en Word, PDF o Markdown), así que ante «pásamelo a Excel» o «dámelo en Word» lo correcto es la tarjeta y una frase que diga cómo bajarla; proponer código para armar ese archivo, o decir que no puede hacer archivos, sí es fricción y una respuesta que no sirve. Un correo nuevo a contactos sale por una campaña: se crea pausada con una aprobación y se activa con otra; no hay envío directo de un texto escrito en el chat. ${IMPORT_RULE[contactsImport ? 'on' : 'off']}${replyThread ? ` ${REPLY_THREAD_RULE}` : ''}${linkedinBatch ? ` ${LINKEDIN_BATCH_RULE}` : ''} Cowork lee los archivos que subió el usuario si son CSV, JSON, Excel (.xlsx), PDF con texto, Word (.docx), Markdown o texto; un .xls antiguo, un PDF escaneado sin texto, un archivo protegido con clave o uno demasiado grande no se leen: lo correcto es decirlo y pedir el contenido pegado o en otro formato. Para cruces o cálculos sobre miles de filas, proponer código con su tarjeta de aprobación también es correcto. Un mensaje que empieza con «Usa exactamente esta versión» viene del botón «Usar esta versión» de una tarjeta de correo: pide fijar ese texto sin cambiarlo y no crear nada todavía (para eso está el botón «Crear campaña con esta versión»); ofrecer crear la campaña como siguiente paso es correcto. La tarjeta que aparece en tarjetaDeAprobacion es visible para el usuario con sus botones Aprobar y Descartar: evalúa si es la acción correcta y si la nota la explica. En cambio, ofrecer como siguiente paso una consulta gratuita que Cowork podía hacer antes de responder sí es fricción.`,
   'Los datos de turnos anteriores (datosDelHistorial) cuentan como datos consultados. Si un nombre aparece enmascarado en los datos (por ejemplo «Carlos Ah***a») y la respuesta lo completa como un hecho, es un dato sin respaldo.',
@@ -55,6 +55,15 @@ const judgeRules = (contactsImport: boolean, replyThread = false, linkedinBatch 
 ].join('\n');
 
 export const COWORK_JUDGE_INSTRUCTIONS = judgeRules(false);
+
+/**
+ * Whether the answer explains (plan 8, phase 1: Cowork always explains what it did, what it found and why it
+ * proposes what it proposes). Only the offline judge grades it, apart from the verdict, so the judge in the turn,
+ * Jev and the calibration keep their five dimensions.
+ */
+export const COWORK_JUDGE_EXPLAIN_RULE = 'Además, en el campo explica (fuera de scores, de 1 a 5, no cuenta para el veredicto): 5 deja claro qué revisó Cowork y cuánto, qué encontró y por qué importa, y qué propone y por qué (qué pasa al aprobar); ante una pregunta del usuario, da contexto, un ejemplo y los límites; 3 da el resultado con poca explicación, o explica con relleno; 1 solo entrega un resultado o una pregunta sin explicar nada. Si no había nada que explicar (un saludo, una confirmación simple), 5.';
+export const coworkJudgeExplainSchema = coworkJudgeSchema.extend({ explica: score });
+export type CoworkExplainedJudgement = z.infer<typeof coworkJudgeExplainSchema>;
 
 /**
  * The judge in the turn (G2) reads the answer before it is shown, while it can still be fixed:
@@ -76,10 +85,10 @@ export const COWORK_JUDGE_TURN_INSTRUCTIONS = [COWORK_JUDGE_INSTRUCTIONS, TURN_R
  * on it proposes several people in one card, so the judge expects those proposals; off, the rules above. `inTurn` adds what the
  * judge in the turn is stricter with. Offline and in the turn, the same flag as the coordinator.
  */
-export function coworkJudgeInstructions(options: { contactsImport?: boolean; replyThread?: boolean; linkedinBatch?: boolean; inTurn?: boolean } = {}) {
+export function coworkJudgeInstructions(options: { contactsImport?: boolean; replyThread?: boolean; linkedinBatch?: boolean; inTurn?: boolean; explain?: boolean } = {}) {
   const rules = options.contactsImport || options.replyThread || options.linkedinBatch
     ? judgeRules(Boolean(options.contactsImport), Boolean(options.replyThread), Boolean(options.linkedinBatch)) : COWORK_JUDGE_INSTRUCTIONS;
-  return options.inTurn ? [rules, TURN_RULE].join('\n') : rules;
+  return [rules, ...(options.inTurn ? [TURN_RULE] : []), ...(options.explain ? [COWORK_JUDGE_EXPLAIN_RULE] : [])].join('\n');
 }
 
 /** What the person saw in a turn, as plain text for the judge. */
@@ -172,7 +181,8 @@ export function coworkJudgePrompt(input: {
 }
 
 /** Mean per dimension and how many judgements fall at or under a score. */
-export function coworkJudgeSummary(judgements: CoworkJudgement[]) {
+export function coworkJudgeSummary(judgements: Array<CoworkJudgement & { explica?: number }>) {
+  const explained = judgements.flatMap(item => typeof item.explica === 'number' ? [item.explica] : []);
   const mean = (dimension: CoworkJudgeDimension) => judgements.length
     ? Math.round(judgements.reduce((sum, item) => sum + item.scores[dimension], 0) / judgements.length * 100) / 100 : null;
   return {
@@ -181,6 +191,8 @@ export function coworkJudgeSummary(judgements: CoworkJudgement[]) {
     veredictos: { buena: judgements.filter(item => item.veredicto === 'buena').length, mejorable: judgements.filter(item => item.veredicto === 'mejorable').length,
       mala: judgements.filter(item => item.veredicto === 'mala').length },
     withLowScore: judgements.filter(item => COWORK_JUDGE_DIMENSIONS.some(dimension => item.scores[dimension] <= 2)).length,
+    // Graded only offline (COWORK_JUDGE_EXPLAIN_RULE); null when none of the judgements has it.
+    explica: explained.length ? Math.round(explained.reduce((sum, value) => sum + value, 0) / explained.length * 100) / 100 : null,
   };
 }
 

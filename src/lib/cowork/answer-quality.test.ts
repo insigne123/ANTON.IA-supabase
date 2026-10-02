@@ -36,6 +36,31 @@ test('a direct answer with a closing offer passes', () => {
   assert.deepEqual(coworkAnswerIssues(good), []);
 });
 
+test('an explanatory answer passes; a greeting first, a wall of text or a reply that belongs in a document do not', () => {
+  const explained = [
+    'Tienes 12 contactos de RR. HH. listos para escribirles hoy: tienen correo y nunca recibieron nada.',
+    '',
+    'Revisé tus 406 contactos guardados y los envíos de los últimos 30 días. Lo que encontré:',
+    '- 12 de RR. HH. con correo y sin envíos, 8 de ellos en empresas de más de 200 personas.',
+    '- 5 respondieron a tu última campaña y 2 pidieron reunión.',
+    '',
+    'Te propongo empezar por los 8 de empresas grandes, porque son las que contratan en volumen. Al aprobar dejo una campaña pausada con un primer correo para cada uno; nada sale sin tu aprobación.',
+    '',
+    '¿Dejo lista la campaña pausada para esos 8?',
+  ].join('\n');
+  assert.deepEqual(coworkAnswerIssues(explained), []);
+  assert.deepEqual(coworkAnswerIssues(`¡Claro! ${explained}`).map(issue => issue.code), ['preamble']);
+  assert.deepEqual(coworkAnswerIssues(`Perfecto, ${explained}`).map(issue => issue.code), ['preamble']);
+  assert.deepEqual(coworkAnswerIssues(`Claro Chile contrata 40 operarios este mes.\n¿Busco a su jefa de RR. HH.?`), [], 'a company named Claro is not a greeting');
+  const wall = `${Array.from({ length: 120 }, (_, index) => `dato${index}`).join(' ')}.\n\n¿Sigo con el resto?`;
+  assert.deepEqual(coworkAnswerIssues(wall).map(issue => issue.code), ['wall']);
+  const paragraph = `${Array.from({ length: 50 }, (_, index) => `cifra${index}`).join(' ')}.`;
+  const long = `${Array.from({ length: 9 }, () => paragraph).join('\n\n')}\n\n¿Lo paso a un documento?`;
+  assert.deepEqual(coworkAnswerIssues(long).map(issue => issue.code), ['length'], 'short paragraphs, but it belongs in a document');
+  const list = `Estos son los 30:\n${Array.from({ length: 30 }, (_, index) => `- Persona ${index}, gerenta de personas en una empresa de retail con correo.`).join('\n')}\n¿Sigo?`;
+  assert.ok(!coworkAnswerIssues(list).some(issue => issue.code === 'wall'), 'list items are not a wall of text');
+});
+
 test('quick replies keep short plain chips and drop malformed ones one by one', () => {
   const chips = coworkSuggestions([
     { label: 'Sí, búscalo.', message: 'Sí, busca el correo de Nehal (00000000-0000-4000-8000-000000000022).' },

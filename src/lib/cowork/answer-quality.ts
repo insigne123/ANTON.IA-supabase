@@ -225,6 +225,18 @@ export const COWORK_JARGON: Array<{ pattern: RegExp; label: string }> = [
 
 export type CoworkAnswerIssue = { code: string; detail: string };
 
+/**
+ * The explanatory style (plan 8, rule 8 of the instructions): from 120 to 350 words in the chat when there is
+ * something to explain, in short paragraphs; the rest goes to the document. The checks leave some room over
+ * the instruction (the closing question, a name more) and flag what a person would notice: a reply that belongs
+ * in a document, a wall of text, or a greeting before the conclusion.
+ */
+export const COWORK_CHAT_WORDS = { max: 400, paragraph: 110 } as const;
+// Followed by a comma or a stop («¡Claro!», «Perfecto, …», «Claro que sí»), so «Claro Chile contrata…» is not one.
+const PREAMBLE = /^[\s¡!*]*(?:(?:hola|claro|por supuesto|perfecto|entendido|excelente|genial|buena pregunta|con gusto|de acuerdo)(?:\s*[,.!:;]|\s+que(?![\p{L}]))|gracias por)/iu;
+const LIST_LINE = /^\s*(?:[-*•]|\d+[.)])\s/;
+const wordCount = (text: string) => (text.match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu) || []).length;
+
 /** Structural checks for a reply: jargon, IDs, formatting and a clear next step. */
 export function coworkAnswerIssues(reply: string, options: { expectNextStep?: boolean } = {}): CoworkAnswerIssue[] {
   const text = String(reply || '');
@@ -234,8 +246,13 @@ export function coworkAnswerIssues(reply: string, options: { expectNextStep?: bo
   if (/`[^`\s@]+@[^`\s@]+`/.test(text)) issues.push({ code: 'format', detail: 'correo con formato de código' });
   if (/\bUTC\b/.test(text)) issues.push({ code: 'timezone', detail: 'hora en UTC en vez de la hora local' });
   const lines = text.split('\n').filter(line => line.trim());
-  const leadLines = lines.findIndex(line => /^\s*(?:[-*]|\d+\.)\s/.test(line));
-  if ((leadLines === -1 ? lines.length : leadLines) > 6) issues.push({ code: 'length', detail: 'más de 5 líneas antes de ir al punto' });
+  if (lines.length && PREAMBLE.test(lines[0])) issues.push({ code: 'preamble', detail: 'abre con un saludo o una muletilla en vez de la conclusión' });
+  if (wordCount(text) > COWORK_CHAT_WORDS.max) issues.push({ code: 'length', detail: `más de ${COWORK_CHAT_WORDS.max} palabras en el chat: lo largo va al documento` });
+  // A paragraph is the text between blank lines, without its list items.
+  const paragraphs = text.split(/\n\s*\n/).map(block => block.split('\n').filter(line => line.trim() && !LIST_LINE.test(line)).join(' '));
+  if (paragraphs.some(paragraph => wordCount(paragraph) > COWORK_CHAT_WORDS.paragraph)) {
+    issues.push({ code: 'wall', detail: `un párrafo de más de ${COWORK_CHAT_WORDS.paragraph} palabras sin cortar` });
+  }
   if (options.expectNextStep !== false) {
     const tail = lines.slice(-2).join(' ');
     if (!/[¿?]|\b(?:propongo|te propongo|si quieres|quieres que|aprueba|revisa la propuesta)\b/i.test(tail)) {

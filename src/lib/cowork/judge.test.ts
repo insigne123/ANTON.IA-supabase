@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, COWORK_JUDGE_NOW_RULE, coworkJudgeAgreement, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
+  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_EXPLAIN_RULE, COWORK_JUDGE_INSTRUCTIONS, COWORK_JUDGE_NOW_RULE, coworkJudgeAgreement, coworkJudgeExplainSchema, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
   coworkJudgeEvidence, coworkJudgeFix, coworkJudgeInstructions, coworkJudgeTurnPrompt, coworkShownFromAnswer, COWORK_JUDGE_TURN_INSTRUCTIONS, type CoworkJudgement,
 } from './judge';
 import { COWORK_NEXT_STEP_RULE } from './next-step';
@@ -242,4 +242,15 @@ test('the judge sees the options of a closing question as the chat shows them, a
   // Options without a question are not shown, as in the chat.
   assert.equal(coworkShownFromAnswer({ reply: 'Listo.', document: null, choices }).choices, undefined);
   assert.match(COWORK_JUDGE_INSTRUCTIONS, /pregunta final con opciones .* no es fricción; pedir con opciones algo que Cowork podía decidir/);
+});
+
+test('the offline judge also grades whether the answer explains, apart from the verdict; the judge in the turn keeps five dimensions', () => {
+  assert.ok(coworkJudgeInstructions({ explain: true }).endsWith(COWORK_JUDGE_EXPLAIN_RULE));
+  assert.ok(!coworkJudgeInstructions({ inTurn: true }).includes(COWORK_JUDGE_EXPLAIN_RULE));
+  assert.ok(!COWORK_JUDGE_INSTRUCTIONS.includes('5 breve'), 'explaining what was done is not penalized as extra text');
+  const base = judgement([5, 5, 4, 4, 5], 'buena');
+  assert.equal(coworkJudgeExplainSchema.safeParse({ ...base, explica: 4 }).success, true);
+  assert.equal(coworkJudgeSchema.safeParse({ ...base, explica: 4 }).success, false, 'the judge in the turn and Jev keep their shape');
+  assert.equal(coworkJudgeSummary([{ ...base, explica: 4 }, { ...base, explica: 5 }]).explica, 4.5);
+  assert.equal(coworkJudgeSummary([base]).explica, null);
 });
