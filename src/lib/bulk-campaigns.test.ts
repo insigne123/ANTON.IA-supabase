@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AI_RANK_CANDIDATE_LIMIT, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
+import { AI_RANK_CANDIDATE_LIMIT, audiencePersonStatus, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
 
 const person: AudiencePerson = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', title: 'Operaciones', country: 'Chile', industry: '', size: '11-50', seniority: 'Manager', leadRef: 'lead', contacted: false, lastSentAt: null, replied: false, blockedReason: null, reasons: [], enriched: true };
 test('audience excludes prior contacts and missing industry evidence', () => {
@@ -127,3 +127,12 @@ test('recipient history merges legacy contact, replies and campaign steps in ord
   assert.equal(events[2].kind, 'contacted');
   assert.equal(events[events.length - 1].kind, 'campaign_attention');
 });
+
+test('each person of the audience says in one line whether they can be written to', () => {
+  assert.deepEqual(audiencePersonStatus({ ...person, blockedReason: 'No contactar o correo rebotado', reasons: ['Cargo con decisión'] }),
+    { text: 'No contactar o correo rebotado', blocked: true }, 'the block wins over the reasons');
+  assert.deepEqual(audiencePersonStatus({ ...person, reasons: ['Sin envíos registrados', 'Cargo con decisión'] }),
+    { text: 'Sin envíos registrados · Cargo con decisión', blocked: false });
+  assert.deepEqual(audiencePersonStatus(person), { text: '', blocked: false });
+});
+

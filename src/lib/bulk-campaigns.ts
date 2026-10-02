@@ -72,6 +72,12 @@ export type AudiencePerson = {
   enriched: boolean;
 };
 
+/** Why a person can or cannot be written to, in one line (Plan 6, PR-D1): the block first, then the search's reasons. */
+export function audiencePersonStatus(person: Pick<AudiencePerson, 'blockedReason' | 'reasons'>) {
+  if (person.blockedReason) return { text: person.blockedReason, blocked: true };
+  return { text: person.reasons.join(' · '), blocked: false };
+}
+
 /** Saved lead with Apollo enrichment characteristics, plus contact-history eligibility. */
 export type EnrichedCandidate = {
   email: string; name: string; company: string; title: string; seniority: string;
