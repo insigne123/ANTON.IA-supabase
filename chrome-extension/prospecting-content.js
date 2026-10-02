@@ -57,6 +57,7 @@
     // Something was saved or sent: the marks on this page ask again.
     if (request.action === 'ANTONIA_PRESENCE_REFRESH') { scheduleDecorate(); return false; }
     if (request.action === 'PROSPECT_READ_RESULTS') { respond({ ok: true, results: readResults() }); return false; }
+    if (request.action === 'PROSPECT_READ_COMPANY') { respond({ ok: true, company: readCompany() }); return false; }
     if (request.action === 'PROSPECT_SWEEP_NETWORK' || request.action === 'PROSPECT_SWEEP_INBOX') {
       try {
         respond({ ok: true, ...(request.action === 'PROSPECT_SWEEP_NETWORK' ? sweepNetwork() : sweepInbox()) });
@@ -132,7 +133,7 @@
     pending = 0;
     const profile = canonical(location.href);
     const name = profile ? (linkedinProfileHeader('')?.heading?.textContent || '').trim().slice(0, 300) : '';
-    const key = profile ? `${profile}|${name}` : `${location.pathname}${location.search}|${visibleResults().length}`;
+    const key = profile ? `${profile}|${name}` : `${location.pathname}${location.search}|${visibleResults().length}|${companyHeading()}`;
     if (key === announced) return;
     announced = key;
     try { chrome.runtime.sendMessage({ action: 'ANTONIA_PROFILE_CHANGED' })?.catch?.(() => {}); } catch { /* The extension was reloaded. */ }
@@ -178,9 +179,21 @@
       return response?.ok ? response.result || {} : {};
     } catch { return {}; }
   };
+  // A LinkedIn people search, or the «Personas» tab of a company page (PR-4d): the people it shows, the same way.
+  const RESULTS_PAGE = /^\/(search\/results\/(people|all)|company\/[^/]+\/people)/;
+  // The company page on screen (PR-4d): its handle, and its name once rendered.
+  const canonicalCompany = value => {
+    try {
+      const url = new URL(value);
+      const match = decodeURIComponent(url.pathname).normalize('NFC').match(/^\/company\/([\p{L}\p{N}][\p{L}\p{N}._-]*)(?:\/|$)/u);
+      return url.hostname === 'www.linkedin.com' && match ? `https://www.linkedin.com/company/${match[1].toLowerCase()}` : '';
+    } catch { return ''; }
+  };
+  const companyHeading = () => canonicalCompany(location.href)
+    ? (document.querySelector('main h1')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300) : '';
   // The visible people of a results page: one link per result item, to a public profile, with a name.
   const visibleResults = () => {
-    if (!/^\/search\/results\/(people|all)/.test(location.pathname)) return [];
+    if (!RESULTS_PAGE.test(location.pathname)) return [];
     const seen = new Set();
     const found = [];
     for (const item of document.querySelectorAll('main li')) {
@@ -196,17 +209,51 @@
   // The people of the results page for the panel's batch save (PR-4c): what the page shows, nothing more.
   const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
   const NOT_A_HEADLINE = /^(•|·)|^(conectar|mensaje|seguir|pendiente|connect|message|follow|pending|ver perfil|view profile)\b|\b(1st|2nd|3rd|1er|2º|3er)\b|grado/i;
-  const readResults = () => visibleResults().map(({ url, anchor }) => {
-    const item = anchor.closest('li');
-    const fullName = clean(anchor.querySelector('span[aria-hidden="true"]')?.textContent || anchor.textContent).slice(0, 300);
-    const lines = [...(item?.querySelectorAll('[class*="subtitle"], [class*="headline"], div, p') || [])]
-      .filter(node => /subtitle|headline/i.test(String(node.className)) || node.childElementCount === 0)
-      .map(node => clean(node.textContent))
-      .filter(text => text && text !== fullName && !fullName.includes(text) && text.length >= 3 && text.length <= 220 && !NOT_A_HEADLINE.test(text));
-    const headline = (lines[0] || '').slice(0, 200);
-    const split = headline.match(/^(.*?)\s+(?:en|at|@|\|)\s+(.+)$/i);
-    return { linkedinUrl: url, fullName, headline, title: clean(split ? split[1] : headline).slice(0, 200), companyName: clean(split ? split[2] : '').slice(0, 200) };
-  });
+  const readResults = () => {
+    const pageCompany = companyHeading();
+    return visibleResults().map(({ url, anchor }) => {
+      const item = anchor.closest('li');
+      const fullName = clean(anchor.querySelector('span[aria-hidden="true"]')?.textContent || anchor.textContent).slice(0, 300);
+      const lines = [...(item?.querySelectorAll('[class*="subtitle"], [class*="headline"], div, p') || [])]
+        .filter(node => /subtitle|headline/i.test(String(node.className)) || node.childElementCount === 0)
+        .map(node => clean(node.textContent))
+        .filter(text => text && text !== fullName && !fullName.includes(text) && text.length >= 3 && text.length <= 220 && !NOT_A_HEADLINE.test(text));
+      const headline = (lines[0] || '').slice(0, 200);
+      const split = headline.match(/^(.*?)\s+(?:en|at|@|\|)\s+(.+)$/i);
+      return { linkedinUrl: url, fullName, headline, title: clean(split ? split[1] : headline).slice(0, 200), companyName: clean(split ? split[2] : pageCompany).slice(0, 200) };
+    });
+  };
+  // What the company page shows (PR-4d), read from the page as it is: its name, and the facts of its header or of its «Acerca de»
+  // tab when they are on screen. Nothing is clicked; LinkedIn's links out are unwrapped to the company's own site.
+  const readCompany = () => {
+    const linkedinUrl = canonicalCompany(location.href);
+    if (!linkedinUrl) return null;
+    const main = document.querySelector('main') || document.body;
+    const facts = [...main.querySelectorAll('[class*="org-top-card-summary-info-list__info-item"], [class*="org-top-card-summary__info-item"]')]
+      .map(node => clean(node.textContent)).filter(Boolean);
+    const about = {};
+    for (const term of main.querySelectorAll('dt')) {
+      const label = clean(term.textContent).toLowerCase();
+      const value = term.nextElementSibling?.tagName === 'DD' ? term.nextElementSibling : null;
+      if (!value) continue;
+      if (/sitio web|website/.test(label)) about.website = value.querySelector('a[href]')?.href || clean(value.textContent);
+      else if (/sector|industria|industry/.test(label)) about.industry = clean(value.textContent);
+      else if (/tamaño|company size/.test(label)) about.size = clean(value.firstElementChild?.textContent || value.textContent);
+      else if (/sede|headquarters/.test(label)) about.headquarters = clean(value.textContent);
+    }
+    const visit = [...main.querySelectorAll('a[href]')].find(link => /sitio web|website/i.test(`${link.textContent} ${link.getAttribute('aria-label') || ''}`)
+      && !/^https:\/\/www\.linkedin\.com\/(company|in|school)\//.test(link.href));
+    let website = about.website || visit?.href || '';
+    try {
+      const url = new URL(website, location.href);
+      website = /(^|\.)linkedin\.com$/.test(url.hostname) ? url.searchParams.get('url') || '' : url.href;
+    } catch { website = ''; }
+    const counts = /seguidores|followers|empleados|employees/i;
+    const other = facts.filter(text => !counts.test(text));
+    return { linkedinUrl, name: companyHeading(), industry: (about.industry || other[0] || '').slice(0, 160),
+      headquarters: (about.headquarters || other[1] || '').slice(0, 200),
+      size: (about.size || facts.find(text => /empleados|employees/i.test(text)) || '').slice(0, 100), website: website.slice(0, 300) };
+  };
   let decorating = 0;
   let generation = 0;
   const decorate = async () => {

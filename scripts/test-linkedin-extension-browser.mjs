@@ -40,6 +40,7 @@ try {
             case 'PROSPECT_SESSION': result = connected ? connection : null; break;
             case 'PROSPECT_PROFILE': result = window.activeProfile; break;
             case 'PROSPECT_SEARCH_RESULTS': result = window.searchResults || null; break;
+            case 'PROSPECT_COMPANY': result = window.companyPage || null; break;
             case 'PROSPECT_PRESENCE': result = Object.fromEntries(request.urls.filter(url => window.presence?.[url]).map(url => [url, window.presence[url]])); break;
             case 'PROSPECT_CONNECT': connected = true; result = { pending: true }; setTimeout(() => listeners.forEach(fn => fn({ prospectConnection: {} }, 'session')), 10); break;
             case 'PROSPECT_PREPARE': result = { ok: true, status: 'prepared', message: 'Mensaje preparado. Envía desde LinkedIn.' }; break;
@@ -48,6 +49,7 @@ try {
             case 'PROSPECT_OPEN': result = true; break;
             case 'PROSPECT_API':
               if (request.body.action === 'phone-status') result = { phone: '+511234567', status: 'completed' };
+              if (request.body.action === 'company') result = window.companyView;
               if (request.body.action === 'save-batch') result = { saved: request.body.profiles.map(({ linkedinUrl, fullName }) => ({ linkedinUrl, fullName })), already: [], blocked: [], failed: [] };
               if (request.body.action === 'quota') result = { credits: { used: 3, limit: 50, remaining: 47 } };
               if (request.body.action === 'enrich') result = { enriched: [{ linkedinUrl: profile.linkedinUrl, fullName: profile.fullName, title: profile.title, companyName: profile.companyName, email: profile.email, companyDomain: profile.companyDomain, city: 'Lima', country: 'Perú', industry: 'Servicios', seniority: 'director' }] };
@@ -234,8 +236,45 @@ try {
     ]]);
     await searchCard.getByRole('button', { name: 'Elige a quiénes guardar' }).waitFor();
     await page.waitForFunction(count => window.requests.filter(request => request.action === 'PROSPECT_PRESENCE').length > count, presenceAsked);
+    // A company page: its facts, the organization's contacts there, the pilot's hiring signal and the search for its decision makers.
+    await page.evaluate(() => {
+      window.searchResults = null;
+      window.companyPage = { linkedinUrl: 'https://www.linkedin.com/company/minera-norte', name: 'Minera Norte', industry: 'Minería', size: '1.001-5.000 empleados', headquarters: 'Antofagasta', website: 'https://mineranorte.cl', people: false, tabId: 12 };
+      window.companyView = { total: 2, truncated: false, searchHref: '/search?company=Minera+Norte&domain=mineranorte.cl&titles=Gerente+de+Operaciones',
+        contacts: [
+          { name: 'Ana Rojas', title: 'Jefa de Operaciones', linkedinUrl: 'https://www.linkedin.com/in/ana-rojas', hasEmail: true, presence: { label: 'Respondió hace 2 días', tone: 'success', blocks: false } },
+          { name: 'Luis Soto', title: 'Subgerente de Abastecimiento', linkedinUrl: '', hasEmail: false, presence: null },
+        ],
+        opportunity: { company: 'Minera Norte', ads: 6, score: 72, status: 'new', page: '/opportunities', signal: 'Minera Norte publicó 6 avisos de empleo en los últimos 30 días (4 de operador de camión y 2 de mantenedor), según LinkedIn.' } };
+      window.navigateTo(null, 'https://www.linkedin.com/company/minera-norte/');
+    });
+    const companyCard = page.locator('section[aria-labelledby="company-heading"]');
+    await companyCard.getByRole('heading', { name: 'Minera Norte' }).waitFor();
+    await companyCard.getByText('Minería · 1.001-5.000 empleados · Antofagasta', { exact: true }).waitFor();
+    await companyCard.getByRole('heading', { name: '2 contactos guardados' }).waitFor();
+    await companyCard.getByText('Respondió hace 2 días', { exact: true }).waitFor();
+    assert.equal(await companyCard.getByRole('link', { name: 'Ana Rojas' }).getAttribute('href'), 'https://www.linkedin.com/in/ana-rojas');
+    await companyCard.getByText('Está contratando', { exact: true }).waitFor();
+    const companyAsked = await page.evaluate(() => JSON.stringify(window.requests.filter(request => request.action === 'PROSPECT_API' && request.body.action === 'company').map(request => request.body.company)));
+    assert.deepEqual(JSON.parse(companyAsked).at(-1), { linkedinUrl: 'https://www.linkedin.com/company/minera-norte', name: 'Minera Norte', domain: 'https://mineranorte.cl', industry: 'Minería', size: '1.001-5.000 empleados', headquarters: 'Antofagasta' });
+    for (const width of [320, 380, 520]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Horizontal overflow in the company at ${width}/${colorScheme}`);
+    }
+    await companyCard.getByRole('button', { name: 'Buscar decisores en Anton.IA' }).click();
+    await page.waitForFunction(() => window.requests.some(request => request.action === 'PROSPECT_OPEN' && request.path === '/search?company=Minera+Norte&domain=mineranorte.cl&titles=Gerente+de+Operaciones'));
+    await companyCard.getByRole('button', { name: /Ver en Oportunidades/ }).click();
+    await page.waitForFunction(() => window.requests.some(request => request.action === 'PROSPECT_OPEN' && request.path === '/opportunities'));
+    // Its «Personas» tab: the same card, and the people on screen to save, named after the company.
+    await page.evaluate(() => {
+      window.companyPage = { ...window.companyPage, people: true };
+      window.searchResults = { salesNavigator: false, results: [{ linkedinUrl: 'https://www.linkedin.com/in/carla-mena', fullName: 'Carla Mena', headline: 'Jefa de Turno', title: 'Jefa de Turno', companyName: 'Minera Norte' }] };
+      window.navigateTo(null, 'https://www.linkedin.com/company/minera-norte/people/');
+    });
+    await page.getByRole('heading', { name: '1 persona de Minera Norte en pantalla' }).waitFor();
+    assert.equal(await companyCard.getByRole('link', { name: /Ver sus personas en LinkedIn/ }).count(), 0, 'Already on its people tab');
     await context.close();
-    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, search batch save with team presence, no horizontal overflow (mocked boundary).`);
+    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, search batch save with team presence, company card with contacts, hiring signal and decision makers, no horizontal overflow (mocked boundary).`);
   }
   assert.deepEqual(errors, []);
 } finally { await browser.close(); }
