@@ -83,3 +83,40 @@ test('nothing to look up, nothing read beyond the organization', async () => {
   assert.deepEqual(locks.byEmail, {});
   assert.deepEqual(log.map(op => op.table), ['organizations']);
 });
+
+test('«Guardado por Ana»: whoever saved the person first, by email in any case, provider id or LinkedIn, and only where there is no thread (Plan 6, PR-E)', async () => {
+  const thread = { recipient_key: 'marcela@sodexo.cl', status: 'active', opened_by_user_id: 'user-ana', first_contacted_at: '2026-09-01T00:00:00Z', last_contacted_at: '2026-09-20T00:00:00Z', reopened_at: null };
+  const { client, log } = fake({
+    organizations: () => ({ collaboration_v1_enabled: true }),
+    organization_contact_threads: () => [thread],
+    organization_members: members,
+    contacted_leads: () => [],
+    leads: (op: Op) => {
+      if (op.filters.some(([kind, column]) => kind === 'in' && column === 'apollo_id')) return [{ user_id: 'user-ana', apollo_id: 'apollo-9', created_at: '2026-09-10T00:00:00Z' }];
+      if (op.filters.some(([kind, column]) => kind === 'in' && column === 'source_provider_id')) return [];
+      const or = String(op.filters.find(([kind]) => kind === 'or')?.[2] || '');
+      if (or.includes('linkedin_url')) return [{ user_id: 'user-ana', linkedin_url: 'https://www.linkedin.com/in/susana-mora/', created_at: '2026-09-11T00:00:00Z' }];
+      // Beto saved Rafael after Ana; Marcela has a thread, so her saved row says nothing more.
+      return [{ user_id: 'user-beto', email: 'rafael@empresa.cl', created_at: '2026-09-15T00:00:00Z' },
+        { user_id: 'user-ana', email: 'Marcela@Sodexo.cl', created_at: '2026-08-01T00:00:00Z' },
+        { user_id: 'user-beto', email: 'nuevo@cliente.cl', created_at: '2026-09-20T00:00:00Z' }];
+    },
+    enriched_leads: (op: Op) => {
+      const or = String(op.filters.find(([kind]) => kind === 'or')?.[2] || '');
+      return or.includes('email.ilike') ? [{ user_id: 'user-ana', email: 'RAFAEL@empresa.cl', created_at: '2026-09-02T00:00:00Z' }] : [];
+    },
+  });
+  const locks = await readTeamLocks(client, scope, {
+    emails: ['rafael@empresa.cl', 'marcela@sodexo.cl', 'nuevo@cliente.cl'], providerIds: ['apollo-9'], linkedinUrls: ['https://cl.linkedin.com/in/susana-mora'],
+  });
+  assert.deepEqual(locks.byEmail['rafael@empresa.cl'], { status: 'saved', ownerName: 'Ana Pérez', mine: false, replied: false, lastContactedAt: null },
+    'Ana found Rafael first («Por escribir»), before Beto saved him');
+  assert.equal(locks.byEmail['marcela@sodexo.cl'].status, 'active', 'a thread says more than a saved row');
+  assert.equal(locks.byEmail['nuevo@cliente.cl'].mine, true, 'only Beto saved this one: nothing to tell him');
+  assert.equal(locks.byProviderId['apollo-9'].status, 'saved');
+  assert.equal(locks.byLinkedin['linkedin.com/in/susana-mora'].ownerName, 'Ana Pérez');
+  const emailRead = log.find(op => op.table === 'enriched_leads' && op.filters.some(([kind]) => kind === 'or'))!;
+  assert.match(String(emailRead.filters.find(([kind]) => kind === 'or')![2]), /^email\.ilike\.rafael@empresa\.cl,email\.ilike\.marcela@sodexo\.cl/);
+  assert.ok(log.filter(op => op.table === 'leads' || op.table === 'enriched_leads')
+    .every(op => op.filters.some(([, column, value]) => column === 'organization_id' && value === 'org-1')), 'only the organization\'s contacts');
+});
