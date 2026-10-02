@@ -40,3 +40,9 @@ test('people are compared by lowercased email and by LinkedIn profile, whatever 
   assert.equal(normalizeLockLinkedin('https://www.linkedin.com/company/sodexo'), '');
   assert.equal(normalizeLockLinkedin(null), '');
 });
+
+test('a contact another member saved first only says so: «Guardado por Ana», without blocking (Plan 6, PR-E)', () => {
+  assert.deepEqual(teamLockNotice(lock({ status: 'saved', lastContactedAt: null }), NOW), { text: 'Guardado por Ana Pérez', blocks: false });
+  assert.equal(teamLockFreeFrom(lock({ status: 'saved' })), null, 'nothing to free: nobody wrote to them yet');
+  assert.equal(teamLockNotice(lock({ status: 'saved', mine: true }), NOW), null, 'saved by you first, nothing to say');
+});

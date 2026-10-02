@@ -50,12 +50,14 @@ export async function readTeamLocks(client: Client, scope: Scope, input: TeamLoc
   }
 
   const allEmails = unique([...emails, ...providerEmail.values(), ...linkedinEmail.values()]);
-  if (!allEmails.length) return result;
+  const savedBy = await readSavedBy(client, scope, { emails: allEmails, providerIds, linkedins });
+  if (!allEmails.length && !savedBy.users.size) return result;
+  const nothing = Promise.resolve({ data: [], error: null });
   const [threads, members, replies] = await Promise.all([
-    client.from('organization_contact_threads').select('recipient_key,status,opened_by_user_id,last_sent_by_user_id,first_contacted_at,last_contacted_at,reopened_at')
-      .eq('organization_id', scope.organizationId).eq('channel', 'email').in('recipient_key', allEmails).in('status', LOCKED),
+    allEmails.length ? client.from('organization_contact_threads').select('recipient_key,status,opened_by_user_id,last_sent_by_user_id,first_contacted_at,last_contacted_at,reopened_at')
+      .eq('organization_id', scope.organizationId).eq('channel', 'email').in('recipient_key', allEmails).in('status', LOCKED) : nothing,
     client.from('organization_members').select('user_id,profiles:user_id(full_name,email)').eq('organization_id', scope.organizationId),
-    client.from('contacted_leads').select('email,replied_at').eq('organization_id', scope.organizationId).in('email', allEmails).not('replied_at', 'is', null).limit(1000),
+    allEmails.length ? client.from('contacted_leads').select('email,replied_at').eq('organization_id', scope.organizationId).in('email', allEmails).not('replied_at', 'is', null).limit(1000) : nothing,
   ]);
   for (const read of [threads, members, replies]) if (read.error) throw read.error;
 
@@ -83,5 +85,64 @@ export async function readTeamLocks(client: Client, scope: Scope, input: TeamLoc
   }
   for (const [id, email] of providerEmail) if (result.byEmail[email]) result.byProviderId[id] = result.byEmail[email];
   for (const [url, email] of linkedinEmail) if (result.byEmail[email]) result.byLinkedin[url] = result.byEmail[email];
+
+  // «Guardado por Ana» (Plan 6, PR-E): whoever saved the person first, where there is no thread yet. A notice, never a lock.
+  const savedLock = (saved: Saved): TeamLock => ({ status: 'saved', ownerName: names.get(saved.userId) || 'Miembro del equipo',
+    mine: saved.userId === scope.userId, replied: false, lastContactedAt: null });
+  for (const [email, saved] of savedBy.byEmail) if (!result.byEmail[email]) result.byEmail[email] = savedLock(saved);
+  for (const [id, saved] of savedBy.byProviderId) if (!result.byProviderId[id]) result.byProviderId[id] = savedLock(saved);
+  for (const [url, saved] of savedBy.byLinkedin) if (!result.byLinkedin[url]) result.byLinkedin[url] = savedLock(saved);
   return result;
+}
+
+type Saved = { userId: string; at: number };
+
+/** Keeps, for each key, the member who saved the person first. */
+function keepFirst(map: Map<string, Saved>, key: string, row: { user_id?: unknown; created_at?: unknown }) {
+  const userId = typeof row.user_id === 'string' ? row.user_id : '';
+  if (!key || !userId) return;
+  const at = Date.parse(String(row.created_at || '')) || Number.MAX_SAFE_INTEGER;
+  const current = map.get(key);
+  if (!current || at < current.at) map.set(key, { userId, at });
+}
+
+const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
+/** An email or a LinkedIn handle inside a PostgREST «ilike» list: no wildcard or grammar characters. */
+const literal = (value: string) => value.replace(/[%,()*\\]/g, '');
+
+/**
+ * Who in the organization saved each person (Plan 6, PR-E): a saved contact or one of «Por escribir», by email (any case), provider
+ * id or LinkedIn. Read with the person's own client, like the rest: members can read their organization's contacts.
+ */
+async function readSavedBy(client: Client, scope: Scope, input: { emails: string[]; providerIds: string[]; linkedins: string[] }) {
+  const byEmail = new Map<string, Saved>();
+  const byProviderId = new Map<string, Saved>();
+  const byLinkedin = new Map<string, Saved>();
+  const own = (table: string, fields: string) => client.from(table).select(fields).eq('organization_id', scope.organizationId);
+  const reads: Array<Promise<void>> = [];
+  const collect = (query: any, use: (row: any) => void) => reads.push((async () => {
+    const read = await query.limit(LIMIT * 2);
+    if (read.error) throw read.error;
+    for (const row of read.data || []) use(row);
+  })());
+  for (const group of chunks(input.emails, 50)) {
+    const filter = group.map(email => `email.ilike.${literal(email)}`).join(',');
+    for (const table of ['leads', 'enriched_leads']) {
+      collect(own(table, 'user_id,email,created_at').or(filter), row => keepFirst(byEmail, normalizeLockEmail(row.email), row));
+    }
+  }
+  if (input.providerIds.length) {
+    collect(own('leads', 'user_id,apollo_id,created_at').in('apollo_id', input.providerIds), row => keepFirst(byProviderId, String(row.apollo_id || ''), row));
+    collect(own('leads', 'user_id,source_provider_id,created_at').in('source_provider_id', input.providerIds), row => keepFirst(byProviderId, String(row.source_provider_id || ''), row));
+    collect(own('enriched_leads', 'user_id,source_provider_id,created_at').in('source_provider_id', input.providerIds), row => keepFirst(byProviderId, String(row.source_provider_id || ''), row));
+  }
+  if (input.linkedins.length) {
+    const filter = input.linkedins.map(url => `linkedin_url.ilike.%linkedin.com/in/${literal(url.replace('linkedin.com/in/', ''))}%`).join(',');
+    for (const table of ['leads', 'enriched_leads']) {
+      collect(own(table, 'user_id,linkedin_url,created_at').or(filter), row => keepFirst(byLinkedin, normalizeLockLinkedin(row.linkedin_url), row));
+    }
+  }
+  await Promise.all(reads);
+  const users = new Set([...byEmail.values(), ...byProviderId.values(), ...byLinkedin.values()].map(saved => saved.userId));
+  return { byEmail, byProviderId, byLinkedin, users };
 }

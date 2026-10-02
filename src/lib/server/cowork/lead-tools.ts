@@ -25,7 +25,7 @@ async function withTeamLocks<Row extends { email?: unknown }>(client: SupabaseCl
     if (!locks.enabled) return rows;
     return rows.map(row => {
       const notice = teamLockNotice(locks.byEmail[normalizeLockEmail(row.email)]);
-      return notice ? { ...row, teamLock: notice.text } : row;
+      return notice ? { ...row, teamLock: notice.text, teamLockBlocks: notice.blocks } : row;
     });
   } catch {
     return rows;
