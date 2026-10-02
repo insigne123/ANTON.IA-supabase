@@ -66,3 +66,30 @@ test('claiming that a small group «works better» is caught', async () => {
     : answer(`${REPLY}\n\nRR. HH. funciona mejor que operaciones.`, DOCUMENT, '¿Guardo estos cargos e industrias como tu cliente ideal en Perfil?'));
   assert.deepEqual(missed, ['no afirma que un grupo «funciona mejor» o «convierte mejor»']);
 });
+
+const offer = ICP_CORPUS.find(item => item.id === 'icp-a-quien-ofrezco')!;
+const recommend = (query: string) => coworkDecisionSchema.parse({ action: 'leads.recommend', query, leadId: null, answer: null });
+const OFFER_REPLY = [
+  'A quienes mejor les calza AXIS son Valentina Fuentes y Matías Soto: lideran equipos de personas en retail y seguridad privada, que contratan en volumen.',
+  '',
+  'Busqué entre tus contactos guardados que aún no reciben nada a jefaturas y gerencias de RR. HH., personas y selección. Valentina tiene correo y ya está investigada; a Matías le falta el correo. Carla también calza, pero es analista: sirve para llegar a su jefatura.',
+  '',
+  'Te propongo prepararlos: buscar el correo de Matías e investigarlo (1 crédito) y dejar a Valentina lista para el primer correo. Nada sale sin tu aprobación.',
+].join('\n');
+
+test('«¿a quiénes les ofrezco X?»: a good turn asks with the terms of the offer and names who fits and what is missing', async () => {
+  const decide: CorpusDecider = async context => context.observations.length === 0 ? recommend('RR. HH., personas, selección, retail, seguridad privada')
+    : coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply: OFFER_REPLY, document: null,
+      question: '¿Preparo a Matías y a Valentina?', suggestions: [{ label: 'Sí, prepáralos', message: 'Prepara a Matías Soto y a Valentina Fuentes' }] } });
+  const outcome = await runCorpusCase(offer, decide);
+  const missed = outcome.checks.filter(check => !check.passed).map(check => check.label);
+  assert.deepEqual(missed, [], `${missed.join(' | ')} · ${outcome.result.failed || outcome.result.reply}`);
+  assert.deepEqual(outcome.result.reads?.map(read => read.action), ['leads.recommend']);
+});
+
+test('«¿a quiénes les ofrezco X?»: recommending without asking, or naming the person another member works, fails', async () => {
+  const blind = (await runCorpusCase(offer, async () => answer('Ofrécele AXIS a Lucía Vera y a Pedro Díaz.', null, '¿Les escribo?')))
+    .checks.filter(check => !check.passed).map(check => check.label);
+  assert.ok(blind.length >= 4, `only failed: ${blind.join(' | ')}`);
+});
+

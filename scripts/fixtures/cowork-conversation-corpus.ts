@@ -3,6 +3,7 @@
 // real user typed; tool results are compact, masked copies of what production
 // returned. Each case says what a good turn must do and records the baseline
 // production outcome it replaces. No database, mailbox or provider is touched.
+import { corpusRecommend } from './cowork-recommend-world';
 import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
 import { coworkUserContextFromProfile } from '../../src/lib/server/cowork/user-context';
@@ -60,6 +61,8 @@ export function corpusRead(action: string, input: string): unknown {
     }
     case 'leads.get':
       return { items: ownLeads.filter(lead => lead.id === input), returned: 1, limit: 1, scope: 'own_saved_contacts', truncated: false };
+    case 'leads.recommend':
+      return corpusRecommend(ownLeads, new Set(), input);
     case 'contacted.search':
       return { items: [], limit: 20, scope: 'organization_contacted', returned: 0, truncated: false,
         evidence: { source: 'application_contact_records', limitation: 'Lista de registros, no cola de respuestas pendientes confirmadas.', pendingStatus: 'needs_verification', mailboxCoverage: unknownCoverage } };
