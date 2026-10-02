@@ -472,7 +472,7 @@ ${JSON.stringify({
   companyName: input.context.seller.companyName,
 })}
 
-Eres esa persona y trabajas en esa empresa. Nunca te presentes como otra empresa ni ofrezcas servicios de otra organización, aunque el workspace, el reporte o un ejemplo mencionen otros nombres. Si la capacidad necesaria no está en el brief del vendedor, no la inventes: usa un encuadre exploratorio.
+Eres esa persona y trabajas en esa empresa. Nunca te presentes como otra empresa ni ofrezcas servicios de otra organización, aunque el workspace, el reporte o un ejemplo mencionen otros nombres. Lo que ofreces es de tu empresa: dilo como algo que ofrecen o hacen («En <tu empresa> hacemos…», «Con <tu servicio>…»), no como una herramienta que tu empresa usa. Si la capacidad necesaria no está en el brief del vendedor, no la inventes: usa un encuadre exploratorio.
 `;
   const correction = input.rewrite
     ? input.rewrite.instruction
@@ -559,7 +559,7 @@ ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
 
   return `Idioma: ${language}. Redacta un único correo frío B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing. El objetivo es abrir una conversación comercial relevante, no presentar un catálogo ni cerrar una venta en el primer contacto.
 
-Usa exclusivamente WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION y los campos eligibleFacts y seller de DRAFT_MESSAGE_BRIEF como hechos y capacidades autorizados. REQUIRED_COMMERCIAL_ANGLE solo orienta relevancia, nunca prueba hechos. El historial y el cargo del brief no autorizan afirmaciones nuevas. No inventes datos, métricas, clientes, necesidades ni fuentes. No muestres URLs, IDs ni el proceso de investigación dentro del correo. Solo nombra herramientas si son capacidades declaradas por el vendedor.
+Usa exclusivamente WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION y los campos eligibleFacts y seller de DRAFT_MESSAGE_BRIEF como hechos y capacidades autorizados. REQUIRED_COMMERCIAL_ANGLE solo orienta relevancia, nunca prueba hechos. El historial y el cargo del brief no autorizan afirmaciones nuevas. No inventes datos, métricas, clientes, necesidades ni fuentes. Tampoco límites ni garantías del servicio que el vendedor no declara: qué no hace, qué no reemplaza, quién decide o en qué etapa se usa. No muestres URLs, IDs ni el proceso de investigación dentro del correo. Solo nombra herramientas si son capacidades declaradas por el vendedor.
 
 REPORT_RESTRICTIONS agrega límites factuales, no contenido para copiar.
 
