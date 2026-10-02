@@ -2,8 +2,10 @@
  * Who in the team holds a contact (Plan 5, PR-9b): «En conversación con Ana», «Contactado por Ana · libre desde el 3 nov».
  * The lock itself lives in organization_contact_threads and the database enforces it when sending; this only says it
  * where people decide whom to write to (Buscar, Por escribir, Cowork). Pure: the screens, Cowork and the tests share it.
+ * Since Plan 6, PR-E a contact another member saved first, still without a thread, says «Guardado por Ana»: only a notice,
+ * nothing is blocked until the first send.
  */
-export type TeamLockStatus = 'reserved' | 'active' | 'closed' | 'suppressed';
+export type TeamLockStatus = 'saved' | 'reserved' | 'active' | 'closed' | 'suppressed';
 
 export type TeamLock = {
   status: TeamLockStatus;
@@ -34,6 +36,7 @@ function shortDate(date: Date) {
 export function teamLockNotice(lock: TeamLock | null | undefined, now = Date.now()): { text: string; blocks: boolean } | null {
   if (!lock || lock.mine) return null;
   const owner = lock.ownerName?.trim() || 'otra persona del equipo';
+  if (lock.status === 'saved') return { text: `Guardado por ${owner}`, blocks: false };
   if (lock.status === 'reserved') return { text: `${owner} está preparando un envío`, blocks: true };
   if (lock.status === 'closed') return { text: `Ganado por ${owner}: no se vuelve a prospectar`, blocks: true };
   if (lock.status === 'suppressed') return { text: 'No contactar: el equipo lo cerró como No interesado', blocks: true };

@@ -26,19 +26,25 @@ try {
   reply.byEmail = {
     'marcela@sodexo.cl': { status: 'active', ownerName: 'Ana Pérez', mine: false, replied: true, lastContactedAt: '2026-09-20T00:00:00Z' },
     'mine@lead.cl': { status: 'active', ownerName: 'Beto Soto', mine: true, replied: false, lastContactedAt: '2026-09-20T00:00:00Z' },
+    'susana@andes.cl': { status: 'saved', ownerName: 'Ana Pérez', mine: false, replied: false, lastContactedAt: null },
   };
-  window.__render(['rafael@otra.cl', 'marcela@sodexo.cl', 'mine@lead.cl']);
+  window.__render(['rafael@otra.cl', 'marcela@sodexo.cl', 'mine@lead.cl', 'susana@andes.cl']);
   await settle();
   assert.equal(requests.length, 1, 'one read for the people on screen');
   assert.equal(requests[0].url, '/api/team-locks');
-  assert.deepEqual(requests[0].body.emails, ['marcela@sodexo.cl', 'mine@lead.cl', 'rafael@otra.cl']);
+  assert.deepEqual(requests[0].body.emails, ['marcela@sodexo.cl', 'mine@lead.cl', 'rafael@otra.cl', 'susana@andes.cl']);
   assert.match(row('marcela@sodexo.cl').textContent, /En conversación con Ana Pérez/);
   assert.ok(row('marcela@sodexo.cl').querySelector('svg[aria-hidden="true"]'), 'the icon is decorative');
   assert.equal(row('mine@lead.cl').textContent, 'mine@lead.cl', 'your own contact says nothing');
   assert.equal(row('rafael@otra.cl').textContent, 'rafael@otra.cl', 'a free contact says nothing');
+  // Plan 6, PR-E: saved first by someone else is a notice in the quiet tone, not the warning of a lock.
+  const saved = row('susana@andes.cl').querySelector('span');
+  assert.match(saved.textContent, /^Guardado por Ana Pérez$/);
+  assert.ok(saved.className.includes('text-muted-foreground') && !saved.className.includes('amber'), saved.className);
+  assert.ok(row('marcela@sodexo.cl').querySelector('span').className.includes('text-amber-700'), 'a lock keeps its warning tone');
 
   // The same people in another order do not read again; without collaboration nothing appears.
-  window.__render(['mine@lead.cl', 'rafael@otra.cl', 'marcela@sodexo.cl']);
+  window.__render(['mine@lead.cl', 'susana@andes.cl', 'rafael@otra.cl', 'marcela@sodexo.cl']);
   await settle();
   assert.equal(requests.length, 1);
   reply = { enabled: false, byEmail: {}, byProviderId: {}, byLinkedin: {} };
@@ -46,5 +52,5 @@ try {
   await settle();
   assert.equal(requests.length, 2);
   assert.equal(row('marcela@sodexo.cl').textContent, 'marcela@sodexo.cl');
-  console.log('PASS: team notices read once per set of people, show only someone else\'s contacts and nothing without collaboration.');
+  console.log('PASS: team notices read once per set of people, show only someone else\'s contacts («Guardado por» in the quiet tone) and nothing without collaboration.');
 } finally { window.close(); }
