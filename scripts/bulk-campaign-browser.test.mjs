@@ -7,7 +7,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 
-const { chromium } = await import(pathToFileURL(path.join(process.env.LOCALAPPDATA, 'Temp/opencode/campaign-browser/node_modules/playwright/index.mjs')).href);
+// The maintainer's Playwright by default; PLAYWRIGHT_MODULE and PLAYWRIGHT_EXECUTABLE run it elsewhere (a Linux Chromium, for example).
+const playwrightModule = process.env.PLAYWRIGHT_MODULE || path.join(process.env.LOCALAPPDATA || '', 'Temp/opencode/campaign-browser/node_modules/playwright/index.mjs');
+const { chromium } = await import(pathToFileURL(playwrightModule).href);
+const launchOptions = process.env.PLAYWRIGHT_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE, headless: true } : { channel: 'chrome', headless: true };
 test('campaign workspace: AI rank, manual filters, profiles, AI proposal, individual edit, rejection, approval, revision, history, responsive and keyboard', async () => {
   const output = await build({
     stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {BulkCampaignWorkspace} from './src/components/campaigns/BulkCampaignWorkspace'; createRoot(document.getElementById('root')).render(<BulkCampaignWorkspace/>);`, loader: 'tsx', resolveDir: process.cwd() },
@@ -24,7 +27,7 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
   try {
     execFileSync(process.execPath, ['node_modules/tailwindcss/lib/cli.js', '-i', 'src/app/globals.css', '-o', path.join(temp, 'styles.css')], { env: process.env, stdio: 'pipe' });
     const css = readFileSync(path.join(temp, 'styles.css'), 'utf8') + readFileSync('src/styles/design-tokens.css', 'utf8');
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
+    browser = await chromium.launch(launchOptions);
     for (const theme of ['light', 'dark']) {
       const page = await browser.newPage({ viewport: { width: 380, height: 900 }, colorScheme: theme });
       const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -70,7 +73,8 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       await page.getByLabel('Nombre de campaña').fill('Campaña de prueba');
       await page.getByLabel('Describe tu lead ideal').fill('Reclutadores con poder de compra en empresas de retail');
       await page.getByRole('button', { name: 'Buscar leads ideales' }).click();
-      await page.getByText('1 resultados', { exact: false }).waitFor();
+      await page.getByText('1 resultado ·', { exact: false }).waitFor();
+      await page.getByRole('columnheader', { name: 'Empresa y cargo' }).waitFor();
       await page.getByText('evaluó 5 leads', { exact: false }).waitFor();
       await page.getByRole('button', { name: 'Seleccionar todos' }).click();
       assert.equal(await page.getByRole('checkbox', { name: /Ana Pérez/ }).isChecked(), true);
@@ -79,11 +83,18 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       await page.getByLabel('Buscar en resultados').fill('ana');
       await page.getByRole('button', { name: 'Buscar con filtros' }).click();
       await page.getByText('Sin envíos registrados', { exact: true }).waitFor();
+      if (process.env.CAMPAIGN_SCREENSHOT_DIR) for (const width of [390, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.screenshot({ path: path.join(process.env.CAMPAIGN_SCREENSHOT_DIR, `campaign-audience-${theme}-${width}.png`), fullPage: true });
+      }
+      await page.setViewportSize({ width: 380, height: 900 });
       await page.getByText('Perfiles de audiencia guardados', { exact: false }).click();
       await page.getByLabel('Nombre del perfil').fill('Perfil de prueba');
       await page.getByRole('button', { name: 'Guardar criterios actuales' }).click();
       await page.getByText('Perfil guardado.', { exact: true }).waitFor();
       await page.getByRole('button', { name: 'Continuar a correos' }).click();
+      await page.getByRole('button', { name: 'Volver a Audiencia' }).waitFor();
+      assert.equal(await page.locator('li[aria-current="step"]').textContent().then(text => text.includes('Correos')), true);
       assert.equal(await page.getByRole('button', { name: 'Generar secuencia con IA', exact: true }).isDisabled(), true);
       const objective = 'Presentar el servicio AXIS y proponer una conversación sobre selección de colaboradores';
       await page.getByLabel('¿Qué quieres conseguir con la campaña?').fill(objective);
@@ -135,6 +146,12 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       await page.getByRole('button', { name: 'Seguimiento 1', exact: true }).click();
       assert.equal(await page.getByLabel('Asunto', { exact: true }).inputValue(), 'Propuesta de conversación');
       await page.getByRole('button', { name: 'Guardar y revisar correos' }).click();
+      await page.getByRole('heading', { name: 'Qué pasa al aprobar' }).waitFor();
+      if (process.env.CAMPAIGN_SCREENSHOT_DIR) for (const width of [390, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.screenshot({ path: path.join(process.env.CAMPAIGN_SCREENSHOT_DIR, `campaign-review-${theme}-${width}.png`), fullPage: true });
+      }
+      await page.setViewportSize({ width: 380, height: 900 });
       await page.getByRole('button', { name: 'Editar correo inicial de esta persona' }).click();
       await page.getByLabel('Asunto individual').fill('Solo para Ana');
       assert.equal(await page.getByRole('button', { name: 'Aprobar campaña' }).isDisabled(), true);
