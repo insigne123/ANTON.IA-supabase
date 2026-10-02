@@ -143,6 +143,49 @@ Archivos: `src/lib/cowork/lead-recommend.ts` (cálculo puro) y `src/lib/server/c
   - un buen turno pide con los cargos de la oferta y nombra a quienes calzan;
   - recomendar sin leer, o nombrar a quien trabaja otro miembro, falla.
 
-## Lo que sigue
+## Pantallas (PR-2c)
 
-- **PR-2c:** la tarjeta en «Perfil» y «Recomendados para ti» en Inicio.
+Lo mismo que lee Cowork, a la vista de todos los usuarios, con la sesión de cada uno (la seguridad por filas aplica igual que en el resto de la app).
+
+### «Lo que dicen tus resultados», en Perfil › Tu cliente ideal
+
+**Muestra:**
+- personas contactadas, respuestas y personas con interés, con su período y el rango probable de cada tasa;
+- un aviso cuando la muestra es chica: con menos de 30 personas, las diferencias pueden ser azar;
+- una tabla por área del cargo, industria, ubicación o nivel.
+  - En «Industria», las que trajeron interés se suman a «Industrias de tus clientes» con un clic.
+  - Nada se guarda hasta que la persona guarda el perfil.
+- cuántos contactos calzan con el cliente ideal y cuántos aún no reciben nada, con un enlace a «Recomendados para ti»;
+- lo que falta y cómo se calcula.
+
+**Archivos:**
+- `src/components/profile/IcpResultsPanel.tsx`;
+- `src/app/api/icp/route.ts`.
+
+### «Recomendados para ti», en Inicio
+
+**Muestra:**
+- los 10 mejores de `leads.recommend` (5 a la vista), con su calce, por qué calzan y qué les falta;
+- cuántos calzan, cuántos tienen correo y cuántos trabaja otro miembro.
+
+**Cada uno va donde se actúa:**
+- a «Por escribir» para escribirle;
+- a «Por completar» para buscar su correo.
+
+**Sin cliente ideal en «Perfil»,** ordena por nivel y preparación, e invita a definirlo.
+
+**Archivos:**
+- `src/components/home/RecommendedLeads.tsx`;
+- `src/app/api/leads/recommendations/route.ts`.
+
+### Dos correcciones a los datos del análisis
+
+- **Las etapas del pipeline se leen con sus tres nombres:**
+  - `lead_saved|`, `lead_enriched|` y `enriched_lead|` (este último lo escribe `crm-service.ts`);
+  - antes solo se leía `lead_saved|`;
+  - en producción, el 2 oct 2026, 37 de 39 fichas del pipeline usaban los otros dos nombres, así que las reuniones y los ganados no se contaban.
+- **La cobertura cuenta también «Por escribir».** Una persona en las dos listas cuenta una vez, como en `leads.recommend`.
+
+**Pruebas:**
+- `src/lib/icp/view.test.ts`;
+- los casos nuevos de `src/lib/cowork/icp.test.ts` y `src/lib/server/cowork/icp-read.test.ts`.

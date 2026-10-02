@@ -52,3 +52,17 @@ test('a failed read is an error, never an empty history', async () => {
     async range() { return { data: null, error: { message: 'private' } }; }, async maybeSingle() { return { data: null, error: null }; } };
   await assert.rejects(readCoworkIcp({ from: () => chain } as never, { userId: USER, organizationId: ORG }, ''), /historial/);
 });
+
+test('«Por escribir» counts in the coverage, once for the saved contact it came from', async () => {
+  const client = fakeClient({
+    contacted_leads: [],
+    leads: [{ id: 'l1', title: 'Gerente de Personas', industry: 'Retail', country: 'Chile', city: 'Santiago' },
+      { id: 'l2', title: 'Jefa de Personas', industry: 'Retail', country: 'Chile', city: 'Santiago' }],
+    enriched_leads: [{ id: 'e1', title: 'Gerente de Personas', organization_industry: 'Retail', country: 'Chile', city: 'Santiago', source_saved_lead_id: 'l1' },
+      { id: 'e2', title: 'Gerenta de Personas', organization_industry: 'Retail', country: 'Chile', city: 'Santiago', source_saved_lead_id: null }],
+    unified_crm_data: [],
+  }, { signatures: { profile_extended: { targetRoles: ['Personas'] } } });
+  const result = await readCoworkIcp(client as never, { userId: USER, organizationId: ORG }, '');
+  assert.equal(result.coverage?.savedContacts, 3, 'e1 stands for l1');
+  assert.equal(result.coverage?.fitNotContacted, 3);
+});
