@@ -78,6 +78,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'missions.list': { label: 'Revisó tus misiones', source: 'Misiones', icon: 'target' },
   'exceptions.list': { label: 'Revisó incidencias abiertas', source: 'Incidencias', icon: 'alert' },
   'audience.analyze': { label: 'Analizó tu audiencia', source: 'Audiencia', icon: 'audience' },
+  'icp.analyze': { label: 'Analizó tu cliente ideal', source: 'Cliente ideal', icon: 'audience' },
   'agenda.today': { label: 'Armó tu lista de hoy', source: 'Agenda', icon: 'calendar' },
   'credits.balance': { label: 'Revisó tu saldo de créditos', source: 'Créditos', icon: 'scale' },
   'gmail.contact_history': { label: 'Revisó correos en tu Gmail', source: 'Gmail', icon: 'mail' },
