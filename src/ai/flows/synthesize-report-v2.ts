@@ -1,5 +1,5 @@
 import {
-  AnalysisV2Schema, ReportV2SectionKeySchema, validateReportV2,
+  AnalysisV2Schema, REPORT_V2_ANGLE_TITLE, ReportV2SectionKeySchema, validateReportV2,
   type AnalysisV2, type ClaimV2, type CommitteeMemberV2, type EntityResolutionV2, type FactV2, type GapV2,
   type QualificationV2, type ReportV2, type SectionV2, type SourceV2,
 } from '@/lib/report-v2-contracts';
@@ -216,6 +216,7 @@ export async function synthesizeReportV2(input: {
     if (section.key === 'committee') return { ...section, title: 'Personas a involucrar', blocks: analysis.buyingCommittee.length ? [{ type: 'committee' as const, title: 'Contacto y roles', claimIds: [...new Set(analysis.buyingCommittee.flatMap((member) => member.claimIds))], payload: analysis.buyingCommittee }] : [] };
     if (section.key === 'volume' && analysis.volumeModel) return { ...section, title: 'Escenarios de volumen', blocks: [{ type: 'table' as const, title: 'Supuestos configurados', claimIds: [analysis.volumeModel.baseClaimId], payload: analysis.volumeModel }] };
     if (section.key === 'gaps' && gaps.length) return { ...section, title: 'Pendientes relevantes', blocks: [{ type: 'gaps' as const, title: 'Para completar la preparacion', claimIds: [], payload: gaps }] };
+    if (section.key === 'angle' && section.paragraphs.length) return { ...section, title: REPORT_V2_ANGLE_TITLE };
     return section;
   });
   const issues = review.issues.map((issue) => issue.severity === 'block'

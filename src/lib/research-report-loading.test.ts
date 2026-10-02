@@ -3,7 +3,7 @@ import test from 'node:test';
 import { buildDeterministicResearchReportDocumentV1 } from '@/ai/flows/synthesize-research-report';
 import { draftSnapshotFixture } from '@/lib/server/draft-v2-test-fixtures';
 import { parseResearchReportDetail, parseResearchWorkspaceRun } from '@/lib/research-workspace';
-import { estimatedResearchProgress, researchDetailLoadingState, researchItemPresentation, researchReportLoadingState } from './research-report-loading';
+import { estimatedResearchProgress, researchDetailLoadingState, researchElapsedLabel, researchItemPresentation, researchReportLoadingState, researchReportPhase } from './research-report-loading';
 
 test('raw evidence never becomes a report while research or editorial work is pending', () => {
   for (const status of ['queued', 'running', 'retry_scheduled'] as const) {
@@ -57,7 +57,7 @@ test('rail labels and drafting follow editorial state, including load errors', (
   assert.equal(researchItemPresentation(item, detail).canCreateDraft, false);
 });
 
-test('elapsed estimate advances beyond two minutes, survives remounts and never reaches 100', (t) => {
+test('elapsed estimate advances beyond the measured times, survives remounts and never reaches 100', (t) => {
   const start = '2026-09-09T12:00:00.000Z';
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse(start) });
   let previous = 0;
@@ -65,7 +65,10 @@ test('elapsed estimate advances beyond two minutes, survives remounts and never 
     t.mock.timers.tick(1000);
     const progress = estimatedResearchProgress(start, Date.now());
     assert.ok(progress.value > previous && progress.value < 95);
-    assert.equal(progress.longRunning, second >= 120);
+    // Half the runs take under 157 s and 9 in 10 under 505 s (production, 2 Oct): typical at 160 s, slow from 510 s.
+    assert.equal(progress.longRunning, second >= 160);
+    assert.equal(progress.slow, second >= 510);
+    assert.equal(progress.elapsedMs, second * 1000);
     previous = progress.value;
   }
   assert.equal(estimatedResearchProgress(start, Date.now()).value, previous);
@@ -74,3 +77,21 @@ test('elapsed estimate advances beyond two minutes, survives remounts and never 
   assert.equal(estimatedResearchProgress('invalid', Date.now()).hasStart, false);
   assert.equal(estimatedResearchProgress('2099-01-01', Date.now()).value, 0);
 });
+
+test('the step comes from the job first and then from the written report; a scheduled retry says so', () => {
+  assert.equal(researchReportPhase({ status: 'queued' }), 'research');
+  assert.equal(researchReportPhase({ status: 'running', synthesis: null }), 'research');
+  assert.equal(researchReportPhase({ status: 'completed', synthesis: { status: 'running' } }), 'writing');
+  assert.equal(researchReportPhase({ status: 'partial', synthesis: { status: 'queued' } }), 'writing');
+  assert.equal(researchReportPhase({ status: 'completed', synthesis: null }), 'writing', 'the job is done: the report is being written');
+  assert.equal(researchReportPhase({ status: 'completed', synthesis: { status: 'retry_scheduled' } }), 'retry');
+});
+
+test('the time it has taken reads in seconds and minutes', () => {
+  assert.equal(researchElapsedLabel(0), '0 s');
+  assert.equal(researchElapsedLabel(45_400), '45 s');
+  assert.equal(researchElapsedLabel(120_000), '2 min');
+  assert.equal(researchElapsedLabel(130_999), '2 min 10 s');
+  assert.equal(researchElapsedLabel(-5), '0 s');
+});
+

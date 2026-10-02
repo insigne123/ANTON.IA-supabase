@@ -6,7 +6,7 @@ import { ReportV2SectionKeySchema, type AnalysisV2, type ClaimV2, type EntityRes
 import type { SellerProfileContextV2 } from './reason-about-report-v2-account';
 import { serializeReportV2Context } from './write-report-v2-section';
 
-export const WRITE_REPORT_V2_PROMPT_VERSION = 'report-v2/editor/7';
+export const WRITE_REPORT_V2_PROMPT_VERSION = 'report-v2/editor/8';
 
 export class ReportV2EditorCitationError extends Error {
   constructor(readonly sections: SectionV2[], readonly telemetry: Awaited<ReturnType<typeof generateStructuredWithTelemetry>>['telemetry']) {
@@ -44,7 +44,7 @@ const EditorOutputSchema = z.object({
       basis: z.enum(['source', 'profile', 'analysis', 'recommendation']),
       claimIds: z.array(z.string().regex(/^c\d{2,4}$/)).max(12),
       context: z.enum(['target', 'headquarters']),
-    }).strict()).max(6),
+    }).strict()).max(9).describe('Hasta 6 parrafos por seccion; angle puede llegar a 9: sus angulos, el primer correo, los dos seguimientos y que no afirmar.'),
   }).strict()).min(1).max(15),
 }).strict();
 
@@ -73,8 +73,8 @@ Analisis de especialistas: ${serializeReportV2Context(input.analysis)}
 Afirmaciones respaldadas: ${serializeReportV2Context(claims)}
 IDs permitidos en claimIds: ${JSON.stringify(claims.map((claim) => claim.id))}. basis=source exige al menos un ID de esta lista. Ausencia de datos, perfil, hipotesis y propuestas NO son basis=source.
 
-Entrega un reporte sustantivo de 1100 a 1600 palabras, sin repetir contexto entre secciones ni convertirlo en una lista gigante de campos vacios.
-Secciones principales: verdict (resumen y decision), company (actividad y operacion), contact (rol, responsabilidades e influencia probable), fit (2-3 oportunidades especificas con proceso, mejora y piloto), angle (apertura util y siguiente paso), discovery (4-6 preguntas exactas, no solo 'conviene validar'), risks (solo limites que cambien la decision).
+Entrega un reporte sustantivo de 1300 a 1900 palabras, sin repetir contexto entre secciones ni convertirlo en una lista gigante de campos vacios.
+Secciones principales: verdict (resumen y decision), company (actividad y operacion), contact (rol, responsabilidades e influencia probable), fit (2-3 oportunidades especificas con proceso, mejora y piloto), angle (como usarlo en el correo y los seguimientos), discovery (4-6 preguntas exactas, no solo 'conviene validar'), risks (solo limites que cambien la decision).
 Opcionales: signals si existen eventos reales; regulatory solo si es relevante; gaps solo si aporta tareas concretas no repetidas. No rellenes para completar una plantilla. No generes sources, snapshot, committee ni volume: la aplicacion los compone desde datos.
 COBERTURA COMERCIAL: intenta responder todas estas dimensiones agrupadas en las secciones existentes. Prioriza datos disponibles y analisis util; agrupa los datos ausentes en una frase por tema, sin inventarlos.
 - company: nombre, sitio y LinkedIn corporativo disponibles (los enlaces van en fuentes/perfil, no en prosa), industria/subindustria, pais, ciudades y mercados operativos, productos/servicios, tipos de clientes B2B/B2C/B2G y competencia. Distingue grupo de operacion local en empleados e ingresos. Si no hay base para facturacion, dotacion, ciudades o competidores concretos, dilo brevemente; puedes analizar alternativas como equipo interno o proveedor actual como hipotesis, no nombrar rivales por memoria.
@@ -82,7 +82,7 @@ COBERTURA COMERCIAL: intenta responder todas estas dimensiones agrupadas en las 
 - contact: nombre, cargo, area, seniority, antiguedad, ubicacion y responsabilidades/decisiones probables; separa datos importados de inferencias. Mapa por roles: dueno del dolor, usuarios, evaluadores, aprobador de presupuesto, firmante y posibles bloqueadores; explica como se relacionarian y como el contacto podria introducirlos, sin inventar nombres ni jerarquias confirmadas. LinkedIn, email y telefono solo en el perfil privado determinista si existen; no busques ni inventes datos personales.
 - fit: por oportunidad, plantea proceso actual hipotetico, pasos manuales posibles, participantes, latencia, errores/riesgos, informacion faltante, tareas repetitivas, automatizacion y KPI. Coste: formula con volumen * minutos / 60 * coste/hora, solo si ayuda y con supuestos explicitos, nunca coste observado. Un escenario ilustrativo no exige fuente web, pero debe etiquetarse como tal, dar rango y supuestos y no aparentar una estimacion real de la empresa.
 - signals/risks: considera contrataciones, financiacion, cambio de CEO/directivos, reestructuracion, expansion/oficinas/mercados/productos, licitaciones/contratos, M&A, regulacion y noticias. Solo relata eventos respaldados y fechados. Si no hay ninguno, resume en risks que no se identificaron detonantes recientes verificables y que no hay urgencia ni iniciativa de compra confirmadas; no implica que no existan ni impide conversar.
-- angle: motivo especifico para este contacto, apertura reciente SOLO si hay evento real, dolor hipotetico, beneficio concreto, angulo y CTA. Casos de exito/clientes similares/metricas logradas solo si el vendedor los aporta; si no, di una vez que no hay caso comparable disponible y propone medir un piloto, sin fabricar logos ni resultados.
+- angle: es la guia para escribirle, segun la oferta real. Cada punto en su propio parrafo y en este orden: (1) de 3 a 5 angulos para este contacto, cada uno con el dato o la senal que lo respalda (basis=source con sus claimIds) o dicho como hipotesis del rol (basis=analysis), con el dolor hipotetico y el beneficio concreto; apertura reciente SOLO si hay evento real. (2) Una idea de primer correo, basis=recommendation: asunto y 2 o 3 frases con el angulo mas fuerte y un CTA de bajo esfuerzo. (3) Dos ideas de seguimiento en un parrafo, basis=recommendation: cada una con un angulo distinto y algo nuevo que aportar (un dato, una pregunta o un recurso), nunca 'solo queria saber si viste mi correo'. (4) Que no afirmar, basis=analysis: los datos que no se pudieron confirmar y lo que el vendedor no puede respaldar. Casos de exito/clientes similares/metricas logradas solo si el vendedor los aporta; si no, di una vez que no hay caso comparable disponible y propone medir un piloto, sin fabricar logos ni resultados.
 Las preguntas y aperturas deben ser neutrales: 'si existe trabajo manual, en que etapa...' en lugar de presuponerlo. Toda la salida debe estar en el idioma solicitado, sin fragmentos en otro idioma salvo nombres o cargos originales.
 En fit, escribe CADA oportunidad en su propio parrafo con proceso, mejora posible, piloto acotado y una metrica concreta: que medir, unidad y comparacion con la linea base. Ejemplos: minutos por expediente antes/despues; porcentaje de expedientes completos al primer envio; horas para resolver una excepcion. No basta 'medir eficiencia' ni una lista global de indicadores. Son criterios propuestos, no ahorros garantizados ni valores actuales inventados.
 Respeta el cargo: para Finanzas/CFO prioriza facturacion, cobranza, cierre y excepciones documentales/financieras compatibles con la evidencia y la oferta. No reemplaces el caso financiero por ingreso de personal, FAQs de RRHH o reporting generico; conecta respaldos operativos con la decision financiera. Para Reclutamiento usa candidatos, entrevistas y expedientes; para TI, integraciones, permisos y soporte. No asumas que esos problemas o procesos existen: plantea hipotesis y preguntas.

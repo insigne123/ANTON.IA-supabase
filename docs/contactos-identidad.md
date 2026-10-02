@@ -35,6 +35,40 @@
    - Al 1 oct calzaban 15 contactos.
    - El resto nunca buscó su correo; se corrige al buscarlo.
 
+## Los nombres ocultos que quedaron (Plan 6, PR-F)
+
+**En producción, el 2 oct (solo lectura):** 21 contactos de «Por escribir» seguían con el apellido oculto. Se enriquecieron antes de este cambio y su búsqueda de correo no guardó el nombre real, así que la migración no tenía de dónde copiarlo.
+
+| Cómo se pueden consultar | Contactos |
+|---|---|
+| Por el id de la persona en el proveedor | 13 |
+| Por su LinkedIn | 3 |
+| Sin id ni LinkedIn: vinieron de otro proveedor (FullEnrich) | 5 |
+
+**El script `scripts/repair-masked-names.ts`** vuelve a preguntar al proveedor por cada uno:
+- **por defecto es una simulación:** lista los contactos y cómo se consultaría cada uno, sin llamar al proveedor ni escribir;
+- **con `--apply` consulta al proveedor:**
+  - usa aproximadamente 1 crédito por persona;
+  - no pide correo ni teléfono, y no envía nada a nadie;
+  - con `--limit=N` consulta como máximo N personas;
+  - si el proveedor se queda sin créditos, no consulta a los siguientes;
+- **solo escribe si es la misma persona:**
+  - el id que devuelve es el pedido;
+  - el LinkedIn calza;
+  - el nombre calza con los extremos visibles («Durán» con «Du\*\*\*n»);
+- **escribe con `applyEnrichedIdentity`:** solo llena vacíos y nunca pisa lo que alguien escribió. Si el contacto vino de uno guardado, ese también recibe el nombre;
+- **mide antes y después** cuántos siguen con el apellido oculto.
+
+Los 5 sin id ni LinkedIn no se pueden consultar. Se corrigen editando el nombre a mano o buscando de nuevo a la persona.
+
+**Lo corre el mantenedor**, con la clave del proveedor. El script nunca lee archivos `.env`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run repair:masked-names
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... APOLLO_API_KEY=... npm run repair:masked-names -- --apply --limit=1
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... APOLLO_API_KEY=... npm run repair:masked-names -- --apply
+```
+
 ## Pruebas
 
 - `src/lib/lead-name.test.ts`:
@@ -51,3 +85,9 @@
 - `src/lib/server/apollo-research-context.test.ts`: la investigación de un contacto guardado toma el nombre real de su búsqueda de correo.
 - `supabase/tests/database/leads_identity_backfill.test.sql`: la regla de la migración sobre datos de prueba.
 - `scripts/test-cowork-contact-names.mjs`: DOM de la tabla de Cowork; corre en `verify-cowork`.
+- `src/lib/server/masked-name-repair.test.ts`: la reparación de los nombres que quedaron:
+  - simulación sin llamadas;
+  - consulta por id o por LinkedIn;
+  - otra persona nunca se escribe;
+  - una edición simultánea gana;
+  - `--limit` y sin créditos.

@@ -20,7 +20,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ResearchReportProgress } from '@/components/research/ResearchReportProgress';
-import { researchReportLoadingState } from '@/lib/research-report-loading';
+import { researchReportLoadingState, researchReportPhase } from '@/lib/research-report-loading';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   ReportFieldAnswers,
@@ -28,7 +28,7 @@ import {
   selectPreviewReportFields,
 } from '@/components/research/ReportFieldAnswers';
 import type { ReportFieldAnswer } from '@/lib/report-field-answers';
-import { REPORT_V2_SCHEMA_VERSION, type ReportV2 } from '@/lib/report-v2-contracts';
+import { REPORT_V2_ANGLE_TITLE, REPORT_V2_SCHEMA_VERSION, type ReportV2 } from '@/lib/report-v2-contracts';
 import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
 import { cn } from '@/lib/utils';
 import {
@@ -465,7 +465,9 @@ export function NativeResearchReport({
   const executiveNarrative = narrative ? decorateNarrative(narrative.executiveSummary) : decorateNarrative(v2Paragraphs('verdict'));
   const companyNarrative = narrative ? decorateNarrative(narrative.companyProfile) : decorateNarrative(v2Paragraphs('snapshot', 'company'));
   const leadNarrative = narrative ? decorateNarrative(narrative.leadContext) : decorateNarrative(v2Paragraphs('contact', 'committee'));
-  const commercialNarrative = narrative ? decorateNarrative(narrative.commercialReading) : decorateNarrative(v2Paragraphs('signals', 'angle', 'discovery', 'objections', 'risks'));
+  // Plan 6, PR-C2: the guide to write to this person (its angles, the first email, two follow-ups and what not to claim) is its own block.
+  const writingNarrative = narrative ? [] : decorateNarrative(v2Paragraphs('angle'));
+  const commercialNarrative = narrative ? decorateNarrative(narrative.commercialReading) : decorateNarrative(v2Paragraphs('signals', 'discovery', 'objections', 'risks'));
   const serviceFitNarrative = narrative?.serviceFit
     ? decorateNarrative(narrative.serviceFit).map((paragraph) => ({ ...paragraph, classification: 'fit' as const }))
     : decorateNarrative(v2Paragraphs('fit').map((paragraph) => ({ ...paragraph, classification: 'fit' as const })));
@@ -473,6 +475,7 @@ export function NativeResearchReport({
   const commercialClaims = [...report.signals, ...report.opportunities];
   const showServiceFit = serviceFitNarrative.length > 0;
   const hasCommercialReading = commercialNarrative.length > 0 || commercialClaims.length > 0 || showServiceFit;
+  const hasWritingGuide = writingNarrative.length > 0;
   const hasUnresolvedContradiction = report.contradictions.some((item) => item.status === 'unresolved');
   const hasBlockingGap = report.gaps.length > 0 && !actionAvailable;
   const reviewNeedsAttention = hasUnresolvedContradiction || hasBlockingGap;
@@ -506,6 +509,7 @@ export function NativeResearchReport({
   );
   const [contactOpen, setContactOpen] = useState(false);
   const [companyOpen, setCompanyOpen] = useState(false);
+  const [writingOpen, setWritingOpen] = useState(!isPreview && hasWritingGuide);
   const [commercialOpen, setCommercialOpen] = useState(isPreview ? false : hasCommercialReading);
   const [reviewOpen, setReviewOpen] = useState(isPreview ? false : reviewNeedsAttention);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -532,10 +536,11 @@ export function NativeResearchReport({
   useEffect(() => {
     setContactOpen(false);
     setCompanyOpen(false);
+    setWritingOpen(!isPreview && hasWritingGuide);
     setCommercialOpen(isPreview ? false : hasCommercialReading);
     setReviewOpen(isPreview ? false : reviewNeedsAttention);
     setDetailsOpen(false);
-  }, [hasCommercialReading, isPreview, reportIdentity, reviewNeedsAttention]);
+  }, [hasCommercialReading, hasWritingGuide, isPreview, reportIdentity, reviewNeedsAttention]);
 
   useEffect(() => {
     if (!actionAvailable) return;
@@ -567,7 +572,7 @@ export function NativeResearchReport({
         <p className="mt-2 text-sm text-muted-foreground">Para {leadName}</p>
       </header>
       {synthesisPending && !loadError ? (
-        <ResearchReportProgress key={reportIdentity} startedAt={startedAt || result.startedAt} retryScheduled={reportSynthesis?.status === 'retry_scheduled'} />
+        <ResearchReportProgress key={reportIdentity} startedAt={startedAt || result.startedAt} retryScheduled={reportSynthesis?.status === 'retry_scheduled'} phase={researchReportPhase({ status, synthesis: reportSynthesis })} />
       ) : (
         <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/25 p-5" role="status">
           <h3 className="font-semibold">{loadError ? 'No pudimos actualizar el informe' : synthesisFailed ? 'No pudimos preparar el informe completo' : 'El informe completo no está disponible'}</h3>
@@ -802,6 +807,23 @@ export function NativeResearchReport({
       )}
 
       <div className="divide-y divide-border/60 rounded-3xl border border-border/70 bg-card/35 px-5 sm:px-6">
+        {hasWritingGuide ? (
+          <ReportCollapsibleSection
+            id={`${id}-writing`}
+            eyebrow="Para escribirle"
+            title={REPORT_V2_ANGLE_TITLE}
+            description="Ángulos con su respaldo, una idea de primer correo, dos seguimientos y qué no afirmar."
+            open={writingOpen}
+            onOpenChange={setWritingOpen}
+          >
+            <div className="border-l-2 border-primary/30 pl-4 sm:pl-5">
+              <NarrativeText
+                paragraphs={writingNarrative}
+                empty="Este informe no trae una guía para escribirle."
+              />
+            </div>
+          </ReportCollapsibleSection>
+        ) : null}
         <ReportCollapsibleSection
           id={`${id}-commercial`}
           eyebrow="Lectura comercial"
