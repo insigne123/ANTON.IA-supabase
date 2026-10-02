@@ -1,15 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Focus, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { AlertCircle, Focus, LayoutGrid, Loader2, RefreshCw, Sparkles, Workflow } from 'lucide-react';
 
 import { KanbanBoard } from '@/components/crm/KanbanBoard';
+import { PipelineFlowView } from '@/components/crm/PipelineFlowView';
 import { LeadDetailDrawer } from '@/components/crm/LeadDetailDrawer';
 import { SmartAlerts } from '@/components/crm/SmartAlerts';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
-import type { PipelineStage } from '@/lib/crm-types';
+import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
+import { flowStage } from '@/lib/pipeline-flow';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 import { buildUnifiedRows } from '@/lib/unified-sheet-data';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
@@ -24,6 +27,16 @@ export default function CRMPage() {
     const [focusMode, setFocusMode] = useState(false);
     const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted');
     const [movingLeadIds, setMovingLeadIds] = useState<Set<string>>(new Set());
+    // «Gráfico» shows the flow by stage (Plan 5, PR-10b); «Tablero» is the board to move leads. The choice is remembered.
+    const [view, setView] = useState<'graph' | 'board'>('graph');
+    const [openStage, setOpenStage] = useState<PipelineStage | null>(null);
+    useEffect(() => {
+        try { if (window.localStorage.getItem('anton.crm.view') === 'board') setView('board'); } catch { /* storage unavailable */ }
+    }, []);
+    function chooseView(next: 'graph' | 'board') {
+        setView(next);
+        try { window.localStorage.setItem('anton.crm.view', next); } catch { /* storage unavailable */ }
+    }
 
     useEffect(() => {
         rowsRef.current = rows;
@@ -77,6 +90,7 @@ export default function CRMPage() {
     }
 
     const selectedLead = rows.find((row) => row.gid === selectedLeadId) ?? null;
+    const stageRows = openStage ? rows.filter((row) => flowStage(row) === openStage) : [];
 
     return (
         <div className="flex h-[calc(100dvh-5rem)] min-h-[480px] min-w-0 flex-col overflow-hidden bg-background md:h-[calc(100dvh-5.5rem)]">
@@ -90,15 +104,23 @@ export default function CRMPage() {
                             Las etapas pueden actualizarse cuando se registran eventos de contacto; revisa cada cambio antes de actuar.
                         </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                        <Button
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        <div role="group" aria-label="Vista del pipeline" className="flex rounded-full border p-0.5">
+                            <Button size="sm" variant={view === 'graph' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'graph'} onClick={() => chooseView('graph')}>
+                                <Workflow className="h-4 w-4" /> Gráfico
+                            </Button>
+                            <Button size="sm" variant={view === 'board' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'board'} onClick={() => chooseView('board')}>
+                                <LayoutGrid className="h-4 w-4" /> Tablero
+                            </Button>
+                        </div>
+                        {view === 'board' && <Button
                             variant={focusMode ? 'secondary' : 'outline'}
                             size="sm"
                             onClick={() => setFocusMode((current) => !current)}
                             aria-pressed={focusMode}
                         >
                             <Focus className="h-4 w-4" /> {focusMode ? 'Ver todo' : 'Enfocar etapa'}
-                        </Button>
+                        </Button>}
                         <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => void loadData()} disabled={loading} aria-label="Actualizar pipeline">
                             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                         </Button>
@@ -106,7 +128,7 @@ export default function CRMPage() {
                 </div>
             </header>
 
-            {!loading && <SmartAlerts leads={rows} onAlertClick={(stage) => { setFocusedStage(stage); setFocusMode(true); }} />}
+            {!loading && <SmartAlerts leads={rows} onAlertClick={(stage) => { setFocusedStage(stage); setFocusMode(true); chooseView('board'); }} />}
 
             {loadError && (
                 <Alert variant="destructive" className="m-4 mb-0 w-auto">
@@ -127,6 +149,10 @@ export default function CRMPage() {
                         <p className="font-medium">Aún no hay leads en el pipeline</p>
                         <p className="max-w-sm text-sm text-muted-foreground">Cuando guardes o contactes leads, aparecerán aquí para que puedas organizar su avance.</p>
                     </div>
+                ) : view === 'graph' ? (
+                    <div className="h-full overflow-y-auto">
+                        <PipelineFlowView rows={rows} onOpenStage={setOpenStage} />
+                    </div>
                 ) : (
                     <KanbanBoard
                         leads={rows}
@@ -140,6 +166,24 @@ export default function CRMPage() {
                     />
                 )}
             </main>
+
+            <Sheet open={Boolean(openStage)} onOpenChange={(open) => { if (!open) setOpenStage(null); }}>
+                <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+                    <SheetHeader>
+                        <SheetTitle>{PIPELINE_STAGES.find((stage) => stage.id === openStage)?.label || 'Etapa'}</SheetTitle>
+                        <SheetDescription>{stageRows.length} {stageRows.length === 1 ? 'lead' : 'leads'} en esta etapa. Toca uno para ver su detalle.</SheetDescription>
+                    </SheetHeader>
+                    {stageRows.length ? <ul className="mt-4 space-y-1.5">
+                        {stageRows.map((lead) => <li key={lead.gid}>
+                            <button type="button" onClick={() => setSelectedLeadId(lead.gid)}
+                                className="w-full rounded-xl border px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                <span className="block truncate font-medium">{lead.name || lead.email || 'Sin nombre'}</span>
+                                <span className="block truncate text-xs text-muted-foreground">{[lead.title, lead.company].filter(Boolean).join(' · ') || 'Sin cargo ni empresa'}</span>
+                            </button>
+                        </li>)}
+                    </ul> : <p className="mt-4 text-sm text-muted-foreground">Aún no hay leads en esta etapa.</p>}
+                </SheetContent>
+            </Sheet>
 
             <LeadDetailDrawer
                 lead={selectedLead}

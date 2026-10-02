@@ -296,7 +296,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: 'Ordena a tus contactos por etapa de venta y prioriza a quién mover.',
     steps: [
       'Las etapas son: Nuevos, Calificado, Contactado, Interesado, Reunión, Negociación, Ganado y Perdido.',
-      'Arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
+      '«Gráfico» muestra cuántos hay en cada etapa, qué parte pasa a la siguiente, tus cifras y los contactos nuevos por semana. Pasa el mouse por una etapa para ver sus 5 más recientes; tócala para verlos a todos.',
+      'En «Tablero», arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
       'Abre un contacto para ver su actividad, el responsable y la próxima acción registrada.',
     ],
     faqs: [
