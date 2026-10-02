@@ -157,11 +157,17 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       assert.equal(await page.getByRole('button', { name: 'Aprobar campaña' }).isDisabled(), true);
       await page.getByRole('button', { name: 'Guardar edición individual' }).click();
       await page.getByRole('heading', { name: 'Solo para Ana', exact: true }).waitFor();
+      await page.getByText('Editado para esta persona', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('list', { name: 'Personas de la campaña' }).getByRole('button', { name: /Ana Pérez/ }).getAttribute('aria-current'), 'true');
+      if (process.env.CAMPAIGN_SCREENSHOT_DIR) for (const width of [390, 1280]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.screenshot({ path: path.join(process.env.CAMPAIGN_SCREENSHOT_DIR, `campaign-review-person-${theme}-${width}.png`), fullPage: true });
+      }
       for (const width of [320, 380, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${theme}/${width} overflow`);
       }
-      await page.getByLabel('Vista previa por destinatario').focus();
+      await page.getByRole('list', { name: 'Personas de la campaña' }).getByRole('button', { name: /Ana Pérez/ }).focus();
       await page.keyboard.press('Tab');
       assert.notEqual(await page.evaluate(() => document.activeElement.tagName), 'BODY');
       await page.getByRole('button', { name: 'Rechazar y editar' }).click();
