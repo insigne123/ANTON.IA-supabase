@@ -32,6 +32,6 @@ export function listOpenLicitaciones(dependencies: Dependencies = { fetch: globa
 }
 
 /** The full tender: buyer, amount, region and items. */
-export async function getLicitacion(code: string, dependencies: Dependencies = { fetch: globalThis.fetch, ticket: process.env.MERCADO_PUBLICO_TICKET }) {
+export async function getLicitacion(code: string, dependencies: Dependencies = { fetch: globalThis.fetch, ticket: process.env.MERCADO_PUBLICO_TICKET }): Promise<Tender | null> {
   return (await call({ codigo: code.slice(0, 60) }, dependencies))[0] ?? null;
 }
