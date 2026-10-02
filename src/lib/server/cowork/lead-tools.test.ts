@@ -196,6 +196,7 @@ test('a contact another member holds comes with its team notice, so Cowork does 
   const byName = Object.fromEntries(result.items.map((item: any) => [item.name, item]));
   assert.equal(byName['Marcela Rojas'].teamLock, 'En conversación con Ana Pérez');
   assert.equal('teamLock' in byName['Rafael Díaz'], false, 'a free contact carries no notice');
+});
 
 test('the summary by state reads only the person\'s own rows, three bounded lists, and never names', async () => {
   const calls: Array<[string, ...unknown[]]> = [];
