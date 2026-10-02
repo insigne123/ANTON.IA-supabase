@@ -71,8 +71,8 @@ const PHONE_RECTS = { menu: [8, 12, 40, 40], 'page-help': [8, 300, 40, 40] };
 const PAGE_RECT = [200, 320, 600, 120];
 const PHONE_PAGE_RECT = [120, 16, 358, 120];
 
-async function open({ width = 1280, offer = true, sidebarOpen = true } = {}) {
-  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/dashboard', runScripts: 'outside-only', pretendToBeVisual: true });
+async function open({ width = 1280, offer = true, sidebarOpen = true, at = '/dashboard' } = {}) {
+  const dom = new JSDOM('<div id="root"></div>', { url: `http://localhost${at}`, runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
   Object.defineProperty(window, 'innerWidth', { value: width, configurable: true });
   Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true });
@@ -92,7 +92,7 @@ async function open({ width = 1280, offer = true, sidebarOpen = true } = {}) {
   const listeners = new Set();
   const navigations = [];
   window.__router = {
-    pathname: '/dashboard',
+    pathname: at.split('?')[0],
     subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
     push: (href) => { navigations.push(href); window.__router.pathname = href; listeners.forEach(listener => listener()); },
   };
@@ -276,6 +276,29 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
   } finally { app.close(); }
 }
 
+// 6. «Ver guía en pantalla» in the help center opens the screen with ?guia=1: its guide starts by itself, with no offer,
+//    and the address drops ?guia=1 so a reload does not start it again. A control that never shows up is left out.
+{
+  const app = await open({ offer: false, at: '/saved/leads?guia=1' });
+  try {
+    await waitFor(() => app.window.location.search === '', '?guia=1 leaves the address');
+    assert.equal(app.window.location.pathname, '/saved/leads');
+    await waitFor(() => app.card(), 'the guide starts by itself', 600);
+    assert.match(app.card().textContent, /Contactos sin correo/);
+    assert.doesNotMatch(app.card().textContent, /Los que tienen correo, aquí/, 'the step whose control is missing is skipped');
+    assert.equal(app.doc.querySelector('[role="region"][aria-label^="Guía de"]'), null, 'no offer card first');
+    await waitFor(() => app.calls.posts.length === 1, 'the guide is remembered as seen');
+    assert.deepEqual(app.calls.posts[0], { guide: 'saved' });
+  } finally { app.close(); }
+
+  const plain = await open({ offer: false, at: '/crm' });
+  try {
+    await waitFor(() => plain.calls.gets === 1, 'asked once');
+    await pause(1100);
+    assert.equal(plain.card(), null, 'without ?guia=1 the guide is only offered');
+  } finally { plain.close(); }
+}
+
 // 5. Phones: page controls are highlighted on the page; menu entries through the menu button.
 {
   const app = await open({ width: 390 });
@@ -315,4 +338,4 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
   } finally { app.close(); }
 }
 
-console.log('PASS: the tour opens once for new accounts, walks every screen, can be skipped, replayed or resumed, and works on desktop and phones.');
+console.log('PASS: the tour opens once for new accounts, walks every screen, can be skipped, replayed or resumed, works on desktop and phones, and a screen opened from the help center starts its guide.');

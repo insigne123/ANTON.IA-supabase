@@ -22,7 +22,7 @@ test('answers from the manual and keeps only the sections the person can see', a
   if (answer.source !== 'ai') return;
   assert.equal(answer.answered, true);
   assert.deepEqual(answer.sections.map((section) => section.id), ['por-escribir', 'correo'], 'hidden and unknown sections are dropped');
-  assert.deepEqual(answer.sections[0], { id: 'por-escribir', title: 'Por escribir', href: '/ayuda#por-escribir', screen: '/saved/leads/enriched' });
+  assert.deepEqual(answer.sections[0], { id: 'por-escribir', title: 'Por escribir', href: '/ayuda/por-escribir', screen: '/saved/leads/enriched' });
   assert.match(prompts[0], /La persona está en la pantalla «Por escribir» \[por-escribir\]/);
   assert.match(prompts[0], /PREGUNTA: ¿Cómo envío mi primer correo\?$/);
   assert.doesNotMatch(prompts[0], /\[administracion\]/, 'a member is never told about the admin panel');

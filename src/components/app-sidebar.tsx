@@ -122,6 +122,7 @@ export function AppSidebar() {
 
   const isActiveRoute = (item: NavItem) => [item.href, ...(item.aliases || [])]
     .some((href) => pathname === href || (!item.exact && href !== '/dashboard' && pathname.startsWith(`${href}/`)));
+  const helpActive = pathname === '/ayuda' || pathname.startsWith('/ayuda/');
   const visibleSections = navSections
     .map((section) => ({
       ...section,
@@ -194,10 +195,10 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              isActive={pathname === '/ayuda'}
+              isActive={helpActive}
               className={cn(
                 'h-10 rounded-2xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/82 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground',
-                pathname === '/ayuda' && 'bg-sidebar-accent/95 text-sidebar-accent-foreground',
+                helpActive && 'bg-sidebar-accent/95 text-sidebar-accent-foreground',
               )}
             >
               <Link href="/ayuda" data-tour="help-center" aria-current={pathname === '/ayuda' ? 'page' : undefined}>

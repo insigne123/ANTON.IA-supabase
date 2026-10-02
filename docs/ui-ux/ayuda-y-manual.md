@@ -67,14 +67,22 @@
 
 ### 5. Centro de ayuda (`/ayuda`)
 
-- **Entrada en el menú:** «Centro de ayuda», al pie, sobre «Ver tutorial».
-- **Contenido:**
-  - buscador sin tildes ni mayúsculas, con las preguntas frecuentes primero;
-  - «Pregúntale a la IA»;
-  - índice por grupo, fijo en escritorio;
-  - cada sección con «Ir a <pantalla>»;
+Rediseñado en el Plan 5 (PR-11); detalle en `docs/ayuda-visual.md`.
+
+- **Entrada en el menú:** «Centro de ayuda», al pie, sobre «Ver tutorial». Queda marcada también en la página de cada sección.
+- **Portada:**
+  - buscador grande, sin tildes ni mayúsculas, con las preguntas frecuentes primero;
+  - «Tu camino al primer correo»: 6 pasos numerados con íconos;
+  - «Preguntas populares», con la respuesta a la vista;
+  - «Todos los temas»: una tarjeta por sección, agrupadas;
+  - «Pregúntale a la IA», fija al costado en escritorio;
   - «Ver recorrido por la app».
-- **Enlaces directos:** `/ayuda#perfil` lleva a la sección, y lo usan el «?» y las respuestas de la IA.
+- **Una página por sección (`/ayuda/perfil`):**
+  - pasos como tarjetas numeradas;
+  - consejos y preguntas frecuentes;
+  - «Ir a <pantalla>» y «Ver guía en pantalla», que abre la pantalla con `?guia=1` y arranca su guía;
+  - «Sigue con», con las secciones relacionadas.
+- **Enlaces directos:** `/ayuda/perfil`. Lo usan el «?», las respuestas de la IA y la guía de Cowork. Los enlaces antiguos (`/ayuda#perfil`) llevan a la página de la sección.
 
 ## Medición con el modelo real
 

@@ -457,9 +457,57 @@ export function helpSectionFor(pathname: string | null | undefined, sections: He
   return sections.find((section) => section.routes?.test(path)) || null;
 }
 
-/** Where to read a section in the manual. */
+/** Where to read a section in the manual: its own page in the «Centro de ayuda». */
 export function helpSectionHref(id: string) {
-  return `/ayuda#${id}`;
+  return `/ayuda/${id}`;
+}
+
+/** A section id read from an address (/ayuda/perfil or an old /ayuda#perfil); a malformed one reads as none. */
+export function helpSectionIdFrom(value: string | null | undefined) {
+  try {
+    return decodeURIComponent(String(value || '')).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** The icon of each section in the «Centro de ayuda» (keys of the help icon set, src/components/help/help-icons.tsx). */
+export type HelpIconKey = 'start' | 'today' | 'search' | 'opportunities' | 'contacts' | 'write' | 'mail' | 'companies' | 'table'
+  | 'conversations' | 'campaigns' | 'pipeline' | 'profile' | 'connections' | 'signature' | 'privacy' | 'credits' | 'admin';
+
+export const HELP_ICONS: Record<string, HelpIconKey> = {
+  'primeros-pasos': 'start', hoy: 'today', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
+  'por-escribir': 'write', correo: 'mail', 'empresas-guardadas': 'companies', tabla: 'table', conversaciones: 'conversations',
+  campanas: 'campaigns', pipeline: 'pipeline', perfil: 'profile', conexiones: 'connections', firmas: 'signature',
+  privacidad: 'privacy', creditos: 'credits', administracion: 'admin',
+};
+
+/** «Tu camino al primer correo»: the order of the work, one step per section, in the words of the first visit. */
+export const FIRST_EMAIL_PATH: Array<{ section: string; title: string; text: string }> = [
+  { section: 'perfil', title: 'Cuenta qué vendes', text: 'Tu oferta y tu cliente ideal guían la búsqueda y los correos.' },
+  { section: 'conexiones', title: 'Conecta tu correo', text: 'Gmail u Outlook: los correos salen desde tu cuenta.' },
+  { section: 'buscar', title: 'Encuentra prospectos', text: 'Empresas afines y quién decide dentro de ellas.' },
+  { section: 'por-completar', title: 'Consigue su correo', text: 'Un crédito por persona, solo para quienes eliges.' },
+  { section: 'por-escribir', title: 'Investiga y escribe', text: 'La IA prepara el borrador; tú lo revisas y lo envías.' },
+  { section: 'conversaciones', title: 'Responde y cierra', text: 'Contesta en el mismo hilo y cierra cada conversación.' },
+];
+
+/** The questions people ask the most, as [section, question] of the manual. */
+export const POPULAR_QUESTIONS: Array<[string, string]> = [
+  ['creditos', 'Me quedé sin créditos. ¿Qué hago?'],
+  ['correo', '¿Desde qué correo sale?'],
+  ['conversaciones', 'Alguien me respondió y no aparece. ¿Qué hago?'],
+  ['por-completar', '¿Qué pasa si no se encuentra el correo?'],
+  ['campanas', '¿Aprobar envía todo al instante?'],
+];
+
+/** The popular questions that exist in the manual and the person can see. */
+export function popularHelpQuestions(sections: HelpSection[] = HELP_SECTIONS): Array<{ section: HelpSection; faq: HelpFaq }> {
+  return POPULAR_QUESTIONS.flatMap(([id, question]) => {
+    const section = sections.find((item) => item.id === id);
+    const faq = section?.faqs.find((item) => item.q === question);
+    return section && faq ? [{ section, faq }] : [];
+  });
 }
 
 export function normalizeHelpText(value: string) {
