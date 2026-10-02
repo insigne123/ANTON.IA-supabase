@@ -5,6 +5,7 @@ import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failur
 import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
+import { coworkOpportunitiesAllowed } from './opportunities-read';
 import { coworkWorkerConfigured } from './runs';
 import { loadCoworkHistory } from './conversation-context';
 import { loadCoworkThreadMemory, saveCoworkThreadMemory } from './thread-memory';
@@ -183,6 +184,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // «Preparar contactos» (save, look up the email, research several people with one approval) needs its kind in the database
     // (migration 20261001210000); on unless COWORK_PREPARE_BATCH_ENABLED=false.
     const prepareBatchEnabled = coworkPrepareBatchEnabled();
+    // «Oportunidades» is read only by the accounts that see the section (OPPORTUNITIES_ALLOWED_EMAILS); for the rest it does not exist.
+    const opportunitiesEnabled = await coworkOpportunitiesAllowed(client, scope.userId);
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
@@ -192,6 +195,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       phoneReveal: phoneRevealEnabled,
       linkedinBatch: linkedinBatchEnabled,
       prepareBatch: prepareBatchEnabled,
+      opportunities: opportunitiesEnabled,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
@@ -287,6 +291,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       phoneReveal: phoneRevealEnabled,
       linkedinBatch: linkedinBatchEnabled,
       prepareBatch: prepareBatchEnabled,
+      opportunities: opportunitiesEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       userContext,
       remember: async memory => { await saveCoworkThreadMemory(client, scope, run, memory); },

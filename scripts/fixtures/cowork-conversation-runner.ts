@@ -49,10 +49,10 @@ export const corpusWriterInstructions = coworkAgentInstructions({
 });
 
 /** Instructions for a case: with the Writer, and with contacts.import, email.reply_thread or the LinkedIn batches when the case turns them on. */
-function instructionsFor(writer: boolean, contactsImport: boolean, replyThread = false, linkedinBatch = false, campaignRetry = false, phoneReveal = false) {
-  if (!contactsImport && !replyThread && !linkedinBatch && !campaignRetry && !phoneReveal) return writer ? corpusWriterInstructions : corpusInstructions;
+function instructionsFor(writer: boolean, contactsImport: boolean, replyThread = false, linkedinBatch = false, campaignRetry = false, phoneReveal = false, opportunities = false) {
+  if (!contactsImport && !replyThread && !linkedinBatch && !campaignRetry && !phoneReveal && !opportunities) return writer ? corpusWriterInstructions : corpusInstructions;
   return coworkAgentInstructions({
-    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport, replyThread, linkedinBatch, campaignRetry, phoneReveal,
+    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport, replyThread, linkedinBatch, campaignRetry, phoneReveal, opportunities,
     threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
   });
 }
@@ -168,13 +168,13 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const recorded: CoworkObservation[] = [];
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
-  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport), Boolean(entry.replyThread), Boolean(entry.linkedinBatch), Boolean(entry.campaignRetry), Boolean(entry.phoneReveal));
+  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport), Boolean(entry.replyThread), Boolean(entry.linkedinBatch), Boolean(entry.campaignRetry), Boolean(entry.phoneReveal), Boolean(entry.opportunities));
   const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
-      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal),
+      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
       onCorrection: verdict => {
