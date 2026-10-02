@@ -13,7 +13,7 @@ export const COWORK_GLOSSARY: Record<string, string> = {
   last_30_days: 'últimos 30 días',
   per_contact: 'por contacto',
   contacted_leads: 'envíos registrados en ANTON.IA',
-  own_saved_contacts: 'tus contactos guardados',
+  own_saved_contacts: 'tus contactos (guardados y de «Por escribir»)',
   organization_contacted: 'envíos registrados del equipo',
   organization_replies: 'respuestas registradas del equipo',
   organization_metrics: 'métricas de la organización',

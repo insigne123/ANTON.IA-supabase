@@ -118,7 +118,7 @@ try {
   reset();
   await refuse({ goal: 'save', people: [{ providerId: 'apollo:nadie' }] }, /haberse visto antes en esta conversación/);
   await refuse({ goal: 'research', people: [{ leadId: L(9) }] }, /haberse visto antes/);
-  await refuse({ goal: 'research', people: [{ leadId: L(3) }] }, /contactos guardados tuyos/);
+  await refuse({ goal: 'research', people: [{ leadId: L(3) }] }, /contactos tuyos/);
   state.runStatus = 'completed';
   await refuse({ goal: 'save', people: [{ providerId: 'apollo:rafael' }] }, /ya no admite propuestas/);
   assert.equal(state.batch, null, 'nothing is staged by a refusal');

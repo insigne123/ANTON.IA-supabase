@@ -1,6 +1,7 @@
 /**
- * «Revisa mis leads» (Plan 5, PR-7): the person's saved contacts by state, with exact figures and the next step of each
- * group. In the test of 1 oct Cowork listed the 20 most recent (16) instead. Pure: the read and its tests share it.
+ * «Revisa mis leads» (Plan 5, PR-7): the person's contacts by state, with exact figures and the next step of each group. In the
+ * test of 1 oct Cowork listed the 20 most recent (16) instead. Since Plan 6, PR-A the contacts are the saved ones and those of
+ * «Por escribir», each person once. Pure: the read and its tests share it.
  * Each contact is in exactly one group, the most advanced one: replied, contacted, ready to write (researched, with an
  * email), with an email, without an email.
  */
@@ -15,7 +16,7 @@ export type CoworkLeadsGroup = { id: 'replied' | 'contacted' | 'ready' | 'with_e
 const email = (value: unknown) => String(value || '').trim().toLowerCase();
 const LINKEDIN_PROFILE = /linkedin\.com\/in\//i;
 
-export function coworkLeadsSummary(input: CoworkLeadsSummaryInput, options: { truncated?: boolean } = {}) {
+export function coworkLeadsSummary(input: CoworkLeadsSummaryInput, options: { truncated?: boolean; sources?: { saved: number; porEscribir: number | null } } = {}) {
   const contactedIds = new Set<string>();
   const contactedEmails = new Set<string>();
   const repliedIds = new Set<string>();
@@ -54,8 +55,12 @@ export function coworkLeadsSummary(input: CoworkLeadsSummaryInput, options: { tr
     exact: !options.truncated,
     groups,
     withLinkedinProfile,
-    note: options.truncated
-      ? 'Cuenta los 5.000 contactos guardados más recientes: las cifras son mínimos.'
-      : 'Cada contacto está en un solo grupo, el más avanzado. Contactado cuenta cualquier envío registrado en ANTON.IA.',
+    ...(options.sources ? { sources: options.sources } : {}),
+    note: [
+      options.truncated ? 'Cuenta los 5.000 contactos más recientes de cada lista: las cifras son mínimos.'
+        : 'Cada contacto está en un solo grupo, el más avanzado. Contactado cuenta cualquier envío registrado en ANTON.IA.',
+      options.sources?.porEscribir === null ? 'No se pudo leer «Por escribir»: solo cuenta tus contactos guardados.'
+        : options.sources ? 'Incluye tus contactos guardados y los de «Por escribir»; una persona que está en ambas cuenta una vez.' : '',
+    ].filter(Boolean).join(' '),
   };
 }

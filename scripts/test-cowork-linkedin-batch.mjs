@@ -134,7 +134,7 @@ try {
   state.events = seen([L(1)]);
   await refuse('invite', invites(1, 2), /consultado antes/);
   state.events = seen(ids(1, 2, 3, 4, 5, 6).concat(L(9)));
-  await refuse('invite', invites(1, 9), /contactos guardados de tu organización/);
+  await refuse('invite', invites(1, 9), /contactos de tu organización/);
   assert.equal(state.batch, null, 'nothing is staged by a refusal');
   reset();
   state.runStatus = 'completed';

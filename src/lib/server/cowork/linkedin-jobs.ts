@@ -13,6 +13,7 @@ import {
 } from '@/lib/cowork/linkedin-bridge';
 import { findCompanyReply, findNegotiationHold } from '@/lib/server/campaign-send-guards';
 import { coworkBatchCompanyKeys, coworkLinkedinRunSteps } from '@/lib/cowork/linkedin-batch';
+import { loadOrganizationContacts } from './own-contacts';
 
 export type Scope = { userId: string; organizationId: string };
 
@@ -38,13 +39,11 @@ export function parseCoworkLinkedinJobTarget(targetId: string) {
 export type LeadRow = { id: string; name: string | null; email: string | null; title: string | null;
   company: string | null; linkedin_url: string | null };
 
+/** A saved contact or one of «Por escribir» (Plan 6, PR-A), which brings the LinkedIn the email search found. */
 export async function loadOwnLead(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, leadId: string): Promise<LeadRow> {
-  const { data, error } = await client.from('leads')
-    .select('id,name,email,title,company,linkedin_url')
-    .eq('organization_id', scope.organizationId).eq('id', leadId).maybeSingle();
-  if (error) throw new Error('No se pudo leer el contacto.');
-  if (!data) throw new Error('El contacto no está disponible en tu organización.');
-  return data as LeadRow;
+  const lead = (await loadOrganizationContacts(client as never, scope.organizationId, [leadId])).get(leadId);
+  if (!lead) throw new Error('El contacto no está disponible en tu organización.');
+  return lead;
 }
 
 export async function assertRunOpen(client: ReturnType<typeof getSupabaseAdminClient>, scope: Scope, runId: string) {
