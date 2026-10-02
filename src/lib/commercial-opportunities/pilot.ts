@@ -20,3 +20,8 @@ export function pilotHiringProfile(extra: Partial<Pick<HiringProfile, 'clients' 
     clients: extra.clients ?? [], contactsCompanies: extra.contactsCompanies ?? [],
   };
 }
+
+/** Who decides on temporary staffing in a company that hires: people, operations and general management. «Buscar decisores»
+ * opens Búsqueda on the company with these roles. */
+export const DECISION_MAKER_TITLES = ['Gerente de Recursos Humanos', 'Jefe de Recursos Humanos', 'Gerente de Personas',
+  'Gerente de Operaciones', 'Jefe de Operaciones', 'Gerente General'];

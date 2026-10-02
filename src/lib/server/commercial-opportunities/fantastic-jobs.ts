@@ -8,12 +8,17 @@ import { jobAdFromFantastic, type JobAd } from '@/lib/commercial-opportunities/h
  */
 export const FANTASTIC_ACTOR = 'fantastic-jobs~advanced-linkedin-job-search-api';
 const DEFAULT_USD_PER_JOB = 0.005;
+/** What one job costs on the Apify plan of the account (APIFY_FANTASTIC_USD_PER_JOB), shown before every search. */
+export function fantasticUsdPerJob(configured = process.env.APIFY_FANTASTIC_USD_PER_JOB) {
+  const value = Number(configured);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_USD_PER_JOB;
+}
 
 export type FantasticQuery = { titles: string[]; locations?: string[]; timeRange?: '24h' | '7d' | '6m'; limit?: number };
 type Dependencies = { fetch: typeof fetch; token: string | undefined; usdPerJob?: number };
 
 export async function searchFantasticJobs(input: FantasticQuery, dependencies: Dependencies = {
-  fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, usdPerJob: Number(process.env.APIFY_FANTASTIC_USD_PER_JOB) || DEFAULT_USD_PER_JOB,
+  fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, usdPerJob: fantasticUsdPerJob(),
 }) {
   if (!dependencies.token) throw new Error('Falta el token de Apify (APIFY_TOKEN).');
   const limit = Math.max(10, Math.min(1000, input.limit ?? 200));
@@ -23,9 +28,9 @@ export async function searchFantasticJobs(input: FantasticQuery, dependencies: D
     titleSearch: input.titles.slice(0, 30).map(title => /\s/.test(title.trim()) ? title.trim() : `${title.trim().replace(/[oa]s?$/i, '')}:*`),
     locationSearch: input.locations?.length ? input.locations.slice(0, 20) : ['Chile'],
   };
-  const response = await dependencies.fetch(`https://api.apify.com/v2/acts/${FANTASTIC_ACTOR}/run-sync-get-dataset-items?timeout=180&memory=1024`, {
+  const response = await dependencies.fetch(`https://api.apify.com/v2/acts/${FANTASTIC_ACTOR}/run-sync-get-dataset-items?timeout=110&memory=1024`, {
     method: 'POST', headers: { authorization: `Bearer ${dependencies.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(200_000),
+    body: JSON.stringify(body), signal: AbortSignal.timeout(120_000),
   });
   if (response.status === 401 || response.status === 403) throw new Error('Apify rechazó el token.');
   if (response.status === 402) throw new Error('Apify: no queda saldo en la cuenta.');
