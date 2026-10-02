@@ -18,6 +18,11 @@ Se agregan referencias RUNTIME a App Hosting solo cuando sus versiones existen y
 el backend `studio` tiene permiso de lectura. No guardar valores en el repositorio.
 Sin las dos claves nuevas, esas fuentes se muestran como pendientes.
 
+El 2 oct 2026 el usuario creó JSEARCH_API_KEY y MERCADO_PUBLICO_TICKET, versión 1
+ENABLED de cada uno. El mantenedor verificó sus nombres y estado, concedió acceso
+a studio y agregó las referencias runtime en apphosting.yaml. La existencia de la
+versión no sustituye la comprobación de suscripción/ticket contra el proveedor.
+
 ## Fantastic Jobs: límites
 
 Tarifa Free verificada el 2 oct: US$0,005 por aviso y US$0,01 por arranque.

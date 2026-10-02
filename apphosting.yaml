@@ -176,8 +176,7 @@ env:
     availability: [RUNTIME]
 
   # Oportunidades comerciales (plan 8, fase 3): la sección y sus rutas solo para estas cuentas; cualquier otra recibe 404.
-  # Las fuentes leen JSEARCH_API_KEY y APIFY_TOKEN como secretos: el mantenedor los agrega aquí cuando existan en Secret
-  # Manager. Sin ellos, la página dice qué falta y no busca.
+  # Las fuentes usan secretos RUNTIME de Secret Manager, con permiso del backend studio.
   - variable: OPPORTUNITIES_ALLOWED_EMAILS
     value: nicolas.yarur.g@yago.cl
     availability: [RUNTIME]
@@ -197,6 +196,12 @@ env:
     availability: [RUNTIME]
   - variable: APIFY_TOKEN
     secret: APIFY_TOKEN
+    availability: [RUNTIME]
+  - variable: JSEARCH_API_KEY
+    secret: JSEARCH_API_KEY
+    availability: [RUNTIME]
+  - variable: MERCADO_PUBLICO_TICKET
+    secret: MERCADO_PUBLICO_TICKET
     availability: [RUNTIME]
 
   # === Lead provider ===
