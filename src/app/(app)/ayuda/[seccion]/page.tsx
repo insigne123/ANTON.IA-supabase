@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useAuth } from '@/context/AuthContext';
-import { helpSectionById, helpSectionHref, visibleHelpSections } from '@/lib/help/manual';
+import { helpSectionById, helpSectionHref, helpSectionIdFrom, visibleHelpSections } from '@/lib/help/manual';
 import { pageGuideFor } from '@/lib/onboarding/product-tour';
 import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
 
@@ -23,7 +23,7 @@ const HEADING = 'text-base font-semibold tracking-tight';
  */
 export default function HelpSectionPage() {
   const params = useParams<{ seccion?: string }>();
-  const id = decodeURIComponent(String(params?.seccion || ''));
+  const id = helpSectionIdFrom(params?.seccion);
   const { organizationRole } = useAuth();
   const admin = organizationRole === 'owner' || organizationRole === 'admin';
   const sections = useMemo(() => visibleHelpSections({ opportunities: isOpportunitiesEnabled(), admin }), [admin]);

@@ -110,7 +110,7 @@ async function open(seccion, { role = 'member' } = {}) {
 
 // 3. A section that is not for this account, or does not exist: says so and leads back to the Centro de ayuda.
 {
-  for (const [seccion, role] of [['administracion', 'member'], ['no-existe', 'owner'], ['oportunidades', 'admin']]) {
+  for (const [seccion, role] of [['administracion', 'member'], ['no-existe', 'owner'], ['oportunidades', 'admin'], ['%E0%A4%A', 'member']]) {
     const app = await open(seccion, { role });
     try {
       assert.match(app.doc.body.textContent, /Esta sección no está en el manual/, `${seccion} as ${role}`);

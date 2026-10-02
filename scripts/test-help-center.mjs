@@ -159,7 +159,7 @@ async function open({ role = 'member', hash = '', respond = () => ({ status: 500
 // 4. An old link to a section of this page opens the section's own page; an unknown or hidden one stays here.
 {
   for (const [hash, role, expected] of [['#perfil', 'member', ['/ayuda/perfil']], ['#administracion', 'member', []],
-    ['#administracion', 'owner', ['/ayuda/administracion']], ['#no-existe', 'member', []]]) {
+    ['#administracion', 'owner', ['/ayuda/administracion']], ['#no-existe', 'member', []], ['#%E0%A4%A', 'member', []]]) {
     const app = await open({ role, hash });
     try {
       await app.waitFor(() => app.text().includes('Centro de ayuda'), 'the page');

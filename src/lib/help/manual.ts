@@ -459,6 +459,15 @@ export function helpSectionHref(id: string) {
   return `/ayuda/${id}`;
 }
 
+/** A section id read from an address (/ayuda/perfil or an old /ayuda#perfil); a malformed one reads as none. */
+export function helpSectionIdFrom(value: string | null | undefined) {
+  try {
+    return decodeURIComponent(String(value || '')).trim();
+  } catch {
+    return '';
+  }
+}
+
 /** The icon of each section in the «Centro de ayuda» (keys of the help icon set, src/components/help/help-icons.tsx). */
 export type HelpIconKey = 'start' | 'today' | 'search' | 'opportunities' | 'contacts' | 'write' | 'mail' | 'companies' | 'table'
   | 'conversations' | 'campaigns' | 'pipeline' | 'profile' | 'connections' | 'signature' | 'privacy' | 'credits' | 'admin';

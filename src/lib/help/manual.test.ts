@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
-  FIRST_EMAIL_PATH, HELP_GROUPS, HELP_ICONS, HELP_SECTIONS, POPULAR_QUESTIONS, helpSectionFor, helpSectionHref, manualAsText,
-  popularHelpQuestions, searchHelp, visibleHelpSections,
+  FIRST_EMAIL_PATH, HELP_GROUPS, HELP_ICONS, HELP_SECTIONS, POPULAR_QUESTIONS, helpSectionFor, helpSectionHref, helpSectionIdFrom,
+  manualAsText, popularHelpQuestions, searchHelp, visibleHelpSections,
 } from './manual';
 
 test('every section is complete, unique and points at real screens and sections', () => {
@@ -78,6 +78,10 @@ test('the manual does not mention retired or internal things', () => {
 
 test('the Centro de ayuda: a page and an icon per section, the path to the first email and the popular questions', () => {
   assert.equal(helpSectionHref('perfil'), '/ayuda/perfil');
+  assert.equal(helpSectionIdFrom('por-escribir'), 'por-escribir');
+  assert.equal(helpSectionIdFrom('por%2Describir'), 'por-escribir');
+  assert.equal(helpSectionIdFrom('%E0%A4%A'), '', 'a malformed address reads as no section instead of breaking the page');
+  assert.equal(helpSectionIdFrom(undefined), '');
   assert.deepEqual(Object.keys(HELP_ICONS).sort(), HELP_SECTIONS.map((section) => section.id).sort(), 'every section has its icon');
 
   const member = visibleHelpSections({ opportunities: false, admin: false });
