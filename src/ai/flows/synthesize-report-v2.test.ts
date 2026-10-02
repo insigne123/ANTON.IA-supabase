@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { AnalysisV2, SectionV2 } from '@/lib/report-v2-contracts';
+import { REPORT_V2_ANGLE_TITLE, type AnalysisV2, type SectionV2 } from '@/lib/report-v2-contracts';
 import { validateReportV2CoverageGapConsistency } from '@/lib/report-v2-coverage';
 import { synthesizeReportV2 } from './synthesize-report-v2';
 import { ReportV2EditorCitationError } from './write-report-v2';
@@ -39,6 +39,8 @@ test('prepares a complete useful report from profile context without mandatory n
   assert.equal(result.document.analysis.volumeModel, null);
   assert.equal(result.metadata.retryable, false);
   assert.doesNotThrow(() => validateReportV2CoverageGapConsistency(result.document));
+  // Plan 6, PR-C2: the guide to write to the person keeps one name, whatever the editor titled it.
+  assert.equal(result.document.sections.find((section) => section.key === 'angle')?.title, REPORT_V2_ANGLE_TITLE);
 });
 
 test('passes the actual blocking fragments to a single targeted repair and preserves accepted sections', async () => {
@@ -183,6 +185,7 @@ test('unresolved invented seller traction is repaired once then withheld, never 
   assert.equal(audits, 2);
   assert.equal(result.document.synthesis.status, 'partial');
   assert.equal(result.document.sections.find((section) => section.key === 'angle')?.paragraphs.length, 0);
+  assert.notEqual(result.document.sections.find((section) => section.key === 'angle')?.title, REPORT_V2_ANGLE_TITLE, 'an emptied guide is not announced');
   assert.equal(result.metadata.errorCode, 'report_v2_content_withheld');
 });
 

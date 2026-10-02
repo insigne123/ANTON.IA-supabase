@@ -88,3 +88,24 @@ test('initial and repair editor prompts require per-opportunity measurement and 
     assert.equal(result.sections[0].paragraphs[0].text, paragraph.text);
   }
 });
+
+test('the angle section is the guide to write: angles with their support, a first email, two follow-ups and what not to claim', async () => {
+  const paragraph = (text: string, basis = 'recommendation') => ({ text, basis, claimIds: [], context: 'target' });
+  let schema: any = null;
+  await writeReportV2({ entity: { contact: { title: 'Jefa de Reclutamiento' } }, analysis: {}, claims: [], sellerProfile: { products: [{ key: 'axis', description: 'Antecedentes laborales.' }] }, language: 'es' } as any, {
+    generate: (async (options: any) => {
+      schema = options.schema;
+      assert.match(options.prompt, /angle \(como usarlo en el correo y los seguimientos\)/);
+      assert.match(options.prompt, /de 3 a 5 angulos para este contacto, cada uno con el dato o la senal que lo respalda/);
+      assert.match(options.prompt, /Una idea de primer correo, basis=recommendation: asunto y 2 o 3 frases/);
+      assert.match(options.prompt, /Dos ideas de seguimiento en un parrafo/);
+      assert.match(options.prompt, /nunca 'solo queria saber si viste mi correo'/);
+      assert.match(options.prompt, /Que no afirmar/);
+      assert.match(options.prompt, /de 1300 a 1900 palabras/);
+      return { data: { sections: [{ key: 'angle', title: 'Guia', paragraphs: [paragraph('Angulo 1', 'analysis')] }] }, telemetry: { modelName: 'gpt-6-luna', durationMs: 1 } };
+    }) as any,
+  });
+  const section = (count: number) => ({ sections: [{ key: 'angle', title: 'Guia', paragraphs: Array.from({ length: count }, (_, index) => paragraph(`Parte ${index + 1}`)) }] });
+  assert.equal(schema.safeParse(section(9)).success, true, 'five angles, the email, the follow-ups and what not to claim fit');
+  assert.equal(schema.safeParse(section(10)).success, false, 'still bounded');
+});
