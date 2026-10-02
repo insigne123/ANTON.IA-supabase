@@ -25,6 +25,8 @@ const EVENT_REASONS: Record<string, string> = {
   positive_reply: 'Respondió con interés.',
   interested: 'Respondió con interés.',
   meeting_request: 'Pidió una reunión.',
+  reply_negotiation: 'Pidió una propuesta, un precio o un contrato.',
+  reply_won: 'Confirmó que quiere comprar.',
   not_interested: 'Respondió que no le interesa.',
   unsubscribe: 'Pidió no recibir más correos.',
   reply_review_required: 'Respondió; conviene leer qué dijo.',
