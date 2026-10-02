@@ -44,12 +44,16 @@ export const ICP_CORPUS: CorpusCase[] = [
       { label: 'entrega el documento «Tu cliente ideal»', test: result => /(cliente ideal|\bicp\b)/.test(normalize(result.document?.title || '')) },
       says('el documento dice quién compra, a quién no y cómo probarlo', /quien(es)? (te )?compra/, /a quien no/, /(hipotesis|probar|prueba)/),
       says('nombra a RR. HH. o personas como de donde vinieron las respuestas positivas', /(rr\.? ?hh|recursos humanos|personas)/),
-      says('dice que la muestra es chica para concluir', /(muestra (es )?(chica|pequena)|ojo con la muestra|pocas (personas|respuestas)|no alcanza para (concluir|sacar)|no (se )?puede(s)? concluir|pocos datos|no concluy|una pista|no (es )?una conclusion|no son concluyentes)/),
+      says('dice que la muestra es chica para concluir', /(muestras? (es |son )?(chicas?|pequenas?)|ojo con la muestra|pocas (personas|respuestas)|pocos (datos|resultados)|no alcanza para (concluir|sacar)|no (se )?puede(s)? concluir|no permiten? concluir|no concluy|una pista|indicios?|no (es )?una conclusion|no (son )?conclusiones|no son concluyentes)/),
       says('ofrece guardar el cliente ideal en Perfil', /perfil/, /(guard|actualiz|complet)/),
       // A negation («no es prueba de que un grupo funciona mejor») is what the recipe asks for; only the claim fails.
       { label: 'no afirma que un grupo «funciona mejor» o «convierte mejor»', test: (result: CorpusTurnResult) => {
         const text = everything(result);
-        return [...text.matchAll(/(funciona|convierte|rinde)n? mejor/g)].every(match => /\b(no|sin|ni|nunca)\b/.test(text.slice(Math.max(0, match.index! - 60), match.index)));
+        // The sentence that says it: a negation or a doubt in it («no permiten concluir cuál funciona mejor») is not a claim.
+        return [...text.matchAll(/(funciona|convierte|rinde)n? mejor/g)].every(match => {
+          const sentence = text.slice(Math.max(0, match.index! - 140), match.index).split(/[.!?\n]/).pop() || '';
+          return /(\bno\b|\bsin\b|\bni\b|nunca|pocos|pocas|afirmar|concluir|saber|cual|que segmento|\bsi\b)/.test(sentence);
+        });
       } },
       { label: 'no envía ni propone otra cosa que guardar en Perfil', test: result => !result.search && (!result.proposal || result.proposal.kind === 'profile_update') }] },
 ];
