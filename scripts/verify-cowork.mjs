@@ -25,6 +25,8 @@ const checks = [
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-thread-send-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-batch-corpus.test.ts'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-agenda-corpus.test.ts'],
+  ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-icp-corpus.test.ts'],
+  ['--loader', './scripts/ts-test-loader.mjs', '--test', 'scripts/cowork-opportunities-corpus.test.ts'],
   ['scripts/test-cowork-message-context.mjs'],
   ['scripts/test-cowork-enrich-batch.mjs'],
   ['scripts/test-cowork-send-batch.mjs'],

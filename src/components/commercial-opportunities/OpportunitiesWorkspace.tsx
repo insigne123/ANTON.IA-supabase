@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Gavel, Landmark, Loader2, Pencil, RotateCcw, Search, Star, Users, X } from 'lucide-react';
+import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Factory, Gavel, Landmark, Loader2, Pencil, RotateCcw, Search, Star, Upload, Users, X } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -22,7 +22,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { CHILE_REGIONS } from '@/lib/commercial-opportunities/hiring';
 import { DECISION_MAKER_TITLES } from '@/lib/commercial-opportunities/pilot';
-import type { HiringOpportunityData, OpportunityStatus, TenderOpportunityData } from '@/lib/commercial-opportunities/records';
+import type { HiringOpportunityData, OpportunityStatus, ProjectOpportunityData, TenderOpportunityData } from '@/lib/commercial-opportunities/records';
+import { SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
 import {
   FILTER_LABELS, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, lastSearch, parseList, relativeTime, sourceLabel, statusCounts,
   type OpportunityFilter,
@@ -30,7 +31,10 @@ import {
 import { companySearchHref } from '@/lib/search/company-prefill';
 import { cn } from '@/lib/utils';
 
-type Profile = { id: string; name: string; offer: string; roles: string[]; regions: string[]; minAds: number; keywords: string[]; unspscCodes: string[]; updatedAt: string };
+type Profile = {
+  id: string; name: string; offer: string; roles: string[]; regions: string[]; minAds: number; keywords: string[]; unspscCodes: string[];
+  sectors: string[]; minInvestmentUsd: number | null; updatedAt: string;
+};
 type PlanSource = { source: 'jsearch' | 'linkedin'; label: string; enabled: boolean; requests: number; estimateUsd: number; missing: string | null };
 type Opportunity = {
   id: string; company: string; domain: string | null; linkedinUrl: string | null; region: string | null; url: string | null; score: number;
@@ -42,17 +46,23 @@ type TenderOpportunity = {
   deadlineAt: string | null; publishedAt: string | null; url: string | null; score: number; reasons: string[]; status: OpportunityStatus; mine: boolean;
   firstSeenAt: string; data: TenderOpportunityData;
 };
+type ProjectOpportunity = {
+  id: string; title: string; owner: string | null; region: string | null; investmentUsd: number | null; presentedAt: string | null; url: string | null;
+  score: number; reasons: string[]; status: OpportunityStatus; mine: boolean; firstSeenAt: string; data: ProjectOpportunityData;
+};
 type Overview = {
   profile: Profile; plan: { sources: PlanSource[]; estimateUsd: number }; month: { spentUsd: number; capUsd: number };
   tenderSearch: { ticket: boolean; keywords: string[]; unspscCodes: string[] };
-  opportunities: Opportunity[]; tenders: TenderOpportunity[]; runs: Run[];
+  opportunities: Opportunity[]; tenders: TenderOpportunity[]; projects: ProjectOpportunity[]; runs: Run[];
 };
-type Tab = 'hiring' | 'tenders';
+type Tab = 'hiring' | 'tenders' | 'projects';
+type ProjectResult = { status: 'done'; read: number; skipped: number; matched: number; created: number };
 type HiringResult =
   | { status: 'done'; fetched: number; qualifying: number; newQualifying: number; costUsd: number; sources: Array<{ source: string; error: string | null }> }
   | { status: 'capped'; message: string };
 type TenderResult = { status: 'done'; found: number; matched: number; created: number; sources: Array<{ source: string; error: string | null }> };
-const TAB_SOURCES: Record<Tab, string[]> = { hiring: ['jsearch', 'linkedin'], tenders: ['mercado_publico', 'compra_agil'] };
+const TAB_SOURCES: Record<Tab, string[]> = { hiring: ['jsearch', 'linkedin'], tenders: ['mercado_publico', 'compra_agil'], projects: ['seia'] };
+const SEIA_MAP_URL = 'https://sig.sea.gob.cl/mapadeproyectos/';
 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => ({}));
@@ -120,6 +130,24 @@ export function OpportunitiesWorkspace() {
     }
   };
 
+  const uploadProjects = async (file: File) => {
+    setRunning(true);
+    try {
+      const form = new FormData();
+      form.set('file', file);
+      const result = await readJson<ProjectResult>(await fetch('/api/commercial-opportunities/projects', { method: 'POST', body: form }));
+      toast({
+        title: `${result.matched} ${result.matched === 1 ? 'proyecto calza' : 'proyectos calzan'}${result.created ? ` (${result.created} nuevos)` : ''}`,
+        description: `${result.read} proyectos leídos del archivo${result.skipped ? `, ${result.skipped} filas sin nombre` : ''}. El archivo no se guarda.`,
+      });
+    } catch (failure) {
+      toast({ title: 'No se pudo leer el archivo', description: failure instanceof Error ? failure.message : undefined, variant: 'destructive' });
+    } finally {
+      setRunning(false);
+      void load();
+    }
+  };
+
   const changeStatus = async (item: { id: string; status: OpportunityStatus }, status: OpportunityStatus) => {
     if (!overview) return;
     const previous = item.status;
@@ -127,6 +155,7 @@ export function OpportunitiesWorkspace() {
       ...current,
       opportunities: current.opportunities.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
       tenders: current.tenders.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
+      projects: current.projects.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
     });
     setBusy(current => new Set(current).add(item.id));
     setOverview(patch(overview, status));
@@ -144,22 +173,26 @@ export function OpportunitiesWorkspace() {
 
   // The tenders are filtered by their title and buyer, as the companies are by their name.
   const tenderItems = useMemo(() => (overview?.tenders || []).map(item => ({ ...item, company: [item.title, item.buyer].filter(Boolean).join(' · ') })), [overview]);
-  const counts = useMemo(() => statusCounts(tab === 'hiring' ? overview?.opportunities || [] : tenderItems), [overview, tab, tenderItems]);
+  const projectItems = useMemo(() => (overview?.projects || []).map(item => ({ ...item, company: [item.title, item.owner].filter(Boolean).join(' · ') })), [overview]);
+  const counts = useMemo(() => statusCounts(tab === 'hiring' ? overview?.opportunities || [] : tab === 'tenders' ? tenderItems : projectItems),
+    [overview, tab, tenderItems, projectItems]);
   const visible = useMemo(() => filterOpportunities(overview?.opportunities || [], filter, query), [overview, filter, query]);
   const visibleTenders = useMemo(() => filterOpportunities(tenderItems, filter, query), [tenderItems, filter, query]);
+  const visibleProjects = useMemo(() => filterOpportunities(projectItems, filter, query), [projectItems, filter, query]);
+  const fileInput = useRef<HTMLInputElement>(null);
   const enabledSources = overview?.plan.sources.filter(source => source.enabled) || [];
   const overCap = overview ? overview.month.spentUsd + overview.plan.estimateUsd > overview.month.capUsd : false;
   const hiringDisabled = running || !overview || !enabledSources.length;
   const tendersDisabled = running || !overview || !overview.tenderSearch.ticket
     || (!overview.tenderSearch.keywords.length && !overview.tenderSearch.unspscCodes.length);
-  const searchDisabled = tab === 'hiring' ? hiringDisabled : tendersDisabled;
-  const startSearch = () => (tab === 'hiring' ? setConfirmOpen(true) : void runSearch('tenders'));
+  const searchDisabled = tab === 'hiring' ? hiringDisabled : tab === 'tenders' ? tendersDisabled : running || !overview;
+  const startSearch = () => (tab === 'hiring' ? setConfirmOpen(true) : tab === 'tenders' ? void runSearch('tenders') : fileInput.current?.click());
 
   return (
     <div className="mx-auto w-full max-w-6xl">
       <PageHeader
         title="Oportunidades"
-        description="Empresas que están contratando para los cargos de tu oferta y licitaciones públicas que calzan con ella, con la evidencia de cada una."
+        description="Empresas que están contratando para los cargos de tu oferta, licitaciones públicas que calzan con ella y proyectos de inversión por partir, con la evidencia de cada una."
       >
         <Button variant="outline" onClick={() => setEditOpen(true)} disabled={!overview}>
           <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -167,8 +200,10 @@ export function OpportunitiesWorkspace() {
         </Button>
         <Button onClick={startSearch} disabled={searchDisabled}>
           {running ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-          {running ? 'Buscando…' : tab === 'hiring' ? 'Buscar ahora' : 'Buscar licitaciones'}
+          {running ? (tab === 'projects' ? 'Leyendo…' : 'Buscando…') : tab === 'hiring' ? 'Buscar ahora' : tab === 'tenders' ? 'Buscar licitaciones' : 'Subir archivo del SEIA'}
         </Button>
+        <input ref={fileInput} type="file" accept=".csv,.xlsx,text/csv" className="hidden" aria-hidden="true" tabIndex={-1}
+          onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void uploadProjects(file); }} />
       </PageHeader>
 
       {error ? (
@@ -190,10 +225,14 @@ export function OpportunitiesWorkspace() {
                 <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.opportunities.length}</span></TabsTrigger>
               <TabsTrigger value="tenders" className="gap-1.5"><Gavel className="h-4 w-4" aria-hidden="true" />Licitaciones y Compra Ágil
                 <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.tenders.length}</span></TabsTrigger>
+              <TabsTrigger value="projects" className="gap-1.5"><Factory className="h-4 w-4" aria-hidden="true" />Proyectos de inversión
+                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.projects.length}</span></TabsTrigger>
             </TabsList>
-            {(['hiring', 'tenders'] as Tab[]).map(kind => (
+            {(['hiring', 'tenders', 'projects'] as Tab[]).map(kind => (
               <TabsContent key={kind} value={kind} className="mt-0">
-                {kind === 'hiring' ? <SearchSummary overview={overview} running={running} /> : <TenderSummary overview={overview} running={running} />}
+                {kind === 'hiring' ? <SearchSummary overview={overview} running={running} />
+                  : kind === 'tenders' ? <TenderSummary overview={overview} running={running} />
+                    : <ProjectSummary overview={overview} running={running} onUpload={() => fileInput.current?.click()} />}
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrar por estado">
@@ -207,12 +246,13 @@ export function OpportunitiesWorkspace() {
                   </div>
                   <div className="relative w-full sm:w-64">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                    <Input value={query} onChange={event => setQuery(event.target.value)} placeholder={kind === 'hiring' ? 'Buscar empresa' : 'Buscar licitación u organismo'}
-                      aria-label={kind === 'hiring' ? 'Buscar empresa' : 'Buscar licitación'} className="pl-9" />
+                    <Input value={query} onChange={event => setQuery(event.target.value)}
+                      placeholder={kind === 'hiring' ? 'Buscar empresa' : kind === 'tenders' ? 'Buscar licitación u organismo' : 'Buscar proyecto o titular'}
+                      aria-label={kind === 'hiring' ? 'Buscar empresa' : kind === 'tenders' ? 'Buscar licitación' : 'Buscar proyecto'} className="pl-9" />
                   </div>
                 </div>
 
-                <section aria-label={kind === 'hiring' ? 'Empresas contratando' : 'Licitaciones y Compra Ágil'} className="mt-4">
+                <section aria-label={kind === 'hiring' ? 'Empresas contratando' : kind === 'tenders' ? 'Licitaciones y Compra Ágil' : 'Proyectos de inversión'} className="mt-4">
                   {kind === 'hiring' ? (visible.length ? (
                     <ul className="grid gap-4 lg:grid-cols-2">
                       {visible.map(item => (
@@ -223,6 +263,16 @@ export function OpportunitiesWorkspace() {
                     </ul>
                   ) : (
                     <ListEmpty overview={overview} filter={filter} query={query} searchDisabled={hiringDisabled} onSearch={() => setConfirmOpen(true)} onEdit={() => setEditOpen(true)} />
+                  )) : kind === 'projects' ? (visibleProjects.length ? (
+                    <ul className="grid gap-4 lg:grid-cols-2">
+                      {visibleProjects.map(item => (
+                        <li key={item.id} className="min-w-0">
+                          <ProjectCard item={item} busy={busy.has(item.id)} onStatus={status => changeStatus(item, status)} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <ProjectEmpty overview={overview} filter={filter} query={query} disabled={running} onUpload={() => fileInput.current?.click()} />
                   )) : (visibleTenders.length ? (
                     <ul className="grid gap-4 lg:grid-cols-2">
                       {visibleTenders.map(item => (
@@ -244,7 +294,8 @@ export function OpportunitiesWorkspace() {
             onSaved={next => { setOverview(current => current && { ...current, profile: next.profile, plan: next.plan }); void load(); }} />
         </>
       ) : null}
-      <span className="sr-only" aria-live="polite">{running ? (tab === 'hiring' ? 'Buscando empresas que están contratando. Puede tardar hasta 2 minutos.' : 'Buscando licitaciones y Compra Ágil.') : ''}</span>
+      <span className="sr-only" aria-live="polite">{running ? (tab === 'hiring' ? 'Buscando empresas que están contratando. Puede tardar hasta 2 minutos.'
+        : tab === 'tenders' ? 'Buscando licitaciones y Compra Ágil.' : 'Leyendo el archivo del SEIA.') : ''}</span>
     </div>
   );
 }
@@ -559,6 +610,120 @@ function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit
   );
 }
 
+function ProjectSummary({ overview, running, onUpload }: { overview: Overview; running: boolean; onUpload: () => void }) {
+  const { profile } = overview;
+  const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.projects.includes(run.source)));
+  const sectors = SEIA_SECTORS.filter(sector => profile.sectors.includes(sector.id)).map(sector => sector.label);
+  return (
+    <section aria-label="Qué buscamos en el SEIA" className="grid gap-4 rounded-xl border border-border/70 bg-card p-4 shadow-sm md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="min-w-0 space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Qué buscamos en los proyectos del SEIA</p>
+        <ul className="flex flex-wrap gap-1.5" aria-label="Sectores">
+          {(sectors.length ? sectors : ['Todos los sectores']).map(sector => <li key={sector} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{sector}</li>)}
+        </ul>
+        <p className="text-xs text-muted-foreground">
+          En calificación o aprobados, presentados en los últimos dos años
+          {profile.minInvestmentUsd ? ` · desde US$ ${(profile.minInvestmentUsd / 1_000_000).toLocaleString('es-CL')} millones` : ''}
+          {profile.regions.length ? ` · suman calce ${profile.regions.join(', ')}` : ''}
+        </p>
+        <p className="text-xs text-muted-foreground">El titular de cada proyecto es la empresa a contactar: construir y operar un proyecto grande pide personal.</p>
+      </div>
+      <div className="space-y-3 border-t border-border/60 pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Último archivo</p>
+          {running ? <p className="mt-0.5 flex items-center gap-1.5 text-sm text-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Leyendo…</p>
+            : last ? <p className="mt-0.5 text-sm text-foreground">{relativeTime(last.at)} · {last.status === 'failed' ? 'falló' : `${last.fetched.toLocaleString('es-CL')} proyectos leídos`}</p>
+              : <p className="mt-0.5 text-sm text-foreground">Aún no subes uno</p>}
+        </div>
+        <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+          <li>Abre el <a href={SEIA_MAP_URL} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">mapa de proyectos del SEIA<span className="sr-only"> (se abre en otra pestaña)</span></a> y filtra si quieres.</li>
+          <li>Exporta el resultado en CSV.</li>
+          <li>
+            <button type="button" onClick={onUpload} className="rounded font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Súbelo aquí</button>.
+            {' '}Se lee y no se guarda; conviene repetirlo cada mes.
+          </li>
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+function ProjectCard({ item, busy, onStatus }: { item: ProjectOpportunity; busy: boolean; onStatus: (status: OpportunityStatus) => void }) {
+  const interested = item.status === 'interested' || item.status === 'converted';
+  const sector = SEIA_SECTORS.find(entry => entry.id === item.data.sector)?.label;
+  return (
+    <article className={cn('flex h-full flex-col rounded-xl border bg-card p-4 shadow-sm transition-colors motion-safe:animate-in motion-safe:fade-in-0',
+      interested ? 'border-primary/40' : 'border-border/70', item.status === 'dismissed' && 'opacity-80')}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
+            {item.data.presentation ? <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">{item.data.presentation}</span> : null}
+            {item.data.state ? <span className="text-muted-foreground">{item.data.state}</span> : null}
+          </p>
+          <h3 className="line-clamp-2 text-base font-semibold text-foreground">{item.title}</h3>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{[item.owner || 'Titular no informado', item.region].filter(Boolean).join(' · ')}</span>
+          </p>
+        </div>
+        <ScorePill score={item.score} />
+      </div>
+      <p className="mt-3 text-sm text-foreground">
+        <strong className="font-semibold">
+          {item.data.investmentMusd !== null ? `US$ ${item.data.investmentMusd.toLocaleString('es-CL', { maximumFractionDigits: 1 })} millones` : 'Inversión no informada'}
+        </strong>
+        {item.presentedAt ? <> · presentado el {formatDay(item.presentedAt)}</> : null}
+      </p>
+      {sector || item.data.communes ? <p className="mt-1 text-xs text-muted-foreground">{[sector, item.data.communes].filter(Boolean).join(' · ')}</p> : null}
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+        {item.status === 'dismissed' ? (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => onStatus('new')}>
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />Recuperar
+          </Button>
+        ) : (
+          <>
+            <Button size="sm" variant={interested ? 'default' : 'outline'} aria-pressed={interested} disabled={busy} onClick={() => onStatus(interested ? 'new' : 'interested')}>
+              <Star className={cn('h-4 w-4', interested && 'fill-current')} aria-hidden="true" />{interested ? 'Te interesa' : 'Me interesa'}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onStatus('dismissed')}>
+              <X className="h-4 w-4" aria-hidden="true" />Descartar
+            </Button>
+          </>
+        )}
+        <div className="flex flex-wrap gap-2 sm:ml-auto">
+          {item.url ? (
+            <Button size="sm" variant="ghost" asChild>
+              <a href={item.url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4" aria-hidden="true" />Expediente<span className="sr-only"> (se abre en otra pestaña)</span>
+              </a>
+            </Button>
+          ) : null}
+          {item.owner ? (
+            <Button size="sm" variant="secondary" asChild>
+              <Link href={companySearchHref({ company: item.owner, titles: DECISION_MAKER_TITLES })}><Users className="h-4 w-4" aria-hidden="true" />Buscar decisores</Link>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ProjectEmpty({ overview, filter, query, disabled, onUpload }: {
+  overview: Overview; filter: OpportunityFilter; query: string; disabled: boolean; onUpload: () => void;
+}) {
+  if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin proyectos con ese texto" description="Prueba con otra palabra del nombre o del titular." />;
+  if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguno" description="Usa «Me interesa» en los proyectos que quieras seguir: quedan a tu nombre y aparecen aquí." />;
+  if (filter === 'dismissed') return <EmptyState icon={X} headingLevel="h3" title="No hay descartados" description="Los proyectos que descartes quedan aquí y los puedes recuperar." />;
+  const uploaded = overview.runs.some(run => TAB_SOURCES.projects.includes(run.source));
+  return (
+    <EmptyState icon={Factory} headingLevel="h3" title={uploaded ? 'Ningún proyecto del archivo calza' : 'Aún no hay proyectos'}
+      description={uploaded ? 'Con tus sectores e inversión mínima no quedó ninguno. Ajusta la búsqueda o sube un archivo con más regiones.'
+        : 'Exporta en CSV el mapa de proyectos del SEIA y súbelo: verás los proyectos en evaluación o aprobados de tus sectores, con su titular.'}
+      action={<Button onClick={onUpload} disabled={disabled}><Upload className="h-4 w-4" aria-hidden="true" />Subir archivo del SEIA</Button>} />
+  );
+}
+
 function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
   open: boolean; onOpenChange: (open: boolean) => void; overview: Overview; overCap: boolean; onConfirm: () => void;
 }) {
@@ -608,12 +773,15 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
   const [minAds, setMinAds] = useState(String(profile.minAds));
   const [keywords, setKeywords] = useState(profile.keywords.join('\n'));
   const [codes, setCodes] = useState(profile.unspscCodes.join(', '));
+  const [sectors, setSectors] = useState<string[]>(profile.sectors);
+  const [minInvestment, setMinInvestment] = useState(profile.minInvestmentUsd ? String(profile.minInvestmentUsd / 1_000_000) : '');
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState('');
   useEffect(() => {
     if (!open) return;
     setName(profile.name); setOffer(profile.offer); setRoles(profile.roles.join('\n')); setRegions(profile.regions); setMinAds(String(profile.minAds));
-    setKeywords(profile.keywords.join('\n')); setCodes(profile.unspscCodes.join(', ')); setProblem('');
+    setKeywords(profile.keywords.join('\n')); setCodes(profile.unspscCodes.join(', ')); setSectors(profile.sectors);
+    setMinInvestment(profile.minInvestmentUsd ? String(profile.minInvestmentUsd / 1_000_000) : ''); setProblem('');
   }, [open, profile]);
 
   const save = async () => {
@@ -625,12 +793,15 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
     if (!roleList.length) return setProblem('Agrega al menos un cargo.');
     if (!Number.isInteger(minimum) || minimum < 1 || minimum > 100) return setProblem('El mínimo de avisos va de 1 a 100.');
     if (codeList.some(code => !/^\d{2,8}$/.test(code))) return setProblem('Los códigos UNSPSC son números de 2 a 8 dígitos, separados por coma.');
+    const investment = minInvestment.trim() ? Number(minInvestment.replace(',', '.')) : null;
+    if (investment !== null && (!Number.isFinite(investment) || investment < 0)) return setProblem('La inversión mínima es un número de millones de dólares.');
     setSaving(true);
     setProblem('');
     try {
       const next = await readJson<{ profile: Profile; plan: Overview['plan'] }>(await fetch('/api/commercial-opportunities/profile', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), offer: offer.trim(), roles: roleList, regions, minAds: minimum, keywords: keywordList, unspscCodes: codeList }),
+        body: JSON.stringify({ name: name.trim(), offer: offer.trim(), roles: roleList, regions, minAds: minimum, keywords: keywordList, unspscCodes: codeList,
+          sectors, minInvestmentUsd: investment === null ? null : Math.round(investment * 1_000_000) }),
       }));
       onSaved(next);
       onOpenChange(false);
@@ -685,6 +856,22 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
             <Label htmlFor="opportunity-codes">Códigos UNSPSC (opcional)</Label>
             <Input id="opportunity-codes" value={codes} inputMode="numeric" onChange={event => setCodes(event.target.value)} placeholder="Ej. 80111600, 801116" aria-describedby="opportunity-codes-hint" />
             <p id="opportunity-codes-hint" className="text-xs text-muted-foreground">Del catálogo de Mercado Público. Un código corto incluye a toda su familia.</p>
+          </div>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-foreground">Sectores de proyectos del SEIA</legend>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {SEIA_SECTORS.map(sector => (
+                <label key={sector.id} className="flex items-center gap-2 text-sm text-foreground">
+                  <Checkbox checked={sectors.includes(sector.id)}
+                    onCheckedChange={checked => setSectors(current => checked ? [...current, sector.id] : current.filter(item => item !== sector.id))} />
+                  {sector.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <div className="space-y-1.5">
+            <Label htmlFor="opportunity-investment">Inversión mínima de un proyecto (millones de US$)</Label>
+            <Input id="opportunity-investment" value={minInvestment} inputMode="decimal" onChange={event => setMinInvestment(event.target.value)} placeholder="Ej. 10" className="w-32" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="opportunity-min">Mínimo de avisos en 30 días</Label>
