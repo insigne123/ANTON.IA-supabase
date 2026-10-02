@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { emailDomain, isFreeMailDomain } from '../cowork/send-cadence';
+import { replyStageSuggestion } from '../reply-stage';
 
 // Isolate provider polling from classification, notifications and all external services.
 const source = readFileSync('src/lib/server/reply-sync.ts', 'utf8');
@@ -198,12 +199,15 @@ test('the conversation view keeps showing the contact only; the sync also keeps 
 });
 
 /** The collaborators of a reply that is recorded, replaced by recorders. */
-function recorder(intent = 'neutral', inserted = true) {
+function recorder(intent = 'neutral', inserted = true, deal: 'negotiation' | 'won' | null = null) {
   const ingested: any[] = [];
   const alerts: string[] = [];
   const exceptions: any[] = [];
+  const crm: any[] = [];
   let classified = 0;
   const stubs = {
+    readReplyDeal: async () => deal,
+    replyStageSuggestion,
     classifyReply: async () => { classified++; return { intent, sentiment: 'neutral', confidence: 0.8, summary: 'Lo van a revisar', reason: 'revision', shouldContinue: false }; },
     extractReplyPreview: (text: string) => String(text).slice(0, 80),
     buildThreadKey: () => 'thread-key',
@@ -211,12 +215,12 @@ function recorder(intent = 'neutral', inserted = true) {
     conversationAdvice: () => ({}),
     notificationService: { sendAlert: async (_organization: string, _title: string, body: string) => { alerts.push(body); } },
     createAntoniaException: async (_supabase: unknown, input: any) => { exceptions.push(input); return {}; },
-    syncLeadAutopilotToCrm: async () => ({}),
+    syncLeadAutopilotToCrm: async (_supabase: unknown, update: any) => { crm.push(update); return {}; },
     maybeEscalateReplyReviewFromContactedId: async () => null,
     stripHtmlToText: (html: string) => html,
     isExplicitOptOut: () => false,
   };
-  return { ingested, alerts, exceptions, stubs, classifications: () => classified };
+  return { ingested, alerts, exceptions, crm, stubs, classifications: () => classified };
 }
 const supabaseStub = { rpc: async () => ({ error: null }) };
 const gmailFull = (id: string, from: string, at: string, headers: Array<{ name: string; value: string }> = []) => ({
@@ -325,4 +329,23 @@ test('what we sent is never the company answering, even when the contact is on o
   const result = await load(stubs).syncSingleContactRow({ rpc: async () => ({ error: null }), from: () => chain }, 'org', companyRow, 'token');
   assert.deepEqual(result, { synced: 0, state: 'ok' });
   assert.equal(ingested.length, 0);
+});
+
+test('each reply proposes its pipeline stage: a meeting, a proposal Jev reads, a refusal and an opt-out (Plan 6, PR-B)', async (t) => {
+  const row = { ...companyRow, organization_id: 'org', user_id: 'user', lead_id: 'lead-1' };
+  const run = async (intent: string, deal: 'negotiation' | 'won' | null = null) => {
+    const fixture = recorder(intent, true, deal);
+    const mock = t.mock.method(globalThis, 'fetch', async () => Response.json(gmailFull('m1', 'Grace <grace@example.com>', '2026-08-05T00:00:00Z')));
+    await load(fixture.stubs).syncColleagueMessage(supabaseStub, row, 'token', 'm1');
+    mock.mock.restore();
+    return fixture.crm.map(update => [update.stage, update.lastAutopilotEvent]);
+  };
+  assert.deepEqual(await run('meeting_request'), [['meeting', 'meeting_request']], 'a meeting request proposes «Reunión», not «Interesado»');
+  assert.deepEqual(await run('positive'), [['engaged', 'positive']]);
+  assert.deepEqual(await run('positive', 'negotiation'), [['negotiation', 'reply_negotiation']], 'Jev reads a request for a proposal');
+  assert.deepEqual(await run('meeting_request', 'won'), [['closed_won', 'reply_won']]);
+  assert.deepEqual(await run('negative'), [['closed_lost', 'not_interested']], 'a refusal proposes «Perdido»');
+  assert.deepEqual(await run('unsubscribe'), [['closed_lost', 'unsubscribe']]);
+  assert.deepEqual(await run('auto_reply'), [], 'an automatic reply proposes nothing');
+  assert.deepEqual(await run('neutral'), []);
 });
