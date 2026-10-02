@@ -46,6 +46,9 @@ import { researchDetailLoadingState } from '@/lib/research-report-loading';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
 import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
 import { EmailOwnerWarning, LeadName } from '@/components/leads/LeadName';
+import { TeamLockBadge } from '@/components/collaboration/TeamLockBadge';
+import { useTeamLocks } from '@/hooks/use-team-locks';
+import { normalizeLockEmail } from '@/lib/team-lock';
 
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
@@ -709,6 +712,9 @@ export default function EnrichedLeadsClient() {
   const startIdx = (page - 1) * pageSize;
   const endIdx = Math.min(startIdx + pageSize, total);
   const pageLeads = useMemo(() => filtered.slice(startIdx, endIdx), [filtered, startIdx, endIdx]);
+  // Who in the team already holds each contact on this page (Plan 5, PR-9b); empty without collaboration.
+  const teamLocks = useTeamLocks({ emails: pageLeads.map(e => normalizeLockEmail(e.email)).filter(email => email.includes('@')) });
+  const teamLockFor = (lead: EnrichedLead) => teamLocks?.byEmail[normalizeLockEmail(lead.email)];
 
   // Elegibles totales (sobre la lista filtrada completa)
   const researchEligible = useMemo(
@@ -1399,6 +1405,7 @@ export default function EnrichedLeadsClient() {
                     <div className="min-w-0">
                       <h2 className="truncate font-semibold"><LeadName name={e.fullName} fallback="Lead sin nombre" /></h2>
                       <p className="mt-0.5 truncate text-sm text-muted-foreground">{e.title || 'Sin cargo'} · {e.companyName || 'Sin empresa'}</p>
+                      <TeamLockBadge lock={teamLockFor(e)} className="mt-1" />
                     </div>
                     {reportStatusLabelFor(e) ? <span className="shrink-0 text-xs font-medium text-muted-foreground">{reportStatusLabelFor(e)}</span> : viewable ? (
                       native?.status === 'insufficient_data' || !isNativeResearchReport(native) ? (
@@ -1524,6 +1531,7 @@ export default function EnrichedLeadsClient() {
                     <TableCell className="py-3">
                       <div className="max-w-[240px] truncate font-medium"><LeadName name={e.fullName} fallback="Lead sin nombre" /></div>
                       <div className="max-w-[220px] truncate text-xs text-muted-foreground">{e.title || 'Sin cargo'}</div>
+                      <TeamLockBadge lock={teamLockFor(e)} className="mt-0.5 max-w-[240px]" />
                     </TableCell>
                     <TableCell className="py-3">
                       <div className="max-w-[180px] truncate font-medium">{e.companyName || '—'}</div>
