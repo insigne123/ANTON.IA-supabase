@@ -89,7 +89,7 @@ Migración `supabase/migrations/20261002170000_commercial_opportunities.sql`, ad
 3. **PR-3c:** la página nueva, con el acceso por correo.
 4. **PR-3d:** Mercado Público, Compra Ágil y la sincronización diaria.
 5. **PR-3e:** proyectos SEIA.
-6. **PR-3f:** Cowork lee las oportunidades.
+6. **PR-3f:** Cowork lee las oportunidades (`docs/oportunidades-cowork.md`).
 7. **PR-3g:** retirar la sección vieja, con visto bueno.
 
 ## Lo que necesita el mantenedor
