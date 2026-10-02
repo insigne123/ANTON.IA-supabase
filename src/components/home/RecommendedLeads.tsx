@@ -38,7 +38,9 @@ export function RecommendedLeads() {
     try {
       const response = await fetch('/api/leads/recommendations', { cache: 'no-store' });
       if (!response.ok) throw new Error(String(response.status));
-      setData(await response.json());
+      const json = await response.json() as Recommendations;
+      if (!json || !Array.isArray(json.top) || !json.criteria) throw new Error('unexpected response');
+      setData(json);
     } catch {
       setError(true);
     } finally {

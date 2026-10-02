@@ -11,6 +11,10 @@ import { formatRate, formatRateCompact, icpPeriod, includesTerm, SEGMENT_VIEWS, 
 import { cn } from '@/lib/utils';
 
 type Analysis = ReturnType<typeof analyzeIcp> & { partial?: string };
+const isAnalysis = (data: unknown): data is Analysis => {
+  const value = data as Partial<Analysis> | null;
+  return Boolean(value && typeof value === 'object' && value.totals && value.segments && Array.isArray(value.gaps));
+};
 
 /**
  * «Lo que dicen tus resultados» in Perfil › Tu cliente ideal (plan 8, phase 2): who answered, by role area, industry,
@@ -30,7 +34,8 @@ export function IcpResultsPanel({ targetIndustries, onAddIndustry }: { targetInd
       const response = await fetch('/api/icp', { cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error((data as { error?: string }).error || 'No pudimos leer tus resultados.');
-      setAnalysis(data as Analysis);
+      if (!isAnalysis(data)) throw new Error('No pudimos leer tus resultados.');
+      setAnalysis(data);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'No pudimos leer tus resultados.');
     } finally {
