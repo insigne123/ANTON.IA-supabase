@@ -65,7 +65,7 @@ Migración `supabase/migrations/20261002170000_commercial_opportunities.sql`, ad
 | Herramienta | Decisión |
 |---|---|
 | JSearch (RapidAPI) | **Principal.** Avisos de Google for Jobs con `country=cl`: empresa, sitio, portal, fecha y enlace |
-| LinkedIn Job Search API de Fantastic Jobs | **Para LinkedIn.** Base actualizada cada hora, con dotación, industria, tamaño y sede de la empresa, y un filtro que saca a las agencias de empleo. Por Apify, donde ya está la cuenta |
+| LinkedIn Job Search API de Fantastic Jobs | **Para LinkedIn.** Base actualizada cada hora, con dotación, industria, tamaño y sede de la empresa, y un filtro que saca a las agencias de empleo. Por Apify, con `APIFY_TOKEN` |
 | `curious_coder/linkedin-jobs-scraper` (Apify) | **De reserva.** 98,5 % de corridas OK, US$1 a 2 por 1.000. Raspa en vivo: el cambio del buscador de LinkedIn de agosto de 2026 le quitó filtros |
 
 **No se usan:**
@@ -94,7 +94,8 @@ Migración `supabase/migrations/20261002170000_commercial_opportunities.sql`, ad
 
 ## Lo que necesita el mantenedor
 
-- **Clave de RapidAPI suscrita a JSearch** (`JSEARCH_API_KEY`) en Secret Manager.
+- **Clave de RapidAPI suscrita a JSearch** (`JSEARCH_API_KEY`): crearla en Secret Manager y declararla en `apphosting.yaml`.
+- **`APIFY_TOKEN`:** hoy no está declarado en `apphosting.yaml`. Hay que declararlo como secreto para que la app use Fantastic Jobs.
 - **Ticket de Mercado Público** (`MERCADO_PUBLICO_TICKET`), gratis en api.mercadopublico.cl.
-- **Un tope de gasto mensual en Apify,** que paga Fantastic Jobs.
-- **`OPPORTUNITIES_ALLOWED_EMAILS`:** va en `apphosting.yaml` con el PR-3c.
+- **Un tope de gasto mensual en Apify,** que paga Fantastic Jobs. La app además se detiene en `OPPORTUNITIES_MONTHLY_USD_CAP`.
+- **`OPPORTUNITIES_ALLOWED_EMAILS`:** ya va en `apphosting.yaml` con el PR-3c; ver `docs/oportunidades-pagina.md`.

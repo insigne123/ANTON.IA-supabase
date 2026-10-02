@@ -64,6 +64,8 @@ const REGIONS: Array<{ region: string; terms: string[] }> = [
   { region: 'Aysén', terms: ['aysen', 'aisen', 'coyhaique'] },
   { region: 'Magallanes', terms: ['magallanes', 'punta arenas', 'puerto natales'] },
 ];
+/** The regions in the north-to-south order of the country, for the search profile's choices. */
+export const CHILE_REGIONS = REGIONS.map(item => item.region);
 const wordIn = (haystack: string, needle: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(haystack);
 export function chileanRegion(location: string | null | undefined) {
   if (!location) return null;

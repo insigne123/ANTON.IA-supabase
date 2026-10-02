@@ -24,6 +24,7 @@ import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
+import { companySearchPrefill } from '@/lib/search/company-prefill';
 import {
   getLinkedInProfileStatuses,
   enrichApolloOrganization,
@@ -895,6 +896,34 @@ export default function SearchPage() {
     }).finally(() => { if (!cancelled) setCheckpointLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // «Buscar decisores» in «Oportunidades» opens Búsqueda by company with the roles to look for. It fills the form after the
+  // checkpoint is restored (so it wins over the last search) and waits for the person to run it.
+  const companyPrefillChecked = useRef(false);
+  useEffect(() => {
+    if (checkpointLoading || companyPrefillChecked.current) return;
+    companyPrefillChecked.current = true;
+    const prefill = companySearchPrefill(window.location.search);
+    if (!prefill) return;
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+    companyRun.current += 1;
+    companyPeopleAbortRef.current?.abort();
+    setError('');
+    setProfileProblem(null);
+    setCompanySearchHint('');
+    setFilterStep('filters');
+    setCompanies([]);
+    setCompanyWindows({});
+    setSelectedCompanyIds(new Set());
+    setActiveCompanyId(null);
+    setActiveSavedSearchId(null);
+    setLeads([]);
+    setSelectedLeads(new Set());
+    setFilters((prev) => ({ ...prev, searchMode: 'company_name', companyName: prefill.companyName, companyDomains: prefill.companyDomains, title: prefill.title, seniorities: [] }));
+    setAdvancedFiltersOpen(true);
+    toast({ title: `Búsqueda en ${prefill.companyName || prefill.companyDomains} lista`, description: 'Revisa los cargos y presiona «Buscar leads».' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkpointLoading]);
 
   useEffect(() => {
     if (!checkpointReady || filters.searchMode !== 'filters' || isLoading || Object.values(companyWindows).some((item) => item.isExpanding || item.isLoading)) return;
