@@ -15,6 +15,7 @@ import { blockLines } from './report-blocks';
 import { personChips, personNextStep, researchSteps, type ChipTone, type NextStep } from './person-status';
 import { BATCH_LIMIT, availableResults, batchSummary, chosenProfiles, type ResultPresence, type SearchResult } from './search-batch';
 import { companyFacts, companyRequest, contactsHeading, emptyCompanyText, type CompanyPage, type CompanyView } from './company-card';
+import { activityNote, activityOpened, type ActivityRead } from './activity';
 
 declare const chrome: any;
 type ProfileDetails = { headline?: string; city?: string; state?: string; country?: string; industry?: string; seniority?: string; departments?: string[]; companySize?: string };
@@ -361,16 +362,27 @@ function App() {
     await api('research', { language, refreshResearch: ['insufficient_data', 'failed', 'partial'].includes(research?.status) }); if (!valid()) return;
     setResearch({ status: 'queued' }); setNotice('La investigación continuará aunque cierres el panel.');
   }).then(refreshCredits);
+  // The person's latest posts, read from their open profile right before writing (PR-4e); none when another tab is open.
+  const readActivity = async (): Promise<ActivityRead> => {
+    try { return (await rpc('PROSPECT_ACTIVITY', { linkedinUrl: profileRef.current.linkedinUrl })) || { posts: [], onProfile: false }; }
+    catch { return { posts: [], onProfile: false }; }
+  };
   const generate = (adjustment = '') => run('Redactando mensaje…', async valid => {
-    const result = await api('message', { instruction: adjustment ? `${instruction}\nAjuste: ${adjustment}` : instruction, tone, language, previousMessage: message });
-    if (valid()) { writeMessage(result.message, result.sources, [...new Set([...messageOptions, ...(message ? [message] : []), result.message])].slice(-8)); setNotice(result.sellerProfileIncomplete
+    const activity = await readActivity();
+    const result = await api('message', { instruction: adjustment ? `${instruction}\nAjuste: ${adjustment}` : instruction, tone, language, previousMessage: message, recentActivity: activity.posts });
+    if (!valid()) return;
+    writeMessage(result.message, result.sources, [...new Set([...messageOptions, ...(message ? [message] : []), result.message])].slice(-8));
+    const opened = Boolean(activityOpened(result.sources || []));
+    setNotice(`${result.sellerProfileIncomplete
       ? 'Borrador conversacional listo. Completa tu empresa y propuesta de valor en el perfil de Anton.IA para personalizar mejor lo que ofreces.'
-      : result.personalized ? 'Mensaje breve para LinkedIn, basado en el análisis del contacto.' : 'Mensaje basado en el perfil. Investiga para añadir un motivo más específico.'); }
+      : opened ? 'Mensaje breve para LinkedIn.'
+      : result.personalized ? 'Mensaje breve para LinkedIn, basado en el análisis del contacto.' : 'Mensaje basado en el perfil. Investiga para añadir un motivo más específico.'} ${activityNote(activity, opened)}`);
   });
   const generateOptions = () => run('Creando opciones de mensaje…', async valid => {
     let options = [...new Set([...messageOptions, ...(message ? [message] : [])])];
+    const activity = await readActivity();
     for (const angle of ['Una pregunta breve sobre sus prioridades.', 'Un enfoque consultivo sobre un reto de su rol.', 'Un inicio cercano basado en un hecho verificable.']) {
-      const result = await api('message', { instruction: `${instruction}\nEnfoque: ${angle}\nEvita repetir estas opciones: ${options.join('\n')}`, tone, language, previousMessage: message });
+      const result = await api('message', { instruction: `${instruction}\nEnfoque: ${angle}\nEvita repetir estas opciones: ${options.join('\n')}`, tone, language, previousMessage: message, recentActivity: activity.posts });
       options = [...new Set([...options, result.message])].slice(-8);
       if (valid()) writeMessage(result.message, result.sources, options);
     }
@@ -590,6 +602,8 @@ function App() {
     </>}
   </section>;
 
+  // The post the draft opens from (PR-4e), shown above it with its words.
+  const openedFrom = activityOpened(sources);
   const messageView = <section aria-label="Mensaje al contacto" className="stack">
     <div className="section-heading"><h2>Mensaje de LinkedIn</h2></div>
     <label className="field">¿Qué quieres conseguir?<textarea rows={3} value={instruction} maxLength={900} onChange={event => setInstruction(event.target.value)} /></label>
@@ -599,6 +613,7 @@ function App() {
     <button className="text-button" disabled={!saved || !instruction.trim()} onClick={() => void generateOptions()}>Crear 3 opciones con IA</button>
     {messageOptions.length > 1 && <label className="field">Opciones guardadas<select value={messageOptions.indexOf(message)} onChange={event => { const next = messageOptions[Number(event.target.value)]; if (next) writeMessage(next, sources, [...new Set([...messageOptions, message])].slice(-8)); }}><option value={-1} disabled>Borrador editado</option>{messageOptions.map((text, index) => <option key={index} value={index}>Opción {index + 1} · {text.slice(0, 65)}…</option>)}</select></label>}
     {message && <div className="message-editor">
+      {openedFrom && <div className="callout activity-quote"><strong>{openedFrom.label}</strong><p>«{openedFrom.quote}»</p></div>}
       <label className="field">Mensaje de LinkedIn<textarea rows={9} maxLength={1200} value={message} onChange={event => writeMessage(event.target.value)} /></label>
       <div className="editor-meta"><span>{message.length}/1200</span><button className="text-button" onClick={() => void generate('Hazlo más breve.')}>Más breve</button><button className="text-button" onClick={() => void generate('Usa un tono más cercano.')}>Más cercano</button></div>
       <div className="columns">

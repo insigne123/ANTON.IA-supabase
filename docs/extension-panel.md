@@ -238,6 +238,53 @@ La oportunidad:
   - la pestaña «Personas» con el lote;
   - sin desborde a 320, 380 y 520 px, en claro y oscuro.
 
+## Apertura con su actividad reciente (PR-4e)
+
+Al redactar un mensaje de LinkedIn, el panel lee las publicaciones recientes de la persona en su perfil abierto. La Redactora puede abrir la conversación desde una de ellas.
+
+**Qué se lee y cuándo:**
+- **Cuándo:** solo al pulsar «Redactar», «Generar otra versión» o «Crear 3 opciones», y solo si la pestaña activa es el perfil de esa persona (`PROSPECT_ACTIVITY` compara el perfil).
+- **Dónde:** en el perfil, la sección «Actividad»; en `/in/…/recent-activity/`, su feed.
+- **Qué:** hasta 3 publicaciones, con su texto (máximo 600 caracteres), la fecha relativa que muestra LinkedIn («2 sem») y si la publicó, la compartió o la comentó.
+- **Cómo:** solo lo ya renderizado, sin clics, sin «ver más» y sin desplazar.
+
+**La Redactora** (`linkedin-conversation/v2`):
+- recibe `recentActivity` y, si una publicación sirve al objetivo, abre desde ella: la cita o la parafrasea con fidelidad, dice si la publicó, la compartió o la comentó, y la conecta con la pregunta;
+- devuelve cuál usó (`activityIndex`). Un índice que no corresponde a ninguna publicación cuenta como ninguna.
+
+**Guarda:** si no recibió publicaciones y el mensaje dice «vi tu publicación», «compartiste», «your post» o algo parecido, se corrige como cualquier otro problema editorial.
+
+**API:**
+- la acción `message` acepta `recentActivity` (hasta 3);
+- la publicación usada vuelve primera en `sources` (`kind: 'activity'`, con su texto y su fecha), junto con `activityRead`.
+
+**En el panel:**
+- **sobre el borrador:** «Abre desde su publicación · 2 sem» y la cita;
+- **en el aviso:**
+  - «revisa que la cita sea fiel» cuando el mensaje abre desde una publicación;
+  - «No vimos publicaciones recientes en su perfil»;
+  - «Sus publicaciones recientes no calzaban con tu objetivo»;
+  - «Abre su perfil en LinkedIn para usar sus publicaciones recientes», cuando la pestaña es otra.
+- **La cita viaja con las fuentes del borrador:** al volver al perfil se ve igual.
+
+**Pruebas:**
+- **`src/lib/server/linkedin-message-writer.test.ts`:**
+  - abre desde la publicación dada y dice cuál;
+  - un índice fuera de rango no cuenta;
+  - sin publicaciones, «vi tu publicación» se corrige;
+  - «postventa» no es una publicación.
+- **La ruta:**
+  - la actividad llega a la Redactora;
+  - la publicación usada vuelve primera en las fuentes;
+  - más de 3 publicaciones, o una de más de 600 caracteres, se rechaza;
+  - sin actividad, la lista va vacía.
+- **`chrome-extension/tests/activity.test.mjs`:**
+  - la sección «Actividad» con publicación, compartida y comentario, hasta 3;
+  - el feed de actividad, con el corte en 600;
+  - fuera del perfil no se lee nada;
+  - los textos del panel.
+- **El navegador:** el borrador muestra «Abre desde su publicación · 2 sem», la cita y el aviso, y la petición lleva la publicación leída.
+
 ## Publicación
 
 - **Se compila con `npm run extension:build`.** El ZIP para la tienda y la versión (4.1.0, al cerrar la fase 4) los publica el mantenedor.

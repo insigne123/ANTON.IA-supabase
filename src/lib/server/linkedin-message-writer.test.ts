@@ -24,3 +24,34 @@ test('writer repairs once and never returns generic seller copy', async () => {
 test('writer rejects a repeated bad result rather than returning an unreviewed message', async () => {
   await assert.rejects(writeLinkedinMessage({ instruction: 'Contactar', language: 'es', tone: 'profesional', seller: {}, lead: {}, evidence: [] }, (async () => ({ message: 'Desde Mi empresa' })) as any), /calidad esperada/);
 });
+
+const posts = [
+  { text: 'Este año duplicamos el equipo de bodega en Antofagasta y seguimos buscando operarios.', when: '2 sem', kind: 'post' as const },
+  { text: 'Felicitaciones al equipo por el récord de seguridad.', when: '1 mes', kind: 'comment' as const },
+];
+test('with the profile’s posts, the writer may open from one and says which', async () => {
+  const calls: any[] = [];
+  const result = await writeLinkedinMessage({ instruction: 'Abrir conversación', language: 'es', tone: 'cercano', seller: { companyName: 'Acme' }, lead: {}, evidence: [], recentActivity: posts }, (async (input: any) => {
+    calls.push(input); return { message: 'Hola Ana, vi tu publicación sobre duplicar el equipo de bodega en Antofagasta.\n\n¿Cómo están resolviendo la selección de operarios?', activityIndex: 0 };
+  }) as any);
+  assert.equal(result.activityIndex, 0);
+  assert.deepEqual(JSON.parse(calls[0].prompt).recentActivity, posts);
+  assert.match(calls[0].systemPrompt, /ACTIVIDAD RECIENTE/);
+  // An index that names no given post is none.
+  const other = await writeLinkedinMessage({ instruction: 'Abrir', language: 'es', tone: 'cercano', seller: {}, lead: {}, evidence: [], recentActivity: posts },
+    (async () => ({ message: 'Hola Ana, ¿cómo están resolviendo la selección de operarios?', activityIndex: 5 })) as any);
+  assert.equal(other.activityIndex, null);
+});
+test('without posts, a message that says it read one is corrected', async () => {
+  const calls: any[] = [];
+  const result = await writeLinkedinMessage({ instruction: 'Abrir', language: 'es', tone: 'cercano', seller: {}, lead: {}, evidence: [] }, (async (input: any) => {
+    calls.push(input);
+    return calls.length === 1 ? { message: 'Hola Ana, vi tu publicación sobre bodega. ¿Conversamos?', activityIndex: 0 } : { message: 'Hola Ana, ¿cómo están resolviendo la selección de operarios?', activityIndex: -1 };
+  }) as any);
+  assert.equal(calls.length, 2);
+  assert.ok(JSON.parse(calls[1].prompt).editorialCorrection.includes('No menciones publicaciones: no se aportó ninguna.'));
+  assert.deepEqual(JSON.parse(calls[0].prompt).recentActivity, []);
+  assert.equal(result.activityIndex, null);
+  assert.deepEqual(linkedinMessageIssues('Hola Ana, vi tu publicación. ¿Conversamos?', 1), []);
+  assert.deepEqual(linkedinMessageIssues('Hola Ana, ¿el servicio de postventa es parte de tu área?'), [], 'a word inside another is not a post');
+});

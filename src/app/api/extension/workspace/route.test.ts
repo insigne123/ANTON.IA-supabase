@@ -54,7 +54,7 @@ function fixture(withLead = false) {
     'node:crypto': require('node:crypto'),
     '@/lib/server/extension-research-report': { extensionResearchReport: async (research: any) => ({ ...research, reportDocumentV2: { evidenceGraph: { claims: [{ type: 'fact', statement: 'Hecho validado V2', evidenceIds: ['fact'] }], facts: [{ id: 'fact', sourceId: 'source' }], sources: [{ id: 'source', url: 'https://example.test' }] }, sections: [{ key: 'angle', title: 'Ángulo comercial', paragraphs: [{ text: 'Enfoque comercial V2' }] }] } }) },
     '@/lib/server/seller-profile': { loadSellerProfile: async () => ({}) },
-    '@/lib/server/linkedin-message-writer': { writeLinkedinMessage: async (input: any) => { calls.push({ generation: { prompt: JSON.stringify(input) } }); return { message: 'Mensaje de prueba', writerVersion: 'linkedin-conversation/v1' }; } },
+    '@/lib/server/linkedin-message-writer': { writeLinkedinMessage: async (input: any) => { calls.push({ generation: { prompt: JSON.stringify(input) } }); return { message: 'Mensaje de prueba', writerVersion: 'linkedin-conversation/v2', activityIndex: input.recentActivity?.length ? input.recentActivity.length - 1 : null }; } },
   };
   modules['@/lib/server/extension-leads'].extensionResearchSubject = (row: any) => ({ id: row.id, linkedinUrl: row.linkedin_url });
   const testModule = { exports: {} as any };
@@ -91,6 +91,26 @@ test('LinkedIn drafting receives final V2 facts and commercial analysis', async 
   const prompt = JSON.parse(env.calls.find(item => item.generation).generation.prompt);
   assert.equal(prompt.evidence[0].statement, 'Hecho validado V2');
   assert.equal(prompt.commercialAnalysis[0].paragraphs[0].text, 'Enfoque comercial V2');
+  assert.deepEqual(prompt.recentActivity, [], 'No posts read: none invented');
+  assert.equal((await response.json()).sources.some((source: any) => source.kind === 'activity'), false);
+});
+test('LinkedIn drafting may open from the profile’s posts, and the post it uses comes back first among the sources', async () => {
+  const env = fixture(true);
+  const recentActivity = [{ text: 'Duplicamos el equipo de bodega.', when: '2 sem' }, { text: 'Felicitaciones por el récord de seguridad.', when: '1 mes', kind: 'comment' }];
+  const response = await env.POST(request({ action: 'message', profile, organizationId: org, userId: user, instruction: 'Iniciar conversación', recentActivity }));
+  assert.equal(response.status, 200);
+  const prompt = JSON.parse(env.calls.find(item => item.generation).generation.prompt);
+  assert.deepEqual(prompt.recentActivity, [{ text: 'Duplicamos el equipo de bodega.', when: '2 sem', kind: 'post' }, { text: 'Felicitaciones por el récord de seguridad.', when: '1 mes', kind: 'comment' }]);
+  const result = await response.json();
+  assert.equal(result.activityRead, 2);
+  assert.equal(result.personalized, true);
+  assert.deepEqual(result.sources[0], { kind: 'activity', activityKind: 'comment', when: '1 mes', text: 'Felicitaciones por el récord de seguridad.',
+    statement: 'Su comentario (1 mes): «Felicitaciones por el récord de seguridad.»', url: '' });
+  assert.equal('activityIndex' in result, false);
+  // More than three posts, or one too long, is refused before writing.
+  const many = Array.from({ length: 4 }, () => ({ text: 'Publicación' }));
+  assert.ok((await env.POST(request({ action: 'message', profile, organizationId: org, userId: user, instruction: 'Iniciar', recentActivity: many }))).status >= 400);
+  assert.ok((await env.POST(request({ action: 'message', profile, organizationId: org, userId: user, instruction: 'Iniciar', recentActivity: [{ text: 'x'.repeat(601) }] }))).status >= 400);
 });
 test('revalidates both user and organization before a save', async () => {
   const env = fixture();

@@ -78,6 +78,12 @@ export const ExtensionRequestSchema = z.object({
   profiles: z.array(ExtensionProfileSchema).min(1).max(25).optional(),
   /** company: the company page on screen. */
   company: ExtensionCompanySchema.optional(),
+  /** message (PR-4e): the person's latest posts as their open profile shows them; the writer may open from one. */
+  recentActivity: z.array(z.object({
+    text: z.string().trim().min(1).max(600),
+    when: z.string().trim().max(40).default(''),
+    kind: z.enum(['post', 'repost', 'comment']).default('post'),
+  }).strict()).max(3).default([]),
   replaceFields: z.boolean().default(false),
   refreshResearch: z.boolean().default(false),
   revealEmail: z.boolean().default(false),

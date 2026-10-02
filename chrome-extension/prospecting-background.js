@@ -138,6 +138,18 @@ async function prospectHandle(request, sender) {
       return { linkedinUrl: tab.url.split(/[?#]/)[0].replace(/\/+$/, ''), fullName: '', title: '', companyName: '', tabId: tab.id };
     }
   }
+  // The latest posts of the person the panel is writing to (PR-4e), only when their profile is the active tab.
+  if (request.action === 'PROSPECT_ACTIVITY') {
+    const handle = value => { try { return decodeURIComponent(new URL(value).pathname).match(/^\/in\/([^/]+)/)?.[1]?.toLowerCase() || ''; } catch { return ''; } };
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const wanted = handle(String(request.linkedinUrl || ''));
+    if (!wanted || !String(tab?.url || '').startsWith('https://www.linkedin.com/in/') || handle(tab.url) !== wanted) return { posts: [], onProfile: false };
+    try {
+      await ensureLinkedinScripts(tab.id);
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'PROSPECT_READ_ACTIVITY' });
+      return { posts: Array.isArray(response?.posts) ? response.posts.slice(0, 3) : [], onProfile: true };
+    } catch { return { posts: [], onProfile: true }; }
+  }
   // The company page open in the active tab (PR-4d): what its page shows, read by the page itself.
   if (request.action === 'PROSPECT_COMPANY') {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
