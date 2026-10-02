@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 export const REPORT_V2_SCHEMA_VERSION = 'research-report-document/v2' as const;
+/** The angle section under one name in the report, Cowork and the drafts (Plan 6, PR-C2): the guide to write to this person. */
+export const REPORT_V2_ANGLE_TITLE = 'Cómo usarlo en el correo y los seguimientos';
 
 const text = z.string().trim().min(1);
 const nullableInstant = z.string().datetime({ offset: true }).nullable();
