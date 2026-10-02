@@ -56,6 +56,7 @@ import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
 import { WEB_CORPUS } from './fixtures/cowork-web-corpus';
 import { LECTURAS_CORPUS } from './fixtures/cowork-lecturas-corpus';
+import { ICP_CORPUS } from './fixtures/cowork-icp-corpus';
 import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 
@@ -73,6 +74,8 @@ CORPUS.push(...WEB_CORPUS);
 
 // The reads that close gaps 6, 7 and 10 of the AXIS bank (scripts/fixtures/cowork-lecturas-corpus.ts).
 CORPUS.push(...LECTURAS_CORPUS);
+// «¿Cuál es mi ICP?» (scripts/fixtures/cowork-icp-corpus.ts).
+CORPUS.push(...ICP_CORPUS);
 // Revealing a phone (scripts/fixtures/cowork-telefono-corpus.ts).
 CORPUS.push(...TELEFONO_CORPUS);
 
