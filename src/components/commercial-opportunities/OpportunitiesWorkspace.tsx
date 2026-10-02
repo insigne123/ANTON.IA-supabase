@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Briefcase, Building2, ChevronDown, ExternalLink, Loader2, Pencil, RotateCcw, Search, Star, Users, X } from 'lucide-react';
+import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Gavel, Landmark, Loader2, Pencil, RotateCcw, Search, Star, Users, X } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -17,31 +17,42 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { CHILE_REGIONS } from '@/lib/commercial-opportunities/hiring';
 import { DECISION_MAKER_TITLES } from '@/lib/commercial-opportunities/pilot';
-import type { HiringOpportunityData, OpportunityStatus } from '@/lib/commercial-opportunities/records';
+import type { HiringOpportunityData, OpportunityStatus, TenderOpportunityData } from '@/lib/commercial-opportunities/records';
 import {
-  FILTER_LABELS, filterOpportunities, formatDay, formatUsd, lastSearch, parseList, relativeTime, sourceLabel, statusCounts, type OpportunityFilter,
+  FILTER_LABELS, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, lastSearch, parseList, relativeTime, sourceLabel, statusCounts,
+  type OpportunityFilter,
 } from '@/lib/commercial-opportunities/view';
 import { companySearchHref } from '@/lib/search/company-prefill';
 import { cn } from '@/lib/utils';
 
-type Profile = { id: string; name: string; offer: string; roles: string[]; regions: string[]; minAds: number; updatedAt: string };
+type Profile = { id: string; name: string; offer: string; roles: string[]; regions: string[]; minAds: number; keywords: string[]; unspscCodes: string[]; updatedAt: string };
 type PlanSource = { source: 'jsearch' | 'linkedin'; label: string; enabled: boolean; requests: number; estimateUsd: number; missing: string | null };
 type Opportunity = {
   id: string; company: string; domain: string | null; linkedinUrl: string | null; region: string | null; url: string | null; score: number;
   reasons: string[]; status: OpportunityStatus; mine: boolean; ads: number; firstSeenAt: string; lastSeenAt: string; data: HiringOpportunityData;
 };
 type Run = { id: string; source: string; status: string; startedAt: string; finishedAt: string | null; fetched: number; created: number; updated: number; costUsd: number; error: string | null };
+type TenderOpportunity = {
+  id: string; kind: 'tender' | 'compra_agil'; title: string; buyer: string | null; region: string | null; amount: number | null; currency: string | null;
+  deadlineAt: string | null; publishedAt: string | null; url: string | null; score: number; reasons: string[]; status: OpportunityStatus; mine: boolean;
+  firstSeenAt: string; data: TenderOpportunityData;
+};
 type Overview = {
   profile: Profile; plan: { sources: PlanSource[]; estimateUsd: number }; month: { spentUsd: number; capUsd: number };
-  opportunities: Opportunity[]; runs: Run[];
+  tenderSearch: { ticket: boolean; keywords: string[]; unspscCodes: string[] };
+  opportunities: Opportunity[]; tenders: TenderOpportunity[]; runs: Run[];
 };
-type SyncResult =
+type Tab = 'hiring' | 'tenders';
+type HiringResult =
   | { status: 'done'; fetched: number; qualifying: number; newQualifying: number; costUsd: number; sources: Array<{ source: string; error: string | null }> }
   | { status: 'capped'; message: string };
+type TenderResult = { status: 'done'; found: number; matched: number; created: number; sources: Array<{ source: string; error: string | null }> };
+const TAB_SOURCES: Record<Tab, string[]> = { hiring: ['jsearch', 'linkedin'], tenders: ['mercado_publico', 'compra_agil'] };
 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => ({}));
@@ -62,6 +73,7 @@ export function OpportunitiesWorkspace() {
   const [running, setRunning] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  const [tab, setTab] = useState<Tab>('hiring');
 
   const load = useCallback(async () => {
     setError('');
@@ -75,18 +87,30 @@ export function OpportunitiesWorkspace() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const runSearch = async () => {
+  const runSearch = async (kind: Tab) => {
     setConfirmOpen(false);
     setRunning(true);
     try {
-      const result = await readJson<SyncResult>(await fetch('/api/commercial-opportunities/runs', { method: 'POST' }));
-      if (result.status === 'capped') toast({ title: 'No se buscó: tope mensual', description: result.message, variant: 'destructive' });
-      else {
+      const response = await fetch('/api/commercial-opportunities/runs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }),
+      });
+      if (kind === 'tenders') {
+        const result = await readJson<TenderResult>(response);
         const failed = result.sources.filter(source => source.error).map(source => sourceLabel(source.source));
         toast({
-          title: `${result.qualifying} ${result.qualifying === 1 ? 'empresa contratando' : 'empresas contratando'}${result.newQualifying ? ` (${result.newQualifying} nuevas)` : ''}`,
-          description: `${result.fetched} avisos revisados · costo ${formatUsd(result.costUsd)}${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
+          title: `${result.matched} ${result.matched === 1 ? 'licitación abierta calza' : 'licitaciones abiertas calzan'}${result.created ? ` (${result.created} nuevas)` : ''}`,
+          description: `${result.found} revisadas en Mercado Público y Compra Ágil · sin costo${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
         });
+      } else {
+        const result = await readJson<HiringResult>(response);
+        if (result.status === 'capped') toast({ title: 'No se buscó: tope mensual', description: result.message, variant: 'destructive' });
+        else {
+          const failed = result.sources.filter(source => source.error).map(source => sourceLabel(source.source));
+          toast({
+            title: `${result.qualifying} ${result.qualifying === 1 ? 'empresa contratando' : 'empresas contratando'}${result.newQualifying ? ` (${result.newQualifying} nuevas)` : ''}`,
+            description: `${result.fetched} avisos revisados · costo ${formatUsd(result.costUsd)}${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
+          });
+        }
       }
     } catch (failure) {
       toast({ title: 'No se pudo buscar', description: failure instanceof Error ? failure.message : undefined, variant: 'destructive' });
@@ -96,42 +120,54 @@ export function OpportunitiesWorkspace() {
     }
   };
 
-  const changeStatus = async (item: Opportunity, status: OpportunityStatus) => {
+  const changeStatus = async (item: { id: string; status: OpportunityStatus }, status: OpportunityStatus) => {
     if (!overview) return;
     const previous = item.status;
+    const patch = (current: Overview, value: OpportunityStatus) => ({
+      ...current,
+      opportunities: current.opportunities.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
+      tenders: current.tenders.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
+    });
     setBusy(current => new Set(current).add(item.id));
-    setOverview({ ...overview, opportunities: overview.opportunities.map(row => row.id === item.id ? { ...row, status, mine: status === 'interested' } : row) });
+    setOverview(patch(overview, status));
     try {
       await readJson(await fetch(`/api/commercial-opportunities/${item.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
       }));
     } catch (failure) {
-      setOverview(current => current && { ...current, opportunities: current.opportunities.map(row => row.id === item.id ? { ...row, status: previous } : row) });
+      setOverview(current => current && patch(current, previous));
       toast({ title: 'No se guardó el cambio', description: failure instanceof Error ? failure.message : undefined, variant: 'destructive' });
     } finally {
       setBusy(current => { const next = new Set(current); next.delete(item.id); return next; });
     }
   };
 
-  const counts = useMemo(() => statusCounts(overview?.opportunities || []), [overview]);
+  // The tenders are filtered by their title and buyer, as the companies are by their name.
+  const tenderItems = useMemo(() => (overview?.tenders || []).map(item => ({ ...item, company: [item.title, item.buyer].filter(Boolean).join(' · ') })), [overview]);
+  const counts = useMemo(() => statusCounts(tab === 'hiring' ? overview?.opportunities || [] : tenderItems), [overview, tab, tenderItems]);
   const visible = useMemo(() => filterOpportunities(overview?.opportunities || [], filter, query), [overview, filter, query]);
+  const visibleTenders = useMemo(() => filterOpportunities(tenderItems, filter, query), [tenderItems, filter, query]);
   const enabledSources = overview?.plan.sources.filter(source => source.enabled) || [];
   const overCap = overview ? overview.month.spentUsd + overview.plan.estimateUsd > overview.month.capUsd : false;
-  const searchDisabled = running || !overview || !enabledSources.length;
+  const hiringDisabled = running || !overview || !enabledSources.length;
+  const tendersDisabled = running || !overview || !overview.tenderSearch.ticket
+    || (!overview.tenderSearch.keywords.length && !overview.tenderSearch.unspscCodes.length);
+  const searchDisabled = tab === 'hiring' ? hiringDisabled : tendersDisabled;
+  const startSearch = () => (tab === 'hiring' ? setConfirmOpen(true) : void runSearch('tenders'));
 
   return (
     <div className="mx-auto w-full max-w-6xl">
       <PageHeader
         title="Oportunidades"
-        description="Empresas que están publicando avisos para los cargos de tu oferta: quién contrata, cuánto y dónde, con los avisos que lo muestran."
+        description="Empresas que están contratando para los cargos de tu oferta y licitaciones públicas que calzan con ella, con la evidencia de cada una."
       >
         <Button variant="outline" onClick={() => setEditOpen(true)} disabled={!overview}>
           <Pencil className="h-4 w-4" aria-hidden="true" />
           Editar búsqueda
         </Button>
-        <Button onClick={() => setConfirmOpen(true)} disabled={searchDisabled}>
+        <Button onClick={startSearch} disabled={searchDisabled}>
           {running ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-          {running ? 'Buscando…' : 'Buscar ahora'}
+          {running ? 'Buscando…' : tab === 'hiring' ? 'Buscar ahora' : 'Buscar licitaciones'}
         </Button>
       </PageHeader>
 
@@ -148,44 +184,67 @@ export function OpportunitiesWorkspace() {
 
       {loading ? <LoadingState /> : overview ? (
         <>
-          <SearchSummary overview={overview} running={running} />
+          <Tabs value={tab} onValueChange={value => { setTab(value as Tab); setFilter('new'); setQuery(''); }}>
+            <TabsList className="mb-4 h-auto flex-wrap">
+              <TabsTrigger value="hiring" className="gap-1.5"><Building2 className="h-4 w-4" aria-hidden="true" />Empresas contratando
+                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.opportunities.length}</span></TabsTrigger>
+              <TabsTrigger value="tenders" className="gap-1.5"><Gavel className="h-4 w-4" aria-hidden="true" />Licitaciones y Compra Ágil
+                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.tenders.length}</span></TabsTrigger>
+            </TabsList>
+            {(['hiring', 'tenders'] as Tab[]).map(kind => (
+              <TabsContent key={kind} value={kind} className="mt-0">
+                {kind === 'hiring' ? <SearchSummary overview={overview} running={running} /> : <TenderSummary overview={overview} running={running} />}
 
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrar por estado">
-              {FILTERS.map(item => (
-                <Button key={item} size="sm" variant={filter === item ? 'default' : 'outline'} aria-pressed={filter === item} onClick={() => setFilter(item)}
-                  className="h-9 rounded-full">
-                  {FILTER_LABELS[item]}
-                  <span className={cn('ml-1 rounded-full px-1.5 text-xs tabular-nums', filter === item ? 'bg-primary-foreground/20' : 'bg-muted text-muted-foreground')}>{counts[item]}</span>
-                </Button>
-              ))}
-            </div>
-            <div className="relative w-full sm:w-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-              <Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar empresa" aria-label="Buscar empresa" className="pl-9" />
-            </div>
-          </div>
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrar por estado">
+                    {FILTERS.map(item => (
+                      <Button key={item} size="sm" variant={filter === item ? 'default' : 'outline'} aria-pressed={filter === item} onClick={() => setFilter(item)}
+                        className="h-9 rounded-full">
+                        {FILTER_LABELS[item]}
+                        <span className={cn('ml-1 rounded-full px-1.5 text-xs tabular-nums', filter === item ? 'bg-primary-foreground/20' : 'bg-muted text-muted-foreground')}>{counts[item]}</span>
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="relative w-full sm:w-64">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                    <Input value={query} onChange={event => setQuery(event.target.value)} placeholder={kind === 'hiring' ? 'Buscar empresa' : 'Buscar licitación u organismo'}
+                      aria-label={kind === 'hiring' ? 'Buscar empresa' : 'Buscar licitación'} className="pl-9" />
+                  </div>
+                </div>
 
-          <section aria-label="Empresas contratando" className="mt-4">
-            {visible.length ? (
-              <ul className="grid gap-4 lg:grid-cols-2">
-                {visible.map(item => (
-                  <li key={item.id}>
-                    <OpportunityCard item={item} minAds={overview.profile.minAds} busy={busy.has(item.id)} onStatus={status => changeStatus(item, status)} />
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <ListEmpty overview={overview} filter={filter} query={query} searchDisabled={searchDisabled} onSearch={() => setConfirmOpen(true)} onEdit={() => setEditOpen(true)} />
-            )}
-          </section>
+                <section aria-label={kind === 'hiring' ? 'Empresas contratando' : 'Licitaciones y Compra Ágil'} className="mt-4">
+                  {kind === 'hiring' ? (visible.length ? (
+                    <ul className="grid gap-4 lg:grid-cols-2">
+                      {visible.map(item => (
+                        <li key={item.id} className="min-w-0">
+                          <OpportunityCard item={item} minAds={overview.profile.minAds} busy={busy.has(item.id)} onStatus={status => changeStatus(item, status)} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <ListEmpty overview={overview} filter={filter} query={query} searchDisabled={hiringDisabled} onSearch={() => setConfirmOpen(true)} onEdit={() => setEditOpen(true)} />
+                  )) : (visibleTenders.length ? (
+                    <ul className="grid gap-4 lg:grid-cols-2">
+                      {visibleTenders.map(item => (
+                        <li key={item.id} className="min-w-0">
+                          <TenderCard item={item} busy={busy.has(item.id)} onStatus={status => changeStatus(item, status)} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <TenderEmpty overview={overview} filter={filter} query={query} searchDisabled={tendersDisabled} onSearch={() => void runSearch('tenders')} onEdit={() => setEditOpen(true)} />
+                  ))}
+                </section>
+              </TabsContent>
+            ))}
+          </Tabs>
 
-          <RunDialog open={confirmOpen} onOpenChange={setConfirmOpen} overview={overview} overCap={overCap} onConfirm={runSearch} />
+          <RunDialog open={confirmOpen} onOpenChange={setConfirmOpen} overview={overview} overCap={overCap} onConfirm={() => void runSearch('hiring')} />
           <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.profile}
             onSaved={next => { setOverview(current => current && { ...current, profile: next.profile, plan: next.plan }); void load(); }} />
         </>
       ) : null}
-      <span className="sr-only" aria-live="polite">{running ? 'Buscando empresas que están contratando. Puede tardar hasta 2 minutos.' : ''}</span>
+      <span className="sr-only" aria-live="polite">{running ? (tab === 'hiring' ? 'Buscando empresas que están contratando. Puede tardar hasta 2 minutos.' : 'Buscando licitaciones y Compra Ágil.') : ''}</span>
     </div>
   );
 }
@@ -202,7 +261,7 @@ function LoadingState() {
 
 function SearchSummary({ overview, running }: { overview: Overview; running: boolean }) {
   const { profile, plan, month } = overview;
-  const last = lastSearch(overview.runs);
+  const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.hiring.includes(run.source)));
   const missing = plan.sources.filter(source => !source.enabled && source.missing);
   const spentShare = month.capUsd > 0 ? Math.min(100, (month.spentUsd / month.capUsd) * 100) : 100;
   return (
@@ -373,6 +432,133 @@ function ListEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }
   );
 }
 
+function TenderSummary({ overview, running }: { overview: Overview; running: boolean }) {
+  const { tenderSearch, profile } = overview;
+  const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.tenders.includes(run.source)));
+  return (
+    <section aria-label="Qué buscamos en licitaciones" className="grid gap-4 rounded-xl border border-border/70 bg-card p-4 shadow-sm md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="min-w-0 space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Qué buscamos en Mercado Público y Compra Ágil</p>
+        {tenderSearch.keywords.length ? (
+          <ul className="flex flex-wrap gap-1.5" aria-label="Palabras">
+            {tenderSearch.keywords.slice(0, 10).map(keyword => <li key={keyword} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{keyword}</li>)}
+            {tenderSearch.keywords.length > 10 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">+{tenderSearch.keywords.length - 10} más</li> : null}
+          </ul>
+        ) : <p className="text-sm text-muted-foreground">Aún no hay palabras para buscar. Agrégalas en «Editar búsqueda».</p>}
+        <p className="text-xs text-muted-foreground">
+          {tenderSearch.unspscCodes.length ? `Códigos UNSPSC: ${tenderSearch.unspscCodes.join(', ')} · ` : ''}
+          Abiertas y publicadas en las últimas dos semanas · {profile.regions.length ? `suman calce ${profile.regions.join(', ')}` : 'todo Chile'}
+        </p>
+      </div>
+      <div className="space-y-3 border-t border-border/60 pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Última búsqueda</p>
+          {running ? (
+            <p className="mt-0.5 flex items-center gap-1.5 text-sm text-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Buscando…</p>
+          ) : last ? (
+            <p className="mt-0.5 text-sm text-foreground">
+              {relativeTime(last.at)} · {last.status === 'failed' ? 'falló' : `${last.fetched} revisadas`}{last.status === 'partial' ? ' · una fuente falló' : ''}
+            </p>
+          ) : <p className="mt-0.5 text-sm text-foreground">Aún no buscas</p>}
+          {!running && last?.errors.length ? <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{last.errors[0]}</p> : null}
+        </div>
+        <p className="text-xs text-muted-foreground">Sin costo: usa la cuota diaria del ticket de Mercado Público. Se actualiza sola cada mañana.</p>
+        {!tenderSearch.ticket ? (
+          <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">Sin ticket de Mercado Público (MERCADO_PUBLICO_TICKET). Lo configura el mantenedor.</p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: boolean; onStatus: (status: OpportunityStatus) => void }) {
+  const { toast } = useToast();
+  const interested = item.status === 'interested' || item.status === 'converted';
+  const isCompraAgil = item.kind === 'compra_agil';
+  const copyCode = async () => {
+    try { await navigator.clipboard.writeText(item.data.code); toast({ title: 'Código copiado', description: `${item.data.code}: búscalo en Mercado Público.` }); }
+    catch { toast({ title: 'No se pudo copiar', description: item.data.code }); }
+  };
+  return (
+    <article className={cn('flex h-full flex-col rounded-xl border bg-card p-4 shadow-sm transition-colors motion-safe:animate-in motion-safe:fade-in-0',
+      interested ? 'border-primary/40' : 'border-border/70', item.status === 'dismissed' && 'opacity-80')}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className={cn('rounded-full px-2 py-0.5 font-medium', isCompraAgil ? 'bg-cw-success-soft text-cw-success' : 'bg-primary/10 text-primary')}>
+              {isCompraAgil ? 'Compra Ágil' : 'Licitación'}
+            </span>
+            <span className="text-muted-foreground">{item.data.code}</span>
+          </p>
+          <h3 className="line-clamp-2 text-base font-semibold text-foreground">{item.title}</h3>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Landmark className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{[item.buyer, item.region].filter(Boolean).join(' · ') || 'Organismo no informado'}</span>
+          </p>
+        </div>
+        <ScorePill score={item.score} />
+      </div>
+      <p className="mt-3 text-sm text-foreground">
+        <strong className="font-semibold">{formatClp(item.amount, item.currency)}</strong> · {closesIn(item.deadlineAt)}
+      </p>
+      {item.data.keywords.length ? (
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Palabras que calzan">
+          {item.data.keywords.slice(0, 4).map(keyword => <li key={keyword} className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">{keyword}</li>)}
+        </ul>
+      ) : null}
+      {item.data.description ? <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{item.data.description}</p> : null}
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+        {item.status === 'dismissed' ? (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => onStatus('new')}>
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />Recuperar
+          </Button>
+        ) : (
+          <>
+            <Button size="sm" variant={interested ? 'default' : 'outline'} aria-pressed={interested} disabled={busy}
+              onClick={() => onStatus(interested ? 'new' : 'interested')}>
+              <Star className={cn('h-4 w-4', interested && 'fill-current')} aria-hidden="true" />{interested ? 'Te interesa' : 'Me interesa'}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => onStatus('dismissed')}>
+              <X className="h-4 w-4" aria-hidden="true" />Descartar
+            </Button>
+          </>
+        )}
+        {item.url ? (
+          <Button size="sm" variant="secondary" asChild className="sm:ml-auto">
+            <a href={item.url} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />Ver en Mercado Público<span className="sr-only">(se abre en otra pestaña)</span>
+            </a>
+          </Button>
+        ) : (
+          <Button size="sm" variant="secondary" className="sm:ml-auto" onClick={() => void copyCode()}>
+            <Copy className="h-4 w-4" aria-hidden="true" />Copiar código
+          </Button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }: {
+  overview: Overview; filter: OpportunityFilter; query: string; searchDisabled: boolean; onSearch: () => void; onEdit: () => void;
+}) {
+  if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin licitaciones con ese texto" description="Prueba con otra palabra del nombre o del organismo." />;
+  if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguna" description="Usa «Me interesa» en las licitaciones que quieras preparar: quedan a tu nombre y aparecen aquí." />;
+  if (filter === 'dismissed') return <EmptyState icon={X} headingLevel="h3" title="No hay descartadas" description="Las licitaciones que descartes quedan aquí y las puedes recuperar." />;
+  if (!overview.runs.some(run => TAB_SOURCES.tenders.includes(run.source))) {
+    return (
+      <EmptyState icon={Gavel} headingLevel="h3" title="Aún no hay licitaciones"
+        description="Busca en Mercado Público y Compra Ágil las compras abiertas que nombran lo que ofreces. No tiene costo."
+        action={<Button onClick={onSearch} disabled={searchDisabled}><Search className="h-4 w-4" aria-hidden="true" />Buscar licitaciones</Button>} />
+    );
+  }
+  return (
+    <EmptyState icon={Gavel} headingLevel="h3" title="Ninguna licitación abierta calza"
+      description="Con tus palabras no hay compras abiertas ahora. Prueba con otras palabras o agrega códigos UNSPSC."
+      action={<Button variant="outline" onClick={onEdit}><Pencil className="h-4 w-4" aria-hidden="true" />Editar búsqueda</Button>} />
+  );
+}
+
 function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
   open: boolean; onOpenChange: (open: boolean) => void; overview: Overview; overCap: boolean; onConfirm: () => void;
 }) {
@@ -420,25 +606,31 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
   const [roles, setRoles] = useState(profile.roles.join('\n'));
   const [regions, setRegions] = useState<string[]>(profile.regions);
   const [minAds, setMinAds] = useState(String(profile.minAds));
+  const [keywords, setKeywords] = useState(profile.keywords.join('\n'));
+  const [codes, setCodes] = useState(profile.unspscCodes.join(', '));
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState('');
   useEffect(() => {
     if (!open) return;
-    setName(profile.name); setOffer(profile.offer); setRoles(profile.roles.join('\n')); setRegions(profile.regions); setMinAds(String(profile.minAds)); setProblem('');
+    setName(profile.name); setOffer(profile.offer); setRoles(profile.roles.join('\n')); setRegions(profile.regions); setMinAds(String(profile.minAds));
+    setKeywords(profile.keywords.join('\n')); setCodes(profile.unspscCodes.join(', ')); setProblem('');
   }, [open, profile]);
 
   const save = async () => {
     const roleList = parseList(roles);
+    const keywordList = parseList(keywords);
+    const codeList = parseList(codes).map(code => code.replace(/\s/g, ''));
     const minimum = Number(minAds);
     if (!name.trim()) return setProblem('Ponle un nombre a la búsqueda.');
     if (!roleList.length) return setProblem('Agrega al menos un cargo.');
     if (!Number.isInteger(minimum) || minimum < 1 || minimum > 100) return setProblem('El mínimo de avisos va de 1 a 100.');
+    if (codeList.some(code => !/^\d{2,8}$/.test(code))) return setProblem('Los códigos UNSPSC son números de 2 a 8 dígitos, separados por coma.');
     setSaving(true);
     setProblem('');
     try {
       const next = await readJson<{ profile: Profile; plan: Overview['plan'] }>(await fetch('/api/commercial-opportunities/profile', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), offer: offer.trim(), roles: roleList, regions, minAds: minimum }),
+        body: JSON.stringify({ name: name.trim(), offer: offer.trim(), roles: roleList, regions, minAds: minimum, keywords: keywordList, unspscCodes: codeList }),
       }));
       onSaved(next);
       onOpenChange(false);
@@ -484,6 +676,16 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
               ))}
             </div>
           </fieldset>
+          <div className="space-y-1.5">
+            <Label htmlFor="opportunity-keywords">Palabras para licitaciones y Compra Ágil</Label>
+            <Textarea id="opportunity-keywords" value={keywords} rows={5} onChange={event => setKeywords(event.target.value)} aria-describedby="opportunity-keywords-hint" />
+            <p id="opportunity-keywords-hint" className="text-xs text-muted-foreground">Como las escriben los organismos: «suministro de personal», «outsourcing». Una por línea; se usan las 12 primeras.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="opportunity-codes">Códigos UNSPSC (opcional)</Label>
+            <Input id="opportunity-codes" value={codes} inputMode="numeric" onChange={event => setCodes(event.target.value)} placeholder="Ej. 80111600, 801116" aria-describedby="opportunity-codes-hint" />
+            <p id="opportunity-codes-hint" className="text-xs text-muted-foreground">Del catálogo de Mercado Público. Un código corto incluye a toda su familia.</p>
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="opportunity-min">Mínimo de avisos en 30 días</Label>
             <Input id="opportunity-min" type="number" inputMode="numeric" min={1} max={100} value={minAds} onChange={event => setMinAds(event.target.value)} className="w-28" />

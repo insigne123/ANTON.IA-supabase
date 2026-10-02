@@ -96,6 +96,7 @@ Migración `supabase/migrations/20261002170000_commercial_opportunities.sql`, ad
 
 - **Clave de RapidAPI suscrita a JSearch** (`JSEARCH_API_KEY`): crearla en Secret Manager y declararla en `apphosting.yaml`.
 - **`APIFY_TOKEN`:** hoy no está declarado en `apphosting.yaml`. Hay que declararlo como secreto para que la app use Fantastic Jobs.
-- **Ticket de Mercado Público** (`MERCADO_PUBLICO_TICKET`), gratis en api.mercadopublico.cl.
+- **Ticket de Mercado Público** (`MERCADO_PUBLICO_TICKET`), gratis en chilecompra.cl/api con Clave Única: crearlo en Secret Manager y declararlo en `apphosting.yaml`. Lo usan licitaciones y Compra Ágil (`docs/oportunidades-licitaciones.md`).
+- **Deploy de las funciones programadas** para la sincronización diaria (`commercialOpportunitiesTick`).
 - **Un tope de gasto mensual en Apify,** que paga Fantastic Jobs. La app además se detiene en `OPPORTUNITIES_MONTHLY_USD_CAP`.
 - **`OPPORTUNITIES_ALLOWED_EMAILS`:** ya va en `apphosting.yaml` con el PR-3c; ver `docs/oportunidades-pagina.md`.

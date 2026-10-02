@@ -1,4 +1,5 @@
 import type { HiringOpportunity, JobAd, JobAdSource } from './hiring';
+import { tenderUrl, type Tender, type TenderSource } from './tenders';
 
 /**
  * The rows of «empresas contratando» (plan 8, phase 3): one commercial_opportunities row per company and one
@@ -108,3 +109,37 @@ export function jobAdFromSignal(row: {
     postedAt: row.posted_at || row.seen_at,
   };
 }
+
+export type TenderOpportunityData = {
+  source: TenderSource; code: string; buyerUnit: string | null; status: string | null; keywords: string[];
+  description: string | null; items: Array<{ code: string | null; name: string }>;
+};
+const kindOf = (source: TenderSource) => (source === 'mercado_publico' ? 'tender' as const : 'compra_agil' as const);
+
+/** The row of a tender or a Compra Ágil quote that fits the offer. As with companies, status and owner are never sent. */
+export function tenderOpportunityRow(tender: Tender, match: { score: number; reasons: string[]; keywords: string[] },
+  scope: { organizationId: string; profileId: string | null }, now: string) {
+  const data: TenderOpportunityData = {
+    source: tender.source, code: tender.code, buyerUnit: clip(tender.buyerUnit, 300), status: tender.status, keywords: match.keywords.slice(0, 10),
+    description: clip(tender.description, 1500), items: tender.items.slice(0, 10).map(item => ({ code: item.code, name: item.name.slice(0, 200) })),
+  };
+  return {
+    organization_id: scope.organizationId, profile_id: scope.profileId, kind: kindOf(tender.source), dedupe_key: tender.code.slice(0, 300),
+    title: clip(tender.name, 500) || tender.code, buyer_name: clip(tender.buyer, 300), region: clip(tender.region, 120),
+    amount: tender.amount, currency: clip(tender.currency, 8), deadline_at: isoOrNull(tender.closesAt), published_at: isoOrNull(tender.publishedAt),
+    url: tenderUrl(tender), score: Math.max(0, Math.min(100, Math.round(match.score))), reasons: match.reasons.slice(0, 10).map(reason => reason.slice(0, 300)),
+    signal_count: 1, last_seen_at: now, updated_at: now, data,
+  };
+}
+export type TenderOpportunityRow = ReturnType<typeof tenderOpportunityRow>;
+
+/** The tender as its own evidence: source, code, buyer and dates, without the official who published it. */
+export function tenderSignalRow(tender: Tender, scope: { organizationId: string; opportunityId: string }, now: string) {
+  return {
+    organization_id: scope.organizationId, opportunity_id: scope.opportunityId, source: tender.source, external_id: tender.code.slice(0, 300),
+    title: clip(tender.name, 500) || tender.code, location: clip(tender.region, 200), publisher: clip(tender.buyer, 120), url: tenderUrl(tender),
+    posted_at: isoOrNull(tender.publishedAt), seen_at: now,
+    data: { buyerUnit: clip(tender.buyerUnit, 300), amount: tender.amount, currency: clip(tender.currency, 8), closesAt: isoOrNull(tender.closesAt) },
+  };
+}
+export type TenderSignalRow = ReturnType<typeof tenderSignalRow>;

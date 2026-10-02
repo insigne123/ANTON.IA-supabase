@@ -25,3 +25,7 @@ export function pilotHiringProfile(extra: Partial<Pick<HiringProfile, 'clients' 
  * opens Búsqueda on the company with these roles. */
 export const DECISION_MAKER_TITLES = ['Gerente de Recursos Humanos', 'Jefe de Recursos Humanos', 'Gerente de Personas',
   'Gerente de Operaciones', 'Jefe de Operaciones', 'Gerente General'];
+
+/** What GrupoExpro sells, as public tenders name it (staffing, outsourcing, recruitment, payroll). Editable in the page. */
+export const GRUPOEXPRO_TENDER_KEYWORDS = ['suministro de personal', 'servicios transitorios', 'personal transitorio', 'personal de reemplazo',
+  'outsourcing', 'externalización', 'contact center', 'call center', 'reclutamiento', 'selección de personal', 'remuneraciones'];
