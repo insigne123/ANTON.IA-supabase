@@ -21,6 +21,8 @@ export type PersonState = {
   /** The LinkedIn send was confirmed in this session. */
   sent: boolean;
   hasMessage: boolean;
+  /** What the organization knows of the person (PR-4b): someone else working it, a reply, the last contact. */
+  presence?: { label: string; tone: ChipTone; blocks: boolean } | null;
 };
 
 const researchFailed = (research: any) => research?.status === 'failed' || research?.reportSynthesisV2?.status === 'failed_permanent';
@@ -41,6 +43,10 @@ export function personChips(state: PersonState): PersonChip[] {
   } else if (reportPending(state.research)) chips.push({ key: 'research', label: 'Investigando…', tone: 'info' });
   else if (researchFailed(state.research)) chips.push({ key: 'research', label: 'Investigación con problemas', tone: 'warning' });
   if (state.sent) chips.push({ key: 'sent', label: 'Mensaje enviado', tone: 'success' });
+  // Being saved is already its own chip; the rest of what the organization knows is new here.
+  if (state.presence && !/^Guardado( en tu organización)?$/.test(state.presence.label)) {
+    chips.push({ key: 'team', label: state.presence.label, tone: state.presence.tone });
+  }
   return chips;
 }
 

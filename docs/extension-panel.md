@@ -81,6 +81,62 @@ La extensión suma la acción `quota` en `/api/extension/workspace`:
   - el cambio de perfil por aviso, y que sin aviso no se consulta nada en 2 segundos.
   - Para correrlo sin Chrome estable: `PLAYWRIGHT_CHROMIUM_EXECUTABLE=<ruta de Chromium>`.
 
+## Marca en cada perfil (PR-4b)
+
+Junto al nombre de cada persona en LinkedIn aparece lo que la organización sabe de ella. Se ve en su perfil y en los resultados de búsqueda de personas que ya están en pantalla, sin abrir el panel.
+
+**Qué dice, en este orden** (`src/lib/extension-presence.ts`):
+1. **Otra persona del equipo la trabaja,** con la colaboración activa:
+   - «Guardado por Ana»;
+   - «En conversación con Ana»;
+   - «Contactado por Ana · libre desde el…»;
+   - «Ganado por Ana».
+   - Son los mismos textos de los bloqueos de equipo (`teamLockNotice`). Si bloquea, el panel pide coordinar antes de escribirle.
+2. **«Respondió hace N días»,** si la respuesta es posterior al último contacto.
+3. **«Contactado hace N días por LinkedIn» o «por correo»:**
+   - LinkedIn: el último envío confirmado desde la extensión;
+   - correo: el último envío registrado.
+4. **«Guardado»,** o «Guardado en tu organización» si lo guardó otra persona.
+
+Sin nada que decir, no hay marca.
+
+**Cómo se lee** (`src/lib/server/extension-presence.ts`, acción `presence`):
+- **Pedido:** hasta 50 perfiles por llamada, los de una página de resultados.
+- **Lecturas con el cliente de la persona,** como los bloqueos de equipo:
+  - contactos guardados;
+  - «Por escribir»;
+  - envíos de correo.
+- **Lectura con la clave de servicio,** acotada a la organización activa: los envíos de LinkedIn, porque esa tabla no da permisos a los miembros.
+- **Se compara el perfil exacto:** «ana» no es «ana-perez».
+
+**En la página de LinkedIn** (`prospecting-content.js`):
+- **La marca** va en un shadow DOM cerrado, junto al nombre. No toca el texto del nombre ni los estilos de LinkedIn.
+- **Sus propias inserciones no disparan otra consulta.**
+- **No hace clics ni desplazamientos.**
+- **Sin cuenta conectada,** no hay marcas.
+
+**Caché:**
+- el worker guarda cada respuesta 5 minutos;
+- al guardar, enviar, ejecutar un trabajo de Cowork o desconectar, la borra y avisa a las pestañas de LinkedIn para que pregunten de nuevo.
+
+**En el panel,** la misma línea se suma a los estados de la tarjeta (sin repetir «Guardado»).
+
+**Pruebas:**
+- **`src/lib/extension-presence.test.ts`:** el orden y los textos.
+- **`src/lib/server/extension-presence.test.ts`:**
+  - todo acotado a la organización;
+  - solo envíos confirmados;
+  - el perfil exacto;
+  - el bloqueo de equipo antes que lo propio;
+  - un tope de 50.
+- **`chrome-extension/tests/presence-marks.test.mjs`:**
+  - la marca junto al nombre, que se actualiza y se quita;
+  - los resultados sin repetir;
+  - sin un bucle por las marcas propias;
+  - sin cuenta, nada.
+- **La ruta:** una prueba para otra cuenta y una para más de 50 perfiles.
+- **El navegador:** el aviso de coordinar en la tarjeta.
+
 ## Publicación
 
 - **Se compila con `npm run extension:build`.** El ZIP para la tienda y la versión (4.1.0, al cerrar la fase 4) los publica el mantenedor.

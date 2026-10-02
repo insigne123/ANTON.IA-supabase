@@ -44,6 +44,11 @@ export async function POST(req: NextRequest) {
       const status = await getDailyQuotaStatus({ ...bridge, resource: 'search', limit: limits.leadSearch });
       return json({ credits: { used: status.count, limit: status.limit, remaining: Math.max(0, status.limit - status.count), resetAt: status.resetAtISO } });
     }
+    if (body.action === 'presence') {
+      // What the organization knows of the people on screen: someone else working them, a reply, the last contact, saved.
+      const { readExtensionPresence } = await import('@/lib/server/extension-presence');
+      return json({ presence: await readExtensionPresence(auth, body.linkedinUrls || []) });
+    }
     if (body.action === 'linkedin-jobs-pending') {
       const { listPendingLinkedinJobs } = await import('@/lib/server/linkedin-bridge-ops');
       const { canonicalExtensionProfileUrl } = await import('@/lib/extension-profile-url');

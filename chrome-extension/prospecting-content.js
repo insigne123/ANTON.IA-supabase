@@ -54,6 +54,8 @@
   }
   chrome.runtime.onMessage.addListener((request, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.tab) return false;
+    // Something was saved or sent: the marks on this page ask again.
+    if (request.action === 'ANTONIA_PRESENCE_REFRESH') { scheduleDecorate(); return false; }
     if (request.action === 'PROSPECT_SWEEP_NETWORK' || request.action === 'PROSPECT_SWEEP_INBOX') {
       try {
         respond({ ok: true, ...(request.action === 'PROSPECT_SWEEP_NETWORK' ? sweepNetwork() : sweepInbox()) });
@@ -135,9 +137,85 @@
     try { chrome.runtime.sendMessage({ action: 'ANTONIA_PROFILE_CHANGED' })?.catch?.(() => {}); } catch { /* The extension was reloaded. */ }
   };
   const schedule = () => { if (!pending) pending = setTimeout(announce, 300); };
+
+  // What the organization knows of each person on screen (PR-4b): a mark next to the profile's name and next to each visible
+  // search result. Read-only: nothing is clicked or scrolled. The mark lives in a closed shadow root, so LinkedIn's styles and
+  // the name's text stay untouched; its own insertions are recognized and never trigger another round.
+  const MARK = 'data-antonia-presence';
+  const TONES = {
+    success: ['#047857', '#ecfdf5'],
+    info: ['hsl(217.2 91.2% 40%)', 'hsl(217.2 91.2% 45% / 0.1)'],
+    warning: ['#b45309', '#fffbeb'],
+  };
+  const markFor = (url, presence) => {
+    const host = document.createElement('span');
+    host.setAttribute(MARK, `${url}|${presence.label}`);
+    const root = host.attachShadow({ mode: 'closed' });
+    const [ink, soft] = TONES[presence.tone] || TONES.info;
+    const style = document.createElement('style');
+    style.textContent = `:host{display:inline-flex;vertical-align:middle;margin:2px 0 2px 8px}
+      span{display:inline-flex;align-items:center;gap:5px;max-width:260px;font:600 12px/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+      color:${ink};background:${soft};border-radius:999px;padding:2px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      i{flex:none;width:6px;height:6px;border-radius:50%;background:currentColor}`;
+    const pill = document.createElement('span');
+    pill.title = `Anton.IA: ${presence.label}`;
+    pill.append(document.createElement('i'), document.createTextNode(presence.label));
+    root.append(style, pill);
+    return host;
+  };
+  const place = (anchor, url, presence) => {
+    const next = anchor.nextElementSibling;
+    const current = next?.hasAttribute?.(MARK) ? next : null;
+    if (!presence) { current?.remove(); return; }
+    if (current?.getAttribute(MARK) === `${url}|${presence.label}`) return;
+    current?.remove();
+    anchor.after(markFor(url, presence));
+  };
+  const presenceOf = async urls => {
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'PROSPECT_PRESENCE', urls });
+      return response?.ok ? response.result || {} : {};
+    } catch { return {}; }
+  };
+  // The visible people of a results page: one link per result item, to a public profile, with a name.
+  const visibleResults = () => {
+    if (!/^\/search\/results\/(people|all)/.test(location.pathname)) return [];
+    const seen = new Set();
+    const found = [];
+    for (const item of document.querySelectorAll('main li')) {
+      const link = [...item.querySelectorAll('a[href*="/in/"]')].find(node => canonical(node.href) && node.textContent.trim() && !node.closest(`[${MARK}]`));
+      const url = link && canonical(link.href);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      found.push({ url, anchor: link });
+      if (found.length >= 50) break;
+    }
+    return found;
+  };
+  let decorating = 0;
+  let generation = 0;
+  const decorate = async () => {
+    decorating = 0;
+    const round = ++generation;
+    const profile = canonical(location.href);
+    const heading = profile ? linkedinProfileHeader('')?.heading : null;
+    const results = visibleResults();
+    const urls = [...new Set([...(heading ? [profile] : []), ...results.map(item => item.url)])];
+    if (!urls.length) return;
+    const presence = await presenceOf(urls);
+    if (round !== generation) return;
+    if (heading && canonical(location.href) === profile) place(heading, profile, presence[profile]);
+    for (const item of results) if (item.anchor.isConnected) place(item.anchor, item.url, presence[item.url]);
+  };
+  const scheduleDecorate = () => { if (!decorating) decorating = setTimeout(decorate, 600); };
+  // A change that is only one of our own marks is not a change of the page.
+  const ours = records => records.every(record => [...record.addedNodes, ...record.removedNodes]
+    .every(node => node.nodeType === 1 && node.hasAttribute?.(MARK)));
   if (typeof MutationObserver === 'function' && document.documentElement) {
-    new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
-    addEventListener('popstate', schedule);
+    new MutationObserver(records => { if (ours(records)) return; schedule(); scheduleDecorate(); })
+      .observe(document.documentElement, { childList: true, subtree: true });
+    addEventListener('popstate', () => { schedule(); scheduleDecorate(); });
     schedule();
+    scheduleDecorate();
   }
 })();

@@ -48,3 +48,11 @@ test('the research steps are the app\'s three, with the current one marked', () 
   assert.equal(researchSteps(null), null);
   assert.equal(researchSteps({ status: 'failed' }), null);
 });
+
+test('what the organization knows joins the chips, without repeating «Guardado»', () => {
+  const label = state => personChips(state).map(chip => `${chip.label}:${chip.tone}`);
+  assert.deepEqual(label({ ...base, saved: true, email: 'a@b.cl', presence: { label: 'En conversación con Ana', tone: 'warning', blocks: true } }),
+    ['Guardado:success', 'Con correo:info', 'En conversación con Ana:warning']);
+  assert.deepEqual(label({ ...base, saved: true, presence: { label: 'Guardado', tone: 'success', blocks: false } }), ['Guardado:success', 'Sin correo:neutral']);
+  assert.deepEqual(label({ ...base, presence: { label: 'Guardado por Ana', tone: 'info', blocks: false } }), ['Sin guardar:neutral', 'Guardado por Ana:info']);
+});
