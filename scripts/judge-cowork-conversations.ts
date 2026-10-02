@@ -14,6 +14,7 @@ import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
 import { WEB_CORPUS } from './fixtures/cowork-web-corpus';
 import { LECTURAS_CORPUS } from './fixtures/cowork-lecturas-corpus';
+import { ICP_CORPUS } from './fixtures/cowork-icp-corpus';
 import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
@@ -35,7 +36,7 @@ async function main() {
   // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
   CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS, ...THREAD_SEND_CORPUS, ...THREAD_SEND_AGENDA_CORPUS, ...BATCH_CORPUS);
   // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
-  CORPUS.push(...AGENDA_CORPUS, ...WEB_CORPUS, ...LECTURAS_CORPUS, ...REINTENTO_CORPUS, ...TELEFONO_CORPUS);
+  CORPUS.push(...AGENDA_CORPUS, ...WEB_CORPUS, ...LECTURAS_CORPUS, ...ICP_CORPUS, ...REINTENTO_CORPUS, ...TELEFONO_CORPUS);
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY) throw new Error('Requires --live and an explicit OPENAI_API_KEY.');
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
   const judgeModel = arg('judge-model') || process.env.COWORK_JUDGE_MODEL || '';
