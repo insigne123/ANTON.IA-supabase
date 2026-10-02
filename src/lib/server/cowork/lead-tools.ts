@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { coworkLeadsSummary, type CoworkLeadsSummaryInput } from '@/lib/cowork/leads-summary';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { normalizeLockEmail, teamLockNotice } from '@/lib/team-lock';
@@ -125,4 +126,24 @@ export async function countCoworkLeads(
     matchedIn: [...COUNT_FIELDS],
     limitation: 'Cuenta por texto en cargo, empresa y sector de tus contactos guardados; un cargo escrito de otra forma no entra. Los conteos son exactos, pero «quiénes son» se ve con leads.search.',
   };
+}
+
+const SUMMARY_LIMIT = 5000;
+
+/** «Revisa mis leads» (Plan 5, PR-7): the person's saved contacts by state with exact figures (up to 5,000) and the next step
+ * of each group. Only ids, emails and dates leave the database; no names. */
+export async function summarizeCoworkLeads(client: SupabaseClient, scope: { userId: string; organizationId: string }) {
+  const own = (table: string, fields: string) => client.from(table).select(fields).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
+  const [leads, contacted, researched] = await Promise.all([
+    own('leads', 'id,email,linkedin_url').order('created_at', { ascending: false }).limit(SUMMARY_LIMIT),
+    own('contacted_leads', 'lead_id,email,replied_at').limit(SUMMARY_LIMIT * 2),
+    own('lead_research_jobs', 'lead_id').eq('status', 'completed').limit(SUMMARY_LIMIT * 2),
+  ]);
+  if (leads.error || contacted.error || researched.error) throw new Error('No se pudieron resumir tus contactos guardados.');
+  const rows = (leads.data || []) as unknown as CoworkLeadsSummaryInput['leads'];
+  return coworkLeadsSummary({
+    leads: rows,
+    contacted: (contacted.data || []) as unknown as CoworkLeadsSummaryInput['contacted'],
+    researched: (researched.data || []) as unknown as CoworkLeadsSummaryInput['researched'],
+  }, { truncated: rows.length >= SUMMARY_LIMIT });
 }

@@ -43,6 +43,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'deliverability.check': { label: 'Verificó los registros DNS del dominio', source: 'Entregabilidad', icon: 'shield' },
   'site.read': { label: 'Leyó tu sitio web', source: 'Sitio web', icon: 'globe' },
   'leads.count': { label: 'Contó tus contactos guardados', source: 'Contactos', icon: 'contacts' },
+  'leads.summary': { label: 'Resumió tus contactos por estado', source: 'Contactos', icon: 'contacts' },
   'deliverability.bounces': { label: 'Analizó los rebotes', source: 'Entregabilidad', icon: 'shield' },
   'deliverability.sender': { label: 'Contrastó tu remitente con envíos reales', source: 'Entregabilidad', icon: 'shield' },
   'compliance.check': { label: 'Revisó la política de contacto', source: 'Cumplimiento', icon: 'scale' },
