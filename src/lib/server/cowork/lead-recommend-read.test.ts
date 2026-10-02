@@ -37,7 +37,7 @@ test('the offer asked about decides; without it, the customer of «Perfil»; con
   };
   const asked1 = await readCoworkLeadRecommendations(client as never, { userId: USER, organizationId: ORG }, 'RR. HH., personas', { locks: locks as never });
   assert.deepEqual(asked1.criteria, { terms: ['RR. HH.', 'personas'], locations: [], source: 'pedido' });
-  assert.deepEqual(asked1.top.map(item => item.leadId), [], 'l1 and l4 were contacted, l2 is Ana’s and l3 does not fit');
+  assert.deepEqual(asked1.top.map(item => item.leadId), ['l3'], 'l1 and l4 were contacted and l2 is Ana’s; l3 is of the same area as «RR. HH.»');
   assert.equal(asked1.excludedByTeam, 1);
   assert.deepEqual(asked, ['l2@acme.cl']);
   const fromProfile = await readCoworkLeadRecommendations(client as never, { userId: USER, organizationId: ORG }, '', { locks: locks as never });

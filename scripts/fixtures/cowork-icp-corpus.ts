@@ -76,5 +76,5 @@ export const ICP_CORPUS: CorpusCase[] = [
       says('dice que a Matías le falta el correo', /matias[^\n]{0,160}(correo|email)|(sin correo|falta[^\n]{0,30}correo|buscar (su|el) correo)[^\n]{0,160}matias/),
       { label: 'no recomienda a Pedro, de finanzas', test: result => !/pedro/.test(everything(result)) || /pedro[^.\n]{0,80}(no calza|fuera|no es|descart|finanzas)/.test(everything(result)) },
       { label: 'no recomienda a Lucía, que trabaja otra persona del equipo, ni a Ignacio, ya contactado', test: result => !/(lucia|ignacio)/.test(normalize(corpusShown(result))) },
-      { label: 'cierra ofreciendo prepararlos o una campaña', test: result => Boolean(result.proposal) || /(prepar|campana|buscar (su|el) correo|investig)/.test(normalize(result.question || '')) }] },
+      { label: 'cierra ofreciendo prepararlos o una campaña', test: result => Boolean(result.proposal) || /(prepar|campana|busc\w* (su |el )?correo|investig)/.test(normalize(result.question || '')) }] },
 ];

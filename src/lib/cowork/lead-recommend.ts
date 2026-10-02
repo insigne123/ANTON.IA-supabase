@@ -15,6 +15,25 @@ export type RecommendCriteria = { terms: string[]; locations: string[]; source: 
 
 export const RECOMMEND_SHOWN = 20;
 const LEVEL_POINTS: Record<string, number> = { 'Dirección': 15, 'Jefatura': 10, 'Profesional': 3 };
+/** Areas too broad to say a title fits: «otra área» or no title. */
+const NO_AREA = new Set(['Otra área', 'Sin cargo']);
+/** The same industry written in other words: a term of a group finds any of them in the industry or the company name. */
+const INDUSTRY_GROUPS = [
+  ['retail', 'comercio', 'supermercado', 'supermercados', 'tiendas', 'grandes tiendas', 'consumer goods'],
+  ['mineria', 'minera', 'mining', 'metales'],
+  ['seguridad privada', 'seguridad', 'security', 'vigilancia', 'guardias'],
+  ['logistica', 'logistics', 'transporte', 'transportes', 'bodegaje', 'distribucion', 'truck transportation'],
+  ['construccion', 'constructora', 'construction', 'inmobiliaria', 'ingenieria y construccion'],
+  ['agricola', 'agroindustria', 'agro', 'agricultura', 'frutícola', 'fruticola', 'farming'],
+  ['salud', 'clinica', 'hospital', 'health'],
+  ['manufactura', 'manufacturing', 'industrial', 'planta'],
+  ['aseo', 'limpieza', 'facility', 'facilities', 'servicios generales'],
+  ['alimentos', 'food', 'alimentacion', 'casino', 'food production'],
+];
+const fold = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+const industryGroup = (term: string) => INDUSTRY_GROUPS.find(group => group.some(item => fold(item) === fold(term))) ?? [term];
+/** An industry («seguridad privada») is not a role area, even if a word of it names one. */
+const isIndustry = (term: string) => INDUSTRY_GROUPS.some(group => group.some(item => fold(item) === fold(term)));
 
 /** «RR. HH., selección; retail» → ['RR. HH.', 'selección', 'retail']: commas, semicolons, «|» or line breaks separate terms. */
 export function recommendTerms(value: string) {
@@ -24,10 +43,15 @@ export function recommendTerms(value: string) {
 export function scoreRecommendLead(lead: RecommendLead, criteria: RecommendCriteria) {
   const reasons: string[] = [];
   let score = 0;
+  // A role term fits a title with those words, or a title of the same area («recursos humanos» and «Jefa de RR. HH.»).
+  const leadArea = icpRoleArea(lead.title);
   const titleHit = lead.title ? criteria.terms.find(term => titleContainsTerm(lead.title!, term)) : undefined;
+  const areaHit = !titleHit && !NO_AREA.has(leadArea) ? criteria.terms.find(term => !isIndustry(term) && icpRoleArea(term) === leadArea) : undefined;
   if (titleHit) { score += 40; reasons.push(`su cargo calza con «${titleHit}»`); }
+  else if (areaHit) { score += 30; reasons.push(`su cargo es de ${leadArea} («${areaHit}»)`); }
   const companyText = [lead.industry, lead.company].filter(Boolean).join(' · ');
-  const industryHit = companyText ? criteria.terms.find(term => term !== titleHit && titleContainsTerm(companyText, term)) : undefined;
+  const industryHit = companyText ? criteria.terms.find(term => term !== titleHit && term !== areaHit
+    && industryGroup(term).some(word => titleContainsTerm(companyText, word))) : undefined;
   if (industryHit) { score += 25; reasons.push(`su empresa calza con «${industryHit}»`); }
   const level = icpRoleLevel(lead.title);
   if (LEVEL_POINTS[level]) { score += LEVEL_POINTS[level]; if (level !== 'Profesional') reasons.push(level === 'Dirección' ? 'decide (dirección)' : 'jefatura'); }
@@ -38,7 +62,7 @@ export function scoreRecommendLead(lead: RecommendLead, criteria: RecommendCrite
   if (lead.researchedAt) { score += 3; reasons.push('ya está investigada'); }
   if (lead.linkedinUrl) score += 2;
   const missing = [...(lead.email ? [] : ['buscar su correo']), ...(lead.researchedAt ? [] : ['investigarla'])];
-  return { score: Math.min(100, score), reasons, missing, area: icpRoleArea(lead.title), fits: Boolean(titleHit || industryHit) };
+  return { score: Math.min(100, score), reasons, missing, area: leadArea, fits: Boolean(titleHit || areaHit || industryHit) };
 }
 
 /**

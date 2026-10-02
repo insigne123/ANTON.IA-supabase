@@ -45,3 +45,14 @@ test('without terms the order is level and readiness, and it says so', () => {
   assert.equal(result.fitting, null);
   assert.match(result.limitation, /Sin cargos ni industrias/);
 });
+
+test('a role fits by its area and an industry by its usual synonyms', () => {
+  const criteria = { terms: ['recursos humanos', 'seguridad privada'], locations: [], source: 'pedido' as const };
+  const hr = scoreRecommendLead(lead('a', 'Jefa de RR. HH.', null, { company: 'Securitas Chile' }), criteria);
+  assert.equal(hr.fits, true);
+  assert.deepEqual(hr.reasons.slice(0, 1), ['su cargo es de Personas y RR. HH. («recursos humanos»)']);
+  const security = scoreRecommendLead(lead('b', 'Gerente de Operaciones', 'Seguridad e investigaciones'), criteria);
+  assert.deepEqual(security.reasons.slice(0, 1), ['su empresa calza con «seguridad privada»']);
+  assert.equal(scoreRecommendLead(lead('c', 'Arquitecta', 'Software'), criteria).fits, false);
+});
+
