@@ -42,13 +42,16 @@ export async function readCoworkIcp(client: SupabaseClient, scope: Scope, value:
     }
     return { rows, complete: false };
   }
-  const [profile, touches, leads, stages] = await Promise.all([
+  const [profile, touches, leads, enriched, stages] = await Promise.all([
     client.from('profiles').select('company_name,signatures').eq('id', userId).maybeSingle(),
     scan<Record<string, string | null>>('contacted_leads', 'id,lead_id,email,role,industry,country,city,sent_at,replied_at,reply_intent,bounced_at'),
     scan<Record<string, string | null>>('leads', 'id,title,industry,country,city'),
+    // «Por escribir» counts too; a contact enriched from a saved one keeps its id and stands for it.
+    scan<Record<string, string | null>>('enriched_leads', 'id,title,organization_industry,country,city,source_saved_lead_id:data->>sourceSavedLeadId'),
     scan<{ id: string; stage: string | null }>('unified_crm_data', 'id,stage'),
   ]);
   if (profile.error) throw new Error('No se pudo leer tu perfil para analizar tu cliente ideal.');
+  const covered = new Set(enriched.rows.flatMap(row => row.source_saved_lead_id ? [row.source_saved_lead_id] : []));
   const analysis = analyzeIcp({
     declared: icpDeclaredFromProfile(profile.data),
     touches: touches.rows.map((row): IcpTouch => ({
@@ -56,11 +59,15 @@ export async function readCoworkIcp(client: SupabaseClient, scope: Scope, value:
       country: row.country || null, city: row.city || null, sentAt: row.sent_at || null, repliedAt: row.replied_at || null,
       replyIntent: row.reply_intent || null, bouncedAt: row.bounced_at || null,
     })),
-    leads: leads.rows.map((row): IcpLead => ({ id: String(row.id), title: row.title || null, industry: row.industry || null, country: row.country || null, city: row.city || null })),
+    leads: [
+      ...enriched.rows.map((row): IcpLead => ({ id: String(row.id), title: row.title || null, industry: row.organization_industry || null, country: row.country || null, city: row.city || null })),
+      ...leads.rows.filter(row => !covered.has(String(row.id)))
+        .map((row): IcpLead => ({ id: String(row.id), title: row.title || null, industry: row.industry || null, country: row.country || null, city: row.city || null })),
+    ],
     stages: new Map(stages.rows.filter(row => typeof row.stage === 'string').map(row => [row.id, row.stage as string])),
     now: new Date().toISOString(),
   });
-  const complete = touches.complete && leads.complete && stages.complete;
+  const complete = touches.complete && leads.complete && enriched.complete && stages.complete;
   return {
     scope: 'organization_icp', offer, ...analysis,
     ...(complete ? {} : { partial: `Se leyeron los primeros ${PAGE * PAGES} registros de cada tabla: las cifras son de esa parte.` }),

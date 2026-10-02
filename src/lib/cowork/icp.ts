@@ -17,7 +17,7 @@ export type IcpTouch = {
   replyIntent: string | null; bouncedAt: string | null;
 };
 export type IcpLead = { id: string; title: string | null; industry: string | null; country: string | null; city: string | null };
-/** CRM stages by record id (`lead_saved|<lead id>`), as unified_crm_data keeps them. */
+/** CRM stages by record id, as unified_crm_data keeps them: `lead_saved|<id>`, `lead_enriched|<id>` or `enriched_lead|<id>`. */
 export type IcpStages = Map<string, string>;
 
 /** Fewer sends than this and a segment is a lead to test, not a conclusion. */
@@ -28,6 +28,8 @@ const POSITIVE = new Set(['positive', 'interested', 'meeting_request']);
 /** Not an answer from a person: an out-of-office or a delivery failure. */
 const NOT_A_REPLY = new Set(['auto_reply', 'delivery_failure']);
 const MEETING_OR_LATER = new Set(['meeting', 'negotiation', 'closed_won']);
+/** The three ways the app names a contact's CRM record (crm-service.ts writes `enriched_lead|`). */
+const CRM_PREFIXES = ['lead_saved', 'lead_enriched', 'enriched_lead'];
 
 /** Functional areas first: «Gerente de Operaciones» is Operations, only what is left is general management. */
 const AREAS: Array<{ area: string; terms: string[] }> = [
@@ -118,7 +120,7 @@ export function analyzeIcp(input: { declared: IcpDeclared | null; touches: IcpTo
     const key = touch.leadId || (touch.email ? touch.email.trim().toLowerCase() : `row:${touch.id}`);
     const lead = touch.leadId ? leadsById.get(touch.leadId) : undefined;
     const title = touch.role || lead?.title || null;
-    const stage = touch.leadId ? input.stages.get(`lead_saved|${touch.leadId}`) : undefined;
+    const stages = touch.leadId ? CRM_PREFIXES.flatMap(prefix => input.stages.get(`${prefix}|${touch.leadId}`) ?? []) : [];
     const intent = (touch.replyIntent || '').toLowerCase();
     const replied = Boolean(touch.repliedAt) && !NOT_A_REPLY.has(intent);
     const current = people.get(key);
@@ -130,8 +132,8 @@ export function analyzeIcp(input: { declared: IcpDeclared | null; touches: IcpTo
     };
     person.replied ||= replied;
     person.positive ||= replied && POSITIVE.has(intent);
-    person.meeting ||= Boolean(stage && MEETING_OR_LATER.has(stage));
-    person.won ||= stage === 'closed_won';
+    person.meeting ||= stages.some(stage => MEETING_OR_LATER.has(stage));
+    person.won ||= stages.includes('closed_won');
     person.bounced ||= Boolean(touch.bouncedAt);
     people.set(key, person);
   }

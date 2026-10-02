@@ -9,9 +9,10 @@ import PerformanceChart from '@/components/dashboard/PerformanceChart';
 import SummaryCards from '@/components/dashboard/SummaryCards';
 import UserCreditsCard from '@/components/dashboard/UserCreditsCard';
 import { TodayPanel } from '@/components/home/TodayPanel';
+import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 import { Search } from 'lucide-react';
 
-/** «Hoy» (docs/inicio-hoy.md): what to do now first, then how the week is going, then credits. */
+/** «Hoy» (docs/inicio-hoy.md): what to do now first, who to write to, then how the week is going, then credits. */
 export default function DashboardPage() {
   return (
     <div>
@@ -29,6 +30,8 @@ export default function DashboardPage() {
 
       <main className="space-y-8">
         <TodayPanel />
+
+        <RecommendedLeads />
 
         <section aria-labelledby="week-title" className="space-y-4">
           <h2 id="week-title" className="text-base font-semibold tracking-tight">Tu semana</h2>

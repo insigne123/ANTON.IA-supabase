@@ -70,3 +70,11 @@ test('only the six biggest groups are listed; the rest are summed apart', () => 
   assert.equal(result.segments.industry.groups.length, 6);
   assert.deepEqual([result.segments.industry.otherGroups, result.segments.industry.otherSent], [3, 3]);
 });
+
+test('a contact of «Por escribir» brings its pipeline stage under any of the three record names', () => {
+  const touches = [touch('t1', { leadId: 'e1', role: 'Gerente de Personas' }), touch('t2', { leadId: 'e2', role: 'Jefe de Operaciones' }),
+    touch('t3', { leadId: 'l3', role: 'Analista' })];
+  const stages = new Map([['enriched_lead|e1', 'closed_won'], ['lead_enriched|e2', 'meeting'], ['lead_saved|l3', 'contacted']]);
+  const result = analyzeIcp({ declared: null, touches, leads: [], stages, now: NOW });
+  assert.deepEqual([result.totals.meetings, result.totals.won], [2, 1]);
+});

@@ -32,6 +32,8 @@ import { profileService } from '@/lib/services/profile-service';
 import { PasswordChangeForm } from '@/components/profile/password-change-form';
 import { ProfileAutofillCard } from '@/components/profile/ProfileAutofillCard';
 import { ProfileCompleteness } from '@/components/profile/ProfileCompleteness';
+import { IcpResultsPanel } from '@/components/profile/IcpResultsPanel';
+import { appendTerm } from '@/lib/icp/view';
 import { ProfileSuggestionDialog } from '@/components/profile/ProfileSuggestionDialog';
 
 const FIELD_CLASS = 'rounded-xl bg-background/70';
@@ -372,6 +374,8 @@ export default function ProfilePage() {
                         <Input id="targetLocations" value={profile.targetLocations} onChange={handleInputChange} aria-describedby="targetLocations-help" placeholder="Ej. Chile, Perú" className={`h-11 ${FIELD_CLASS}`} />
                       </Field>
                     </div>
+                    <IcpResultsPanel targetIndustries={profile.targetIndustries}
+                      onAddIndustry={(industry) => setField('targetIndustries', appendTerm(profile.targetIndustries, industry))} />
                   </Section>
                 </div>
               )}
