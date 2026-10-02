@@ -53,7 +53,7 @@ export function coworkResearchNoticeMessage(done: CoworkResearchNoticePerson[], 
     ...done.map(person => `- ${who(person)}, leadId ${person.leadId}: ${coworkResearchStatusText(person.status, person.errorCode)}.`),
     ...(running.length ? [`Sigue${running.length === 1 ? '' : 'n'} en curso: ${running.map(who).join(', ')}. Te aviso aquí cuando termine${running.length === 1 ? '' : 'n'}.`] : []),
     ready
-      ? 'Lee cada informe listo con research.get_existing y cuéntale al usuario, por persona y en pocas líneas, lo más útil para escribirle: qué hace su empresa, una señal reciente con su fuente y qué faltó. Luego propone el siguiente paso concreto, por ejemplo los borradores de correo.'
+      ? 'Lee cada informe listo con research.get_existing y entrégalos completos en document («Informes de la investigación»): una sección por persona con su informe tal como viene en report.sections, con sus títulos (la persona, su empresa, las oportunidades, cómo abrir la conversación y las preguntas), sin resumirlo; si report es null, di por qué con reportMessage y usa la evidencia. En reply, una línea por persona con lo más útil para escribirle y qué faltó. Si no alcanzas a leerlos todos en este turno, entrega los que leíste y ofrece seguir con el resto. Luego propone el siguiente paso concreto, por ejemplo los borradores de correo.'
       : 'Cuéntale al usuario qué pasó con cada una y qué puede hacer ahora.',
     'No inicies investigaciones nuevas ni repitas las que siguen en curso.',
   ].join('\n');
