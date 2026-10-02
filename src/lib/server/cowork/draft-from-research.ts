@@ -7,6 +7,7 @@ import { requireCoworkWorkerAccess } from './access';
 import { ResearchSnapshotV1Schema } from '@/lib/research-contracts';
 import { loadSellerProfile, sellerWithOfferInPlay } from '@/lib/server/seller-profile';
 import { loadCoworkOfferInPlay } from './thread-memory';
+import { ownsContact } from './own-contacts';
 
 export const coworkDraftRequestSchema = z.object({ snapshotId: z.string().uuid() }).strict();
 
@@ -30,9 +31,8 @@ async function validateObservedDraftTarget(auth: AuthContext, runId: string, sna
   const snapshot = ResearchSnapshotV1Schema.parse(row.data.payload);
   if (snapshot.id !== snapshotId || snapshot.scope.ownerUserId !== scope.userId
     || snapshot.scope.organizationId !== scope.organizationId || !snapshot.subject.leadId) throw new Error('COWORK_RESULT_UNAVAILABLE');
-  const lead = await auth.supabase.from('leads').select('id').eq('id', snapshot.subject.leadId)
-    .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
-  if (lead.error || !lead.data) throw new Error('COWORK_RESULT_UNAVAILABLE');
+  // The researched person is a saved contact or one of «Por escribir» (Plan 6, PR-A).
+  if (!(await ownsContact(auth.supabase as never, scope, snapshot.subject.leadId))) throw new Error('COWORK_RESULT_UNAVAILABLE');
   return { scope, snapshot };
 }
 
@@ -112,9 +112,7 @@ export async function processCoworkDraftQueue() {
       || snapshot.scope.organizationId !== scope.organizationId || !snapshot.subject.leadId) {
       throw new Error('COWORK_RESULT_UNAVAILABLE');
     }
-    const lead = await client.from('leads').select('id').eq('id', snapshot.subject.leadId)
-      .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
-    if (lead.error || !lead.data) throw new Error('COWORK_RESULT_UNAVAILABLE');
+    if (!(await ownsContact(client as never, scope, snapshot.subject.leadId))) throw new Error('COWORK_RESULT_UNAVAILABLE');
     await requireCoworkWorkerAccess(client, scope);
     const current = await client.from('cowork_runs').select('status').eq('id', job.run_id).single();
     if (current.error || current.data.status === 'cancelled') throw new Error('Draft cancelled');
