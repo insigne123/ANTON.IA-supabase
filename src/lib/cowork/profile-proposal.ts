@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
+import { PROFILE_COMPANY_SIZES } from '@/lib/profile/profile-mappings';
 
 /** Commercial identity and a channel-specific signature for human review.
  * Signature markup is sanitized on the server before it is staged. */
@@ -13,6 +14,11 @@ export const coworkProfilePatchSchema = z.object({
   services: z.string().trim().max(2000).optional(),
   valueProposition: z.string().trim().max(2000).optional(),
   proofPoints: z.string().trim().max(2000).optional(),
+  /** «Tu cliente ideal» (plan 8): what «¿Cuál es mi ICP?» offers to keep. Lists separated by commas. */
+  targetRoles: z.string().trim().max(500).optional(),
+  targetIndustries: z.string().trim().max(500).optional(),
+  targetCompanySize: z.enum(PROFILE_COMPANY_SIZES).optional(),
+  targetLocations: z.string().trim().max(500).optional(),
   signature: z.object({ channel: z.enum(['gmail', 'outlook']),
     html: z.string().trim().min(1).max(12000), enabled: z.boolean(),
     separatorPlaintext: z.boolean().default(true),
@@ -33,6 +39,7 @@ const field = (max: number) => z.string().trim().max(max).nullable().optional();
 export const coworkProfileDecisionSchema = z.object({
   name: field(200), role: field(200), companyName: field(200), sector: field(200), website: field(500),
   description: field(2000), services: field(2000), valueProposition: field(2000), proofPoints: field(2000),
+  targetRoles: field(500), targetIndustries: field(500), targetCompanySize: z.enum(PROFILE_COMPANY_SIZES).nullable().optional(), targetLocations: field(500),
   signature: z.object({ channel: z.enum(['gmail', 'outlook']),
     html: z.string().trim().max(12000), enabled: z.boolean(),
     separatorPlaintext: z.boolean().default(true),

@@ -49,6 +49,8 @@ export async function stageCoworkProfileUpdate(
   set('sector', parsed.sector); set('website', parsed.website); set('description', parsed.description);
   set('services', parsed.services); set('valueProposition', parsed.valueProposition);
   set('proofPoints', parsed.proofPoints);
+  set('targetRoles', parsed.targetRoles); set('targetIndustries', parsed.targetIndustries);
+  set('targetCompanySize', parsed.targetCompanySize); set('targetLocations', parsed.targetLocations);
   if (parsed.website !== undefined && parsed.website !== ''
     && !normalizeCompanyWebsite(parsed.website).domain) {
     throw new Error('El sitio web no es un dominio público válido.');
