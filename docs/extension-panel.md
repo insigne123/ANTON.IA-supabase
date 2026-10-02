@@ -180,6 +180,64 @@ En una búsqueda de personas de LinkedIn (`/search/results/people/`), el panel m
   - la marca se vuelve a pedir;
   - sin desborde a 320, 380 y 520 px, en claro y oscuro.
 
+## Ficha de empresa (PR-4d)
+
+En una página de empresa de LinkedIn (`linkedin.com/company/…`), el panel muestra una tarjeta «Empresa». Va arriba de todo, también en sus pestañas «Acerca de» y «Personas».
+
+**Lo que se ve:**
+- **El nombre y una línea con lo que muestra la página:** sector, tamaño y sede.
+- **«Está contratando»** (solo para las cuentas de `OPPORTUNITIES_ALLOWED_EMAILS`, la cuenta piloto):
+  - la señal de la oportunidad, con la misma frase que en la página y en Cowork («Minera Norte publicó 6 avisos de empleo en los últimos 30 días…»);
+  - el enlace «Ver en Oportunidades».
+- **«N contactos guardados»:** los de la organización en esa empresa, cada uno con la marca de PR-4b («Respondió hace 2 días», «En conversación con Ana»). El nombre abre su perfil.
+  - Se muestran hasta 20.
+  - Sin contactos, el panel dice qué hacer.
+- **«Buscar decisores en Anton.IA»:** abre la Búsqueda de la app con la empresa, su dominio y los cargos de «Perfil» (`companySearchHref`). La persona revisa y busca ahí, con el costo de siempre. La extensión no busca ni gasta créditos.
+- **«Ver sus personas en LinkedIn»:** abre la pestaña «Personas» de la empresa. Ahí se puede elegir y guardar a quienes se ven, con el lote de PR-4c («N personas de Minera Norte en pantalla»). Su empresa es la de la página cuando el titular no la dice.
+
+**Qué se lee de la página:**
+- el nombre (el `h1`);
+- los datos del encabezado: sector, sede y empleados (no los seguidores);
+- en «Acerca de»: sitio web, sector, tamaño y sede;
+- el sitio web se saca del enlace de redirección de LinkedIn;
+- sin clics, sin desplazar y sin abrir otras pestañas.
+
+**API: acción `company`** en `/api/extension/workspace`, solo lectura.
+
+Busca los contactos en `enriched_leads` y `leads` de la organización activa por:
+- la página de LinkedIn de la empresa (`leads.company_linkedin`);
+- el dominio (`organization_domain`, el dominio del correo y `company_website`);
+- el nombre sin sufijo legal («Minera Norte S.A.» es «minera norte»).
+
+Un nombre contenido en otro no cuenta: «Falabella» no es «Banco Falabella». La misma persona guardada dos veces cuenta una.
+
+La oportunidad:
+- se lee con el cliente de servicio, después de comprobar la cuenta con `isOpportunitiesUserAllowed`;
+- usa el mínimo de avisos del perfil de búsqueda;
+- no incluye las descartadas;
+- si falla, la tarjeta igual muestra los contactos.
+
+**`PROSPECT_OPEN`** ahora también abre `/search?…` y `/opportunities` de la app.
+
+**Pruebas:**
+- **`src/lib/extension-company.test.ts`:** la URL de la empresa, el dominio, el nombre sin sufijo y «la misma empresa».
+- **`src/lib/server/extension-company.test.ts`:**
+  - cada contacto una vez, con su marca;
+  - solo la organización activa;
+  - el enlace de búsqueda con los cargos de «Perfil»;
+  - la oportunidad solo para la cuenta piloto, sin confundir «Minera Norte» con «Minera Norte Grande»;
+  - sin nada que buscar, no se lee nada.
+- **La ruta:** la empresa llega con sus claves; sin empresa, con una página que no es de empresa o con otra cuenta, se rechaza.
+- **`chrome-extension/tests/company-page.test.mjs`:**
+  - la lectura del encabezado y de «Acerca de», con el sitio sacado de la redirección;
+  - la pestaña «Personas» como resultados;
+  - los textos de la tarjeta.
+- **El navegador:**
+  - la tarjeta con su línea de datos, los contactos y la señal;
+  - «Buscar decisores» y «Ver en Oportunidades» abren la app;
+  - la pestaña «Personas» con el lote;
+  - sin desborde a 320, 380 y 520 px, en claro y oscuro.
+
 ## Publicación
 
 - **Se compila con `npm run extension:build`.** El ZIP para la tienda y la versión (4.1.0, al cerrar la fase 4) los publica el mantenedor.

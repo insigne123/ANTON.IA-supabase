@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { v5 as uuidv5 } from 'uuid';
 import { canonicalExtensionProfileUrl as normalizeLinkedinProfileUrl } from '@/lib/extension-profile-url';
+import { canonicalCompanyUrl, companyDomain } from '@/lib/extension-company';
 
 export const ExtensionProfileSchema = z.object({
   linkedinUrl: z.string().max(2048).transform(normalizeLinkedinProfileUrl).refine(Boolean, 'URL de perfil de LinkedIn inválida.'),
@@ -21,9 +22,20 @@ export const ExtensionProfileSchema = z.object({
 }).strict();
 export type ExtensionProfile = z.infer<typeof ExtensionProfileSchema>;
 
+/** company (PR-4d): the LinkedIn company page on screen, with what its page shows. */
+export const ExtensionCompanySchema = z.object({
+  linkedinUrl: z.string().max(2048).transform(canonicalCompanyUrl).refine(Boolean, 'URL de empresa de LinkedIn inválida.'),
+  name: z.string().trim().min(1).max(300),
+  domain: z.string().trim().max(300).default('').transform(companyDomain),
+  industry: z.string().trim().max(160).default(''),
+  size: z.string().trim().max(100).default(''),
+  headquarters: z.string().trim().max(200).default(''),
+}).strict();
+export type ExtensionCompany = z.infer<typeof ExtensionCompanySchema>;
+
 export const ExtensionRequestSchema = z.object({
   action: z.enum(['session', 'lookup', 'save', 'enrich', 'research', 'research-status', 'research-retry', 'phone-status', 'message', 'email-draft', 'sequence', 'campaigns', 'campaign-add', 'send-claim', 'send-result',
-    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota', 'presence', 'save-batch']),
+    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota', 'presence', 'save-batch', 'company']),
   jobId: z.string().uuid().optional(),
   jobResult: z.object({
     jobId: z.string().uuid(), claimToken: z.string().uuid(),
@@ -64,6 +76,8 @@ export const ExtensionRequestSchema = z.object({
   linkedinUrls: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
   /** save-batch: the people chosen from a LinkedIn search, with what the results show. */
   profiles: z.array(ExtensionProfileSchema).min(1).max(25).optional(),
+  /** company: the company page on screen. */
+  company: ExtensionCompanySchema.optional(),
   replaceFields: z.boolean().default(false),
   refreshResearch: z.boolean().default(false),
   revealEmail: z.boolean().default(false),
@@ -83,7 +97,7 @@ export const ExtensionRequestSchema = z.object({
   const profileless = body.action === 'session' || body.action === 'linkedin-jobs-pending'
     || body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result'
     || body.action === 'network-report' || body.action === 'inbox-report' || body.action === 'quota' || body.action === 'presence'
-    || body.action === 'save-batch';
+    || body.action === 'save-batch' || body.action === 'company';
   if (!profileless && (!body.organizationId || !body.userId || !body.profile)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta y selecciona un perfil.' });
   }
@@ -92,6 +106,9 @@ export const ExtensionRequestSchema = z.object({
   }
   if (body.action === 'save-batch' && !body.profiles?.length) {
     ctx.addIssue({ code: 'custom', message: 'Elige al menos una persona para guardar.' });
+  }
+  if (body.action === 'company' && !body.company) {
+    ctx.addIssue({ code: 'custom', message: 'Abre la página de una empresa en LinkedIn.' });
   }
   if ((body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result') && !body.jobId && !body.jobResult) {
     ctx.addIssue({ code: 'custom', message: 'Selecciona el trabajo de LinkedIn.' });

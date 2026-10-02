@@ -25,6 +25,9 @@ function fixture(withLead = false) {
     '@/lib/server/extension-batch': {
       saveExtensionBatch: async (...args: any[]) => { calls.push({ batch: args[1] }); return { saved: args[1].map((item: any) => ({ linkedinUrl: item.linkedinUrl, fullName: item.fullName })), already: [], blocked: [], failed: [] }; },
     },
+    '@/lib/server/extension-company': {
+      readExtensionCompany: async (...args: any[]) => { calls.push({ company: args[1] }); return { contacts: [], total: 0, truncated: false, searchHref: '/search?company=Acme', opportunity: null }; },
+    },
     '@/lib/server/extension-presence': {
       readExtensionPresence: async (...args: any[]) => { calls.push({ presence: args.slice(1) }); return { 'https://www.linkedin.com/in/ana': { label: 'Guardado por Ana', tone: 'info', blocks: false } }; },
     },
@@ -221,4 +224,21 @@ test('save-batch takes up to 25 people of the signed-in organization, without a 
   assert.ok((await env.POST(request({ action: 'save-batch', organizationId: org, userId: user, profiles: many }))).status >= 400);
   assert.equal((await env.POST(request({ action: 'save-batch', organizationId: org, userId: '550e8400-e29b-41d4-a716-446655440009', profiles: people }))).status, 409);
   assert.equal(env.calls.filter(call => call.batch).length, 1);
+});
+
+test('company reads the company page on screen for the signed-in organization, without a person', async () => {
+  const env = fixture();
+  const company = { linkedinUrl: 'https://www.linkedin.com/company/Acme/people/', name: 'Acme S.A.', domain: 'https://www.acme.cl/', industry: 'Minería' };
+  const response = await env.POST(request({ action: 'company', organizationId: org, userId: user, company }));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).searchHref, '/search?company=Acme');
+  // The page and the domain arrive as their keys.
+  const read = env.calls.find(call => call.company).company;
+  assert.equal(read.linkedinUrl, 'https://www.linkedin.com/company/acme');
+  assert.equal(read.domain, 'acme.cl');
+  // Without the company, with a page that is not a company, or for another account: refused before reading.
+  assert.ok((await env.POST(request({ action: 'company', organizationId: org, userId: user }))).status >= 400);
+  assert.ok((await env.POST(request({ action: 'company', organizationId: org, userId: user, company: { ...company, linkedinUrl: 'https://www.linkedin.com/in/ana' } }))).status >= 400);
+  assert.equal((await env.POST(request({ action: 'company', organizationId: org, userId: '550e8400-e29b-41d4-a716-446655440009', company }))).status, 409);
+  assert.equal(env.calls.filter(call => call.company).length, 1);
 });

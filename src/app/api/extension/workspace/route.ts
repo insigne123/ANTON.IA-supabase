@@ -54,6 +54,11 @@ export async function POST(req: NextRequest) {
       const { saveExtensionBatch } = await import('@/lib/server/extension-batch');
       return json(await saveExtensionBatch(auth, body.profiles || []));
     }
+    if (body.action === 'company') {
+      // The LinkedIn company on screen: its saved contacts, the search for its decision makers and, for the pilot, its opportunity.
+      const { readExtensionCompany } = await import('@/lib/server/extension-company');
+      return json(await readExtensionCompany(auth, body.company!));
+    }
     if (body.action === 'linkedin-jobs-pending') {
       const { listPendingLinkedinJobs } = await import('@/lib/server/linkedin-bridge-ops');
       const { canonicalExtensionProfileUrl } = await import('@/lib/extension-profile-url');

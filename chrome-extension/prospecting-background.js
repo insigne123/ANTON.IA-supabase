@@ -138,12 +138,27 @@ async function prospectHandle(request, sender) {
       return { linkedinUrl: tab.url.split(/[?#]/)[0].replace(/\/+$/, ''), fullName: '', title: '', companyName: '', tabId: tab.id };
     }
   }
-  // The people of the LinkedIn search open in the active tab, for the batch save (PR-4c). Sales Navigator shows no public profile.
+  // The company page open in the active tab (PR-4d): what its page shows, read by the page itself.
+  if (request.action === 'PROSPECT_COMPANY') {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const url = String(tab?.url || '');
+    const handle = url.match(/^https:\/\/www\.linkedin\.com\/company\/([^/?#]+)/)?.[1];
+    if (!handle) return null;
+    const linkedinUrl = `https://www.linkedin.com/company/${handle.toLowerCase()}`;
+    const people = /^https:\/\/www\.linkedin\.com\/company\/[^/?#]+\/people/.test(url);
+    try {
+      await ensureLinkedinScripts(tab.id);
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'PROSPECT_READ_COMPANY' });
+      return { ...(response?.company || {}), linkedinUrl, people, tabId: tab.id };
+    } catch { return { linkedinUrl, name: '', people, tabId: tab.id }; }
+  }
+  // The people of the LinkedIn search open in the active tab, for the batch save (PR-4c), or of a company's «Personas» tab (PR-4d).
+  // Sales Navigator shows no public profile.
   if (request.action === 'PROSPECT_SEARCH_RESULTS') {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = String(tab?.url || '');
     if (url.startsWith('https://www.linkedin.com/sales/')) return { results: [], salesNavigator: true };
-    if (!/^https:\/\/www\.linkedin\.com\/search\/results\/(people|all)/.test(url)) return null;
+    if (!/^https:\/\/www\.linkedin\.com\/(search\/results\/(people|all)|company\/[^/?#]+\/people)/.test(url)) return null;
     try {
       await ensureLinkedinScripts(tab.id);
       const response = await chrome.tabs.sendMessage(tab.id, { action: 'PROSPECT_READ_RESULTS' });
@@ -246,7 +261,7 @@ async function prospectHandle(request, sender) {
     } finally { sendTabs.delete(tab.id); void presenceChanged(); }
   }
   if (request.action === 'PROSPECT_OPEN') {
-    if (typeof request.path !== 'string' || !/^\/(saved\/leads\/enriched|contact\/compose)(\?|$)/.test(request.path)) throw new Error('Destino inválido.');
+    if (typeof request.path !== 'string' || !/^\/(saved\/leads\/enriched|contact\/compose|search|opportunities)(\?|$)/.test(request.path)) throw new Error('Destino inválido.');
     await chrome.tabs.create({ url: new URL(request.path, connection.origin).href });
     return true;
   }
