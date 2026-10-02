@@ -86,18 +86,37 @@ Sin las variables, los dos scripts usan el conjunto ServiPro y la carpeta de sie
 
 **Suena humano (3,6) es el criterio más bajo.** Las frases que el juez marca son de plantilla, por ejemplo «vale mirar cómo funciona esta verificación en la práctica».
 
-## Siguiente paso: un ajuste probado, todavía sin integrar
+## El ajuste de los seguimientos (`native-draft/v18`)
 
-**La rama `claude/seguimientos-sin-alcances` (`native-draft/v18`) ajusta el generador:**
+**Cambia el generador:**
 - el paso Respaldo precisa el alcance solo con lo que el vendedor declara;
-- no se afirman límites ni garantías del servicio que el vendedor no declara: qué no hace, qué no reemplaza, quién decide;
+- no se afirman límites ni garantías del servicio que el vendedor no declara: qué no hace, qué no reemplaza, quién decide o en qué etapa se usa;
 - lo que se ofrece se dice como de la empresa del vendedor, no como algo que la empresa usa.
 
-**Medido con este mismo conjunto (3 corridas, 24 correos):**
+**Con el conjunto AXIS (3 corridas, 24 correos):**
 - «usamos AXIS» baja de 3 correos a 0;
 - los límites del servicio (quién decide, qué no hace, en qué etapa se usa) bajan de 6 correos a 0;
 - el juez marca otras inferencias, por ejemplo «150 vendedores podría implicar muchas consultas»;
 - el total queda igual: 7 para enviar, 7 para corregir y 10 a revisión humana;
 - la veracidad sube de 3,7 a 3,9.
 
-**Falta compararlo con el conjunto ServiPro** para descartar que empeore otros correos. Esa corrida no se pudo hacer: la cuenta de OpenAI de este entorno se quedó sin créditos (`credit_balance_exhausted`). Con créditos, se corren los dos scripts sin `OUTREACH_EVAL_SET`, una vez en `main` y otra en la rama, y se juzgan con este juez.
+**Con el conjunto ServiPro (2 oct, una corrida de 20 casos en cada versión, 25 correos juzgados):**
+
+| | v17 | v18 |
+|---|---|---|
+| Enviar | 5 | 8 |
+| Corregir | 8 | 7 |
+| Revisión humana | 12 | 10 |
+| Veracidad | 3,72 | 4,04 |
+| Suena humano | 3,36 | 3,44 |
+| Revisión previa aprobada | 24 de 24, todos al primer intento | 24 de 24, uno tras el reintento |
+| Costo | US$ 0,034 | US$ 0,036 |
+
+**No empeora en ninguno de los dos conjuntos**, que era la condición para integrarlo:
+- «revisión humana» no sube;
+- «enviar» no baja;
+- la veracidad no baja.
+
+Es una corrida por versión, así que la diferencia en ServiPro puede ser en parte ruido. Lo que sí es claro es el caso AXIS: desaparecen los límites del servicio sin respaldo. En ServiPro, lo que el juez marca en las dos versiones son sobre todo inferencias del beneficio, por ejemplo «su equipo podría dejar esa gestión en nuestras manos».
+
+**Para repetir la medición:** corre los dos scripts sin `OUTREACH_EVAL_SET`, una vez en cada versión, y juzga con este juez.
