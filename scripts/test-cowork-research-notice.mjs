@@ -11,7 +11,7 @@ const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const base = Date.parse('2026-10-01T15:00:00Z');
 const minutes = n => new Date(base + n * 60_000).toISOString();
 
-const db = { cowork_runs: [], lead_research_jobs: [], cowork_run_events: [], leads: [] };
+const db = { cowork_runs: [], lead_research_jobs: [], cowork_run_events: [], leads: [], enriched_leads: [] };
 const failures = { admit: 0, markers: 0 };
 let admitted = [];
 function matches(row, filters) {
@@ -162,9 +162,19 @@ assert.deepEqual(await pass(71), { notified: 0 });
 assert.equal(admitted.length, before);
 assert.deepEqual(await pass(72), { notified: 1 });
 
+// A contact of «Por escribir» (Plan 6, PR-C1): the notice names them from enriched_leads, and asks for the whole report.
+run(60, 'completed', null);
+db.enriched_leads.push({ id: id(203), user_id: U, organization_id: O, full_name: 'Marcela Rojas', company_name: null, organization_name: 'Acme Ltda.' },
+  { id: id(204), user_id: 'someone-else', organization_id: O, full_name: 'Ajena', company_name: 'Otra' });
+research(10, 60, 203, 'completed', 74);
+assert.deepEqual(await pass(75), { notified: 1 });
+assert.match(admitted.at(-1).p_message, /Marcela Rojas \(Acme Ltda\.\), leadId [0-9a-f-]+: lista\./);
+assert.match(admitted.at(-1).p_message, /entrégalos completos en document/);
+assert.doesNotMatch(admitted.at(-1).p_message, /pocas líneas/);
+
 // Research started outside Cowork is never told to a conversation; and one pass every 20 seconds at most.
 db.lead_research_jobs.push({ id: id(9000), user_id: U, organization_id: O, status: 'completed', error_code: null, created_at: minutes(80), request_idempotency_key: `manual:${id(50)}` });
 assert.deepEqual(await pass(81), { notified: 0 });
 assert.deepEqual(await processCoworkResearchNotices({ client, now: new Date(base + 81 * 60_000 + 5_000) }), { notified: 0 });
 
-console.log('PASS: research notices wait for the request or 10 minutes, go after the newest finished turn, are marked before admission, recovered once and never told twice; the live card reads the conversation.');
+console.log('PASS: research notices wait for the request or 10 minutes, go after the newest finished turn, are marked before admission, recovered once and never told twice, name contacts of «Por escribir» and ask for the whole report; the live card reads the conversation.');
