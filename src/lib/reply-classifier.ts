@@ -2,7 +2,8 @@ import { classifyReplyFlow } from '@/ai/flows/classify-reply';
 import { isHardNegativeReply } from '@/lib/reply-intent-rules';
 import { isExplicitOptOut, newReplyText } from '@/lib/reply-text';
 import { askJev, type JevResult } from '@/lib/server/jev';
-import { jevReplyClassification, jevReplyRead, replyEngine, REPLY_JEV_QUESTION, type ReplyEngine } from '@/lib/reply-jev';
+import { jevReplyClassification, jevReplyDeal, jevReplyRead, replyEngine, REPLY_JEV_DEAL_QUESTION, REPLY_JEV_QUESTION, type ReplyEngine } from '@/lib/reply-jev';
+import type { ReplyDeal } from '@/lib/reply-stage';
 
 export type ReplyClassification = {
   intent: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown' | 'delivery_failure';
@@ -124,6 +125,22 @@ export async function classifyReply(raw: string, options: ClassifyReplyOptions =
   const result = await classifyWithModel(cleaned, options);
   if (shadow) logJevShadow(result, await shadow);
   return result;
+}
+
+/**
+ * Plan 6, PR-B: Jev reads whether an interested reply asks for a proposal, a price or a contract, or confirms the purchase. It fails
+ * open: without TYPESAFE_API_KEY, on a timeout, an error or less certainty it says nothing, and the reply proposes the stage its
+ * intent does. Never logs the reply.
+ */
+export async function readReplyDeal(raw: string, options: Pick<ClassifyReplyOptions, 'askJev' | 'env'> = {}): Promise<ReplyDeal | null> {
+  const cleaned = newReplyText(raw).slice(0, 3000);
+  if (!cleaned) return null;
+  try {
+    const result = await (options.askJev ?? askJev)({ state: { reply: cleaned }, questions: { deal: REPLY_JEV_DEAL_QUESTION }, env: options.env });
+    return jevReplyDeal(result?.answers?.deal);
+  } catch {
+    return null;
+  }
 }
 
 export function extractReplyPreview(raw: string) {
