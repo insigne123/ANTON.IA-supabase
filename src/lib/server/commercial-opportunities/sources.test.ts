@@ -7,23 +7,42 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 
 test('JSearch asks for Chile and the last month, sends the key only in its header and keeps the company data', async () => {
   let url = '', headers: Record<string, string> = {};
+  const urls: string[] = [];
   const fetch = (async (input: string, init: RequestInit) => {
     url = input; headers = init.headers as Record<string, string>;
-    return json(200, { data: [
+    urls.push(url);
+    if (urls.length === 2) return json(200, { status: 'OK', data: { jobs: [], cursor: null } });
+    return json(200, { status: 'OK', data: { jobs: [
       { job_id: 'j1', job_title: 'Operario de bodega', employer_name: 'Acme', employer_website: 'https://acme.cl', job_publisher: 'Computrabajo',
         job_apply_link: 'https://cl.computrabajo.com/j1', job_city: 'Calama', job_state: 'Antofagasta', job_country: 'CL', job_posted_at_datetime_utc: '2026-09-30T10:00:00.000Z' },
       { job_title: 'sin id' },
-    ] });
+    ], cursor: 'next-page' } });
   }) as unknown as typeof globalThis.fetch;
   const result = await searchJSearch({ query: 'operario', numPages: 2 }, { fetch, key: 'secret-key' });
   const params = new URL(url).searchParams;
   assert.equal(new URL(url).host, 'jsearch.p.rapidapi.com');
-  assert.deepEqual([params.get('query'), params.get('country'), params.get('date_posted'), params.get('num_pages')], ['operario', 'cl', 'month', '2']);
+  assert.equal(new URL(url).pathname, '/search-v2');
+  assert.deepEqual([params.get('query'), params.get('country'), params.get('date_posted'), params.get('language'), params.get('cursor')], ['operario Chile', 'cl', 'month', 'es', 'next-page']);
+  assert.equal(new URL(urls[0]).searchParams.has('cursor'), false);
+  assert.equal(params.has('num_pages'), false);
   assert.equal(url.includes('secret-key'), false, 'the key never goes in the address');
   assert.equal(headers['x-rapidapi-key'], 'secret-key');
   assert.equal(result.ads.length, 1);
   assert.deepEqual([result.ads[0].companyDomain, result.ads[0].region], ['acme.cl', 'Antofagasta']);
   assert.deepEqual([result.requests, result.costUsd], [2, 0.005]);
+});
+
+test('JSearch v2 rejects malformed results, stops on repeated cursors and counts actual requests rather than requested pages', async () => {
+  let calls = 0;
+  const fetch = (async () => { calls++; return json(200, { status: 'OK', data: { jobs: [], cursor: 'same-cursor' } }); }) as unknown as typeof globalThis.fetch;
+  const result = await searchJSearch({ query: 'Operario Chile', numPages: 5 }, { fetch, key: 'k' });
+  assert.equal(calls, 2);
+  assert.equal(result.requests, 2);
+  assert.equal(result.costUsd, 0.005);
+  assert.equal(result.cursor, null);
+  const malformed = (async () => json(200, { data: [] })) as unknown as typeof globalThis.fetch;
+  await assert.rejects(searchJSearch({ query: 'x' }, { fetch: malformed, key: 'k' }), /sin una lista/);
+  await assert.rejects(searchJSearch({ query: 'x', page: 2 }, { fetch: malformed, key: 'k' }), /usa cursor/);
 });
 
 test('JSearch errors say what happened without the key', async () => {

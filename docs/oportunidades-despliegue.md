@@ -23,6 +23,14 @@ ENABLED de cada uno. El mantenedor verificó sus nombres y estado, concedió acc
 a studio y agregó las referencias runtime en apphosting.yaml. La existencia de la
 versión no sustituye la comprobación de suscripción/ticket contra el proveedor.
 
+La validación real confirmó el ticket: API v1 de licitaciones y API v2 de Compra
+Ágil devolvieron listas válidas. JSearch retiró `/search`: responde 404 incluso con
+clave válida. La ruta actual `/search-v2` sí respondió 200 con `data.jobs` y
+`data.cursor`; el cliente se actualiza a esa ruta, country=cl, language=es y Chile
+en la consulta. La paginación pide hasta el número de páginas permitido, por cursor,
+y cuenta las llamadas reales. Un resultado inesperado ya no se trata como vacío.
+Fuente: https://www.openwebninja.com/api/jsearch (consultada el 2 oct 2026).
+
 ## Fantastic Jobs: límites
 
 Tarifa Free verificada el 2 oct: US$0,005 por aviso y US$0,01 por arranque.
