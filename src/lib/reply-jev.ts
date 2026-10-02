@@ -1,5 +1,6 @@
 import type { JevAnswer, JevQuestion } from '@/lib/server/jev';
 import type { ReplyClassification } from '@/lib/reply-classifier';
+import type { ReplyDeal } from '@/lib/reply-stage';
 
 /**
  * Jev (TypeSafe) as a second reader of what a prospect's reply means (docs/cowork-jev.md). Pure: the question Jev is asked, what
@@ -71,4 +72,26 @@ export function jevReplyClassification(answer: JevAnswer | undefined, minConfide
   const { intent, confidence } = jevReplyRead(answer);
   if (!intent || NEVER_DECIDES.has(intent) || confidence === null || confidence < minConfidence) return null;
   return { intent, confidence, reason: 'jev', ...MEANING[intent as keyof typeof MEANING] };
+}
+
+/**
+ * Plan 6, PR-B: where an interested reply leaves the deal, for the pipeline. It only proposes a stage the person confirms, so a
+ * mistake costs one click; still, the app takes Jev's word only from JEV_DEAL_MIN_CONFIDENCE up (scripts/calibrate-reply-deal-jev.ts).
+ */
+export const REPLY_JEV_DEAL_QUESTION: JevQuestion = {
+  type: 'choice',
+  instructions: 'An interested sales prospect replied to a cold B2B email. Where does this reply leave the deal?',
+  criteria: {
+    negotiation: 'Asks for a formal proposal, a quote, detailed pricing, a contract or commercial terms in order to move forward.',
+    won: 'Confirms the purchase: accepts the proposal or the price, says to go ahead or to start, asks to sign, for the invoice or how to pay.',
+    none: 'Neither: shows interest, asks for a meeting, a call or a demo, asks a general question about the product, or anything else.',
+  },
+};
+
+export const JEV_DEAL_MIN_CONFIDENCE = 0.8;
+
+/** The deal stage Jev's answer stands for, or null: no answer, «none», an unknown option or less certainty than the floor. */
+export function jevReplyDeal(answer: JevAnswer | undefined, minConfidence = JEV_DEAL_MIN_CONFIDENCE): ReplyDeal | null {
+  if (answer?.type !== 'choice' || (answer.choice !== 'negotiation' && answer.choice !== 'won')) return null;
+  return answer.confidence >= minConfidence ? answer.choice : null;
 }
