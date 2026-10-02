@@ -87,7 +87,62 @@ Si en «Perfil» faltan los cargos o las industrias, la pregunta final ofrece gu
   - decir que un grupo chico «funciona mejor» se detecta.
 - **Con el modelo real:** el caso `icp-cual-es-mi-icp` (`scripts/fixtures/cowork-icp-corpus.ts`), 3 veces. Ver el PR.
 
+## A quién escribir: `leads.recommend` (PR-2b)
+
+Archivos: `src/lib/cowork/lead-recommend.ts` (cálculo puro) y `src/lib/server/cowork/lead-recommend-read.ts` (lectura).
+
+**Ordena** los contactos de la organización, de las dos listas:
+- **«Por escribir»** (`enriched_leads`), casi siempre con correo;
+- **«Por completar»** (`leads`).
+
+**Una persona en las dos listas cuenta una vez,** como la de «Por escribir». Se reconoce porque guarda el id del contacto de origen, o por correo o LinkedIn. En GrupoExpro, el 2 oct 2026, 98 de los 123 contactos de «Por escribir» tenían correo, contra 3 de 354 en «Por completar».
+
+**Deja fuera:**
+- a quien ya recibió algo: por el id del contacto, por su correo en los envíos, o porque «Por escribir» lo marca contactado;
+- a quien trabaja otro miembro del equipo (los bloqueos de `team-locks`).
+
+**«Ya está investigada»** sale de los informes de la persona que pregunta: los informes son privados de quien los pidió.
+
+**El criterio:**
+- **Pedido:** los cargos e industrias de la oferta preguntada, que Cowork deduce de su descripción («RR. HH., selección, retail»).
+- **Perfil:** si no hay pedido, el cliente ideal de «Perfil».
+- **Ninguno:** el orden es solo por nivel y preparación, y la respuesta lo dice.
+
+**El puntaje (hasta 100):**
+
+| Qué | Puntos |
+|---|---|
+| El cargo calza | 40 |
+| La industria o la empresa calzan | 25 |
+| Nivel: dirección, jefatura o profesional | 15, 10 o 3 |
+| La región calza | 5 |
+| Tiene correo | 10 |
+| Ya está investigada | 3 |
+| Tiene LinkedIn | 2 |
+
+**Devuelve:**
+- los 20 mejores, con sus motivos («su cargo calza con «RR. HH.»», «tiene correo») y lo que les falta (buscar su correo o investigarla);
+- cuántos calzan, cuántos están listos para escribirles, cuántos necesitan correo, cuántos trabaja otro miembro y cómo se reparten por área.
+
+**La receta «¿A quiénes debería contactar? / ¿A quiénes les ofrezco X?»:**
+1. Explica el criterio y de dónde salió.
+2. Muestra a los mejores en una tabla: contacto, empresa, por qué y qué falta.
+3. Cierra proponiendo el paso que los deja listos: «Preparar contactos» para los que les falta correo o investigación, o una campaña pausada para los que ya tienen correo.
+
+«¿A quién le escribo hoy?» sigue con su receta.
+
+**Pruebas:**
+- `src/lib/cowork/lead-recommend.test.ts`: términos, puntaje y motivos, contactados y bloqueados fuera, sin criterio.
+- `src/lib/server/cowork/lead-recommend-read.test.ts`:
+  - el pedido manda; sin pedido, «Perfil»;
+  - los bloqueos se leen para los mejores;
+  - la copia de «Por escribir» reemplaza al contacto guardado;
+  - un envío al mismo correo cuenta como contacto;
+  - lo investigado suma.
+- **El caso `icp-a-quien-ofrezco`, con modelo guionado:**
+  - un buen turno pide con los cargos de la oferta y nombra a quienes calzan;
+  - recomendar sin leer, o nombrar a quien trabaja otro miembro, falla.
+
 ## Lo que sigue
 
-- **PR-2b `leads.recommend`:** a quién escribir y a quién ofrecerle algo, con motivos.
 - **PR-2c:** la tarjeta en «Perfil» y «Recomendados para ti» en Inicio.
