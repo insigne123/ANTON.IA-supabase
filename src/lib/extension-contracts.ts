@@ -23,7 +23,7 @@ export type ExtensionProfile = z.infer<typeof ExtensionProfileSchema>;
 
 export const ExtensionRequestSchema = z.object({
   action: z.enum(['session', 'lookup', 'save', 'enrich', 'research', 'research-status', 'research-retry', 'phone-status', 'message', 'email-draft', 'sequence', 'campaigns', 'campaign-add', 'send-claim', 'send-result',
-    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota', 'presence']),
+    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota', 'presence', 'save-batch']),
   jobId: z.string().uuid().optional(),
   jobResult: z.object({
     jobId: z.string().uuid(), claimToken: z.string().uuid(),
@@ -62,6 +62,8 @@ export const ExtensionRequestSchema = z.object({
   profile: ExtensionProfileSchema.optional(),
   /** presence: the LinkedIn profiles on screen (a profile, or one page of search results). */
   linkedinUrls: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
+  /** save-batch: the people chosen from a LinkedIn search, with what the results show. */
+  profiles: z.array(ExtensionProfileSchema).min(1).max(25).optional(),
   replaceFields: z.boolean().default(false),
   refreshResearch: z.boolean().default(false),
   revealEmail: z.boolean().default(false),
@@ -80,12 +82,16 @@ export const ExtensionRequestSchema = z.object({
   }
   const profileless = body.action === 'session' || body.action === 'linkedin-jobs-pending'
     || body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result'
-    || body.action === 'network-report' || body.action === 'inbox-report' || body.action === 'quota' || body.action === 'presence';
+    || body.action === 'network-report' || body.action === 'inbox-report' || body.action === 'quota' || body.action === 'presence'
+    || body.action === 'save-batch';
   if (!profileless && (!body.organizationId || !body.userId || !body.profile)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta y selecciona un perfil.' });
   }
   if (profileless && (!body.organizationId || !body.userId)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta antes de continuar.' });
+  }
+  if (body.action === 'save-batch' && !body.profiles?.length) {
+    ctx.addIssue({ code: 'custom', message: 'Elige al menos una persona para guardar.' });
   }
   if ((body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result') && !body.jobId && !body.jobResult) {
     ctx.addIssue({ code: 'custom', message: 'Selecciona el trabajo de LinkedIn.' });

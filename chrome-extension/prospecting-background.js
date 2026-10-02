@@ -138,6 +138,18 @@ async function prospectHandle(request, sender) {
       return { linkedinUrl: tab.url.split(/[?#]/)[0].replace(/\/+$/, ''), fullName: '', title: '', companyName: '', tabId: tab.id };
     }
   }
+  // The people of the LinkedIn search open in the active tab, for the batch save (PR-4c). Sales Navigator shows no public profile.
+  if (request.action === 'PROSPECT_SEARCH_RESULTS') {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const url = String(tab?.url || '');
+    if (url.startsWith('https://www.linkedin.com/sales/')) return { results: [], salesNavigator: true };
+    if (!/^https:\/\/www\.linkedin\.com\/search\/results\/(people|all)/.test(url)) return null;
+    try {
+      await ensureLinkedinScripts(tab.id);
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'PROSPECT_READ_RESULTS' });
+      return { results: Array.isArray(response?.results) ? response.results.slice(0, 50) : [], salesNavigator: false };
+    } catch { return { results: [], salesNavigator: false }; }
+  }
   if (request.action === 'PROSPECT_SWEEP_COLLECT') {
     if (!panelSender(sender)) throw new Error('Origen no autorizado.');
     const kind = request.kind === 'inbox' ? 'inbox' : 'network';

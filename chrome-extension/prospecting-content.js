@@ -56,6 +56,7 @@
     if (sender.id !== chrome.runtime.id || sender.tab) return false;
     // Something was saved or sent: the marks on this page ask again.
     if (request.action === 'ANTONIA_PRESENCE_REFRESH') { scheduleDecorate(); return false; }
+    if (request.action === 'PROSPECT_READ_RESULTS') { respond({ ok: true, results: readResults() }); return false; }
     if (request.action === 'PROSPECT_SWEEP_NETWORK' || request.action === 'PROSPECT_SWEEP_INBOX') {
       try {
         respond({ ok: true, ...(request.action === 'PROSPECT_SWEEP_NETWORK' ? sweepNetwork() : sweepInbox()) });
@@ -131,7 +132,7 @@
     pending = 0;
     const profile = canonical(location.href);
     const name = profile ? (linkedinProfileHeader('')?.heading?.textContent || '').trim().slice(0, 300) : '';
-    const key = `${profile || location.pathname}|${name}`;
+    const key = profile ? `${profile}|${name}` : `${location.pathname}${location.search}|${visibleResults().length}`;
     if (key === announced) return;
     announced = key;
     try { chrome.runtime.sendMessage({ action: 'ANTONIA_PROFILE_CHANGED' })?.catch?.(() => {}); } catch { /* The extension was reloaded. */ }
@@ -192,6 +193,20 @@
     }
     return found;
   };
+  // The people of the results page for the panel's batch save (PR-4c): what the page shows, nothing more.
+  const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+  const NOT_A_HEADLINE = /^(•|·)|^(conectar|mensaje|seguir|pendiente|connect|message|follow|pending|ver perfil|view profile)\b|\b(1st|2nd|3rd|1er|2º|3er)\b|grado/i;
+  const readResults = () => visibleResults().map(({ url, anchor }) => {
+    const item = anchor.closest('li');
+    const fullName = clean(anchor.querySelector('span[aria-hidden="true"]')?.textContent || anchor.textContent).slice(0, 300);
+    const lines = [...(item?.querySelectorAll('[class*="subtitle"], [class*="headline"], div, p') || [])]
+      .filter(node => /subtitle|headline/i.test(String(node.className)) || node.childElementCount === 0)
+      .map(node => clean(node.textContent))
+      .filter(text => text && text !== fullName && !fullName.includes(text) && text.length >= 3 && text.length <= 220 && !NOT_A_HEADLINE.test(text));
+    const headline = (lines[0] || '').slice(0, 200);
+    const split = headline.match(/^(.*?)\s+(?:en|at|@|\|)\s+(.+)$/i);
+    return { linkedinUrl: url, fullName, headline, title: clean(split ? split[1] : headline).slice(0, 200), companyName: clean(split ? split[2] : '').slice(0, 200) };
+  });
   let decorating = 0;
   let generation = 0;
   const decorate = async () => {
