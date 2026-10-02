@@ -27,7 +27,9 @@ async function component(file: string, dependencies: Record<string, unknown>) {
 }
 
 const { ResearchReportProgress } = await component('./ResearchReportProgress.tsx', {
+  'lucide-react': new Proxy({}, { get: () => 'svg' }),
   '@/lib/research-report-loading': loading,
+  '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
   '@/components/ui/progress': { Progress: ({ value, ...props }: any) => React.createElement('div', { ...props, role: 'progressbar', 'aria-valuenow': value }) },
 });
 const { NativeResearchReport } = await component('./NativeResearchReport.tsx', {
@@ -74,9 +76,13 @@ test('progress uses the clock, isolates lead switches, and clears its timer on u
     const value = () => Number(dom.window.document.querySelector('[role="progressbar"]')!.getAttribute('aria-valuenow'));
     await render('lead-a', start);
     await act(async () => { t.mock.timers.tick(150_000); timers.forEach((tick) => tick()); });
+    assert.match(dom.window.document.body.textContent!, /Lleva 2 min 30 s\./);
+    assert.doesNotMatch(dom.window.document.body.textContent!, /más que 9 de cada 10/, 'two and a half minutes is usual');
+    await act(async () => { t.mock.timers.tick(370_000); timers.forEach((tick) => tick()); });
     const elapsedValue = value();
     assert.ok(elapsedValue > 0 && elapsedValue < 95);
-    assert.match(dom.window.document.body.textContent!, /tomando más de lo estimado/);
+    assert.match(dom.window.document.body.textContent!, /Lleva 8 min 40 s\./);
+    assert.match(dom.window.document.querySelector('[role="status"]')!.textContent!, /Está tardando más que 9 de cada 10 investigaciones/);
     assert.equal(dom.window.document.querySelector('[role="status"] [role="progressbar"]'), null);
     await render('lead-b', new Date(Date.now()).toISOString());
     assert.equal(value(), 0);
@@ -90,3 +96,27 @@ test('progress uses the clock, isolates lead switches, and clears its timer on u
     dom.window.close();
   }
 });
+
+test('the steps say where the research is: sources, then the written report; the step is announced, not the clock', () => {
+  const steps = (phase: string, retryScheduled = false) => {
+    const html = renderToStaticMarkup(React.createElement(ResearchReportProgress, { startedAt: null, phase, retryScheduled }));
+    const dom = new JSDOM(html);
+    const document = dom.window.document;
+    const states = [...document.querySelectorAll('li[data-step]')].map((item) => `${item.getAttribute('data-step')}:${item.getAttribute('data-state')}`);
+    return { states, status: document.querySelector('[role="status"]')!.textContent!, text: document.body.textContent! };
+  };
+  const researching = steps('research');
+  assert.deepEqual(researching.states, ['research:current', 'writing:pending', 'ready:pending']);
+  assert.match(researching.status, /Paso 1 de 3: Buscar y leer fuentes/);
+  assert.match(researching.text, /Buscar y leer fuentes: en curso/, 'the state is read aloud, not only drawn');
+  const writing = steps('writing');
+  assert.deepEqual(writing.states, ['research:done', 'writing:current', 'ready:pending']);
+  assert.match(writing.status, /Paso 2 de 3: Escribir y revisar el informe/);
+  assert.match(writing.text, /Buscar y leer fuentes: hecho/);
+  const retry = steps('writing', true);
+  assert.deepEqual(retry.states, ['research:done', 'writing:current', 'ready:pending']);
+  assert.match(retry.status, /Reintentaremos la preparación automáticamente/);
+  assert.doesNotMatch(writing.status, /Lleva/, 'the running clock stays out of the live region');
+  assert.match(writing.text, /La mitad de las investigaciones tarda menos de 3 minutos y 9 de cada 10, menos de 9\./);
+});
+

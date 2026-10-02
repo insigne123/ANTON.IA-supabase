@@ -1,8 +1,32 @@
 import type { ResearchReportDetail, ResearchReportSynthesisViewState, ResearchWorkspaceStatus, ResearchWorkspaceRunItem } from '@/lib/research-workspace';
 
-// Local UX estimate: observed cold research (~34s) + editorial (~71s), rounded
-// conservatively to 120s. Not a measured population average or a time guarantee.
-export const RESEARCH_REPORT_ESTIMATE_MS = 120_000;
+// Measured in production (2 Oct, last 30 days, 24 written reports): the research takes 7 s (half of them) to 14 s (9 in 10);
+// writing the report 151 s to 378 s; the whole run 157 s to 505 s (Plan 6, PR-C3). The bar and the messages use those times:
+// they say what usually happens, never a promise.
+export const RESEARCH_REPORT_ESTIMATE_MS = 160_000;
+/** Slower than 9 in 10 runs: only then does the screen say it is taking longer than usual. */
+export const RESEARCH_REPORT_SLOW_MS = 510_000;
+
+export type ResearchReportPhase = 'research' | 'writing' | 'retry';
+
+/** The step a pending report is in, from what the app knows: the research job first, then the written report. */
+export function researchReportPhase(input: {
+  status?: ResearchWorkspaceStatus | string | null;
+  synthesis?: Pick<ResearchReportSynthesisViewState, 'status'> | null;
+}): ResearchReportPhase {
+  if (input.synthesis?.status === 'retry_scheduled') return 'retry';
+  if (input.status === 'queued' || input.status === 'running') return 'research';
+  return 'writing';
+}
+
+/** «45 s», «2 min», «2 min 10 s». */
+export function researchElapsedLabel(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
+}
 
 export function researchReportLoadingState(input: {
   status: ResearchWorkspaceStatus;
@@ -47,12 +71,14 @@ export function researchItemPresentation(item: ResearchWorkspaceRunItem, detail?
 
 export function estimatedResearchProgress(startedAt: string | null | undefined, now: number, typicalMs = RESEARCH_REPORT_ESTIMATE_MS) {
   const start = Date.parse(startedAt || '');
-  if (!Number.isFinite(start)) return { value: 0, longRunning: false, hasStart: false };
+  if (!Number.isFinite(start)) return { value: 0, longRunning: false, slow: false, elapsedMs: null, hasStart: false };
   const elapsed = Math.max(0, now - start);
   const duration = Number.isFinite(typicalMs) && typicalMs > 0 ? typicalMs : RESEARCH_REPORT_ESTIMATE_MS;
   return {
     value: Math.min(95, 95 * elapsed / (elapsed + duration / 4)),
     longRunning: elapsed >= duration,
+    slow: elapsed >= RESEARCH_REPORT_SLOW_MS,
+    elapsedMs: elapsed,
     hasStart: true,
   };
 }
