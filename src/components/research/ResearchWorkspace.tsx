@@ -18,7 +18,7 @@ import {
 import { PageHeader } from '@/components/page-header';
 import NativeResearchReport from '@/components/research/NativeResearchReport';
 import { ResearchReportProgress } from '@/components/research/ResearchReportProgress';
-import { researchDetailLoadingState, researchItemPresentation } from '@/lib/research-report-loading';
+import { researchDetailLoadingState, researchItemPresentation, researchReportPhase } from '@/lib/research-report-loading';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
@@ -640,6 +640,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const activeItem = runItems.find((item) => item.lead.key === activeLeadKey) || null;
   const activeLead = activeItem?.lead || workspaceLeads.find((lead) => lead.key === activeLeadKey) || null;
   const activeStatus = activeItem?.status || 'idle';
+  // The presented status reads «running» while the report is written; the step comes from the job itself (Plan 6, PR-C3).
+  const activeJobStatus = baseRunItems.find((item) => item.lead.key === activeLeadKey)?.status || null;
   const activeReportId = activeItem?.reportId || null;
   const activeReportDetail = activeReportId ? reportDetails[activeReportId] || null : null;
   const activeReportSynthesis = activeReportDetail?.preferredReportSynthesis || null;
@@ -1271,7 +1273,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                       </header> : null}
 
                       {isResearchInFlight(activeStatus) ? (
-                        <ResearchReportProgress key={activeItem?.id || activeLead.key} startedAt={activeReportDetail?.result.startedAt || activeItem?.startedAt} retryScheduled={activeReportSynthesis?.status === 'retry_scheduled'} />
+                        <ResearchReportProgress key={activeItem?.id || activeLead.key} startedAt={activeReportDetail?.result.startedAt || activeItem?.startedAt} retryScheduled={activeReportSynthesis?.status === 'retry_scheduled'} phase={researchReportPhase({ status: activeReportDetail?.result.status || activeJobStatus, synthesis: activeReportSynthesis })} />
                       ) : (activeStatus === 'failed' || activeStatus === 'cancelled') && !activeItem?.result ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-rose-950 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">
                           <p className="text-sm font-medium">Esta investigación necesita atención</p>

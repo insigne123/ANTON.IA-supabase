@@ -20,7 +20,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ResearchReportProgress } from '@/components/research/ResearchReportProgress';
-import { researchReportLoadingState } from '@/lib/research-report-loading';
+import { researchReportLoadingState, researchReportPhase } from '@/lib/research-report-loading';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   ReportFieldAnswers,
@@ -567,7 +567,7 @@ export function NativeResearchReport({
         <p className="mt-2 text-sm text-muted-foreground">Para {leadName}</p>
       </header>
       {synthesisPending && !loadError ? (
-        <ResearchReportProgress key={reportIdentity} startedAt={startedAt || result.startedAt} retryScheduled={reportSynthesis?.status === 'retry_scheduled'} />
+        <ResearchReportProgress key={reportIdentity} startedAt={startedAt || result.startedAt} retryScheduled={reportSynthesis?.status === 'retry_scheduled'} phase={researchReportPhase({ status, synthesis: reportSynthesis })} />
       ) : (
         <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/25 p-5" role="status">
           <h3 className="font-semibold">{loadError ? 'No pudimos actualizar el informe' : synthesisFailed ? 'No pudimos preparar el informe completo' : 'El informe completo no está disponible'}</h3>
