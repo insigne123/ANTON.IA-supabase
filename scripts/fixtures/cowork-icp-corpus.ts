@@ -4,6 +4,7 @@
 // ideal», says the sample is small and offers to keep the customer in «Perfil».
 import { analyzeIcp, type IcpTouch } from '../../src/lib/cowork/icp';
 import { CORPUS_COMMON_CHECKS, corpusRead, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { corpusRecommend } from './cowork-recommend-world';
 
 const normalize = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const everything = (result: CorpusTurnResult) => normalize([corpusShown(result), result.document?.title || '', result.document?.content || '', result.question || ''].join('\n'));
@@ -35,6 +36,19 @@ export const ICP_ANALYSIS = { scope: 'organization_icp', offer: null, ...analyze
   declared: null, touches: TOUCHES, leads: [], stages: new Map([[`lead_saved|${TOUCHES[0].leadId}`, 'meeting']]), now: '2026-09-25T12:00:00Z',
 }) };
 
+// «¿A quiénes les ofrezco AXIS?»: six saved contacts, one already written to and one that Ana (another member) is working.
+const RECOMMEND_ROWS = [
+  { id: '00000000-0000-4000-8000-00000000e101', name: 'Valentina Fuentes', title: 'Jefa de RR. HH.', company: 'Retail Andes', industry: 'Retail', email: 'vfuentes@retailandes.cl', researched: true },
+  { id: '00000000-0000-4000-8000-00000000e102', name: 'Matías Soto', title: 'Gerente de Personas', company: 'Seguridad Austral', industry: 'Seguridad privada', email: null },
+  { id: '00000000-0000-4000-8000-00000000e103', name: 'Carla Núñez', title: 'Analista de Selección', company: 'Retail Andes', industry: 'Retail', email: 'cnunez@retailandes.cl' },
+  { id: '00000000-0000-4000-8000-00000000e104', name: 'Pedro Díaz', title: 'Gerente de Finanzas', company: 'Minera Norte', industry: 'Minería', email: 'pdiaz@mineranorte.cl' },
+  { id: '00000000-0000-4000-8000-00000000e105', name: 'Lucía Vera', title: 'Jefa de Reclutamiento', company: 'Seguridad Austral', industry: 'Seguridad privada', email: 'lvera@segaustral.cl' },
+  { id: '00000000-0000-4000-8000-00000000e106', name: 'Ignacio Pérez', title: 'Gerente de RR. HH.', company: 'Transportes Sur', industry: 'Transporte', email: 'iperez@tsur.cl' },
+];
+export const RECOMMEND_WORLD_READ = (action: string, query: string) => action === 'leads.recommend'
+  ? corpusRecommend(RECOMMEND_ROWS, new Set(['00000000-0000-4000-8000-00000000e106']), query, new Map([['lvera@segaustral.cl', 'Ana']]))
+  : corpusRead(action, query);
+
 export const ICP_CORPUS: CorpusCase[] = [
   { id: 'icp-cual-es-mi-icp', title: '¿Cuál es mi cliente ideal?', request: '¿Cuál es mi ICP? ¿A qué tipo de empresas y personas debería apuntar?',
     origin: 'Plan 8, fase 2: el usuario pidió que Cowork razone su cliente ideal con su oferta, su Perfil y sus resultados.',
@@ -52,4 +66,15 @@ export const ICP_CORPUS: CorpusCase[] = [
         return [...text.matchAll(/(funciona|convierte|rinde)n? mejor/g)].every(match => /\b(no|sin|ni|nunca)\b/.test(text.slice(Math.max(0, match.index! - 60), match.index)));
       } },
       { label: 'no envía ni propone otra cosa que guardar en Perfil', test: result => !result.search && (!result.proposal || result.proposal.kind === 'profile_update') }] },
+  { id: 'icp-a-quien-ofrezco', title: '¿A quiénes les ofrezco mi producto?', request: '¿A quiénes de mis contactos les ofrezco AXIS?',
+    origin: 'Plan 8, fase 2: «¿a qué leads les ofrezco este servicio?». leads.recommend con los cargos e industrias que la oferta apunta.',
+    world: { read: RECOMMEND_WORLD_READ, savedEmails: [] },
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'pide la recomendación con los cargos o industrias de la oferta', test: result => result.reads
+        ?.some(read => read.action === 'leads.recommend' && read.input.trim().length > 0) ?? false },
+      says('nombra a Valentina y a Matías, los que mejor calzan', /valentina/, /matias/),
+      says('dice que a Matías le falta el correo', /matias[^\n]{0,160}(correo|email)|(sin correo|falta[^\n]{0,30}correo|buscar (su|el) correo)[^\n]{0,160}matias/),
+      { label: 'no recomienda a Pedro, de finanzas', test: result => !/pedro/.test(everything(result)) || /pedro[^.\n]{0,80}(no calza|fuera|no es|descart|finanzas)/.test(everything(result)) },
+      { label: 'no recomienda a Lucía, que trabaja otra persona del equipo, ni a Ignacio, ya contactado', test: result => !/(lucia|ignacio)/.test(normalize(corpusShown(result))) },
+      { label: 'cierra ofreciendo prepararlos o una campaña', test: result => Boolean(result.proposal) || /(prepar|campana|buscar (su|el) correo|investig)/.test(normalize(result.question || '')) }] },
 ];
