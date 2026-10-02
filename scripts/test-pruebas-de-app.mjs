@@ -239,7 +239,8 @@ const bundle = await build({
       export { draftSnapshotFixture } from './src/lib/server/draft-v2-test-fixtures';
       export { ResearchSnapshotV1Schema } from './src/lib/research-contracts';
       export { REPORT_V2_ANGLE_TITLE } from './src/lib/report-v2-contracts';
-      export { canonicalSha256 } from './src/lib/messaging-contracts';`,
+      export { canonicalSha256 } from './src/lib/messaging-contracts';
+      export { withCoworkReports } from './src/lib/cowork/report-document';`,
     resolveDir: process.cwd(), loader: 'ts',
   },
   bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent',
@@ -376,7 +377,7 @@ try {
   assert.match(notice.p_message, /Valentina Fuentes \(Tiendas Andinas\)/);
   assert.match(notice.p_message, /Patricio Soto \(Constructora Pehuén\)/);
   assert.doesNotMatch(notice.p_message, /\*\*\*|Contacto sin nombre|pocas líneas/);
-  assert.match(notice.p_message, /entrégalos completos/);
+  assert.match(notice.p_message, /entrégalos completos con answer\.reports/);
   // The notice starts a new chain like a message: it does not spend the automatic steps of the turn before (point 15).
   assert.equal(notice.p_reset_depth, true);
   assert.equal(notice.p_parent_run_id, REASK_RUN, 'after the newest finished turn of the conversation');
@@ -384,14 +385,23 @@ try {
   tables.cowork_runs.find(run => run.id === id(101)).status = 'completed';
 
   // 4. Each report, complete, with its guide to write the email and the follow-ups (points 12 and 13).
+  const reads = [];
   for (const key of ['valentina', 'patricio']) {
     const read = await app.readCoworkResearch(db, scope, leadOf(key).id);
+    reads.push({ action: 'research.get_existing', result: read });
     assert.equal(read.reportStatus, 'ready');
     assert.equal(read.report.truncated, false);
     const angle = read.report.sections.find(section => section.key === 'angle');
     assert.equal(angle.title, 'Cómo usarlo en el correo y los seguimientos');
     assert.match(angle.text, /Idea de primer correo[\s\S]*Dos ideas de seguimiento[\s\S]*Qué no afirmar/);
   }
+  // The notice turn hands both reports over complete: the model names them and the app writes the document, so the turn never
+  // waits for the model to copy them (on 2 Oct that ran out of time).
+  const delivered = app.withCoworkReports({ reply: 'Valentina: abrir con la temporada. Patricio: las obras del Biobío.', document: null,
+    reports: [{ leadId: leadOf('valentina').id, title: 'Valentina Fuentes · Tiendas Andinas' }, { leadId: leadOf('patricio').id, title: 'Patricio Soto · Constructora Pehuén' }] }, reads);
+  assert.equal(delivered.document.title, 'Informes de la investigación');
+  assert.match(delivered.document.content, /^## Valentina Fuentes · Tiendas Andinas[\s\S]*### Cómo usarlo en el correo y los seguimientos[\s\S]*## Patricio Soto · Constructora Pehuén/);
+  shown.push(delivered.reply, delivered.document.content);
 
   // 5. «Escríbeles el primer correo»: from each research, about AXIS, greeting with the first name (points 14 and 19).
   tables.cowork_runs.push({ id: DRAFT_RUN, user_id: USER, organization_id: ORG, status: 'running', mode: 'approval', parent_run_id: id(101),

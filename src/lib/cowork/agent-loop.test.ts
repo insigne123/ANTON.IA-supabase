@@ -43,6 +43,27 @@ test('the decision that closes the turn hands its summary of the conversation to
   assert.equal(kept.reply, 'Un contacto encontrado.');
 });
 
+test('reports named in the answer go complete in its document, written by the app from what the turn read, not by the model', async () => {
+  const leadId = '00000000-0000-4000-8000-0000000000a1';
+  const report = { status: 'completed', caveats: [], truncated: false, sections: [
+    { key: 'verdict', title: 'Resumen y decisión', text: 'Vale la pena escribirle.' },
+    { key: 'angle', title: 'Cómo usarlo en el correo y los seguimientos', text: 'Idea de primer correo: asunto «antecedentes».' }] };
+  let decisions = 0;
+  const result = await runCoworkReadLoop({
+    message: 'Terminaron las investigaciones que pediste en esta conversación', signal: new AbortController().signal, authorize: async () => {},
+    decide: async () => (decisions++ === 0
+      ? { action: 'research.get_existing', query: null, leadId, answer: null }
+      : { action: 'answer', query: null, leadId: null, answer: { reply: 'Rafael: abrir con la temporada.', document: null,
+        reports: [{ leadId, title: 'Rafael Durán · RyD Montajes' }] } }) as never,
+    execute: async (action, value) => { assert.equal(action, 'research.get_existing'); return { leadId: value, availability: 'available', reportStatus: 'ready', report }; },
+    record: async () => {},
+  });
+  assert.equal(result.document?.title, 'Informes de la investigación');
+  assert.match(result.document?.content || '', /## Rafael Durán · RyD Montajes\n\n### Resumen y decisión\n\nVale la pena escribirle\./);
+  assert.match(result.document?.content || '', /### Cómo usarlo en el correo y los seguimientos/);
+  assert.equal('reports' in result, false);
+});
+
 test('lead-scoped effect labels use the observed contact name, never raw IDs', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const leadId = '00000000-0000-4000-8000-000000000021';

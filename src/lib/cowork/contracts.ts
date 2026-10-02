@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { coworkReportRequestSchema } from './report-document';
 
 export const coworkRequestSchema = z.object({
   requestId: z.string().uuid(),
@@ -251,6 +252,8 @@ export const coworkDocumentSchema = z.object({
   suggestions: z.array(coworkSuggestionSchema).max(6).nullable().optional(),
   /** The closing question's answers to pick, when it asks for something only the person knows (V5). */
   choices: coworkChoicesSchema.nullable().optional(),
+  /** Whose research reports, read in this turn, go complete in document: the app writes it (report-document.ts). */
+  reports: z.array(coworkReportRequestSchema).min(1).max(5).nullable().optional(),
 }).strict();
 
 const transitions: Record<CoworkRunStatus, readonly CoworkRunStatus[]> = {
