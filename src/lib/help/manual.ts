@@ -296,9 +296,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Las etapas son: Nuevos, Calificado, Contactado, Interesado, Reunión, Negociación, Ganado y Perdido.',
       'Arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
       'Abre un contacto para ver su actividad, el responsable y la próxima acción registrada.',
+      'Arriba aparecen las sugerencias de etapa: un envío, una respuesta o una reunión pedida proponen mover al contacto. Acéptalas una por una o con «Aceptar todas».',
     ],
     faqs: [
       { q: '¿Cómo llegan los contactos al pipeline?', a: 'Aparecen cuando guardas o contactas leads.' },
+      { q: '¿Las etapas cambian solas?', a: 'No. Los envíos y las respuestas proponen el cambio y tú lo aceptas. Nunca se mueve un contacto hacia atrás ni uno ya cerrado.' },
       { q: '¿Puedo asignar un responsable?', a: 'Sí, en el detalle del contacto, en «Colaboración».' },
     ],
     related: ['conversaciones', 'hoy'],

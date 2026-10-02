@@ -1,3 +1,5 @@
+import { stageSuggestionReason } from '@/lib/crm-stage-suggestions';
+
 type CrmAutopilotUpdate = {
   organizationId: string;
   leadId?: string | null;
@@ -29,7 +31,6 @@ export async function syncLeadAutopilotToCrm(supabase: any, update: CrmAutopilot
     updated_at: new Date().toISOString(),
   } as Record<string, any>;
 
-  if (update.stage !== undefined) payload.stage = update.stage;
   if (update.notes !== undefined) payload.notes = update.notes;
   if (update.nextAction !== undefined) payload.next_action = update.nextAction;
   if (update.nextActionType !== undefined) payload.next_action_type = update.nextActionType;
@@ -37,6 +38,23 @@ export async function syncLeadAutopilotToCrm(supabase: any, update: CrmAutopilot
   if (update.autopilotStatus !== undefined) payload.autopilot_status = update.autopilotStatus;
   if (update.lastAutopilotEvent !== undefined) payload.last_autopilot_event = update.lastAutopilotEvent;
   if (update.meetingLink !== undefined) payload.meeting_link = update.meetingLink;
+
+  // Plan 5, PR-10: events never move the stage; they leave a suggestion the person confirms in the pipeline.
+  if (update.stage) {
+    const { error } = await supabase.rpc('suggest_crm_stage_v1', {
+      p_organization_id: update.organizationId,
+      p_lead_ref: leadId,
+      p_to_stage: update.stage,
+      p_reason: stageSuggestionReason(update.lastAutopilotEvent, update.notes),
+      p_source: update.lastAutopilotEvent || 'event',
+      p_evidence: {
+        event: update.lastAutopilotEvent || null,
+        autopilotStatus: update.autopilotStatus || null,
+        note: update.notes ? String(update.notes).slice(0, 300) : null,
+      },
+    });
+    if (error) console.error('[crm-autopilot] stage suggestion failed', leadId, error);
+  }
 
   await Promise.all(gids.map(async (gid) => {
     const { error } = await supabase

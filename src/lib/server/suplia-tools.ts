@@ -1124,8 +1124,8 @@ async function updateCrmStage(input: Record<string, unknown>, context: SupliaToo
   return {
     leadIds,
     stage,
-    updatedCount: leadIds.length,
-    note: 'CRM actualizado en unified_crm_data. No se enviaron mensajes ni campanas.',
+    suggestedCount: leadIds.length,
+    note: 'Cambio de etapa propuesto: queda como sugerencia en el Pipeline hasta que la persona lo acepte. No se enviaron mensajes ni campanas.',
   };
 }
 
