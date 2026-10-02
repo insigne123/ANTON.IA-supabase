@@ -4,7 +4,7 @@ import {
 } from '@/lib/commercial-opportunities/records';
 import { formatUsd } from '@/lib/commercial-opportunities/view';
 import { JSEARCH_USD_PER_REQUEST, searchJSearch } from './jsearch';
-import { fantasticUsdPerJob, searchFantasticJobs } from './fantastic-jobs';
+import { fantasticMaxRunUsd, fantasticRunPlan, fantasticStartUsd, fantasticUsdPerJob, searchFantasticJobs } from './fantastic-jobs';
 
 /**
  * One search of «empresas contratando» (plan 8, phase 3): asks each source with a key for the ads of the profile's roles,
@@ -13,7 +13,7 @@ import { fantasticUsdPerJob, searchFantasticJobs } from './fantastic-jobs';
  */
 export type HiringSyncSource = 'jsearch' | 'linkedin';
 export type HiringSearchProfile = { id: string; name: string; offer: string; roles: string[]; regions: string[]; minAds: number };
-export type HiringSyncEnvironment = { jsearchKey?: string; apifyToken?: string; usdPerJob: number };
+export type HiringSyncEnvironment = { jsearchKey?: string; apifyToken?: string; usdPerJob: number; maxRunUsd?: number; startUsd?: number };
 
 export const JSEARCH_QUERIES = 10;
 export const LINKEDIN_LIMIT = 200;
@@ -24,7 +24,9 @@ const DAY = 86_400_000;
 const round = (value: number) => Math.round(value * 10_000) / 10_000;
 
 export function hiringSyncEnvironment(env: Record<string, string | undefined> = process.env): HiringSyncEnvironment {
-  return { jsearchKey: env.JSEARCH_API_KEY || undefined, apifyToken: env.APIFY_TOKEN || undefined, usdPerJob: fantasticUsdPerJob(env.APIFY_FANTASTIC_USD_PER_JOB) };
+  return { jsearchKey: env.JSEARCH_API_KEY || undefined, apifyToken: env.APIFY_TOKEN || undefined,
+    usdPerJob: fantasticUsdPerJob(env.APIFY_FANTASTIC_USD_PER_JOB),
+    maxRunUsd: fantasticMaxRunUsd(env.APIFY_FANTASTIC_MAX_RUN_USD), startUsd: fantasticStartUsd(env.APIFY_FANTASTIC_START_USD) };
 }
 
 export function monthlyCapUsd(configured = process.env.OPPORTUNITIES_MONTHLY_USD_CAP) {
@@ -35,11 +37,12 @@ export function monthlyCapUsd(configured = process.env.OPPORTUNITIES_MONTHLY_USD
 /** What a search will ask and what it may cost, shown before the person runs it. A source without its key is listed as missing. */
 export function hiringSyncPlan(profile: Pick<HiringSearchProfile, 'roles'>, env: HiringSyncEnvironment) {
   const queries = profile.roles.slice(0, JSEARCH_QUERIES);
+  const apify = fantasticRunPlan(LINKEDIN_LIMIT, env.usdPerJob, env.maxRunUsd, env.startUsd);
   const sources = [
     { source: 'jsearch' as const, label: 'Google for Jobs (JSearch)', enabled: Boolean(env.jsearchKey) && queries.length > 0,
       requests: queries.length, estimateUsd: round(queries.length * JSEARCH_USD_PER_REQUEST), missing: env.jsearchKey ? null : 'JSEARCH_API_KEY' },
-    { source: 'linkedin' as const, label: 'LinkedIn (Fantastic Jobs)', enabled: Boolean(env.apifyToken) && profile.roles.length > 0,
-      requests: LINKEDIN_LIMIT, estimateUsd: round(LINKEDIN_LIMIT * env.usdPerJob), missing: env.apifyToken ? null : 'APIFY_TOKEN' },
+    { source: 'linkedin' as const, label: 'LinkedIn (Fantastic Jobs)', enabled: Boolean(env.apifyToken) && profile.roles.length > 0 && apify.enabled,
+      requests: apify.limit, estimateUsd: apify.estimateUsd, missing: env.apifyToken ? null : 'APIFY_TOKEN' },
   ];
   return { sources, estimateUsd: round(sources.filter(item => item.enabled).reduce((sum, item) => sum + item.estimateUsd, 0)) };
 }
@@ -132,10 +135,14 @@ export async function runHiringSync(input: {
         return { source, runId, ...result };
       }
       const result = await sources.fantastic({ titles: profile.roles, limit: LINKEDIN_LIMIT, timeRange: '7d' },
-        { fetch: globalThis.fetch, token: env.apifyToken, usdPerJob: env.usdPerJob });
+        { fetch: globalThis.fetch, token: env.apifyToken, usdPerJob: env.usdPerJob, maxRunUsd: env.maxRunUsd, startUsd: env.startUsd });
       return { source, runId, ads: result.ads, costUsd: result.costUsd, error: null, failed: false };
     } catch (error) {
-      return { source, runId, ads: [], costUsd: 0, error: message(error), failed: true };
+      // A timeout or malformed result may follow a paid actor start. Conservatively
+      // reserve its whole hard cap in the monthly ledger instead of counting zero.
+      const costUsd = source === 'linkedin' ? fantasticMaxRunUsd(String(env.maxRunUsd ?? 1)) : 0;
+      return { source, runId, ads: [], costUsd,
+        error: source === 'linkedin' ? `${message(error)} Se reserva el tope de esta corrida como costo estimado; revisa el recibo de Apify.` : message(error), failed: true };
     }
   }));
 

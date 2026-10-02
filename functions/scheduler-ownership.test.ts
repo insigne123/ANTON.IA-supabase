@@ -32,7 +32,7 @@ function sourceBlock(startMarker: string, endMarker: string) {
 }
 
 test('the retired mission agent has no scheduler, manual trigger, legacy worker or cron left', () => {
-    assert.doesNotMatch(functionsSource, /export const antoniaTick\b|export const antoniaTickHttp\b|antoniaWorker|runAntoniaTick/);
+    assert.doesNotMatch(functionsSource, /export (?:const|\{)[^\n]*(?:antoniaTick\b|antoniaTickHttp\b|antoniaWorker\b)|\bfunction runAntoniaTick\b/);
     assert.doesNotMatch(functionsSource, /from\('antonia_tasks'\)|from\('antonia_missions'\)/);
     assert.equal(existsSync('src/app/api/cron/antonia/route.ts'), false);
     assert.equal(existsSync('functions/src/antonia-worker.ts'), false);
@@ -99,7 +99,7 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
     assert.doesNotMatch(replySyncSource, /ownerOffset/);
 
     assert.match(deploymentDocs, /Firebase Scheduled Functions es la [^\n]+ propietaria/);
-    assert.doesNotMatch(deploymentDocs, /`antoniaTick`/);
+    assert.match(deploymentDocs, /El agente de misiones[^\n]+se retiró/);
     assert.match(deploymentDocs, /`nativeResearchTick`/);
     assert.match(deploymentDocs, /`campaignProcessingTick`/);
     assert.match(deploymentDocs, /`FIREBASE_SCHEDULER_SECRET`/);

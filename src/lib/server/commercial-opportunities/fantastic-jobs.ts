@@ -8,27 +8,58 @@ import { jobAdFromFantastic, type JobAd } from '@/lib/commercial-opportunities/h
  */
 export const FANTASTIC_ACTOR = 'fantastic-jobs~advanced-linkedin-job-search-api';
 const DEFAULT_USD_PER_JOB = 0.005;
+const DEFAULT_START_USD = 0.01;
+const DEFAULT_MAX_RUN_USD = 1;
 /** What one job costs on the Apify plan of the account (APIFY_FANTASTIC_USD_PER_JOB), shown before every search. */
 export function fantasticUsdPerJob(configured = process.env.APIFY_FANTASTIC_USD_PER_JOB) {
   const value = Number(configured);
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_USD_PER_JOB;
 }
 
+export function fantasticStartUsd(configured = process.env.APIFY_FANTASTIC_START_USD) {
+  const value = Number(configured);
+  return configured !== undefined && configured !== '' && Number.isFinite(value) && value >= 0 ? value : DEFAULT_START_USD;
+}
+
+export function fantasticMaxRunUsd(configured = process.env.APIFY_FANTASTIC_MAX_RUN_USD) {
+  const value = Number(configured);
+  return configured !== undefined && configured !== '' && Number.isFinite(value) && value >= 0 ? value : DEFAULT_MAX_RUN_USD;
+}
+
+/** The request limit and the monthly estimate share the same startup fee and
+ * provider-side hard cap. On Free, US$1 allows 198 jobs plus US$0.01 to start. */
+export function fantasticRunPlan(requested = 200, usdPerJob = fantasticUsdPerJob(),
+  maxRunUsd = fantasticMaxRunUsd(), startUsd = fantasticStartUsd()) {
+  if (!Number.isFinite(usdPerJob) || usdPerJob <= 0 || !Number.isFinite(maxRunUsd) || maxRunUsd < 0
+    || !Number.isFinite(startUsd) || startUsd < 0) throw new Error('El presupuesto de Apify no es válido.');
+  const affordable = Math.max(0, Math.floor((maxRunUsd - startUsd + 1e-9) / usdPerJob));
+  const desired = Number.isFinite(requested) ? Math.max(10, Math.min(1000, Math.floor(requested))) : 200;
+  const limit = Math.min(desired, affordable);
+  const enabled = limit >= 10;
+  return { enabled, limit: enabled ? limit : 0, maxRunUsd, startUsd,
+    estimateUsd: enabled ? Math.round((startUsd + limit * usdPerJob) * 10_000) / 10_000 : 0 };
+}
+
 export type FantasticQuery = { titles: string[]; locations?: string[]; timeRange?: '24h' | '7d' | '6m'; limit?: number };
-type Dependencies = { fetch: typeof fetch; token: string | undefined; usdPerJob?: number };
+type Dependencies = { fetch: typeof fetch; token: string | undefined; usdPerJob?: number; maxRunUsd?: number; startUsd?: number };
 
 export async function searchFantasticJobs(input: FantasticQuery, dependencies: Dependencies = {
   fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, usdPerJob: fantasticUsdPerJob(),
 }) {
   if (!dependencies.token) throw new Error('Falta el token de Apify (APIFY_TOKEN).');
-  const limit = Math.max(10, Math.min(1000, input.limit ?? 200));
+  const usdPerJob = dependencies.usdPerJob ?? fantasticUsdPerJob();
+  const plan = fantasticRunPlan(input.limit, usdPerJob, dependencies.maxRunUsd, dependencies.startUsd);
+  if (!plan.enabled) throw new Error('El tope por búsqueda de Apify no alcanza para consultar 10 avisos.');
+  const limit = plan.limit;
   const body = {
     timeRange: input.timeRange ?? '7d', limit, removeAgency: true, descriptionType: '',
     // «operari:*» also finds «operaria» and «operarios»; a title of several words goes as a phrase.
     titleSearch: input.titles.slice(0, 30).map(title => /\s/.test(title.trim()) ? title.trim() : `${title.trim().replace(/[oa]s?$/i, '')}:*`),
     locationSearch: input.locations?.length ? input.locations.slice(0, 20) : ['Chile'],
   };
-  const response = await dependencies.fetch(`https://api.apify.com/v2/acts/${FANTASTIC_ACTOR}/run-sync-get-dataset-items?timeout=110&memory=1024`, {
+  const params = new URLSearchParams({ timeout: '110', memory: '1024', restartOnError: 'false',
+    forcePermissionLevel: 'LIMITED_PERMISSIONS', maxTotalChargeUsd: String(plan.maxRunUsd) });
+  const response = await dependencies.fetch(`https://api.apify.com/v2/acts/${FANTASTIC_ACTOR}/run-sync-get-dataset-items?${params}`, {
     method: 'POST', headers: { authorization: `Bearer ${dependencies.token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body), signal: AbortSignal.timeout(120_000),
   });
@@ -36,10 +67,14 @@ export async function searchFantasticJobs(input: FantasticQuery, dependencies: D
   if (response.status === 402) throw new Error('Apify: no queda saldo en la cuenta.');
   if (!response.ok) throw new Error(`Apify respondió ${response.status}.`);
   const items = await response.json() as unknown;
-  const list = Array.isArray(items) ? items : [];
+  if (!Array.isArray(items)) throw new Error('Apify no entregó una lista de avisos; no se puede confirmar el resultado ni el costo.');
+  const list = items.slice(0, limit);
   const ads: JobAd[] = list.flatMap(item => {
     const ad = item && typeof item === 'object' ? jobAdFromFantastic(item as Record<string, unknown>) : null;
     return ad ? [ad] : [];
   });
-  return { ads, fetched: list.length, costUsd: Math.round(list.length * (dependencies.usdPerJob ?? DEFAULT_USD_PER_JOB) * 10_000) / 10_000 };
+  // The dataset response has no receipt. Keep the estimate explicit and never
+  // undercount an actor that returned more rows than requested.
+  return { ads, fetched: list.length, costUsd: Math.min(plan.maxRunUsd,
+    Math.round((plan.startUsd + items.length * usdPerJob) * 10_000) / 10_000) };
 }

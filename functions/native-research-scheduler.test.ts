@@ -19,10 +19,10 @@ test('native research scheduler is opt-in and delegates with its dedicated worke
 
 test('native research manual trigger is private and does not reuse the legacy tick secret', () => {
     const manualTriggerStart = source.indexOf('export const nativeResearchTickHttp');
-    const antoniaScheduleStart = source.indexOf('// Main scheduler function', manualTriggerStart);
-    assert.ok(manualTriggerStart >= 0 && antoniaScheduleStart > manualTriggerStart);
+    const nextScheduleStart = source.indexOf('export const researchSequencePreparationTick', manualTriggerStart);
+    assert.ok(manualTriggerStart >= 0 && nextScheduleStart > manualTriggerStart);
 
-    const manualTrigger = source.slice(manualTriggerStart, antoniaScheduleStart);
+    const manualTrigger = source.slice(manualTriggerStart, nextScheduleStart);
     assert.match(manualTrigger, /invoker: 'private'/);
     assert.match(manualTrigger, /NATIVE_RESEARCH_MANUAL_TICK_SECRET/);
     assert.match(manualTrigger, /hasManualTickAuthorization/);
