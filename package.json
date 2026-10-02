@@ -49,6 +49,7 @@
     "backfill:research-report-fallbacks": "node scripts/backfill-fallback-research-reports.mjs",
     "repair:contacted-history": "node scripts/repair-contacted-history.mjs",
     "repair:crm-pipeline-history": "node scripts/repair-crm-pipeline-history.mjs",
+    "repair:masked-names": "node --loader ./scripts/ts-test-loader.mjs scripts/repair-masked-names.ts",
     "verify:linkedin-profile": "node scripts/verify-linkedin-profile-search.mjs"
   },
   "dependencies": {
