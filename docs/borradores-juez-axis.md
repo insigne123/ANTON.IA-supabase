@@ -75,9 +75,9 @@ Sin las variables, los dos scripts usan el conjunto ServiPro y la carpeta de sie
 - Un solo pedido por correo (4,9).
 - La revisión previa aprobó 23 de 24. El que no pasó, ni con el reintento, es un cierre que terminaba en «¿te parece que lo dejemos aquí?»: la revisión no lo aceptó como pregunta de sí o no.
 
-**Lo que el juez manda a revisión, 11 correos:**
+**Lo que el juez manda a revisión, 11 correos** (en 2 de ellos, por otras inferencias):
 1. **«En Yago SpA usamos AXIS»**, en el primer correo de retail, en las 3 corridas. El juez lo lee como un uso interno de Yago. Decir «AXIS, de Yago, …» lo evita.
-2. **El alcance del servicio sin respaldo** en los seguimientos 1 y 2, en 8 correos. Ejemplos:
+2. **Límites del servicio sin respaldo** en los seguimientos 1 y 2, en 6 correos. Ejemplos:
    - «la decisión de contratación sigue en manos de tu equipo», en 3;
    - «su alcance es esa consulta, no otras verificaciones»;
    - «podrían dejar la revisión para la etapa final».
@@ -86,10 +86,18 @@ Sin las variables, los dos scripts usan el conjunto ServiPro y la carpeta de sie
 
 **Suena humano (3,6) es el criterio más bajo.** Las frases que el juez marca son de plantilla, por ejemplo «vale mirar cómo funciona esta verificación en la práctica».
 
-## Siguiente paso
+## Siguiente paso: un ajuste probado, todavía sin integrar
 
-- **Ajustar los seguimientos 1 y 2:**
-  - precisar el alcance solo con lo que declara el perfil;
-  - no afirmar límites, exclusiones ni quién decide si el perfil no lo dice.
-- **Nombrar el producto como del vendedor:** «AXIS, de Yago».
-- **Volver a medir con este conjunto,** y con el de ServiPro para no retroceder.
+**La rama `claude/seguimientos-sin-alcances` (`native-draft/v18`) ajusta el generador:**
+- el paso Respaldo precisa el alcance solo con lo que el vendedor declara;
+- no se afirman límites ni garantías del servicio que el vendedor no declara: qué no hace, qué no reemplaza, quién decide;
+- lo que se ofrece se dice como de la empresa del vendedor, no como algo que la empresa usa.
+
+**Medido con este mismo conjunto (3 corridas, 24 correos):**
+- «usamos AXIS» baja de 3 correos a 0;
+- los límites del servicio (quién decide, qué no hace, en qué etapa se usa) bajan de 6 correos a 0;
+- el juez marca otras inferencias, por ejemplo «150 vendedores podría implicar muchas consultas»;
+- el total queda igual: 7 para enviar, 7 para corregir y 10 a revisión humana;
+- la veracidad sube de 3,7 a 3,9.
+
+**Falta compararlo con el conjunto ServiPro** para descartar que empeore otros correos. Esa corrida no se pudo hacer: la cuenta de OpenAI de este entorno se quedó sin créditos (`credit_balance_exhausted`). Con créditos, se corren los dos scripts sin `OUTREACH_EVAL_SET`, una vez en `main` y otra en la rama, y se juzgan con este juez.
