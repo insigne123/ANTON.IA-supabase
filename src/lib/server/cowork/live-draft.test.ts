@@ -101,8 +101,11 @@ test('the page reads its own draft; odd progress reads as no cards', async () =>
 });
 
 test('held, no text or card title travels: only the phase and how far each card got, and a phase never goes back', async () => {
+  // A frozen clock: after the first write every change waits for the interval, so what is written depends on the calls,
+  // never on how busy the machine is (with the real clock, a slow millisecond between review() and adjust() wrote both).
+  const frozen = () => 0;
   const writes: Array<{ text: string; progress: unknown }> = [];
-  const writer = coworkDraftWriter(async (text, progress) => { writes.push({ text, progress }); return true; }, { intervalMs: 1, hold: true });
+  const writer = coworkDraftWriter(async (text, progress) => { writes.push({ text, progress }); return true; }, { intervalMs: 1, hold: true, now: frozen });
   assert.equal(writer.held, true);
   // Nothing written yet: nothing to review or adjust.
   writer.review();
@@ -134,7 +137,7 @@ test('held, no text or card title travels: only the phase and how far each card 
   // A correction starts its cards over: the counts the reader saw only grow, so nothing new is written while it catches up.
   const written: Array<{ cards: unknown; phase?: string }> = [];
   const steps = (count: number) => Array.from({ length: count }, (_, index) => `{"day":${index + 1}`).join('},');
-  const again = coworkDraftWriter(async (_text, progress) => { written.push({ cards: progress.cards, phase: progress.phase }); return true; }, { intervalMs: 1, hold: true });
+  const again = coworkDraftWriter(async (_text, progress) => { written.push({ cards: progress.cards, phase: progress.phase }); return true; }, { intervalMs: 1, hold: true, now: frozen });
   again.push(answer('Listo.', `,"blocks":[{"type":"sequence","title":"Secuencia","steps":[${steps(3)}`));
   await again.flush();
   again.review();
@@ -154,7 +157,7 @@ test('held, no text or card title travels: only the phase and how far each card 
 
   // Not held, adjust() does nothing: a correction is announced by review() and never streamed.
   const shown: string[] = [];
-  const live = coworkDraftWriter(async text => { shown.push(text); return true; }, { intervalMs: 1 });
+  const live = coworkDraftWriter(async text => { shown.push(text); return true; }, { intervalMs: 1, now: frozen });
   assert.equal(live.held, false);
   live.push(answer('Hola'));
   await live.flush();
