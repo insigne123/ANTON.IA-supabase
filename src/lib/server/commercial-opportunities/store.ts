@@ -1,10 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { GRUPOEXPRO_PILOT } from '@/lib/commercial-opportunities/pilot';
-import { HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, type HiringOpportunityData, type OpportunityStatus } from '@/lib/commercial-opportunities/records';
+import { GRUPOEXPRO_PILOT, GRUPOEXPRO_TENDER_KEYWORDS } from '@/lib/commercial-opportunities/pilot';
+import {
+  HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, type HiringOpportunityData, type OpportunityStatus, type TenderOpportunityData,
+} from '@/lib/commercial-opportunities/records';
 import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import type { HiringSearchProfile, HiringStore, HiringSyncSource } from './sync';
+import type { TenderStore } from './tender-sync';
 
 /**
  * Reads and writes of «Oportunidades» (plan 8, phase 3). The tables have no member grants: every call here runs with the
@@ -14,10 +17,16 @@ type Scope = { userId: string; organizationId: string };
 const PAGE = 1000;
 const DAY = 86_400_000;
 
-const PROFILE_COLUMNS = 'id,name,offer,roles,regions,min_ads,sources,updated_at';
-type ProfileRow = { id: string; name: string; offer: string; roles: string[]; regions: string[]; min_ads: number; sources: string[]; updated_at: string };
-const toProfile = (row: ProfileRow): HiringSearchProfile & { updatedAt: string } => ({
-  id: row.id, name: row.name, offer: row.offer, roles: row.roles || [], regions: row.regions || [], minAds: row.min_ads, updatedAt: row.updated_at,
+const PROFILE_COLUMNS = 'id,name,offer,roles,regions,min_ads,keywords,unspsc_codes,sources,updated_at';
+type ProfileRow = {
+  id: string; name: string; offer: string; roles: string[]; regions: string[]; min_ads: number; keywords: string[]; unspsc_codes: string[];
+  sources: string[]; updated_at: string;
+};
+/** Every source on: the profile has no per-source switch yet, and a source without its key is skipped anyway. */
+const ALL_SOURCES = ['hiring', 'tender', 'compra_agil'];
+const toProfile = (row: ProfileRow): HiringSearchProfile & { keywords: string[]; unspscCodes: string[]; updatedAt: string } => ({
+  id: row.id, name: row.name, offer: row.offer, roles: row.roles || [], regions: row.regions || [], minAds: row.min_ads,
+  keywords: row.keywords || [], unspscCodes: row.unspsc_codes || [], updatedAt: row.updated_at,
 });
 
 function fail(what: string, error: unknown): never {
@@ -35,7 +44,8 @@ export async function ensureHiringProfile(client: SupabaseClient, scope: Scope) 
   if (found.data) return toProfile(found.data as ProfileRow);
   const created = await client.from('commercial_opportunity_profiles').insert({
     organization_id: scope.organizationId, created_by: scope.userId, name: GRUPOEXPRO_PILOT.name, offer: GRUPOEXPRO_PILOT.offer,
-    roles: [...GRUPOEXPRO_PILOT.roles], regions: [...GRUPOEXPRO_PILOT.regions], min_ads: GRUPOEXPRO_PILOT.minAds, sources: ['hiring'],
+    roles: [...GRUPOEXPRO_PILOT.roles], regions: [...GRUPOEXPRO_PILOT.regions], min_ads: GRUPOEXPRO_PILOT.minAds,
+    keywords: [...GRUPOEXPRO_TENDER_KEYWORDS], sources: ALL_SOURCES,
   }).select(PROFILE_COLUMNS).single();
   if (created.data) return toProfile(created.data as ProfileRow);
   // Two tabs opening the page at once: the other one created it.
@@ -52,11 +62,15 @@ export const hiringProfilePatchSchema = z.object({
   roles: list(40, 80).refine(values => values.length > 0, 'Agrega al menos un cargo.'),
   regions: list(20, 60),
   minAds: z.number().int().min(1).max(100),
+  keywords: list(40, 80).optional(),
+  unspscCodes: z.array(z.string().trim().regex(/^\d{2,8}$/, 'Los códigos UNSPSC son de 2 a 8 dígitos.')).max(40).optional(),
 }).strict();
 
 export async function updateHiringProfile(client: SupabaseClient, scope: Scope, id: string, patch: z.infer<typeof hiringProfilePatchSchema>) {
   const { data, error } = await client.from('commercial_opportunity_profiles').update({
-    name: patch.name, offer: patch.offer, roles: patch.roles, regions: patch.regions, min_ads: patch.minAds, updated_at: new Date().toISOString(),
+    name: patch.name, offer: patch.offer, roles: patch.roles, regions: patch.regions, min_ads: patch.minAds,
+    ...(patch.keywords ? { keywords: patch.keywords } : {}), ...(patch.unspscCodes ? { unspsc_codes: [...new Set(patch.unspscCodes)] } : {}),
+    sources: ALL_SOURCES, updated_at: new Date().toISOString(),
   }).eq('id', id).eq('organization_id', scope.organizationId).select(PROFILE_COLUMNS).maybeSingle();
   if (error) fail('guardar el perfil de búsqueda', error);
   return data ? toProfile(data as ProfileRow) : null;
@@ -104,8 +118,8 @@ export type OpportunityRunView = { id: string; source: HiringSyncSource; status:
 export async function recentRuns(client: SupabaseClient, scope: Scope) {
   const { data, error } = await client.from('commercial_opportunity_runs')
     .select('id,source,status,started_at,finished_at,fetched,created,updated,cost_estimate_usd,error')
-    .eq('organization_id', scope.organizationId).in('source', ['jsearch', 'linkedin'])
-    .order('started_at', { ascending: false }).limit(8);
+    .eq('organization_id', scope.organizationId)
+    .order('started_at', { ascending: false }).limit(12);
   if (error) fail('leer las búsquedas', error);
   return (data || []).map((row: Record<string, any>): OpportunityRunView => ({
     id: row.id, source: row.source, status: row.status, startedAt: row.started_at, finishedAt: row.finished_at, fetched: row.fetched,
@@ -120,23 +134,42 @@ export async function monthSpentUsd(client: SupabaseClient, scope: Scope, since:
   return (data || []).reduce((sum: number, row: { cost_estimate_usd: number | string }) => sum + (Number(row.cost_estimate_usd) || 0), 0);
 }
 
-/** The HiringStore of a sync, over the service client and the person's organization. */
-export function supabaseHiringStore(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule'): HiringStore {
+type RunInput = { source: string; status: 'running' | 'skipped'; error?: string; costUsd?: number; finishedAt?: string };
+/** Opportunities of any kind, upserted on (organization, kind, key): status, owner and first sighting are never in the rows. */
+async function upsertOpportunities(client: SupabaseClient, rows: Array<{ dedupe_key: string }>) {
+  const ids = new Map<string, string>();
+  for (let index = 0; index < rows.length; index += 200) {
+    const { data, error } = await client.from('commercial_opportunities')
+      .upsert(rows.slice(index, index + 200), { onConflict: 'organization_id,kind,dedupe_key' }).select('id,dedupe_key');
+    if (error) fail('guardar las oportunidades', error);
+    for (const row of data || []) ids.set(String((row as { dedupe_key: string }).dedupe_key), String((row as { id: string }).id));
+  }
+  return ids;
+}
+/** The evidence of any source, upserted on (organization, source, external id). */
+async function upsertSignals(client: SupabaseClient, rows: object[]) {
+  for (let index = 0; index < rows.length; index += 500) {
+    const { error } = await client.from('commercial_opportunity_signals')
+      .upsert(rows.slice(index, index + 500), { onConflict: 'organization_id,source,external_id' });
+    if (error) fail('guardar la evidencia', error);
+  }
+}
+/** The run log, shared by every source: at most one search running per organization. */
+function runLog(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule') {
   const runs = () => client.from('commercial_opportunity_runs');
   return {
-    monthSpentUsd: since => monthSpentUsd(client, scope, since),
-    async closeStaleRuns(before, now) {
+    async closeStaleRuns(before: string, now: string) {
       const { error } = await runs().update({ status: 'failed', finished_at: now, error: 'La búsqueda se cortó antes de terminar.' })
         .eq('organization_id', scope.organizationId).eq('status', 'running').lt('started_at', before);
       if (error) fail('cerrar búsquedas cortadas', error);
     },
-    async hasRunningRun(since) {
+    async hasRunningRun(since: string) {
       const { data, error } = await runs().select('id').eq('organization_id', scope.organizationId).eq('status', 'running')
         .gte('started_at', since).limit(1);
       if (error) fail('revisar búsquedas en curso', error);
       return Boolean(data?.length);
     },
-    async startRun(input) {
+    async startRun(input: RunInput) {
       const { data, error } = await runs().insert({
         organization_id: scope.organizationId, profile_id: scope.profileId, source: input.source, trigger, status: input.status,
         requested_by: scope.userId, finished_at: input.status === 'running' ? null : (input.finishedAt ?? new Date().toISOString()),
@@ -145,13 +178,22 @@ export function supabaseHiringStore(client: SupabaseClient, scope: Scope & { pro
       if (error || !data) fail('registrar la búsqueda', error);
       return String(data.id);
     },
-    async finishRun(id, patch) {
+    async finishRun(id: string, patch: Parameters<HiringStore['finishRun']>[1]) {
       const { error } = await runs().update({
         status: patch.status, finished_at: patch.finishedAt, fetched: patch.fetched, created: patch.created, updated: patch.updated,
         cost_estimate_usd: patch.costUsd, error: patch.error?.slice(0, 1000) ?? null,
       }).eq('id', id).eq('organization_id', scope.organizationId);
       if (error) fail('cerrar la búsqueda', error);
     },
+  };
+}
+
+/** The HiringStore of a sync, over the service client and the person's organization. */
+export function supabaseHiringStore(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule'): HiringStore {
+  const log = runLog(client, scope, trigger);
+  return {
+    monthSpentUsd: since => monthSpentUsd(client, scope, since),
+    ...log,
     async recentSignals(since) {
       const ads: JobAd[] = [];
       for (let page = 0; page < 20; page++) {
@@ -190,22 +232,51 @@ export function supabaseHiringStore(client: SupabaseClient, scope: Scope & { pro
       }
       return found;
     },
-    async saveOpportunities(rows) {
-      const ids = new Map<string, string>();
-      for (let index = 0; index < rows.length; index += 200) {
-        const { data, error } = await client.from('commercial_opportunities')
-          .upsert(rows.slice(index, index + 200), { onConflict: 'organization_id,kind,dedupe_key' }).select('id,dedupe_key');
-        if (error) fail('guardar las empresas', error);
-        for (const row of data || []) ids.set(String((row as { dedupe_key: string }).dedupe_key), String((row as { id: string }).id));
+    saveOpportunities: rows => upsertOpportunities(client, rows),
+    saveSignals: rows => upsertSignals(client, rows),
+  };
+}
+
+const TENDER_COLUMNS = 'id,kind,title,buyer_name,region,amount,currency,deadline_at,published_at,url,score,reasons,status,claimed_by,first_seen_at,last_seen_at,data';
+type TenderRow = {
+  id: string; kind: 'tender' | 'compra_agil'; title: string; buyer_name: string | null; region: string | null; amount: number | string | null;
+  currency: string | null; deadline_at: string | null; published_at: string | null; url: string | null; score: number; reasons: string[];
+  status: OpportunityStatus; claimed_by: string | null; first_seen_at: string; last_seen_at: string; data: TenderOpportunityData;
+};
+export type TenderOpportunityView = {
+  id: string; kind: 'tender' | 'compra_agil'; title: string; buyer: string | null; region: string | null; amount: number | null; currency: string | null;
+  deadlineAt: string | null; publishedAt: string | null; url: string | null; score: number; reasons: string[]; status: OpportunityStatus; mine: boolean;
+  firstSeenAt: string; data: TenderOpportunityData;
+};
+
+/** Tenders and Compra Ágil quotes still open, best first and then by the nearest deadline. */
+export async function listTenderOpportunities(client: SupabaseClient, scope: Scope, input: { now?: string } = {}) {
+  const { data, error } = await client.from('commercial_opportunities').select(TENDER_COLUMNS)
+    .eq('organization_id', scope.organizationId).in('kind', ['tender', 'compra_agil']).gte('deadline_at', input.now ?? new Date().toISOString())
+    .order('score', { ascending: false }).order('deadline_at', { ascending: true }).limit(300);
+  if (error) fail('leer las licitaciones', error);
+  return ((data || []) as TenderRow[]).map((row): TenderOpportunityView => ({
+    id: row.id, kind: row.kind, title: row.title, buyer: row.buyer_name, region: row.region, amount: row.amount === null ? null : Number(row.amount),
+    currency: row.currency, deadlineAt: row.deadline_at, publishedAt: row.published_at, url: row.url, score: row.score, reasons: row.reasons || [],
+    status: row.status, mine: row.claimed_by === scope.userId, firstSeenAt: row.first_seen_at, data: row.data,
+  }));
+}
+
+/** The TenderStore of a tender sync: runs, keys and rows of the person's organization through the service client. */
+export function supabaseTenderStore(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule'): TenderStore {
+  return {
+    ...runLog(client, scope, trigger),
+    async existingKeys(keys, kinds) {
+      const found = new Set<string>();
+      for (let index = 0; index < keys.length; index += 200) {
+        const { data, error } = await client.from('commercial_opportunities').select('dedupe_key')
+          .eq('organization_id', scope.organizationId).in('kind', kinds).in('dedupe_key', keys.slice(index, index + 200));
+        if (error) fail('revisar las licitaciones guardadas', error);
+        for (const row of data || []) found.add(String((row as { dedupe_key: string }).dedupe_key));
       }
-      return ids;
+      return found;
     },
-    async saveSignals(rows) {
-      for (let index = 0; index < rows.length; index += 500) {
-        const { error } = await client.from('commercial_opportunity_signals')
-          .upsert(rows.slice(index, index + 500), { onConflict: 'organization_id,source,external_id' });
-        if (error) fail('guardar los avisos', error);
-      }
-    },
+    saveOpportunities: rows => upsertOpportunities(client, rows),
+    saveSignals: rows => upsertSignals(client, rows),
   };
 }

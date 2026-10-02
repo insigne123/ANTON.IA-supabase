@@ -78,6 +78,7 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 | Reply sync | `replySyncTick` | cada 5 minutos | Invoca `/api/cron/reply-sync` por par organizacion/usuario. |
 | Retencion de privacidad | `privacyRetentionTick` | 03:30 UTC diario | Invoca `/api/cron/privacy-retention`. |
 | Rollups ANTON.IA | `antoniaRollupsTick` | 00:10 UTC diario | Invoca `/api/cron/antonia-rollups`. |
+| Oportunidades comerciales | `commercialOpportunitiesTick` | 11:15 UTC diario (08:15 en Chile) | Invoca `/api/cron/commercial-opportunities`: licitaciones y Compra Ágil (con `MERCADO_PUBLICO_TICKET`) y avisos de JSearch dentro del tope mensual. |
 
 No agregues estas cargas a Vercel, App Hosting ni a un Cloud Scheduler HTTP externo. `vercel.json` conserva exclusivamente el cron de SUPL.IA, que no forma parte de este traspaso.
 

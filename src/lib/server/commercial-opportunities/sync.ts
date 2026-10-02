@@ -100,11 +100,15 @@ async function runJSearch(roles: string[], search: Sources['jsearch'], key: stri
 export async function runHiringSync(input: {
   store: HiringStore; profile: HiringSearchProfile; env: HiringSyncEnvironment; capUsd: number; organizationId: string;
   now?: string; sources?: Sources;
+  /** Only these sources (the daily sync asks the cheap one); every source with its key when absent. */
+  only?: HiringSyncSource[];
 }) {
   const now = input.now ?? new Date().toISOString();
   const sources = input.sources ?? { jsearch: searchJSearch, fantastic: searchFantasticJobs };
   const { store, profile, env } = input;
-  const plan = hiringSyncPlan(profile, env);
+  const full = hiringSyncPlan(profile, env);
+  const chosen = full.sources.filter(item => !input.only || input.only.includes(item.source));
+  const plan = { sources: chosen, estimateUsd: round(chosen.filter(item => item.enabled).reduce((sum, item) => sum + item.estimateUsd, 0)) };
   const enabled = plan.sources.filter(item => item.enabled);
   if (!profile.roles.length) throw new HiringSyncError('Agrega al menos un cargo a la búsqueda.', 400);
   if (!enabled.length) throw new HiringSyncError('No hay fuentes con su clave configurada (JSEARCH_API_KEY o APIFY_TOKEN).', 503);

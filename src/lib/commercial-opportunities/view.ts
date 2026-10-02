@@ -7,7 +7,7 @@ export type OpportunityListItem = { id: string; company: string; status: 'new' |
 export type RunListItem = { source: string; status: string; startedAt: string; finishedAt: string | null; fetched: number; created: number; costUsd: number; error: string | null };
 
 export const FILTER_LABELS: Record<OpportunityFilter, string> = { new: 'Nuevas', interested: 'Me interesan', dismissed: 'Descartadas', all: 'Todas' };
-const SOURCE_LABELS: Record<string, string> = { jsearch: 'Google for Jobs', linkedin: 'LinkedIn', jooble: 'Jooble' };
+const SOURCE_LABELS: Record<string, string> = { jsearch: 'Google for Jobs', linkedin: 'LinkedIn', jooble: 'Jooble', mercado_publico: 'Mercado Público', compra_agil: 'Compra Ágil' };
 export const sourceLabel = (source: string) => SOURCE_LABELS[source] || source;
 
 const fold = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
@@ -65,4 +65,19 @@ export function relativeTime(value: string, now = Date.now()) {
 export function parseList(value: string) {
   const items = value.split(/[,;\n]/).map(item => item.replace(/\s+/g, ' ').trim()).filter(Boolean);
   return [...new Map(items.map(item => [fold(item), item])).values()];
+}
+
+const clpFormat = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
+/** «$12.500.000», or what the source said when the amount is in another currency. */
+export function formatClp(amount: number | null, currency: string | null = 'CLP') {
+  if (amount === null || !Number.isFinite(amount)) return 'Monto no informado';
+  return !currency || currency === 'CLP' ? clpFormat.format(amount) : `${amount.toLocaleString('es-CL')} ${currency}`;
+}
+
+/** «cierra hoy», «cierra mañana» or «cierra en 6 días», with its date; past deadlines read as closed. */
+export function closesIn(deadline: string | null, now = Date.now()) {
+  if (!deadline || !Number.isFinite(Date.parse(deadline))) return 'sin fecha de cierre';
+  const days = Math.floor((Date.parse(deadline) - now) / 86_400_000);
+  if (Date.parse(deadline) < now) return 'cerrada';
+  return `${days <= 0 ? 'cierra hoy' : days === 1 ? 'cierra mañana' : `cierra en ${days} días`} · ${formatDay(deadline)}`;
 }

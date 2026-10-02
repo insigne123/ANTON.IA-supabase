@@ -236,6 +236,21 @@ export const privacyRetentionTick = functions.scheduler.onSchedule({
     });
 });
 
+export const commercialOpportunitiesTick = functions.scheduler.onSchedule({
+    schedule: '15 11 * * *',
+    timeZone: 'Etc/UTC',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    // Oportunidades (plan 8, phase 3): public tenders and the cheap hiring source, every morning (08:15 in Chile).
+    await invokeFirebaseSchedulerBridge({
+        name: 'commercial-opportunities',
+        path: '/api/cron/commercial-opportunities',
+        method: 'POST',
+    });
+});
+
 export const antoniaRollupsTick = functions.scheduler.onSchedule({
     schedule: '10 0 * * *',
     timeZone: 'Etc/UTC',
