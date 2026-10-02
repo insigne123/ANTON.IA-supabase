@@ -58,6 +58,7 @@
     if (request.action === 'ANTONIA_PRESENCE_REFRESH') { scheduleDecorate(); return false; }
     if (request.action === 'PROSPECT_READ_RESULTS') { respond({ ok: true, results: readResults() }); return false; }
     if (request.action === 'PROSPECT_READ_COMPANY') { respond({ ok: true, company: readCompany() }); return false; }
+    if (request.action === 'PROSPECT_READ_ACTIVITY') { respond({ ok: true, posts: readActivity() }); return false; }
     if (request.action === 'PROSPECT_SWEEP_NETWORK' || request.action === 'PROSPECT_SWEEP_INBOX') {
       try {
         respond({ ok: true, ...(request.action === 'PROSPECT_SWEEP_NETWORK' ? sweepNetwork() : sweepInbox()) });
@@ -253,6 +254,33 @@
     return { linkedinUrl, name: companyHeading(), industry: (about.industry || other[0] || '').slice(0, 160),
       headquarters: (about.headquarters || other[1] || '').slice(0, 200),
       size: (about.size || facts.find(text => /empleados|employees/i.test(text)) || '').slice(0, 100), website: website.slice(0, 300) };
+  };
+  // The person's latest posts (PR-4e): the «Actividad» section of their profile, or the feed of their activity page. Only what is
+  // rendered, up to 3, with LinkedIn's own relative date and whether they posted, shared or commented it; nothing is clicked,
+  // expanded or scrolled.
+  const ACTIVITY_PAGE = /^\/in\/[^/]+\/?(recent-activity(\/.*)?)?$/;
+  const POST = '[data-urn*="urn:li:activity"], .feed-shared-update-v2, .profile-creator-shared-feed-update__container';
+  const POST_TEXT = '.update-components-text, .feed-shared-update-v2__description, .feed-shared-inline-show-more-text, [class*="commentary"]';
+  const POST_WHEN = '.update-components-actor__sub-description, .feed-shared-actor__sub-description, [class*="actor__sub-description"]';
+  const visibleText = node => clean([...(node?.querySelectorAll('span[aria-hidden="true"]') || [])].map(item => item.textContent).join(' ') || node?.textContent);
+  const readActivity = () => {
+    if (!ACTIVITY_PAGE.test(location.pathname)) return [];
+    const recent = /\/recent-activity/.test(location.pathname);
+    const scope = recent ? document.querySelector('main') : [...document.querySelectorAll('main section')]
+      .find(section => /^(actividad|activity)/i.test(visibleText(section.querySelector('h2'))));
+    if (!scope) return [];
+    const containers = [...scope.querySelectorAll(POST)];
+    const posts = [];
+    for (const item of containers.filter(node => !containers.some(other => other !== node && other.contains(node)))) {
+      const text = clean(item.querySelector(POST_TEXT)?.textContent).replace(/…?\s*(ver más|see more|más)$/i, '').trim().slice(0, 600);
+      if (!text) continue;
+      const header = clean(item.querySelector('.update-components-header, .feed-shared-header, [class*="header__text"]')?.textContent);
+      const kind = /coment|comment/i.test(header) ? 'comment' : /compart|repost|shared/i.test(header) ? 'repost' : 'post';
+      const when = visibleText(item.querySelector(POST_WHEN)).split('•')[0].trim().slice(0, 40);
+      posts.push({ text, when, kind });
+      if (posts.length >= 3) break;
+    }
+    return posts;
   };
   let decorating = 0;
   let generation = 0;

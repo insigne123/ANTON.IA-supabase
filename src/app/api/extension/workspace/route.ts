@@ -161,13 +161,17 @@ export async function POST(req: NextRequest) {
       const evidence = report ? report.evidenceGraph.claims.filter((item: any) => item.type === 'fact').slice(0, 8).map((item: any) => ({ statement: item.statement,
         sourceUrl: report.evidenceGraph.sources.find((source: any) => source.id === report.evidenceGraph.facts.find((fact: any) => fact.id === item.evidenceIds[0])?.sourceId)?.url || '' }))
         : [];
-      const generated = await writeLinkedinMessage({ instruction: body.instruction, language: body.language, tone: body.tone,
+      const { activityIndex, ...generated } = await writeLinkedinMessage({ instruction: body.instruction, language: body.language, tone: body.tone,
           seller, lead: extensionResearchSubject(row), evidence,
           commercialAnalysis: report?.sections.filter((section: any) => ['verdict', 'fit', 'angle'].includes(section.key)).map((section: any) => ({ title: section.title, paragraphs: section.paragraphs })),
-           previousMessage: body.previousMessage,
+           previousMessage: body.previousMessage, recentActivity: body.recentActivity,
       });
-      return json({ ...generated, personalized: evidence.length > 0,
-         sources: evidence.map((item: any) => ({ statement: item.statement, url: item.sourceUrl })) });
+      // The post it opens from (PR-4e) goes first among the sources, with its words, so the panel can show what it quotes.
+      const opened = activityIndex === null ? null : body.recentActivity[activityIndex];
+      const activitySource = opened ? [{ kind: 'activity', activityKind: opened.kind, when: opened.when, text: opened.text,
+        statement: `${opened.kind === 'comment' ? 'Su comentario' : opened.kind === 'repost' ? 'Lo que compartió' : 'Su publicación'}${opened.when ? ` (${opened.when})` : ''}: «${opened.text.slice(0, 240)}${opened.text.length > 240 ? '…' : ''}»`, url: '' }] : [];
+      return json({ ...generated, personalized: evidence.length > 0 || Boolean(opened), activityRead: body.recentActivity.length,
+         sources: [...activitySource, ...evidence.map((item: any) => ({ statement: item.statement, url: item.sourceUrl }))] });
     }
     if (!row.email) return json({ error: 'Completa un email antes de crear la secuencia.' }, 422);
     if (!research?.researchSnapshotId) return json({ error: 'Completa la investigación antes de generar el correo.' }, 409);

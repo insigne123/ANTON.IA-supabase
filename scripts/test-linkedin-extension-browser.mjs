@@ -41,6 +41,7 @@ try {
             case 'PROSPECT_PROFILE': result = window.activeProfile; break;
             case 'PROSPECT_SEARCH_RESULTS': result = window.searchResults || null; break;
             case 'PROSPECT_COMPANY': result = window.companyPage || null; break;
+            case 'PROSPECT_ACTIVITY': result = window.activity || { onProfile: true, posts: [{ text: 'Este año duplicamos el equipo de personas en Lima.', when: '2 sem', kind: 'post' }] }; break;
             case 'PROSPECT_PRESENCE': result = Object.fromEntries(request.urls.filter(url => window.presence?.[url]).map(url => [url, window.presence[url]])); break;
             case 'PROSPECT_CONNECT': connected = true; result = { pending: true }; setTimeout(() => listeners.forEach(fn => fn({ prospectConnection: {} }, 'session')), 10); break;
             case 'PROSPECT_PREPARE': result = { ok: true, status: 'prepared', message: 'Mensaje preparado. Envía desde LinkedIn.' }; break;
@@ -62,7 +63,8 @@ try {
               if (request.body.action === 'research-status') result = { research: researched ? { status: 'partial', researchSnapshotId: 'snapshot', reportVersion: 'doc:1', reportSynthesisV2: { status: 'completed' }, reportDocumentV2: { synthesis: { status: 'completed' }, sections: [{ key: 'verdict', title: 'Resumen y decisión', paragraphs: [{ text: 'Análisis comercial de demostración.' }], blocks: [] }], evidenceGraph: {} }, result: { evidence: [{ id: 'fact', kind: 'fact', statement: 'Empresa de demostración', sourceUrl: 'https://example.test' }] } } : null };
               if (['sequence', 'email-draft'].includes(request.body.action)) result = { composeUrl: '/contact/compose?draftId=test' };
               if (request.body.action === 'research-status' && researched && !window.finalReportReady) result = { research: { status: 'partial', researchSnapshotId: 'snapshot', result: { evidence: [{ statement: 'Cita preliminar' }] }, reportSynthesisV2: { status: 'running' } } };
-              if (request.body.action === 'message') result = { message: 'Hola María, ¿te parece si conversamos sobre tu equipo?', sources: [], personalized: false };
+              if (request.body.action === 'message') result = { message: 'Hola María, ¿te parece si conversamos sobre tu equipo?', personalized: Boolean(request.body.recentActivity?.length), activityRead: request.body.recentActivity?.length || 0,
+                sources: request.body.recentActivity?.length ? [{ kind: 'activity', activityKind: request.body.recentActivity[0].kind, when: request.body.recentActivity[0].when, text: request.body.recentActivity[0].text, statement: `Su publicación: «${request.body.recentActivity[0].text}»`, url: '' }] : [] };
               break;
           }
           return { ok: true, result };
@@ -127,6 +129,12 @@ try {
     assert.equal(await page.getByRole('tab', { name: 'Mensaje', exact: true }).getAttribute('aria-selected'), 'true');
     await page.getByRole('button', { name: 'Redactar mensaje de LinkedIn' }).click();
     await page.getByRole('button', { name: 'Preparar en LinkedIn', exact: true }).waitFor();
+    // The draft opens from the person's latest post, read from their open profile, and shows it above.
+    await page.getByText('Abre desde su publicación · 2 sem', { exact: true }).waitFor();
+    await page.getByText('«Este año duplicamos el equipo de personas en Lima.»', { exact: true }).waitFor();
+    await page.getByText('Mensaje breve para LinkedIn. Abre desde su actividad reciente: revisa que la cita sea fiel.', { exact: true }).waitFor();
+    assert.deepEqual(await page.evaluate(() => JSON.stringify(window.requests.find(request => request.body?.action === 'message').body.recentActivity)),
+      JSON.stringify([{ text: 'Este año duplicamos el equipo de personas en Lima.', when: '2 sem', kind: 'post' }]));
     await page.getByRole('button', { name: 'Preparar en LinkedIn' }).click();
     await page.getByText('Mensaje preparado. Envía desde LinkedIn.').waitFor();
     await page.getByText('Añadir a una campaña existente', { exact: true }).click();
@@ -274,7 +282,7 @@ try {
     await page.getByRole('heading', { name: '1 persona de Minera Norte en pantalla' }).waitFor();
     assert.equal(await companyCard.getByRole('link', { name: /Ver sus personas en LinkedIn/ }).count(), 0, 'Already on its people tab');
     await context.close();
-    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, search batch save with team presence, company card with contacts, hiring signal and decision makers, no horizontal overflow (mocked boundary).`);
+    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, search batch save with team presence, company card with contacts, hiring signal and decision makers, opening from a recent post, no horizontal overflow (mocked boundary).`);
   }
   assert.deepEqual(errors, []);
 } finally { await browser.close(); }
