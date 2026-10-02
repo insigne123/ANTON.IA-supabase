@@ -1,4 +1,5 @@
-import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
+import { classifyReply, extractReplyPreview, readReplyDeal } from '@/lib/reply-classifier';
+import { replyStageSuggestion } from '@/lib/reply-stage';
 import { detectDeliveryFailure } from '@/lib/delivery-failure-detector';
 import { buildThreadKey } from '@/lib/email-observability';
 import { tokenService } from '@/lib/services/token-service';
@@ -500,16 +501,34 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
     }).catch(() => null);
 
     if (row.lead_id) {
+      // Plan 6, PR-B: the reply proposes its stage (a meeting request, «Reunión»), and Jev reads whether it asks for a proposal
+      // or confirms the purchase. Only a suggestion: the person confirms it in the pipeline.
+      const move = replyStageSuggestion(classification.intent, await readReplyDeal(rawText || preview || ''));
       await syncLeadAutopilotToCrm(supabase, {
         organizationId: row.organization_id,
         leadId: row.lead_id,
-        stage: 'engaged',
+        stage: move?.stage ?? 'engaged',
         notes: summary,
         nextAction: classification.intent === 'meeting_request' ? 'Confirmar reunion y preparar contexto comercial' : 'Responder rapido y proponer siguiente paso',
         nextActionType: classification.intent === 'meeting_request' ? 'meeting_handoff' : 'hot_reply_followup',
         nextActionDueAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         autopilotStatus: classification.intent === 'meeting_request' ? 'meeting_requested' : 'positive_reply',
-        lastAutopilotEvent: classification.intent,
+        lastAutopilotEvent: move?.event ?? classification.intent,
+      }).catch(() => null);
+    }
+  }
+
+  // A refusal or an opt-out proposes «Perdido» (Plan 6, PR-B); the follow-ups already stop by the classification.
+  if (!failure && row.organization_id && row.lead_id && (classification.intent === 'negative' || classification.intent === 'unsubscribe')) {
+    const move = replyStageSuggestion(classification.intent);
+    if (move) {
+      await syncLeadAutopilotToCrm(supabase, {
+        organizationId: row.organization_id,
+        leadId: row.lead_id,
+        stage: move.stage,
+        notes: classification.summary || preview || null,
+        autopilotStatus: classification.intent === 'unsubscribe' ? 'unsubscribed' : 'not_interested',
+        lastAutopilotEvent: move.event,
       }).catch(() => null);
     }
   }
