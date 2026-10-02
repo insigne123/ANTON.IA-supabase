@@ -188,4 +188,7 @@ Lo mismo que lee Cowork, a la vista de todos los usuarios, con la sesión de cad
 
 **Pruebas:**
 - `src/lib/icp/view.test.ts`;
-- los casos nuevos de `src/lib/cowork/icp.test.ts` y `src/lib/server/cowork/icp-read.test.ts`.
+- los casos nuevos de `src/lib/cowork/icp.test.ts` y `src/lib/server/cowork/icp-read.test.ts`;
+- `scripts/test-profile-page.mjs` (prueba DOM de Perfil): el resumen del panel con su aviso de muestra chica, y «Sumar» una industria sin guardar.
+
+**Si la respuesta no trae la forma esperada,** el panel y «Recomendados para ti» muestran el error con «Reintentar», en vez de romper la página.
