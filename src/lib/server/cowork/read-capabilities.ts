@@ -7,6 +7,7 @@ import { readCoworkResearch } from './research-read';
 import { readCoworkSavedSearches } from './saved-searches';
 import { readCoworkProfile } from './profile-read';
 import { readCoworkIcp } from './icp-read';
+import { readCoworkLeadRecommendations } from './lead-recommend-read';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from '@/lib/cowork/domain-reads';
 import { queryCoworkContactabilityBatch, queryCoworkDomainRead } from './domain-reads';
 import { readCoworkBatchReport, readCoworkCompanyPlan, readCoworkNextTouch, readCoworkRetryReview } from './batch-reads';
@@ -77,6 +78,12 @@ export function coworkReadCapabilities(
       description: 'Cliente ideal: lo declarado en Perfil frente a los resultados de los envíos, por segmento, y cuántos contactos guardados calzan',
       input: z.string().max(300), output: z.unknown(),
       execute: input => readCoworkIcp(client, scope, input as string),
+    },
+    {
+      name: 'leads.recommend', version: 1, effect: 'read',
+      description: 'A quién escribir: contactos guardados sin contactar, ordenados por calce con la oferta o el cliente ideal y por preparación',
+      input: z.string().max(300), output: z.unknown(),
+      execute: input => readCoworkLeadRecommendations(client, scope, input as string),
     },
     {
       name: 'leads.get', version: 1, effect: 'read',
