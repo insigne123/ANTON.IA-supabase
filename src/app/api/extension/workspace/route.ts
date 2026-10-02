@@ -49,6 +49,11 @@ export async function POST(req: NextRequest) {
       const { readExtensionPresence } = await import('@/lib/server/extension-presence');
       return json({ presence: await readExtensionPresence(auth, body.linkedinUrls || []) });
     }
+    if (body.action === 'save-batch') {
+      // The people chosen from a LinkedIn search: saved with what the results show, never over a richer record.
+      const { saveExtensionBatch } = await import('@/lib/server/extension-batch');
+      return json(await saveExtensionBatch(auth, body.profiles || []));
+    }
     if (body.action === 'linkedin-jobs-pending') {
       const { listPendingLinkedinJobs } = await import('@/lib/server/linkedin-bridge-ops');
       const { canonicalExtensionProfileUrl } = await import('@/lib/extension-profile-url');

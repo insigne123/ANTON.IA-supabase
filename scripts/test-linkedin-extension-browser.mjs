@@ -20,9 +20,9 @@ try {
       const profile = { linkedinUrl: 'https://www.linkedin.com/in/test-person', fullName: 'María Fernández', title: 'Directora de Personas', companyName: 'Empresa de prueba', email: 'maria@example.test', companyDomain: 'example.test', tabId: 12 };
       window.activeProfile = profile;
       // What LinkedIn's page does when another profile opens: the panel reads it then, not on a timer.
-      window.navigateTo = next => {
+      window.navigateTo = (next, url = next.linkedinUrl) => {
         window.activeProfile = next;
-        profileListeners.forEach(fn => fn({ action: 'ANTONIA_PROFILE_CHANGED' }, { id: 'test-extension', tab: { id: 12, active: true, url: next.linkedinUrl } }));
+        profileListeners.forEach(fn => fn({ action: 'ANTONIA_PROFILE_CHANGED' }, { id: 'test-extension', tab: { id: 12, active: true, url } }));
       };
       let connected = false;
       let saved = null;
@@ -39,6 +39,7 @@ try {
           switch (request.action) {
             case 'PROSPECT_SESSION': result = connected ? connection : null; break;
             case 'PROSPECT_PROFILE': result = window.activeProfile; break;
+            case 'PROSPECT_SEARCH_RESULTS': result = window.searchResults || null; break;
             case 'PROSPECT_PRESENCE': result = Object.fromEntries(request.urls.filter(url => window.presence?.[url]).map(url => [url, window.presence[url]])); break;
             case 'PROSPECT_CONNECT': connected = true; result = { pending: true }; setTimeout(() => listeners.forEach(fn => fn({ prospectConnection: {} }, 'session')), 10); break;
             case 'PROSPECT_PREPARE': result = { ok: true, status: 'prepared', message: 'Mensaje preparado. Envía desde LinkedIn.' }; break;
@@ -47,6 +48,7 @@ try {
             case 'PROSPECT_OPEN': result = true; break;
             case 'PROSPECT_API':
               if (request.body.action === 'phone-status') result = { phone: '+511234567', status: 'completed' };
+              if (request.body.action === 'save-batch') result = { saved: request.body.profiles.map(({ linkedinUrl, fullName }) => ({ linkedinUrl, fullName })), already: [], blocked: [], failed: [] };
               if (request.body.action === 'quota') result = { credits: { used: 3, limit: 50, remaining: 47 } };
               if (request.body.action === 'enrich') result = { enriched: [{ linkedinUrl: profile.linkedinUrl, fullName: profile.fullName, title: profile.title, companyName: profile.companyName, email: profile.email, companyDomain: profile.companyDomain, city: 'Lima', country: 'Perú', industry: 'Servicios', seniority: 'director' }] };
               if (request.body.action === 'enrich' && request.body.revealPhone && window.requests.filter(item => item.body?.action === 'enrich').length > 1) result = { enriched: [{ id: 'person-id', linkedinUrl: profile.linkedinUrl, enrichmentStatus: 'pending_phone' }] };
@@ -201,8 +203,39 @@ try {
     const asked = await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_PROFILE').length);
     await page.waitForTimeout(2000);
     assert.equal(await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_PROFILE').length), asked, 'no polling');
+    // A LinkedIn people search: the people on screen, the one someone else works can't be chosen, and the rest save in one batch.
+    await page.evaluate(() => {
+      window.searchResults = { salesNavigator: false, results: [
+        { linkedinUrl: 'https://www.linkedin.com/in/ana-rojas', fullName: 'Ana Rojas', headline: 'Jefa de Operaciones en Minera Norte', title: 'Jefa de Operaciones', companyName: 'Minera Norte' },
+        { linkedinUrl: 'https://www.linkedin.com/in/another-profile', fullName: 'Otro perfil', headline: 'Gerente General', title: '', companyName: '' },
+        { linkedinUrl: 'https://www.linkedin.com/in/luis-soto', fullName: 'Luis Soto', headline: 'Gerente de Personas at Logística Sur', title: 'Gerente de Personas', companyName: 'Logística Sur' },
+      ] };
+      window.navigateTo(null, 'https://www.linkedin.com/search/results/people/?keywords=operaciones');
+    });
+    await page.getByRole('heading', { name: '3 personas en esta búsqueda' }).waitFor();
+    const searchCard = page.locator('section[aria-labelledby="search-heading"]');
+    await searchCard.getByText('En conversación con Ana', { exact: true }).waitFor();
+    assert.ok(await searchCard.getByRole('checkbox', { name: /Otro perfil/ }).isDisabled(), 'Someone else works this person: not selectable');
+    assert.ok(await searchCard.getByRole('button', { name: 'Elige a quiénes guardar' }).isDisabled());
+    await searchCard.getByRole('button', { name: 'Seleccionar disponibles' }).click();
+    assert.ok(await searchCard.getByRole('checkbox', { name: /Ana Rojas/ }).isChecked());
+    assert.ok(await searchCard.getByRole('checkbox', { name: /Luis Soto/ }).isChecked());
+    for (const width of [320, 380, 520]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Horizontal overflow in the search at ${width}/${colorScheme}`);
+    }
+    const presenceAsked = await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_PRESENCE').length);
+    await searchCard.getByRole('button', { name: 'Guardar 2 en Anton.IA' }).click();
+    await page.getByText('2 contactos guardados en tu organización.', { exact: true }).waitFor();
+    const batch = await page.evaluate(() => JSON.stringify(window.requests.filter(request => request.action === 'PROSPECT_API' && request.body.action === 'save-batch').map(request => request.body.profiles)));
+    assert.deepEqual(JSON.parse(batch), [[
+      { linkedinUrl: 'https://www.linkedin.com/in/ana-rojas', fullName: 'Ana Rojas', title: 'Jefa de Operaciones', companyName: 'Minera Norte', details: { headline: 'Jefa de Operaciones en Minera Norte' } },
+      { linkedinUrl: 'https://www.linkedin.com/in/luis-soto', fullName: 'Luis Soto', title: 'Gerente de Personas', companyName: 'Logística Sur', details: { headline: 'Gerente de Personas at Logística Sur' } },
+    ]]);
+    await searchCard.getByRole('button', { name: 'Elige a quiénes guardar' }).waitFor();
+    await page.waitForFunction(count => window.requests.filter(request => request.action === 'PROSPECT_PRESENCE').length > count, presenceAsked);
     await context.close();
-    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, no horizontal overflow (mocked boundary).`);
+    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, search batch save with team presence, no horizontal overflow (mocked boundary).`);
   }
   assert.deepEqual(errors, []);
 } finally { await browser.close(); }

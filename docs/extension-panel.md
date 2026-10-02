@@ -137,6 +137,49 @@ Sin nada que decir, no hay marca.
 - **La ruta:** una prueba para otra cuenta y una para más de 50 perfiles.
 - **El navegador:** el aviso de coordinar en la tarjeta.
 
+## Guardar en lote desde la búsqueda (PR-4c)
+
+En una búsqueda de personas de LinkedIn (`/search/results/people/`), el panel muestra a las personas que ya están en pantalla. Desde ahí se pueden guardar varias de una vez.
+
+**Lo que se ve:**
+- **Encabezado:** «N personas en esta búsqueda».
+- **Una casilla por persona:** con su nombre, su titular y la marca de PR-4b, si la organización ya la conoce.
+- **«Seleccionar disponibles»:** marca solo a quienes la organización todavía no tiene, hasta 25.
+- **Quien trabaja otra persona del equipo** («En conversación con Ana») no se puede elegir.
+- **«Guardar N en Anton.IA»:** guarda el lote y responde en una línea. Por ejemplo: «2 contactos guardados en tu organización. 1 ya estaba guardado. No se guardó Pedro Díaz (En conversación con Ana).»
+
+**Qué se lee de la página:**
+- solo lo que LinkedIn ya muestra: el enlace `/in/`, el nombre y el titular;
+- el cargo y la empresa, cuando el titular los dice («Jefa de Operaciones en Minera Norte», «… at …», «… | …»);
+- hasta 50 personas, sin desplazar, sin hacer clic y sin abrir perfiles;
+- **Sales Navigator** no muestra el perfil público. El panel lo dice y pide abrir el perfil para guardarlo.
+
+**API: acción `save-batch`** en `/api/extension/workspace`:
+- recibe hasta 25 perfiles;
+- quita los repetidos;
+- relee los bloqueos de equipo en el servidor, aunque el panel ya los haya filtrado;
+- usa el mismo guardado de un perfil (`saveExtensionLead`), sin pisar lo que ya estaba;
+- devuelve `saved`, `already`, `blocked` (con el motivo) y `failed`.
+
+**Después de guardar,** la marca de cada persona se vuelve a pedir: ahora dice «Guardado».
+
+**«Preparar»** (buscar correo e investigar a varios con una sola aprobación) sigue en Cowork (`contacts.prepare_batch`). El texto de ayuda lo menciona.
+
+**Pruebas:**
+- **`src/lib/server/extension-batch.test.ts`:** el tope de 25, los repetidos, los bloqueados, los que ya estaban y los errores por persona.
+- **La ruta:** `save-batch` para otra cuenta y para más de 25 perfiles.
+- **`chrome-extension/tests/search-results.test.mjs`:**
+  - la lectura de los resultados (nombre, titular, cargo y empresa);
+  - fuera de una búsqueda no hay nadie;
+  - el tope de 50.
+- **`chrome-extension/tests/search-batch.test.mjs`:** «Seleccionar disponibles», los perfiles que se envían y el resumen.
+- **El navegador:**
+  - la persona bloqueada no se puede elegir;
+  - «Seleccionar disponibles» marca a las otras dos;
+  - «Guardar 2 en Anton.IA» envía exactamente esos dos perfiles y muestra el resumen;
+  - la marca se vuelve a pedir;
+  - sin desborde a 320, 380 y 520 px, en claro y oscuro.
+
 ## Publicación
 
 - **Se compila con `npm run extension:build`.** El ZIP para la tienda y la versión (4.1.0, al cerrar la fase 4) los publica el mantenedor.

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AnimatePresence, LazyMotion, MotionConfig, domAnimation, m } from 'framer-motion';
 import {
   AlertTriangle, ArrowUpRight, Check, ChevronRight, Circle, Copy, Download, ExternalLink, Link2, Loader2, LogOut, Mail, RefreshCw, Search, Send,
-  Sparkles, UserRound, WifiOff,
+  Sparkles, UserRound, Users, WifiOff,
 } from 'lucide-react';
 import { canonicalExtensionProfileUrl as normalizeLinkedinProfileUrl } from '../../src/lib/extension-profile-url';
 import './panel.css';
@@ -13,6 +13,7 @@ import { restoreProfileEdits } from './profile-cache';
 import { researchFindings } from './research-findings';
 import { blockLines } from './report-blocks';
 import { personChips, personNextStep, researchSteps, type ChipTone, type NextStep } from './person-status';
+import { BATCH_LIMIT, availableResults, batchSummary, chosenProfiles, type ResultPresence, type SearchResult } from './search-batch';
 
 declare const chrome: any;
 type ProfileDetails = { headline?: string; city?: string; state?: string; country?: string; industry?: string; seniority?: string; departments?: string[]; companySize?: string };
@@ -85,6 +86,11 @@ function App() {
   const [credits, setCredits] = useState<Credits | null>(null);
   // What the organization knows of the open person (PR-4b), the same line the mark on LinkedIn shows.
   const [presence, setPresence] = useState<{ label: string; tone: ChipTone; blocks: boolean } | null>(null);
+  // The LinkedIn search open in the active tab (PR-4c): its visible people, what the organization knows of each, the choice.
+  const [searchPage, setSearchPage] = useState<{ results: SearchResult[]; salesNavigator: boolean } | null>(null);
+  const [resultPresence, setResultPresence] = useState<Record<string, ResultPresence>>({});
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [presenceRound, setPresenceRound] = useState(0);
   // The session ended without «Desconectar» (it expired or the account changed): the welcome says so.
   const [sessionLost, setSessionLost] = useState(false);
   const [stale, setStale] = useState(false);
@@ -143,6 +149,10 @@ function App() {
     const detect = async () => {
       try { const value = await rpc('PROSPECT_PROFILE'); if (alive) setCandidate(value?.linkedinUrl ? { ...value, linkedinUrl: normalizeLinkedinProfileUrl(value.linkedinUrl) } : null); }
       catch (err: any) { if (alive) { setCandidate(null); if (STALE.test(err?.message || '')) setStale(true); } }
+      try {
+        const page = await rpc('PROSPECT_SEARCH_RESULTS');
+        if (alive) setSearchPage(page && (page.salesNavigator || page.results?.length) ? page : null);
+      } catch { if (alive) setSearchPage(null); }
     };
     void detect();
     // LinkedIn swaps profiles without reloading: its page says when the profile on screen changes (the URL, or the name once it
@@ -163,6 +173,15 @@ function App() {
       chrome.tabs.onUpdated.removeListener(update); document.removeEventListener('visibilitychange', visible);
     };
   }, []);
+  const resultUrls = searchPage?.results.map(result => result.linkedinUrl).join('\n') || '';
+  useEffect(() => {
+    const urls = resultUrls ? resultUrls.split('\n') : [];
+    setChosen(previous => previous.filter(url => urls.includes(url)));
+    if (!connection || !urls.length) { setResultPresence({}); return; }
+    let alive = true;
+    rpc('PROSPECT_PRESENCE', { urls }).then(result => { if (alive) setResultPresence(result || {}); }).catch(() => { if (alive) setResultPresence({}); });
+    return () => { alive = false; };
+  }, [connection, resultUrls, presenceRound]);
   // The day's credits of the account, the same the app shows: read when connecting and after anything that may use them.
   const refreshCredits = useCallback(async () => {
     if (!connection) { setCredits(null); return; }
@@ -440,6 +459,35 @@ function App() {
     setView(TABS[next].id);
     tabRefs.current[TABS[next].id]?.focus();
   };
+  const saveChosen = () => void run(`Guardando ${chosen.length === 1 ? '1 contacto' : `${chosen.length} contactos`}…`, async valid => {
+    const profiles = chosenProfiles(searchPage?.results || [], chosen);
+    const result = await rpc('PROSPECT_API', { organizationId: connection!.session.organizationId, userId: connection!.session.userId, body: { action: 'save-batch', profiles } });
+    if (!valid()) return;
+    setChosen([]);
+    setNotice(batchSummary(result));
+    setPresenceRound(round => round + 1);
+  });
+  const toggleChosen = (url: string, on: boolean) => setChosen(previous => on ? [...new Set([...previous, url])].slice(0, BATCH_LIMIT) : previous.filter(item => item !== url));
+  const searchCard = searchPage && <section className="panel-card" aria-labelledby="search-heading">
+    <div className="section-heading"><h2 id="search-heading">{searchPage.salesNavigator ? 'Búsqueda de Sales Navigator' : `${searchPage.results.length} ${searchPage.results.length === 1 ? 'persona' : 'personas'} en esta búsqueda`}</h2><Users size={16} aria-hidden="true" /></div>
+    {searchPage.salesNavigator ? <p>Sales Navigator no muestra el perfil público de cada persona. Abre su perfil de LinkedIn para guardarla desde aquí.</p> : <>
+      <div className="row-actions">
+        <button className="text-button" onClick={() => setChosen(availableResults(searchPage.results, resultPresence))}>Seleccionar disponibles</button>
+        {chosen.length > 0 && <button className="text-button" onClick={() => setChosen([])}>Quitar selección</button>}
+      </div>
+      <ul className="result-list">{searchPage.results.map(result => {
+        const known = resultPresence[result.linkedinUrl];
+        const checked = chosen.includes(result.linkedinUrl);
+        return <li key={result.linkedinUrl}><label className="result-row">
+          <input type="checkbox" checked={checked} disabled={!!known?.blocks || (!checked && chosen.length >= BATCH_LIMIT)} onChange={event => toggleChosen(result.linkedinUrl, event.target.checked)} />
+          <span className="result-text"><strong>{result.fullName || 'Perfil de LinkedIn'}</strong>{result.headline && <span>{result.headline}</span>}
+            {known && <span className={`chip chip-${known.tone}`}>{known.label}</span>}</span>
+        </label></li>;
+      })}</ul>
+      <button className="primary full" disabled={!chosen.length || !!busy} onClick={saveChosen}><Check size={16} aria-hidden="true" />{chosen.length ? `Guardar ${chosen.length} en Anton.IA` : 'Elige a quiénes guardar'}</button>
+      <p className="helper">Se guardan con lo que muestra LinkedIn: nombre, cargo y empresa, hasta {BATCH_LIMIT} por vez. Los que trabaja otra persona del equipo no se guardan. Después puedes buscar su correo o prepararlos en Cowork.</p>
+    </>}
+  </section>;
   const disconnect = () => void run('Desconectando…', async () => {
     known.current = null;
     await rpc('PROSPECT_DISCONNECT'); setConnection(null); setCredits(null); setSessionLost(false); reset();
@@ -619,7 +667,8 @@ function App() {
             <div className="input-action"><Link2 size={16} aria-hidden="true" /><input id="profile-url" value={url} onChange={event => setUrl(event.target.value)} placeholder="linkedin.com/in/nombre" disabled={!!busy} /><button className="icon-button" disabled={!!busy || !url.trim()} aria-label="Buscar perfil"><ArrowUpRight size={18} aria-hidden="true" /></button></div>
           </form>
         </div>
-        {!profile.linkedinUrl ? <section className="state-card">
+        {searchCard}
+        {!profile.linkedinUrl ? searchPage ? null : <section className="state-card">
           <UserRound size={28} aria-hidden="true" /><h1>Empieza por una persona</h1>
           <p>Abre su perfil de LinkedIn y el panel lo sigue solo, o pega su URL aquí arriba.</p>
         </section> : <>

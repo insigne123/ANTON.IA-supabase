@@ -22,6 +22,9 @@ function fixture(withLead = false) {
     '@/lib/server/auth-utils': { AuthError, requireAuth: async () => ({ organizationId: org, user: { id: user } }), handleAuthError: (error: any) => NextResponse.json({ error: error.message }, { status: error.status }) },
     '@/lib/server/extension-leads': { findExtensionLead: async (...args: any[]) => { calls.push(args); return withLead ? { id: 'lead', email: 'ana@example.test', linkedin_url: profile.linkedinUrl } : null; }, saveExtensionLead: async (...args: any[]) => { calls.push(args); return { lead: { id: 'saved' } }; } },
     '@/lib/server/extension-sends': { claimExtensionSend: async (...args: any[]) => { calls.push({ claim: args }); return { id: org, claimed: true }; }, finishExtensionSend: async (...args: any[]) => { calls.push({ finish: args }); return { id: org, status: 'confirmed' }; } },
+    '@/lib/server/extension-batch': {
+      saveExtensionBatch: async (...args: any[]) => { calls.push({ batch: args[1] }); return { saved: args[1].map((item: any) => ({ linkedinUrl: item.linkedinUrl, fullName: item.fullName })), already: [], blocked: [], failed: [] }; },
+    },
     '@/lib/server/extension-presence': {
       readExtensionPresence: async (...args: any[]) => { calls.push({ presence: args.slice(1) }); return { 'https://www.linkedin.com/in/ana': { label: 'Guardado por Ana', tone: 'info', blocks: false } }; },
     },
@@ -203,4 +206,19 @@ test('presence answers for the profiles on screen of the signed-in organization,
   const many = Array.from({ length: 51 }, (_, index) => `https://www.linkedin.com/in/p${index}`);
   assert.equal((await env.POST(request({ action: 'presence', organizationId: org, userId: user, linkedinUrls: many }))).status >= 400, true);
   assert.equal((await env.POST(request({ action: 'presence', organizationId: org, userId: '550e8400-e29b-41d4-a716-446655440009', linkedinUrls: urls }))).status, 409);
+});
+
+test('save-batch takes up to 25 people of the signed-in organization, without a single profile', async () => {
+  const env = fixture();
+  const people = [{ linkedinUrl: 'https://www.linkedin.com/in/ana', fullName: 'Ana' }, { linkedinUrl: 'https://www.linkedin.com/in/bruno', fullName: 'Bruno', title: 'Jefe de Operaciones en Acme' }];
+  const response = await env.POST(request({ action: 'save-batch', organizationId: org, userId: user, profiles: people }));
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).saved.map((item: any) => item.fullName), ['Ana', 'Bruno']);
+  assert.equal(env.calls.find(call => call.batch).batch[1].title, 'Jefe de Operaciones en Acme');
+  // Nobody chosen, more than 25, or another account: refused before saving anything.
+  assert.ok((await env.POST(request({ action: 'save-batch', organizationId: org, userId: user, profiles: [] }))).status >= 400);
+  const many = Array.from({ length: 26 }, (_, index) => ({ linkedinUrl: `https://www.linkedin.com/in/p${index}` }));
+  assert.ok((await env.POST(request({ action: 'save-batch', organizationId: org, userId: user, profiles: many }))).status >= 400);
+  assert.equal((await env.POST(request({ action: 'save-batch', organizationId: org, userId: '550e8400-e29b-41d4-a716-446655440009', profiles: people }))).status, 409);
+  assert.equal(env.calls.filter(call => call.batch).length, 1);
 });
