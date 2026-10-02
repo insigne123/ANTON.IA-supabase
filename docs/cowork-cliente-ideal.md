@@ -91,9 +91,17 @@ Si en «Perfil» faltan los cargos o las industrias, la pregunta final ofrece gu
 
 Archivos: `src/lib/cowork/lead-recommend.ts` (cálculo puro) y `src/lib/server/cowork/lead-recommend-read.ts` (lectura).
 
-**Ordena** los contactos guardados de la organización:
-- solo los que nadie ha contactado;
-- sin los que trabaja otro miembro del equipo (los bloqueos de `team-locks`).
+**Ordena** los contactos de la organización, de las dos listas:
+- **«Por escribir»** (`enriched_leads`), casi siempre con correo;
+- **«Por completar»** (`leads`).
+
+**Una persona en las dos listas cuenta una vez,** como la de «Por escribir». Se reconoce porque guarda el id del contacto de origen, o por correo o LinkedIn. En GrupoExpro, el 2 oct 2026, 98 de los 123 contactos de «Por escribir» tenían correo, contra 3 de 354 en «Por completar».
+
+**Deja fuera:**
+- a quien ya recibió algo: por el id del contacto, por su correo en los envíos, o porque «Por escribir» lo marca contactado;
+- a quien trabaja otro miembro del equipo (los bloqueos de `team-locks`).
+
+**«Ya está investigada»** sale de los informes de la persona que pregunta: los informes son privados de quien los pidió.
 
 **El criterio:**
 - **Pedido:** los cargos e industrias de la oferta preguntada, que Cowork deduce de su descripción («RR. HH., selección, retail»).
@@ -125,7 +133,12 @@ Archivos: `src/lib/cowork/lead-recommend.ts` (cálculo puro) y `src/lib/server/c
 
 **Pruebas:**
 - `src/lib/cowork/lead-recommend.test.ts`: términos, puntaje y motivos, contactados y bloqueados fuera, sin criterio.
-- `src/lib/server/cowork/lead-recommend-read.test.ts`: el pedido manda; sin pedido, «Perfil»; los bloqueos se leen para los mejores.
+- `src/lib/server/cowork/lead-recommend-read.test.ts`:
+  - el pedido manda; sin pedido, «Perfil»;
+  - los bloqueos se leen para los mejores;
+  - la copia de «Por escribir» reemplaza al contacto guardado;
+  - un envío al mismo correo cuenta como contacto;
+  - lo investigado suma.
 - **El caso `icp-a-quien-ofrezco`, con modelo guionado:**
   - un buen turno pide con los cargos de la oferta y nombra a quienes calzan;
   - recomendar sin leer, o nombrar a quien trabaja otro miembro, falla.

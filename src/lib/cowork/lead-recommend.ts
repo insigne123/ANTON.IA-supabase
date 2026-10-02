@@ -10,6 +10,8 @@ import { icpRoleArea, icpRoleLevel } from './icp';
 export type RecommendLead = {
   id: string; name: string | null; title: string | null; company: string | null; industry: string | null;
   email: string | null; linkedinUrl: string | null; researchedAt: string | null; city: string | null; country: string | null;
+  /** Where the person is in the app: «Por escribir» (enriched, ready) or «Por completar» (saved, still needs data). */
+  list?: 'por_escribir' | 'por_completar';
 };
 export type RecommendCriteria = { terms: string[]; locations: string[]; source: 'pedido' | 'perfil' | 'ninguno' };
 
@@ -92,7 +94,7 @@ export function recommendLeads(input: { leads: RecommendLead[]; contacted: Set<s
     byArea: [...byArea].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([area, people]) => ({ area, people })),
     top: pool.slice(0, RECOMMEND_SHOWN).map(item => ({
       leadId: item.lead.id, name: item.lead.name, title: item.lead.title, company: item.lead.company,
-      score: item.score, reasons: item.reasons, missing: item.missing,
+      score: item.score, reasons: item.reasons, missing: item.missing, list: item.lead.list ?? 'por_completar',
     })),
     limitation: input.criteria.source === 'ninguno'
       ? 'Sin cargos ni industrias que buscar (ni en el pedido ni en «Perfil»): el orden es solo por nivel y preparación.'
