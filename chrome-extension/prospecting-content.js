@@ -120,4 +120,24 @@
     }
     return { threads, reachedCap: threads.length >= SWEEP_INBOX_CAP };
   }
+
+  // The panel follows the profile on screen without asking on a timer: LinkedIn changes pages without reloading and renders the
+  // name after the URL, so this page says when either changed. Only a hint: the panel reads the profile through the worker.
+  let announced = '';
+  let pending = 0;
+  const announce = () => {
+    pending = 0;
+    const profile = canonical(location.href);
+    const name = profile ? (linkedinProfileHeader('')?.heading?.textContent || '').trim().slice(0, 300) : '';
+    const key = `${profile || location.pathname}|${name}`;
+    if (key === announced) return;
+    announced = key;
+    try { chrome.runtime.sendMessage({ action: 'ANTONIA_PROFILE_CHANGED' })?.catch?.(() => {}); } catch { /* The extension was reloaded. */ }
+  };
+  const schedule = () => { if (!pending) pending = setTimeout(announce, 300); };
+  if (typeof MutationObserver === 'function' && document.documentElement) {
+    new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+    addEventListener('popstate', schedule);
+    schedule();
+  }
 })();

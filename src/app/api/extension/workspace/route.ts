@@ -37,6 +37,13 @@ export async function POST(req: NextRequest) {
     }
     try { assertExtensionScope(body, auth); } catch { return json({ error: 'EXTENSION_SESSION_CHANGED', message: 'La cuenta o la organización cambió. Vuelve a conectar la extensión.' }, 409); }
     const bridge = { organizationId: auth.organizationId, userId: auth.user.id };
+    if (body.action === 'quota') {
+      // The day's credits the app shows (quota/status): one allowance for searching, enriching and researching.
+      const { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } = await import('@/lib/server/daily-quota-store');
+      const limits = await getEffectiveDailyQuotaLimits(bridge);
+      const status = await getDailyQuotaStatus({ ...bridge, resource: 'search', limit: limits.leadSearch });
+      return json({ credits: { used: status.count, limit: status.limit, remaining: Math.max(0, status.limit - status.count), resetAt: status.resetAtISO } });
+    }
     if (body.action === 'linkedin-jobs-pending') {
       const { listPendingLinkedinJobs } = await import('@/lib/server/linkedin-bridge-ops');
       const { canonicalExtensionProfileUrl } = await import('@/lib/extension-profile-url');

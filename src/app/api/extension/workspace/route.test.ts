@@ -22,6 +22,10 @@ function fixture(withLead = false) {
     '@/lib/server/auth-utils': { AuthError, requireAuth: async () => ({ organizationId: org, user: { id: user } }), handleAuthError: (error: any) => NextResponse.json({ error: error.message }, { status: error.status }) },
     '@/lib/server/extension-leads': { findExtensionLead: async (...args: any[]) => { calls.push(args); return withLead ? { id: 'lead', email: 'ana@example.test', linkedin_url: profile.linkedinUrl } : null; }, saveExtensionLead: async (...args: any[]) => { calls.push(args); return { lead: { id: 'saved' } }; } },
     '@/lib/server/extension-sends': { claimExtensionSend: async (...args: any[]) => { calls.push({ claim: args }); return { id: org, claimed: true }; }, finishExtensionSend: async (...args: any[]) => { calls.push({ finish: args }); return { id: org, status: 'confirmed' }; } },
+    '@/lib/server/daily-quota-store': {
+      getEffectiveDailyQuotaLimits: async (...args: any[]) => { calls.push({ limits: args }); return { leadSearch: 50, enrich: 50, research: 50, contact: 100 }; },
+      getDailyQuotaStatus: async (input: any) => { calls.push({ quota: input }); return { allowed: true, count: 12, limit: input.limit, dayKey: '2026-10-02', resetAtISO: '2026-10-03T00:00:00.000Z' }; },
+    },
     '@/lib/server/linkedin-bridge-ops': {
       listPendingLinkedinJobs: async (...args: any[]) => { calls.push({ jobs: args }); return []; },
       claimLinkedinJob: async (...args: any[]) => { calls.push({ jobClaim: args }); if (args[1] === user) return { id: 'job', status: 'claimed' }; throw new Error('Otro navegador reclamó este trabajo.'); },
@@ -172,4 +176,15 @@ test('first email receives the visible instruction and different instructions ha
   assert.equal(drafts[0].userInstruction, 'Proponer una llamada');
   assert.equal(drafts[1].userInstruction, 'Compartir un caso aprobado');
   assert.notEqual(drafts[0].idempotencyKey, drafts[1].idempotencyKey);
+});
+
+test('quota reads the day\'s credits of the signed-in person without a profile', async () => {
+  const env = fixture();
+  const response = await env.POST(request({ action: 'quota', organizationId: org, userId: user }));
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).credits, { used: 12, limit: 50, remaining: 38, resetAt: '2026-10-03T00:00:00.000Z' });
+  assert.deepEqual(env.calls.find(call => call.quota).quota, { organizationId: org, userId: user, resource: 'search', limit: 50 });
+  // Another account or organization in the body is refused before reading anything.
+  const other = await env.POST(request({ action: 'quota', organizationId: org, userId: '550e8400-e29b-41d4-a716-446655440009' }));
+  assert.equal(other.status, 409);
 });
