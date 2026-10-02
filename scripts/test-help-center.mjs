@@ -1,7 +1,8 @@
-// «Centro de ayuda» (/ayuda), rendered: the manual with its index, the search without accents, «Pregúntale a la IA» with the
-// sections it comes from, the manual's answer when the AI is not available, the rate-limit message, the replay of the tour,
-// and the sections only owners and admins see. Isolated: esbuild bundles the real page with the auth context, the tour and
-// next/navigation stubbed; DOM via jsdom; fetch is stubbed. Not visual certification.
+// «Centro de ayuda» (/ayuda), rendered: «Tu camino al primer correo», the popular questions, every topic as a card that
+// opens its own page, the search without accents, «Pregúntale a la IA» with the sections it comes from, the manual's answer
+// when the AI is not available, the rate-limit message, the replay of the tour, the topics only owners and admins see and
+// the old links to a section of this page (/ayuda#perfil). Isolated: esbuild bundles the real page with the auth context,
+// the tour and next/navigation stubbed; DOM via jsdom; fetch is stubbed. Not visual certification.
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
@@ -9,7 +10,7 @@ import { JSDOM } from 'jsdom';
 const sources = {
   '@/context/AuthContext': 'export const useAuth = () => ({ organizationRole: window.__role });',
   '@/components/onboarding/ProductTour': 'export const useProductTour = () => ({ start: () => { window.__started += 1; }, guide: null, startGuide() {}, active: false });',
-  'next/navigation': 'export const usePathname = () => "/ayuda"; export const useRouter = () => ({ push() {}, replace() {} });',
+  'next/navigation': 'export const usePathname = () => "/ayuda"; export const useRouter = () => ({ push() {}, replace(href) { window.__replaced.push(href); } });',
 };
 const externals = new RegExp(`^(${Object.keys(sources).map((key) => key.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|')})$`);
 const bundle = await build({
@@ -26,12 +27,13 @@ const bundle = await build({
   } }],
 });
 
-async function open({ role = 'member', respond = () => ({ status: 500, body: {} }) } = {}) {
-  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/ayuda', runScripts: 'outside-only', pretendToBeVisual: true });
+async function open({ role = 'member', hash = '', respond = () => ({ status: 500, body: {} }) } = {}) {
+  const dom = new JSDOM('<div id="root"></div>', { url: `http://localhost/ayuda${hash}`, runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
   window.process = { env: { NODE_ENV: 'test' } };
   window.__role = role;
   window.__started = 0;
+  window.__replaced = [];
   window.matchMedia = (media) => ({ matches: false, media, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
   window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   window.HTMLElement.prototype.scrollIntoView = function () {};
@@ -59,31 +61,53 @@ async function open({ role = 'member', respond = () => ({ status: 500, body: {} 
     await waitFor(() => !button('Preguntar')?.disabled, 'the question is typed');
     button('Preguntar').click();
   };
-  return { window, doc, text, button, type, waitFor, ask, calls, close: () => { unmount(); window.close(); } };
+  // «Pregúntale a la IA» on the side: the popular questions on the page share some of its answers.
+  const asked = () => doc.querySelector('aside')?.textContent || '';
+  return { window, doc, text, asked, button, type, waitFor, ask, calls, close: () => { unmount(); window.close(); } };
 }
 
-// 1. A member: the whole manual, the index, the search, the tour, and nothing about features they cannot use.
+// 1. A member: the path to the first email, the popular questions, every topic as a card, the search and the tour.
 {
   const app = await open();
   try {
     await app.waitFor(() => app.text().includes('Centro de ayuda'), 'the page');
+    const path = app.doc.querySelector('section[aria-labelledby="help-path-title"]');
+    assert.match(path.textContent, /Tu camino al primer correo/);
+    const steps = [...path.querySelectorAll('ol > li a')];
+    assert.deepEqual(steps.map((link) => link.getAttribute('href')),
+      ['/ayuda/perfil', '/ayuda/conexiones', '/ayuda/buscar', '/ayuda/por-completar', '/ayuda/por-escribir', '/ayuda/conversaciones']);
+    assert.match(steps[0].textContent, /^1Cuenta qué vendes/, 'numbered, in the order of the work');
+    assert.match(steps[5].textContent, /^6Responde y cierra/);
+
+    const popular = app.doc.querySelector('section[aria-labelledby="help-popular-title"]');
+    const questions = [...popular.querySelectorAll('details')];
+    assert.equal(questions.length, 5);
+    assert.equal(questions[0].querySelector('summary').textContent, 'Me quedé sin créditos. ¿Qué hago?');
+    assert.match(questions[0].textContent, /administrador/, 'the answer is right there');
+    assert.equal(questions[0].querySelector('a').getAttribute('href'), '/ayuda/creditos');
+    assert.match(questions[0].querySelector('a').textContent, /^Más en /);
+
     const index = app.doc.querySelector('nav[aria-label="Índice del manual"]');
     for (const group of ['Empieza aquí', 'Prospectar', 'Contactos', 'Seguimiento', 'Configuración']) assert.match(index.textContent, new RegExp(group));
-    assert.equal(index.querySelector('a[href="#perfil"]')?.textContent, 'Perfil');
-    assert.ok(app.doc.getElementById('por-escribir'), 'each section is an anchor');
-    assert.equal(app.doc.querySelector('#perfil a[href="/profile"]')?.textContent.trim(), 'Ir a Perfil');
-    assert.equal(app.doc.getElementById('administracion'), null, 'members do not see the admin panel help');
-    assert.equal(app.doc.getElementById('oportunidades'), null, 'a feature that is off is not described');
+    const profile = index.querySelector('a[href="/ayuda/perfil"]');
+    assert.match(profile.textContent, /^Perfil/, 'each topic is a card that opens its page');
+    assert.ok(profile.querySelector('svg'), 'with its icon');
+    assert.equal(index.querySelector('a[href="/ayuda/administracion"]'), null, 'members do not see the admin panel help');
+    assert.equal(index.querySelector('a[href="/ayuda/oportunidades"]'), null, 'a feature that is off is not described');
     assert.doesNotMatch(index.textContent, /Administración/);
+    assert.deepEqual(app.window.__replaced, [], 'no old link to follow');
 
     const search = app.doc.getElementById('help-search');
     app.type(search, 'creditos');
     await app.waitFor(() => app.doc.querySelector('[aria-label="Resultados de la búsqueda"]'), 'results');
     const results = app.doc.querySelector('[aria-label="Resultados de la búsqueda"]');
     assert.match(results.textContent, /Me quedé sin créditos\. ¿Qué hago\?/, 'found without the accent');
-    assert.equal(results.querySelector('a').getAttribute('href'), '/ayuda#creditos');
+    assert.equal(results.querySelector('a').getAttribute('href'), '/ayuda/creditos');
     app.type(search, 'xylofón');
     await app.waitFor(() => app.text().includes('No encontramos «xylofón»'), 'nothing found says what to do');
+    app.doc.querySelector('button[aria-label="Borrar búsqueda"]').click();
+    await app.waitFor(() => !app.doc.querySelector('[aria-label="Resultados de la búsqueda"]'), 'the search is cleared');
+    assert.equal(search.value, '');
 
     app.button('Ver recorrido por la app').click();
     assert.equal(app.window.__started, 1, 'the tour starts from here');
@@ -95,29 +119,30 @@ async function open({ role = 'member', respond = () => ({ status: 500, body: {} 
 {
   const replies = [
     { body: { source: 'ai', answer: 'Pídele más a un administrador de tu organización.', answered: true,
-      sections: [{ id: 'creditos', title: 'Créditos y uso diario', href: '/ayuda#creditos', screen: null }] } },
+      sections: [{ id: 'creditos', title: 'Créditos y uso diario', href: '/ayuda/creditos', screen: null }] } },
     { body: { source: 'manual', answer: null, answered: true,
-      matches: [{ section: { id: 'correo', title: 'Preparar y enviar un correo', href: '/ayuda#correo', screen: null }, q: '¿Desde qué correo sale?', a: 'Desde tu cuenta conectada de Gmail u Outlook.' }] } },
+      matches: [{ section: { id: 'correo', title: 'Preparar y enviar un correo', href: '/ayuda/correo', screen: null }, q: '¿Desde qué correo sale?', a: 'Desde tu cuenta conectada de Gmail u Outlook.' }] } },
     { status: 429, body: { error: 'Hiciste varias preguntas seguidas. Espera unos minutos y vuelve a intentarlo.' } },
   ];
   const app = await open({ respond: (n) => replies[n - 1] });
+  const { asked } = app;
   try {
     await app.waitFor(() => app.doc.querySelector('textarea'), 'the box');
     assert.equal(app.button('Preguntar').disabled, true, 'nothing to ask yet');
     await app.ask('¿Qué hago si me quedo sin créditos?');
-    await app.waitFor(() => app.text().includes('Pídele más a un administrador'), 'the answer');
+    await app.waitFor(() => asked().includes('Pídele más a un administrador'), 'the answer');
     assert.deepEqual(JSON.parse(JSON.stringify(app.calls[0])), { url: '/api/help/ask', body: { question: '¿Qué hago si me quedo sin créditos?', sectionId: null } });
-    assert.match(app.text(), /Tu pregunta: ¿Qué hago si me quedo sin créditos\?/);
-    const more = [...app.doc.querySelectorAll('a')].find((node) => node.textContent === 'Créditos y uso diario' && node.getAttribute('href') === '/ayuda#creditos');
+    assert.match(asked(), /Tu pregunta: ¿Qué hago si me quedo sin créditos\?/);
+    const more = [...app.doc.querySelectorAll('a')].find((node) => node.textContent === 'Créditos y uso diario' && node.getAttribute('href') === '/ayuda/creditos');
     assert.ok(more, '«Leer más» links to the section');
     assert.equal(app.doc.querySelector('textarea').value, '', 'ready for the next question');
 
     await app.ask('¿Desde qué correo sale?');
-    await app.waitFor(() => app.text().includes('La IA no está disponible ahora'), 'the manual answers instead');
-    assert.match(app.text(), /Desde tu cuenta conectada de Gmail u Outlook\./);
+    await app.waitFor(() => asked().includes('La IA no está disponible ahora'), 'the manual answers instead');
+    assert.match(asked(), /Desde tu cuenta conectada de Gmail u Outlook\./);
 
     await app.ask('Otra pregunta más');
-    await app.waitFor(() => app.text().includes('Hiciste varias preguntas seguidas'), 'the limit says what to do');
+    await app.waitFor(() => asked().includes('Hiciste varias preguntas seguidas'), 'the limit says what to do');
     assert.equal(app.doc.querySelector('textarea').value, 'Otra pregunta más', 'the question is kept to try again');
   } finally { app.close(); }
 }
@@ -126,9 +151,22 @@ async function open({ role = 'member', respond = () => ({ status: 500, body: {} 
 {
   const app = await open({ role: 'admin' });
   try {
-    await app.waitFor(() => app.doc.getElementById('administracion'), 'the admin section');
-    assert.match(app.doc.getElementById('administracion').textContent, /Usuarios/);
+    await app.waitFor(() => app.doc.querySelector('a[href="/ayuda/administracion"]'), 'the admin topic');
+    assert.match(app.doc.querySelector('a[href="/ayuda/administracion"]').textContent, /Administración/);
   } finally { app.close(); }
 }
 
-console.log('PASS: the Centro de ayuda shows the manual by role, searches without accents, answers with the AI or the manual, and starts the tour. DOM only, not visual certification.');
+// 4. An old link to a section of this page opens the section's own page; an unknown or hidden one stays here.
+{
+  for (const [hash, role, expected] of [['#perfil', 'member', ['/ayuda/perfil']], ['#administracion', 'member', []],
+    ['#administracion', 'owner', ['/ayuda/administracion']], ['#no-existe', 'member', []]]) {
+    const app = await open({ role, hash });
+    try {
+      await app.waitFor(() => app.text().includes('Centro de ayuda'), 'the page');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.deepEqual([...app.window.__replaced], expected, `${hash} as ${role}`);
+    } finally { app.close(); }
+  }
+}
+
+console.log('PASS: the Centro de ayuda shows the path to the first email, the popular questions and a card per topic by role, searches without accents, answers with the AI or the manual, sends old links to the section page and starts the tour. DOM only, not visual certification.');

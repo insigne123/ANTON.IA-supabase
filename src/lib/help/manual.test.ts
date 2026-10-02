@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
-  HELP_GROUPS, HELP_SECTIONS, helpSectionFor, manualAsText, searchHelp, visibleHelpSections,
+  FIRST_EMAIL_PATH, HELP_GROUPS, HELP_ICONS, HELP_SECTIONS, POPULAR_QUESTIONS, helpSectionFor, helpSectionHref, manualAsText,
+  popularHelpQuestions, searchHelp, visibleHelpSections,
 } from './manual';
 
 test('every section is complete, unique and points at real screens and sections', () => {
@@ -12,7 +13,7 @@ test('every section is complete, unique and points at real screens and sections'
   assert.equal(new Set(ids).size, ids.length);
   for (const section of HELP_SECTIONS) {
     assert.ok(HELP_GROUPS.includes(section.group), section.id);
-    assert.match(section.id, /^[a-z-]+$/, 'usable as an anchor in /ayuda');
+    assert.match(section.id, /^[a-z-]+$/, 'usable as a path in /ayuda');
     assert.ok(section.summary.length >= 20 && section.summary.length <= 220, `${section.id}: summary`);
     assert.ok(section.steps.length >= 2, `${section.id}: steps`);
     assert.ok(section.faqs.length >= 1, `${section.id}: faqs`);
@@ -39,7 +40,7 @@ test('the «?» of each screen opens its section, including the screens behind a
     ['/contact/compose', 'correo'], ['/contact/sequence', 'correo'], ['/contacted', 'conversaciones'], ['/contacted/replied', 'conversaciones'],
     ['/campaigns', 'campanas'], ['/crm', 'pipeline'], ['/profile', 'perfil'], ['/gmail', 'conexiones'], ['/outlook', 'conexiones'],
     ['/settings/email-studio', 'firmas'], ['/settings/unsubscribes', 'privacidad'], ['/leads/import', 'tabla'],
-    ['/dashboard/admin/users', 'administracion'], ['/search?mode=x', 'buscar'], ['/cowork', null], ['/ayuda', null], [null as never, null],
+    ['/dashboard/admin/users', 'administracion'], ['/search?mode=x', 'buscar'], ['/cowork', null], ['/ayuda', null], ['/ayuda/perfil', null], [null as never, null],
   ];
   for (const [path, id] of cases) assert.equal(helpSectionFor(path)?.id ?? null, id, String(path));
 });
@@ -73,4 +74,23 @@ test('the manual the AI reads has every visible section with its id, steps and F
 test('the manual does not mention retired or internal things', () => {
   const text = JSON.stringify(HELP_SECTIONS);
   assert.doesNotMatch(text, /agente|misiones|Apollo|Serper|Supabase|token de/i);
+});
+
+test('the Centro de ayuda: a page and an icon per section, the path to the first email and the popular questions', () => {
+  assert.equal(helpSectionHref('perfil'), '/ayuda/perfil');
+  assert.deepEqual(Object.keys(HELP_ICONS).sort(), HELP_SECTIONS.map((section) => section.id).sort(), 'every section has its icon');
+
+  const member = visibleHelpSections({ opportunities: false, admin: false });
+  const memberIds = member.map((section) => section.id);
+  assert.equal(FIRST_EMAIL_PATH.length, 6);
+  for (const step of FIRST_EMAIL_PATH) {
+    assert.ok(memberIds.includes(step.section), `${step.section}: every member sees the path`);
+    assert.ok(step.title.length <= 24 && step.text.length <= 80, `${step.section}: short enough for a card`);
+  }
+
+  const popular = popularHelpQuestions(member);
+  assert.equal(popular.length, POPULAR_QUESTIONS.length, 'every popular question is still in the manual, word for word');
+  assert.deepEqual(popular.map(({ section }) => section.id), POPULAR_QUESTIONS.map(([id]) => id));
+  assert.deepEqual(popularHelpQuestions(member.filter((section) => section.id !== 'creditos')).map(({ section }) => section.id),
+    ['correo', 'conversaciones', 'por-completar', 'campanas'], 'a hidden section takes its questions with it');
 });
