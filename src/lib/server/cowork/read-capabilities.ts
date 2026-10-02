@@ -67,8 +67,8 @@ export function coworkReadCapabilities(
     },
     {
       name: 'leads.search', version: 1, effect: 'read',
-      description: 'Contactos guardados propios que coinciden con un texto',
-      input: textInput, output: z.unknown(),
+      description: 'Contactos propios por texto o URL exacta de perfil LinkedIn; una URL no trae coincidencias de otras personas',
+      input: z.string().max(500), output: z.unknown(),
       execute: input => queryCoworkLeads(client, scope, 'leads.search', input as string),
     },
     {

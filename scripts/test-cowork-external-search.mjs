@@ -39,6 +39,13 @@ globalThis.__coworkSearch = {
     assert.equal(payload.reveal_email, false); assert.equal(payload.reveal_phone, false);
     assert.equal(payload.user_id, 'owner');
     if (state.failProvider) throw new Error('timeout');
+    if (payload.search_mode === 'profile') {
+      assert.equal(payload.max_results, 1);
+      assert.equal(payload.linkedin_url, 'https://www.linkedin.com/in/contacto-de-prueba-23825746');
+      return { leads: state.noProfile ? [] : [{ id: 'profile-1', name: 'Contacto De Prueba',
+        linkedin_url: state.wrongProfile ? 'https://www.linkedin.com/in/otra-persona' : payload.linkedin_url,
+        email: 'must-not-leave@example.com' }] };
+    }
     if (state.companiesFirst) return state.companiesFirst(payload);
     assert.equal(payload.max_results, 5);
     if (payload.search_mode === 'organization_search') {
@@ -195,7 +202,28 @@ try {
   assert.deepEqual(empty.items, []);
   assert.match(empty.notice, /No encontré empresas/);
   assert.equal(empty.next, null);
-  console.log('PASS: approval without provider call, background claim, parallel ticks, quota exhaustion, timeout without replay, no reveal, rejection and cancellation; companies first with buyers first, «Traer más», a group that fails and no companies.');
+  // A profile supplied in a continuation needs no company or broad people search.
+  criteria = { linkedinUrl: 'https://www.linkedin.com/in/contacto-de-prueba-23825746', titles: [], industries: [], locations: [], limit: 1 };
+  state.claimed = false; state.approved = true;
+  const profileBefore = { quota: state.quota, provider: state.provider };
+  assert.equal((await tick()).processed, 1);
+  const profile = state.finishes.at(-1).p_payload.result;
+  assert.equal(state.quota - profileBefore.quota, 1);
+  assert.equal(state.provider - profileBefore.provider, 1);
+  assert.equal(profile.strategy, 'profile');
+  assert.equal(profile.items[0].id, 'apollo:profile-1');
+  assert.equal(profile.items[0].email, null);
+  assert.equal(profile.next, null);
+  assert.equal(profile.hasMore, false);
+  assert.match(state.admissions.at(-1).p_message, /perfil exacto/);
+  state.claimed = false; state.wrongProfile = true;
+  assert.equal((await tick()).processed, 0, 'another profile is rejected, never saved or offered');
+  state.claimed = false; state.wrongProfile = false; state.noProfile = true;
+  assert.equal((await tick()).processed, 1);
+  const missingProfile = state.finishes.at(-1).p_payload.result;
+  assert.deepEqual(missingProfile.items, []);
+  assert.match(missingProfile.notice, /extensión/);
+  console.log('PASS: approval, claim and quota ordering, companies first and pagination; one exact profile, no contact data, wrong identity rejected and no match without unrelated people.');
 } finally {
   delete globalThis.__coworkSearch;
   if (envBefore === undefined) delete process.env.COWORK_EXTERNAL_SEARCH_ENABLED;
