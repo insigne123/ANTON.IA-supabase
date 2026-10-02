@@ -12,7 +12,7 @@ import { reportReady, reportPending, reportStatusLabel } from './research-state'
 import { restoreProfileEdits } from './profile-cache';
 import { researchFindings } from './research-findings';
 import { blockLines } from './report-blocks';
-import { personChips, personNextStep, researchSteps, type NextStep } from './person-status';
+import { personChips, personNextStep, researchSteps, type ChipTone, type NextStep } from './person-status';
 
 declare const chrome: any;
 type ProfileDetails = { headline?: string; city?: string; state?: string; country?: string; industry?: string; seniority?: string; departments?: string[]; companySize?: string };
@@ -83,6 +83,8 @@ function App() {
   const [connecting, setConnecting] = useState(false);
   const [booting, setBooting] = useState(true);
   const [credits, setCredits] = useState<Credits | null>(null);
+  // What the organization knows of the open person (PR-4b), the same line the mark on LinkedIn shows.
+  const [presence, setPresence] = useState<{ label: string; tone: ChipTone; blocks: boolean } | null>(null);
   // The session ended without «Desconectar» (it expired or the account changed): the welcome says so.
   const [sessionLost, setSessionLost] = useState(false);
   const [stale, setStale] = useState(false);
@@ -101,7 +103,7 @@ function App() {
     setEnrichedReady(false); setConfirmSend(false); setSendState('');
     setCampaigns(null); setCampaignId(''); setJobs(null);
     setSweepNetwork(null); setSweepInbox(null); setSweepComplete(false);
-    epoch.current++; setProfile(empty); setUrl(''); setSaved(null); setResearch(null); setMessage(''); setMessageOptions([]); setSources([]); setComposeUrl(''); setNotice(''); setError('');
+    epoch.current++; setPresence(null); setProfile(empty); setUrl(''); setSaved(null); setResearch(null); setMessage(''); setMessageOptions([]); setSources([]); setComposeUrl(''); setNotice(''); setError('');
   };
   // The last connection seen: one that disappears without «Desconectar» expired or changed account.
   const known = useRef<Connection | null>(null);
@@ -222,6 +224,7 @@ function App() {
         if (valid()) setResearch(status.research);
       }
     });
+    void refreshPresence(linkedinUrl);
     } catch (err: any) { setError(err.message || 'No pudimos recuperar el borrador guardado.'); } finally { selecting.current = false; }
   };
   useEffect(() => {
@@ -275,13 +278,20 @@ function App() {
     return () => { alive = false; clearInterval(timer); };
   }, [phoneJob, scope, api]);
 
+  const refreshPresence = async (url = profileRef.current.linkedinUrl) => {
+    if (!url) return;
+    try {
+      const result = await rpc('PROSPECT_PRESENCE', { urls: [url] });
+      if (profileRef.current.linkedinUrl === url) setPresence((Object.values(result || {})[0] as any) || null);
+    } catch { if (profileRef.current.linkedinUrl === url) setPresence(null); }
+  };
   const save = () => run('Guardando lead…', async valid => {
     const result = await api('save', { replaceFields: true }); if (!valid()) return;
     setProfile(fromRow(result.lead)); profileRef.current = fromRow(result.lead);
     dirty.current = false; setCachedEdits(null);
     await chrome.storage.session.remove(`prospect-profile:${scope}:${profile.linkedinUrl}`);
     setSaved(result.lead); setCampaigns(null); setCampaignId(''); setNotice('Lead guardado en tu organización.');
-  });
+  }).then(() => refreshPresence());
   // Without a choice, what the options of «Enriquecer perfil» say; «Buscar correo» and «Buscar teléfono» ask for one thing.
   const enrich = (wants?: { email: boolean; phone: boolean }) => run('Consultando datos…', async valid => {
     const wantsEmail = !profile.email && (wants ? wants.email : revealEmail);
@@ -345,7 +355,7 @@ function App() {
     if (valid()) setNotice(response.duplicate ? 'Este mensaje ya está registrado como enviado. No lo reenviamos.' : response.synced
       ? 'Mensaje confirmado en LinkedIn y guardado en el historial del contacto.'
       : 'Mensaje confirmado en LinkedIn. Pulsa Sincronizar historial para guardar el resultado en Anton.IA.');
-  });
+  }).then(() => refreshPresence());
   const email = (sequence: boolean) => run(sequence ? 'Creando secuencia y borradores…' : 'Creando primer correo…', async valid => {
     const days = offsets.split(',').map(value => Number(value.trim()));
     if (sequence && (days.length > 4 || days.some((n, i) => !Number.isInteger(n) || n < 1 || n > 365 || (i > 0 && n <= days[i - 1])))) throw new Error('Escribe de 1 a 4 días crecientes, por ejemplo: 3, 7.');
@@ -406,7 +416,7 @@ function App() {
 
   const personState = {
     saved: !!saved, enrichedReady, email: profile.email, emailStatus: profile.emailStatus, research, researchEnabled: !!connection?.session.researchEnabled,
-    phonePending: !!phoneJob, sent: sendState === 'confirmed', hasMessage: !!message.trim(),
+    phonePending: !!phoneJob, sent: sendState === 'confirmed', hasMessage: !!message.trim(), presence,
   };
   const chips = personChips(personState);
   const step = personNextStep(personState);
@@ -621,6 +631,7 @@ function App() {
             </div>
             {busy === LOOKUP && !saved ? <div className="chips" aria-hidden="true"><span className="chip skeleton" /><span className="chip skeleton" /></div>
               : <ul className="chips" aria-label="Estado del contacto">{chips.map(chip => <li key={chip.key} className={`chip chip-${chip.tone}`}>{chip.label}</li>)}</ul>}
+            {presence?.blocks && <p className="callout callout-warning"><AlertTriangle size={16} aria-hidden="true" />{presence.label}. Coordina con tu equipo antes de escribirle.</p>}
             {showStep && step && <div className="next-step">
               <button className="primary full" disabled={!!busy} onClick={() => runStep(step)}>{step.id === 'save' ? <Check size={16} aria-hidden="true" /> : step.id === 'write' ? <Send size={16} aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}{step.label}</button>
               <p className="helper">{step.hint}</p>

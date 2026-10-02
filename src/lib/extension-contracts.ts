@@ -23,7 +23,7 @@ export type ExtensionProfile = z.infer<typeof ExtensionProfileSchema>;
 
 export const ExtensionRequestSchema = z.object({
   action: z.enum(['session', 'lookup', 'save', 'enrich', 'research', 'research-status', 'research-retry', 'phone-status', 'message', 'email-draft', 'sequence', 'campaigns', 'campaign-add', 'send-claim', 'send-result',
-    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota']),
+    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota', 'presence']),
   jobId: z.string().uuid().optional(),
   jobResult: z.object({
     jobId: z.string().uuid(), claimToken: z.string().uuid(),
@@ -60,6 +60,8 @@ export const ExtensionRequestSchema = z.object({
   organizationId: z.string().uuid().optional(),
   userId: z.string().uuid().optional(),
   profile: ExtensionProfileSchema.optional(),
+  /** presence: the LinkedIn profiles on screen (a profile, or one page of search results). */
+  linkedinUrls: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
   replaceFields: z.boolean().default(false),
   refreshResearch: z.boolean().default(false),
   revealEmail: z.boolean().default(false),
@@ -78,7 +80,7 @@ export const ExtensionRequestSchema = z.object({
   }
   const profileless = body.action === 'session' || body.action === 'linkedin-jobs-pending'
     || body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result'
-    || body.action === 'network-report' || body.action === 'inbox-report' || body.action === 'quota';
+    || body.action === 'network-report' || body.action === 'inbox-report' || body.action === 'quota' || body.action === 'presence';
   if (!profileless && (!body.organizationId || !body.userId || !body.profile)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta y selecciona un perfil.' });
   }

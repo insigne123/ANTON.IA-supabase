@@ -2,6 +2,47 @@
 const PROSPECT_DEFAULT_ORIGIN = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const panelSender = sender => sender.id === chrome.runtime.id && !sender.tab && sender.url === chrome.runtime.getURL('panel.html');
 const sendTabs = new Set();
+// What the organization knows of each profile on screen (PR-4b), for 5 minutes or until something is saved or sent.
+const PRESENCE_TTL = 5 * 60_000;
+const presenceCache = new Map();
+function presenceKey(value) {
+  try {
+    const url = new URL(value);
+    const path = decodeURIComponent(url.pathname).normalize('NFC').replace(/\/+$/, '');
+    if (!/(^|\.)linkedin\.com$/.test(url.hostname) || !/^\/in\/[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(path)) return '';
+    return `https://www.linkedin.com${path.toLowerCase()}`;
+  } catch { return ''; }
+}
+async function presenceFor(urls) {
+  const connection = await prospectConnection();
+  if (!connection?.session) return {};
+  const wanted = [...new Set((Array.isArray(urls) ? urls : []).map(presenceKey).filter(Boolean))].slice(0, 50);
+  const now = Date.now();
+  const result = {};
+  const missing = [];
+  for (const url of wanted) {
+    const hit = presenceCache.get(url);
+    if (hit && now - hit.at < PRESENCE_TTL) { if (hit.value) result[url] = hit.value; } else missing.push(url);
+  }
+  if (missing.length) {
+    const response = await prospectRequest(connection, { action: 'presence', organizationId: connection.session.organizationId,
+      userId: connection.session.userId, linkedinUrls: missing });
+    for (const url of missing) {
+      const value = response?.presence?.[url] || null;
+      presenceCache.set(url, { at: now, value });
+      if (value) result[url] = value;
+    }
+  }
+  return result;
+}
+// After a save or a send, LinkedIn pages ask again instead of showing what was true before.
+async function presenceChanged() {
+  presenceCache.clear();
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://www.linkedin.com/*' });
+    for (const tab of tabs) chrome.tabs.sendMessage(tab.id, { action: 'ANTONIA_PRESENCE_REFRESH' }).catch(() => {});
+  } catch { /* No LinkedIn tab to tell. */ }
+}
 async function syncSend(connection, key, record) {
   if (!record?.result) return record;
   await prospectRequest(connection, { action: 'send-result', organizationId: connection.session.organizationId,
@@ -62,6 +103,12 @@ async function prospectHandle(request, sender) {
     await chrome.storage.session.remove('prospectPending');
     return { connected: true };
   }
+  // LinkedIn pages ask for the marks next to the people they show; the panel asks for the open profile.
+  if (request.action === 'PROSPECT_PRESENCE') {
+    const linkedinPage = sender.id === chrome.runtime.id && String(sender.tab?.url || '').startsWith('https://www.linkedin.com/');
+    if (!panelSender(sender) && !linkedinPage) throw new Error('Origen no autorizado.');
+    return presenceFor(request.urls);
+  }
   if (!panelSender(sender)) throw new Error('Origen no autorizado.');
   if (request.action === 'PROSPECT_CONNECT') {
     const origin = request.origin || PROSPECT_DEFAULT_ORIGIN;
@@ -76,6 +123,7 @@ async function prospectHandle(request, sender) {
   if (request.action === 'PROSPECT_DISCONNECT') {
     await chrome.storage.local.remove('prospectConnection');
     await chrome.storage.session.clear();
+    await presenceChanged();
     return { disconnected: true };
   }
   if (request.action === 'PROSPECT_SESSION') return prospectConnection();
@@ -147,7 +195,7 @@ async function prospectHandle(request, sender) {
       await chrome.storage.local.set({ [key]: record });
       try { await syncSend(connection, key, record); return { ...result, synced: true }; }
       catch { return { ...result, synced: false }; }
-    } finally { sendTabs.delete(tab.id); }
+    } finally { sendTabs.delete(tab.id); void presenceChanged(); }
   }
   // Cowork bridge: claim a queued LinkedIn job, execute it against the verified
   // profile tab, then report the destination-confirmed result. Uncertain
@@ -183,7 +231,7 @@ async function prospectHandle(request, sender) {
           userId: session.userId, jobResult: { jobId: job.id, claimToken: job.claim_token, status: finalStatus,
             eventId: result.eventId, threadUrl: result.threadUrl, error: result.error } });
       } catch { return { ...result, synced: false }; }
-    } finally { sendTabs.delete(tab.id); }
+    } finally { sendTabs.delete(tab.id); void presenceChanged(); }
   }
   if (request.action === 'PROSPECT_OPEN') {
     if (typeof request.path !== 'string' || !/^\/(saved\/leads\/enriched|contact\/compose)(\?|$)/.test(request.path)) throw new Error('Destino inválido.');
@@ -193,7 +241,9 @@ async function prospectHandle(request, sender) {
   if (request.action === 'PROSPECT_API') {
     const { organizationId, userId } = connection.session;
     if (request.organizationId !== organizationId || request.userId !== userId) throw new Error('La sesión cambió. Actualiza el panel.');
-    return prospectRequest(connection, { ...request.body, organizationId, userId });
+    const result = await prospectRequest(connection, { ...request.body, organizationId, userId });
+    if (['save', 'save-batch'].includes(request.body?.action)) void presenceChanged();
+    return result;
   }
   throw new Error('Acción no disponible.');
 }

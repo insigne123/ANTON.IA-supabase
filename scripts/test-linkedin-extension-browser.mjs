@@ -39,6 +39,7 @@ try {
           switch (request.action) {
             case 'PROSPECT_SESSION': result = connected ? connection : null; break;
             case 'PROSPECT_PROFILE': result = window.activeProfile; break;
+            case 'PROSPECT_PRESENCE': result = Object.fromEntries(request.urls.filter(url => window.presence?.[url]).map(url => [url, window.presence[url]])); break;
             case 'PROSPECT_CONNECT': connected = true; result = { pending: true }; setTimeout(() => listeners.forEach(fn => fn({ prospectConnection: {} }, 'session')), 10); break;
             case 'PROSPECT_PREPARE': result = { ok: true, status: 'prepared', message: 'Mensaje preparado. Envía desde LinkedIn.' }; break;
             case 'PROSPECT_SEND': result = sent ? { status: 'confirmed', duplicate: true } : { status: 'confirmed', eventId: 'new-event', synced: true }; sent = true; break;
@@ -171,8 +172,12 @@ try {
       await page.screenshot({ path: resolve(process.env.EXTENSION_SCREENSHOT_DIR, `extension-contact-${colorScheme}.png`), fullPage: true });
     }
     const rememberedMessage = await draft.inputValue();
+    // Someone else is working the next person: the card says so and asks to coordinate.
+    await page.evaluate(() => { window.presence = { 'https://www.linkedin.com/in/another-profile': { label: 'En conversación con Ana', tone: 'warning', blocks: true } }; });
     await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/another-profile', fullName: 'Otro perfil' }); });
     await page.waitForFunction(() => document.querySelector('#profile-url').value === 'https://www.linkedin.com/in/another-profile');
+    await page.getByText('En conversación con Ana. Coordina con tu equipo antes de escribirle.', { exact: true }).waitFor();
+    assert.match(await page.locator('.chips').textContent(), /En conversación con Ana/);
     await page.waitForTimeout(500);
     await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/test-person' }); });
     await page.waitForFunction(() => document.querySelector('#profile-url').value === 'https://www.linkedin.com/in/test-person');

@@ -13,7 +13,11 @@ test('a new profile and its name rendering later are announced once each; repeat
   const w = dom.window;
   const sent = [];
   // Messages are built inside the page's realm: keep their action only.
-  w.chrome = { runtime: { id: 'ext', onMessage: { addListener() {} }, sendMessage: message => { sent.push(message.action); return Promise.resolve(); } } };
+  // Only the announcements count here; the marks of PR-4b ask for presence through the same channel.
+  w.chrome = { runtime: { id: 'ext', onMessage: { addListener() {} }, sendMessage: message => {
+    if (message.action === 'ANTONIA_PROFILE_CHANGED') sent.push(message.action);
+    return Promise.resolve({ ok: true, result: {} });
+  } } };
   // jsdom lays nothing out: the visibility the header helpers check, as in the other DOM tests.
   w.HTMLElement.prototype.getBoundingClientRect = () => ({ width: 100, height: 30 });
   w.eval(helpers); w.eval(content);

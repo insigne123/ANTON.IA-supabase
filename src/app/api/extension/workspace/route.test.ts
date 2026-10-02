@@ -22,6 +22,9 @@ function fixture(withLead = false) {
     '@/lib/server/auth-utils': { AuthError, requireAuth: async () => ({ organizationId: org, user: { id: user } }), handleAuthError: (error: any) => NextResponse.json({ error: error.message }, { status: error.status }) },
     '@/lib/server/extension-leads': { findExtensionLead: async (...args: any[]) => { calls.push(args); return withLead ? { id: 'lead', email: 'ana@example.test', linkedin_url: profile.linkedinUrl } : null; }, saveExtensionLead: async (...args: any[]) => { calls.push(args); return { lead: { id: 'saved' } }; } },
     '@/lib/server/extension-sends': { claimExtensionSend: async (...args: any[]) => { calls.push({ claim: args }); return { id: org, claimed: true }; }, finishExtensionSend: async (...args: any[]) => { calls.push({ finish: args }); return { id: org, status: 'confirmed' }; } },
+    '@/lib/server/extension-presence': {
+      readExtensionPresence: async (...args: any[]) => { calls.push({ presence: args.slice(1) }); return { 'https://www.linkedin.com/in/ana': { label: 'Guardado por Ana', tone: 'info', blocks: false } }; },
+    },
     '@/lib/server/daily-quota-store': {
       getEffectiveDailyQuotaLimits: async (...args: any[]) => { calls.push({ limits: args }); return { leadSearch: 50, enrich: 50, research: 50, contact: 100 }; },
       getDailyQuotaStatus: async (input: any) => { calls.push({ quota: input }); return { allowed: true, count: 12, limit: input.limit, dayKey: '2026-10-02', resetAtISO: '2026-10-03T00:00:00.000Z' }; },
@@ -187,4 +190,17 @@ test('quota reads the day\'s credits of the signed-in person without a profile',
   // Another account or organization in the body is refused before reading anything.
   const other = await env.POST(request({ action: 'quota', organizationId: org, userId: '550e8400-e29b-41d4-a716-446655440009' }));
   assert.equal(other.status, 409);
+});
+
+test('presence answers for the profiles on screen of the signed-in organization, without a profile', async () => {
+  const env = fixture();
+  const urls = ['https://www.linkedin.com/in/ana', 'https://www.linkedin.com/in/bruno'];
+  const response = await env.POST(request({ action: 'presence', organizationId: org, userId: user, linkedinUrls: urls }));
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).presence, { 'https://www.linkedin.com/in/ana': { label: 'Guardado por Ana', tone: 'info', blocks: false } });
+  assert.deepEqual(env.calls.find(call => call.presence).presence, [urls]);
+  // More than one page of results is refused, and so is another account.
+  const many = Array.from({ length: 51 }, (_, index) => `https://www.linkedin.com/in/p${index}`);
+  assert.equal((await env.POST(request({ action: 'presence', organizationId: org, userId: user, linkedinUrls: many }))).status >= 400, true);
+  assert.equal((await env.POST(request({ action: 'presence', organizationId: org, userId: '550e8400-e29b-41d4-a716-446655440009', linkedinUrls: urls }))).status, 409);
 });
