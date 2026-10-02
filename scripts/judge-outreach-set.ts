@@ -1,16 +1,21 @@
 // Puntúa muestras generadas con el juez Luna y exporta pares ciegos v15 vs v16.
 // Uso: node --loader ./scripts/ts-test-loader.mjs scripts/judge-outreach-set.ts <dir-resultados> [<dir-baseline>]
 // Requiere OPENAI_API_KEY. Sin escrituras en BD, sin envíos.
+// OUTREACH_EVAL_SET: el mismo conjunto con que se generaron las muestras, si no es el de siempre.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { judgeOutreach, judgeVerdict } from '../src/ai/flows/judge-outreach';
+import { RESEARCH_SEQUENCE_STEPS } from '../src/lib/outreach-sequence-brief';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY required');
 const dir = process.argv[2];
 const baselineDir = process.argv[3];
 if (!dir) throw new Error('Falta <dir-resultados>');
 
-const evalSet = JSON.parse(readFileSync(new URL('./fixtures/outreach-eval-set.json', import.meta.url), 'utf8'));
+const setPath = process.env.OUTREACH_EVAL_SET
+  ? resolve(process.env.OUTREACH_EVAL_SET)
+  : new URL('./fixtures/outreach-eval-set.json', import.meta.url);
+const evalSet = JSON.parse(readFileSync(setPath, 'utf8'));
 const caseById = new Map<string, any>(evalSet.cases.map((c: any) => [c.id, c]));
 const run = JSON.parse(readFileSync(join(dir, 'results.json'), 'utf8'));
 
@@ -24,12 +29,21 @@ for (const result of run.results) {
     senal: evalCase.senal, objecion: evalCase.objecion,
     hechos_permitidos: [
       `Vendedor: ${evalSet.seller.name}, ${evalSet.seller.jobTitle} de ${evalSet.seller.companyName}`,
-      ...evalSet.seller.services,
+      ...(evalSet.seller.description ? [evalSet.seller.description] : []),
+      // Lo que ofrece la empresa del vendedor, dicho así: «En Yago usamos AXIS» no es un hecho inventado.
+      ...evalSet.seller.services.map((service: string) => `${evalSet.seller.companyName} ofrece: ${service}`),
       evalSet.seller.valueProposition,
+      ...(evalSet.seller.proofPoints || []),
     ],
+    // El pedido que fija el estilo aprobado (p. ej. «15 minutos») y, en una secuencia, qué pide su paso: no son hechos inventados.
+    ...(result.cta ? { cta_aprobado: result.cta } : {}),
   };
   if (result.steps) {
-    for (const step of result.steps) samples.push({ label: `${result.id}#${step.step}`, datos, asunto: step.subject, cuerpo: step.body });
+    for (const step of result.steps) {
+      const stage = RESEARCH_SEQUENCE_STEPS[step.step - 1];
+      const paso = stage ? { nombre: stage.name, instruccion: stage.instruction } : { nombre: 'Inicial' };
+      samples.push({ label: `${result.id}#${step.step}`, datos: { ...datos, paso }, asunto: step.subject, cuerpo: step.body });
+    }
   } else if (result.body) {
     samples.push({ label: result.id, datos, asunto: result.subject, cuerpo: String(result.body).replace(/<[^>]+>/g, ' ') });
   }
