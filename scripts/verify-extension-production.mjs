@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import AdmZip from 'adm-zip';
+import JSZip from 'jszip';
 const base = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const response = await fetch(`${base}/downloads/antonia-linkedin-extension.zip?verify=${Date.now()}`);
 assert.equal(response.status, 200);
@@ -10,7 +10,8 @@ const bytes = Buffer.from(await response.arrayBuffer());
 const local = await readFile(new URL('../public/downloads/antonia-linkedin-extension.zip', import.meta.url));
 assert.ok(bytes.equals(local), 'Production ZIP must match local verified artifact');
 const expectedVersion = JSON.parse(await readFile(new URL('../chrome-extension/manifest.release.json', import.meta.url), 'utf8')).version;
-assert.equal(JSON.parse(new AdmZip(bytes).readAsText('manifest.json')).version, expectedVersion);
+const zip = await JSZip.loadAsync(bytes);
+assert.equal(JSON.parse(await zip.file('manifest.json').async('string')).version, expectedVersion);
 console.log(`PASS production ZIP ${expectedVersion}: ${bytes.length} bytes, SHA256 ${createHash('sha256').update(bytes).digest('hex')}`);
 const privacy = await fetch(`${base}/privacy/extension`);
 assert.equal(privacy.status, 200);
