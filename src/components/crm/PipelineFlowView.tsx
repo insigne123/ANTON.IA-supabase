@@ -10,11 +10,14 @@ import type { UnifiedRow } from '@/lib/unified-sheet-types';
 /**
  * The pipeline as a graph (Plan 5, PR-10b): the figures that matter, one node per stage with its count and the share
  * that moved on, the five most recent leads on hover or focus, and the weekly trend. A click opens the whole stage.
+ * Each node also marks the stage changes into it that wait for the person's confirmation (PR-10a).
  */
-export function PipelineFlowView({ rows, onOpenStage, now }: {
+export function PipelineFlowView({ rows, onOpenStage, now, pending }: {
   rows: UnifiedRow[];
   onOpenStage: (stage: PipelineStage) => void;
   now?: number;
+  /** Suggested stage changes waiting for confirmation, by the stage they propose. */
+  pending?: Partial<Record<PipelineStage, number>>;
 }) {
   const flow = useMemo(() => buildPipelineFlow(rows, { now }), [rows, now]);
   const [peek, setPeek] = useState<PipelineStage | null>(null);
@@ -31,10 +34,11 @@ export function PipelineFlowView({ rows, onOpenStage, now }: {
   const peekNode = peek === 'closed_lost'
     ? { label: 'Perdido', recent: flow.lost.recent }
     : flow.nodes.find(node => node.stage === peek) || null;
-  const stageNode = (node: Pick<PipelineFlowNode, 'stage' | 'label' | 'count' | 'recent'>, muted = false) =>
-    <div onMouseEnter={() => setPeek(node.stage)} onMouseLeave={() => setPeek(current => current === node.stage ? null : current)}>
+  const stageNode = (node: Pick<PipelineFlowNode, 'stage' | 'label' | 'count' | 'recent'>, muted = false) => {
+    const waiting = pending?.[node.stage] || 0;
+    return <div onMouseEnter={() => setPeek(node.stage)} onMouseLeave={() => setPeek(current => current === node.stage ? null : current)}>
       <button type="button" onClick={() => onOpenStage(node.stage)} onFocus={() => setPeek(node.stage)} onBlur={() => setPeek(current => current === node.stage ? null : current)}
-        aria-label={`${node.label}: ${node.count} ${node.count === 1 ? 'lead' : 'leads'}. Ver la etapa completa.`}
+        aria-label={`${node.label}: ${node.count} ${node.count === 1 ? 'lead' : 'leads'}${waiting ? `, ${waiting} ${waiting === 1 ? 'cambio' : 'cambios'} por confirmar` : ''}. Ver la etapa completa.`}
         className={cn('flex w-[7.25rem] flex-col gap-1.5 rounded-2xl border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           muted && 'bg-muted/30')}>
         <span className="truncate text-xs font-medium text-muted-foreground">{node.label}</span>
@@ -42,8 +46,10 @@ export function PipelineFlowView({ rows, onOpenStage, now }: {
         <span className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true">
           <span className={cn('block h-full rounded-full', muted ? 'bg-muted-foreground/50' : 'bg-primary')} style={{ width: `${Math.max(node.count ? 6 : 0, (node.count / maxCount) * 100)}%` }} />
         </span>
+        {waiting > 0 && <span className="text-[11px] font-medium text-primary" aria-hidden="true">+{waiting} por confirmar</span>}
       </button>
     </div>;
+  };
 
   return <div className="space-y-6 p-4 sm:p-6">
     <section aria-label="Cifras del pipeline" className="grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -7,11 +7,13 @@ import { KanbanBoard } from '@/components/crm/KanbanBoard';
 import { PipelineFlowView } from '@/components/crm/PipelineFlowView';
 import { LeadDetailDrawer } from '@/components/crm/LeadDetailDrawer';
 import { SmartAlerts } from '@/components/crm/SmartAlerts';
+import { StageSuggestions } from '@/components/crm/StageSuggestions';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
 import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
+import { stageDecisionNotice, type CrmStageSuggestion } from '@/lib/crm-stage-suggestions';
 import { flowStage } from '@/lib/pipeline-flow';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 import { buildUnifiedRows } from '@/lib/unified-sheet-data';
@@ -27,6 +29,8 @@ export default function CRMPage() {
     const [focusMode, setFocusMode] = useState(false);
     const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted');
     const [movingLeadIds, setMovingLeadIds] = useState<Set<string>>(new Set());
+    const [suggestions, setSuggestions] = useState<CrmStageSuggestion[]>([]);
+    const [deciding, setDeciding] = useState(false);
     // «Gráfico» shows the flow by stage (Plan 5, PR-10b); «Tablero» is the board to move leads. The choice is remembered.
     const [view, setView] = useState<'graph' | 'board'>('graph');
     const [openStage, setOpenStage] = useState<PipelineStage | null>(null);
@@ -57,9 +61,39 @@ export default function CRMPage() {
         }
     }, []);
 
+    // Stage suggestions (Plan 5, PR-10): events propose, the person confirms. If they cannot be read, the board still works.
+    const loadSuggestions = useCallback(async () => {
+        try {
+            const response = await fetch('/api/crm/stage-suggestions', { cache: 'no-store' });
+            const data = response.ok ? await response.json() : null;
+            setSuggestions(Array.isArray(data?.suggestions) ? data.suggestions : []);
+        } catch {
+            setSuggestions([]);
+        }
+    }, []);
+
     useEffect(() => {
         void loadData();
-    }, [loadData]);
+        void loadSuggestions();
+    }, [loadData, loadSuggestions]);
+
+    async function decideSuggestions(ids: string[], decision: 'accept' | 'dismiss') {
+        if (!ids.length || deciding) return;
+        setDeciding(true);
+        try {
+            const response = await fetch('/api/crm/stage-suggestions', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, decision }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'No pudimos guardar tu decisión.');
+            toast({ title: decision === 'accept' ? 'Pipeline actualizado' : 'Sugerencias descartadas', description: stageDecisionNotice(data) });
+            await Promise.all([loadData(), loadSuggestions()]);
+        } catch (error) {
+            toast({ variant: 'destructive', title: 'No se guardó la decisión', description: (error as Error).message });
+        } finally {
+            setDeciding(false);
+        }
+    }
 
     async function handleLeadMove(leadId: string, newStage: PipelineStage) {
         const previousStage = rowsRef.current.find((row) => row.gid === leadId)?.stage;
@@ -91,6 +125,9 @@ export default function CRMPage() {
 
     const selectedLead = rows.find((row) => row.gid === selectedLeadId) ?? null;
     const stageRows = openStage ? rows.filter((row) => flowStage(row) === openStage) : [];
+    const pendingByStage = suggestions.reduce<Partial<Record<PipelineStage, number>>>((counts, suggestion) => ({
+        ...counts, [suggestion.to_stage]: (counts[suggestion.to_stage] || 0) + 1,
+    }), {});
 
     return (
         <div className="flex h-[calc(100dvh-5rem)] min-h-[480px] min-w-0 flex-col overflow-hidden bg-background md:h-[calc(100dvh-5.5rem)]">
@@ -101,7 +138,7 @@ export default function CRMPage() {
                         <p className="mt-0.5 text-sm text-muted-foreground">Prioriza oportunidades y mueve cada lead a su siguiente etapa.</p>
                         <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                             <Sparkles className="h-3.5 w-3.5" />
-                            Las etapas pueden actualizarse cuando se registran eventos de contacto; revisa cada cambio antes de actuar.
+                            Los envíos y las respuestas proponen cambios de etapa; nada se mueve hasta que los aceptes.
                         </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -130,6 +167,13 @@ export default function CRMPage() {
 
             {!loading && <SmartAlerts leads={rows} onAlertClick={(stage) => { setFocusedStage(stage); setFocusMode(true); chooseView('board'); }} />}
 
+            <StageSuggestions
+                suggestions={suggestions}
+                busy={deciding}
+                nameFor={(crmId) => rows.find((row) => row.gid === crmId)?.name || 'Contacto'}
+                onDecide={(ids, decision) => void decideSuggestions(ids, decision)}
+            />
+
             {loadError && (
                 <Alert variant="destructive" className="m-4 mb-0 w-auto">
                     <AlertCircle className="h-4 w-4" />
@@ -151,7 +195,7 @@ export default function CRMPage() {
                     </div>
                 ) : view === 'graph' ? (
                     <div className="h-full overflow-y-auto">
-                        <PipelineFlowView rows={rows} onOpenStage={setOpenStage} />
+                        <PipelineFlowView rows={rows} onOpenStage={setOpenStage} pending={pendingByStage} />
                     </div>
                 ) : (
                     <KanbanBoard

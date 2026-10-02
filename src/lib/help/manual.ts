@@ -299,9 +299,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       '«Gráfico» muestra cuántos hay en cada etapa, qué parte pasa a la siguiente, tus cifras y los contactos nuevos por semana. Pasa el mouse por una etapa para ver sus 5 más recientes; tócala para verlos a todos.',
       'En «Tablero», arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
       'Abre un contacto para ver su actividad, el responsable y la próxima acción registrada.',
+      'Arriba aparecen las sugerencias de etapa: un envío, una respuesta o una reunión pedida proponen mover al contacto. Acéptalas una por una o con «Aceptar todas». En «Gráfico», cada etapa marca cuántos cambios esperan tu confirmación.',
     ],
     faqs: [
       { q: '¿Cómo llegan los contactos al pipeline?', a: 'Aparecen cuando guardas o contactas leads.' },
+      { q: '¿Las etapas cambian solas?', a: 'No. Los envíos y las respuestas proponen el cambio y tú lo aceptas. Nunca se mueve un contacto hacia atrás ni uno ya cerrado.' },
       { q: '¿Puedo asignar un responsable?', a: 'Sí, en el detalle del contacto, en «Colaboración».' },
     ],
     related: ['conversaciones', 'hoy'],

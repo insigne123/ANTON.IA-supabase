@@ -39,7 +39,7 @@ El usuario pidió un pipeline gráfico, como la imagen de referencia.
 
 ## Fuera de este PR
 
-- **Sugerencias de etapa:** van en PR-10a (`claude/pipeline-sugerencias`). Su migración está lista y probada, y espera que el MCP de Supabase vuelva a aplicar migraciones.
+- **Sugerencias de etapa:** llegan en PR-10a (`docs/pipeline-sugerencias.md`), que además marca en cada etapa del gráfico los cambios por confirmar.
 - **Días por etapa:** no hay historial de cambios de etapa, solo la etapa actual. Las sugerencias decididas de PR-10a darán ese historial.
 
 ## Pruebas
