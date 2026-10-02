@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
-import { countCoworkLeads, queryCoworkLeads, segmentPhrases } from './lead-tools';
+import { countCoworkLeads, queryCoworkLeads, segmentPhrases, summarizeCoworkLeads } from './lead-tools';
 
 function client() {
   const calls: Array<[string, ...unknown[]]> = [];
@@ -170,4 +170,27 @@ test('without phrases it counts every saved contact, and a value that is only sy
 test('segment phrases keep whole phrases, drop noise and stop at six', () => {
   assert.deepEqual(segmentPhrases('gerente general | a | talent acquisition'), ['gerente general', 'talent acquisition']);
   assert.equal(segmentPhrases('a1,b2,c3,d4,e5,f6,g7,h8').length, 6);
+});
+
+test('the summary by state reads only the person\'s own rows, three bounded lists, and never names', async () => {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const data: Record<string, unknown[]> = {
+    leads: [{ id: 'a', email: 'ana@x.cl', linkedin_url: null }, { id: 'b', email: null, linkedin_url: null }],
+    contacted_leads: [{ lead_id: 'a', email: 'ana@x.cl', replied_at: null }],
+    lead_research_jobs: [],
+  };
+  const db = { from: (table: string) => {
+    calls.push(['from', table]);
+    const chain: Record<string, unknown> = {};
+    for (const name of ['select', 'eq', 'order', 'limit']) chain[name] = (...args: unknown[]) => { calls.push([name, ...args]); return chain; };
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: data[table], error: null }));
+    return chain;
+  } } as unknown as SupabaseClient;
+  const summary = await summarizeCoworkLeads(db, { userId: 'owner', organizationId: 'org' });
+  assert.deepEqual(summary.groups.filter(group => group.count).map(group => [group.id, group.count]), [['contacted', 1], ['no_email', 1]]);
+  assert.equal(calls.filter(call => call[0] === 'eq' && call[1] === 'user_id' && call[2] === 'owner').length, 3);
+  assert.equal(calls.filter(call => call[0] === 'eq' && call[1] === 'organization_id' && call[2] === 'org').length, 3);
+  assert.ok(calls.some(call => call[0] === 'eq' && call[1] === 'status' && call[2] === 'completed'), 'only finished research counts');
+  assert.ok(calls.filter(call => call[0] === 'select').every(call => !/name|company|title/.test(String(call[1]))), 'no names leave the database');
+  assert.ok(calls.filter(call => call[0] === 'limit').every(call => Number(call[1]) <= 10000));
 });

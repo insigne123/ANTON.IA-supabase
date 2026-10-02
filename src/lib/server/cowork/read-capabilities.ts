@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CoworkCapability } from '@/lib/cowork/capabilities';
-import { countCoworkLeads, queryCoworkLeads } from './lead-tools';
+import { countCoworkLeads, queryCoworkLeads, summarizeCoworkLeads } from './lead-tools';
 import { queryCoworkExtendedReads, readCoworkFileContent, type CoworkExtendedReadAction } from './extended-reads';
 import { readCoworkResearch } from './research-read';
 import { readCoworkSavedSearches } from './saved-searches';
@@ -149,6 +149,10 @@ export function coworkReadCapabilities(
     {
       name: 'leads.count', version: 1, effect: 'read', description: 'Cuenta exacta de tus contactos guardados que calzan con uno o varios términos (separados por |)',
       input: z.string().max(120), output: z.unknown(), execute: input => countCoworkLeads(client, scope, input as string),
+    },
+    {
+      name: 'leads.summary', version: 1, effect: 'read', description: 'Tus contactos guardados por estado (respondieron, contactados, listos, con correo, sin correo), con cifras exactas y el siguiente paso de cada grupo',
+      input: z.literal(''), output: z.unknown(), execute: () => summarizeCoworkLeads(client, scope),
     },
     {
       name: 'site.read', version: 1, effect: 'read', description: 'Texto público del sitio web de la empresa (el de Perfil si no se da uno)',

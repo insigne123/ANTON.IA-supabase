@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowRight, X } from 'lucide-react';
+import { ArrowRight, ChevronDown, X } from 'lucide-react';
 import { coworkOfferMessage, coworkOverviewFigures, type CoworkOverview } from '@/lib/cowork/overview';
 import { coworkShortTime, coworkStatusCopy, type CoworkThreadSummary } from '@/lib/cowork/presentation';
 import { COWORK_STARTERS } from '@/lib/cowork/starters';
 import { cn } from '@/lib/utils';
 import { CwCollapse, CwCount } from './motion';
+import { CoworkGuide } from './CoworkGuide';
 import { CoworkIcon, CoworkMark, CwButton, CwStatusPill } from './ui';
 
 function greeting(hour: number) {
@@ -108,6 +109,9 @@ export function CoworkHome({ composer, threads, ready, loading, onSuggestion, on
   const [hello, setHello] = useState('Hola');
   useEffect(() => { setHello(greeting(new Date().getHours())); }, []);
   const [offerHidden, setOfferHidden] = useState(true);
+  // «¿Qué puedes hacer?»: the whole guide, opened on demand so the home stays short.
+  const [guideOpen, setGuideOpen] = useState(false);
+  const guideId = useId();
   useEffect(() => {
     try { setOfferHidden(window.localStorage.getItem(OFFER_CARD_KEY) === '1'); } catch { setOfferHidden(false); }
   }, []);
@@ -140,6 +144,18 @@ export function CoworkHome({ composer, threads, ready, loading, onSuggestion, on
           className="cw-rise inline-flex items-center gap-2 rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
           <CoworkIcon name={item.icon} className="h-4 w-4 text-cw-accent" />{item.title}
         </button>)}
+      </div>
+      <div className="mt-3 flex justify-center">
+        <button type="button" aria-expanded={guideOpen} aria-controls={guideId} onClick={() => setGuideOpen(open => !open)}
+          className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium text-cw-accent transition-colors hover:bg-cw-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+          ¿Qué puedes hacer?
+          <ChevronDown className={cn('h-4 w-4 transition-transform', guideOpen && 'rotate-180')} aria-hidden="true" />
+        </button>
+      </div>
+      <div id={guideId}>
+        <CwCollapse show={guideOpen}>
+          <div className="pt-4"><CoworkGuide onTry={message => { onSuggestion(message); setGuideOpen(false); }} /></div>
+        </CwCollapse>
       </div>
       {(pending.length > 0 || recent.length > 0) && <div className="cw-rise mt-10 [animation-delay:180ms]">
         <h2 className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">{pending.length ? 'Continúa donde quedaste' : 'Recientes'}</h2>
