@@ -30,3 +30,8 @@ contiene un flujo autenticado para publicar en la tienda; no afirmar que ya est�
 
 Pendiente: DOM de LinkedIn real, vigencia de la ficha de empresa/Personas/Actividad,
 y calidad de los borradores con el modelo real. Pasos en `docs/linkedin-prueba-guiada.md`.
+
+Corrección del smoke de conexión: la petición inicial `session` no lleva usuario ni
+organización, porque los descubre desde la sesión autenticada del servidor. Los demás
+comandos sin perfil (créditos, presencia, empresa, lote) siguen exigiendo ambos ids
+y revalidando el vínculo. Una petición de sesión anónima debe responder 401, no 400.

@@ -107,7 +107,9 @@ export const ExtensionRequestSchema = z.object({
   if (!profileless && (!body.organizationId || !body.userId || !body.profile)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta y selecciona un perfil.' });
   }
-  if (profileless && (!body.organizationId || !body.userId)) {
+  // Initial pairing discovers the authenticated scope through session. The
+  // browser cannot provide ids before that response; all other reads still pin them.
+  if (profileless && body.action !== 'session' && (!body.organizationId || !body.userId)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta antes de continuar.' });
   }
   if (body.action === 'save-batch' && !body.profiles?.length) {

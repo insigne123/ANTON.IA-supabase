@@ -12,14 +12,22 @@ const user = '550e8400-e29b-41d4-a716-446655440001';
 const profile = { linkedinUrl: 'https://www.linkedin.com/in/ana' };
 const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-function fixture(withLead = false) {
+function fixture(withLead = false, authenticated = true) {
   const calls: any[] = [];
   class AuthError extends Error { status = 401; }
   const modules: Record<string, any> = {
     '@/app/api/opportunities/enrich-apollo/route': { POST: async (req: any) => { const body = await req.json(); calls.push(body); return NextResponse.json({ enriched: [] }); } },
     'next/server': { NextRequest, NextResponse }, zod: require('zod'),
     '@/lib/extension-contracts': { ExtensionRequestSchema, assertExtensionScope },
-    '@/lib/server/auth-utils': { AuthError, requireAuth: async () => ({ organizationId: org, user: { id: user } }), handleAuthError: (error: any) => NextResponse.json({ error: error.message }, { status: error.status }) },
+    '@/lib/server/auth-utils': { AuthError, requireAuth: async () => {
+      if (!authenticated) throw new AuthError('Unauthorized');
+      return { organizationId: org, user: { id: user, email: 'seller@example.test' }, supabase: { from: (table: string) => {
+        calls.push({ table });
+        const query: any = { select: () => query, eq: (field: string, value: string) => { calls.push({ filter: field, value }); return query; },
+          maybeSingle: async () => ({ data: { name: 'Equipo de prueba' }, error: null }) };
+        return query;
+      } } };
+    }, handleAuthError: (error: any) => NextResponse.json({ error: error.message }, { status: error.status }) },
     '@/lib/server/extension-leads': { findExtensionLead: async (...args: any[]) => { calls.push(args); return withLead ? { id: 'lead', email: 'ana@example.test', linkedin_url: profile.linkedinUrl } : null; }, saveExtensionLead: async (...args: any[]) => { calls.push(args); return { lead: { id: 'saved' } }; } },
     '@/lib/server/extension-sends': { claimExtensionSend: async (...args: any[]) => { calls.push({ claim: args }); return { id: org, claimed: true }; }, finishExtensionSend: async (...args: any[]) => { calls.push({ finish: args }); return { id: org, status: 'confirmed' }; } },
     '@/lib/server/extension-batch': {
@@ -42,7 +50,8 @@ function fixture(withLead = false) {
       reportLinkedinNetwork: async (...args: any[]) => { calls.push({ network: args }); return { observed: 1, hasMore: false }; },
       reportLinkedinInbox: async (...args: any[]) => { calls.push({ inbox: args }); return { observed: 1, hasMore: false }; },
     },
-    '@/lib/server/native-research': { listNativeResearchLeadStatuses: async () => [{ researchSnapshotId: 'snapshot', reportId: 'report' }] },
+    '@/lib/server/native-research': { listNativeResearchLeadStatuses: async () => [{ researchSnapshotId: 'snapshot', reportId: 'report' }], isNativeResearchEnabled: () => true },
+    '@/lib/server/campaigns-v2/feature-access': { isCampaignsV2Enabled: async () => false },
     '@/app/api/native-research/[reportId]/route': { POST: async (_req: any, context: any) => { calls.push({ retry: await context.params }); return NextResponse.json({ ok: true }); } },
     '@/lib/extension-profile-url': { canonicalExtensionProfileUrl: (value: string) => value },
     '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: (table: string) => {
@@ -83,6 +92,24 @@ test('rejects cross-origin and unmarked requests before reading authenticated da
   assert.equal((await env.POST(request({ action: 'session' }, 'https://www.linkedin.com'))).status, 403);
   assert.equal((await env.POST(request({ action: 'session' }, 'https://app.antonia.ai', ''))).status, 403);
   assert.equal(env.calls.length, 0);
+});
+test('initial extension pairing discovers session without ids, remains authenticated and never trusts supplied scope', async () => {
+  const env = fixture();
+  const response = await env.POST(request({ action: 'session' }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { userId: user, email: 'seller@example.test', organizationId: org,
+    organizationName: 'Equipo de prueba', researchEnabled: true, sequencesEnabled: false });
+  assert.ok(env.calls.some(call => call.filter === 'id' && call.value === org));
+  const untrusted = fixture();
+  const alternate = await untrusted.POST(request({ action: 'session', organizationId: user, userId: org }));
+  assert.equal(alternate.status, 200);
+  assert.equal((await alternate.json()).organizationId, org, 'session always comes from the authenticated server scope');
+  const anonymous = fixture(false, false);
+  assert.equal((await anonymous.POST(request({ action: 'session' }))).status, 401);
+  assert.equal(anonymous.calls.length, 0);
+  const extension = fixture();
+  assert.equal((await extension.POST(request({ action: 'session' }, `chrome-extension://${'a'.repeat(32)}`))).status, 200);
+  assert.equal((await env.POST(request({ action: 'quota' }))).status, 400, 'other profileless reads still require paired ids');
 });
 test('LinkedIn drafting receives final V2 facts and commercial analysis', async () => {
   const env = fixture(true);
