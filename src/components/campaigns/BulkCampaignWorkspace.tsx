@@ -218,30 +218,48 @@ export function BulkCampaignWorkspace() {
                 setDefinition({ ...campaign.definition, name: `${campaign.definition.name} · Copia`, emails: [], overrides: [] });
                 setCampaign(null); setPeople([]); setSearched(false); setStep(0); setDirty(true); setMessageIndex(0);
               }}>Reutilizar perfil y mensajes</Button>
-              {!frozen && selectedPreview && <div className="space-y-3">
-                <div className="flex flex-wrap gap-2">{selectedPreview.messages.map((value, index) => <Button key={value.draftId} variant="outline" disabled={busy || Boolean(individual)} onClick={() => {
-                  setIndividual({ email: selectedPreview.email, messageIndex: index, subject: value.subject, body: value.body });
-                  setIndividualInstruction(''); setIndividualProposal(null);
-                }}>Editar {index === 0 ? 'correo inicial' : `seguimiento ${index}`} de esta persona</Button>)}</div>
-                {individual && <div className="space-y-3 rounded-xl border p-4">
-                  <h3 className="font-medium">Editar solo para {individual.email}</h3>
-                  <Label htmlFor="individual-subject">Asunto individual</Label><Input id="individual-subject" disabled={busy} value={individual.subject} onChange={event => { setIndividual({ ...individual, subject: event.target.value }); setIndividualProposal(null); }} />
-                  <Label htmlFor="individual-body">Correo individual</Label><Textarea id="individual-body" disabled={busy} className="min-h-48" value={individual.body} onChange={event => { setIndividual({ ...individual, body: event.target.value }); setIndividualProposal(null); }} />
-                  <Label htmlFor="individual-instruction">Cambio con IA para esta persona</Label><Input id="individual-instruction" disabled={busy} value={individualInstruction} onChange={event => setIndividualInstruction(event.target.value)} />
-                  <Button variant="outline" disabled={busy || individualInstruction.trim().length < 5} onClick={() => void run(async () => {
-                    const result = await request('/assist', { mode: 'message', instruction: individualInstruction, objective: definition.objective, relationship: definition.criteria.relationship,
-                      current: { subject: individual.subject, body: individual.body, delayDays: definition.messages[individual.messageIndex].delayDays } });
-                    setIndividualProposal(result.proposal);
-                  })}>Proponer cambio individual</Button>
-                  {individualProposal && <div className="space-y-2 rounded-lg bg-muted/40 p-3"><p className="font-medium">{individualProposal.subject}</p><p className="whitespace-pre-wrap text-sm">{individualProposal.body}</p><Button variant="secondary" disabled={busy} onClick={() => { setIndividual({ ...individual, subject: individualProposal.subject, body: individualProposal.body }); setIndividualProposal(null); }}>Aplicar propuesta</Button><Button variant="ghost" disabled={busy} onClick={() => setIndividualProposal(null)}>Descartar</Button></div>}
-                  <div className="flex gap-2"><Button disabled={busy} onClick={() => void run(async () => {
-                    const overrides = [...(definition.overrides || []).filter(value => value.email !== individual.email || value.messageIndex !== individual.messageIndex), individual];
-                    await save({ ...definition, overrides }); setIndividual(null); setIndividualProposal(null);
-                  })}>Guardar edición individual</Button><Button variant="ghost" disabled={busy} onClick={() => { setIndividual(null); setIndividualProposal(null); }}>Cancelar</Button></div>
+              <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+                <section aria-labelledby="campaign-review-people" className="min-w-0 space-y-2">
+                  <h3 id="campaign-review-people" className="text-sm font-semibold">Personas ({campaign.recipients.length})</h3>
+                  <p className="text-xs leading-5 text-muted-foreground">Elige a una persona para ver sus correos tal como los recibirá.</p>
+                  <ul className="max-h-[28rem] divide-y overflow-y-auto rounded-xl border" aria-label="Personas de la campaña">
+                    {campaign.recipients.map((person, index) => {
+                      const edited = (definition.overrides || []).some(value => value.email === person.email);
+                      return <li key={person.email}><button type="button" aria-current={index === recipientIndex ? 'true' : undefined} disabled={Boolean(individual)} onClick={() => setRecipientIndex(index)}
+                        className={`block w-full min-w-0 px-3 py-2 text-left text-sm hover:bg-muted/60 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring ${index === recipientIndex ? 'bg-muted font-medium' : ''}`}>
+                        <span className="block break-words">{person.name || person.email}</span>
+                        <span className="block break-all text-xs font-normal text-muted-foreground">{person.email}</span>
+                        {edited && <span className="mt-1 inline-block rounded-full border px-2 py-0.5 text-[11px] font-normal text-muted-foreground">Editado para esta persona</span>}
+                      </button></li>;
+                    })}
+                  </ul>
+                </section>
+                <section aria-label={selectedPreview ? `Correos para ${selectedPreview.name || selectedPreview.email}` : 'Correos'} className="min-w-0 space-y-3">
+                {!frozen && selectedPreview && <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">{selectedPreview.messages.map((value, index) => <Button key={value.draftId} variant="outline" disabled={busy || Boolean(individual)} onClick={() => {
+                    setIndividual({ email: selectedPreview.email, messageIndex: index, subject: value.subject, body: value.body });
+                    setIndividualInstruction(''); setIndividualProposal(null);
+                  }}>Editar {index === 0 ? 'correo inicial' : `seguimiento ${index}`} de esta persona</Button>)}</div>
+                  {individual && <div className="space-y-3 rounded-xl border p-4">
+                    <h3 className="font-medium">Editar solo para {individual.email}</h3>
+                    <Label htmlFor="individual-subject">Asunto individual</Label><Input id="individual-subject" disabled={busy} value={individual.subject} onChange={event => { setIndividual({ ...individual, subject: event.target.value }); setIndividualProposal(null); }} />
+                    <Label htmlFor="individual-body">Correo individual</Label><Textarea id="individual-body" disabled={busy} className="min-h-48" value={individual.body} onChange={event => { setIndividual({ ...individual, body: event.target.value }); setIndividualProposal(null); }} />
+                    <Label htmlFor="individual-instruction">Cambio con IA para esta persona</Label><Input id="individual-instruction" disabled={busy} value={individualInstruction} onChange={event => setIndividualInstruction(event.target.value)} />
+                    <Button variant="outline" disabled={busy || individualInstruction.trim().length < 5} onClick={() => void run(async () => {
+                      const result = await request('/assist', { mode: 'message', instruction: individualInstruction, objective: definition.objective, relationship: definition.criteria.relationship,
+                        current: { subject: individual.subject, body: individual.body, delayDays: definition.messages[individual.messageIndex].delayDays } });
+                      setIndividualProposal(result.proposal);
+                    })}>Proponer cambio individual</Button>
+                    {individualProposal && <div className="space-y-2 rounded-lg bg-muted/40 p-3"><p className="font-medium">{individualProposal.subject}</p><p className="whitespace-pre-wrap text-sm">{individualProposal.body}</p><Button variant="secondary" disabled={busy} onClick={() => { setIndividual({ ...individual, subject: individualProposal.subject, body: individualProposal.body }); setIndividualProposal(null); }}>Aplicar propuesta</Button><Button variant="ghost" disabled={busy} onClick={() => setIndividualProposal(null)}>Descartar</Button></div>}
+                    <div className="flex gap-2"><Button disabled={busy} onClick={() => void run(async () => {
+                      const overrides = [...(definition.overrides || []).filter(value => value.email !== individual.email || value.messageIndex !== individual.messageIndex), individual];
+                      await save({ ...definition, overrides }); setIndividual(null); setIndividualProposal(null);
+                    })}>Guardar edición individual</Button><Button variant="ghost" disabled={busy} onClick={() => { setIndividual(null); setIndividualProposal(null); }}>Cancelar</Button></div>
+                  </div>}
                 </div>}
-              </div>}
-              <div className="space-y-2"><Label htmlFor="preview-person">Vista previa por destinatario</Label><select id="preview-person" className="h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" value={recipientIndex} onChange={event => setRecipientIndex(Number(event.target.value))}>{campaign.recipients.map((person, index) => <option key={person.email} value={index}>{person.name || person.email} · {person.email}</option>)}</select></div>
-              {selectedPreview?.messages.map((value, index) => <article key={value.draftId} className="space-y-3 rounded-xl border bg-background p-5"><p className="text-xs text-muted-foreground">{index === 0 ? 'Primer correo' : `Seguimiento ${index} · ${value.delayDays} días después del anterior`}</p><h3 className="font-semibold">{value.subject}</h3><p className="whitespace-pre-wrap break-words text-sm leading-7">{value.body}</p><p className="border-t pt-3 text-xs text-muted-foreground">El envío incluye el enlace para darse de baja.</p></article>)}
+                {selectedPreview?.messages.map((value, index) => <article key={value.draftId} className="space-y-3 rounded-xl border bg-background p-5"><p className="text-xs text-muted-foreground">{index === 0 ? 'Primer correo' : `Seguimiento ${index} · ${value.delayDays} días después del anterior`}</p><h3 className="font-semibold">{value.subject}</h3><p className="whitespace-pre-wrap break-words text-sm leading-7">{value.body}</p><p className="border-t pt-3 text-xs text-muted-foreground">El envío incluye el enlace para darse de baja.</p></article>)}
+                </section>
+              </div>
               {!frozen ? <><section aria-labelledby="campaign-approve-what" className="rounded-xl border bg-muted/30 p-4">
                 <h3 id="campaign-approve-what" className="text-sm font-semibold">Qué pasa al aprobar</h3>
                 <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
