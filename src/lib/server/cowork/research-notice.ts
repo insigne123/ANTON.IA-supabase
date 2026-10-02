@@ -77,10 +77,21 @@ async function admitNotice(client: Client, scope: Scope, parent: Pick<Run, 'id' 
   return !error && typeof data === 'string';
 }
 
+/** Who each research is about: a saved contact or one of «Por escribir» (Plan 6, PR-C1). Best effort: a name that cannot be read is null. */
 async function people(client: Client, scope: Scope, leadIds: string[]): Promise<Map<string, { name: string | null; company: string | null }>> {
-  const { data } = await client.from('leads').select('id,name,company').in('id', [...new Set(leadIds)])
+  const ids = [...new Set(leadIds)];
+  const found = new Map<string, { name: string | null; company: string | null }>();
+  const { data } = await client.from('leads').select('id,name,company').in('id', ids)
     .eq('user_id', scope.userId).eq('organization_id', scope.organizationId);
-  return new Map(((data || []) as Array<{ id: string; name: string | null; company: string | null }>).map(lead => [lead.id, { name: lead.name, company: lead.company }]));
+  for (const lead of (data || []) as Array<{ id: string; name: string | null; company: string | null }>) found.set(lead.id, { name: lead.name, company: lead.company });
+  const missing = ids.filter(id => !found.has(id));
+  if (!missing.length) return found;
+  const enriched = await client.from('enriched_leads').select('id,full_name,company_name,organization_name').in('id', missing)
+    .eq('user_id', scope.userId).eq('organization_id', scope.organizationId);
+  for (const row of (enriched.data || []) as Array<{ id: string; full_name: string | null; company_name: string | null; organization_name: string | null }>) {
+    found.set(String(row.id), { name: row.full_name, company: row.company_name || row.organization_name || null });
+  }
+  return found;
 }
 
 /** One pass: tells every conversation whose research finished. Best effort; never throws. */
