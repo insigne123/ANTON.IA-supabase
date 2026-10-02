@@ -57,6 +57,7 @@ import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
 import { WEB_CORPUS } from './fixtures/cowork-web-corpus';
 import { LECTURAS_CORPUS } from './fixtures/cowork-lecturas-corpus';
 import { ICP_CORPUS } from './fixtures/cowork-icp-corpus';
+import { OPPORTUNITIES_CORPUS } from './fixtures/cowork-opportunities-corpus';
 import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 
@@ -76,6 +77,8 @@ CORPUS.push(...WEB_CORPUS);
 CORPUS.push(...LECTURAS_CORPUS);
 // «¿Cuál es mi ICP?» (scripts/fixtures/cowork-icp-corpus.ts).
 CORPUS.push(...ICP_CORPUS);
+// «¿Qué oportunidades hay hoy?» (scripts/fixtures/cowork-opportunities-corpus.ts).
+CORPUS.push(...OPPORTUNITIES_CORPUS);
 // Revealing a phone (scripts/fixtures/cowork-telefono-corpus.ts).
 CORPUS.push(...TELEFONO_CORPUS);
 
