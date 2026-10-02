@@ -56,3 +56,28 @@ Solo se puede hacer con tu sesión de LinkedIn. Usa un contacto de confianza; pu
 
 - **El lote** sigue detrás de `COWORK_LINKEDIN_BATCH_ENABLED`: lo enciende el mantenedor después de que la prueba guiada salga bien con un contacto.
 - **El flujo del navegador** (extensión y página de LinkedIn) no se puede automatizar desde aquí, porque necesita tu sesión.
+
+## Comprobación real de la extensión 4.1.0
+
+Después de instalar 4.1.0 y recargar las pestañas de LinkedIn:
+
+1. **Perfil guardado:** abre un contacto conocido. Compara la marca junto a su nombre
+   y los estados del panel con lo que consta en la app; cambiar de perfil debe
+   cambiar también la persona del panel.
+2. **Empresa:** abre una página empresarial. Nombre, URL, web y datos visibles de
+   la ficha deben coincidir con la página abierta; nunca con una recomendación.
+3. **Personas de esa empresa:** abre la pestaña Personas. Revisa el nombre y URL
+   de los contactos que muestra el panel; guardar solo la selección explícita
+   debe conservar la empresa y distinguir contactos nuevos de los ya guardados.
+4. **Búsqueda de personas:** abre resultados de LinkedIn y repite la comprobación
+   de marcas y selección. Comienza con una persona para verificar su ficha al guardar.
+5. **Actividad y mensaje:** en un perfil de confianza con publicaciones recientes,
+   solicita un borrador. La cita, fecha y autoría deben corresponder a la publicación,
+   contenido compartido o comentario real; revisa que la apertura sea natural y no
+   invente una relación o necesidad. Generar o preparar no exige enviarlo.
+6. **Sin actividad visible:** el panel debe informar que no la encontró y no decir
+   «vi tu publicación» sin una fuente.
+
+Las pruebas de 4.1.0 usan páginas y API simuladas; esta comprobación no está certificada
+hasta que la haga una persona con LinkedIn real. Anotar la URL, acción, resultado y
+captura ante una discrepancia, evitando datos privados innecesarios.

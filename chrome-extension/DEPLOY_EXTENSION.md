@@ -1,4 +1,4 @@
-# Anton.IA — LinkedIn Workspace 4.0.1
+# Anton.IA — LinkedIn Workspace 4.1.0
 
 ## Compilar e instalar
 
@@ -18,9 +18,26 @@ La aplicación elegida debe incluir `/extension/connect` y `/api/extension/works
 
 Después de actualizar la extensión, recarga las pestañas de LinkedIn y conexión. Chrome no reemplaza los scripts ya inyectados.
 
+## Cambios de 4.1.0
+
+- Panel renovado en Resumen, Investigación, Mensaje y Más, con créditos y siguiente paso contextual.
+- Marca en perfiles y resultados con lo que sabe la organización; guardado en lote desde búsqueda de personas.
+- Ficha de empresa desde una página empresarial de LinkedIn y su pestaña Personas.
+- Captura acotada de Actividad para proponer una apertura desde una publicación, comentario o contenido compartido.
+- Sin permisos nuevos respecto de 4.0.14.
+
+Las lecturas de página se verificaron contra DOM simulado. Antes de activar el lote
+de invitaciones, completar `docs/linkedin-prueba-guiada.md` y confirmar que los datos
+de empresa, personas y actividad coinciden con la página real abierta. Revisar la
+fidelidad de la publicación usada y la calidad del borrador antes de enviarlo.
+
+La distribución disponible en la app usa
+`/downloads/antonia-linkedin-extension.zip`. La publicación en Chrome Web Store
+requiere subir el ZIP a la ficha existente con la cuenta editora y revisión de Google.
+
 ## Funciones disponibles
 
-- Panel React con Perfil, Investigación y Contactar; tema del sistema y teclado.
+- Panel React con Resumen, Investigación, Mensaje y Más; tema del sistema y teclado.
 - Captura de URL, nombre y titular del perfil visible; URL pegada manualmente.
 - Consulta de leads guardados dentro de la organización activa.
 - Guardado sin email, actualización de datos, email y teléfono.
@@ -34,7 +51,7 @@ Después de actualizar la extensión, recarga las pestañas de LinkedIn y conexi
 
 - El nuevo panel **no pulsa Enviar** ni registra un mensaje preparado como enviado. El puente histórico usado desde la app sigue siendo independiente.
 - Se crean planes personalizados del motor de campañas V2. El selector de campañas existentes se integra con `/api/campaigns/bulk`: permite añadir un lead a una campaña propia en borrador o rechazada, conservando sus criterios y mensajes. Revalida la revisión, evita duplicados y no aprueba ni envía. Si el módulo colectivo no está desplegado y habilitado, explica que aún no está disponible. Activar ese módulo requiere resolver sus propios pendientes documentados en `docs/plans/bulk-campaigns-implementation-status.md`.
-- No se incluyen Sales Navigator, capturas masivas ni mensajes programados LinkedIn.
+- No se incluye Sales Navigator. Guardar varios resultados visibles no envía mensajes ni invitaciones.
 - El teléfono puede llegar de forma asíncrona desde Apollo. El panel guarda el teléfono recibido en la respuesta; aún no sigue los callbacks de teléfono pendientes.
 - No abre el chat de una URL pegada automáticamente: abre ese perfil en LinkedIn antes de pulsar Preparar. Se ofrece Copiar cuando no puede confirmar el destinatario.
 - Conserva borradores LinkedIn en `chrome.storage.session`, separados por usuario, organización y perfil. Sobreviven al cierre del panel y reinicio del worker, pero no al cierre completo del navegador. Las investigaciones y borradores de email se guardan en el servidor.

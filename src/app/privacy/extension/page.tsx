@@ -57,6 +57,18 @@ export default function ExtensionPrivacyPolicy() {
                                 del usuario cuando este lo confirma.
                             </li>
                             <li>
+                                <strong>Contexto de la página abierta:</strong> la extensión puede leer los perfiles visibles de una búsqueda
+                                o de la pestaña Personas de una empresa, y consultar cuáles ya conoce la organización. El usuario elige
+                                qué personas guardar. En páginas de empresa lee su nombre, sitio y datos profesionales visibles para
+                                mostrar una ficha con los contactos y señales comerciales ya registrados en Anton.IA.
+                            </li>
+                            <li>
+                                <strong>Actividad para redactar:</strong> al solicitar un mensaje, puede leer hasta tres publicaciones,
+                                contenidos compartidos o comentarios visibles del perfil seleccionado, con hasta 600 caracteres de texto
+                                por elemento y la fecha relativa que muestra LinkedIn. Ese contexto se envía a Anton.IA y al proveedor
+                                de generación de texto para proponer una apertura; el panel muestra la fuente usada para que el usuario la revise.
+                            </li>
+                            <li>
                                 <strong>Investigación y redacción:</strong> el contexto del perfil y del lead guardado se envía a Anton.IA y a sus proveedores
                                 de investigación y de generación de texto para producir informes con fuentes y borradores de mensajes. Las respuestas se
                                 tratan como texto, no como código ejecutable.
