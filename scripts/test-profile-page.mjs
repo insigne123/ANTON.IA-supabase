@@ -42,6 +42,21 @@ const AUTOFILL = {
   emptyReason: null, websiteFrom: 'input',
 };
 
+const rate = (part, whole) => ({ pct: Math.round((part / whole) * 1000) / 10, low: 1, high: 60 });
+const group = (value, sent, replied, positive) => ({ value, sent, replied, positive, replyRate: rate(replied, sent), positiveRate: rate(positive, sent) });
+const ICP = {
+  totals: { people: 12, replied: 3, positive: 2, meetings: 0, firstSend: '2026-07-01', lastSend: '2026-09-30',
+    replyRate: rate(3, 12), positiveRate: rate(2, 12), confidence: 'muestra chica: no concluyas' },
+  segments: {
+    area: { groups: [group('Personas y RR. HH.', 8, 2, 2), group('Operaciones', 4, 1, 0)], otherGroups: 0, otherSent: 0 },
+    level: { groups: [group('Gerencia', 12, 3, 2)], otherGroups: 0, otherSent: 0 },
+    industry: { groups: [group('Minería', 5, 2, 2), group('Retail', 7, 1, 0)], otherGroups: 0, otherSent: 0 },
+    location: { groups: [group('Santiago', 12, 3, 2)], otherGroups: 0, otherSent: 0 },
+  },
+  coverage: null, gaps: ['Hay 12 personas con envíos registrados: muy pocas para concluir qué segmento responde mejor.'],
+  method: 'Cuenta a cada persona contactada una vez.',
+};
+
 async function open(respond) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/profile', runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
@@ -54,7 +69,13 @@ async function open(respond) {
   globalThis.__profile = { stored: { full_name: 'Ana Pérez', job_title: '', company_name: '', company_domain: '', signatures: { gmail: { html: '<p>Firma</p>' } } }, updates: [] };
   window.__profile = globalThis.__profile;
   const calls = [];
-  window.fetch = async (url, options = {}) => { calls.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null }); return respond(calls.length); };
+  const icpCalls = [];
+  window.fetch = async (url, options = {}) => {
+    // «Lo que dicen tus resultados» loads on its own: answered apart so the profile calls keep their order.
+    if (String(url) === '/api/icp') { icpCalls.push(String(url)); return ok(ICP); }
+    calls.push({ url: String(url), body: options.body ? JSON.parse(options.body) : null });
+    return respond(calls.length);
+  };
   window.eval(bundle.outputFiles[0].text);
   const unmount = window.mount();
   const doc = window.document;
@@ -65,7 +86,7 @@ async function open(respond) {
     for (let i = 0; i < 400; i++) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
     throw new Error(`Timed out: ${label}`);
   };
-  return { window, doc, text, button, field, waitFor, calls, close: () => { unmount(); window.close(); } };
+  return { window, doc, text, button, field, waitFor, calls, icpCalls, close: () => { unmount(); window.close(); } };
 }
 
 const ok = (data) => ({ ok: true, status: 200, json: async () => data });
@@ -79,6 +100,10 @@ const ok = (data) => ({ ok: true, status: 200, json: async () => data });
     assert.match(app.text(), /Lo tomamos de tu correo corporativo/);
     assert.match(app.text(), /la IA no puede redactar tus correos/, 'what blocks drafting is said first');
     assert.match(app.text(), /Tu perfil: 0 de 10/);
+    await app.waitFor(() => app.text().includes('personas contactadas'), 'the results panel');
+    assert.match(app.text(), /12 personas contactadas entre el 1 jul y el 30 sept: 3 respondieron \(25 %, entre 1 % y 60 %\) y 2 con interés/);
+    assert.match(app.text(), /Muestra chica/);
+    assert.equal(app.icpCalls.length, 1);
 
     app.button('Leer mi sitio').click();
     await app.waitFor(() => app.text().includes('Revisa lo que encontramos'), 'the review');
@@ -114,7 +139,25 @@ const ok = (data) => ({ ok: true, status: 200, json: async () => data });
   } finally { app.close(); }
 }
 
-// 2. An unreachable site: no dialog, and the card says what to do.
+// 2. «Sumar» an industry that answered: it joins the form, unsaved.
+{
+  const app = await open(() => ok(AUTOFILL));
+  try {
+    await app.waitFor(() => app.text().includes('personas contactadas'), 'the results panel');
+    app.button('Industria').click();
+    await app.waitFor(() => app.text().includes('Minería'), 'by industry');
+    const add = app.doc.querySelector('button[aria-label="Sumar Minería a las industrias de tu cliente ideal"]');
+    assert.ok(add, 'an industry with positive answers can be added');
+    assert.equal(app.doc.querySelector('button[aria-label="Sumar Retail a las industrias de tu cliente ideal"]'), null, 'one without positive answers cannot');
+    add.click();
+    await app.waitFor(() => app.field('targetIndustries').value === 'Minería', 'added');
+    assert.match(app.text(), /En tu perfil/);
+    assert.match(app.text(), /Cambios sin guardar/);
+    assert.equal(globalThis.__profile.updates.length, 0, 'nothing is saved before «Guardar cambios»');
+  } finally { app.close(); }
+}
+
+// 3. An unreachable site: no dialog, and the card says what to do.
 {
   const app = await open(() => ok({ ...AUTOFILL, emptyReason: 'site_unreachable', services: [], pagesRead: [], sources: {} }));
   try {
