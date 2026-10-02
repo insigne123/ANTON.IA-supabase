@@ -32,6 +32,8 @@ const SCREEN_INSET = 3;
 const SETTLE_MS = 320;
 /** A screen gets this long to render its controls before its guide is offered. */
 const GUIDE_OFFER_DELAY_MS = 900;
+/** A guide asked for from the help center waits up to this long for the screen to show its controls. */
+const GUIDE_REQUEST_WAIT_MS = 3000;
 /** A tour step whose control is still not on screen after this long says so (an empty list, for example). */
 const MISSING_TARGET_MS = 2500;
 
@@ -154,10 +156,20 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
   }, [userId]);
   const markGuideSeen = useCallback((id: string) => markGuidesSeen([id]), [markGuidesSeen]);
 
+  // «Ver guía en pantalla» in the help center opens the screen with ?guia=1: its guide starts by itself, with no offer.
+  const guideRequested = useRef(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    guideRequested.current = url.searchParams.get('guia') === '1';
+    if (!guideRequested.current) return;
+    url.searchParams.delete('guia');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [pathname]);
+
   // A screen with a guide the person has not seen offers it once, quietly, after its controls are on screen.
   useEffect(() => {
     setOfferedGuide(null);
-    if (!guidesLoaded || phase !== 'idle' || !currentGuide || seenGuides[currentGuide.id]) return;
+    if (guideRequested.current || !guidesLoaded || phase !== 'idle' || !currentGuide || seenGuides[currentGuide.id]) return;
     const timer = window.setTimeout(() => {
       if (currentGuide.steps.some((step) => visibleElement(step.target))) setOfferedGuide(currentGuide);
     }, GUIDE_OFFER_DELAY_MS);
@@ -180,6 +192,23 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     setGuideId(guide.id);
     setPhase('guide');
   }, [markGuideSeen]);
+
+  // The requested guide starts when its controls are on screen, or after a short wait with the ones there are.
+  useEffect(() => {
+    if (!guideRequested.current || phase !== 'idle' || !currentGuide) return;
+    const guide = currentGuide;
+    const since = Date.now();
+    const attempt = () => {
+      if (!guide.steps.every((step) => visibleElement(step.target)) && Date.now() - since < GUIDE_REQUEST_WAIT_MS) {
+        timer = window.setTimeout(attempt, 200);
+        return;
+      }
+      guideRequested.current = false;
+      startGuide(guide.id);
+    };
+    let timer = window.setTimeout(attempt, GUIDE_OFFER_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentGuide, phase, startGuide]);
 
   const save = useCallback((status: ProductTourStatus) => {
     if (!userId) return;
