@@ -27,7 +27,6 @@ import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
 import { APP_VERSION } from '@/lib/app-version';
 import { cn } from '@/lib/utils';
-import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
 import { WorkspaceSwitcher } from '@/components/organization/WorkspaceSwitcher';
 import { COWORK_OWNER_EMAIL } from '@/lib/cowork/access';
 import { useProductTour } from '@/components/onboarding/ProductTour';
@@ -67,7 +66,6 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: '/saved/leads/enriched', icon: MailCheck, label: 'Por escribir', tour: 'saved-leads' },
       { href: '/saved/leads', icon: Users, label: 'Por completar', exact: true },
-      { href: '/saved/opportunities', icon: Briefcase, label: 'Empresas guardadas', feature: 'opportunities' },
       { href: '/sheet', label: 'Tabla de datos', icon: TableIcon, aliases: ['/leads/import'] },
     ],
   },
@@ -116,7 +114,19 @@ export function AppSidebar() {
       .catch(() => {});
     return () => controller.abort();
   }, [currentScope, user?.email]);
-  const canAccessOpportunities = isOpportunitiesEnabled();
+  // «Oportunidades» is for the accounts in OPPORTUNITIES_ALLOWED_EMAILS: the server answers, the menu only follows it.
+  const [opportunitiesScope, setOpportunitiesScope] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setOpportunitiesScope(null);
+    if (!user?.id) return;
+    const controller = new AbortController();
+    fetch('/api/commercial-opportunities/access', { cache: 'no-store', signal: controller.signal })
+      .then(response => (response.ok ? response.json() : null))
+      .then(data => { if (data?.available === true && !controller.signal.aborted) setOpportunitiesScope(currentScope); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [currentScope, user?.id]);
+  const canAccessOpportunities = opportunitiesScope === currentScope;
   // Every organization's owners and admins see its panel; the server checks the role again (admin-dashboard-auth.ts).
   const canAccessAdminDashboard = Boolean(organizationId) && (organizationRole === 'owner' || organizationRole === 'admin');
 

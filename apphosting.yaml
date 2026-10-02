@@ -175,6 +175,16 @@ env:
     value: gmeneses@grupoexpro.com,nicolas.yarur.g@yago.cl
     availability: [RUNTIME]
 
+  # Oportunidades comerciales (plan 8, fase 3): la sección y sus rutas solo para estas cuentas; cualquier otra recibe 404.
+  # Las fuentes leen JSEARCH_API_KEY y APIFY_TOKEN como secretos: el mantenedor los agrega aquí cuando existan en Secret
+  # Manager. Sin ellos, la página dice qué falta y no busca.
+  - variable: OPPORTUNITIES_ALLOWED_EMAILS
+    value: nicolas.yarur.g@yago.cl
+    availability: [RUNTIME]
+  - variable: OPPORTUNITIES_MONTHLY_USD_CAP
+    value: "10"
+    availability: [RUNTIME]
+
   # === Lead provider ===
   # Apollo runs in-process in this service: server runtime only, never BUILD,
   # so the key cannot be emitted into the browser bundle.

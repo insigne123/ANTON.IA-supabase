@@ -4,7 +4,7 @@
 
 Convierte avisos de empleo en oportunidades: una por empresa que publica muchos avisos para los cargos que la oferta cubre. Para el piloto de GrupoExpro son cargos operativos: operario, bodeguero, reponedor, cajero, vendedor, guardia, conductor, auxiliar de aseo, temporero y otros (`src/lib/commercial-opportunities/pilot.ts`).
 
-Este PR trae las fuentes y el cálculo. La página y el guardado en las tablas de #119 llegan con PR-3c.
+Este PR trae las fuentes y el cálculo. La página y el guardado en las tablas de #119 llegan con PR-3c (`docs/oportunidades-pagina.md`).
 
 ## Fuentes
 
@@ -14,7 +14,7 @@ Este PR trae las fuentes y el cálculo. La página y el guardado en las tablas d
 | LinkedIn Job Search API de Fantastic Jobs (Apify) | `src/lib/server/commercial-opportunities/fantastic-jobs.ts` | Avisos de LinkedIn de los últimos 7 días, con tamaño e industria de la empresa | US$5 por 1.000 avisos en los planes gratis y Bronze de Apify, 3,5 en Silver y 1,5 desde Gold (`APIFY_FANTASTIC_USD_PER_JOB`) |
 
 - **JSearch** usa `JSEARCH_API_KEY`, que va solo en el encabezado y nunca en la dirección ni en los mensajes de error.
-- **Fantastic Jobs** usa el `APIFY_TOKEN` que ya existe, también por encabezado. Pide los avisos sin agencias (`removeAgency`) y sin descripción.
+- **Fantastic Jobs** usa `APIFY_TOKEN`, también por encabezado. Pide los avisos sin agencias (`removeAgency`) y sin descripción; si no responde en 2 minutos, se corta.
 - **Del aviso no se guarda al reclutador:** Fantastic Jobs lo trae, pero se descarta.
 
 ## Cómo se calcula (`src/lib/commercial-opportunities/hiring.ts`)
