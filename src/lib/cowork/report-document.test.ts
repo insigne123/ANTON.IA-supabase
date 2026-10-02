@@ -50,7 +50,8 @@ test('a report that does not fit is named apart instead of cut', () => {
 });
 
 test('the answer gets the document the app writes, after one the model wrote, and never keeps the request', () => {
-  const plain = withCoworkReports({ reply: 'Te dejo los dos informes.', document: null, reports: [{ leadId: RAFAEL, title: 'Rafael Durán · RyD Montajes' }] }, [rafael]);
+  const none = null as { title: string; content: string } | null;
+  const plain = withCoworkReports({ reply: 'Te dejo los dos informes.', document: none, reports: [{ leadId: RAFAEL, title: 'Rafael Durán · RyD Montajes' }] }, [rafael]);
   assert.equal(plain.document?.title, COWORK_REPORTS_TITLE);
   assert.match(plain.document?.content || '', /^## Rafael Durán · RyD Montajes\n\n### Resumen y decisión/);
   assert.equal('reports' in plain, false);
