@@ -89,12 +89,13 @@ export async function queryCoworkLeads(
     const rows = await withTeamLocks(client, scope, merged.rows.slice(0, 1).map(withProfile));
     return { items: rows, returned: rows.length, limit: 1, scope: 'own_saved_contacts', sources, truncated: false };
   }
-  const time = (row: Record<string, unknown>) => Date.parse(String(row.created_at || '')) || 0;
+  // Ties keep the most recent first across both lists: ISO timestamps compare as text, like the database orders them.
+  const created = (row: Record<string, unknown>) => String(row.created_at || '');
   const ranked = merged.rows.map(row => {
     const haystack = SEARCH_FIELDS.map(field => String((row as Record<string, unknown>)[field] || '')).join(' ').toLocaleLowerCase('es');
     const matched = terms.filter(term => haystack.includes(term.toLocaleLowerCase('es'))).length;
     return { row, matched };
-  }).sort((left, right) => right.matched - left.matched || time(right.row) - time(left.row));
+  }).sort((left, right) => right.matched - left.matched || created(right.row).localeCompare(created(left.row)));
   const best = ranked[0]?.matched || 0;
   const items = await withTeamLocks(client, scope, ranked.slice(0, 20).map(entry => withProfile(entry.row)));
   return {
