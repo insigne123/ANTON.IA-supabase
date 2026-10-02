@@ -221,6 +221,8 @@ export type CorpusCase = {
   campaignRetry?: boolean;
   /** Runs with lead.enrich_phone available (COWORK_PHONE_REVEAL_ENABLED). */
   phoneReveal?: boolean;
+  /** Runs for an account that sees «Oportunidades» (OPPORTUNITIES_ALLOWED_EMAILS): opportunities.list is available. */
+  opportunities?: boolean;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
 };
 

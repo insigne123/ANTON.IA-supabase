@@ -1,13 +1,16 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { GRUPOEXPRO_PILOT, GRUPOEXPRO_TENDER_KEYWORDS } from '@/lib/commercial-opportunities/pilot';
+import { PILOT_SEIA_SECTORS, SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
 import {
-  HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, type HiringOpportunityData, type OpportunityStatus, type TenderOpportunityData,
+  HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, type HiringOpportunityData, type OpportunityStatus, type ProjectOpportunityData,
+  type TenderOpportunityData,
 } from '@/lib/commercial-opportunities/records';
 import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import type { HiringSearchProfile, HiringStore, HiringSyncSource } from './sync';
 import type { TenderStore } from './tender-sync';
+import type { ProjectStore } from './project-import';
 
 /**
  * Reads and writes of «Oportunidades» (plan 8, phase 3). The tables have no member grants: every call here runs with the
@@ -17,16 +20,19 @@ type Scope = { userId: string; organizationId: string };
 const PAGE = 1000;
 const DAY = 86_400_000;
 
-const PROFILE_COLUMNS = 'id,name,offer,roles,regions,min_ads,keywords,unspsc_codes,sources,updated_at';
+const PROFILE_COLUMNS = 'id,name,offer,roles,regions,min_ads,keywords,unspsc_codes,seia_sectors,min_investment_usd,sources,updated_at';
 type ProfileRow = {
   id: string; name: string; offer: string; roles: string[]; regions: string[]; min_ads: number; keywords: string[]; unspsc_codes: string[];
-  sources: string[]; updated_at: string;
+  seia_sectors: string[]; min_investment_usd: number | string | null; sources: string[]; updated_at: string;
 };
 /** Every source on: the profile has no per-source switch yet, and a source without its key is skipped anyway. */
-const ALL_SOURCES = ['hiring', 'tender', 'compra_agil'];
-const toProfile = (row: ProfileRow): HiringSearchProfile & { keywords: string[]; unspscCodes: string[]; updatedAt: string } => ({
+const ALL_SOURCES = ['hiring', 'tender', 'compra_agil', 'project'];
+const toProfile = (row: ProfileRow): HiringSearchProfile & {
+  keywords: string[]; unspscCodes: string[]; sectors: string[]; minInvestmentUsd: number | null; updatedAt: string;
+} => ({
   id: row.id, name: row.name, offer: row.offer, roles: row.roles || [], regions: row.regions || [], minAds: row.min_ads,
-  keywords: row.keywords || [], unspscCodes: row.unspsc_codes || [], updatedAt: row.updated_at,
+  keywords: row.keywords || [], unspscCodes: row.unspsc_codes || [], sectors: row.seia_sectors || [],
+  minInvestmentUsd: row.min_investment_usd === null || row.min_investment_usd === undefined ? null : Number(row.min_investment_usd), updatedAt: row.updated_at,
 });
 
 function fail(what: string, error: unknown): never {
@@ -34,18 +40,27 @@ function fail(what: string, error: unknown): never {
   throw new Error(`No se pudo ${what}.`);
 }
 
+const readHiringProfile = (client: SupabaseClient, scope: Scope) => client.from('commercial_opportunity_profiles').select(PROFILE_COLUMNS)
+  .eq('organization_id', scope.organizationId).eq('active', true).contains('sources', ['hiring'])
+  .order('created_at', { ascending: true }).limit(1).maybeSingle();
+
+/** The organization's profile, or null when nobody opened «Oportunidades» yet. Read only: Cowork never creates it. */
+export async function findHiringProfile(client: SupabaseClient, scope: Scope) {
+  const found = await readHiringProfile(client, scope);
+  if (found.error) fail('leer el perfil de búsqueda', found.error);
+  return found.data ? toProfile(found.data as ProfileRow) : null;
+}
+
 /** The organization's «contratando» profile; the first time, the pilot's starting point (editable in the page). */
 export async function ensureHiringProfile(client: SupabaseClient, scope: Scope) {
-  const read = () => client.from('commercial_opportunity_profiles').select(PROFILE_COLUMNS)
-    .eq('organization_id', scope.organizationId).eq('active', true).contains('sources', ['hiring'])
-    .order('created_at', { ascending: true }).limit(1).maybeSingle();
+  const read = () => readHiringProfile(client, scope);
   const found = await read();
   if (found.error) fail('leer el perfil de búsqueda', found.error);
   if (found.data) return toProfile(found.data as ProfileRow);
   const created = await client.from('commercial_opportunity_profiles').insert({
     organization_id: scope.organizationId, created_by: scope.userId, name: GRUPOEXPRO_PILOT.name, offer: GRUPOEXPRO_PILOT.offer,
     roles: [...GRUPOEXPRO_PILOT.roles], regions: [...GRUPOEXPRO_PILOT.regions], min_ads: GRUPOEXPRO_PILOT.minAds,
-    keywords: [...GRUPOEXPRO_TENDER_KEYWORDS], sources: ALL_SOURCES,
+    keywords: [...GRUPOEXPRO_TENDER_KEYWORDS], seia_sectors: [...PILOT_SEIA_SECTORS], min_investment_usd: 10_000_000, sources: ALL_SOURCES,
   }).select(PROFILE_COLUMNS).single();
   if (created.data) return toProfile(created.data as ProfileRow);
   // Two tabs opening the page at once: the other one created it.
@@ -64,12 +79,15 @@ export const hiringProfilePatchSchema = z.object({
   minAds: z.number().int().min(1).max(100),
   keywords: list(40, 80).optional(),
   unspscCodes: z.array(z.string().trim().regex(/^\d{2,8}$/, 'Los códigos UNSPSC son de 2 a 8 dígitos.')).max(40).optional(),
+  sectors: z.array(z.enum(SEIA_SECTORS.map(sector => sector.id) as [string, ...string[]])).max(20).optional(),
+  minInvestmentUsd: z.number().min(0).max(100_000_000_000).nullable().optional(),
 }).strict();
 
 export async function updateHiringProfile(client: SupabaseClient, scope: Scope, id: string, patch: z.infer<typeof hiringProfilePatchSchema>) {
   const { data, error } = await client.from('commercial_opportunity_profiles').update({
     name: patch.name, offer: patch.offer, roles: patch.roles, regions: patch.regions, min_ads: patch.minAds,
     ...(patch.keywords ? { keywords: patch.keywords } : {}), ...(patch.unspscCodes ? { unspsc_codes: [...new Set(patch.unspscCodes)] } : {}),
+    ...(patch.sectors ? { seia_sectors: [...new Set(patch.sectors)] } : {}), ...(patch.minInvestmentUsd !== undefined ? { min_investment_usd: patch.minInvestmentUsd } : {}),
     sources: ALL_SOURCES, updated_at: new Date().toISOString(),
   }).eq('id', id).eq('organization_id', scope.organizationId).select(PROFILE_COLUMNS).maybeSingle();
   if (error) fail('guardar el perfil de búsqueda', error);
@@ -155,7 +173,7 @@ async function upsertSignals(client: SupabaseClient, rows: object[]) {
   }
 }
 /** The run log, shared by every source: at most one search running per organization. */
-function runLog(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule') {
+function runLog(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule' | 'upload') {
   const runs = () => client.from('commercial_opportunity_runs');
   return {
     async closeStaleRuns(before: string, now: string) {
@@ -263,20 +281,56 @@ export async function listTenderOpportunities(client: SupabaseClient, scope: Sco
 }
 
 /** The TenderStore of a tender sync: runs, keys and rows of the person's organization through the service client. */
+async function existingKeysOf(client: SupabaseClient, scope: Scope, kinds: string[], keys: string[]) {
+  const found = new Set<string>();
+  for (let index = 0; index < keys.length; index += 200) {
+    const { data, error } = await client.from('commercial_opportunities').select('dedupe_key')
+      .eq('organization_id', scope.organizationId).in('kind', kinds).in('dedupe_key', keys.slice(index, index + 200));
+    if (error) fail('revisar las oportunidades guardadas', error);
+    for (const row of data || []) found.add(String((row as { dedupe_key: string }).dedupe_key));
+  }
+  return found;
+}
+
 export function supabaseTenderStore(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule'): TenderStore {
   return {
     ...runLog(client, scope, trigger),
-    async existingKeys(keys, kinds) {
-      const found = new Set<string>();
-      for (let index = 0; index < keys.length; index += 200) {
-        const { data, error } = await client.from('commercial_opportunities').select('dedupe_key')
-          .eq('organization_id', scope.organizationId).in('kind', kinds).in('dedupe_key', keys.slice(index, index + 200));
-        if (error) fail('revisar las licitaciones guardadas', error);
-        for (const row of data || []) found.add(String((row as { dedupe_key: string }).dedupe_key));
-      }
-      return found;
-    },
+    existingKeys: (keys, kinds) => existingKeysOf(client, scope, kinds, keys),
     saveOpportunities: rows => upsertOpportunities(client, rows),
     saveSignals: rows => upsertSignals(client, rows),
   };
+}
+
+/** The ProjectStore of a SEIA upload. */
+export function supabaseProjectStore(client: SupabaseClient, scope: Scope & { profileId: string }): ProjectStore {
+  return {
+    ...runLog(client, scope, 'upload'),
+    existingKeys: keys => existingKeysOf(client, scope, ['project'], keys),
+    saveOpportunities: rows => upsertOpportunities(client, rows),
+    saveSignals: rows => upsertSignals(client, rows),
+  };
+}
+
+const PROJECT_COLUMNS = 'id,title,company_name,region,amount,published_at,url,score,reasons,status,claimed_by,first_seen_at,last_seen_at,data';
+type ProjectRow = {
+  id: string; title: string; company_name: string | null; region: string | null; amount: number | string | null; published_at: string | null;
+  url: string | null; score: number; reasons: string[]; status: OpportunityStatus; claimed_by: string | null; first_seen_at: string; last_seen_at: string;
+  data: ProjectOpportunityData;
+};
+export type ProjectOpportunityView = {
+  id: string; title: string; owner: string | null; region: string | null; investmentUsd: number | null; presentedAt: string | null; url: string | null;
+  score: number; reasons: string[]; status: OpportunityStatus; mine: boolean; firstSeenAt: string; data: ProjectOpportunityData;
+};
+
+/** The SEIA projects of the last uploads, best first and then the most recent. */
+export async function listProjectOpportunities(client: SupabaseClient, scope: Scope) {
+  const { data, error } = await client.from('commercial_opportunities').select(PROJECT_COLUMNS)
+    .eq('organization_id', scope.organizationId).eq('kind', 'project')
+    .order('score', { ascending: false }).order('published_at', { ascending: false }).limit(300);
+  if (error) fail('leer los proyectos', error);
+  return ((data || []) as ProjectRow[]).map((row): ProjectOpportunityView => ({
+    id: row.id, title: row.title, owner: row.company_name, region: row.region, investmentUsd: row.amount === null ? null : Number(row.amount),
+    presentedAt: row.published_at, url: row.url, score: row.score, reasons: row.reasons || [], status: row.status, mine: row.claimed_by === scope.userId,
+    firstSeenAt: row.first_seen_at, data: row.data,
+  }));
 }

@@ -8,6 +8,7 @@ import { readCoworkSavedSearches } from './saved-searches';
 import { readCoworkProfile } from './profile-read';
 import { readCoworkIcp } from './icp-read';
 import { readCoworkLeadRecommendations } from './lead-recommend-read';
+import { readCoworkOpportunities } from './opportunities-read';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from '@/lib/cowork/domain-reads';
 import { queryCoworkContactabilityBatch, queryCoworkDomainRead } from './domain-reads';
 import { readCoworkBatchReport, readCoworkCompanyPlan, readCoworkNextTouch, readCoworkRetryReview } from './batch-reads';
@@ -84,6 +85,12 @@ export function coworkReadCapabilities(
       description: 'A quién escribir: contactos guardados sin contactar, ordenados por calce con la oferta o el cliente ideal y por preparación',
       input: z.string().max(300), output: z.unknown(),
       execute: input => readCoworkLeadRecommendations(client, scope, input as string),
+    },
+    {
+      name: 'opportunities.list', version: 1, effect: 'read',
+      description: 'Oportunidades comerciales de la organización (empresas contratando, licitaciones y proyectos del SEIA) con su señal, fuente y fecha; solo cuentas con acceso',
+      input: z.string().max(200), output: z.unknown(),
+      execute: input => readCoworkOpportunities(client, scope, input as string),
     },
     {
       name: 'leads.get', version: 1, effect: 'read',

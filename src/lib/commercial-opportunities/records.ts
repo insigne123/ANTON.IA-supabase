@@ -1,5 +1,6 @@
 import type { HiringOpportunity, JobAd, JobAdSource } from './hiring';
 import { tenderUrl, type Tender, type TenderSource } from './tenders';
+import type { SeiaProject } from './projects';
 
 /**
  * The rows of «empresas contratando» (plan 8, phase 3): one commercial_opportunities row per company and one
@@ -143,3 +144,36 @@ export function tenderSignalRow(tender: Tender, scope: { organizationId: string;
   };
 }
 export type TenderSignalRow = ReturnType<typeof tenderSignalRow>;
+
+export type ProjectOpportunityData = {
+  owner: string | null; presentation: 'DIA' | 'EIA' | null; typology: string | null; sector: string | null; state: string | null;
+  communes: string | null; presentedAt: string | null; qualifiedAt: string | null; investmentMusd: number | null;
+};
+/** A SEIA project: its owner is the company to reach. Status and owner of the row are never sent, as with the rest. */
+export function projectOpportunityRow(project: SeiaProject, match: { score: number; reasons: string[]; sector: string | null },
+  scope: { organizationId: string; profileId: string | null }, now: string) {
+  const data: ProjectOpportunityData = {
+    owner: clip(project.owner, 300), presentation: project.presentation, typology: clip(project.typology, 300), sector: match.sector,
+    state: clip(project.state, 60), communes: clip(project.communes, 200), presentedAt: project.presentedAt, qualifiedAt: project.qualifiedAt,
+    investmentMusd: project.investmentMusd,
+  };
+  return {
+    organization_id: scope.organizationId, profile_id: scope.profileId, kind: 'project' as const, dedupe_key: project.id.slice(0, 300),
+    title: clip(project.name, 500) || project.id, company_name: clip(project.owner, 300), region: clip(project.region, 120),
+    amount: project.investmentMusd === null ? null : Math.round(project.investmentMusd * 1_000_000), currency: 'USD',
+    published_at: project.presentedAt ? `${project.presentedAt}T12:00:00.000Z` : null, url: httpUrl(project.url),
+    score: Math.max(0, Math.min(100, Math.round(match.score))), reasons: match.reasons.slice(0, 10).map(reason => reason.slice(0, 300)),
+    signal_count: 1, last_seen_at: now, updated_at: now, data,
+  };
+}
+export type ProjectOpportunityRow = ReturnType<typeof projectOpportunityRow>;
+
+export function projectSignalRow(project: SeiaProject, scope: { organizationId: string; opportunityId: string }, now: string) {
+  return {
+    organization_id: scope.organizationId, opportunity_id: scope.opportunityId, source: 'seia' as const, external_id: project.id.slice(0, 300),
+    title: clip(project.name, 500) || project.id, location: clip([project.communes, project.region].filter(Boolean).join(', '), 200),
+    publisher: 'SEIA', url: httpUrl(project.url), posted_at: project.presentedAt ? `${project.presentedAt}T12:00:00.000Z` : null, seen_at: now,
+    data: { owner: clip(project.owner, 300), state: clip(project.state, 60), investmentMusd: project.investmentMusd, presentation: project.presentation },
+  };
+}
+export type ProjectSignalRow = ReturnType<typeof projectSignalRow>;

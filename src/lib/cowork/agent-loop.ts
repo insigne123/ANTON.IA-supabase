@@ -50,7 +50,7 @@ export const coworkDecisionSchema = z.object({
     'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'linkedin.invite_batch', 'linkedin.message_batch', 'contacts.import',
     'contacts.prepare_batch',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
-    'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze', 'leads.recommend',
+    'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze', 'leads.recommend', 'opportunities.list',
     'answer', 'draft.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
@@ -97,7 +97,8 @@ export const coworkDecisionSchema = z.object({
 export type CoworkReadAction = CoworkDomainRead | 'privacy.contactability_batch' | 'lists.review_batch' | 'leads.search' | 'leads.get' | 'research.get_existing'
   | 'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'contacted.account' | 'replies.meeting_chain' | 'replies.attention' | 'replies.stalled' | 'metrics.overview' | 'metrics.rates' | 'metrics.diagnose' | 'metrics.channels' | 'metrics.incidents' | 'deliverability.check' | 'site.read' | 'leads.count' | 'leads.summary' | 'deliverability.bounces' | 'deliverability.sender' | 'compliance.check' | 'compliance.law' | 'compliance.obligation' | 'app.context' | 'draft.get' | 'campaigns.list' | 'files.list' | 'files.read' | 'saved_searches.list' | 'profile.get'
   | 'campaigns.batch_report' | 'campaigns.next_touch' | 'campaigns.retry_review' | 'campaigns.company_plan'
-  | 'linkedin.network' | 'linkedin.inbox' | 'linkedin.quota' | 'linkedin.followups' | 'linkedin.jobs' | 'icp.analyze' | 'leads.recommend';
+  | 'linkedin.network' | 'linkedin.inbox' | 'linkedin.quota' | 'linkedin.followups' | 'linkedin.jobs' | 'icp.analyze' | 'leads.recommend'
+  | 'opportunities.list';
 export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draft.request' | 'lead.enrich' | 'email.send' | 'campaign.create' | 'campaign.activate' | 'campaign.pause' | 'code.execute'
   | 'profile.update' | 'saved_search.create' | 'saved_search.update' | 'saved_search.delete' | 'campaign.stop_v2'
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
@@ -606,6 +607,9 @@ function proposalRejection(error: unknown, signal: AbortSignal): unknown {
 
 const ID_TEXT = /[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/i;
 const NOT_A_STEP_READ = new Set(['answer', 'reads.parallel', 'reads.plan']);
+const readsOpportunities = (decision: Decision) => decision.action === 'opportunities.list'
+  || Boolean(decision.reads?.some(task => task.action === 'opportunities.list'))
+  || Boolean(decision.plan?.some(task => task.read.action === 'opportunities.list'));
 
 /** The plan as the person reads it: two to five short steps without IDs or
  * [filler]. A step keeps its read only when it names one the loop runs, so the
@@ -668,6 +672,8 @@ async function runCoworkLoop(input: {
   linkedinBatch?: boolean;
   /** contacts.prepare_batch may be proposed (on unless COWORK_PREPARE_BATCH_ENABLED=false; its kind is in the migration 20261001210000). */
   prepareBatch?: boolean;
+  /** opportunities.list may be read: the owner of the run is in OPPORTUNITIES_ALLOWED_EMAILS (server/cowork/opportunities-read.ts). */
+  opportunities?: boolean;
   /** The judge (plan 2, G2): reads the coordinator's final answer before it is shown and returns
    * what to fix, or null when it stands. At most once per turn, and only with a decision to spare;
    * `canRead` says whether its correction may still make a read (a decision for it and one to answer). */
@@ -1112,6 +1118,10 @@ async function runCoworkLoop(input: {
       if (turn === last) throw new Error('Cowork tool budget exhausted');
       // Checked again here: the decision itself may have run past the soft deadline.
       if (late()) throw rejected('Cowork turn time exhausted', 'Se acabó el tiempo de este turno: responde con lo observado y di en una línea qué queda para el siguiente paso.');
+      // «Oportunidades» exists only for the accounts that see the section: for anyone else the read is not there.
+      if (!input.opportunities && readsOpportunities(decision)) {
+        throw rejected('Read unavailable', 'Esa consulta no está disponible en esta cuenta: sigue con las demás y no la menciones.');
+      }
       await recordPlan(decision);
       if (decision.action === 'reads.plan') {
         if (!decision.plan || readsUsed + decision.plan.length > readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
@@ -1162,7 +1172,7 @@ async function runCoworkLoop(input: {
           || decision.action === 'files.read'
         ? (decision.query ?? (decision.reads?.length === 1 && decision.reads[0].action === decision.action
             ? decision.reads[0].input : null))
-          : decision.action === 'icp.analyze' || decision.action === 'leads.recommend'
+          : decision.action === 'icp.analyze' || decision.action === 'leads.recommend' || decision.action === 'opportunities.list'
             ? (decision.query ?? '')
           : decision.action === 'metrics.overview' || decision.action === 'metrics.rates' || decision.action === 'metrics.diagnose' || decision.action === 'metrics.channels' || decision.action === 'metrics.incidents' || decision.action === 'deliverability.bounces' || decision.action === 'deliverability.sender' || decision.action === 'compliance.law' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
           || decision.action === 'linkedin.network' || decision.action === 'linkedin.inbox' || decision.action === 'linkedin.quota'
