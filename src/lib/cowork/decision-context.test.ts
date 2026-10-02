@@ -203,7 +203,7 @@ test('LinkedIn batches are described only when they are on, say who the server l
   const text = String(on.linkedinBatchCapability);
   assert.match(text, /linkedin\.invite_batch con linkedinBatch \{leads: \[\{leadId\}\]\} \(hasta 25\) invita sin nota/);
   assert.match(text, /linkedin\.message_batch con linkedinBatch \{leads: \[\{leadId, message\}\]\} \(hasta 15\)/);
-  assert.match(text, /leadId son de contactos guardados que ya consultaste en esta conversación/);
+  assert.match(text, /leadId son de tus contactos \(guardados o de «Por escribir»\) que ya consultaste en esta conversación/);
   assert.match(text, /Antes de invitar consulta linkedin\.quota/);
   // The server plans the day: one company a day across email and LinkedIn, the quota, and the brakes of a single action.
   assert.match(text, /una empresa por día sumando correo y LinkedIn \(sale la primera de cada empresa\)/);

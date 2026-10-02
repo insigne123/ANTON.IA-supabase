@@ -102,6 +102,17 @@ async function loadOwnLeads(client: Client, scope: Scope, leadIds: string[], apo
     byId.set(lead.id, lead);
     for (const key of [lead.apollo_id, lead.source_provider_id]) if (key && !byProvider.has(key)) byProvider.set(key, lead);
   }
+  // A contact of «Por escribir» (Plan 6, PR-A) is already a contact with its email: only its research can be left to do.
+  const missing = leadIds.filter(id => !byId.has(id));
+  if (missing.length) {
+    const enriched = await client.from('enriched_leads').select('id,full_name,company_name,organization_name,title,email,source_provider_id')
+      .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).in('id', missing);
+    if (enriched.error) throw new Error('No se pudo leer a las personas del lote.');
+    for (const row of (enriched.data || []) as Array<Record<string, string | null>>) {
+      byId.set(String(row.id), { id: String(row.id), name: row.full_name ?? null, company: row.company_name || row.organization_name || null,
+        title: row.title ?? null, email: row.email ?? null, apollo_id: null, source_provider_id: row.source_provider_id ?? null });
+    }
+  }
   return { byId, byProvider };
 }
 
@@ -151,7 +162,7 @@ export async function stageCoworkPrepareBatch(scope: Scope, runId: string, input
   const leadIds = people.flatMap(person => ('leadId' in person ? [person.leadId] : []));
   const apolloIds = people.flatMap(person => ('providerId' in person ? [apolloKey(person.providerId)] : []));
   const leads = await loadOwnLeads(client, scope, leadIds, apolloIds);
-  if (leadIds.some(id => !leads.byId.has(id))) throw new Error('Todas las personas del lote deben ser contactos guardados tuyos.');
+  if (leadIds.some(id => !leads.byId.has(id))) throw new Error('Todas las personas del lote deben ser contactos tuyos (guardados o de «Por escribir»).');
   const savedRows = people.flatMap(person => {
     const lead = 'leadId' in person ? leads.byId.get(person.leadId) : leads.byProvider.get(apolloKey(person.providerId));
     return lead ? [lead] : [];

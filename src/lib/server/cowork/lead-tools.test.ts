@@ -123,17 +123,21 @@ test('a malformed stored profile never makes the whole result unreadable for the
   assert.equal(observed.find(row => row.id === ID(2))?.linkedin_url, null);
 });
 
-/** A client that answers the three head counts of a segment by the filters each one applied. */
-function countingClient(counts: { total: number; email: number; profile: number }, error = false) {
+/** A client that answers the head counts of a segment by the table and the filters each one applied. */
+function countingClient(counts: { total: number; email: number; profile: number }, error = false,
+  enriched: { total: number; email: number; profile: number } | 'error' = { total: 0, email: 0, profile: 0 }) {
   const calls: Array<[string, ...unknown[]]> = [];
   const make = (table: string) => {
     const applied: string[] = [];
     const chain: Record<string, unknown> = {};
-    for (const name of ['select', 'eq', 'or', 'not', 'neq', 'ilike']) {
+    for (const name of ['select', 'eq', 'or', 'not', 'neq', 'ilike', 'is']) {
       chain[name] = (...args: unknown[]) => { calls.push([name, ...args]); applied.push(name); return chain; };
     }
-    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({
-      count: applied.includes('ilike') ? counts.profile : applied.includes('neq') ? counts.email : counts.total, error: error ? { message: 'boom' } : null }));
+    const source = table === 'enriched_leads' ? enriched : counts;
+    const failed = table === 'enriched_leads' ? enriched === 'error' : error;
+    const pick = (value: { total: number; email: number; profile: number } | 'error') => value === 'error' ? null
+      : applied.includes('ilike') ? value.profile : applied.includes('neq') ? value.email : value.total;
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ count: pick(source), error: failed ? { message: 'boom' } : null }));
     return chain;
   };
   return { calls, db: { from: (table: string) => { calls.push(['from', table]); return make(table); } } as unknown as SupabaseClient };
@@ -148,8 +152,8 @@ test('a segment is counted exactly, per user and organization, with whole phrase
   assert.equal(result.withoutEmail, 34);
   assert.equal(result.withLinkedinProfile, 150);
   assert.equal(result.exact, true);
-  assert.equal(f.calls.filter(call => call[0] === 'eq' && call[1] === 'user_id' && call[2] === 'owner').length, 3);
-  assert.equal(f.calls.filter(call => call[0] === 'eq' && call[1] === 'organization_id' && call[2] === 'org').length, 3);
+  assert.equal(f.calls.filter(call => call[0] === 'eq' && call[1] === 'user_id' && call[2] === 'owner').length, 6, 'saved and «Por escribir»');
+  assert.equal(f.calls.filter(call => call[0] === 'eq' && call[1] === 'organization_id' && call[2] === 'org').length, 6);
   assert.ok(f.calls.filter(call => call[0] === 'select').every(call => call[1] === 'id' && (call[2] as { head: boolean }).head === true), 'only counts leave the database');
   const filter = String(f.calls.find(call => call[0] === 'or')?.[1]);
   assert.ok(filter.includes('title.ilike."%Recursos Humanos%"'));
@@ -198,7 +202,7 @@ test('a contact another member holds comes with its team notice, so Cowork does 
   assert.equal('teamLock' in byName['Rafael Díaz'], false, 'a free contact carries no notice');
 });
 
-test('the summary by state reads only the person\'s own rows, three bounded lists, and never names', async () => {
+test('the summary by state reads only the person\'s own rows, four bounded lists, and never names', async () => {
   const calls: Array<[string, ...unknown[]]> = [];
   const data: Record<string, unknown[]> = {
     leads: [{ id: 'a', email: 'ana@x.cl', linkedin_url: null }, { id: 'b', email: null, linkedin_url: null }],
@@ -214,9 +218,111 @@ test('the summary by state reads only the person\'s own rows, three bounded list
   } } as unknown as SupabaseClient;
   const summary = await summarizeCoworkLeads(db, { userId: 'owner', organizationId: 'org' });
   assert.deepEqual(summary.groups.filter(group => group.count).map(group => [group.id, group.count]), [['contacted', 1], ['no_email', 1]]);
-  assert.equal(calls.filter(call => call[0] === 'eq' && call[1] === 'user_id' && call[2] === 'owner').length, 3);
-  assert.equal(calls.filter(call => call[0] === 'eq' && call[1] === 'organization_id' && call[2] === 'org').length, 3);
+  assert.equal(calls.filter(call => call[0] === 'eq' && call[1] === 'user_id' && call[2] === 'owner').length, 4, 'saved, «Por escribir», sends and research');
+  assert.equal(calls.filter(call => call[0] === 'eq' && call[1] === 'organization_id' && call[2] === 'org').length, 4);
   assert.ok(calls.some(call => call[0] === 'eq' && call[1] === 'status' && call[2] === 'completed'), 'only finished research counts');
   assert.ok(calls.filter(call => call[0] === 'select').every(call => !/name|company|title/.test(String(call[1]))), 'no names leave the database');
   assert.ok(calls.filter(call => call[0] === 'limit').every(call => Number(call[1]) <= 10000));
+});
+
+/** A client whose tables answer their own rows (or an error), whatever the filters: enough to see how the sources merge. */
+function tablesClient(tables: Record<string, unknown[] | 'error'>) {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const db = { from: (table: string) => {
+    calls.push(['from', table]);
+    const chain: Record<string, unknown> = {};
+    for (const name of ['select', 'eq', 'order', 'limit', 'or', 'in', 'not', 'is', 'neq', 'ilike']) {
+      chain[name] = (...args: unknown[]) => { calls.push([name, table, ...args]); return chain; };
+    }
+    const answer = () => tables[table] === 'error' ? { data: null, error: { message: 'boom' } } : { data: tables[table] || [], error: null };
+    chain.maybeSingle = () => Promise.resolve(answer());
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(answer()));
+    return chain;
+  } } as unknown as SupabaseClient;
+  return { calls, db };
+}
+
+const SAVED_A = '00000000-0000-4000-8000-0000000000a1';
+const ENRICHED_B = '00000000-0000-4000-8000-0000000000b2';
+const ENRICHED_LINKED = '00000000-0000-4000-8000-0000000000c3';
+
+test('«Por escribir» joins the search: a saved person once, with the LinkedIn its email search found, and the rest as enriched', async () => {
+  const f = tablesClient({
+    leads: [{ id: SAVED_A, name: 'Rafael Díaz', title: 'Gerente de Personas', company: 'Sodexo', email: null, linkedin_url: null, created_at: '2026-09-20T10:00:00Z' }],
+    enriched_leads: [
+      { id: ENRICHED_LINKED, full_name: 'Rafael Díaz', title: 'Gerente de Personas', company_name: 'Sodexo', email: 'rdiaz@sodexo.cl',
+        linkedin_url: 'https://cl.linkedin.com/in/rafael-diaz/', saved_lead_id: SAVED_A, created_at: '2026-09-21T10:00:00Z' },
+      { id: ENRICHED_B, full_name: 'Susana Mora', title: 'Jefa de Reclutamiento', company_name: null, organization_name: 'Andes Servicios',
+        email: 'smora@andes.cl', organization_industry: 'Staffing', linkedin_url: 'linkedin.com/in/susana-mora', created_at: '2026-09-25T10:00:00Z' },
+    ],
+  });
+  const result = await queryCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
+  assert.equal(result.scope, 'own_saved_contacts', 'the observed rows keep their scope');
+  assert.deepEqual(result.sources, { saved: 1, enriched: 1 });
+  const byId = new Map((result.items as Array<Record<string, unknown>>).map(item => [item.id, item]));
+  assert.equal(byId.size, 2, 'each person once');
+  assert.deepEqual(
+    { source: byId.get(SAVED_A)?.source, email: byId.get(SAVED_A)?.email, linkedin: byId.get(SAVED_A)?.linkedin_url },
+    { source: 'saved', email: 'rdiaz@sodexo.cl', linkedin: 'https://www.linkedin.com/in/rafael-diaz' });
+  assert.deepEqual(
+    { source: byId.get(ENRICHED_B)?.source, name: byId.get(ENRICHED_B)?.name, company: byId.get(ENRICHED_B)?.company,
+      industry: byId.get(ENRICHED_B)?.industry, linkedin: byId.get(ENRICHED_B)?.linkedin_url },
+    { source: 'enriched', name: 'Susana Mora', company: 'Andes Servicios', industry: 'Staffing', linkedin: 'https://www.linkedin.com/in/susana-mora' });
+  assert.equal((result.items as Array<{ id: string }>)[0].id, ENRICHED_B, 'the most recent first');
+  assert.ok(f.calls.some(call => call[0] === 'eq' && call[1] === 'enriched_leads' && call[2] === 'user_id' && call[3] === 'owner'), '«Por escribir» is read per user too');
+  // The exports and batches see them as observed contacts.
+  assert.deepEqual(collectCoworkLeadRows([{ action: 'leads.search', result }]).map(row => row.id).sort(), [SAVED_A, ENRICHED_B].sort());
+});
+
+test('a search term looks in «Por escribir» with its own columns and no grammar from the model', async () => {
+  const f = tablesClient({ leads: [], enriched_leads: [{ id: ENRICHED_B, full_name: 'Susana Mora', email: 'smora@andes.cl', created_at: '2026-09-25T10:00:00Z' }] });
+  const result = await queryCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'Susana (Mora)');
+  const filter = String(f.calls.find(call => call[0] === 'or' && call[1] === 'enriched_leads')?.[2]);
+  assert.ok(filter.split(',').every(part => /^(full_name|title|company_name|email|city|country)\.ilike\.%[^%,()]*%$/.test(part)), filter);
+  assert.equal(result.returned, 1);
+  assert.equal(result.partial, false);
+});
+
+test('a contact of «Por escribir» is read by its id, and if «Por escribir» fails the saved contacts still answer', async () => {
+  const one = tablesClient({ leads: [], enriched_leads: [{ id: ENRICHED_B, full_name: 'Susana Mora', email: 'smora@andes.cl', linkedin_url: 'https://www.linkedin.com/in/susana-mora' }] });
+  const detail = await queryCoworkLeads(one.db, { userId: 'owner', organizationId: 'org' }, 'leads.get', ENRICHED_B);
+  assert.equal(detail.returned, 1);
+  assert.deepEqual([(detail.items as Array<Record<string, unknown>>)[0].name, (detail.items as Array<Record<string, unknown>>)[0].source], ['Susana Mora', 'enriched']);
+  const down = tablesClient({ leads: [{ id: SAVED_A, name: 'Rafael Díaz', email: null }], enriched_leads: 'error' });
+  const saved = await queryCoworkLeads(down.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
+  assert.deepEqual(saved.sources, { saved: 1, enriched: 0 });
+  assert.equal(saved.returned, 1);
+});
+
+test('the summary counts «Por escribir» once per person, with their emails and LinkedIn', async () => {
+  const f = tablesClient({
+    leads: [{ id: SAVED_A, email: null, linkedin_url: null }],
+    enriched_leads: [
+      { id: ENRICHED_LINKED, email: 'rdiaz@sodexo.cl', linkedin_url: 'https://www.linkedin.com/in/rafael-diaz', saved_lead_id: SAVED_A },
+      { id: ENRICHED_B, email: 'smora@andes.cl', linkedin_url: 'https://www.linkedin.com/in/susana-mora' },
+    ],
+    contacted_leads: [], lead_research_jobs: [{ lead_id: ENRICHED_B }],
+  });
+  const summary = await summarizeCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' });
+  assert.equal(summary.total, 2);
+  assert.deepEqual(summary.groups.filter(group => group.count).map(group => [group.id, group.count]), [['ready', 1], ['with_email', 1]]);
+  assert.equal(summary.withLinkedinProfile, 2);
+  assert.deepEqual(summary.sources, { saved: 1, porEscribir: 1 });
+  assert.match(summary.note, /«Por escribir»/);
+  const down = tablesClient({ leads: [{ id: SAVED_A, email: null }], enriched_leads: 'error', contacted_leads: [], lead_research_jobs: [] });
+  const partial = await summarizeCoworkLeads(down.db, { userId: 'owner', organizationId: 'org' });
+  assert.deepEqual(partial.sources, { saved: 1, porEscribir: null });
+  assert.match(partial.note, /No se pudo leer «Por escribir»/);
+});
+
+test('a segment counts «Por escribir» too, without the ones already tied to a saved contact', async () => {
+  const f = countingClient({ total: 10, email: 4, profile: 1 }, false, { total: 30, email: 30, profile: 25 });
+  const result = await countCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'reclutador');
+  assert.deepEqual([result.total, result.withEmail, result.withoutEmail, result.withLinkedinProfile], [40, 34, 6, 26]);
+  assert.deepEqual(result.bySource, { saved: { total: 10, withEmail: 4, withLinkedinProfile: 1 }, porEscribir: { total: 30, withEmail: 30, withLinkedinProfile: 25 } });
+  assert.ok(f.calls.some(call => call[0] === 'is' && call[1] === 'data->>sourceSavedLeadId' && call[2] === null), 'no person counts twice through its link');
+  const enrichedFilter = String(f.calls.filter(call => call[0] === 'or').map(call => call[1]).find(value => String(value).includes('company_name')));
+  assert.ok(enrichedFilter.split(',').every(part => /^(title|company_name|organization_industry)\.ilike\."%[^%,()"]+%"$/.test(part)), enrichedFilter);
+  const down = await countCoworkLeads(countingClient({ total: 10, email: 4, profile: 1 }, false, 'error').db, { userId: 'owner', organizationId: 'org' }, '');
+  assert.deepEqual([down.total, down.exact, down.bySource.porEscribir], [10, false, null]);
 });

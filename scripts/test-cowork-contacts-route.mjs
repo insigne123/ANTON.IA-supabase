@@ -18,13 +18,18 @@ const state = {
     ...Array.from({ length: 8 }, (_, index) => lead(20 + index, `Persona ${index + 1}`, 'Cargo', 'Empresa', null)),
     lead(40, '  ', 'Sin nombre', 'Empresa', null),
   ],
+  // «Por escribir» (Plan 6, PR-A): a contact found from Buscar, with no saved row.
+  enriched: [{ id: '00000000-0000-4000-8000-000000000090', full_name: 'Susana Mora', title: 'Jefa de Reclutamiento', company_name: 'Andes Servicios',
+    email: 'smora@andes.cl', linkedin_url: null, created_at: '2026-09-01T10:00:00Z', user_id: USER, organization_id: ORG }],
 };
 globalThis.__coworkContactsRoute = state;
 // A PostgREST-like client over the leads above: only what queryCoworkLeads uses.
 const client = {
   from: table => {
-    assert.equal(table, 'leads');
-    const query = { eq: [], or: null, limit: null };
+    assert.ok(table === 'leads' || table === 'enriched_leads', table);
+    const source = table === 'leads' ? state.leads : state.enriched;
+    const fields = table === 'leads' ? ['name', 'title', 'company', 'email'] : ['full_name', 'title', 'company_name', 'email'];
+    const query = { table, eq: [], or: null, limit: null };
     const builder = {
       select: () => builder,
       eq: (column, value) => { query.eq.push([column, value]); return builder; },
@@ -34,8 +39,8 @@ const client = {
       then: (resolve, reject) => {
         state.queries.push(query);
         const terms = query.or ? [...new Set(query.or.split(',').map(part => part.split('.ilike.%')[1]?.replace(/%$/, '').toLowerCase()))] : [];
-        const rows = state.leads.filter(row => query.eq.every(([column, value]) => row[column] === value))
-          .filter(row => !terms.length || terms.some(term => ['name', 'title', 'company', 'email'].some(field => String(row[field] || '').toLowerCase().includes(term))))
+        const rows = source.filter(row => query.eq.every(([column, value]) => row[column] === value))
+          .filter(row => !terms.length || terms.some(term => fields.some(field => String(row[field] || '').toLowerCase().includes(term))))
           .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, query.limit ?? undefined);
         return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
       },
@@ -79,7 +84,10 @@ try {
   assert.deepEqual(marcela.body.contacts.map(contact => contact.name), ['Marcela Rojas']);
   assert.deepEqual(marcela.body.contacts[0], { id: state.leads[0].id, name: 'Marcela Rojas', title: 'Gerente de Personas', company: 'Sodexo Chile', hasEmail: true });
   assert.ok(!JSON.stringify(marcela.body).includes('@'), 'no email address reaches the page');
-  assert.deepEqual(state.queries.at(-1).eq, [['organization_id', ORG], ['user_id', USER]], 'only your own contacts in your organization');
+  assert.ok(state.queries.slice(-2).every(query => JSON.stringify(query.eq) === JSON.stringify([['organization_id', ORG], ['user_id', USER]])), 'only your own contacts in your organization');
+  // A contact of «Por escribir» can be mentioned too.
+  const susana = await get('susana');
+  assert.deepEqual(susana.body.contacts, [{ id: state.enriched[0].id, name: 'Susana Mora', title: 'Jefa de Reclutamiento', company: 'Andes Servicios', hasEmail: true }]);
 
   // Without a query, the most recent ones, at most six, and never a row without a name.
   const recent = await get('');
@@ -96,10 +104,10 @@ try {
   // One letter (the search takes two): the most recent ones with a name or last name that starts with it, accents aside.
   const letter = await get('m');
   assert.equal(letter.status, 200);
-  assert.deepEqual(letter.body.contacts.map(contact => contact.name), ['Felipe Muñoz', 'Marcela Rojas']);
+  assert.deepEqual(letter.body.contacts.map(contact => contact.name), ['Felipe Muñoz', 'Marcela Rojas', 'Susana Mora'], 'a surname counts too, from «Por escribir» as well');
   assert.deepEqual((await get('Á')).body.contacts.map(contact => contact.name), ['Andrea Vega']);
   assert.deepEqual(state.queries.at(-1).or, null, 'one letter lists the recent ones instead of searching');
-  console.log('PASS: the composer\'s «@» asks for access first, finds only your own saved contacts (from one letter on), sends at most six without their addresses, and treats signs as no search.');
+  console.log('PASS: the composer\'s «@» asks for access first, finds only your own contacts, saved and in «Por escribir» (from one letter on), sends at most six without their addresses, and treats signs as no search.');
 } finally {
   delete globalThis.__coworkContactsRoute;
   delete globalThis.__coworkContactsClient;

@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 
 const RUN = '00000000-0000-4000-8000-000000000010';
 const LEAD = '00000000-0000-4000-8000-000000000021';
+// A contact of «Por escribir» (Plan 6, PR-A): no saved row, the LinkedIn came with its email search.
+const ENRICHED = '00000000-0000-4000-8000-000000000031';
 const state = {
+  enriched: { id: ENRICHED, organization_id: 'org', full_name: 'Susana Mora', email: 'smora@andes.cl', title: 'Jefa de Reclutamiento',
+    company_name: 'Andes Servicios', linkedin_url: 'https://cl.linkedin.com/in/susana-mora/' },
   runStatus: 'completed',
   lead: { id: LEAD, organization_id: 'org', name: 'Ana Pérez', email: 'ana@acme.cl',
     title: 'Gerenta', company: 'Acme', linkedin_url: 'https://www.linkedin.com/in/ana-perez' },
@@ -25,7 +29,7 @@ function tableHandler(table) {
   chain.select = () => chain;
   chain.eq = (column, value) => { chain._eq.push([column, value]); return chain; };
   chain.not = () => chain;
-  chain.in = () => chain;
+  chain.in = (column, values) => { chain._in.push([column, values]); return chain; };
   chain.order = () => chain;
   chain.limit = () => chain;
   chain.gte = (column, value) => { chain._gte.push([column, value]); return chain; };
@@ -49,6 +53,10 @@ function tableHandler(table) {
       return { data: filtered, error: null, count: filtered.length };
     }
     if (table === 'contacted_leads') return { data: s.contacted, error: null };
+    // Contacts are read by id: the saved one, or one of «Por escribir».
+    const byIds = row => row && matches(row, chain._eq, chain._gte) && chain._in.every(([column, values]) => values.includes(row[column]));
+    if (table === 'leads') return { data: byIds(s.lead) ? [s.lead] : [], error: null };
+    if (table === 'enriched_leads') return { data: byIds(s.enriched) ? [s.enriched] : [], error: null };
     if (table === 'unified_crm_data') return { data: s.stages, error: null };
     return { data: [], error: null };
   };
@@ -137,7 +145,19 @@ try {
   // 10. Same content refuses as duplicate; profile change refuses execution.
   state.staged = null;
   await assert.rejects(api.stageCoworkLinkedinMessage(scope, RUN, { leadId: LEAD, message: 'Hola Ana, ¿conversamos?' }), /ya tiene un trabajo/);
-  console.log('PASS: linkedin invite/message staging, identity refusal, quota/reply/negotiation brakes and hash-bound execution without writes.');
+  // 11. A contact of «Por escribir» is invited with the LinkedIn its email search found, and the job names her.
+  state.staged = null;
+  const enrichedInvite = await api.stageCoworkLinkedinInvite(scope, RUN, { leadId: ENRICHED });
+  assert.equal(enrichedInvite.canonicalUrl, 'https://www.linkedin.com/in/susana-mora');
+  assert.equal(enrichedInvite.nameCheck, 'verified');
+  const enrichedDone = await api.executeCoworkLinkedinInvite(auth, RUN, `linkedinjob:${enrichedInvite.hash}`);
+  assert.match(enrichedDone.reply, /^Dejé lista la invitación para Susana Mora\./);
+  assert.equal(state.jobs.at(-1).display_name, 'Susana Mora');
+  // 12. Another organization's contact of «Por escribir» is not available.
+  state.staged = null;
+  state.enriched = { ...state.enriched, organization_id: 'otra' };
+  await assert.rejects(api.stageCoworkLinkedinInvite(scope, RUN, { leadId: ENRICHED }), /no está disponible/);
+  console.log('PASS: linkedin invite/message staging (saved contacts and «Por escribir»), identity refusal, quota/reply/negotiation brakes and hash-bound execution without writes.');
 } finally {
   delete globalThis.__coworkLinkedinJobs;
 }
