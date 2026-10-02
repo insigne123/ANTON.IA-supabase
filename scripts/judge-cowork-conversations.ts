@@ -18,8 +18,8 @@ import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import {
-  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, COWORK_JUDGE_NOW_RULE, coworkJudgeAgreement, coworkJudgeInstructions, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
-  type CoworkJudgement,
+  COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, COWORK_JUDGE_NOW_RULE, coworkJudgeAgreement, coworkJudgeExplainSchema, coworkJudgeInstructions, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
+  type CoworkExplainedJudgement, type CoworkJudgement,
 } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW, CORPUS_USER_CONTEXT, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
@@ -44,11 +44,12 @@ async function main() {
   const maxCalls = Number(arg('max-calls'));
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 400) throw new Error('Explicit --max-calls=1..400 required');
   let calls = 0;
-  const judge = async (prompt: string, systemPrompt = COWORK_JUDGE_INSTRUCTIONS): Promise<CoworkJudgement | null> => {
+  // The corpus reports also grade whether the answer explains (COWORK_JUDGE_EXPLAIN_RULE); the calibration keeps the five dimensions.
+  const judge = async (prompt: string, systemPrompt = COWORK_JUDGE_INSTRUCTIONS, explain = false): Promise<(CoworkJudgement & Partial<Pick<CoworkExplainedJudgement, 'explica'>>) | null> => {
     if (calls >= maxCalls) return null;
     calls++;
     try {
-      const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt, prompt,
+      const response = await generateStructuredWithTelemetry({ schema: explain ? coworkJudgeExplainSchema : coworkJudgeSchema, systemPrompt, prompt,
         openAiModel: judgeModel, allowDefaultModelFallback: false, provider: 'openai', maxAttempts: 2, timeoutMs: 60000, maxOutputTokens: 1200 });
       return response.data;
     } catch (error) {
@@ -89,7 +90,7 @@ async function main() {
     if (!input) throw new Error('Requires --input=report.json (an evaluate-cowork-conversations output) or --calibrate.');
     const source = JSON.parse(readFileSync(input, 'utf8')) as { outcomes: Array<{ id: string; attempt: number; passed: boolean; result: CorpusTurnResult; contactsImport?: boolean; replyThread?: boolean; linkedinBatch?: boolean }> };
     const selected = arg('cases')?.split(',').filter(Boolean);
-    const rows: Array<{ id: string; attempt: number; passedChecks: boolean; judgement: CoworkJudgement | null;
+    const rows: Array<{ id: string; attempt: number; passedChecks: boolean; judgement: (CoworkJudgement & { explica?: number }) | null;
       reference?: AxisReference | null; op?: string; block?: string; capability?: string; star?: boolean }> = [];
     for (const outcome of source.outcomes) {
       if (selected && !selected.includes(outcome.id)) continue;
@@ -97,7 +98,7 @@ async function main() {
       if (!entry) continue;
       // The rules of the turn as it ran: contacts.import, email.reply_thread and the LinkedIn batches on or off (in older reports, as the case says).
       // The worlds of the bank run on their own clock (the 25th), not on the day the judge runs: it reads the same date the coordinator did.
-      const rules = [coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport), replyThread: outcome.replyThread ?? Boolean(entry.replyThread), linkedinBatch: outcome.linkedinBatch ?? Boolean(entry.linkedinBatch) }), COWORK_JUDGE_NOW_RULE].join('\n');
+      const rules = [coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport), replyThread: outcome.replyThread ?? Boolean(entry.replyThread), linkedinBatch: outcome.linkedinBatch ?? Boolean(entry.linkedinBatch), explain: true }), COWORK_JUDGE_NOW_RULE].join('\n');
       const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
       const observations = corpusObservations(entry, outcome.result);
       const shown = corpusShownAnswer(outcome.result);
@@ -105,11 +106,11 @@ async function main() {
         request: entry.request,
         history: (entry.history || []).map(turn => ({ request: turn.request, reply: turn.reply, observations: turn.observations })),
         userContext, observations, shown, now: CORPUS_NOW,
-      }), rules);
+      }), rules, true);
       const compared = entry.axis ? await reference(axisReferencePrompt(entry, { shown, observations, userContext })) : undefined;
       rows.push({ id: outcome.id, attempt: outcome.attempt, passedChecks: outcome.passed, judgement,
         ...(entry.axis ? { reference: compared ?? null, op: entry.axis.op, block: entry.axis.block, capability: entry.axis.capability, star: Boolean(entry.axis.star) } : {}) });
-      if (judgement) console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id} #${outcome.attempt} · ${COWORK_JUDGE_DIMENSIONS.map(dimension => judgement.scores[dimension]).join('/')} · ${judgement.veredicto}${judgement.problemas.length ? ` · ${judgement.problemas.join(' | ')}` : ''}${compared ? ` · frente a la IA anterior: ${compared.veredicto} (${compared.motivo})` : ''}`);
+      if (judgement) console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id} #${outcome.attempt} · ${COWORK_JUDGE_DIMENSIONS.map(dimension => judgement.scores[dimension]).join('/')}${typeof judgement.explica === 'number' ? ` · explica ${judgement.explica}` : ''} · ${judgement.veredicto}${judgement.problemas.length ? ` · ${judgement.problemas.join(' | ')}` : ''}${compared ? ` · frente a la IA anterior: ${compared.veredicto} (${compared.motivo})` : ''}`);
     }
     const judged = rows.flatMap(row => row.judgement ? [row] : []);
     report = {

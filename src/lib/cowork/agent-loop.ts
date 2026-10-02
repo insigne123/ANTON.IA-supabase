@@ -456,7 +456,7 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
     chips || coworkQuestion(answer.question) ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
     // Two or more emails are meant to be copied and kept: they go in a card, not in the chat.
     !answer.document && !drafts && (answer.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2
-      ? 'pon los correos en un bloque sequence (regla 11) y deja en reply un resumen breve' : null,
+      ? 'pon los correos en un bloque sequence (regla 11) y deja en reply qué escribiste y por qué, sin repetir los correos' : null,
     // A card is copied as is: a [placeholder] would reach the recipient.
     filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
   ].filter(Boolean);
