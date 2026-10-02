@@ -34,7 +34,6 @@ create index if not exists crm_stage_suggestions_org_status_idx
   on public.crm_stage_suggestions(organization_id, status, created_at desc);
 
 alter table public.crm_stage_suggestions enable row level security;
-drop policy if exists "Members can read stage suggestions" on public.crm_stage_suggestions;
 create policy "Members can read stage suggestions"
   on public.crm_stage_suggestions for select to authenticated
   using (public.organization_has_role_v1(organization_id));

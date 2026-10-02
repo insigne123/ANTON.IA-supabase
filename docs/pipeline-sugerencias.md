@@ -33,7 +33,7 @@ Incluso podían retroceder: una apertura después de una reunión dejaba al lead
 
 ## Base de datos
 
-**Migración `20261002020000_crm_stage_suggestions.sql`:**
+**Migración `20261002005957_crm_stage_suggestions.sql`:**
 - **Tabla:** `crm_stage_suggestions`, con RLS. Los miembros solo leen las de su organización, y nadie con sesión escribe la tabla directo.
 - **`suggest_crm_stage_v1`** (solo `service_role`):
   - resuelve la fila del pipeline (`lead_saved|` o `lead_enriched|`);

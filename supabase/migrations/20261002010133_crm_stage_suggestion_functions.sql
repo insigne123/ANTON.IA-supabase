@@ -1,4 +1,4 @@
--- Plan 5, PR-10: the functions of the stage suggestions (table in 20261002020000_crm_stage_suggestions.sql).
+-- Plan 5, PR-10: the functions of the stage suggestions (table in 20261002005957_crm_stage_suggestions.sql).
 -- Events (service role): leaves or raises the pending suggestion of a lead. Returns its id, or null when nothing is
 -- suggested (unknown lead, same stage, a backward move or a closed lead).
 create or replace function public.suggest_crm_stage_v1(
