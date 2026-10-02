@@ -28,3 +28,11 @@ test('the schema the model gets lets every field be null, so it never has to inv
     assert.ok(property.anyOf?.some(option => option.type === 'null'), `${name} can be null`);
   }
 });
+
+test('«Tu cliente ideal» can be proposed too: roles, industries, a size from «Perfil» and regions', () => {
+  const decided = coworkProfileDecisionSchema.parse({ ...strict, website: null, valueProposition: null,
+    targetRoles: 'Gerente de Personas, Jefe de RR. HH.', targetIndustries: 'Retail, Minería', targetCompanySize: '201-500', targetLocations: null });
+  assert.deepEqual(coworkProfilePatchFromDecision(decided),
+    { targetRoles: 'Gerente de Personas, Jefe de RR. HH.', targetIndustries: 'Retail, Minería', targetCompanySize: '201-500' });
+  assert.equal(coworkProfileDecisionSchema.safeParse({ ...strict, targetCompanySize: '200 a 500' }).success, false, 'a size outside the options of «Perfil» is refused');
+});

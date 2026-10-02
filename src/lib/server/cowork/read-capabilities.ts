@@ -6,6 +6,7 @@ import { queryCoworkExtendedReads, readCoworkFileContent, type CoworkExtendedRea
 import { readCoworkResearch } from './research-read';
 import { readCoworkSavedSearches } from './saved-searches';
 import { readCoworkProfile } from './profile-read';
+import { readCoworkIcp } from './icp-read';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from '@/lib/cowork/domain-reads';
 import { queryCoworkContactabilityBatch, queryCoworkDomainRead } from './domain-reads';
 import { readCoworkBatchReport, readCoworkCompanyPlan, readCoworkNextTouch, readCoworkRetryReview } from './batch-reads';
@@ -70,6 +71,12 @@ export function coworkReadCapabilities(
       description: 'Contactos propios por texto o URL exacta de perfil LinkedIn; una URL no trae coincidencias de otras personas',
       input: z.string().max(500), output: z.unknown(),
       execute: input => queryCoworkLeads(client, scope, 'leads.search', input as string),
+    },
+    {
+      name: 'icp.analyze', version: 1, effect: 'read',
+      description: 'Cliente ideal: lo declarado en Perfil frente a los resultados de los envíos, por segmento, y cuántos contactos guardados calzan',
+      input: z.string().max(300), output: z.unknown(),
+      execute: input => readCoworkIcp(client, scope, input as string),
     },
     {
       name: 'leads.get', version: 1, effect: 'read',

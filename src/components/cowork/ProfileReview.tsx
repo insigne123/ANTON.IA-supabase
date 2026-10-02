@@ -57,7 +57,8 @@ function SignatureValues({ value }: { value: unknown }) {
   const extended = signatures.profile_extended && typeof signatures.profile_extended === 'object'
     ? signatures.profile_extended as Record<string, unknown> : {};
   const labels: Record<string, string> = { role: 'Cargo', sector: 'Sector', description: 'Descripción',
-    services: 'Servicios', valueProposition: 'Propuesta de valor', proofPoints: 'Evidencias' };
+    services: 'Servicios', valueProposition: 'Propuesta de valor', proofPoints: 'Evidencias',
+    targetRoles: 'Cargos de tu cliente ideal', targetIndustries: 'Industrias de tu cliente ideal', targetCompanySize: 'Tamaño de empresa', targetLocations: 'Regiones' };
   return <div className="space-y-3">
     {Object.entries(labels).map(([key, label]) => extended[key] ? <p key={key} className="whitespace-pre-wrap">
       <span className="font-medium">{label}: </span>{Array.isArray(extended[key])
