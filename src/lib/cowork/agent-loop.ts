@@ -50,7 +50,7 @@ export const coworkDecisionSchema = z.object({
     'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'linkedin.invite_batch', 'linkedin.message_batch', 'contacts.import',
     'contacts.prepare_batch',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
-    'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze',
+    'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze', 'leads.recommend',
     'answer', 'draft.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
@@ -97,7 +97,7 @@ export const coworkDecisionSchema = z.object({
 export type CoworkReadAction = CoworkDomainRead | 'privacy.contactability_batch' | 'lists.review_batch' | 'leads.search' | 'leads.get' | 'research.get_existing'
   | 'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'contacted.account' | 'replies.meeting_chain' | 'replies.attention' | 'replies.stalled' | 'metrics.overview' | 'metrics.rates' | 'metrics.diagnose' | 'metrics.channels' | 'metrics.incidents' | 'deliverability.check' | 'site.read' | 'leads.count' | 'leads.summary' | 'deliverability.bounces' | 'deliverability.sender' | 'compliance.check' | 'compliance.law' | 'compliance.obligation' | 'app.context' | 'draft.get' | 'campaigns.list' | 'files.list' | 'files.read' | 'saved_searches.list' | 'profile.get'
   | 'campaigns.batch_report' | 'campaigns.next_touch' | 'campaigns.retry_review' | 'campaigns.company_plan'
-  | 'linkedin.network' | 'linkedin.inbox' | 'linkedin.quota' | 'linkedin.followups' | 'linkedin.jobs' | 'icp.analyze';
+  | 'linkedin.network' | 'linkedin.inbox' | 'linkedin.quota' | 'linkedin.followups' | 'linkedin.jobs' | 'icp.analyze' | 'leads.recommend';
 export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draft.request' | 'lead.enrich' | 'email.send' | 'campaign.create' | 'campaign.activate' | 'campaign.pause' | 'code.execute'
   | 'profile.update' | 'saved_search.create' | 'saved_search.update' | 'saved_search.delete' | 'campaign.stop_v2'
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
@@ -456,7 +456,7 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
     chips || coworkQuestion(answer.question) ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
     // Two or more emails are meant to be copied and kept: they go in a card, not in the chat.
     !answer.document && !drafts && (answer.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2
-      ? 'pon los correos en un bloque sequence (regla 11) y deja en reply un resumen breve' : null,
+      ? 'pon los correos en un bloque sequence (regla 11) y deja en reply qué escribiste y por qué, sin repetir los correos' : null,
     // A card is copied as is: a [placeholder] would reach the recipient.
     filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
   ].filter(Boolean);
@@ -1162,7 +1162,7 @@ async function runCoworkLoop(input: {
           || decision.action === 'files.read'
         ? (decision.query ?? (decision.reads?.length === 1 && decision.reads[0].action === decision.action
             ? decision.reads[0].input : null))
-          : decision.action === 'icp.analyze'
+          : decision.action === 'icp.analyze' || decision.action === 'leads.recommend'
             ? (decision.query ?? '')
           : decision.action === 'metrics.overview' || decision.action === 'metrics.rates' || decision.action === 'metrics.diagnose' || decision.action === 'metrics.channels' || decision.action === 'metrics.incidents' || decision.action === 'deliverability.bounces' || decision.action === 'deliverability.sender' || decision.action === 'compliance.law' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
           || decision.action === 'linkedin.network' || decision.action === 'linkedin.inbox' || decision.action === 'linkedin.quota'
