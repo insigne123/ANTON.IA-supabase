@@ -3,6 +3,7 @@
 // production). The account is small on purpose: 5 saved contacts, no campaigns
 // and one email sent. Names are fictional and complete: masked names made the
 // model guess surnames. No database, mailbox or provider is touched.
+import { corpusRecommend } from './cowork-recommend-world';
 import { coworkStarter } from '../../src/lib/cowork/starters';
 import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '../../src/lib/cowork/blocks';
 import { COWORK_FILE_NOTICE, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTablePreview, coworkTextPreview } from '../../src/lib/cowork/file-read';
@@ -34,6 +35,7 @@ const marcelaSent = { leadId: MARKETING_LEAD.marcela, name: 'Marcela Rojas', com
   subject: 'Antecedentes laborales sin trámites manuales', sentAt: '2026-09-19T13:02:00Z', replied: false };
 
 function read(action: string, input: string): unknown {
+  if (action === 'leads.recommend') return corpusRecommend(contacts, new Set([MARKETING_LEAD.marcela]), input);
   const term = input.toLowerCase().trim();
   switch (action) {
     case 'leads.search': {
