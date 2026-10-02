@@ -19,12 +19,32 @@ export async function coworkResearchTarget(auth: AuthContext, runId: string, lea
   return savedResearchLead(auth, leadId);
 }
 
-async function savedResearchLead(auth: AuthContext, leadId: string) {
+type ResearchLeadRow = {
+  id: string; name: string | null; email: string | null; title: string | null; company: string | null;
+  company_website: string | null; company_linkedin: string | null; linkedin_url: string | null; industry: string | null;
+  city: string | null; country: string | null; apollo_id: string | null; source_provider_id: string | null;
+};
+
+/** The person to research: a saved contact or one of «Por escribir» (Plan 6, PR-A), which already has its email. */
+async function savedResearchLead(auth: AuthContext, leadId: string): Promise<ResearchLeadRow> {
   const lead = await auth.supabase.from('leads')
     .select('id,name,email,title,company,company_website,company_linkedin,linkedin_url,industry,city,country,apollo_id,source_provider_id')
     .eq('id', leadId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
-  if (lead.error || !lead.data) throw new Error('COWORK_RESEARCH_TARGET_UNAVAILABLE');
-  return lead.data;
+  if (lead.error) throw new Error('COWORK_RESEARCH_TARGET_UNAVAILABLE');
+  if (lead.data) return lead.data as ResearchLeadRow;
+  const enriched = await auth.supabase.from('enriched_leads')
+    .select('id,full_name,email,title,company_name,organization_name,organization_domain,linkedin_url,organization_industry,city,country,source_provider_id')
+    .eq('id', leadId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
+  if (enriched.error || !enriched.data) throw new Error('COWORK_RESEARCH_TARGET_UNAVAILABLE');
+  const row = enriched.data as Record<string, string | null>;
+  const domain = String(row.organization_domain || '').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  return {
+    id: String(row.id), name: row.full_name ?? null, email: row.email ?? null, title: row.title ?? null,
+    company: row.company_name || row.organization_name || null,
+    company_website: domain ? `https://${domain}` : null, company_linkedin: null, linkedin_url: row.linkedin_url ?? null,
+    industry: row.organization_industry ?? null, city: row.city ?? null, country: row.country ?? null,
+    apollo_id: null, source_provider_id: row.source_provider_id ?? null,
+  };
 }
 
 export async function startCoworkResearch(auth: AuthContext, runId: string, leadId: string) {

@@ -17,6 +17,7 @@ import {
   assertLinkedinMessageAllowed, assertLinkedinMessageStillAllowed, assertRunOpen, existingLiveJob, inviteQuota, linkedinProfileOf,
   loadOwnLead, queueLinkedinJob, type LeadRow, type Scope,
 } from './linkedin-jobs';
+import { loadOrganizationContacts } from './own-contacts';
 
 /**
  * Invitations or messages for several people on LinkedIn with one approval, behind COWORK_LINKEDIN_BATCH_ENABLED and the
@@ -74,11 +75,14 @@ export async function stageCoworkLinkedinBatch(scope: Scope, runId: string, orig
   if (events.error) throw new Error('No se pudo comprobar lo consultado en este trabajo.');
   const seen = observedCoworkLeadIds((events.data || []) as Array<{ kind: string; payload: unknown }>);
   if (wanted.some(person => !seen.has(person.leadId))) throw new Error('Todas las personas del lote deben haberse consultado antes en esta conversación.');
-  const rows = await client.from('leads').select('id,name,email,title,company,linkedin_url')
-    .eq('organization_id', scope.organizationId).in('id', wanted.map(person => person.leadId));
-  if (rows.error) throw new Error('No se pudo leer a las personas del lote.');
-  const byId = new Map(((rows.data || []) as LeadRow[]).map(lead => [lead.id, lead]));
-  if (wanted.some(person => !byId.has(person.leadId))) throw new Error('Todas las personas del lote deben ser contactos guardados de tu organización.');
+  // Saved contacts and those of «Por escribir» (Plan 6, PR-A), with the LinkedIn the email search found.
+  let byId: Map<string, LeadRow>;
+  try {
+    byId = await loadOrganizationContacts(client as never, scope.organizationId, wanted.map(person => person.leadId));
+  } catch {
+    throw new Error('No se pudo leer a las personas del lote.');
+  }
+  if (wanted.some(person => !byId.has(person.leadId))) throw new Error('Todas las personas del lote deben ser contactos de tu organización (guardados o de «Por escribir»).');
   const quota = kind === 'invite' ? await inviteQuota(client, scope) : null;
   const quotaLeft = quota ? Math.max(0, quota.limit - quota.pending - quota.sent7d) : null;
   const touched = await companiesTouchedToday(client, scope, santiagoDayBounds(new Date()).start);
