@@ -1,0 +1,55 @@
+{
+  "version": "outreach-eval-axis/v1",
+  "description": "Caso AXIS (Plan 6, punto 14): la oferta de prueba AXIS de Yago SpA y 2 destinatarios ficticios de RR. HH., uno en retail y otro en construcción, cada uno con una señal. De tú, como el pedido del estilo por defecto. Datos de prueba, como el banco AXIS. No editar casos para comparar versiones; agregar nuevos con otro id.",
+  "seller": {
+    "name": "Nicolás Yarur",
+    "jobTitle": "Gerente Comercial",
+    "companyName": "Yago SpA",
+    "companyDomain": "yago.cl",
+    "sector": "Software B2B para recursos humanos",
+    "services": [
+      "AXIS: consultas judiciales automáticas en el Poder Judicial (PJUD) para revisar antecedentes laborales"
+    ],
+    "valueProposition": "Revisa antecedentes laborales de postulantes con consultas judiciales automáticas, sin trámites manuales.",
+    "description": "Yago automatiza una verificación repetitiva sobre las personas que una empresa contrata.",
+    "proofPoints": [
+      "Un cliente en piloto ya lo usa a diario en reclutamiento"
+    ]
+  },
+  "cases": [
+    {
+      "id": "axis-retail-secuencia",
+      "type": "secuencia",
+      "tratamiento": "tu",
+      "destinatario": {
+        "nombre": "Valentina Fuentes",
+        "cargo": "Jefa de Reclutamiento y Selección",
+        "empresa": "Tiendas Andinas",
+        "dominio": "tiendasandinas.cl"
+      },
+      "actividadEmpresa": "Cadena de tiendas de vestuario con 60 locales en Chile.",
+      "senal": {
+        "hecho": "Busca 150 vendedores para la temporada de Navidad",
+        "fuente": "aviso de empleo",
+        "fecha": "2026-09-18"
+      }
+    },
+    {
+      "id": "axis-construccion-secuencia",
+      "type": "secuencia",
+      "tratamiento": "tu",
+      "destinatario": {
+        "nombre": "Patricio Soto",
+        "cargo": "Gerente de Personas",
+        "empresa": "Constructora Pehuén",
+        "dominio": "pehuen.cl"
+      },
+      "actividadEmpresa": "Constructora de obras habitacionales e industriales en el sur de Chile.",
+      "senal": {
+        "hecho": "Contratará 300 trabajadores para dos obras nuevas en el Biobío",
+        "fuente": "nota de prensa",
+        "fecha": "2026-09-15"
+      }
+    }
+  ]
+}

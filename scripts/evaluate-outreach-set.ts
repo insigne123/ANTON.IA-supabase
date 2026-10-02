@@ -1,8 +1,9 @@
 // Línea base de calidad de borradores. Sin escrituras en BD, sin aprobaciones, sin envíos.
 // Uso: node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-outreach-set.ts
 // Requiere OPENAI_API_KEY en el ambiente. Guarda resultados en el dir temporal.
+// OUTREACH_EVAL_SET elige otro conjunto (p. ej. scripts/fixtures/outreach-eval-axis.json) y OUTREACH_EVAL_OUT otra carpeta.
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { generateOutreachFromDraftContextV2 } from '../src/ai/flows/generate-outreach-from-report';
 import { generateReconnectionMessage } from '../src/ai/flows/generate-reconnection-message';
 import {
@@ -23,23 +24,19 @@ import { OUTREACH_OPENING_KINDS } from '../src/lib/outreach-example-library';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY required');
 
-const setPath = new URL('./fixtures/outreach-eval-set.json', import.meta.url);
+const setPath = process.env.OUTREACH_EVAL_SET
+  ? resolve(process.env.OUTREACH_EVAL_SET)
+  : new URL('./fixtures/outreach-eval-set.json', import.meta.url);
 const evalSet = JSON.parse(readFileSync(setPath, 'utf8'));
 const outDir = join(
-  'C:\\Users\\nicol\\AppData\\Local\\Temp\\opencode',
+  process.env.OUTREACH_EVAL_OUT || 'C:\\Users\\nicol\\AppData\\Local\\Temp\\opencode',
   'outreach-eval',
   new Date().toISOString().replace(/[:.]/g, '-'),
 );
 mkdirSync(outDir, { recursive: true });
 
-const seller = normalizeDraftSellerProfileV2({
-  name: evalSet.seller.name,
-  jobTitle: evalSet.seller.jobTitle,
-  companyName: evalSet.seller.companyName,
-  services: evalSet.seller.services,
-  valueProposition: evalSet.seller.valueProposition,
-  description: evalSet.seller.description,
-});
+// El vendedor tal como lo guarda «Perfil»: también el sector, el dominio y los clientes o pruebas, si el conjunto los trae.
+const seller = normalizeDraftSellerProfileV2(evalSet.seller);
 
 function buildSnapshot(evalCase: any) {
   const snapshot: any = draftSnapshotFixture({ includeRole: Boolean(evalCase.destinatario.cargo) });
@@ -255,7 +252,7 @@ for (const evalCase of evalSet.cases) {
         });
         priorMessages.push({ kind: index ? 'follow_up' : 'initial', index, name: step?.name || 'Inicial', subject: output.subject, body });
       }
-      results.push({ id: evalCase.id, type: evalCase.type, openingKind, steps });
+      results.push({ id: evalCase.id, type: evalCase.type, openingKind, cta: context.constraints.cta.exactText, steps });
       continue;
     }
 
@@ -274,7 +271,8 @@ for (const evalCase of evalSet.cases) {
     );
     const { output, validation, body, attempts, recovered } = tried;
     results.push({
-      id: evalCase.id, type: evalCase.type, openingKind, subject: output.subject, body, model: output.model,
+      id: evalCase.id, type: evalCase.type, openingKind, cta: context.constraints.cta.exactText,
+      subject: output.subject, body, model: output.model,
       words: wordCount(body), subjectWords: wordCount(output.subject),
       valid: validation.valid, attempts, recovered,
       issues: validation.issues.map((issue: any) => issue.message),
