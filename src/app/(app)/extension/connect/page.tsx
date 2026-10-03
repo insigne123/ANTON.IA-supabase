@@ -21,7 +21,7 @@ export default function ExtensionConnectPage() {
     const timer = setTimeout(() => { setStatus('error'); setError('La extensión no respondió. Recárgala y vuelve a conectar desde su panel.'); }, 15000);
     return () => clearTimeout(timer);
   }, [status]);
-  return <main className="mx-auto flex min-h-[65vh] max-w-lg items-center px-5 py-12">
+  return <div className="mx-auto flex min-h-[65vh] max-w-lg items-center px-5 py-12">
     <section className="w-full rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-800 dark:bg-slate-950">
       <div className="mb-6 flex size-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300"><Puzzle aria-hidden="true" /></div>
       <h1 className="text-2xl font-semibold tracking-tight">Anton.IA, junto a LinkedIn.</h1>
@@ -34,5 +34,5 @@ export default function ExtensionConnectPage() {
         }}>{status === 'pending' ? 'Conectando…' : 'Conectar mi cuenta'}<ArrowUpRight className="ml-2 size-4" aria-hidden="true" /></Button>}
       {status === 'error' && <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{error}</p>}
     </section>
-  </main>;
+  </div>;
 }

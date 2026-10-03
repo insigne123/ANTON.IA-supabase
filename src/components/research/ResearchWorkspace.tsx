@@ -867,7 +867,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   );
 
   return (
-    <main className={cn(
+    <div className={cn(
       'mx-auto w-full max-w-[1500px]',
       embedded
         ? 'flex h-full min-h-0 max-w-none flex-col gap-3 overflow-hidden p-3 sm:p-4 lg:gap-4 lg:p-5'
@@ -1357,6 +1357,6 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
             : `${readyItems.length} ${readyItems.length === 1 ? 'lead listo para redactar' : 'leads listos para redactar'}.`}
         </p>
       ) : null}
-    </main>
+    </div>
   );
 }
