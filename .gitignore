@@ -9,6 +9,8 @@ service-account.json
 functions/.webpack/
 .next/
 .next-build/
+.next-audit/
+/.visual-audit/
 .playwright-mcp/
 /.release-*/
 
