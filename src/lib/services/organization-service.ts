@@ -21,19 +21,35 @@ export type OrganizationDetailsResponse = {
 
 const currentOrganizationListeners = new Set<() => void>();
 
+// «Which organization am I in?» had 32 callers, each asking /api/organizations on its own: «Por escribir» sent it 9 times
+// on load. Callers within LIST_TTL_MS share one request. Any write here (switch, create, rename, invite, leave, delete,
+// members) forgets it, and a failed request is never shared.
+const LIST_TTL_MS = 5_000;
+let organizationList: { at: number; promise: Promise<OrganizationListResponse> } | null = null;
+
+function forgetOrganizationList() {
+    organizationList = null;
+}
+
 function notifyCurrentOrganizationChanged() {
+    forgetOrganizationList();
     for (const listener of currentOrganizationListeners) listener();
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(path, {
-        ...init,
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', ...init?.headers },
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || 'Organization request failed');
-    return payload as T;
+    const isWrite = Boolean(init?.method && init.method.toUpperCase() !== 'GET');
+    try {
+        const response = await fetch(path, {
+            ...init,
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', ...init?.headers },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || 'Organization request failed');
+        return payload as T;
+    } finally {
+        if (isWrite) forgetOrganizationList();
+    }
 }
 
 export const organizationService = {
@@ -43,7 +59,14 @@ export const organizationService = {
     },
 
     async listOrganizations(): Promise<OrganizationListResponse> {
-        return requestJson<OrganizationListResponse>('/api/organizations');
+        const now = Date.now();
+        if (organizationList && now - organizationList.at < LIST_TTL_MS) return organizationList.promise;
+        const entry = { at: now, promise: requestJson<OrganizationListResponse>('/api/organizations') };
+        organizationList = entry;
+        entry.promise.catch(() => {
+            if (organizationList === entry) organizationList = null;
+        });
+        return entry.promise;
     },
 
     async getCurrentOrganizationId(_knownUserId?: string | null): Promise<string | null> {
