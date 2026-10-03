@@ -130,6 +130,8 @@ export default function SearchPage() {
   const [activeSavedSearchId, setActiveSavedSearchId] = useState<string | null>(null);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  // On phones the criteria fold into one bar once there are results, so the results are what you see first.
+  const [criteriaOpen, setCriteriaOpen] = useState(true);
 
   // Company-first flow: filtros → empresas → ventanas por empresa (50 por empresa).
   type CompanyWindowState = {
@@ -578,7 +580,10 @@ export default function SearchPage() {
         setCompanyWindows(restored);
         setLeads(Object.values(restored).flatMap((item) => item.leads || []));
         setFilterStep(['filters', 'companies', 'people'].includes(snapshot.filterStep) ? snapshot.filterStep : 'filters');
-        if (snapshot.companies.length > 0 || hasWindows) setCheckpointNotice('Recuperamos tu última búsqueda: sigue donde quedaste.');
+        if (snapshot.companies.length > 0 || hasWindows) {
+          setCheckpointNotice('Recuperamos tu última búsqueda: sigue donde quedaste.');
+          setCriteriaOpen(false);
+        }
       }
       setCheckpointReady(true);
     }).catch(() => {
@@ -768,7 +773,7 @@ export default function SearchPage() {
       setSelectedLeads(new Set());
     } catch (error) {
       console.error('Error saving leads:', error);
-      toast({ variant: "destructive", title: "Error", description: "No se pudieron guardar los leads." });
+      toast({ variant: "destructive", title: "No pudimos guardar", description: "Los contactos no se guardaron. Intenta de nuevo en unos segundos." });
     } finally {
       setIsSaving(false);
     }
@@ -1566,8 +1571,6 @@ export default function SearchPage() {
     return next;
   });
 
-  // On phones the criteria fold into one bar once there are results, so the results are what you see first.
-  const [criteriaOpen, setCriteriaOpen] = useState(true);
   useEffect(() => { if (missingFilterError) setCriteriaOpen(true); }, [missingFilterError]);
   const runSearch = () => {
     setCriteriaOpen(false);
@@ -2336,8 +2339,6 @@ export default function SearchPage() {
         title="Buscar prospectos"
         description="Elige a quién buscar, revisa los resultados y guarda los contactos que te sirven."
       />
-      {checkpointNotice ? <p role="status" className="text-sm text-foreground/70">{checkpointNotice}</p> : null}
-
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <aside aria-label="Criterios de búsqueda" className="min-w-0 space-y-3 lg:sticky lg:top-16">
           {hasResults ? (
@@ -2357,20 +2358,13 @@ export default function SearchPage() {
           <Card
             id="search-criteria"
             className={cn(
-              'min-w-0 flex-col overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] lg:flex lg:max-h-[calc(100vh-5rem)]',
+              'min-w-0 flex-col overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] lg:flex lg:max-h-[calc(100vh-13rem)]',
               hasResults && !criteriaOpen ? 'hidden' : 'flex',
             )}
           >
             <CardHeader className="space-y-3 border-b border-border/60 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 space-y-0.5">
-                  <h2 className="text-base font-semibold tracking-tight">Criterios</h2>
-                  <CardDescription className="truncate text-foreground/70">
-                    {activeSavedSearchId
-                      ? `Usando «${savedSearches.find((item) => item.id === activeSavedSearchId)?.name || 'búsqueda guardada'}»`
-                      : 'Configura solo lo necesario.'}
-                  </CardDescription>
-                </div>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-semibold tracking-tight">Criterios</h2>
                 <div className="flex shrink-0 items-center gap-0.5">
                   {savedSearchesMenu}
                   <Button
@@ -2388,6 +2382,11 @@ export default function SearchPage() {
                   </Button>
                 </div>
               </div>
+              {activeSavedSearchId ? (
+                <CardDescription className="truncate text-foreground/70">
+                  Usando «{savedSearches.find((item) => item.id === activeSavedSearchId)?.name || 'búsqueda guardada'}»
+                </CardDescription>
+              ) : null}
               {modeSwitch}
             </CardHeader>
             <CardContent className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -2420,6 +2419,7 @@ export default function SearchPage() {
           aria-label="Resultados"
           className={cn('min-w-0 space-y-4', filters.searchMode === 'filters' && resultsView === 'intro' && 'order-first lg:order-none')}
         >
+          {checkpointNotice ? <p role="status" className="text-sm text-foreground/70">{checkpointNotice}</p> : null}
           {filters.searchMode === 'filters' ? (
             resultsView === 'intro' ? (
               <>
