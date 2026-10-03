@@ -59,11 +59,14 @@ export interface Lead {
   avatar: string;
   status: 'saved' | 'investigated' | 'contacted' | string;
   emailEnrichment?: {
-    enriched: boolean;
+    enriched?: boolean;
     enrichedAt?: string;
     source?: 'original' | 'anymail_finder' | 'n8n';
     confidence?: number;
     creditsUsed?: number;
+    /** «Por completar»: the last search found nothing, so the contact stays marked «Sin correo». */
+    status?: 'not_found';
+    attemptedAt?: string;
   };
   industry?: string | null;
   companyWebsite?: string | null;
