@@ -34,8 +34,11 @@ try {
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`${width}/${theme} horizontal overflow`);
     await page.getByLabel('Qué harás').fill('Confirmar horario');
     await page.getByLabel('Fecha y hora local').fill('2026-10-01T10:00');
-    await page.keyboard.press('Escape');
-    assert.match(await page.evaluate(()=>document.activeElement?.textContent || ''),/Ana Prueba/);
+    // Below 1024 px the conversation opens over the list: Escape closes it and focus returns to the row. Wider, it stays beside the list.
+    if (width < 1024) {
+      await page.keyboard.press('Escape');
+      assert.match(await page.evaluate(()=>document.activeElement?.textContent || ''),/Ana Prueba/);
+    }
     await page.close();
   }
   console.log('PASS: rendered workspace 360/768/1440 light/dark, work form, AI recommendation, no page horizontal overflow, Escape and focus restoration. Mock API, no real sends.');
