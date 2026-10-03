@@ -79,6 +79,11 @@ export function enrichedLeadPhoneState(lead: EnrichedLead): EnrichedPhoneState {
   return 'missing';
 }
 
+/** The ids with a phone lookup still running, sorted: a key that changes only when that set changes. */
+export function pendingPhoneLookupKey(leads: EnrichedLead[]) {
+  return leads.filter((lead) => hasActivePhoneLookup(lead)).map((lead) => String(lead.id || '').trim()).filter(Boolean).sort().join(',');
+}
+
 export type EnrichedLeadFilters = {
   searchTerm: string;
   companyFilter: string;
