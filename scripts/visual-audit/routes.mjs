@@ -63,6 +63,8 @@ export function routeList(ctx) {
     { path: '/privacy/extension', name: 'Privacidad de la extensión', area: 'public' },
     { path: '/privacy/request', name: 'Solicitud de privacidad', area: 'public' },
     { path: '/unsubscribe', name: 'Darse de baja', area: 'public' },
+    // Without a session it explains the expired link; signed in, it shows the new-password form.
+    { path: '/restablecer-clave', name: 'Crear contraseña nueva', area: 'public' },
   ];
 }
 
