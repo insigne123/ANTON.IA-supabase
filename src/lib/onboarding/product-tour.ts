@@ -136,7 +136,7 @@ export const PAGE_GUIDES: PageGuide[] = [
     { id: 'contact', target: 'enriched-contact', title: 'Escríbeles',
       body: 'Marca a quién contactar: la IA prepara el correo y los seguimientos, y tú los revisas antes de enviar.' },
   ] },
-  { id: 'conversations', title: 'Conversaciones', routes: /^\/contacted(\/replied)?\/?$/, steps: [
+  { id: 'conversations', title: 'Conversaciones', routes: /^\/contacted\/?$/, steps: [
     { id: 'views', target: 'conv-views', title: 'Primero, quien te respondió',
       body: '«Por responder» junta a quienes esperan tu respuesta. Ábrelos y contesta en el mismo hilo.' },
     { id: 'sync', target: 'conv-sync', title: 'Trae respuestas nuevas',

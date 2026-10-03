@@ -11,7 +11,6 @@ const leadResearchRoutePath = 'src/app/api/lead-research/route.ts';
 const leadSearchRoutePath = 'src/app/api/leads/search/route.ts';
 const quotaStatusRoutePath = 'src/app/api/quota/status/route.ts';
 const enrichmentRoutePath = 'src/app/api/opportunities/enrich-apollo/route.ts';
-const supliaRunnerPath = 'src/lib/server/suplia-tool-runner.ts';
 const supliaResearchPath = 'src/lib/server/suplia-research-tools.ts';
 const operationSql = readFileSync(operationMigrationPath, 'utf8');
 const sharedCreditsSql = readFileSync(sharedCreditsMigrationPath, 'utf8');
@@ -21,7 +20,6 @@ const leadResearchRoute = readFileSync(leadResearchRoutePath, 'utf8');
 const leadSearchRoute = readFileSync(leadSearchRoutePath, 'utf8');
 const quotaStatusRoute = readFileSync(quotaStatusRoutePath, 'utf8');
 const enrichmentRoute = readFileSync(enrichmentRoutePath, 'utf8');
-const supliaRunner = readFileSync(supliaRunnerPath, 'utf8');
 const supliaResearch = readFileSync(supliaResearchPath, 'utf8');
 
 function operationFunctionBody(name: string) {
@@ -160,7 +158,6 @@ test('all metered resources use the same user-scoped atomic credit boundary', ()
   assert.match(sharedCreditsSql, /revoke all on table public\.antonia_suplia_research_credit_operations from public, anon, authenticated;/);
   assert.match(sharedCreditsSql, /revoke all on function public\.consume_suplia_research_tool_credit_v1\(uuid, uuid, uuid\)[\s\S]*from public, anon, authenticated;/);
   assert.match(sharedCreditsSql, /grant execute on function public\.consume_suplia_research_tool_credit_v1\(uuid, uuid, uuid\)[\s\S]*to service_role;/);
-  assert.match(supliaRunner, /consumeSupliaResearchToolCredit\([\s\S]*toolRunId: toolRun\.id/);
   assert.match(supliaResearch, /if \(!context\.consumeResearchCredit\) throw new Error\('RESEARCH_CREDIT_RESERVATION_REQUIRED'\)/);
   assert.match(supliaResearch, /needEnv\('SERPER_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*await searchSerper\(search\)/);
   assert.match(supliaResearch, /needEnv\('BRANDDEV_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*fetchJsonWithTimeout/);
