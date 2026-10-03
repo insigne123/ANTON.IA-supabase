@@ -18,7 +18,7 @@ import { companySizes } from '@/lib/data';
 import { organizationService } from '@/lib/services/organization-service';
 import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Search, Save, X, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal } from 'lucide-react';
+import { Search, Save, X, ChevronDown, ChevronRight, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal, Users } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
@@ -44,7 +44,7 @@ import { useRouter } from 'next/navigation';
 import { activeFilterChips, idealCustomerStarter, savedLeadsToast, searchStartersFor, type ActiveFilterChip, type SearchStarter } from '@/lib/search/search-guidance';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { profileService } from '@/lib/services/profile-service';
-import { FilterRelaxHint, SearchStarters } from '@/components/search/SearchGuidance';
+import { FilterRelaxHint } from '@/components/search/SearchGuidance';
 import { ProfileSearchProblemAlert } from '@/components/search/ProfileSearchProblemAlert';
 import {
   ProfileSearchProblemError, profileProblemFromMessage, profileSearchMessage, profileSearchPersonHint, profileUrlProblem,
@@ -79,8 +79,12 @@ import { MultiCheckDropdown } from '@/components/search/MultiCheckDropdown';
 import {
   buildLinkedInProfileNotice, getFriendlySearchErrorMessage, hasBatchSearchFilters, hasLeadPhone, hasVisibleLeadEmail,
   hasVisibleLeadPhone, isPendingEnrichmentStatus, mapLeadToEnriched, normalizeLeadForUI, splitFilterInput, splitTitlesInput,
-  normalizeUiPhoneNumbers, statusChipClasses, getPhoneFallback, type ProfileContactState,
+  normalizeUiPhoneNumbers, contactStateBadge, displayDomain, getPhoneFallback, type ProfileContactState,
+  companyFilterSignature, contactedKeys, isLeadContacted, isLeadSaved, peopleFilterSignature, type SavedLeadIds,
 } from '@/lib/search/lead-ui';
+import { ResultsActionBar } from '@/components/search/ResultsActionBar';
+import { SearchIntro } from '@/components/search/SearchIntro';
+import { SearchLeadRow } from '@/components/search/SearchLeadRow';
 
 const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
 
@@ -126,6 +130,8 @@ export default function SearchPage() {
   const [activeSavedSearchId, setActiveSavedSearchId] = useState<string | null>(null);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  // On phones the criteria fold into one bar once there are results, so the results are what you see first.
+  const [criteriaOpen, setCriteriaOpen] = useState(true);
 
   // Company-first flow: filtros → empresas → ventanas por empresa (50 por empresa).
   type CompanyWindowState = {
@@ -172,6 +178,12 @@ export default function SearchPage() {
     ? teamLocks.byEmail[normalizeLockEmail(lead.email)] || teamLocks.byProviderId[String(lead.id || '')] || teamLocks.byLinkedin[normalizeLockLinkedin(lead.linkedinUrl)]
     : undefined;
   const [savedApolloIds, setSavedApolloIds] = useState<Set<string>>(new Set());
+  const savedLeadIds = useMemo<SavedLeadIds>(() => ({ ids: savedIds, providerIds: savedApolloIds }), [savedIds, savedApolloIds]);
+  const isSavedLead = (lead: UILaed) => isLeadSaved(lead, savedLeadIds);
+  const isContactedLead = (lead: UILaed) => isLeadContacted(lead, contactedIds);
+  // The filters each list was searched with. Editing a filter marks the list as old instead of erasing it.
+  const [companySearchSignature, setCompanySearchSignature] = useState('');
+  const [peopleSearchSignature, setPeopleSearchSignature] = useState('');
 
   const refreshSavedApolloIds = async () => {
     try {
@@ -257,7 +269,16 @@ export default function SearchPage() {
       setCompaniesPage(Number(result.page ?? page) || page);
       setCompaniesTotalPages(Number(result.total_pages ?? 1) || 1);
       setCompaniesTotalEntries(result.total_entries);
-      if (page === 1) setSelectedCompanyIds(new Set());
+      if (page === 1) {
+        setSelectedCompanyIds(new Set());
+        // A new company list starts over: the contacts found in the previous companies no longer apply.
+        setCompanySearchSignature(companyFilterSignature(filters));
+        setCompanyWindows({});
+        setActiveCompanyId(null);
+        setLeads([]);
+        setSelectedLeads(new Set());
+        setPeopleSearchSignature('');
+      }
       setFilterStep('companies');
       if (orgs.length === 0) {
         setError('No encontramos empresas con estos filtros. Prueba ampliando palabras clave, sede o tamaño.');
@@ -317,6 +338,8 @@ export default function SearchPage() {
       return;
     }
     const { leadsPerCompany } = getCompanyPersonFilters();
+    const peopleSignature = peopleFilterSignature(filters);
+    const reuseWindows = peopleSearchSignature === peopleSignature;
     setIsLoadingCompanyPeople(true);
     setIsLoading(true);
     setError('');
@@ -330,7 +353,7 @@ export default function SearchPage() {
           const organization = queue.shift();
           if (!organization) return;
           try {
-            if (companyWindows[organization.id]) {
+            if (reuseWindows && companyWindows[organization.id]) {
               nextWindows[organization.id] = companyWindows[organization.id];
               continue;
             }
@@ -366,6 +389,7 @@ export default function SearchPage() {
       await Promise.all(workers);
       if (controller.signal.aborted || run !== companyRun.current) return;
       setCompanyWindows(nextWindows);
+      setPeopleSearchSignature(peopleSignature);
       setActiveCompanyId(selected[0]?.id || null);
       setFilterStep('people');
       // Flatten for the existing save flow.
@@ -395,7 +419,10 @@ export default function SearchPage() {
       const { leads, totalEntries, totalPages, hasMore } = await fetchCompanyWindowPage(
         window.organization, nextPage, window.perPage, window.deliveredIds,
       );
-      if (run !== companyRun.current) return;
+      if (run !== companyRun.current) {
+        setCompanyWindows((current) => current[organizationId] ? { ...current, [organizationId]: { ...current[organizationId], isExpanding: false } } : current);
+        return;
+      }
       setCompanyWindows((current) => {
         const existing = current[organizationId];
         if (!existing) return current;
@@ -429,7 +456,10 @@ export default function SearchPage() {
         toast({ title: `Se agregaron ${leads.length} contactos`, description: window.organization.name });
       }
     } catch (expandError: any) {
-      if (run !== companyRun.current) return;
+      if (run !== companyRun.current) {
+        setCompanyWindows((current) => current[organizationId] ? { ...current, [organizationId]: { ...current[organizationId], isExpanding: false } } : current);
+        return;
+      }
       if ((expandError as any)?.name === 'AbortError') return;
       setCompanyWindows((current) => ({
         ...current,
@@ -462,12 +492,7 @@ export default function SearchPage() {
       contactedLeadsStorage.get()
     ]).then(([saved, contacted]) => {
       setSavedIds(new Set(saved.map(l => l.id)));
-      const cSet = new Set<string>();
-      contacted.forEach(c => {
-        if (c.leadId) cSet.add(c.leadId);
-        if (c.email) cSet.add(c.email);
-      });
-      setContactedIds(cSet);
+      setContactedIds(contactedKeys(contacted));
     });
 
     // Load saved searches
@@ -540,7 +565,11 @@ export default function SearchPage() {
       checkpointOrganization.current = String(data.scope || '').split(':')[0];
       const snapshot = data.snapshot;
       if (snapshot?.version === 1 && snapshot.filters && Array.isArray(snapshot.companies) && snapshot.companyWindows && typeof snapshot.companyWindows === 'object') {
-        setFilters(normalizeSavedSearchCriteria(snapshot.filters));
+        const restoredFilters = normalizeSavedSearchCriteria(snapshot.filters);
+        const hasWindows = Object.keys(snapshot.companyWindows).length > 0;
+        setFilters(restoredFilters);
+        setCompanySearchSignature(typeof snapshot.companySignature === 'string' ? snapshot.companySignature : snapshot.companies.length > 0 ? companyFilterSignature(restoredFilters) : '');
+        setPeopleSearchSignature(typeof snapshot.peopleSignature === 'string' ? snapshot.peopleSignature : hasWindows ? peopleFilterSignature(restoredFilters) : '');
         setCompanies(snapshot.companies);
         setCompaniesPage(snapshot.companiesPage || 1);
         setCompaniesTotalPages(snapshot.companiesTotalPages || 1);
@@ -551,7 +580,10 @@ export default function SearchPage() {
         setCompanyWindows(restored);
         setLeads(Object.values(restored).flatMap((item) => item.leads || []));
         setFilterStep(['filters', 'companies', 'people'].includes(snapshot.filterStep) ? snapshot.filterStep : 'filters');
-        setCheckpointNotice('Búsqueda recuperada. Puedes continuar desde donde quedaste.');
+        if (snapshot.companies.length > 0 || hasWindows) {
+          setCheckpointNotice('Recuperamos tu última búsqueda: sigue donde quedaste.');
+          setCriteriaOpen(false);
+        }
       }
       setCheckpointReady(true);
     }).catch(() => {
@@ -588,9 +620,20 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkpointLoading]);
 
+  const checkpointBaseline = useRef<string | null>(null);
   useEffect(() => {
     if (!checkpointReady || filters.searchMode !== 'filters' || isLoading || Object.values(companyWindows).some((item) => item.isExpanding || item.isLoading)) return;
-    const snapshot = { version: 1, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds: [...selectedCompanyIds], activeCompanyId, companyWindows, filterStep };
+    const snapshot = {
+      version: 1, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds: [...selectedCompanyIds],
+      activeCompanyId, companyWindows, filterStep, companySignature: companySearchSignature, peopleSignature: peopleSearchSignature,
+    };
+    const serialized = JSON.stringify(snapshot);
+    // What was just restored, or the empty start, is not a change. Saving it wrote the checkpoint on every visit.
+    if (checkpointBaseline.current === null) {
+      checkpointBaseline.current = serialized;
+      return;
+    }
+    if (serialized === checkpointBaseline.current) return;
     const timeout = window.setTimeout(() => {
       checkpointQueue.current = checkpointQueue.current.then(async () => {
         if (checkpointStopped.current) return;
@@ -604,14 +647,17 @@ export default function SearchPage() {
           return;
         }
         checkpointRevision.current = (await response.json()).revision;
+        checkpointBaseline.current = serialized;
       }).catch(() => { setCheckpointNotice('No pudimos guardar el avance de la búsqueda.'); });
     }, 400);
     return () => window.clearTimeout(timeout);
-  }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading]);
+  }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading, companySearchSignature, peopleSearchSignature]);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
-    companyRun.current += 1;
-    companyPeopleAbortRef.current?.abort();
+    if (field === 'searchMode') {
+      companyRun.current += 1;
+      companyPeopleAbortRef.current?.abort();
+    }
     setError('');
     setProfileProblem(null);
     if (field === 'searchMode' && value !== 'company_name') setCompanySearchHint('');
@@ -640,20 +686,16 @@ export default function SearchPage() {
       setSelectedOrganization(null);
       setCompanySelectionPending(false);
     }
-    if (field !== 'searchMode') {
-      // Any company/person filter change invalidates company windows.
-      setFilterStep('filters');
-      setCompanies([]);
-      setCompanyWindows({});
-      setSelectedCompanyIds(new Set());
-      setActiveCompanyId(null);
-    }
+    // Company and person filters no longer erase what was found: the lists stay, marked as old, until the next search
+    // (companySearchSignature and peopleSearchSignature). Before, one keystroke threw away the companies and contacts.
     setActiveSavedSearchId(null);
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
   const resetCompanyFirstFlow = () => {
     companyRun.current += 1;
+    setCompanySearchSignature('');
+    setPeopleSearchSignature('');
     companiesAbortRef.current?.abort();
     companyPeopleAbortRef.current?.abort();
     setFilterStep('filters');
@@ -688,10 +730,7 @@ export default function SearchPage() {
   const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
     // Filter out already contacted
-    const selectedNotContacted = selected.filter(l => {
-      const isContacted = (l.id && contactedIds.has(l.id)) || (l.email && contactedIds.has(l.email));
-      return !isContacted;
-    });
+    const selectedNotContacted = selected.filter(l => !isContactedLead(l));
 
     if (selectedNotContacted.length === 0) {
       toast({ title: 'Nada que guardar', description: 'Todos los seleccionados ya fueron contactados o no hay selección.' });
@@ -734,7 +773,7 @@ export default function SearchPage() {
       setSelectedLeads(new Set());
     } catch (error) {
       console.error('Error saving leads:', error);
-      toast({ variant: "destructive", title: "Error", description: "No se pudieron guardar los leads." });
+      toast({ variant: "destructive", title: "No pudimos guardar", description: "Los contactos no se guardaron. Intenta de nuevo en unos segundos." });
     } finally {
       setIsSaving(false);
     }
@@ -1088,6 +1127,8 @@ export default function SearchPage() {
     setCompanyWindows({});
     setSelectedCompanyIds(new Set());
     setActiveCompanyId(null);
+    setCompanySearchSignature('');
+    setPeopleSearchSignature('');
     setActiveSavedSearchId(null);
     setFilters((prev) => ({ ...prev, searchMode: 'filters', industry: '', companyNameFilter: '', personLocation: '', ...starter.filters }));
     toast({ title: `Filtros de «${starter.label}» listos`, description: 'Revísalos y presiona «Buscar empresas».' });
@@ -1381,20 +1422,15 @@ export default function SearchPage() {
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;
-    const selectable = pagedLeads.filter(lead => {
-      const isContacted = (lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email));
-      return !savedIds.has(lead.id) && !isContacted;
-    });
+    const selectable = pagedLeads.filter(lead => !isLeadSaved(lead, savedLeadIds) && !isLeadContacted(lead, contactedIds));
     if (selectable.length === 0) return false;
     return selectable.every(lead => selectedLeads.has(lead.id));
-  }, [pagedLeads, selectedLeads, savedIds, contactedIds]);
+  }, [pagedLeads, selectedLeads, savedLeadIds, contactedIds]);
 
   const handleSelectAll = (checked: boolean) => {
     const newSelectedLeads = new Set(selectedLeads);
     pagedLeads.forEach(lead => {
-      const already = savedIds.has(lead.id);
-      const contacted = (lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email));
-      if (!already && !contacted) {
+      if (!isSavedLead(lead) && !isContactedLead(lead)) {
         if (checked) newSelectedLeads.add(lead.id);
         else newSelectedLeads.delete(lead.id);
       }
@@ -1510,866 +1546,928 @@ export default function SearchPage() {
 
   const missingFilterError = error.toLowerCase().includes('al menos un filtro');
 
-  return (
-    <div className="mx-auto max-w-[1440px] space-y-5 py-2">
-      <PageHeader
-        title="Buscar prospectos"
-        description="Define tu audiencia, busca prospectos y guarda criterios para volver a usarlos."
-      />
-      {checkpointNotice ? <p role="status" className="text-sm text-muted-foreground">{checkpointNotice}</p> : null}
-      {filters.searchMode === 'filters' && error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+  // What the results column shows in «Filtros»: the intro before searching, then companies, then their contacts.
+  const contactsFound = companyWindowList.reduce((total, window) => total + window.leads.length, 0);
+  const resultsView: 'intro' | 'companies' | 'people' =
+    filterStep === 'people' && (companyWindowList.length > 0 || isLoadingCompanyPeople) ? 'people'
+      : companies.length > 0 || isLoadingCompanies || filterStep === 'companies' ? 'companies'
+        : 'intro';
+  const companiesStale = companies.length > 0 && Boolean(companySearchSignature) && companySearchSignature !== companyFilterSignature(filters);
+  const peopleStale = companyWindowList.length > 0 && Boolean(peopleSearchSignature) && peopleSearchSignature !== peopleFilterSignature(filters);
+  const hasResults = filters.searchMode === 'filters'
+    ? resultsView !== 'intro'
+    : leads.length > 0 || isLoading || hasSearched || companySelectionPending;
+  const activeChips = activeFilterChips(filters);
+  const criteriaSummary = filters.searchMode === 'filters'
+    ? activeChips.length > 0 ? activeChips.map((chip) => chip.value).join(' · ') : 'Sin filtros'
+    : filters.searchMode === 'company_name'
+      ? filters.companyName.trim() || filters.companyDomains.trim() || 'Escribe una empresa'
+      : filters.linkedinUrl.trim() || 'Pega un perfil de LinkedIn';
+  const leadsPerCompany = getCompanyPersonFilters().leadsPerCompany;
+  const showLeadsBar = selectedLeads.size > 0 && (filters.searchMode !== 'filters' || resultsView === 'people');
+  const selectWindowLeads = (window: CompanyWindowState) => setSelectedLeads((current) => {
+    const next = new Set(current);
+    for (const lead of window.leads) if (!isSavedLead(lead) && !isContactedLead(lead)) next.add(lead.id);
+    return next;
+  });
 
-      <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
-        <CardHeader className="gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0 sm:px-5">
-          <div className="min-w-0 space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">Criterios de búsqueda</h2>
-            <CardDescription className="truncate">
-              {activeSavedSearchId
-                ? `Usando “${savedSearches.find((item) => item.id === activeSavedSearchId)?.name || 'búsqueda guardada'}”`
-                : 'Configura solo lo necesario para encontrar leads.'}
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-1 sm:flex-shrink-0">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="max-w-[190px] shadow-none" aria-label="Abrir búsquedas guardadas">
-                  {savedSearchesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}
-                  <span className="truncate">Guardadas{savedSearches.length > 0 ? ` (${savedSearches.length})` : ''}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="max-h-80 w-[min(20rem,calc(100vw-2rem))] overflow-auto">
-                {savedSearchesLoading ? (
-                  <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Cargando búsquedas…
-                  </div>
-                ) : savedSearchesError ? (
-                  <div className="space-y-2 p-3">
-                    <p className="text-sm text-destructive">{savedSearchesError}</p>
-                    <Button size="sm" variant="outline" onClick={() => void loadSavedSearches()}>Reintentar</Button>
-                  </div>
-                ) : savedSearches.length === 0 ? (
-                  <div className="p-3 text-sm text-muted-foreground">Aún no guardaste búsquedas.</div>
-                ) : (
-                  savedSearches.map((savedSearch) => (
-                    <div key={savedSearch.id} className="group flex items-center gap-1 rounded-md p-1 hover:bg-muted focus-within:bg-muted">
-                      <button
-                        type="button"
-                        aria-current={activeSavedSearchId === savedSearch.id ? 'true' : undefined}
-                        className="min-w-0 flex-1 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => handleLoadSearch(savedSearch)}
-                      >
-                      <span className="block min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-medium">{savedSearch.name}</span>
-                          {activeSavedSearchId === savedSearch.id ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : null}
-                        </div>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {savedSearch.isShared ? `Equipo · ${savedSearch.user?.fullName || 'Usuario'}` : 'Privada'}
-                        </span>
-                      </span>
-                      </button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100" onClick={(event) => handleRequestDeleteSearch(event, savedSearch)} aria-label={`Eliminar búsqueda guardada ${savedSearch.name}`}>
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shadow-none"
-              aria-label="Guardar búsqueda"
-              onClick={() => {
-                setSaveSearchError('');
-                setSaveSearchOpen(true);
-              }}
+  useEffect(() => { if (missingFilterError) setCriteriaOpen(true); }, [missingFilterError]);
+  const runSearch = () => {
+    setCriteriaOpen(false);
+    void handleSearch();
+  };
+
+  const modeSwitch = (
+    <fieldset disabled={isLoading || checkpointLoading} className="min-w-0 border-0 p-0">
+      <legend className="sr-only">Modo de búsqueda</legend>
+      <div data-tour="search-modes" className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1" role="group" aria-label="Modo de búsqueda">
+        {([
+          ['filters', 'Filtros'],
+          ['company_name', 'Empresa'],
+          ['linkedin_profile', 'Perfil'],
+        ] as const).map(([value, label]) => {
+          const active = filters.searchMode === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => handleFilterChange('searchMode', value)}
+              className={cn(
+                'inline-flex items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+                active ? 'bg-background text-foreground shadow-sm' : 'text-foreground/70 hover:text-foreground',
+              )}
             >
-              <BookmarkPlus className="h-4 w-4" />
-              <span className="hidden sm:inline">Guardar</span>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+
+  const savedSearchesMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-8 px-2 shadow-none" aria-label={`Abrir búsquedas guardadas${savedSearches.length > 0 ? ` (${savedSearches.length})` : ''}`}>
+          {savedSearchesLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Bookmark className="h-4 w-4" aria-hidden="true" />}
+          <span>Guardadas{savedSearches.length > 0 ? ` (${savedSearches.length})` : ''}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-80 w-[min(20rem,calc(100vw-2rem))] overflow-auto">
+        {savedSearchesLoading ? (
+          <div className="flex items-center gap-2 p-3 text-sm text-foreground/70">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Cargando búsquedas…
+          </div>
+        ) : savedSearchesError ? (
+          <div className="space-y-2 p-3">
+            <p className="text-sm text-destructive">{savedSearchesError}</p>
+            <Button size="sm" variant="outline" onClick={() => void loadSavedSearches()}>Reintentar</Button>
+          </div>
+        ) : savedSearches.length === 0 ? (
+          <div className="p-3 text-sm text-foreground/70">Aún no guardas búsquedas. Usa «Guardar» para volver a estos criterios.</div>
+        ) : (
+          savedSearches.map((savedSearch) => (
+            <div key={savedSearch.id} className="group flex items-center gap-1 rounded-md p-1 hover:bg-muted focus-within:bg-muted">
+              <button
+                type="button"
+                aria-current={activeSavedSearchId === savedSearch.id ? 'true' : undefined}
+                className="min-w-0 flex-1 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => handleLoadSearch(savedSearch)}
+              >
+                <span className="block min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{savedSearch.name}</span>
+                    {activeSavedSearchId === savedSearch.id ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-cw-success" aria-hidden="true" /> : null}
+                  </span>
+                  <span className="block truncate text-xs text-foreground/70">
+                    {savedSearch.isShared ? `Equipo · ${savedSearch.user?.fullName || 'Usuario'}` : 'Privada'}
+                  </span>
+                </span>
+              </button>
+              <Button variant="ghost" size="icon" className="h-8 w-8 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100" onClick={(event) => handleRequestDeleteSearch(event, savedSearch)} aria-label={`Eliminar búsqueda guardada ${savedSearch.name}`}>
+                <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+              </Button>
+            </div>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  const criteriaFields = filters.searchMode === 'linkedin_profile' ? (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="linkedinUrl">URL del perfil de LinkedIn *</Label>
+        <Input
+          id="linkedinUrl"
+          inputMode="url"
+          autoComplete="url"
+          placeholder="https://www.linkedin.com/in/nombre"
+          value={filters.linkedinUrl}
+          onChange={(event) => handleFilterChange('linkedinUrl', event.target.value)}
+          required
+        />
+        <p className="text-xs text-foreground/70">Pega la dirección que empieza con linkedin.com/in/. No sirven las de Sales Navigator ni las páginas de empresas.</p>
+      </div>
+      <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+        <CollapsibleTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" className="px-0 text-foreground/70 hover:bg-transparent hover:text-foreground">
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            Datos de contacto
+            <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
+              <div>
+                <Label htmlFor="revealEmail">Correo laboral</Label>
+                <p className="text-xs text-foreground/70">Solicita únicamente direcciones de trabajo.</p>
+              </div>
+              <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(value) => handleFilterChange('revealEmail', value)} />
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
+              <div>
+                <Label htmlFor="revealPhone">Teléfono</Label>
+                <p className="text-xs text-foreground/70">Cuesta 10 créditos por persona y llega en 1 a 3 minutos, si el proveedor lo tiene.</p>
+              </div>
+              <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      <p className="text-xs text-foreground/70" role="status" aria-live="polite">
+        Primero verás los datos profesionales; el correo y el teléfono llegan después, sin que tengas que esperar.
+      </p>
+    </div>
+  ) : filters.searchMode === 'company_name' ? (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        {companySearchHint ? (
+          <p className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm" role="status">
+            Buscando a <strong>{companySearchHint}</strong>: escribe su empresa y, en opciones avanzadas, su cargo.
+          </p>
+        ) : null}
+        <Label htmlFor="companyName">Empresa *</Label>
+        <Input
+          id="companyName"
+          autoComplete="organization"
+          placeholder="Ej. Microsoft"
+          value={filters.companyName}
+          onChange={(event) => handleFilterChange('companyName', event.target.value)}
+        />
+        <p className="text-xs text-foreground/70">También puedes buscar solo por dominio desde las opciones avanzadas.</p>
+      </div>
+      <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+        <CollapsibleTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" className="px-0 text-foreground/70 hover:bg-transparent hover:text-foreground">
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            Opciones avanzadas
+            <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-1">
+            <div className="space-y-2 md:col-span-2 lg:col-span-1">
+              <Label htmlFor="companyDomains">Dominio de la empresa</Label>
+              <Input id="companyDomains" placeholder="Ej. empresa.com, empresa.cl" value={filters.companyDomains} onChange={(event) => handleFilterChange('companyDomains', event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="companyTitles">Cargos</Label>
+              <Input id="companyTitles" placeholder="Ej. VP Marketing, Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="maxResults">Máximo de resultados</Label>
+              <Input id="maxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 25)))} />
+            </div>
+            <div className="md:col-span-2 lg:col-span-1">
+              <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {selectedOrganization ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-cw-border bg-cw-success-soft p-3 text-sm">
+          <div className="flex min-w-0 items-start gap-2">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cw-success" aria-hidden="true" />
+            <div className="min-w-0">
+              <span className="font-medium">Empresa elegida: </span>
+              <span>{selectedOrganization.name}{selectedOrganization.primary_domain ? ` · ${selectedOrganization.primary_domain}` : ''}</span>
+              {selectedOrganization.short_description ? <p className="mt-1 line-clamp-2 text-xs text-foreground/70">{selectedOrganization.short_description}</p> : null}
+            </div>
+          </div>
+          {selectedOrganization.primary_domain ? (
+            <Button type="button" variant="outline" size="sm" className="self-start bg-background/70 shadow-none" onClick={handleEnrichOrganization} disabled={isLoading || isEnrichingOrganization}>
+              {isEnrichingOrganization ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Building2 className="h-4 w-4" aria-hidden="true" />}
+              {isEnrichingOrganization ? 'Actualizando…' : 'Completar empresa'}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  ) : (
+    <div className="space-y-5">
+      <p id="filterRequirement" className={cn('text-sm text-foreground/70', missingFilterError && 'font-medium text-destructive')}>
+        {missingFilterError
+          ? error
+          : 'Primero eliges empresas con estos filtros; después buscamos contactos solo dentro de las que marques.'}
+      </p>
+      {(filters as any)?.industry ? (
+        <Alert variant="warning">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
+          <AlertTitle>Revisa tus criterios</AlertTitle>
+          <AlertDescription>
+            Esta búsqueda guardada usa el filtro antiguo «Industria», que ya no se aplica. Mueve ese término a «Palabras clave de empresa» antes de continuar.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="space-y-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+          <Building2 className="h-4 w-4 text-primary" aria-hidden="true" />
+          Empresas
+        </h3>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-1">
+          <div className="space-y-2">
+            <Label htmlFor="companyKeywords">Palabras clave de empresa</Label>
+            <Input id="companyKeywords" aria-describedby="companyKeywordsHelp" placeholder="Ej. retail, logística, moda" value={filters.companyKeywords} onChange={(event) => handleFilterChange('companyKeywords', event.target.value)} />
+            <p id="companyKeywordsHelp" className="text-xs text-foreground/70">Lo que hace la empresa. Separa varias con comas.</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="location">Sede de la empresa</Label>
+            <Input id="location" aria-describedby="companyLocationHelp" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} />
+            <p id="companyLocationHelp" className="text-xs text-foreground/70">Dónde está la empresa, no dónde vive el contacto.</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="companyNameFilter">Nombre de empresa</Label>
+            <Input id="companyNameFilter" aria-describedby="companyNameFilterHelp" placeholder="Ej. Adecco, SONDA" value={filters.companyNameFilter} onChange={(event) => handleFilterChange('companyNameFilter', event.target.value)} />
+            <p id="companyNameFilterHelp" className="text-xs text-foreground/70">Se combina con los demás filtros.</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sizeRange">Tamaño de empresa</Label>
+            <Select name="sizeRange" value={filters.sizeRange || 'all'} onValueChange={(value) => handleFilterChange('sizeRange', value === 'all' ? '' : value)}>
+              <SelectTrigger id="sizeRange"><SelectValue placeholder="Cualquier tamaño" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" disabled={isLoading}>Cualquier tamaño</SelectItem>
+                {companySizes.map((size) => <SelectItem key={size} value={size} disabled={isLoading}>{size.replace('+', ' o más')}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-3 border-t border-border/60 pt-4">
+        <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+          <Users className="h-4 w-4 text-primary" aria-hidden="true" />
+          Contactos en esas empresas
+        </h3>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-1">
+          <div className="space-y-2">
+            <Label htmlFor="title">Cargo o posición</Label>
+            <Input id="title" placeholder="Ej. Gerente de Personas" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
+          </div>
+          <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
+          <div className="space-y-2">
+            <Label htmlFor="personLocation">Ubicación del contacto</Label>
+            <Input id="personLocation" aria-describedby="personLocationHelp" placeholder="Ej. Santiago, Buenos Aires" value={filters.personLocation} onChange={(event) => handleFilterChange('personLocation', event.target.value)} />
+            <p id="personLocationHelp" className="text-xs text-foreground/70">Dónde vive o trabaja la persona.</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="filterMaxResults">Contactos por empresa</Label>
+            <Input id="filterMaxResults" type="number" min={1} max={100} aria-describedby="filterMaxResultsHelp" value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 50)))} />
+            <p id="filterMaxResultsHelp" className="text-xs text-foreground/70">Cuántos traer de cada empresa marcada. Puedes pedir más después.</p>
+          </div>
+        </div>
+      </div>
+      <p className="text-xs leading-relaxed text-foreground/70">
+        La búsqueda no gasta créditos en correos: los buscas después, en «Por completar».
+      </p>
+    </div>
+  );
+
+  const searchError = error && !missingFilterError ? (
+    <Alert variant="warning">
+      <AlertCircle className="h-4 w-4" aria-hidden="true" />
+      <AlertTitle>No pudimos completar la búsqueda</AlertTitle>
+      <AlertDescription className="space-y-3">
+        <p id="searchValidationError">{error}</p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" variant="outline" className="bg-background/80" onClick={runSearch} disabled={isLoading}>
+            Intentar de nuevo
+          </Button>
+          {filters.searchMode === 'linkedin_profile' && profileOnlyRetry && (filters.revealEmail || filters.revealPhone) ? (
+            <Button size="sm" variant="outline" className="bg-background/80" onClick={handleProfileOnlyRetry} disabled={isLoading}>
+              Buscar solo datos profesionales
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={() => setError('')}>
+            Ocultar aviso
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
+  ) : null;
+
+  const rowSkeleton = (label: string) => (
+    <div className="space-y-2" aria-busy="true" aria-label={label}>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 rounded-xl border border-border/60 bg-background p-3">
+          <Skeleton className="h-4 w-4" />
+          <Skeleton className="h-9 w-9 rounded-full" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-48 max-w-full" />
+            <Skeleton className="h-3 w-64 max-w-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const profileDetails = (lead: UILaed) => filters.searchMode === 'linkedin_profile' ? (
+    <div className="mt-1 flex flex-col gap-0.5 text-xs">
+      {filters.revealEmail && !lead.email ? <span className="text-cw-warning">Correo no disponible</span> : null}
+      {filters.revealPhone ? (
+        lead.primaryPhone ? (
+          <span className="font-medium text-cw-success">{lead.primaryPhone}</span>
+        ) : isPendingEnrichmentStatus(lead.enrichmentStatus) ? (
+          <span className="inline-flex items-center gap-1 text-primary">
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+            Teléfono en camino…
+          </span>
+        ) : (
+          <span className="text-foreground/70">Sin teléfono visible</span>
+        )
+      ) : null}
+    </div>
+  ) : null;
+
+  const stepButton = (step: 'companies' | 'people', index: number, label: string, count: number, disabled = false) => {
+    const active = resultsView === step;
+    return (
+      <button
+        type="button"
+        aria-current={active ? 'step' : undefined}
+        disabled={disabled || isLoading}
+        onClick={() => setFilterStep(step)}
+        className={cn(
+          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+          active ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border/70 bg-card text-foreground/70 hover:text-foreground',
+        )}
+      >
+        <span className={cn('flex h-5 w-5 items-center justify-center rounded-full text-xs tabular-nums', active ? 'bg-primary text-primary-foreground' : 'bg-muted')}>{index}</span>
+        {label}
+        {count > 0 ? <span className="tabular-nums text-foreground/70">{count.toLocaleString('es-CL')}</span> : null}
+      </button>
+    );
+  };
+
+  const companiesSection = (
+    <section aria-labelledby="companies-title" className="space-y-3 rounded-2xl border border-border/60 bg-card p-4 sm:p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <h2 id="companies-title" className="text-base font-semibold tracking-tight">
+            {isLoadingCompanies ? 'Buscando empresas…' : companies.length > 0 ? `${companies.length.toLocaleString('es-CL')} empresas` : 'Empresas'}
+          </h2>
+          <p className="text-sm text-foreground/70" role="status" aria-live="polite">
+            Marca las que te interesan; en cada una buscaremos hasta {leadsPerCompany} contactos.
+            {companiesTotalEntries ? ` Hay unas ${companiesTotalEntries.toLocaleString('es-CL')} en total.` : ''}
+          </p>
+        </div>
+        {companies.length > 0 ? (
+          <div className="flex shrink-0 gap-1">
+            <Button type="button" variant="ghost" size="sm" disabled={isLoading} onClick={() => setSelectedCompanyIds(new Set(companies.map((org) => org.id)))}>
+              Marcar todas
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={isLoading || selectedCompanyIds.size === 0} onClick={() => setSelectedCompanyIds(new Set())}>
+              Desmarcar
             </Button>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-5 p-4 sm:p-5">
-          <fieldset
-            ref={criteriaRef}
-            disabled={isLoading || checkpointLoading}
-            tabIndex={-1}
-            aria-invalid={missingFilterError || undefined}
-            aria-describedby={filters.searchMode === 'filters' ? 'filterRequirement' : undefined}
-            className="min-w-0 space-y-5 border-0 p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            {filters.searchMode === 'filters' && filterStep === 'filters' && !activeSavedSearchId ? (
-              <SearchStarters starters={searchStarters} onPick={applySearchStarter} disabled={isLoading || isLoadingCompanies} missingIdealCustomer={idealCustomerChecked && !idealCustomer} />
-            ) : null}
-          <legend className="sr-only">Criterios de búsqueda</legend>
-          <div data-tour="search-modes" className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1 sm:w-[420px]" role="group" aria-label="Modo de búsqueda">
-            {([
-              ['filters', 'Filtros'],
-              ['company_name', 'Empresa'],
-              ['linkedin_profile', 'Perfil'],
-            ] as const).map(([value, label]) => {
-              const active = filters.searchMode === value;
+        ) : null}
+      </div>
+      {companiesStale ? (
+        <Alert variant="info" role="status">
+          <Info className="h-4 w-4" aria-hidden="true" />
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            Cambiaste los filtros de empresa: esta lista es de la búsqueda anterior.
+            <Button type="button" size="sm" variant="outline" className="h-7 bg-background/80" onClick={runSearch} disabled={isLoading}>Actualizar empresas</Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {isLoadingCompanies ? rowSkeleton('Buscando empresas') : companies.length > 0 ? (
+        <>
+          <ul className="grid gap-2 xl:grid-cols-2" aria-label="Empresas encontradas">
+            {companies.map((org) => {
+              const checked = selectedCompanyIds.has(org.id);
+              const place = [org.city, org.country].filter(Boolean).join(', ');
+              return (
+                <li key={org.id}>
+                  <label className={cn(
+                    'flex h-full cursor-pointer items-start gap-3 rounded-xl border border-border/60 bg-background p-3 transition-colors hover:border-primary/40 focus-within:ring-2 focus-within:ring-ring',
+                    checked && 'border-primary/50 bg-primary/5',
+                  )}>
+                    <Checkbox
+                      aria-label={`Marcar ${org.name}`}
+                      checked={checked}
+                      onCheckedChange={(value) => toggleCompanySelection(org.id, Boolean(value))}
+                      className="mt-2.5"
+                    />
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground/70">
+                      <Building2 className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{org.name}</span>
+                      <span className="block truncate text-xs text-foreground/70">{displayDomain(org.primary_domain || org.website_url || '') || 'Sin sitio web visible'}</span>
+                      <span className="mt-1 block text-xs text-foreground/70">
+                        {place || 'Ubicación no disponible'}
+                        {typeof org.estimated_num_employees === 'number' ? ` · ${org.estimated_num_employees.toLocaleString('es-CL')} personas` : ''}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          {companiesPage < companiesTotalPages && companiesPage < 500 ? (
+            <Button type="button" variant="outline" className="w-full sm:w-auto" disabled={isLoading} onClick={() => void handleSearchCompanies(companiesPage + 1)}>
+              Cargar más empresas
+            </Button>
+          ) : null}
+        </>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
+          <p className="font-medium">No encontramos empresas con estos filtros</p>
+          <p className="mt-1 text-sm text-foreground/70">{error && !missingFilterError ? error : 'Prueba ampliando palabras clave, sede o tamaño.'}</p>
+          <FilterRelaxHint chips={activeChips} onRemove={removeFilterChip} disabled={isLoadingCompanies} />
+        </div>
+      )}
+    </section>
+  );
+
+  const peopleSection = (
+    <section aria-labelledby="people-title" className="space-y-3 rounded-2xl border border-border/60 bg-card p-4 sm:p-5">
+      <div className="space-y-1">
+        <h2 id="people-title" className="text-base font-semibold tracking-tight">Contactos por empresa</h2>
+        <p className="text-sm text-foreground/70" role="status" aria-live="polite" aria-atomic="true">
+          {isLoadingCompanyPeople
+            ? 'Buscando contactos en las empresas marcadas…'
+            : companyWindowList.length > 0
+              ? `${contactsFound.toLocaleString('es-CL')} contactos en ${companyWindowList.length} empresas. Marca los que quieras guardar.`
+              : 'Marca empresas y busca contactos para ver resultados.'}
+        </p>
+      </div>
+      {peopleStale ? (
+        <Alert variant="info" role="status">
+          <Info className="h-4 w-4" aria-hidden="true" />
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            Cambiaste los filtros de contactos: estos resultados son de la búsqueda anterior.
+            <Button type="button" size="sm" variant="outline" className="h-7 bg-background/80" onClick={() => void handleSearchCompanyPeople()} disabled={isLoading || selectedCompanyIds.size === 0}>
+              Buscar de nuevo en {selectedCompanyIds.size} {selectedCompanyIds.size === 1 ? 'empresa' : 'empresas'}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {isLoadingCompanyPeople && companyWindowList.length === 0 ? rowSkeleton('Buscando contactos') : companyWindowList.length === 0 ? (
+        <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
+          <Building2 className="mb-3 h-5 w-5 text-foreground/70" aria-hidden="true" />
+          <p className="font-medium">Aún no hay contactos</p>
+          <p className="mt-1 max-w-md text-sm text-foreground/70">Vuelve a «Empresas», marca al menos una y busca contactos.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+          <div role="group" aria-label="Empresas con contactos" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-col md:overflow-visible md:px-0 md:pb-0">
+            {companyWindowList.map((window) => {
+              const active = window.organization.id === activeCompanyId;
               return (
                 <button
-                  key={value}
+                  key={window.organization.id}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => handleFilterChange('searchMode', value)}
+                  onClick={() => setActiveCompanyId(window.organization.id)}
                   className={cn(
-                    'inline-flex items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
-                    active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                    'flex shrink-0 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full',
+                    active ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background hover:border-primary/30',
                   )}
                 >
-                  {label}
+                  <span className="min-w-0 max-w-[11rem] md:max-w-none">
+                    <span className="block truncate font-medium">{window.organization.name}</span>
+                    <span className="hidden truncate text-xs text-foreground/70 md:block">
+                      {displayDomain(window.organization.primary_domain || window.organization.website_url || '') || 'Sin sitio web'}
+                    </span>
+                  </span>
+                  <Badge variant={active ? 'info' : 'neutral'} className="tabular-nums">{window.leads.length}</Badge>
                 </button>
               );
             })}
           </div>
-
-          <div className="space-y-4">
-            {filters.searchMode === 'linkedin_profile' ? (
-              <div className="space-y-4">
-                <div className="max-w-3xl space-y-2">
-                  <Label htmlFor="linkedinUrl">URL del perfil de LinkedIn *</Label>
-                  <Input
-                    id="linkedinUrl"
-                    inputMode="url"
-                    autoComplete="url"
-                    placeholder="https://www.linkedin.com/in/nombre"
-                    value={filters.linkedinUrl}
-                    onChange={(event) => handleFilterChange('linkedinUrl', event.target.value)}
-                    required
-                  />
-                  <p className="text-xs text-muted-foreground">Pega la dirección del perfil, la que empieza con linkedin.com/in/. No sirven las de Sales Navigator ni las páginas de empresas.</p>
-                </div>
-                <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
-                  <CollapsibleTrigger asChild>
-                    <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent hover:text-foreground">
-                      <SlidersHorizontal className="h-4 w-4" />
-                      Datos de contacto
-                      <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-2">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
-                        <div>
-                          <Label htmlFor="revealEmail">Correo laboral</Label>
-                          <p className="text-xs text-muted-foreground">Solicita únicamente direcciones de trabajo.</p>
-                        </div>
-                        <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(value) => handleFilterChange('revealEmail', value)} />
-                      </div>
-                      <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
-                        <div>
-                          <Label htmlFor="revealPhone">Teléfono</Label>
-                          <p className="text-xs text-muted-foreground">Cuesta 10 créditos por persona y llega en 1 a 3 minutos, si el proveedor lo tiene.</p>
-                        </div>
-                        <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
-                      </div>
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-                <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
-                  El resultado inicial muestra datos profesionales. Los datos de contacto se actualizan en segundo plano.
-                </p>
-              </div>
-            ) : filters.searchMode === 'company_name' ? (
-              <div className="space-y-4">
-                <div className="max-w-3xl space-y-2">
-                  {companySearchHint ? (
-                    <p className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm" role="status">
-                      Buscando a <strong>{companySearchHint}</strong>: escribe su empresa y, en opciones avanzadas, su cargo.
+          <div className="min-w-0 space-y-3">
+            {!activeWindow ? (
+              <p className="text-sm text-foreground/70">Elige una empresa para ver sus contactos.</p>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold">{activeWindow.organization.name}</h3>
+                    <p className="text-xs text-foreground/70">
+                      {activeWindow.leads.length} {activeWindow.leads.length === 1 ? 'contacto' : 'contactos'}
+                      {activeWindow.totalEntries ? ` de unos ${activeWindow.totalEntries.toLocaleString('es-CL')}` : ''}
                     </p>
-                  ) : null}
-                  <Label htmlFor="companyName">Empresa *</Label>
-                  <Input
-                    id="companyName"
-                    autoComplete="organization"
-                    placeholder="Ej. Microsoft"
-                    value={filters.companyName}
-                    onChange={(event) => handleFilterChange('companyName', event.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">También puedes buscar solo por dominio desde las opciones avanzadas.</p>
-                </div>
-                <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
-                  <CollapsibleTrigger asChild>
-                    <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent hover:text-foreground">
-                      <SlidersHorizontal className="h-4 w-4" />
-                      Opciones avanzadas
-                      <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-2">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="companyDomains">Dominio de la empresa</Label>
-                        <Input id="companyDomains" placeholder="Ej. empresa.com, empresa.cl" value={filters.companyDomains} onChange={(event) => handleFilterChange('companyDomains', event.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="companyTitles">Cargos</Label>
-                        <Input id="companyTitles" placeholder="Ej. VP Marketing, Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="maxResults">Máximo de resultados</Label>
-                        <Input id="maxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 25)))} />
-                      </div>
-                      <div className="md:col-span-2">
-                        <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
-                      </div>
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-
-                {selectedOrganization ? (
-                  <div className="flex max-w-3xl flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-sm dark:border-emerald-500/30 dark:bg-emerald-500/10 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex min-w-0 items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-                    <div className="min-w-0">
-                      <span className="font-medium text-emerald-900 dark:text-emerald-100">Empresa seleccionada: </span>
-                      <span className="text-emerald-800 dark:text-emerald-200">{selectedOrganization.name}{selectedOrganization.primary_domain ? ` · ${selectedOrganization.primary_domain}` : ''}</span>
-                      {selectedOrganization.short_description ? <p className="mt-1 line-clamp-2 text-xs text-emerald-800/80 dark:text-emerald-100/70">{selectedOrganization.short_description}</p> : null}
-                    </div>
-                    </div>
-                    {selectedOrganization.primary_domain ? (
-                      <Button type="button" variant="outline" size="sm" className="shrink-0 bg-background/70 shadow-none" onClick={handleEnrichOrganization} disabled={isLoading || isEnrichingOrganization}>
-                        {isEnrichingOrganization ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
-                        {isEnrichingOrganization ? 'Actualizando…' : 'Completar empresa'}
-                      </Button>
-                    ) : null}
                   </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="space-y-5">
-                <p id="filterRequirement" className={cn('text-sm text-muted-foreground', missingFilterError && 'font-medium text-destructive')}>
-                  {missingFilterError
-                    ? error
-                    : 'Primero elige empresas con estos filtros. Después buscaremos contactos solo dentro de las que selecciones.'}
-                </p>
-                {(filters as any)?.industry ? (
-                  <Alert className="border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-                    <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
-                    <AlertTitle>Revisa tus criterios</AlertTitle>
-                    <AlertDescription>
-                      Esta búsqueda guardada usa el filtro antiguo «Industria», que ya no se aplica. Mueve ese término a «Palabras clave de empresa» antes de continuar.
-                    </AlertDescription>
+                  {activeWindow.leads.some((lead) => !isSavedLead(lead) && !isContactedLead(lead)) ? (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => selectWindowLeads(activeWindow)}>Marcar todos</Button>
+                  ) : null}
+                </div>
+                {activeWindow.error && activeWindow.leads.length === 0 ? (
+                  <Alert variant="warning">
+                    <AlertCircle className="h-4 w-4" aria-hidden="true" />
+                    <AlertTitle>Sin resultados en esta empresa</AlertTitle>
+                    <AlertDescription>{activeWindow.error}</AlertDescription>
                   </Alert>
-                ) : null}
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold tracking-tight">Empresas</h3>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="companyKeywords">Palabras clave de empresa</Label>
-                      <Input id="companyKeywords" aria-describedby="companyKeywordsHelp" placeholder="Ej. fashion, retail, moda" value={filters.companyKeywords} onChange={(event) => handleFilterChange('companyKeywords', event.target.value)} />
-                      <p id="companyKeywordsHelp" className="text-xs text-muted-foreground">Busca términos asociados a la actividad de la empresa. Separa varios con comas.</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="location">Sede de la empresa</Label>
-                      <Input id="location" aria-describedby="companyLocationHelp" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} />
-                      <p id="companyLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación de la organización, no por la residencia del lead.</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="companyNameFilter">Nombre de empresa</Label>
-                      <Input id="companyNameFilter" aria-describedby="companyNameFilterHelp" placeholder="Ej. Adecco, SONDA" value={filters.companyNameFilter} onChange={(event) => handleFilterChange('companyNameFilter', event.target.value)} />
-                      <p id="companyNameFilterHelp" className="text-xs text-muted-foreground">Filtra por el nombre de la organización. Puedes combinarlo con los demás filtros.</p>
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="sizeRange">Tamaño de empresa</Label>
-                      <Select name="sizeRange" value={filters.sizeRange || 'all'} onValueChange={(value) => handleFilterChange('sizeRange', value === 'all' ? '' : value)}>
-                        <SelectTrigger id="sizeRange"><SelectValue placeholder="Cualquier tamaño" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all" disabled={isLoading}>Cualquier tamaño</SelectItem>
-                          {companySizes.map((size) => <SelectItem key={size} value={size} disabled={isLoading}>{size.replace('+', ' o más')}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold tracking-tight">Contactos a buscar en esas empresas</h3>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="title">Cargo o posición</Label>
-                      <Input id="title" placeholder="Ej. Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
-                    </div>
-                    <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
-                    <div className="space-y-2">
-                      <Label htmlFor="personLocation">Ubicación del lead</Label>
-                      <Input id="personLocation" aria-describedby="personLocationHelp" placeholder="Ej. Santiago, Buenos Aires" value={filters.personLocation} onChange={(event) => handleFilterChange('personLocation', event.target.value)} />
-                      <p id="personLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación personal o laboral del prospecto.</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="filterMaxResults">Leads por empresa</Label>
-                      <Input id="filterMaxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 50)))} />
-                      <p className="text-xs text-muted-foreground">Cada empresa seleccionada cargará hasta esta cantidad. Puedes expandirla después.</p>
-                    </div>
-                  </div>
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  La búsqueda no enriquece contactos. Puedes buscar su correo después desde «Por completar».
-                </p>
-              </div>
-            )}
-          </div>
-          </fieldset>
-
-          <div className="sticky bottom-2 z-10 flex flex-col gap-2 rounded-xl border border-border/70 bg-card/95 p-2 pt-2 shadow-lg backdrop-blur sm:static sm:flex-row sm:items-center sm:justify-end sm:rounded-none sm:border-x-0 sm:border-b-0 sm:bg-transparent sm:p-0 sm:pt-4 sm:shadow-none sm:backdrop-blur-none">
-            <Button variant="ghost" className="shadow-none" onClick={handleClear} disabled={isLoading}><X className="h-4 w-4" />Limpiar</Button>
-            {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
-            <Button data-tour="search-run" className="shadow-none sm:min-w-36" onClick={handleSearch} disabled={isLoading || checkpointLoading}>
-              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              {isLoading ? 'Buscando…' : filters.searchMode === 'filters' ? 'Buscar empresas' : 'Buscar leads'}
-            </Button>
-          </div>
-
-          {filters.searchMode === 'filters' && filterStep !== 'filters' ? (
-            <div className="mt-4 space-y-3">
-              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Etapas de búsqueda">
-                {(['filters', 'companies', 'people'] as const).map((step, index) => {
-                  const labels = { filters: '1. Filtros', companies: '2. Empresas', people: '3. Contactos' } as const;
-                  const active = filterStep === step;
-                  const done = (filterStep === 'companies' && step === 'filters') || (filterStep === 'people' && step !== 'people');
-                  return (
-                    <div key={step} className="flex items-center gap-2">
-                      <Badge variant={active ? 'default' : done ? 'secondary' : 'outline'}>{labels[step]}</Badge>
-                      {index < 2 ? <span className="text-muted-foreground">→</span> : null}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setFilterStep('filters')} disabled={isLoading}>
-                  Editar filtros
-                </Button>
-                {filterStep === 'people' ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => setFilterStep('companies')} disabled={isLoading}>
-                    Cambiar empresas
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {filters.searchMode === 'filters' && filterStep === 'companies' ? (
-            <div className="mt-4 space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="font-medium">
-                    {isLoadingCompanies ? 'Buscando empresas…' : companies.length > 0 ? `${companies.length} empresas encontradas` : 'Empresas'}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Selecciona las que te interesen. Cada una cargará hasta {getCompanyPersonFilters().leadsPerCompany} contactos.
-                    {companiesTotalEntries ? ` Total estimado: ${companiesTotalEntries}.` : ''}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm" disabled={isLoading || companies.length === 0} onClick={() => setSelectedCompanyIds(new Set(companies.map((org) => org.id)))}>
-                    Seleccionar cargadas
-                  </Button>
-                  <Button type="button" variant="ghost" size="sm" disabled={isLoading} onClick={() => setSelectedCompanyIds(new Set())}>
-                    Limpiar selección
-                  </Button>
-                </div>
-              </div>
-              {isLoadingCompanies ? (
-                <div className="space-y-2" aria-busy="true" aria-label="Buscando empresas">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <div key={index} className="flex items-center gap-3 rounded-xl border border-border/60 bg-background p-3">
-                      <Skeleton className="h-4 w-4" />
-                      <div className="flex-1 space-y-2">
-                        <Skeleton className="h-4 w-48 max-w-full" />
-                        <Skeleton className="h-3 w-64 max-w-full" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : companies.length > 0 ? (
-                <div className="space-y-2">
-                  {companies.map((org) => {
-                    const checked = selectedCompanyIds.has(org.id);
-                    return (
-                      <label key={org.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/60 bg-background p-3 transition hover:border-primary/40 focus-within:ring-2 focus-within:ring-ring">
-                        <Checkbox
-                          aria-label={`Seleccionar ${org.name}`}
-                          checked={checked}
-                          onCheckedChange={(value) => toggleCompanySelection(org.id, Boolean(value))}
+                ) : activeWindow.leads.length > 0 ? (
+                  <ul className="space-y-2" aria-label={`Contactos de ${activeWindow.organization.name}`}>
+                    {activeWindow.leads.map((lead) => (
+                      <li key={lead.id}>
+                        <SearchLeadRow
+                          lead={lead}
+                          selected={selectedLeads.has(lead.id)}
+                          saved={isSavedLead(lead)}
+                          contacted={isContactedLead(lead)}
+                          onSelect={(checked) => handleSelectLead(lead.id, checked)}
+                          lock={teamLockFor(lead)}
+                          showCompany={false}
                         />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{org.name}</span>
-                          <span className="block truncate text-sm text-muted-foreground">{org.primary_domain || org.website_url || 'Sin dominio visible'}</span>
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            {[org.city, org.country].filter(Boolean).join(', ') || 'Ubicación no disponible'}
-                            {typeof org.estimated_num_employees === 'number' ? ` · ${org.estimated_num_employees} empleados` : ''}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                  {companiesPage < companiesTotalPages && companiesPage < 500 ? <Button variant="outline" disabled={isLoading} onClick={() => void handleSearchCompanies(companiesPage + 1)}>Cargar más empresas</Button> : null}
-                  <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="text-sm text-muted-foreground" role="status">
-                      {selectedCompanyIds.size} empresa{selectedCompanyIds.size === 1 ? '' : 's'} seleccionada{selectedCompanyIds.size === 1 ? '' : 's'}
-                    </span>
-                    <Button type="button" disabled={isLoadingCompanyPeople || selectedCompanyIds.size === 0} onClick={() => void handleSearchCompanyPeople()}>
-                      {isLoadingCompanyPeople ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                      {isLoadingCompanyPeople ? 'Buscando contactos…' : `Buscar contactos${selectedCompanyIds.size > 0 ? ` (${selectedCompanyIds.size})` : ''}`}
-                    </Button>
-                  </div>
-                </div>
-              ) : !error ? (
-                <div className="text-center">
-                  <p className="text-sm font-medium">No encontramos empresas con estos filtros</p>
-                  <FilterRelaxHint chips={activeFilterChips(filters)} onRemove={removeFilterChip} disabled={isLoadingCompanies} />
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {profileSearchNotice ? (
-            <Alert
-              className={cn(
-                'mt-4 overflow-hidden border-border/60 bg-card/90',
-                profileSearchNotice.tone === 'warning' && 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
-              )}
-            >
-              {profileSearchNotice.tone === 'warning'
-                ? <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
-                : (profilePhonePollingIds.length > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <Info className="h-4 w-4" />)}
-              <AlertTitle>{profileSearchNotice.title}</AlertTitle>
-              <AlertDescription>
-                <div className="space-y-3">
-                  <p>{profileSearchNotice.description}</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="inline-flex items-center gap-2 text-sm">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span>Correo</span>
-                      <Badge variant="outline" className={statusChipClasses(profileSearchNotice.emailState)}>
-                        {profileSearchNotice.emailState === 'ready' ? 'Disponible' : profileSearchNotice.emailState === 'queued' ? 'Buscando…' : profileSearchNotice.emailState === 'missing' ? 'No disponible' : 'No solicitado'}
-                      </Badge>
-                    </div>
-                    <div className="inline-flex items-center gap-2 text-sm">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span>Teléfono</span>
-                      <Badge variant="outline" className={statusChipClasses(profileSearchNotice.phoneState)}>
-                        {profileSearchNotice.phoneState === 'ready' ? 'Disponible' : profileSearchNotice.phoneState === 'queued' ? 'Buscando…' : profileSearchNotice.phoneState === 'missing' ? 'No disponible' : 'No solicitado'}
-                      </Badge>
-                    </div>
-                  </div>
-                  {profilePhonePollingIds.length > 0 ? <p className="text-xs text-muted-foreground">Puedes seguir usando la app; este resultado se actualizará automáticamente.</p> : null}
-                </div>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
-          {filters.searchMode === 'company_name' && companySelectionPending && companyCandidates.length > 0 ? (
-            <div className="mt-4 rounded-xl border border-border/60 bg-muted/20 p-4">
-              <div className="mb-3 flex items-start gap-3">
-                <Building2 className="mt-0.5 h-4 w-4 text-blue-600" />
-                <div>
-                  <div className="font-medium">Selecciona la empresa correcta</div>
-                  <p className="text-sm text-muted-foreground">Encontramos varias coincidencias para “{filters.companyName}”. Elige una para continuar.</p>
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                {companyCandidates.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                   type="button"
-                    disabled={isLoading}
-                    onClick={() => handleSelectOrganization(candidate)}
-                    className="rounded-xl border border-border/60 bg-background p-3 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {activeWindow.error && activeWindow.leads.length > 0 ? (
+                  <p className="text-sm text-cw-warning">{activeWindow.error}</p>
+                ) : null}
+                <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-foreground/70">
+                    {peopleStale
+                      ? 'Vuelve a buscar con los filtros nuevos para traer más.'
+                      : activeWindow.hasMore
+                        ? `Puedes traer hasta ${activeWindow.perPage} más de esta empresa.`
+                        : 'No quedan más contactos con estos filtros en esta empresa.'}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!activeWindow.hasMore || activeWindow.isExpanding || peopleStale}
+                    onClick={() => void handleExpandCompany(activeWindow.organization.id)}
                   >
-                    <div className="font-medium">{candidate.name}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {candidate.primary_domain || candidate.website_url || 'Sin dominio visible'}
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {[candidate.city, candidate.state, candidate.country].filter(Boolean).join(', ') || 'Ubicación no disponible'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {filters.searchMode === 'filters' && filterStep === 'people' ? (
-        <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
-          <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold tracking-tight">Contactos por empresa</h2>
-              <CardDescription role="status" aria-live="polite" aria-atomic="true">
-                {isLoadingCompanyPeople
-                  ? 'Buscando contactos en las empresas seleccionadas…'
-                  : companyWindowList.length > 0
-                    ? `${companyWindowList.reduce((total, window) => total + window.leads.length, 0)} contactos en ${companyWindowList.length} empresas.`
-                    : 'Selecciona empresas y busca contactos para ver resultados.'}
-              </CardDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={selectedLeads.size === 0 || isSaving}
-              onClick={handleSaveSelectedLeads}
-              className="shadow-none"
-            >
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {isSaving ? 'Guardando…' : `Guardar seleccionados${selectedLeads.size > 0 ? ` (${selectedLeads.size})` : ''}`}
-            </Button>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-5">
-            {companyWindowList.length === 0 && !isLoadingCompanyPeople ? (
-              <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <Building2 className="h-5 w-5" />
+                    {activeWindow.isExpanding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                    {activeWindow.isExpanding ? 'Buscando más…' : activeWindow.page === 0 ? 'Reintentar' : `Traer ${activeWindow.perPage} más`}
+                  </Button>
                 </div>
-                <p className="font-medium">Sin ventanas todavía</p>
-                <p className="mt-1 max-w-md text-sm text-muted-foreground">Vuelve a Empresas, selecciona al menos una y busca contactos.</p>
-              </div>
-            ) : (
-              <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                <div className="space-y-2" role="group" aria-label="Empresas seleccionadas">
-                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">Empresas</Label>
-                  {companyWindowList.map((window) => {
-                    const active = window.organization.id === activeCompanyId;
-                    return (
-                      <button
-                        key={window.organization.id}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => setActiveCompanyId(window.organization.id)}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                          active ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background hover:border-primary/30',
-                        )}
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium">{window.organization.name}</span>
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {window.organization.primary_domain || window.organization.website_url || 'Sin dominio'}
-                          </span>
-                        </span>
-                        <Badge variant={active ? 'default' : 'secondary'}>{window.leads.length}</Badge>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="min-w-0 space-y-3">
-                  {!activeWindow ? (
-                    <p className="text-sm text-muted-foreground">Elige una empresa para ver sus contactos.</p>
-                  ) : (
-                    <>
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-base font-semibold">{activeWindow.organization.name}</h3>
-                          <p className="truncate text-sm text-muted-foreground">
-                            {activeWindow.organization.primary_domain || activeWindow.organization.website_url || ''}
-                            {activeWindow.totalEntries ? ` · ${activeWindow.totalEntries} estimados` : ''}
-                          </p>
-                        </div>
-                        <span className="text-sm text-muted-foreground" role="status">
-                          {activeWindow.leads.length} contacto{activeWindow.leads.length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                      {activeWindow.error && activeWindow.leads.length === 0 ? (
-                        <Alert className="border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-                          <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
-                          <AlertTitle>Sin resultados en esta empresa</AlertTitle>
-                          <AlertDescription>{activeWindow.error}</AlertDescription>
-                        </Alert>
-                      ) : activeWindow.leads.length > 0 ? (
-                        <div className="max-h-[65vh] space-y-2 overflow-y-auto">
-                          {activeWindow.leads.map((lead) => {
-                            const already = savedIds.has(lead.id) || savedApolloIds.has(String(lead.id));
-                            const contacted = !!((lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email)));
-                            const disabled = already || contacted;
-                            return (
-                              <div key={lead.id} className="flex items-start gap-3 rounded-xl border border-border/60 p-3">
-                                <Checkbox
-                                  aria-label={`Seleccionar ${lead.name}`}
-                                  disabled={disabled}
-                                  checked={selectedLeads.has(lead.id)}
-                                  onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
-                                  className="mt-1"
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
-                                      <p className="truncate font-medium">{lead.name}</p>
-                                      <p className="line-clamp-2 text-sm text-muted-foreground">{lead.title}</p>
-                                      <TeamLockBadge lock={teamLockFor(lead)} className="mt-1" />
-                                    </div>
-                                    {already ? <Badge variant="secondary">Guardado</Badge> : contacted ? <Badge variant="outline">Contactado</Badge> : null}
-                                  </div>
-                                  <p className="mt-1 truncate text-sm">{lead.company}</p>
-                                  {lead.email ? <p className="truncate text-xs text-muted-foreground">{lead.email}</p> : null}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                      {activeWindow.error && activeWindow.leads.length > 0 ? (
-                        <p className="text-sm text-amber-700 dark:text-amber-200">{activeWindow.error}</p>
-                      ) : null}
-                      <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs text-muted-foreground">
-                          {activeWindow.hasMore
-                            ? `Página ${activeWindow.page}. Puedes cargar hasta ${activeWindow.perPage} más.`
-                            : 'No quedan más contactos con estos filtros en esta empresa.'}
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={!activeWindow.hasMore || activeWindow.isExpanding}
-                          onClick={() => void handleExpandCompany(activeWindow.organization.id)}
-                        >
-                          {activeWindow.isExpanding ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                          {activeWindow.isExpanding ? 'Buscando más…' : activeWindow.page === 0 ? 'Reintentar' : `Expandir · hasta ${activeWindow.perPage} más`}
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
+              </>
             )}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {filters.searchMode === 'filters' ? null : (
-      <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
-        <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold tracking-tight">Resultados</h2>
-            <CardDescription role="status" aria-live="polite" aria-atomic="true">
-              {isLoading
-                ? 'Buscando leads que coincidan con tus criterios…'
-                : leads.length > 0
-                ? `Mostrando ${pagedLeads.length} de ${leads.length} leads.`
-                : companySelectionPending
-                  ? 'Selecciona una empresa para continuar.'
-                  : hasSearched
-                    ? 'Revisa el resultado o ajusta los criterios.'
-                    : 'Aquí aparecerán los leads que encuentres.'}
-            </CardDescription>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={selectedLeads.size === 0 || isSaving}
-            onClick={handleSaveSelectedLeads}
-            className="shadow-none"
+        </div>
+      )}
+    </section>
+  );
+
+  const profileNotice = profileSearchNotice ? (
+    <Alert variant={profileSearchNotice.tone === 'warning' ? 'warning' : 'info'} role="status">
+      {profileSearchNotice.tone === 'warning'
+        ? <AlertCircle className="h-4 w-4" aria-hidden="true" />
+        : (profilePhonePollingIds.length > 0 ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Info className="h-4 w-4" aria-hidden="true" />)}
+      <AlertTitle>{profileSearchNotice.title}</AlertTitle>
+      <AlertDescription>
+        <div className="space-y-3">
+          <p>{profileSearchNotice.description}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            {([['Correo', Mail, profileSearchNotice.emailState], ['Teléfono', Phone, profileSearchNotice.phoneState]] as const).map(([label, Icon, state]) => {
+              const badge = contactStateBadge(state);
+              return (
+                <span key={label} className="inline-flex items-center gap-2 text-sm">
+                  <Icon className="h-4 w-4 text-foreground/70" aria-hidden="true" />
+                  {label}
+                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                </span>
+              );
+            })}
+          </div>
+          {profilePhonePollingIds.length > 0 ? <p className="text-xs text-foreground/70">Puedes seguir usando la app; este resultado se actualiza solo.</p> : null}
+        </div>
+      </AlertDescription>
+    </Alert>
+  ) : null;
+
+  const companyCandidatesSection = filters.searchMode === 'company_name' && companySelectionPending && companyCandidates.length > 0 ? (
+    <section aria-labelledby="candidates-title" className="space-y-3 rounded-2xl border border-border/60 bg-card p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <Building2 className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
+        <div>
+          <h2 id="candidates-title" className="font-medium">¿Cuál de estas empresas es?</h2>
+          <p className="text-sm text-foreground/70">Encontramos varias coincidencias para «{filters.companyName}». Elige una para seguir.</p>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {companyCandidates.map((candidate) => (
+          <button
+            key={candidate.id}
+            type="button"
+            disabled={isLoading}
+            onClick={() => handleSelectOrganization(candidate)}
+            className="rounded-xl border border-border/60 bg-background p-3 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {isSaving ? 'Guardando…' : `Guardar seleccionados${selectedLeads.size > 0 ? ` (${selectedLeads.size})` : ''}`}
-          </Button>
-        </CardHeader>
-        <CardContent className="p-4 sm:p-5">
-          {filters.searchMode === 'linkedin_profile' && profileProblem ? (
-            <ProfileSearchProblemAlert message={profileProblem} busy={isLoading} onAction={handleProfileProblemAction} onDismiss={() => setProfileProblem(null)} />
-          ) : null}
-          {error && !missingFilterError ? (
-            <Alert role="alert" className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-              <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
-              <AlertTitle>No pudimos completar la búsqueda</AlertTitle>
-              <AlertDescription className="space-y-3 text-amber-800 dark:text-amber-100/80">
-                <p id="searchValidationError">{error}</p>
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Button size="sm" variant="outline" className="border-amber-300 bg-background/80 text-foreground hover:bg-background dark:border-amber-500/40" onClick={handleSearch} disabled={isLoading}>
-                    Intentar de nuevo
-                  </Button>
-                  {filters.searchMode === 'linkedin_profile' && profileOnlyRetry && (filters.revealEmail || filters.revealPhone) ? (
-                    <Button size="sm" variant="outline" className="border-amber-300 bg-background/80 text-foreground hover:bg-background dark:border-amber-500/40" onClick={handleProfileOnlyRetry} disabled={isLoading}>
-                      Buscar solo datos profesionales
-                    </Button>
-                  ) : null}
-                  <Button size="sm" variant="ghost" className="text-amber-900 hover:bg-amber-100 dark:text-amber-100 dark:hover:bg-amber-500/10" onClick={() => setError('')}>
-                    Ocultar aviso
-                  </Button>
-                </div>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {isLoading ? (
-            <div className="space-y-2" aria-busy="true" aria-label="Buscando leads">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <div key={index} className="flex items-center gap-3 rounded-xl border border-border/60 p-3">
-                  <Skeleton className="h-4 w-4" />
-                  <Skeleton className="h-10 w-10 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-40 max-w-full" />
-                    <Skeleton className="h-3 w-64 max-w-full" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : pagedLeads.length > 0 ? (
-            <>
-              <div className="space-y-2 md:hidden">
+            <span className="block font-medium">{candidate.name}</span>
+            <span className="mt-1 block text-sm text-foreground/70">{displayDomain(candidate.primary_domain || candidate.website_url || '') || 'Sin sitio web visible'}</span>
+            <span className="mt-2 block text-xs text-foreground/70">
+              {[candidate.city, candidate.state, candidate.country].filter(Boolean).join(', ') || 'Ubicación no disponible'}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  ) : null;
+
+  const leadsResults = (
+    <section aria-labelledby="results-title" className="space-y-4 rounded-2xl border border-border/60 bg-card p-4 sm:p-5">
+      <div className="space-y-1">
+        <h2 id="results-title" className="text-base font-semibold tracking-tight">Resultados</h2>
+        <p className="text-sm text-foreground/70" role="status" aria-live="polite" aria-atomic="true">
+          {isLoading
+            ? 'Buscando personas que calcen con tus criterios…'
+            : leads.length > 0
+              ? `${leads.length.toLocaleString('es-CL')} ${leads.length === 1 ? 'persona' : 'personas'}. Marca las que quieras guardar.`
+              : companySelectionPending
+                ? 'Elige una empresa para seguir.'
+                : hasSearched
+                  ? 'Revisa el resultado o ajusta los criterios.'
+                  : 'Aquí aparecerán las personas que encuentres.'}
+        </p>
+      </div>
+      {filters.searchMode === 'linkedin_profile' && profileProblem ? (
+        <ProfileSearchProblemAlert message={profileProblem} busy={isLoading} onAction={handleProfileProblemAction} onDismiss={() => setProfileProblem(null)} />
+      ) : null}
+      {searchError}
+      {isLoading ? rowSkeleton('Buscando personas') : pagedLeads.length > 0 ? (
+        <>
+          <ul className="space-y-2 md:hidden" aria-label="Personas encontradas">
+            {pagedLeads.map((lead) => (
+              <li key={lead.id}>
+                <SearchLeadRow
+                  lead={lead}
+                  selected={selectedLeads.has(lead.id)}
+                  saved={isSavedLead(lead)}
+                  contacted={isContactedLead(lead)}
+                  onSelect={(checked) => handleSelectLead(lead.id, checked)}
+                  lock={teamLockFor(lead)}
+                  details={profileDetails(lead)}
+                />
+              </li>
+            ))}
+          </ul>
+          <div className="hidden overflow-x-auto rounded-xl border border-border/60 md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[52px]">
+                    <Checkbox aria-label="Marcar todas las personas de esta página" onCheckedChange={(checked) => handleSelectAll(Boolean(checked))} checked={isPageAllSelected} />
+                  </TableHead>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Cargo</TableHead>
+                  <TableHead>Empresa</TableHead>
+                  <TableHead>Estado</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {pagedLeads.map((lead) => {
-                  const already = savedIds.has(lead.id);
-                  const contacted = !!((lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email)));
-                  const disabled = already || contacted;
+                  const saved = isSavedLead(lead);
+                  const contacted = isContactedLead(lead);
                   return (
-                    <div key={lead.id} className="rounded-xl border border-border/60 p-3" data-state={selectedLeads.has(lead.id) ? 'selected' : undefined}>
-                      <div className="flex items-start gap-3">
-                        <Checkbox aria-label={`Seleccionar ${lead.name}`} className="mt-1" disabled={disabled} checked={selectedLeads.has(lead.id)} onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="truncate font-medium">{lead.name}</p>
-                              <p className="line-clamp-2 text-sm text-muted-foreground">{lead.title}</p>
-                              <TeamLockBadge lock={teamLockFor(lead)} className="mt-1" />
-                            </div>
-                            {already ? <Badge variant="secondary">Guardado</Badge> : contacted ? <Badge variant="outline">Contactado</Badge> : null}
+                    <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? 'selected' : ''}>
+                      <TableCell>
+                        <Checkbox
+                          aria-label={saved || contacted ? `${lead.name}: ${saved ? 'ya guardado' : 'ya contactado'}` : `Seleccionar ${lead.name}`}
+                          disabled={saved || contacted}
+                          checked={selectedLeads.has(lead.id)}
+                          onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          {lead.avatar ? (
+                            <Avatar>
+                              <Image src={lead.avatar} width={40} height={40} className="rounded-full" alt="" unoptimized />
+                              <AvatarFallback>{lead.name ? lead.name.charAt(0) : ''}</AvatarFallback>
+                            </Avatar>
+                          ) : (
+                            <InitialsAvatar name={lead.name} className="h-10 w-10" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="font-medium">{lead.name}</div>
+                            {lead.email ? <div className="text-xs text-foreground/70">{lead.email}</div> : null}
+                            {profileDetails(lead)}
+                            <TeamLockBadge lock={teamLockFor(lead)} className="mt-0.5" />
                           </div>
-                          <p className="mt-2 truncate text-sm">{lead.company}</p>
-                          <p className="truncate text-xs text-muted-foreground">{lead.industry}</p>
-                          {lead.email ? <p className="mt-2 truncate text-xs text-muted-foreground">{lead.email}</p> : null}
-                          {filters.searchMode === 'linkedin_profile' && filters.revealPhone ? (
-                            <p className="mt-1 text-xs text-muted-foreground">{lead.primaryPhone || (isPendingEnrichmentStatus(lead.enrichmentStatus) ? 'Teléfono en proceso…' : 'Sin teléfono disponible')}</p>
-                          ) : null}
                         </div>
-                      </div>
-                    </div>
+                      </TableCell>
+                      <TableCell>{lead.title}</TableCell>
+                      <TableCell>
+                        <div>{lead.company}</div>
+                        {lead.industry && lead.industry !== '—' ? <div className="text-xs text-foreground/70">{lead.industry}</div> : null}
+                      </TableCell>
+                      <TableCell>
+                        {saved ? <Badge variant="success">Guardado</Badge> : contacted ? <Badge variant="info">Contactado</Badge> : <span className="text-xs text-foreground/70">Nuevo</span>}
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      ) : !error && !(filters.searchMode === 'linkedin_profile' && profileProblem) ? (
+        <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
+          <Search className="mb-3 h-5 w-5 text-foreground/70" aria-hidden="true" />
+          <p className="font-medium">
+            {companySelectionPending
+              ? 'Elige una empresa para seguir'
+              : filters.searchMode === 'linkedin_profile' && profileSearchNotice
+                ? 'El perfil aún no está disponible'
+                : hasSearched
+                  ? 'No encontramos personas con estos criterios'
+                  : 'Tus resultados aparecerán aquí'}
+          </p>
+          <p className="mt-1 max-w-md text-sm text-foreground/70">
+            {companySelectionPending
+              ? 'Selecciona una de las coincidencias de arriba.'
+              : hasSearched
+                ? 'Prueba ampliando la ubicación, el tamaño de empresa o el cargo.'
+                : filters.searchMode === 'linkedin_profile'
+                  ? 'Pega el perfil y presiona «Buscar».'
+                  : 'Escribe la empresa y presiona «Buscar».'}
+          </p>
+          {hasSearched && !companySelectionPending && filters.searchMode !== 'linkedin_profile' ? (
+            <FilterRelaxHint chips={activeChips} onRemove={removeFilterChip} disabled={isLoading} />
+          ) : null}
+        </div>
+      ) : null}
+      {totalPages > 1 ? (
+        <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-foreground/70">
+            {leads.length === 0 ? '0' : `${pageIndex * pageSize + 1}–${Math.min(leads.length, (pageIndex + 1) * pageSize)}`} de {leads.length}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              name="pageSize"
+              value={String(pageSize)}
+              onValueChange={(v) => { const n = Number(v); if (!Number.isNaN(n)) { setPageSize(n); setPageIndex(0); } }}
+            >
+              <SelectTrigger className="w-full sm:w-[150px]" aria-label="Personas por página"><SelectValue placeholder="Tamaño de página" /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((opt) => (<SelectItem key={opt} value={String(opt)}>{opt} por página</SelectItem>))}
+              </SelectContent>
+            </Select>
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>Anterior</Button>
+            <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setPageIndex((p) => (p + 1 < totalPages ? p + 1 : p))} disabled={pageIndex + 1 >= totalPages}>Siguiente</Button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+
+  return (
+    <div className="mx-auto max-w-[1440px] space-y-5 py-2">
+      <PageHeader
+        title="Buscar prospectos"
+        description="Elige a quién buscar, revisa los resultados y guarda los contactos que te sirven."
+      />
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+        <aside aria-label="Criterios de búsqueda" className="min-w-0 space-y-3 lg:sticky lg:top-16">
+          {hasResults ? (
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-card px-4 py-3 lg:hidden">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {filters.searchMode === 'filters' ? `Filtros${activeChips.length > 0 ? ` (${activeChips.length})` : ''}` : filters.searchMode === 'company_name' ? 'Empresa' : 'Perfil'}
+                </p>
+                <p className="truncate text-xs text-foreground/70">{criteriaSummary}</p>
               </div>
-              <div className="hidden overflow-x-auto rounded-xl border border-border/60 md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[52px]">
-                        <Checkbox aria-label="Seleccionar todos los leads de esta página" onCheckedChange={(checked) => handleSelectAll(Boolean(checked))} checked={isPageAllSelected} />
-                      </TableHead>
-                      <TableHead>Nombre</TableHead>
-                      <TableHead>Cargo</TableHead>
-                      <TableHead>Empresa</TableHead>
-                      <TableHead>Industria</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {pagedLeads.map(lead => {
-                    const already = savedIds.has(lead.id);
-                    const contacted = !!((lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email)));
-                    const disabled = already || contacted;
-                    return (
-                      <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : ""}>
-                        <TableCell>
-                          <Checkbox
-                            aria-label={`Seleccionar ${lead.name}`}
-                            disabled={disabled}
-                            checked={selectedLeads.has(lead.id)}
-                            onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
-                          />
-                          {already && <span className="text-xs text-muted-foreground ml-2">Guardado</span>}
-                          {contacted && <span className="text-xs text-primary ml-2">Contactado</span>}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {lead.avatar ? (
-                              <Avatar>
-                                <Image src={lead.avatar} width={40} height={40} className="rounded-full" alt={lead.name || ''} data-ai-hint="person face" unoptimized />
-                                <AvatarFallback>{lead.name ? lead.name.charAt(0) : ''}</AvatarFallback>
-                              </Avatar>
-                            ) : (
-                              <InitialsAvatar name={lead.name} className="h-10 w-10" />
-                            )}
-                            <div>
-                              <div className="font-medium">{lead.name}</div>
-                              <TeamLockBadge lock={teamLockFor(lead)} className="mt-0.5" />
-                              {(lead.email || filters.searchMode === 'linkedin_profile') ? (
-                                <div className="mt-1 flex flex-col gap-1 text-xs">
-                                  {filters.searchMode === 'linkedin_profile' && filters.revealEmail ? (
-                                    lead.email ? (
-                                      <span className="text-muted-foreground">{lead.email}</span>
-                                    ) : (
-                                      <span className="text-amber-700">Correo no disponible</span>
-                                    )
-                                  ) : lead.email ? <span className="text-muted-foreground">{lead.email}</span> : null}
-                                  {filters.searchMode === 'linkedin_profile' && filters.revealPhone ? (
-                                    lead.primaryPhone ? (
-                                      <span className="font-medium text-emerald-600">{lead.primaryPhone}</span>
-                                    ) : isPendingEnrichmentStatus(lead.enrichmentStatus) ? (
-                                      <span className="inline-flex items-center gap-1 text-blue-600">
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                        Teléfono en proceso...
-                                      </span>
-                                    ) : (
-                                      <span className="text-muted-foreground">Sin teléfono visible</span>
-                                    )
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>{lead.title}</TableCell>
-                        <TableCell>{lead.company}</TableCell>
-                        <TableCell>{lead.industry}</TableCell>
-                      </TableRow>
-                    );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
-          ) : !error && !(filters.searchMode === 'linkedin_profile' && profileProblem) ? (
-            <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
-              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <Search className="h-5 w-5" />
-              </div>
-              <p className="font-medium">
-                {companySelectionPending
-                  ? 'Elige una empresa para continuar'
-                  : filters.searchMode === 'linkedin_profile' && profileSearchNotice
-                    ? 'El perfil aún no está disponible'
-                    : hasSearched
-                      ? 'No encontramos leads con estos criterios'
-                      : 'Tus resultados aparecerán aquí'}
-              </p>
-              <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                {companySelectionPending
-                  ? 'Selecciona una de las coincidencias mostradas arriba.'
-                  : hasSearched
-                    ? 'Prueba ampliando la ubicación, el tamaño de empresa o el cargo.'
-                    : 'Completa los criterios y presiona «Buscar leads».'}
-              </p>
-              {hasSearched && !companySelectionPending && filters.searchMode !== 'linkedin_profile' ? (
-                <FilterRelaxHint chips={activeFilterChips(filters)} onRemove={removeFilterChip} disabled={isLoading} />
-              ) : null}
+              <Button type="button" variant="outline" size="sm" aria-expanded={criteriaOpen} aria-controls="search-criteria" onClick={() => setCriteriaOpen((open) => !open)}>
+                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+                {criteriaOpen ? 'Ocultar' : 'Editar'}
+              </Button>
             </div>
           ) : null}
-          {totalPages > 1 && (
-            <div className="flex flex-col gap-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-muted-foreground">
-                Mostrando{' '}
-                {leads.length === 0 ? '0' : `${pageIndex * pageSize + 1}–${Math.min(leads.length, (pageIndex + 1) * pageSize)}`} de {leads.length}
+          <Card
+            id="search-criteria"
+            className={cn(
+              'min-w-0 flex-col overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] lg:flex lg:max-h-[calc(100vh-13rem)]',
+              hasResults && !criteriaOpen ? 'hidden' : 'flex',
+            )}
+          >
+            <CardHeader className="space-y-3 border-b border-border/60 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-semibold tracking-tight">Criterios</h2>
+                <div className="flex shrink-0 items-center gap-0.5">
+                  {savedSearchesMenu}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 shadow-none"
+                    aria-label="Guardar búsqueda"
+                    onClick={() => {
+                      setSaveSearchError('');
+                      setSaveSearchOpen(true);
+                    }}
+                  >
+                    <BookmarkPlus className="h-4 w-4" aria-hidden="true" />
+                    <span className="hidden sm:inline lg:hidden xl:inline">Guardar</span>
+                  </Button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  name="pageSize"
-                  value={String(pageSize)}
-                  onValueChange={(v) => { const n = Number(v); if (!Number.isNaN(n)) { setPageSize(n); setPageIndex(0); } }}
-                >
-                  <SelectTrigger className="w-full sm:w-[150px]"><SelectValue placeholder="Tamaño de página" /></SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((opt) => (<SelectItem key={opt} value={String(opt)}>{opt} / página</SelectItem>))}
-                  </SelectContent>
-                </Select>
-                <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>Anterior</Button>
-                <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setPageIndex((p) => (p + 1 < totalPages ? p + 1 : p))} disabled={pageIndex + 1 >= totalPages}>Siguiente</Button>
-              </div>
+              {activeSavedSearchId ? (
+                <CardDescription className="truncate text-foreground/70">
+                  Usando «{savedSearches.find((item) => item.id === activeSavedSearchId)?.name || 'búsqueda guardada'}»
+                </CardDescription>
+              ) : null}
+              {modeSwitch}
+            </CardHeader>
+            <CardContent className="min-h-0 flex-1 overflow-y-auto p-4">
+              <fieldset
+                ref={criteriaRef}
+                disabled={isLoading || checkpointLoading}
+                tabIndex={-1}
+                aria-invalid={missingFilterError || undefined}
+                aria-describedby={filters.searchMode === 'filters' ? 'filterRequirement' : undefined}
+                className="min-w-0 border-0 p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <legend className="sr-only">Criterios de búsqueda</legend>
+                {criteriaFields}
+              </fieldset>
+            </CardContent>
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/60 bg-card p-3">
+              <Button variant="ghost" className="shadow-none" onClick={handleClear} disabled={isLoading}>
+                <X className="h-4 w-4" aria-hidden="true" />Limpiar
+              </Button>
+              {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
+              <Button data-tour="search-run" className="flex-1 shadow-none sm:flex-none sm:min-w-36" onClick={runSearch} disabled={isLoading || checkpointLoading}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
+                {isLoading ? 'Buscando…' : filters.searchMode === 'filters' ? 'Buscar empresas' : 'Buscar'}
+              </Button>
             </div>
+          </Card>
+        </aside>
+
+        <section
+          aria-label="Resultados"
+          className={cn('min-w-0 space-y-4', filters.searchMode === 'filters' && resultsView === 'intro' && 'order-first lg:order-none')}
+        >
+          {checkpointNotice ? <p role="status" className="text-sm text-foreground/70">{checkpointNotice}</p> : null}
+          {filters.searchMode === 'filters' ? (
+            resultsView === 'intro' ? (
+              <>
+                {searchError}
+                <SearchIntro starters={searchStarters} onPick={applySearchStarter} disabled={isLoading || isLoadingCompanies} missingIdealCustomer={idealCustomerChecked && !idealCustomer} />
+              </>
+            ) : (
+              <>
+                <nav aria-label="Etapas de la búsqueda" className="flex flex-wrap items-center gap-2">
+                  {stepButton('companies', 1, 'Empresas', companies.length)}
+                  <ChevronRight className="h-4 w-4 text-foreground/70" aria-hidden="true" />
+                  {stepButton('people', 2, 'Contactos', contactsFound, companyWindowList.length === 0)}
+                </nav>
+                {resultsView === 'people' ? peopleSection : companiesSection}
+                {resultsView === 'companies' && companies.length > 0 ? (
+                  <ResultsActionBar
+                    label={`${selectedCompanyIds.size} de ${companies.length} empresas marcadas`}
+                    hint={selectedCompanyIds.size === 0 ? 'Marca al menos una para buscar contactos.' : `Buscaremos hasta ${leadsPerCompany} contactos en cada una.`}
+                  >
+                    <Button type="button" disabled={isLoadingCompanyPeople || selectedCompanyIds.size === 0} onClick={() => void handleSearchCompanyPeople()}>
+                      {isLoadingCompanyPeople ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
+                      {isLoadingCompanyPeople ? 'Buscando contactos…' : 'Buscar contactos'}
+                    </Button>
+                  </ResultsActionBar>
+                ) : null}
+              </>
+            )
+          ) : (
+            <>
+              {profileNotice}
+              {companyCandidatesSection}
+              {leadsResults}
+            </>
           )}
-        </CardContent>
-      </Card>
-      )}
+          {showLeadsBar ? (
+            <ResultsActionBar
+              label={`${selectedLeads.size} ${selectedLeads.size === 1 ? 'contacto seleccionado' : 'contactos seleccionados'}`}
+              hint="Con correo o teléfono van a «Por escribir»; sin correo, a «Por completar»."
+            >
+              <Button type="button" variant="ghost" onClick={() => setSelectedLeads(new Set())} disabled={isSaving}>Quitar selección</Button>
+              <Button type="button" onClick={handleSaveSelectedLeads} disabled={isSaving}>
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
+                {isSaving ? 'Guardando…' : `Guardar ${selectedLeads.size}`}
+              </Button>
+            </ResultsActionBar>
+          ) : null}
+        </section>
+      </div>
 
       <Dialog open={saveSearchOpen} onOpenChange={setSaveSearchOpen}>
         <DialogContent>
@@ -2400,7 +2498,7 @@ export default function SearchPage() {
             <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3">
               <div>
                 <Label htmlFor="shared">Compartir con el equipo</Label>
-                <p className="text-xs text-muted-foreground">Otros miembros podrán cargar estos criterios.</p>
+                <p className="text-xs text-foreground/70">Otros miembros podrán cargar estos criterios.</p>
               </div>
               <Switch id="shared" checked={isShared} onCheckedChange={setIsShared} />
             </div>
