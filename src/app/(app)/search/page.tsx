@@ -2,6 +2,8 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import { InitialsAvatar } from '@/components/initials-avatar';
+import { safeAvatarUrl } from '@/lib/avatar';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -189,9 +191,8 @@ function normalizeLeadForUI(raw: Lead, options?: {
 
   const location = [raw.city, raw.state, raw.country].filter(Boolean).join(', ') || '—';
 
-  const avatar =
-    raw.photo_url?.trim() ||
-    `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&size=40`;
+  // A real photo or nothing: the row draws initials itself instead of sending the name to an avatar service.
+  const avatar = safeAvatarUrl(raw.photo_url) || '';
 
   const companyWebsite =
     options?.organization?.website_url?.trim() ||
@@ -1619,7 +1620,7 @@ export default function SearchPage() {
                 title: item.title || lead.title,
                 company: item.organization_name || item.org_name || lead.company,
                 industry: item.organization_industry || item.industry || lead.industry,
-                avatar: item.photo_url || lead.avatar,
+                avatar: safeAvatarUrl(item.photo_url) || lead.avatar,
                 email: nextEmail,
                 phoneNumbers: nextPhoneNumbers,
                 primaryPhone: nextPrimaryPhone,
@@ -2609,10 +2610,14 @@ export default function SearchPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
-                            <Avatar>
-                              <Image src={lead.avatar} width={40} height={40} className="rounded-full" alt={lead.name || ''} data-ai-hint="person face" unoptimized />
-                              <AvatarFallback>{lead.name ? lead.name.charAt(0) : ''}</AvatarFallback>
-                            </Avatar>
+                            {lead.avatar ? (
+                              <Avatar>
+                                <Image src={lead.avatar} width={40} height={40} className="rounded-full" alt={lead.name || ''} data-ai-hint="person face" unoptimized />
+                                <AvatarFallback>{lead.name ? lead.name.charAt(0) : ''}</AvatarFallback>
+                              </Avatar>
+                            ) : (
+                              <InitialsAvatar name={lead.name} className="h-10 w-10" />
+                            )}
                             <div>
                               <div className="font-medium">{lead.name}</div>
                               <TeamLockBadge lock={teamLockFor(lead)} className="mt-0.5" />
