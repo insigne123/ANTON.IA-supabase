@@ -37,7 +37,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
-                    <DialogTitle>Opciones de Enriquecimiento</DialogTitle>
+                    <DialogTitle>Buscar datos de contacto</DialogTitle>
                     <DialogDescription>
                         Elige los datos laborales que quieres obtener para los contactos seleccionados.
                     </DialogDescription>
