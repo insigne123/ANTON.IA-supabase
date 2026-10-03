@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import type { EnrichedLead, Lead } from '@/lib/types';
@@ -9,6 +10,7 @@ import {
   filterEnrichedLeads,
   hasNativeResearchResult,
   normalizeSearchText,
+  pendingPhoneLookupKey,
   splitFilterTerms,
   withCompanyFromSaved,
   type EnrichedLeadFilters,
@@ -79,4 +81,26 @@ test('a research result counts only when it finished', () => {
   assert.equal(hasNativeResearchResult({ status: 'running', result: {} } as never), false);
   assert.equal(hasNativeResearchResult({ status: 'insufficient_data', result: {} } as never), true);
   assert.equal(hasNativeResearchResult({ status: 'completed', result: null } as never), false);
+});
+
+test('the pending phone key changes only when the set of running lookups changes', () => {
+  const now = new Date().toISOString();
+  const a = lead({ id: 'b', enrichmentStatus: 'pending_phone', updatedAt: now });
+  const b = lead({ id: 'a', enrichmentStatus: 'pending_phone', updatedAt: now });
+  const done = lead({ id: 'c', enrichmentStatus: 'completed', updatedAt: now });
+  const stale = lead({ id: 'd', enrichmentStatus: 'pending_phone', updatedAt: '2020-01-01T00:00:00Z' });
+  assert.equal(pendingPhoneLookupKey([a, done, b, stale]), 'a,b', 'sorted, without finished or abandoned lookups');
+  assert.equal(pendingPhoneLookupKey([{ ...b }, { ...a }]), 'a,b', 'a reload with new objects keeps the same key');
+  assert.equal(pendingPhoneLookupKey([done]), '');
+});
+
+test('«Por escribir» reloads once per burst, checks phones per set and confirms in the app dialog', () => {
+  const page = readFileSync('src/app/(app)/saved/leads/enriched/Client.tsx', 'utf8');
+  assert.match(page, /createCoalescedRunner\(/);
+  assert.doesNotMatch(page, /void loadData\(\);\s*\}\s*\)\s*\.subscribe/, 'a realtime event no longer reloads at once');
+  assert.match(page, /\[pendingPhoneKey, syncPendingPhoneLeads\]/, 'the phone check follows the set of running lookups, not every reload');
+  assert.doesNotMatch(page, /[^.\w]confirm\(['`]/, 'no browser confirm()');
+  assert.match(page, /const targets = filtered\.filter\(hasReportStrict\)/, '«Borrar investigaciones» acts on the list in view');
+  assert.match(page, /'x-quota-ticket': getQuotaTicket\(\)/);
+  assert.match(page, /contactos-por-escribir-/);
 });
