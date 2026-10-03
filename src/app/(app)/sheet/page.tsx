@@ -493,11 +493,11 @@ export default function SheetPage() {
                   ))}
                   <TableCell className="sticky right-0 z-10 border-l bg-card px-3 py-2 text-right group-hover:bg-muted">
                     {row.kind === 'contacted' ? (
-                      <Button asChild size="sm" variant="outline"><Link href="/contacted">Ver hilo</Link></Button>
+                      <Button asChild size="sm" variant="outline"><Link href={`/contacted?c=${encodeURIComponent(row.sourceId)}`} aria-label={`Ver la conversación con ${row.name || 'este contacto'}`}>Ver conversación</Link></Button>
                     ) : (row.kind === 'lead_enriched' || row.kind === 'opportunity') && row.hasEmail ? (
                       <Button asChild size="sm"><Link href={`/contact/compose?id=${encodeURIComponent(row.sourceId)}`} aria-label={`Preparar correo para ${row.name || 'este contacto'}`}>Preparar correo</Link></Button>
                     ) : row.kind === 'lead_saved' ? (
-                      <Button asChild size="sm" variant="outline"><Link href="/saved/leads">Abrir</Link></Button>
+                      <Button asChild size="sm" variant="outline"><Link href={`/saved/leads?q=${encodeURIComponent(row.name || row.email || row.company || '')}`} aria-label={`Abrir a ${row.name || 'este contacto'} en «Por completar»`}>Abrir</Link></Button>
                     ) : null}
                   </TableCell>
                 </TableRow>

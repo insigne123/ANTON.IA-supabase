@@ -79,20 +79,20 @@ export function SmartAlerts({ leads, onAlertClick }: Props) {
     if (!alert) return null;
 
     return (
-        <div className="border-b border-amber-200/70 bg-amber-50/80 px-4 py-2.5 dark:border-amber-500/25 dark:bg-amber-500/10">
+        <div className="border-b border-cw-border bg-cw-warning-soft px-4 py-2.5">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-start gap-2.5">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-cw-warning" aria-hidden="true" />
                     <div className="min-w-0">
-                        <p className="text-sm font-medium text-amber-950 dark:text-amber-100">{alert.message}</p>
-                        <p className="truncate text-xs text-amber-800/80 dark:text-amber-200/75">{alert.detail}</p>
+                        <p className="text-sm font-medium text-foreground">{alert.message}</p>
+                        <p className="truncate text-xs text-foreground/70">{alert.detail}</p>
                     </div>
                 </div>
                 <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-8 shrink-0 justify-start text-amber-900 hover:bg-amber-100 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-500/15"
+                    className="h-8 shrink-0 justify-start text-foreground hover:bg-background/70"
                     onClick={() => onAlertClick?.(alert.targetStage)}
                 >
                     {alert.action} <ArrowRight className="h-3.5 w-3.5" />
