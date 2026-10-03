@@ -11,6 +11,10 @@ const alertVariants = cva(
         default: "bg-background text-foreground",
         destructive:
           "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/80 dark:bg-rose-950/35 dark:text-rose-200 [&>svg]:text-rose-800 dark:[&>svg]:text-rose-200",
+        // The same states as Badge, on the app's status colors.
+        success: "border-cw-border bg-cw-success-soft text-foreground [&>svg]:text-cw-success",
+        warning: "border-cw-border bg-cw-warning-soft text-foreground [&>svg]:text-cw-warning",
+        info: "border-cw-border bg-cw-accent-soft text-foreground [&>svg]:text-primary",
       },
     },
     defaultVariants: {
