@@ -44,6 +44,7 @@ import {
     type LeadContactState,
 } from '@/lib/services/lead-collaboration-service';
 import Link from 'next/link';
+import { formatDateTime } from '@/lib/dates';
 
 interface Props {
     lead: UnifiedRow | null;
@@ -623,8 +624,14 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                                       </a>
                                     </Button>
                                 )}
+                                {lead.kind === 'contacted' && lead.sourceId && (
+                                    <Button asChild size="sm" variant="outline" className="h-8 text-xs">
+                                      <Link href={`/contacted?c=${encodeURIComponent(lead.sourceId)}`}>
+                                        <MessageSquare className="mr-1 h-3 w-3" /> Ver conversación
+                                      </Link>
+                                    </Button>
+                                )}
                                 <Badge variant="secondary">{humanizeValue(String(lead.stage || 'inbox'))}</Badge>
-                                {lead.autopilotStatus && <Badge variant="outline">{humanizeValue(lead.autopilotStatus)}</Badge>}
                             </div>
                         </div>
                     </div>
@@ -642,12 +649,12 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                 />
 
                 {(lead.nextAction || lead.nextActionDueAt || lead.meetingLink) && (
-                    <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-                        <h4 className="mb-1 text-sm font-semibold text-amber-900 dark:text-amber-100">Próxima acción registrada</h4>
-                        {lead.nextAction && <p className="text-sm text-amber-800 dark:text-amber-100/80">{lead.nextAction}</p>}
+                    <div className="mb-6 rounded-lg border border-cw-border bg-cw-warning-soft p-4">
+                        <h4 className="mb-1 text-sm font-semibold text-foreground">Próxima acción registrada</h4>
+                        {lead.nextAction && <p className="text-sm text-foreground/80">{lead.nextAction}</p>}
                         {lead.nextActionDueAt && (
-                            <p className="mt-2 text-xs text-amber-700 dark:text-amber-200/80">
-                                Vence: {new Date(lead.nextActionDueAt).toLocaleString()}
+                            <p className="mt-2 text-xs text-foreground/70">
+                                Vence: {formatDateTime(lead.nextActionDueAt)}
                             </p>
                         )}
                         {lead.meetingLink && (

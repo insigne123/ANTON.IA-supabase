@@ -51,6 +51,7 @@ import { defaultColumns } from '@/lib/unified-sheet-storage';
 import type { CustomData } from '@/lib/services/unified-sheet-service';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 import type { ColumnDef, ColumnKey, UnifiedRow, UnifiedStatus } from '@/lib/unified-sheet-types';
+import { compareSheetRows } from '@/lib/unified-sheet-sort';
 
 type StatusFilter = 'all' | 'saved' | 'enriched' | 'sent' | 'read' | 'replied';
 type EditableKey = Exclude<keyof CustomData, 'updated_at'>;
@@ -221,18 +222,7 @@ export default function SheetPage() {
         .some((value) => String(value || '').toLowerCase().includes(term));
     });
 
-    return [...list].sort((a, b) => {
-      const aValue = a[sortKey as keyof UnifiedRow];
-      const bValue = b[sortKey as keyof UnifiedRow];
-      if (aValue == null && bValue == null) return 0;
-      if (aValue == null) return 1;
-      if (bValue == null) return -1;
-      const multiplier = sortDirection === 'asc' ? 1 : -1;
-      if (sortKey.toLowerCase().includes('at')) {
-        return (new Date(aValue as string | number).getTime() - new Date(bValue as string | number).getTime()) * multiplier;
-      }
-      return String(aValue).localeCompare(String(bValue), 'es', { numeric: true, sensitivity: 'base' }) * multiplier;
-    });
+    return [...list].sort((a, b) => compareSheetRows(a, b, sortKey, sortDirection));
   }, [createdFrom, createdTo, industryFilter, query, rows, sortDirection, sortKey, statusFilter]);
 
   function clearFilters() {
@@ -468,7 +458,7 @@ export default function SheetPage() {
                   <TableHead
                     key={column.key}
                     aria-sort={sortKey === column.key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                    className={`h-10 px-3 ${index === 0 ? 'sticky left-0 z-30 border-r bg-muted' : 'bg-muted/95'}`}
+                    className={`h-10 px-3 text-foreground/70 ${index === 0 ? 'sticky left-0 z-30 border-r bg-muted' : 'bg-muted/95'}`}
                     style={{ minWidth: column.width ? `${column.width}px` : undefined }}
                   >
                     <button type="button" onClick={() => sortBy(column.key)} className="flex w-full items-center gap-1.5 rounded-sm py-1 text-left font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -479,7 +469,7 @@ export default function SheetPage() {
                     </button>
                   </TableHead>
                 ))}
-                <TableHead className="sticky right-0 z-20 h-10 w-28 border-l bg-muted px-3 text-right">Acción</TableHead>
+                <TableHead className="sticky right-0 z-20 h-10 w-28 border-l bg-muted px-3 text-right text-foreground/70">Acción</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

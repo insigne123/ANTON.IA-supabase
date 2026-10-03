@@ -32,8 +32,9 @@ function safeDaysSince(value: UnifiedRow['updatedAt']) {
 export function SmartAlerts({ leads, onAlertClick }: Props) {
     const alert = useMemo(() => {
         const alerts: PriorityAlert[] = [];
+        // A reply with its next action already due. The retired Autopilot used to set autopilotStatus; replies now set the status.
         const urgentReplies = leads.filter((lead) =>
-            (lead.autopilotStatus === 'positive_reply' || lead.autopilotStatus === 'meeting_requested') &&
+            (lead.status === 'replied' || lead.autopilotStatus === 'positive_reply' || lead.autopilotStatus === 'meeting_requested') &&
             lead.nextActionDueAt &&
             new Date(lead.nextActionDueAt).getTime() <= Date.now(),
         );
@@ -42,7 +43,7 @@ export function SmartAlerts({ leads, onAlertClick }: Props) {
                 id: 'urgent-replies',
                 priority: 3,
                 message: `${urgentReplies.length} ${urgentReplies.length === 1 ? 'lead necesita' : 'leads necesitan'} respuesta hoy`,
-                detail: 'Hay una respuesta positiva o solicitud de reunión pendiente.',
+                detail: 'Respondieron y la próxima acción registrada ya venció.',
                 action: 'Priorizar',
                 targetStage: 'engaged',
             });
