@@ -1,23 +1,39 @@
 // src/app/(app)/dashboard/page.tsx
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Search } from 'lucide-react';
+
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import PerformanceChart from '@/components/dashboard/PerformanceChart';
-import SummaryCards from '@/components/dashboard/SummaryCards';
 import UserCreditsCard from '@/components/dashboard/UserCreditsCard';
+import { HomeSummary } from '@/components/home/HomeSummary';
 import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
-import { Search } from 'lucide-react';
 
-/** «Hoy» (docs/inicio-hoy.md): what to do now first, who to write to, then how the week is going, then credits. */
+const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+
+/**
+ * «Hoy» (docs/inicio-hoy.md). The work first: the next step and what is waiting, in the main column. How the week goes,
+ * the campaigns in progress and the credits sit beside it, so they never push the work down. On phones the order is
+ * step → pending → summary → recommended.
+ */
 export default function DashboardPage() {
+  // The date is read in the browser: the page is prerendered, and the server's day may not be the person's.
+  const [today, setToday] = useState('');
+  useEffect(() => {
+    const label = TODAY.format(new Date());
+    setToday(label.charAt(0).toLocaleUpperCase('es-CL') + label.slice(1));
+  }, []);
+
   return (
     <div>
       <PageHeader
         title="Hoy"
+        eyebrow={today || undefined}
         description="Lo que toca ahora, lo que falta para enviar y cómo va tu semana."
       >
         <Button asChild variant="ghost" className="flex-1 text-muted-foreground sm:flex-none">
@@ -28,24 +44,21 @@ export default function DashboardPage() {
         </Button>
       </PageHeader>
 
-      <div className="space-y-8">
-        <TodayPanel />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px] xl:items-start">
+        <div className="min-w-0 xl:col-start-1">
+          <TodayPanel />
+        </div>
 
-        <RecommendedLeads />
-
-        <section aria-labelledby="week-title" className="space-y-4">
-          <h2 id="week-title" className="text-base font-semibold tracking-tight">Tu semana</h2>
-          <SummaryCards />
+        <aside aria-label="Tu semana" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
+          <HomeSummary />
           <PerformanceChart />
-        </section>
+          <UserCreditsCard />
+          <DailyQuotaProgress summary title="Uso diario" kinds={['contact']} />
+        </aside>
 
-        <section aria-labelledby="credits-title" className="space-y-4">
-          <h2 id="credits-title" className="text-base font-semibold tracking-tight">Créditos y uso diario</h2>
-          <div className="grid gap-4 xl:grid-cols-[minmax(280px,0.65fr)_minmax(0,1.5fr)]">
-            <UserCreditsCard />
-            <DailyQuotaProgress summary title="Uso diario" kinds={['contact']} className="h-full [&>div]:h-full" />
-          </div>
-        </section>
+        <div className="min-w-0 xl:col-start-1">
+          <RecommendedLeads />
+        </div>
       </div>
     </div>
   );

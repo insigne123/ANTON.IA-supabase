@@ -118,8 +118,8 @@ export default function PerformanceChart() {
             </div>
           </div>
         ) : hasError ? (
-          <div role="alert" className="flex h-[202px] flex-col items-center justify-center rounded-xl border border-amber-200 bg-amber-50/70 px-5 text-center dark:border-amber-500/30 dark:bg-amber-500/10">
-            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+          <div role="alert" className="flex h-[202px] flex-col items-center justify-center rounded-xl border border-cw-border bg-cw-warning-soft px-5 text-center">
+            <AlertCircle className="h-5 w-5 text-cw-warning" aria-hidden="true" />
             <p className="mt-2 text-sm font-medium">Rendimiento no disponible</p>
             <p className="mt-1 text-xs text-muted-foreground">No pudimos actualizar la actividad semanal.</p>
           </div>

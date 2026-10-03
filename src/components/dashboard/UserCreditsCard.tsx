@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { parseCreditStatus, personalCreditSummary, type CreditStatus } from '@/lib/personal-credit-summary';
+import { fetchQuotaStatus } from '@/lib/quota-status-client';
 
 type QuotaBucket = { count: number; limit: number } | null;
 
@@ -41,20 +42,16 @@ function resolveError(error: unknown): CreditsState {
   return 'error';
 }
 
-async function requestUserCredits(signal?: AbortSignal) {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  if (signal?.aborted) controller.abort();
-  signal?.addEventListener('abort', abort, { once: true });
-  const timeout = window.setTimeout(abort, 10_000);
+async function requestUserCredits(force = false) {
+  let timeout = 0;
   try {
-    const response = await fetch('/api/quota/status', { cache: 'no-store', signal: controller.signal });
-    if (!response.ok) throw new Error(`USER_CREDIT_REQUEST_${response.status}`);
-    const result = (await response.json()) as QuotaStatusResponse;
+    const result = await Promise.race([
+      fetchQuotaStatus({ force }) as Promise<QuotaStatusResponse>,
+      new Promise<never>((_resolve, reject) => { timeout = window.setTimeout(() => reject(new Error('USER_CREDIT_REQUEST_TIMEOUT')), 10_000); }),
+    ]);
     return { credits: parseCreditStatus(result?.credits) };
   } finally {
     window.clearTimeout(timeout);
-    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -64,7 +61,7 @@ export default function UserCreditsCard({ className }: { className?: string }) {
 
   useEffect(() => {
     const abort = new AbortController();
-    requestUserCredits(abort.signal)
+    requestUserCredits()
       .then((result) => {
         if (abort.signal.aborted) return;
         setCredits(result?.credits ?? null);
@@ -79,7 +76,7 @@ export default function UserCreditsCard({ className }: { className?: string }) {
   async function refresh() {
     setState('loading');
     try {
-      const result = await requestUserCredits();
+      const result = await requestUserCredits(true);
       setCredits(result?.credits ?? null);
       setState('ready');
     } catch (error) {
@@ -169,17 +166,14 @@ export default function UserCreditsCard({ className }: { className?: string }) {
               <span
                 className={cn(
                   'text-3xl font-semibold tracking-[-0.04em] tabular-nums',
-                  lowBalance && 'text-amber-700 dark:text-amber-300',
+                  lowBalance && 'text-cw-warning',
                 )}
               >
                 {remaining.toLocaleString('es-CL')}
               </span>
               <span className="pb-1 text-xs text-muted-foreground">restantes para ti hoy</span>
               {lowBalance ? (
-                <Badge
-                  variant="outline"
-                  className="mb-0.5 gap-1 border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
-                >
+                <Badge variant="warning" className="mb-0.5 gap-1">
                   <AlertTriangle className="size-3" aria-hidden="true" />
                   Quedan pocos
                 </Badge>

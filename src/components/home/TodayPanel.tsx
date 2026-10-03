@@ -42,9 +42,9 @@ export function TodayPanel() {
 
   if (loading && !data) {
     return (
-      <section aria-label="Hoy" aria-busy="true" className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <section aria-label="Hoy" aria-busy="true" className="space-y-4">
         <Skeleton className="h-44 rounded-2xl" />
-        <Skeleton className="h-44 rounded-2xl" />
+        <Skeleton className="h-40 rounded-2xl" />
       </section>
     );
   }
@@ -63,7 +63,7 @@ export function TodayPanel() {
   const setupComplete = data.setupDone === data.setup.length;
 
   return (
-    <section aria-label="Hoy" className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]" data-tour="today">
+    <section aria-label="Hoy" className="space-y-4" data-tour="today">
       <div className="space-y-4">
         <Card className="relative overflow-hidden rounded-2xl border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
           <CardHeader className="pb-2">
@@ -119,12 +119,17 @@ export function TodayPanel() {
         </Card>
       </div>
 
-      <Card className={cn('rounded-2xl', setupComplete && 'lg:self-start')} data-tour="setup">
+      {/* Once everything is set up, the checklist shrinks to one line: «Hoy» is for the work, not for setup. */}
+      {setupComplete ? (
+        <p data-tour="setup" className="flex items-center gap-2 rounded-2xl border border-border/60 px-4 py-3 text-sm text-foreground/80">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          Tu cuenta está lista: perfil, correo y contactos.
+        </p>
+      ) : (
+      <Card className="rounded-2xl" data-tour="setup">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">{setupComplete ? 'Todo listo para vender' : 'Prepara tu cuenta'}</CardTitle>
-          <CardDescription>
-            {setupComplete ? 'Tu perfil, tu correo y tus contactos están listos.' : `${data.setupDone} de ${data.setup.length} pasos. Cada uno toma un par de minutos.`}
-          </CardDescription>
+          <CardTitle className="text-base">Prepara tu cuenta</CardTitle>
+          <CardDescription>{data.setupDone} de {data.setup.length} pasos. Cada uno toma un par de minutos.</CardDescription>
           <Progress value={(data.setupDone / data.setup.length) * 100} className="mt-2 h-2" aria-label={`${data.setupDone} de ${data.setup.length} pasos completos`} />
         </CardHeader>
         <CardContent>
@@ -152,6 +157,7 @@ export function TodayPanel() {
           </ol>
         </CardContent>
       </Card>
+      )}
     </section>
   );
 }

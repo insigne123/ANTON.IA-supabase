@@ -9,6 +9,7 @@ import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, isCreditQu
 import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 import { cn } from '@/lib/utils';
 import { AlertCircle, Loader2, Users, Sparkles } from 'lucide-react';
+import { fetchQuotaStatus } from '@/lib/quota-status-client';
 
 type Props = {
   className?: string;
@@ -90,14 +91,9 @@ export default function DailyQuotaProgress({ className, kinds, compact, summary,
     const abort = new AbortController();
     (async () => {
       try {
-        const res = await fetch('/api/quota/status', {
-          method: 'GET',
-          cache: 'no-store',
-          signal: abort.signal,
-        });
-        if (!res.ok) throw new Error('Quota status request failed');
-        const data = await res.json();
-        const statuses: Array<{ resource: string; count: number; limit: number; dayKey: string }> = data?.statuses || [];
+        const data = await fetchQuotaStatus();
+        if (abort.signal.aborted) return;
+        const statuses = (Array.isArray(data?.statuses) ? data.statuses : []) as Array<{ resource: string; count: number; limit: number; dayKey: string }>;
         // Refleja exactamente lo que ve el servidor para evitar que queden contadores viejos en localStorage.
         const map = new Map(statuses.map(s => [s.resource, s]));
         for (const k of ks) {
@@ -136,7 +132,7 @@ export default function DailyQuotaProgress({ className, kinds, compact, summary,
               {syncState === 'loading' ? (
                 <><Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> Actualizando uso</>
               ) : syncState === 'error' ? (
-                <><AlertCircle className="h-3 w-3 text-amber-600 dark:text-amber-300" aria-hidden="true" /> Mostrando datos guardados</>
+                <><AlertCircle className="h-3 w-3 text-cw-warning" aria-hidden="true" /> Mostrando datos guardados</>
               ) : (
                 <>Se reinicia a las {resetDateStr || '—'}</>
               )}
