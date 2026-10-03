@@ -17,9 +17,9 @@ test('the prepared sequence lets the user change follow-up days without rewritin
 });
 
 test('enriched leads opens the research workspace rather than starting its own drafting flow', () => {
-  assert.match(source, /openResearchWorkspace\(\[e\.id\]\)/);
-  assert.match(source, />Contactar<\/Button>/);
-  assert.match(source, /openResearchWorkspace\(selectedToContact\)/);
+  assert.match(source, /openResearchWorkspace\(\[lead\.id\]\)/);
+  assert.match(source, />Escribir<\/Button>/, 'the row action that writes is «Escribir»');
+  assert.match(source, /openResearchWorkspace\(selectedLeads\.filter/, 'the action bar opens the workspace with the selection');
   assert.doesNotMatch(source, /fetch\('\/api\/native-drafts'/);
   assert.doesNotMatch(source, /createNativeDraftBatch\(/);
 });
