@@ -485,36 +485,6 @@ export async function consumeLeadSearchQuota(params: { userId: string; organizat
   });
 }
 
-export async function consumeSupliaResearchToolCredit(params: {
-  toolRunId: string;
-  userId: string;
-  organizationId: string;
-}) {
-  const toolRunId = String(params.toolRunId || '').trim();
-  const userId = String(params.userId || '').trim();
-  const organizationId = String(params.organizationId || '').trim();
-  if (!toolRunId || !userId || !organizationId) {
-    throw new Error('SUPLIA research credit identity is required');
-  }
-
-  const { data, error } = await (getSupabaseAdmin() as any).rpc('consume_suplia_research_tool_credit_v1', {
-    p_tool_run_id: toolRunId,
-    p_organization_id: organizationId,
-    p_user_id: userId,
-  });
-  if (error) throw error;
-  const result = data as { allowed?: boolean; count?: number; limit?: number; reused?: boolean } | null;
-  if (!result || typeof result.allowed !== 'boolean' || !Number.isFinite(Number(result.count))) {
-    throw new Error('Invalid SUPLIA research credit response');
-  }
-  return {
-    allowed: result.allowed,
-    count: Number(result.count),
-    limit: Number(result.limit ?? DEFAULT_DAILY_CREDIT_LIMIT),
-    reused: Boolean(result.reused),
-  };
-}
-
 async function countContactsToday(params: { userId: string; organizationId: string; dayKey: string; scope: ContactQuotaContext['scope'] }) {
   let query = getSupabaseAdmin()
     .from('contacted_leads')

@@ -27,7 +27,9 @@ const crmStageLabels: Record<string, string> = { inbox: 'Nuevo', negotiation: 'N
 
 async function json(response: Response) { const data = await response.json(); if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'Tu sesión o tus permisos cambiaron. Vuelve a ingresar.' : 'No pudimos completar la consulta. Intenta nuevamente.'); return data; }
 
-export default function ConversationsWorkspace({ initialView = 'reply' }: { initialView?: ConversationView }) {
+const CONVERSATION_VIEWS: ConversationView[] = ['reply', 'waiting', 'scheduled', 'all'];
+
+export default function ConversationsWorkspace() {
   const [rows, setRows] = useState<ConversationRow[]>([]);
   const [touches, setTouches] = useState<PlannedTouch[]>([]);
   const [userId, setUserId] = useState('');
@@ -35,7 +37,7 @@ export default function ConversationsWorkspace({ initialView = 'reply' }: { init
   const [error, setError] = useState('');
   const [coverage, setCoverage] = useState(true);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
-  const [view, setView] = useState(initialView);
+  const [view, setView] = useState<ConversationView>('reply');
   const [query, setQuery] = useState('');
   const [mine, setMine] = useState(false);
   const [provider, setProvider] = useState('all');
@@ -74,6 +76,11 @@ export default function ConversationsWorkspace({ initialView = 'reply' }: { init
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // An address can open a view (?view=reply|waiting|scheduled|all): the old «Respondidos» and «Planificador» pages and the reply notices use it.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('view');
+    if (requested && (CONVERSATION_VIEWS as string[]).includes(requested)) setView(requested as ConversationView);
+  }, []);
 
   const sync = useCallback(async () => {
     setSyncing(true); setSyncStatus('Consultando tus cuentas de correo…');
