@@ -8,6 +8,7 @@ import { setEmailDraftStorageScope } from '@/lib/email-drafts-storage';
 import { setResearchedLeadsStorageScope } from '@/lib/researched-leads-storage';
 import { setQuotaStorageScope } from '@/lib/quota-client';
 import { organizationService, type OrganizationRole } from '@/lib/services/organization-service';
+import { safeNextPath } from '@/lib/safe-next-path';
 
 interface AuthContextType {
     user: User | null;
@@ -18,7 +19,11 @@ interface AuthContextType {
     error: string | null;
     signInWithGoogle: (nextPath?: string) => Promise<void>;
     signInWithPassword: (email: string, password: string) => Promise<void>;
-    signUpWithPassword: (email: string, password: string) => Promise<void>;
+    /** `needsConfirmation`: Supabase asks the person to confirm the email before the first sign-in. */
+    signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
+    /** Sends the reset link; Supabase answers the same whether or not the account exists. */
+    requestPasswordReset: (email: string) => Promise<void>;
+    updatePassword: (password: string) => Promise<void>;
     signOut: () => Promise<void>;
     refreshOrganization: () => Promise<void>;
 }
@@ -101,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const signInWithGoogle = async (nextPath?: string) => {
         setError(null);
 
-        const safeNext = typeof nextPath === 'string' && nextPath.startsWith('/') ? nextPath : '';
+        const safeNext = safeNextPath(nextPath, '');
         const redirectTo = safeNext
             ? `${window.location.origin}/api/auth/callback?next=${encodeURIComponent(safeNext)}`
             : `${window.location.origin}/api/auth/callback`;
@@ -129,13 +134,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const signUpWithPassword = async (email: string, password: string) => {
         setError(null);
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
             email,
             password,
             options: {
                 emailRedirectTo: `${window.location.origin}/api/auth/callback`,
             },
         });
+        if (error) {
+            setError(error.message);
+            throw error;
+        }
+        return { needsConfirmation: !data.session };
+    };
+
+    const requestPasswordReset = async (email: string) => {
+        setError(null);
+        const next = encodeURIComponent('/restablecer-clave');
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+            redirectTo: `${window.location.origin}/api/auth/callback?next=${next}`,
+        });
+        if (error) {
+            setError(error.message);
+            throw error;
+        }
+    };
+
+    const updatePassword = async (password: string) => {
+        setError(null);
+        const { error } = await supabase.auth.updateUser({ password });
         if (error) {
             setError(error.message);
             throw error;
@@ -148,7 +175,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, organizationId, organizationRole, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, signOut, refreshOrganization }}>
+        <AuthContext.Provider value={{ user, session, organizationId, organizationRole, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, requestPasswordReset, updatePassword, signOut, refreshOrganization }}>
             <Fragment key={`${user?.id || 'anonymous'}:${organizationId || 'personal'}`}>
                 {children}
             </Fragment>

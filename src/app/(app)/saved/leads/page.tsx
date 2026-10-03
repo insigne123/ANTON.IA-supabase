@@ -29,6 +29,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { LeadName } from '@/components/leads/LeadName';
 import { retainVisibleSelection } from '@/lib/leads-workspace/selection';
 import { v4 as uuid } from 'uuid';
+import { safeAvatarUrl } from '@/lib/avatar';
 
 const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
@@ -562,7 +563,7 @@ export default function SavedLeadsPage() {
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar className="h-9 w-9">
-                          <AvatarImage src={l.avatar} alt={l.name || 'lead'} />
+                          <AvatarImage src={safeAvatarUrl(l.avatar)} alt={l.name || 'lead'} />
                           <AvatarFallback>{(l.name || 'L').charAt(0)}</AvatarFallback>
                         </Avatar>
                         <div className="min-w-0">

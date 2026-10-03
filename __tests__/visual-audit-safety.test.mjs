@@ -8,6 +8,7 @@ import path from 'node:path';
 import { classify, BLOCKED_MESSAGE } from '../scripts/visual-audit/api-policy.mjs';
 import { buildEnv, productionFlags } from '../scripts/visual-audit/env.mjs';
 import { routeList, planVisits } from '../scripts/visual-audit/routes.mjs';
+import { AUDIT_INVITE_TOKEN } from '../scripts/visual-audit/fixtures/people.mjs';
 
 const GUARD = path.resolve('scripts/visual-audit/egress-guard.cjs');
 const request = (method, url) => ({ method: () => method, url: () => url });
@@ -74,7 +75,8 @@ test('every page is visited by the owner, gated pages by the member, and private
   const routes = routeList({ MEMBER: 'member-id' });
   const visits = planVisits(routes, { personas: ['owner', 'member', 'anon'], datasets: ['full', 'empty'] });
   const owner = visits.filter(visit => visit.persona === 'owner' && visit.dataset === 'full').map(visit => visit.route.path);
-  assert.ok(owner.includes('/') && owner.includes('/cowork') && owner.includes('/invite/audit-invite-token'));
+  assert.ok(owner.includes('/') && owner.includes('/cowork') && owner.includes(`/invite/${AUDIT_INVITE_TOKEN}`));
+  assert.ok(AUDIT_INVITE_TOKEN.length >= 20, 'the invitation APIs ignore tokens under 20 characters');
   assert.ok(!owner.includes('/login'));
   assert.ok(visits.filter(visit => visit.persona === 'member').every(visit => visit.dataset === 'full'));
   assert.deepEqual(visits.filter(visit => visit.persona === 'anon' && visit.route.area === 'app').map(visit => visit.route.path).sort(), ['/', '/cowork']);

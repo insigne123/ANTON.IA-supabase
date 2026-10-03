@@ -42,8 +42,10 @@ export async function middleware(req: NextRequest) {
 
     // Allow some public routes (unsubscribe, invites, privacy) even without session.
     // Note: the matcher also skips most static assets; this is just an extra guard.
+    // /restablecer-clave explains an expired reset link itself instead of sending the person to a login they cannot pass.
     const isPublicRoute =
         pathname === '/login' ||
+        pathname === '/restablecer-clave' ||
         pathname === '/unsubscribe' ||
         pathname.startsWith('/invite') ||
         pathname.startsWith('/privacy');

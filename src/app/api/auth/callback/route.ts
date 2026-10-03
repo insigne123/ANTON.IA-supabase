@@ -2,18 +2,24 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
+import { safeNextPath } from '@/lib/safe-next-path';
+
 export async function GET(request: Request) {
     const requestUrl = new URL(request.url);
     const code = requestUrl.searchParams.get('code');
-    const next = requestUrl.searchParams.get('next');
+    // Only a path of this app: a link to the callback cannot send the new session to another site.
+    const next = safeNextPath(requestUrl.searchParams.get('next'), '/');
+
+    // Supabase sends `error` instead of `code` when the link expired or was already used.
+    if (requestUrl.searchParams.get('error')) return NextResponse.redirect(new URL('/login?enlace=vencido', requestUrl.origin));
 
     if (code) {
         const cookieStore = cookies();
         const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-        await supabase.auth.exchangeCodeForSession(code);
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        // An expired link, or one opened in another browser (the code verifier lives in the first one).
+        if (error) return NextResponse.redirect(new URL('/login?enlace=vencido', requestUrl.origin));
     }
 
-    // URL to redirect to after sign in process completes
-    const safeNext = next && next.startsWith('/') ? next : '/';
-    return NextResponse.redirect(new URL(safeNext, requestUrl.origin));
+    return NextResponse.redirect(new URL(next, requestUrl.origin));
 }
