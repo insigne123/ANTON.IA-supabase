@@ -78,14 +78,14 @@ export function DefaultSenderCard() {
             const id = `default-sender-${provider}`;
             return <Label key={provider} htmlFor={id}
               className={cn('flex min-h-16 items-center gap-3 rounded-2xl border border-border/70 px-4 py-3 transition-colors',
-                connected ? 'cursor-pointer hover:bg-muted/60' : 'cursor-not-allowed opacity-70',
+                connected ? 'cursor-pointer hover:bg-muted/60' : 'cursor-not-allowed bg-muted/40',
                 (state.preferred ?? state.resolved) === provider && 'border-primary/60 bg-primary/5')}>
               <RadioGroupItem id={id} value={provider} disabled={!connected || saving !== null} />
               <Icon className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="min-w-0 flex-1">
                 <span className="block text-[15px] font-semibold tracking-tight text-foreground">{MAIL_PROVIDER_LABEL[provider]}</span>
                 <span className="block text-sm font-normal text-muted-foreground">
-                  {saving === provider ? 'Guardando…' : connected ? 'Conectada' : 'No conectada: conéctala abajo para elegirla'}
+                  {saving === provider ? 'Guardando…' : connected ? 'Conectada' : 'No conectada: conéctala en «Correo» para elegirla'}
                 </span>
               </span>
             </Label>;
