@@ -6,8 +6,13 @@ import type { EnrichedLead, Lead } from '@/lib/types';
 import {
   enrichedExportRow,
   enrichedLeadPhoneState,
+  ENRICHED_STAGE_LABELS,
+  ENRICHED_STAGE_ORDER,
+  enrichedSelectionAction,
+  enrichedStage,
   extractDomainFromEmail,
   filterEnrichedLeads,
+  hasUsableEmail,
   hasNativeResearchResult,
   normalizeSearchText,
   pendingPhoneLookupKey,
@@ -100,7 +105,27 @@ test('«Por escribir» reloads once per burst, checks phones per set and confirm
   assert.doesNotMatch(page, /void loadData\(\);\s*\}\s*\)\s*\.subscribe/, 'a realtime event no longer reloads at once');
   assert.match(page, /\[pendingPhoneKey, syncPendingPhoneLeads\]/, 'the phone check follows the set of running lookups, not every reload');
   assert.doesNotMatch(page, /[^.\w]confirm\(['`]/, 'no browser confirm()');
-  assert.match(page, /const targets = filtered\.filter\(hasReportStrict\)/, '«Borrar investigaciones» acts on the list in view');
+  assert.match(page, /const targets = listed\.filter\(hasReportStrict\)/, '«Borrar investigaciones» acts on the list in view (filters and stage)');
   assert.match(page, /'x-quota-ticket': getQuotaTicket\(\)/);
   assert.match(page, /contactos-por-escribir-/);
+});
+
+test('each contact has one stage, in working order: research, then write', () => {
+  const base = { hasEmail: true, researching: false, viewable: false, ready: false };
+  assert.equal(enrichedStage(base), 'to_research');
+  assert.equal(enrichedStage({ ...base, researching: true }), 'researching');
+  assert.equal(enrichedStage({ ...base, viewable: true }), 'review', 'a report that cannot draft yet asks for a look');
+  assert.equal(enrichedStage({ ...base, viewable: true, ready: true }), 'ready');
+  assert.equal(enrichedStage({ ...base, hasEmail: false, ready: true }), 'no_email', 'without an email nothing else applies');
+  assert.deepEqual(Object.keys(ENRICHED_STAGE_LABELS).sort(), [...ENRICHED_STAGE_ORDER].sort());
+  assert.ok(hasUsableEmail('ana@retail.cl'));
+  assert.ok(!hasUsableEmail('Not Found') && !hasUsableEmail('') && !hasUsableEmail(null));
+});
+
+test('the action bar names what it will do with the selection', () => {
+  assert.equal(enrichedSelectionAction({ total: 0, toResearch: 0, ready: 0 }), null);
+  assert.equal(enrichedSelectionAction({ total: 3, toResearch: 0, ready: 3 }), 'Escribir a 3 contactos');
+  assert.equal(enrichedSelectionAction({ total: 1, toResearch: 0, ready: 1 }), 'Escribir a 1 contacto');
+  assert.equal(enrichedSelectionAction({ total: 4, toResearch: 4, ready: 0 }), 'Investigar (4)');
+  assert.equal(enrichedSelectionAction({ total: 5, toResearch: 3, ready: 2 }), 'Investigar y escribir (5)');
 });

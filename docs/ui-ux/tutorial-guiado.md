@@ -26,7 +26,7 @@ Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Co
 | Hoy (`/dashboard`) | Lo primero (`today`), Prepara tu cuenta (`setup`) |
 | Búsqueda (`/search`) | Tres formas de buscar (`search-modes`), Puntos de partida (`search-starters`), Busca y guarda (`search-run`) |
 | Por completar (`/saved/leads`) | Contactos sin correo (`saved-list`), ir a «Por escribir» (`saved-enriched-link`) |
-| Por escribir (`/saved/leads/enriched`) | Investigar (`enriched-research`), Contactar (`enriched-contact`) |
+| Por escribir (`/saved/leads/enriched`) | Etapa «Por investigar» (`enriched-research`), etapa «Listos para escribir» (`enriched-contact`) |
 | Conversaciones (`/contacted`) | Por responder (`conv-views`), Traer respuestas (`conv-sync`) |
 | Campañas (`/campaigns`) | Masivas o una por una (`campaigns-tabs`) |
 | Pipeline (`/crm`) | Etapas (`crm-board`) |
