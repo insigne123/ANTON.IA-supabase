@@ -17,7 +17,7 @@ type Props = {
   kinds?: QuotaKind[];
   /** Modo compacto: sin Card wrapper */
   compact?: boolean;
-  /** Resumen horizontal para superficies con poco alto */
+  /** Resumen compacto para la columna lateral de «Hoy» */
   summary?: boolean;
   /** Título opcional */
   title?: string;
@@ -125,8 +125,8 @@ export default function DailyQuotaProgress({ className, kinds, compact, summary,
   if (summary) {
     return (
       <Card className={cn('overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_10px_28px_-26px_rgba(15,23,42,0.28)]', className)} aria-busy={syncState === 'loading'}>
-        <CardContent className="flex flex-col gap-3 p-3 sm:p-4 lg:flex-row lg:items-center lg:gap-5">
-          <div className="min-w-0 lg:w-40 lg:shrink-0">
+        <CardContent className="flex flex-col gap-3 p-4">
+          <div className="min-w-0">
             <CardTitle className="text-sm">{title}</CardTitle>
             <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground" aria-live="polite">
               {syncState === 'loading' ? (
@@ -139,7 +139,7 @@ export default function DailyQuotaProgress({ className, kinds, compact, summary,
             </div>
           </div>
 
-          <div className="grid min-w-0 flex-1 grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
+          <div className={cn('grid min-w-0 grid-cols-1 gap-x-5 gap-y-3', rows.length > 1 && 'sm:grid-cols-2')}>
             {rows.map((row) => (
               <div key={row.kind} className="min-w-0">
                 <div className="flex items-center justify-between gap-2 text-xs">

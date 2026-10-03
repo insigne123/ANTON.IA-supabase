@@ -106,13 +106,13 @@ export function RecommendedLeads() {
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium text-foreground">{item.name || 'Sin nombre'}</p>
                             <p className="truncate text-xs text-muted-foreground">{[item.title, item.company].filter(Boolean).join(', ') || 'Sin cargo'}</p>
-                            <p className="truncate text-xs text-muted-foreground/90">{item.reasons.slice(0, 3).join(' · ')}</p>
+                            <p className="truncate text-xs text-foreground/70">{item.reasons.slice(0, 3).join(' · ')}</p>
                           </div>
                         </div>
                         <div className="flex shrink-0 flex-wrap items-center gap-2 pl-12 sm:pl-0">
                           {item.missing.map(missing => (
                             <span key={missing} className={cn('rounded-full px-2 py-0.5 text-xs',
-                              missing === 'buscar su correo' ? 'bg-cw-warning-soft text-cw-warning' : 'bg-muted text-muted-foreground')}>
+                              missing === 'buscar su correo' ? 'bg-cw-warning-soft text-cw-warning' : 'bg-muted text-foreground/70')}>
                               {MISSING_LABELS[missing] || missing}
                             </span>
                           ))}
