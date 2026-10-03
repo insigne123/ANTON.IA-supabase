@@ -84,7 +84,7 @@ export function DefaultSenderCard() {
               <Icon className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="min-w-0 flex-1">
                 <span className="block text-[15px] font-semibold tracking-tight text-foreground">{MAIL_PROVIDER_LABEL[provider]}</span>
-                <span className="block text-sm font-normal text-muted-foreground">
+                <span className="block text-sm font-normal text-foreground/70">
                   {saving === provider ? 'Guardando…' : connected ? 'Conectada' : 'No conectada: conéctala en «Correo» para elegirla'}
                 </span>
               </span>
