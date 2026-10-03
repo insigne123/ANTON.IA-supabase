@@ -47,6 +47,10 @@ import { TeamLockBadge } from '@/components/collaboration/TeamLockBadge';
 import { useTeamLocks } from '@/hooks/use-team-locks';
 import { normalizeLockEmail } from '@/lib/team-lock';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
+import { useConfirm } from '@/components/confirm-dialog';
+import * as Quota from '@/lib/quota-client';
+import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
+import { createCoalescedRunner } from '@/lib/leads-workspace/coalesced-runner';
 import {
   ENRICHED_EXPORT_HEADERS,
   enrichedExportRow,
@@ -55,6 +59,7 @@ import {
   hasNativeResearchResult,
   isNativeResearchReport,
   nativeResearchCanCreateDraft,
+  pendingPhoneLookupKey,
   withCompanyFromSaved,
 } from '@/lib/leads-workspace/enriched-view';
 
@@ -63,6 +68,7 @@ const PAGE_SIZE = 50;
 export default function EnrichedLeadsClient() {
   const router = useRouter();
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
@@ -123,6 +129,8 @@ export default function EnrichedLeadsClient() {
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': operationId,
+          // The same daily-quota ticket «Por completar» sends: without it the server could not match the browser's count.
+          'x-quota-ticket': getQuotaTicket() || '',
         },
         body: JSON.stringify({
           leads: payloadLeads,
@@ -132,15 +140,24 @@ export default function EnrichedLeadsClient() {
         }),
       });
 
-      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const reason = String(data?.error || data?.message || '').slice(0, 200);
+        throw new Error(reason || `El servidor respondió ${res.status}. Intenta de nuevo en unos minutos.`);
+      }
 
-      const data = await res.json();
-
-      // Print server-side logs for debugging
-      if (data?.debug?.serverLogs && Array.isArray(data.debug.serverLogs)) {
+      if (process.env.NODE_ENV !== 'production' && Array.isArray(data?.debug?.serverLogs)) {
         console.groupCollapsed('[Server Logs] Apollo Enrichment');
         data.debug.serverLogs.forEach((l: string) => console.log(l));
         console.groupEnd();
+      }
+
+      const ticket = data?.ticket || res.headers.get('x-quota-ticket');
+      if (ticket) setQuotaTicket(ticket);
+      const consumed = Number(data?.usage?.consumed ?? 0);
+      if (consumed > 0) Quota.incClientQuota('enrich', consumed);
+      if (typeof data?.note === 'string' && data.note.includes('Quota')) {
+        toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: data.note });
       }
 
       const { enriched: newEnriched } = data;
@@ -190,14 +207,17 @@ export default function EnrichedLeadsClient() {
         // Reload list
         const fresh = await enrichedLeadsStorageGet();
         setEnriched(fresh);
+        const sent = toUpdate.length + toAdd.length;
         toast({
-          title: 'Enriquecimiento en curso',
-          description: `Enviados: ${toUpdate.length + toAdd.length}. Los datos se actualizarán al finalizar.`,
+          title: 'Actualizando datos',
+          description: `${sent} ${sent === 1 ? 'contacto enviado' : 'contactos enviados'}. Lo que llegue después (como un teléfono) aparece solo en la lista.`,
         });
+      } else {
+        toast({ title: 'Sin datos nuevos', description: 'El proveedor no devolvió datos nuevos para estos contactos.' });
       }
 
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e.message });
+      toast({ variant: 'destructive', title: 'No pudimos actualizar los datos', description: e.message || 'Intenta de nuevo en unos minutos.' });
     } finally {
       setEnriching(false);
       setLeadsToEnrich([]);
@@ -364,8 +384,26 @@ export default function EnrichedLeadsClient() {
     }
   }, [loadNativeResearchStatuses]);
 
+  // Realtime events, phone results and a late sign-in ask for a reload; a burst of them shares one
+  // (src/lib/leads-workspace/coalesced-runner.ts). Before, each event reloaded the whole list at once.
+  const loadDataRef = useRef(loadData);
+  useEffect(() => { loadDataRef.current = loadData; }, [loadData]);
+  const reloaderRef = useRef<ReturnType<typeof createCoalescedRunner> | null>(null);
+  useEffect(() => {
+    const runner = createCoalescedRunner(() => loadDataRef.current());
+    reloaderRef.current = runner;
+    return () => {
+      runner.cancel();
+      if (reloaderRef.current === runner) reloaderRef.current = null;
+    };
+  }, []);
+  const scheduleReload = useCallback(() => { reloaderRef.current?.schedule(); }, []);
+
+  const enrichedRef = useRef(enriched);
+  useEffect(() => { enrichedRef.current = enriched; }, [enriched]);
+
   const syncPendingPhoneLeads = useCallback(async (ids?: string[]) => {
-    const targetIds = (ids || enriched.filter((lead) => hasActivePhoneLookup(lead)).map((lead) => lead.id))
+    const targetIds = (ids || enrichedRef.current.filter((lead) => hasActivePhoneLookup(lead)).map((lead) => lead.id))
       .filter(Boolean)
       .slice(0, 50);
 
@@ -387,7 +425,7 @@ export default function EnrichedLeadsClient() {
       }
 
       if ((data?.updated || 0) > 0 || (data?.completedWithoutPhone || 0) > 0) {
-        await loadData();
+        scheduleReload();
       }
     } catch (error) {
       console.warn('[phone-sync] unexpected error:', error);
@@ -395,7 +433,7 @@ export default function EnrichedLeadsClient() {
       pendingPhoneSyncRef.current = false;
       setSyncingPendingPhones(false);
     }
-  }, [enriched, loadData]);
+  }, [scheduleReload]);
 
   useEffect(() => {
     void loadData();
@@ -430,8 +468,7 @@ export default function EnrichedLeadsClient() {
               }
             }
           }
-          // Reload data
-          void loadData();
+          scheduleReload();
         }
       )
       .subscribe();
@@ -439,15 +476,13 @@ export default function EnrichedLeadsClient() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadData, toast]);
+  }, [loadData, scheduleReload, toast]);
 
-  // Listen for Auth Changes to reload data if session restores late
+  // Phone lookups still running are checked when that set changes and then every 15 s. Before, the check ran again on
+  // every reload of the list, and a reload after each check could loop.
+  const pendingPhoneKey = useMemo(() => pendingPhoneLookupKey(enriched), [enriched]);
   useEffect(() => {
-    const pendingIds = enriched
-      .filter((lead) => hasActivePhoneLookup(lead))
-      .map((lead) => lead.id)
-      .filter(Boolean);
-
+    const pendingIds = pendingPhoneKey ? pendingPhoneKey.split(',') : [];
     if (pendingIds.length === 0) return;
 
     syncPendingPhoneLeads(pendingIds);
@@ -469,16 +504,15 @@ export default function EnrichedLeadsClient() {
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [enriched, syncPendingPhoneLeads]);
+  }, [pendingPhoneKey, syncPendingPhoneLeads]);
 
+  // A session that restores late reloads the list.
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        void loadData();
-      }
+      if (event === 'SIGNED_IN' && session) scheduleReload();
     });
     return () => subscription.unsubscribe();
-  }, [loadData]);
+  }, [scheduleReload]);
 
 
   // Referencia compuesta estable (id || email || linkedin || nombre|empresa)
@@ -612,9 +646,9 @@ export default function EnrichedLeadsClient() {
     }
   }, [enriched, sel, selectedToContact]);
 
-  const anyInvestigated = useMemo(
-    () => enriched.some(hasReportStrict),
-    [enriched, hasReportStrict]
+  const investigatedInList = useMemo(
+    () => filtered.filter(hasReportStrict).length,
+    [filtered, hasReportStrict]
   );
 
   const toggleAllResearch = (checked: boolean) => {
@@ -746,8 +780,14 @@ export default function EnrichedLeadsClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingLeads, nativeResearchStatusKnown, enriched]);
 
-  function clearInvestigationFor(lead: EnrichedLead) {
-    if (!confirm(`¿Borrar investigación para ${lead.fullName}?`)) return;
+  async function clearInvestigationFor(lead: EnrichedLead) {
+    const accepted = await confirm({
+      title: `¿Borrar la investigación de ${lead.fullName || 'este contacto'}?`,
+      description: 'Podrás investigarlo de nuevo. No se envía ningún correo.',
+      confirmLabel: 'Borrar investigación',
+      tone: 'danger',
+    });
+    if (!accepted) return;
     const ref = leadRefOf(lead);
 
     const removedCount = leadResearchStorage.removeWhere(r => {
@@ -771,14 +811,20 @@ export default function EnrichedLeadsClient() {
     });
   }
 
-  /** Borra reportes de investigación de los leads visibles y limpia marcas legacy. */
-  function clearInvestigations() {
-    if (!enriched.length) return;
-    const ok = confirm('¿Borrar todos los reportes e investigaciones de los leads listados? Podrás investigarlos nuevamente.');
-    if (!ok) return;
+  /** Borra los reportes de los contactos que se ven en la lista (con los filtros actuales) y limpia marcas legacy. */
+  async function clearInvestigations() {
+    const targets = filtered.filter(hasReportStrict);
+    if (!targets.length) return;
+    const accepted = await confirm({
+      title: `¿Borrar ${targets.length === 1 ? 'la investigación de 1 contacto' : `las investigaciones de ${targets.length} contactos`}?`,
+      description: 'Solo los contactos de la lista que ves, con los filtros actuales. Podrás investigarlos de nuevo.',
+      confirmLabel: 'Borrar investigaciones',
+      tone: 'danger',
+    });
+    if (!accepted) return;
 
     // 1) Construir referencias exactas de los leads objetivo.
-    const refs = enriched.map(leadRefOf).filter(Boolean);
+    const refs = targets.map(leadRefOf).filter(Boolean);
 
     // 2) Eliminar solo reportes ligados a estos leads, nunca los de otro contacto de la empresa.
     const removedCount = leadResearchStorage.removeWhere((r) => {
@@ -804,11 +850,16 @@ export default function EnrichedLeadsClient() {
   }
 
   /** Borra reportes e investigación SOLO de los "Contactar seleccionados". */
-  function clearInvestigationsSelected() {
+  async function clearInvestigationsSelected() {
     const targets = enriched.filter(l => selectedToContact.has(l.id));
     if (!targets.length) return;
-    const ok = confirm(`¿Borrar investigaciones de ${targets.length} lead(s) seleccionados? Podrás investigarlos nuevamente.`);
-    if (!ok) return;
+    const accepted = await confirm({
+      title: `¿Borrar la investigación de ${targets.length === 1 ? '1 contacto seleccionado' : `${targets.length} contactos seleccionados`}?`,
+      description: 'Podrás investigarlos de nuevo. No se envía ningún correo.',
+      confirmLabel: 'Borrar investigación',
+      tone: 'danger',
+    });
+    if (!accepted) return;
 
     const refs = targets.map(leadRefOf).filter(Boolean);
     const removedCount = leadResearchStorage.removeWhere((r) => {
@@ -872,8 +923,14 @@ export default function EnrichedLeadsClient() {
   }
 
   async function handleDeleteEnriched(id: string) {
-    const ok = confirm('¿Quitar este contacto de «Por escribir»?');
-    if (!ok) return;
+    const lead = enriched.find((entry) => entry.id === id);
+    const accepted = await confirm({
+      title: `¿Quitar a ${lead?.fullName || 'este contacto'} de «Por escribir»?`,
+      description: 'No se envía ningún correo. Si lo necesitas de nuevo, búscalo y guárdalo otra vez.',
+      confirmLabel: 'Quitar',
+      tone: 'danger',
+    });
+    if (!accepted) return;
     try {
       const next = await removeEnrichedLeadById(id);
       setEnriched(next);
@@ -894,11 +951,11 @@ export default function EnrichedLeadsClient() {
   const buildRows = (list: EnrichedLead[]) => list.map(enrichedExportRow);
   const handleExportCsv = () => {
     if (!filtered.length) return;
-    exportToCsv(ENRICHED_EXPORT_HEADERS, buildRows(filtered), 'enriched-leads.csv');
+    exportToCsv(ENRICHED_EXPORT_HEADERS, buildRows(filtered), `contactos-por-escribir-${new Date().toISOString().slice(0, 10)}.csv`);
   };
   const handleExportXlsx = async () => {
     if (!filtered.length) return;
-    await exportToXlsx(ENRICHED_EXPORT_HEADERS, buildRows(filtered), 'enriched-leads.xlsx');
+    await exportToXlsx(ENRICHED_EXPORT_HEADERS, buildRows(filtered), `contactos-por-escribir-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const clearFilters = () => {
@@ -1181,8 +1238,8 @@ export default function EnrichedLeadsClient() {
                   <DropdownMenuContent align="end" className="w-64">
                     <DropdownMenuItem onClick={() => initiateEnrichment(filtered.filter(e => selectedToContact.has(e.id)))} disabled={contactCount === 0}>Actualizar datos</DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={clearInvestigationsSelected} disabled={contactCount === 0}>Borrar investigación de seleccionados</DropdownMenuItem>
-                    <DropdownMenuItem onClick={clearInvestigations} disabled={!anyInvestigated} className="text-destructive focus:text-destructive">Borrar todas las investigaciones</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => void clearInvestigationsSelected()} disabled={contactCount === 0}>Borrar investigación de seleccionados</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => void clearInvestigations()} disabled={investigatedInList === 0} className="text-destructive focus:text-destructive">Borrar investigaciones de la lista ({investigatedInList})</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
