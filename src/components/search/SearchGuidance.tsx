@@ -30,7 +30,7 @@ export function SearchStarters({ starters, onPick, disabled, missingIdealCustome
         ))}
       </div>
       <p className="text-xs text-muted-foreground">
-        Rellena los filtros de abajo; puedes cambiarlos antes de buscar.
+        Llena los criterios de búsqueda; puedes cambiarlos antes de buscar.
         {missingIdealCustomer ? <> Define tu cliente ideal en <Link href="/profile" className="font-medium text-foreground underline underline-offset-2">Perfil</Link> para tener tu propio punto de partida.</> : null}
       </p>
     </section>

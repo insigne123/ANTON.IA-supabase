@@ -199,11 +199,52 @@ export function buildLinkedInProfileNotice(params: {
   return { tone, title, description, emailState, phoneState };
 }
 
-export function statusChipClasses(state: ProfileContactState) {
-  if (state === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200';
-  if (state === 'queued') return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200';
-  if (state === 'missing') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200';
-  return 'border-border/70 bg-muted/40 text-muted-foreground';
+/** How an email or phone state of a LinkedIn profile reads: a Badge tone of the app's palette and its word. */
+export function contactStateBadge(state: ProfileContactState): { variant: 'success' | 'info' | 'warning' | 'neutral'; label: string } {
+  if (state === 'ready') return { variant: 'success', label: 'Disponible' };
+  if (state === 'queued') return { variant: 'info', label: 'Buscando…' };
+  if (state === 'missing') return { variant: 'warning', label: 'No disponible' };
+  return { variant: 'neutral', label: 'No solicitado' };
+}
+
+export type SavedLeadIds = { ids: Set<string>; providerIds: Set<string> };
+
+/**
+ * A search row carries the provider's id; a saved contact keeps that id in sourceProviderId (or, in old rows, as its own
+ * id). Comparing only the saved rows' own ids, as the page did, never marked a result as «Guardado».
+ */
+export function isLeadSaved(lead: Pick<UILaed, 'id' | 'sourceProviderId'>, saved: SavedLeadIds) {
+  const id = String(lead.id || '').trim();
+  const providerId = String(lead.sourceProviderId || '').trim();
+  return Boolean((id && (saved.ids.has(id) || saved.providerIds.has(id))) || (providerId && saved.providerIds.has(providerId)));
+}
+
+/** Contacted ids hold lead ids and emails in lower case (see contactedKeys). */
+export function isLeadContacted(lead: Pick<UILaed, 'id' | 'email'>, contacted: Set<string>) {
+  const email = String(lead.email || '').trim().toLowerCase();
+  return Boolean((lead.id && contacted.has(String(lead.id))) || (email && contacted.has(email)));
+}
+
+export function contactedKeys(rows: Array<{ leadId?: string | null; email?: string | null }>) {
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.leadId) keys.add(String(row.leadId));
+    const email = String(row.email || '').trim().toLowerCase();
+    if (email) keys.add(email);
+  }
+  return keys;
+}
+
+const normalizedList = (value?: string) => splitFilterInput(value).map((item) => item.toLocaleLowerCase('es-CL')).sort();
+
+/** What the company list depends on: change one of these and the companies shown no longer match the filters. */
+export function companyFilterSignature(filters: Pick<LeadSearchFilters, 'companyKeywords' | 'location' | 'companyNameFilter' | 'sizeRange'>) {
+  return JSON.stringify([normalizedList(filters.companyKeywords), normalizedList(filters.location), String(filters.companyNameFilter || '').trim().toLocaleLowerCase('es-CL'), String(filters.sizeRange || '').trim()]);
+}
+
+/** What the contacts inside the chosen companies depend on. */
+export function peopleFilterSignature(filters: Pick<LeadSearchFilters, 'title' | 'seniorities' | 'personLocation' | 'maxResults'>) {
+  return JSON.stringify([normalizedList(filters.title), [...(filters.seniorities || [])].sort(), normalizedList(filters.personLocation), Number(filters.maxResults) || 0]);
 }
 
 export function isPendingEnrichmentStatus(value?: string | null) {

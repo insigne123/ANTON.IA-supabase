@@ -18,6 +18,40 @@ const PEOPLE = [
   ['Rocío', 'Figueroa', 'Jefa de Compensaciones'],
 ];
 const slug = text => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]+/g, '');
+// People the provider returns in a search that are not saved yet (the saved ones above come back as «Guardado»).
+const SEARCH_PEOPLE = [
+  ['Paula', 'Henríquez', 'Gerente de Personas'], ['Ignacio', 'Molina', 'Jefe de Reclutamiento'], ['Constanza', 'Ríos', 'Subgerente de RR. HH.'],
+  ['Rodrigo', 'Saavedra', 'Jefe de Selección'], ['Daniela', 'Olivares', 'Business Partner de Personas'], ['Gonzalo', 'Vera', 'Gerente de Operaciones'],
+];
+
+/** The owner left a company-first search half done: 4 companies found, 2 of them searched, one person already saved. */
+function searchCheckpoint(people) {
+  const companies = COMPANIES.slice(0, 4).map(([name, domain, industry, size], index) => ({
+    id: `org-qa-${index}`, name, primary_domain: domain, website_url: `https://www.${domain}`, industry,
+    city: index % 2 ? 'Concepción' : 'Santiago', country: 'Chile', estimated_num_employees: size,
+  }));
+  const row = (id, name, title, organization, linkedin) => ({
+    id, name, title, company: organization.name, email: null, avatar: '', location: 'Santiago, Chile', industry: organization.industry,
+    companyWebsite: organization.website_url, companyLinkedin: null, linkedinUrl: linkedin, sourceProvider: 'apollo', sourceProviderId: id,
+    phoneNumbers: null, primaryPhone: null, country: 'Chile', city: 'Santiago', status: 'saved',
+  });
+  const found = SEARCH_PEOPLE.map(([first, last, title], index) => ({ id: `apollo-new-${index}`, name: `${first} ${last}`, title, linkedin: `https://www.linkedin.com/in/${slug(first)}-${slug(last)}-qa` }));
+  const saved = people[0];
+  const windows = [
+    [companies[0], [row('apollo-qa-0', saved.name, saved.title, companies[0], saved.linkedin), ...found.slice(0, 3).map(p => row(p.id, p.name, p.title, companies[0], p.linkedin))]],
+    [companies[1], found.slice(3).map(p => row(p.id, p.name, p.title, companies[1], p.linkedin))],
+  ];
+  return {
+    version: 1,
+    filters: { searchMode: 'filters', companyKeywords: 'retail, logística', location: 'Chile', title: 'Gerente de Personas, Jefe de Reclutamiento', seniorities: [], sizeRange: '', maxResults: 25 },
+    companies, companiesPage: 1, companiesTotalPages: 3, companiesTotalEntries: 57,
+    selectedCompanyIds: ['org-qa-0', 'org-qa-1'], activeCompanyId: 'org-qa-0', filterStep: 'people',
+    companyWindows: Object.fromEntries(windows.map(([organization, leads]) => [organization.id, {
+      organization, leads, page: 1, perPage: 25, totalEntries: leads.length + 6, totalPages: 1, isLoading: false, isExpanding: false,
+      hasMore: true, error: '', deliveredIds: leads.map(lead => lead.id),
+    }])),
+  };
+}
 
 export default function leads(ctx) {
   const people = PEOPLE.map(([first, last, title], index) => {
@@ -71,6 +105,8 @@ export default function leads(ctx) {
         { id: ctx.uid(3002), organization_id: ctx.ORG, user_id: ctx.OWNER, name: 'Logística 200-500', criteria: { industries: ['Logística'], sizes: ['201-500'] }, is_shared: false, created_at: ctx.daysAgo(30), updated_at: ctx.daysAgo(30) },
       ],
       excluded_domains: [{ id: ctx.uid(3101), organization_id: ctx.ORG, user_id: ctx.OWNER, domain: 'competidor.cl', created_at: ctx.daysAgo(40) }],
+      // Only the owner has one: the member and the empty organization open «Buscar prospectos» from the start.
+      search_workspace_checkpoints: [{ organization_id: ctx.ORG, user_id: ctx.OWNER, revision: 3, snapshot: searchCheckpoint(people), updated_at: ctx.hoursAgo(2) }],
     },
   };
 }
