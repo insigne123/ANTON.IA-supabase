@@ -6,6 +6,8 @@ const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8');
 const batchPayloadSource = readFileSync(new URL('../../../../lib/server/lead-search-payload.ts', import.meta.url), 'utf8');
 const clientSource = readFileSync(new URL('../../../../lib/leads-client.ts', import.meta.url), 'utf8');
 const searchPageSource = readFileSync(new URL('../../../(app)/search/page.tsx', import.meta.url), 'utf8');
+// How a provider lead becomes a row lives in src/lib/search/lead-ui.ts since the search page was split.
+const leadUiSource = readFileSync(new URL('../../../../lib/search/lead-ui.ts', import.meta.url), 'utf8');
 const profileStatusSource = readFileSync(new URL('../profile-status/route.ts', import.meta.url), 'utf8');
 const enrichmentSource = readFileSync(new URL('../../opportunities/enrich-apollo/route.ts', import.meta.url), 'utf8');
 const organizationEnrichmentSource = readFileSync(new URL('../../organizations/enrich-apollo/route.ts', import.meta.url), 'utf8');
@@ -60,7 +62,7 @@ test('profile search uses one idempotent enrichment request and polls the persis
   assert.match(clientSource, /hasUsableLinkedInProfileData\(fallbackLead\)/);
   assert.match(clientSource, /profile-match:\$\{crypto\.randomUUID\(\)\}/);
   assert.match(searchPageSource, /organization: canonicalOrganization/);
-  assert.match(searchPageSource, /country: raw\.country \|\| null/);
+  assert.match(leadUiSource, /country: raw\.country \|\| null/);
   assert.match(searchPageSource, /reveal_email: activeRevealEmail,[\s\S]*reveal_phone: activeRevealPhone/);
   assert.doesNotMatch(searchPageSource, /await enrichLinkedInProfileLead\(/);
   assert.match(source, /LINKEDIN_PROFILE_REQUIRES_ENRICHMENT/);
