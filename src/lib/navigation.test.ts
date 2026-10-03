@@ -42,3 +42,15 @@ test('the menu has one entry per screen and every entry opens a real page', () =
     assert.doesNotThrow(() => readFileSync(`src/app/(app)${href}/page.tsx`), `${href} has a page`);
   }
 });
+
+test('the shell clips sideways without becoming a scroll box, so sticky bars inside a page stay on screen', () => {
+  // overflow-x: hidden turns overflow-y into auto: <main> and its wrappers became the sticky container while the window
+  // scrolled, so the top bar, the search rail and every bottom action bar scrolled away with the page. clip does not.
+  const shell = readFileSync('src/components/app-shell.tsx', 'utf8');
+  const sidebar = readFileSync('src/components/ui/sidebar.tsx', 'utf8');
+  for (const [file, code] of [['app-shell', shell], ['sidebar', sidebar]] as const) {
+    assert.doesNotMatch(code, /overflow-x-hidden/, `${file} keeps no overflow-x-hidden wrapper`);
+  }
+  assert.match(shell, /id="contenido"[\s\S]{0,80}className="[^"]*overflow-x-clip/, '<main> clips sideways');
+  assert.equal((sidebar.match(/overflow-x-clip/g) || []).length, 2, 'the sidebar wrapper and the inset clip sideways');
+});

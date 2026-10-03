@@ -64,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ref={contentRef}
             id="contenido"
             tabIndex={-1}
-            className="min-h-0 min-w-0 flex-1 overflow-x-hidden px-4 py-4 outline-none md:px-6 md:py-5"
+            className="min-h-0 min-w-0 flex-1 overflow-x-clip px-4 py-4 outline-none md:px-6 md:py-5"
           >
             {children}
           </main>
