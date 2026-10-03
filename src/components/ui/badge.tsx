@@ -20,7 +20,8 @@ const badgeVariants = cva(
         warning: "border-transparent bg-cw-warning-soft text-cw-warning",
         danger: "border-transparent bg-cw-danger-soft text-rose-800 dark:text-rose-200",
         info: "border-transparent bg-cw-accent-soft text-primary",
-        neutral: "border-transparent bg-muted text-muted-foreground",
+        // text-foreground/70 reads at 6.4:1 on bg-muted; muted-foreground gave 4.3:1, too low for 12 px text.
+        neutral: "border-transparent bg-muted text-foreground/70",
       },
     },
     defaultVariants: {
