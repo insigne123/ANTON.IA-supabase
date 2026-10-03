@@ -1347,10 +1347,8 @@ export default function EnrichedLeadsClient() {
                           aria-label={`Seleccionar a ${e.fullName || 'este contacto'}`}
                         />
                         <div className="min-w-0 flex-1 space-y-2">
-                          <div className="flex items-start justify-between gap-2">
-                            {leadIdentity(e)}
-                            {stageBadge(e)}
-                          </div>
+                          {leadIdentity(e)}
+                          <div>{stageBadge(e)}</div>
                           <div className="text-sm">{companyCell(e)}</div>
                           <div className="text-sm">{contactCell(e)}</div>
                           <div className="flex flex-wrap items-center gap-1">
