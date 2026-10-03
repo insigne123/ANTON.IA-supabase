@@ -105,7 +105,7 @@ Comando: `npx tsx scripts/evaluate-help-ask.ts --live`. No lee la base de datos 
 
 Resultado: **12 de 12**, de 1,1 a 4,0 s.
 
-- **Criterio para una respuesta con tema:** cita una sección esperada y nombra lo clave (por ejemplo, «100», «Enviar ahora» o «Actualizar mis respuestas»).
+- **Criterio para una respuesta con tema:** cita una sección esperada y nombra lo clave (por ejemplo, «100», «Enviar ahora» o «Traer respuestas»).
 - **Criterio para una pregunta sin tema:** dice que no lo sabe.
 
 ## Mantener el manual al día
