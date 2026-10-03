@@ -17,6 +17,14 @@ test('«Hoy» puts the work first and the week beside it, in the phone order ste
   assert.ok(!existsSync('src/components/dashboard/SummaryCards.tsx'), 'the browser no longer downloads whole tables to count');
 });
 
+test('the cards of «Tu semana» keep their own height on phones', () => {
+  // A stretched grid item resolves h-full against the whole column: «Rendimiento» grew that tall and covered the credits.
+  assert.match(page, /className="grid items-start gap-6/);
+  for (const file of ['src/components/dashboard/PerformanceChart.tsx', 'src/components/dashboard/UserCreditsCard.tsx']) {
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /<Card[^>]*h-full|'h-full /, file);
+  }
+});
+
 test('the counts come from /api/home/summary and each one opens its screen', () => {
   assert.match(summary, /fetch\('\/api\/home\/summary'/);
   assert.doesNotMatch(summary, /from\('contacted_leads'\)|supabase\./);

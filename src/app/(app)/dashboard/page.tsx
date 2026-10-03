@@ -44,7 +44,8 @@ export default function DashboardPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px] xl:items-start">
+      {/* items-start at every width: a stretched grid item would turn a card's h-full into the whole column. */}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 xl:col-start-1">
           <TodayPanel />
         </div>

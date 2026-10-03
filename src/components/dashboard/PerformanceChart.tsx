@@ -96,7 +96,7 @@ export default function PerformanceChart() {
   const isEmpty = totals.sent === 0 && totals.replied === 0;
 
   return (
-    <Card className="h-full overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_12px_32px_-28px_rgba(15,23,42,0.3)]">
+    <Card className="overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_12px_32px_-28px_rgba(15,23,42,0.3)]">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-x-4 gap-y-2 space-y-0 px-5 pb-2 pt-4">
         <div className="space-y-1">
           <CardTitle className="text-base">Rendimiento</CardTitle>

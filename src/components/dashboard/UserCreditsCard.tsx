@@ -108,12 +108,12 @@ export default function UserCreditsCard({ className }: { className?: string }) {
   return (
     <Card
       className={cn(
-        'h-full overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_10px_28px_-26px_rgba(15,23,42,0.28)]',
+        'overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_10px_28px_-26px_rgba(15,23,42,0.28)]',
         className,
       )}
       aria-busy={state === 'loading'}
     >
-      <CardContent className="flex h-full flex-col justify-between gap-4 p-4 sm:p-5">
+      <CardContent className="flex flex-col gap-4 p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
