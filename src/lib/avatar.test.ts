@@ -24,5 +24,5 @@ test('no screen builds an avatar URL that carries a prospect name to a third par
   assert.doesNotMatch(leadUi, /ui-avatars\.com/);
   assert.match(leadUi, /safeAvatarUrl\(raw\.photo_url\)/);
   assert.match(search, /<InitialsAvatar name=\{lead\.name\}/);
-  assert.match(saved, /<AvatarImage src=\{safeAvatarUrl\(l\.avatar\)\}/, 'saved leads may still hold old ui-avatars URLs');
+  assert.match(saved, /<AvatarImage src=\{safeAvatarUrl\(lead\.avatar\)\}/, 'saved leads may still hold old ui-avatars URLs');
 });
