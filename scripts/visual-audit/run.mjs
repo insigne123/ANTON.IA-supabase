@@ -83,10 +83,29 @@ const normalize = text => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{27}/gi
 
 let realtimeMocked = false;
 
+/** A retired address: one navigation, as the owner, and the URL it ends on. No screenshots or checks of the destination. */
+async function checkRedirect(browser, { route }, data, result, add) {
+  const context = await browser.newContext({ viewport: { width: options.widths[0], height: BASE_HEIGHT(options.widths[0]) }, locale: 'es-CL' });
+  try {
+    await context.addCookies([authCookie(data.personas[data.ctx.OWNER], { appUrl: APP_URL })]);
+    await installPolicy(context, { appOrigin: APP_URL, supabaseOrigin: SUPABASE_URL, onRecord: () => {} });
+    const page = await context.newPage();
+    const response = await page.goto(`${APP_URL}${route.path}`, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
+    const landed = new URL(page.url());
+    result.status = response?.status() ?? null;
+    result.finalPath = `${landed.pathname}${landed.search}`;
+    if (result.finalPath !== route.redirectsTo) add('redirect', route.redirectsTo, `Debía llevar a ${route.redirectsTo} y terminó en ${result.finalPath} (estado ${result.status}).`);
+  } finally {
+    await context.close().catch(() => {});
+  }
+  return result;
+}
+
 async function visitPage(browser, visit, data) {
   const { persona, dataset, route } = visit;
   const result = { persona, dataset, path: route.path, name: route.name, gate: route.gate || null, status: null, finalPath: null, findings: [], shots: [] };
   const add = (type, key, detail, where = {}) => result.findings.push({ type, key: normalize(String(key)).slice(0, 160), detail: String(detail).slice(0, 600), ...where });
+  if (route.redirectsTo) return checkRedirect(browser, visit, data, result, add);
   for (const width of options.widths) {
     const baseHeight = BASE_HEIGHT(width);
     const context = await browser.newContext({ viewport: { width, height: baseHeight }, locale: 'es-CL', timezoneId: 'America/Santiago', reducedMotion: 'reduce', colorScheme: options.schemes[0], deviceScaleFactor: 1 });
@@ -151,6 +170,7 @@ async function visitPage(browser, visit, data) {
   if (persona === 'member' && route.gate && !blocked) add('access', route.gate, `El miembro (fuera de la lista «${route.gate}») ve la página con estado ${result.status}.`);
   if (persona === 'anon' && route.area === 'app' && !(result.finalPath || '').startsWith('/login')) add('access', 'anon', `Sin sesión no redirige a /login (terminó en ${result.finalPath}).`);
   if (persona === 'owner' && !route.notFound && !route.legacy && result.status && result.status >= 400) add('status', result.status, `Respondió ${result.status}.`);
+  if (persona === 'owner' && route.notFound && result.status !== 404) add('status', result.status, `Debía responder 404 y respondió ${result.status}.`);
   return result;
 }
 

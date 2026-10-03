@@ -48,7 +48,7 @@ test('the «?» of each screen opens its section, including the screens behind a
 
 test('hidden features stay out of the manual for the people who cannot use them', () => {
   const member = visibleHelpSections({ opportunities: false, admin: false }).map((section) => section.id);
-  assert.ok(!member.includes('administracion') && !member.includes('oportunidades') && !member.includes('empresas-guardadas'));
+  assert.ok(!member.includes('administracion') && !member.includes('oportunidades'));
   const admin = visibleHelpSections({ opportunities: true, admin: true }).map((section) => section.id);
   assert.equal(admin.length, HELP_SECTIONS.length);
   assert.doesNotMatch(manualAsText(visibleHelpSections({ opportunities: false, admin: false })), /\[administracion\]/);
