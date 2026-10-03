@@ -6,7 +6,7 @@ import path from 'node:path';
 const TYPES = {
   pageError: 'Error de página', consoleError: 'console.error', serverError: 'Respuesta ≥ 500', overflow: 'Desborde horizontal',
   axe: 'Accesibilidad (axe)', writeOnLoad: 'Escritura al cargar', external: 'Host externo', access: 'Acceso indebido', unsettled: 'No terminó de cargar',
-  status: 'Estado HTTP inesperado',
+  status: 'Estado HTTP inesperado', redirect: 'Redirección incorrecta',
 };
 
 /** One stable key per finding, so two runs can be compared without looking at pixels. */

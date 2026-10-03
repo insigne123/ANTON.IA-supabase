@@ -182,7 +182,7 @@ export default function CRMPage() {
                 </Alert>
             )}
 
-            <main data-tour="crm-board" className="min-h-0 flex-1">
+            <div data-tour="crm-board" className="min-h-0 flex-1">
                 {loading && rows.length === 0 ? (
                     <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground" aria-live="polite">
                         <Loader2 className="h-5 w-5 animate-spin" />
@@ -209,7 +209,7 @@ export default function CRMPage() {
                         setFocusedStage={setFocusedStage}
                     />
                 )}
-            </main>
+            </div>
 
             <Sheet open={Boolean(openStage)} onOpenChange={(open) => { if (!open) setOpenStage(null); }}>
                 <SheetContent className="w-full overflow-y-auto sm:max-w-md">

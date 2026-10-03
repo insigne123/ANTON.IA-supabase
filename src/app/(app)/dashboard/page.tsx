@@ -28,7 +28,7 @@ export default function DashboardPage() {
         </Button>
       </PageHeader>
 
-      <main className="space-y-8">
+      <div className="space-y-8">
         <TodayPanel />
 
         <RecommendedLeads />
@@ -46,7 +46,7 @@ export default function DashboardPage() {
             <DailyQuotaProgress summary title="Uso diario" kinds={['contact']} className="h-full [&>div]:h-full" />
           </div>
         </section>
-      </main>
+      </div>
     </div>
   );
 }

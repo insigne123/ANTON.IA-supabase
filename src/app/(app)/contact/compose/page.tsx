@@ -941,7 +941,7 @@ function ComposeInner() {
     || leadLoadError;
   if (nativeDraftLoading || leadLoading || campaignSendContextLoading) {
     return (
-      <main aria-busy="true" className="mx-auto w-full max-w-4xl space-y-5 px-4 py-6 sm:px-6">
+      <div aria-busy="true" className="mx-auto w-full max-w-4xl space-y-5 px-4 py-6 sm:px-6">
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisar correo</p>
           <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Cargando correo…</h1>
@@ -953,13 +953,13 @@ function ComposeInner() {
             <Skeleton className="h-72 w-full" />
           </CardContent>
         </Card>
-      </main>
+      </div>
     );
   }
 
   if (loadError) {
     return (
-      <main className="mx-auto w-full max-w-2xl space-y-5 px-4 py-6 sm:px-6">
+      <div className="mx-auto w-full max-w-2xl space-y-5 px-4 py-6 sm:px-6">
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisar correo</p>
           <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">No pudimos cargar el correo</h1>
@@ -987,13 +987,13 @@ function ComposeInner() {
             Reintentar
           </Button>
         </div>
-      </main>
+      </div>
     );
   }
 
   if (!lead) {
     return (
-      <main className="mx-auto w-full max-w-2xl space-y-5 px-4 py-6 sm:px-6">
+      <div className="mx-auto w-full max-w-2xl space-y-5 px-4 py-6 sm:px-6">
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisar correo</p>
           <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">No encontramos el contacto</h1>
@@ -1008,7 +1008,7 @@ function ComposeInner() {
             <Button type="button" onClick={() => router.back()}>Volver</Button>
           </CardContent>
         </Card>
-      </main>
+      </div>
     );
   }
 
@@ -1016,8 +1016,9 @@ function ComposeInner() {
     const report = findReportForLead({ leadId: id, email: composeEmail, companyDomain: lead?.companyDomain, companyName: lead?.companyName });
     const snapshotId = String(report?.raw?.research_snapshot_id || report?.raw?.researchSnapshotId || '').trim();
     const leadIdForResearch = String((lead as any)?.id || '');
+    // Contacts from the retired «Empresas guardadas» section have no research page of their own: they open in «Por escribir».
     const researchHref = lead?._sourceTable === 'opportunities'
-      ? '/saved/opportunities/enriched'
+      ? '/saved/leads/enriched'
       : `/saved/leads/enriched${leadIdForResearch ? `?investigar=${encodeURIComponent(leadIdForResearch)}` : ''}`;
     const createDraft = async () => {
       if (!snapshotId || creatingDraft) return;
@@ -1037,7 +1038,7 @@ function ComposeInner() {
       } finally { setCreatingDraft(false); }
     };
     return (
-      <main className="mx-auto max-w-2xl space-y-5 px-4 py-6 sm:px-6">
+      <div className="mx-auto max-w-2xl space-y-5 px-4 py-6 sm:px-6">
         <h1 className="text-2xl font-semibold tracking-tight">Preparar correo</h1>
         <Card><CardHeader><CardTitle className="text-base">{lead.fullName || 'Contacto'}</CardTitle><CardDescription>{composeEmail || 'Sin email disponible'}</CardDescription></CardHeader>
           <CardContent className="space-y-4">
@@ -1049,7 +1050,7 @@ function ComposeInner() {
             </div>
           </CardContent>
         </Card>
-      </main>
+      </div>
     );
   }
 
@@ -1061,7 +1062,7 @@ function ComposeInner() {
     const nextDate = formatFollowUpDate(activeFollowUpPlan?.nextDueAt || nextStep?.dueAt);
     const hasFollowUpContext = Boolean(followUpPlan || campaignStepId);
     return (
-      <main className="mx-auto flex min-h-[70vh] w-full max-w-2xl items-center px-4 py-8 sm:px-6">
+      <div className="mx-auto flex min-h-[70vh] w-full max-w-2xl items-center px-4 py-8 sm:px-6">
         <Card className="w-full overflow-hidden rounded-2xl border-emerald-200/80 shadow-[0_24px_70px_-50px_rgba(15,23,42,0.35)] dark:border-emerald-500/30">
           <CardContent className="p-6 sm:p-8">
             <div className="flex size-11 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
@@ -1106,7 +1107,7 @@ function ComposeInner() {
             </div>
           </CardContent>
         </Card>
-      </main>
+      </div>
     );
   }
 
@@ -1185,7 +1186,7 @@ function ComposeInner() {
   const ReviewStatusIcon = reviewStatus.icon;
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-4 px-4 py-5 pb-24 sm:px-6 sm:py-6 sm:pb-24">
+    <div className="mx-auto w-full max-w-6xl space-y-4 px-4 py-5 pb-24 sm:px-6 sm:py-6 sm:pb-24">
       <header className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 gap-3">
           <Button
@@ -1602,7 +1603,7 @@ function ComposeInner() {
           )}
         </div>
       </footer>
-    </main>
+    </div>
   );
 }
 

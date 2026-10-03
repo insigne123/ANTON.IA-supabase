@@ -14,13 +14,9 @@ const quotaStoreSource = readFileSync(new URL('./daily-quota-store.ts', import.m
 const quotaClientSource = readFileSync(new URL('../quota-client.ts', import.meta.url), 'utf8');
 const protectedRouteSources = [
   readFileSync(new URL('../../app/api/opportunities/enrich-apollo/route.ts', import.meta.url), 'utf8'),
-  readFileSync(new URL('../../app/api/opportunities/search/route.ts', import.meta.url), 'utf8'),
-  readFileSync(new URL('../../app/api/opportunities/status/route.ts', import.meta.url), 'utf8'),
 ];
 const freeSearchRouteSources = [
   readFileSync(new URL('../../app/api/leads/search/route.ts', import.meta.url), 'utf8'),
-  readFileSync(new URL('../../app/api/opportunities/leads-apollo/route.ts', import.meta.url), 'utf8'),
-  readFileSync(new URL('../../app/api/opportunities/orgs-apollo/route.ts', import.meta.url), 'utf8'),
 ];
 
 test('paid enrichment access is available to every authenticated email', () => {

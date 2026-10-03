@@ -195,7 +195,7 @@ function SequencePreparation() {
   const total = view?.slots.length || 1;
   const composeId = view?.slots[0].draftId;
   return (
-    <main className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-6">
+    <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Tu secuencia de contacto</h1>
         <p className="text-sm text-muted-foreground">Un correo inicial{view?.followUpCount ? ` y ${view.followUpCount} ${view.followUpCount === 1 ? 'seguimiento' : 'seguimientos'}` : ''}{view?.offsets?.length ? ` · días ${view.offsets.join(', ')} después del inicial` : ''}. Se guardan como borradores; preparar no envía ningún correo.</p>
@@ -252,7 +252,7 @@ function SequencePreparation() {
           {slot.draftId && slot.versionId ? <SequenceEmailEditor key={slot.draftId} slot={slot} onSaved={() => load()} /> : <p className="text-sm text-muted-foreground">{slot.status === 'running' ? 'Estamos redactando este correo.' : 'El correo aparecerá aquí cuando esté guardado.'}</p>}
         </li>)}
       </ol>
-    </main>
+    </div>
   );
 }
 
