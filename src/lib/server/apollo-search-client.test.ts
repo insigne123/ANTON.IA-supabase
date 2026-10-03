@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { ApolloSearchClientError, requestApolloSearch } from './apollo-search-client';
 
-const legacySearchRoute = readFileSync('src/app/api/opportunities/leads-apollo/route.ts', 'utf8');
 
 const API_KEY_ENV = { APOLLO_API_KEY: 'test-apollo-key' };
 
@@ -84,14 +82,6 @@ test('Apollo search maps exhausted credits to a 429 client error', async () => {
     );
   } finally {
     globalThis.fetch = originalFetch;
-  }
-});
-
-test('ambiguous company searches return candidates instead of auto-selecting the first match', () => {
-  for (const source of [legacySearchRoute]) {
-    assert.match(source, /organization_candidates/);
-    assert.match(source, /requiresOrganizationSelection/);
-    assert.doesNotMatch(source, /candidates\[0\][\s\S]*selected_organization_id/);
   }
 });
 

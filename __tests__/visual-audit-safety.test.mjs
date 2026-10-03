@@ -80,4 +80,6 @@ test('every page is visited by the owner, gated pages by the member, and private
   assert.deepEqual(visits.filter(visit => visit.persona === 'anon' && visit.route.area === 'app').map(visit => visit.route.path).sort(), ['/', '/cowork']);
   assert.ok(visits.filter(visit => visit.dataset === 'empty').every(visit => visit.persona === 'owner' && !visit.route.legacy && visit.route.area === 'app'));
   assert.equal(new Set(routes.map(route => route.path)).size, routes.length);
+  const redirects = visits.filter(visit => visit.route.redirectsTo);
+  assert.ok(redirects.length >= 8 && redirects.every(visit => visit.persona === 'owner' && visit.dataset === 'full'), 'each retired address is checked once, as the owner');
 });

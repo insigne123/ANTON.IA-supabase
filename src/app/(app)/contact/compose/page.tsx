@@ -1016,8 +1016,9 @@ function ComposeInner() {
     const report = findReportForLead({ leadId: id, email: composeEmail, companyDomain: lead?.companyDomain, companyName: lead?.companyName });
     const snapshotId = String(report?.raw?.research_snapshot_id || report?.raw?.researchSnapshotId || '').trim();
     const leadIdForResearch = String((lead as any)?.id || '');
+    // Contacts from the retired «Empresas guardadas» section have no research page of their own: they open in «Por escribir».
     const researchHref = lead?._sourceTable === 'opportunities'
-      ? '/saved/opportunities/enriched'
+      ? '/saved/leads/enriched'
       : `/saved/leads/enriched${leadIdForResearch ? `?investigar=${encodeURIComponent(leadIdForResearch)}` : ''}`;
     const createDraft = async () => {
       if (!snapshotId || creatingDraft) return;

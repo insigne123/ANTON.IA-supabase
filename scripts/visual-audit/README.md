@@ -62,7 +62,11 @@ Para una tabla nueva, agrega sus filas en el archivo de su dominio. El reporte l
 
 ## Rutas
 
-`routes.mjs` lista cada página con su nombre y, si tiene lista de acceso, su `gate`. Al agregar una página, súmala ahí. `legacy` marca lo que se va a retirar; `notFound`, la prueba de 404.
+`routes.mjs` lista cada página con su nombre y, si tiene lista de acceso, su `gate`. Al agregar una página, súmala ahí.
+
+- `notFound`: la página debe responder 404.
+- `redirectsTo`: una dirección retirada que debe llevar a la que la reemplazó. Se comprueba una vez, como owner, sin capturas.
+- `legacy`: lo que se va a retirar.
 
 ## Salida
 
