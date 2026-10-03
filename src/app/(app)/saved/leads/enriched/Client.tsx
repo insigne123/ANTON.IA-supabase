@@ -33,10 +33,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { haveSameSelection, retainVisibleSelection } from '@/lib/leads-workspace/selection';
 import {
   MAX_RESEARCH_BATCH_SIZE,
-  buildResearchReport,
-  canShowResearchDraftAction,
   parseResearchReportDetail,
-  researchReadinessFor,
   type ResearchReportDetail,
 } from '@/lib/research-workspace';
 import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
@@ -49,64 +46,23 @@ import { EmailOwnerWarning, LeadName } from '@/components/leads/LeadName';
 import { TeamLockBadge } from '@/components/collaboration/TeamLockBadge';
 import { useTeamLocks } from '@/hooks/use-team-locks';
 import { normalizeLockEmail } from '@/lib/team-lock';
-
-const extractDomainFromEmail = (email?: string | null) =>
-  email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
-
-function isNativeResearchReport(status: NativeResearchLeadStatus | null | undefined) {
-  const review = nativeResearchReview(status);
-  return Boolean(
-    review
-    && status
-    && ['completed', 'partial'].includes(status.status)
-    && status.researchSnapshotId
-    && review.report.coverage.companyFacts > 0,
-  );
-}
-
-function hasNativeResearchResult(status: NativeResearchLeadStatus | null | undefined) {
-  return Boolean(
-    status?.result
-    && ['completed', 'partial', 'insufficient_data'].includes(status.status),
-  );
-}
-
-function nativeResearchReview(status: NativeResearchLeadStatus | null | undefined) {
-  if (!status?.result) return null;
-  const report = buildResearchReport(status.result);
-  const readiness = researchReadinessFor({
-    status: status.status,
-    lead: status.result.lead,
-    result: status.result,
-    snapshotId: status.researchSnapshotId,
-    evidenceCount: report.coverage.evidenceRecords,
-    sourceCount: report.coverage.sources,
-  });
-  return { report, readiness };
-}
-
-function nativeResearchCanCreateDraft(lead: EnrichedLead, status: NativeResearchLeadStatus | null | undefined) {
-  const review = nativeResearchReview(status);
-  return Boolean(
-    lead.email
-    && status?.result
-    && review
-    && canShowResearchDraftAction({
-      readiness: review.readiness,
-      snapshotId: status.researchSnapshotId,
-      eligible: status.result.draftEligibility.eligible,
-      canCreateDraft: true,
-    }),
-  );
-}
-
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
+import {
+  ENRICHED_EXPORT_HEADERS,
+  enrichedExportRow,
+  enrichedLeadPhoneState,
+  filterEnrichedLeads,
+  hasNativeResearchResult,
+  isNativeResearchReport,
+  nativeResearchCanCreateDraft,
+  withCompanyFromSaved,
+} from '@/lib/leads-workspace/enriched-view';
+
+const PAGE_SIZE = 50;
 
 export default function EnrichedLeadsClient() {
   const router = useRouter();
   const { toast } = useToast();
-  const [tick, setTick] = useState(0); // Force re-render
-  // ... existing state
 
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
@@ -267,7 +223,7 @@ export default function EnrichedLeadsClient() {
   });
 
   // --- PAGINACIÓN ---
-  const [pageSize, setPageSize] = useState<number>(50);
+  const pageSize = PAGE_SIZE;
   const [page, setPage] = useState<number>(1);
   const pendingPhoneSyncRef = useRef(false);
   const [syncingPendingPhones, setSyncingPendingPhones] = useState(false);
@@ -393,27 +349,7 @@ export default function EnrichedLeadsClient() {
         supabaseService.getLeads(),
       ]);
 
-      const patched = e.map((x) => {
-        if (x.companyName && x.companyDomain) return x;
-
-        // buscar el lead guardado que corresponde (mismo linkedin o mismo nombre+empresa)
-        const match =
-          saved.find(s => x.linkedinUrl && s.linkedinUrl === x.linkedinUrl) ||
-          saved.find(s => `${s.name}|${s.company}`.toLowerCase() === `${x.fullName}|${x.companyName || ''}`.toLowerCase());
-
-        const fromEmail = extractDomainFromEmail(x.email);
-        const fromWebsite =
-          match?.companyWebsite
-            ? (match.companyWebsite.startsWith('http') ? new URL(match.companyWebsite).hostname : match.companyWebsite)
-              .replace(/^https?:\/\//, '').replace(/^www\./, '')
-            : undefined;
-
-        return {
-          ...x,
-          companyName: x.companyName ?? match?.company ?? x.companyName ?? undefined,
-          companyDomain: x.companyDomain ?? fromWebsite ?? fromEmail ?? x.companyDomain ?? undefined,
-        };
-      });
+      const patched = withCompanyFromSaved(e, saved);
 
       if (loadDataRequestIdRef.current !== requestId) return;
       setEnriched(patched);
@@ -544,19 +480,6 @@ export default function EnrichedLeadsClient() {
     return () => subscription.unsubscribe();
   }, [loadData]);
 
-  // 🔄 Refrescar si otro tab/página (compose) modifica el localStorage
-  // DEPRECATED: Cloud sync handles this differently (realtime), removing local storage listener.
-  /*
-  useEffect(() => {
-    function onStorage(ev: StorageEvent) {
-      if (ev.key === 'leadflow-enriched-leads') {
-        setEnriched(enrichedLeadsStorageGet());
-      }
-    }
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-  */
 
   // Referencia compuesta estable (id || email || linkedin || nombre|empresa)
   const leadRefOf = useCallback((e: EnrichedLead) => {
@@ -614,84 +537,16 @@ export default function EnrichedLeadsClient() {
     return state.pending ? 'Preparando informe' : state.failed || state.unavailable ? 'Revisar informe' : null;
   };
 
-  // Normaliza cadenas (quita acentos y pasa a minúsculas)
-  const norm = useCallback((s?: string | null) =>
-    (s || '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, ''), []);
-
-  const splitTerms = useCallback((value: string) =>
-    value
-      .split(',')
-      .map(t => norm(t).trim())
-      .filter(Boolean), [norm]);
-
-  const getLeadPhoneState = useCallback((lead: EnrichedLead) => {
-    const fallbackPhone = lead.phoneNumbers?.length ? lead.phoneNumbers[0].sanitized_number : undefined;
-    const shownPhone = lead.primaryPhone || fallbackPhone;
-    if (shownPhone && shownPhone !== 'Not Found') return 'ready';
-    if (hasActivePhoneLookup(lead)) return 'pending';
-    return 'missing';
-  }, []);
-
   const industryOptions = useMemo(
     () => Array.from(new Set(enriched.map((lead) => String(lead.industry || lead.organizationIndustry || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
     [enriched],
   );
 
-  // ---- Aplicación de filtros con soporte de múltiples términos (separados por coma) ----
-  const filtered = useMemo(() => {
-    // incluye
-    const incCompanies = splitTerms(applied.incCompany);
-    const incLeads = splitTerms(applied.incLead);
-    const incTitles = splitTerms(applied.incTitle);
-    // excluye
-    const excCompanies = splitTerms(applied.excCompany);
-    const excLeads = splitTerms(applied.excLead);
-    const excTitles = splitTerms(applied.excTitle);
-
-    const containsAny = (value?: string | null, terms?: string[]) => {
-      if (!terms || terms.length === 0) return true; // si no hay filtro, pasa
-      const v = norm(value);
-      return terms.some(t => v.includes(t));
-    };
-
-    const excludesAll = (value?: string | null, terms?: string[]) => {
-      if (!terms || terms.length === 0) return true; // si no hay filtro, pasa
-      const v = norm(value);
-      return terms.every(t => !v.includes(t));
-    };
-
-
-    return enriched.filter(e =>
-      (!searchTerm || [e.fullName, e.companyName, e.title, e.email, e.companyDomain]
-        .some((value) => norm(value).includes(norm(searchTerm)))) &&
-      // INCLUIR: debe cumplir todos los grupos que el usuario haya escrito
-      containsAny(e.companyName, incCompanies) &&
-      containsAny(e.fullName, incLeads) &&
-      containsAny(e.title, incTitles) &&
-
-      (!companyFilter || norm(e.companyName).includes(norm(companyFilter))) &&
-      (!nameFilter || norm(e.fullName).includes(norm(nameFilter))) &&
-      (!titleFilter || norm(e.title).includes(norm(titleFilter))) &&
-      (industryFilter === 'all' || String(e.industry || e.organizationIndustry || '').trim() === industryFilter) &&
-      (phoneFilter === 'all' || getLeadPhoneState(e) === phoneFilter) &&
-      (() => {
-        if (!createdFrom && !createdTo) return true;
-        const created = new Date(e.createdAt || 0);
-        if (Number.isNaN(created.getTime())) return false;
-        if (createdFrom && created < new Date(`${createdFrom}T00:00:00`)) return false;
-        if (createdTo && created > new Date(`${createdTo}T23:59:59`)) return false;
-        return true;
-      })() &&
-
-      // EXCLUIR: si alguno matchea, se descarta
-      excludesAll(e.companyName, excCompanies) &&
-      excludesAll(e.fullName, excLeads) &&
-      excludesAll(e.title, excTitles)
-    );
-  }, [enriched, applied, splitTerms, norm, searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, getLeadPhoneState]);
+  // ---- Filtros con varios términos separados por coma (src/lib/leads-workspace/enriched-view.ts) ----
+  const filtered = useMemo(
+    () => filterEnrichedLeads(enriched, { searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, applied }),
+    [enriched, applied, searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo],
+  );
 
   useEffect(() => {
     setPage(1);
@@ -702,9 +557,6 @@ export default function EnrichedLeadsClient() {
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (page > totalPages) setPage(totalPages);
   }, [filtered.length, pageSize, page]);
-
-  // Resetear a la primera página si cambia el tamaño de página
-  useEffect(() => { setPage(1); }, [pageSize]);
 
   // --- Cálculo de la página actual (sobre filtrados) ---
   const total = filtered.length;
@@ -978,38 +830,6 @@ export default function EnrichedLeadsClient() {
     });
   }
 
-  /** Borra reportes e investigación de un único lead (usado en el modal de reporte). */
-  function clearSingleInvestigation(lead: EnrichedLead) {
-    const ok = confirm(`¿Borrar la investigación de ${lead.fullName}?`);
-    if (!ok) return;
-    const ref = leadRefOf(lead);
-    const removedCount = leadResearchStorage.removeWhere((r) => {
-      const rref = (r?.meta?.leadRef || '').trim().toLowerCase();
-      return [ref, lead.email || ''].some((value) => rref === String(value).trim().toLowerCase() && rref.length > 0);
-    });
-    unmarkResearched([ref]);
-    const nextSel = new Set<string>(selectedToContact); nextSel.delete(lead.id);
-    setSelectedToContact(nextSel);
-    setReports(getLeadReports());
-    setOpenReport(false);
-    toast({
-      title: 'Investigación borrada',
-      description: removedCount > 0 ? 'Se eliminó el reporte. Ya puedes reinvestigar.' : 'No se encontró reporte para borrar.',
-    });
-  }
-
-  function openReportFor(e: EnrichedLead) {
-    const native = nativeResearchForLead(e);
-    const rep = reportForLead(e);
-    if (!hasNativeResearchResult(native) && !rep?.cross) {
-      toast({ title: 'Sin reporte', description: 'Investiga este lead antes de abrir su reporte.' });
-      return;
-    }
-    setReportToView(rep);
-    setReportLead(e);
-    setOpenReport(true);
-  }
-
   async function handleLogCall(result: 'connected' | 'voicemail' | 'wrong_number' | 'no_answer', notes: string) {
     if (!leadToCall) return;
 
@@ -1071,24 +891,14 @@ export default function EnrichedLeadsClient() {
   const contactCount = selectedToContact.size;
 
   // ---------- Export helpers ----------
-  const exportHeaders = ['Nombre', 'Cargo', 'Empresa', 'Email', 'Teléfono', 'LinkedIn', 'Dominio'];
-  const toRow = (e: EnrichedLead): (string | number)[] => ([
-    e.fullName || '',
-    e.title || '',
-    e.companyName || '',
-    e.email || (e.emailStatus === 'locked' ? '(locked)' : ''),
-    e.primaryPhone || (e.phoneNumbers && e.phoneNumbers[0] ? e.phoneNumbers[0].sanitized_number : '') || '',
-    e.linkedinUrl || '',
-    e.companyDomain || '',
-  ]);
-  const buildRows = (list: EnrichedLead[]) => list.map(toRow);
+  const buildRows = (list: EnrichedLead[]) => list.map(enrichedExportRow);
   const handleExportCsv = () => {
     if (!filtered.length) return;
-    exportToCsv(exportHeaders, buildRows(filtered), 'enriched-leads.csv');
+    exportToCsv(ENRICHED_EXPORT_HEADERS, buildRows(filtered), 'enriched-leads.csv');
   };
   const handleExportXlsx = async () => {
     if (!filtered.length) return;
-    await exportToXlsx(exportHeaders, buildRows(filtered), 'enriched-leads.xlsx');
+    await exportToXlsx(ENRICHED_EXPORT_HEADERS, buildRows(filtered), 'enriched-leads.xlsx');
   };
 
   const clearFilters = () => {
@@ -1116,8 +926,8 @@ export default function EnrichedLeadsClient() {
   );
 
   const phoneReadyCount = useMemo(
-    () => enriched.filter((lead) => getLeadPhoneState(lead) === 'ready').length,
-    [enriched, getLeadPhoneState],
+    () => enriched.filter((lead) => enrichedLeadPhoneState(lead) === 'ready').length,
+    [enriched],
   );
   const nativeReportToView = reportLead ? nativeResearchForLead(reportLead) : null;
   const nativeReportIdToView = String(nativeReportToView?.reportId || '').trim();
