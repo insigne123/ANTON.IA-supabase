@@ -5,7 +5,7 @@ import {
   searchSerper,
 } from '@/lib/server/serper-search';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import type { SupliaToolContext } from '@/lib/server/suplia-tools';
+import type { AuthContext } from '@/lib/server/auth-utils';
 
 const RESEARCH_UA = 'ANTON.IA SUPLIA Research/1.0 (+https://anton.ia)';
 const DEFAULT_TIMEOUT_MS = 3500;
@@ -51,7 +51,14 @@ function withCacheMeta<T extends Record<string, unknown>>(value: T, hit: boolean
   return { ...value, cache: { hit } };
 }
 
-function getResearchOrganizationId(context: SupliaToolContext | undefined) {
+/** What a research call needs from its caller: whose credits and cache it uses, and how to charge a premium lookup. */
+export type ResearchToolContext = {
+  auth: AuthContext;
+  conversationId?: string;
+  consumeResearchCredit?: () => Promise<void>;
+};
+
+function getResearchOrganizationId(context: ResearchToolContext | undefined) {
   return context?.auth?.organizationId || '';
 }
 
@@ -60,7 +67,7 @@ function stripCacheMeta(value: Record<string, unknown>) {
   return payload;
 }
 
-async function getPersistentResearchCache(context: SupliaToolContext | undefined, provider: string, key: string, enabled = true) {
+async function getPersistentResearchCache(context: ResearchToolContext | undefined, provider: string, key: string, enabled = true) {
   const organizationId = getResearchOrganizationId(context);
   if (!enabled || !organizationId || !key) return null;
   try {
@@ -86,7 +93,7 @@ async function getPersistentResearchCache(context: SupliaToolContext | undefined
   }
 }
 
-async function setPersistentResearchCache(context: SupliaToolContext | undefined, provider: string, key: string, value: Record<string, unknown>) {
+async function setPersistentResearchCache(context: ResearchToolContext | undefined, provider: string, key: string, value: Record<string, unknown>) {
   const organizationId = getResearchOrganizationId(context);
   if (!organizationId || !key) return;
   try {
@@ -285,7 +292,7 @@ function needEnv(name: string) {
   return value;
 }
 
-async function consumePremiumResearchCredit(context: SupliaToolContext) {
+async function consumePremiumResearchCredit(context: ResearchToolContext) {
   if (!context.consumeResearchCredit) throw new Error('RESEARCH_CREDIT_RESERVATION_REQUIRED');
   await context.consumeResearchCredit();
 }
@@ -312,7 +319,7 @@ function buildSerpQuery(kind: string, input: Record<string, unknown>) {
   return base;
 }
 
-async function researchSerp(input: Record<string, unknown>, context: SupliaToolContext, kind: 'serp_company_profile' | 'serp_company_news' | 'serp_competitors' | 'serp_jobs_signals' | 'brand_mentions') {
+async function researchSerp(input: Record<string, unknown>, context: ResearchToolContext, kind: 'serp_company_profile' | 'serp_company_news' | 'serp_competitors' | 'serp_jobs_signals' | 'brand_mentions') {
   const query = asText(input.query) || buildSerpQuery(kind, input);
   const search = normalizeSerperSearchInput({
     organizationId: getResearchOrganizationId(context),
@@ -350,7 +357,7 @@ async function researchSerp(input: Record<string, unknown>, context: SupliaToolC
   return output;
 }
 
-export async function researchSimilarweb(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchSimilarweb(input: Record<string, unknown>, context: ResearchToolContext) {
   const domain = normalizeResearchDomain(input.domain || input.companyDomain || input.website || input.url || input.company);
   if (!domain) throw new Error('Falta domain para research.similarweb.');
 
@@ -373,7 +380,7 @@ export async function researchSimilarweb(input: Record<string, unknown>, context
   return withCacheMeta(output, false);
 }
 
-export async function researchWhois(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchWhois(input: Record<string, unknown>, context: ResearchToolContext) {
   const domain = normalizeResearchDomain(input.domain || input.companyDomain || input.website || input.url);
   if (!domain) throw new Error('Falta domain para research.whois.');
 
@@ -396,7 +403,7 @@ export async function researchWhois(input: Record<string, unknown>, context: Sup
   return withCacheMeta(output, false);
 }
 
-export async function researchBrand(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchBrand(input: Record<string, unknown>, context: ResearchToolContext) {
   const domain = normalizeResearchDomain(input.domain || input.companyDomain || input.website || input.url);
   if (!domain) throw new Error('Falta domain para research.brand.');
   const cached = await getPersistentResearchCache(context, 'brand.dev', domain, input.cache !== false);
@@ -429,23 +436,23 @@ export async function researchBrand(input: Record<string, unknown>, context: Sup
   return output;
 }
 
-export async function researchSerpCompanyNews(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchSerpCompanyNews(input: Record<string, unknown>, context: ResearchToolContext) {
   return researchSerp(input, context, 'serp_company_news');
 }
 
-export async function researchSerpCompanyProfile(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchSerpCompanyProfile(input: Record<string, unknown>, context: ResearchToolContext) {
   return researchSerp(input, context, 'serp_company_profile');
 }
 
-export async function researchSerpCompetitors(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchSerpCompetitors(input: Record<string, unknown>, context: ResearchToolContext) {
   return researchSerp(input, context, 'serp_competitors');
 }
 
-export async function researchSerpJobsSignals(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchSerpJobsSignals(input: Record<string, unknown>, context: ResearchToolContext) {
   return researchSerp(input, context, 'serp_jobs_signals');
 }
 
-export async function researchBrandMentions(input: Record<string, unknown>, context: SupliaToolContext) {
+export async function researchBrandMentions(input: Record<string, unknown>, context: ResearchToolContext) {
   return researchSerp(input, context, 'brand_mentions');
 }
 

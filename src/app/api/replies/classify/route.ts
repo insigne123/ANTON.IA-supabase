@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
       await notificationService.sendAlert(
         row.organization_id,
         'Respuesta positiva detectada',
-        `Lead ${row.email} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
+        `Lead ${row.email} respondió: ${summary}. Revisar: ${appUrl}/contacted?view=reply`
       );
     }
 

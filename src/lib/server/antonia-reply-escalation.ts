@@ -67,7 +67,7 @@ export async function maybeEscalateAutonomousReplyReview(input: EscalateReplyRev
   await notificationService.sendAlert(
     input.organizationId,
     'Reply requiere revision humana',
-    `ANTONIA no esta segura de como responder a ${leadLabel}. Motivo: ${input.decision.reason}. Revisar: ${appUrl}/contacted/replied`
+    `ANTONIA no esta segura de como responder a ${leadLabel}. Motivo: ${input.decision.reason}. Revisar: ${appUrl}/contacted?view=reply`
   );
 
   if (input.leadId) {

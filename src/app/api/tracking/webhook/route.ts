@@ -456,7 +456,7 @@ export async function POST(req: Request) {
                         await notificationService.sendAlert(
                             orgId,
                             'Respuesta positiva detectada',
-                            `Lead ${recipientEmail} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
+                            `Lead ${recipientEmail} respondió: ${summary}. Revisar: ${appUrl}/contacted?view=reply`
                         );
                         await createAntoniaException(supabase, {
                             organizationId: orgId,

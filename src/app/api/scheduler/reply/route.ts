@@ -104,7 +104,7 @@ export async function POST(request: Request) {
             await notificationService.sendAlert(
                 row.organization_id,
                 'Respuesta positiva detectada',
-                `Lead ${row.email || row.id} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`,
+                `Lead ${row.email || row.id} respondió: ${summary}. Revisar: ${appUrl}/contacted?view=reply`,
             );
         }
 

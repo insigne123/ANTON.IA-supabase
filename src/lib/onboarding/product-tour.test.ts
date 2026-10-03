@@ -68,7 +68,8 @@ test('screen guides are short, unique, cover the main screens and point at ancho
   assert.equal(pageGuideFor('/search')?.id, 'search');
   assert.equal(pageGuideFor('/saved/leads')?.id, 'saved');
   assert.equal(pageGuideFor('/saved/leads/enriched')?.id, 'enriched');
-  assert.equal(pageGuideFor('/contacted/replied')?.id, 'conversations');
+  assert.equal(pageGuideFor('/contacted')?.id, 'conversations');
+  assert.equal(pageGuideFor('/contacted/replied'), null); // Retired: the address redirects to /contacted?view=reply.
   assert.equal(pageGuideFor('/dashboard')?.id, 'home');
   assert.equal(pageGuideFor('/settings/privacy'), null);
   assert.equal(pageGuideFor(null), null);

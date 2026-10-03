@@ -37,6 +37,13 @@ const nextConfig = {
         destination: '/icon-192.png',
         permanent: true,
       },
+      // Pantallas retiradas: sus direcciones viejas abren lo que las reemplazó.
+      { source: '/contacted/replied', destination: '/contacted?view=reply', permanent: false },
+      { source: '/contacted/analytics', destination: '/contacted', permanent: false },
+      { source: '/planner', destination: '/contacted?view=scheduled', permanent: false },
+      { source: '/settings/email-studio/test', destination: '/settings/email-studio', permanent: false },
+      { source: '/antonia/:path+', destination: '/antonia', permanent: false },
+      { source: '/admin/suggestions', destination: '/dashboard', permanent: false },
     ];
   },
 
