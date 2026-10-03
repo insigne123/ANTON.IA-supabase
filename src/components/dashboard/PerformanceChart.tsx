@@ -96,7 +96,7 @@ export default function PerformanceChart() {
   const isEmpty = totals.sent === 0 && totals.replied === 0;
 
   return (
-    <Card className="h-full overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_12px_32px_-28px_rgba(15,23,42,0.3)]">
+    <Card className="overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_12px_32px_-28px_rgba(15,23,42,0.3)]">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-x-4 gap-y-2 space-y-0 px-5 pb-2 pt-4">
         <div className="space-y-1">
           <CardTitle className="text-base">Rendimiento</CardTitle>
@@ -118,8 +118,8 @@ export default function PerformanceChart() {
             </div>
           </div>
         ) : hasError ? (
-          <div role="alert" className="flex h-[202px] flex-col items-center justify-center rounded-xl border border-amber-200 bg-amber-50/70 px-5 text-center dark:border-amber-500/30 dark:bg-amber-500/10">
-            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+          <div role="alert" className="flex h-[202px] flex-col items-center justify-center rounded-xl border border-cw-border bg-cw-warning-soft px-5 text-center">
+            <AlertCircle className="h-5 w-5 text-cw-warning" aria-hidden="true" />
             <p className="mt-2 text-sm font-medium">Rendimiento no disponible</p>
             <p className="mt-1 text-xs text-muted-foreground">No pudimos actualizar la actividad semanal.</p>
           </div>
