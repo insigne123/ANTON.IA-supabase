@@ -44,6 +44,7 @@ const nextConfig = {
       { source: '/settings/email-studio/test', destination: '/settings/email-studio', permanent: false },
       { source: '/antonia/:path+', destination: '/antonia', permanent: false },
       { source: '/admin/suggestions', destination: '/dashboard', permanent: false },
+      { source: '/saved/opportunities/:path*', destination: '/opportunities', permanent: false },
     ];
   },
 

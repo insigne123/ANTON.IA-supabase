@@ -1,6 +1,7 @@
 // Every page of the app, with who may see it. `gate` names the allowlist a page sits behind: the owner is on every list and
 // the member on none, so for the member a gated page must end in a 404, a redirect or an access notice. Public pages also
-// run without a session; two private pages check that an anonymous visit goes to /login.
+// run without a session; two private pages check that an anonymous visit goes to /login. `redirectsTo` is a retired
+// address that must land on what replaced it (checked once, as the owner); `notFound` must answer 404.
 export function routeList(ctx) {
   const app = (path, name, extra = {}) => ({ path, name, area: 'app', ...extra });
   return [
@@ -12,8 +13,6 @@ export function routeList(ctx) {
     app('/saved', 'Empresas guardadas'),
     app('/research', 'Investigaciones'),
     app('/contacted', 'Conversaciones'),
-    app('/contacted/analytics', 'Analítica de contactados', { legacy: true }),
-    app('/contacted/replied', 'Respondidos', { legacy: true }),
     app('/crm', 'Pipeline'),
     app('/sheet', 'Tabla de datos'),
     app('/campaigns', 'Campañas'),
@@ -21,13 +20,10 @@ export function routeList(ctx) {
     app('/contact/compose', 'Redactar'),
     app('/contact/sequence', 'Secuencia'),
     app('/opportunities', 'Oportunidades', { gate: 'opportunities' }),
-    app('/saved/opportunities', 'Oportunidades antiguas', { gate: 'opportunities', legacy: true }),
-    app('/saved/opportunities/enriched', 'Oportunidades antiguas enriquecidas', { gate: 'opportunities', legacy: true }),
     app('/cowork', 'Cowork', { gate: 'cowork' }),
     app('/profile', 'Perfil'),
     app('/connections', 'Conexiones'),
     app('/settings/email-studio', 'Firmas y estilo'),
-    app('/settings/email-studio/test', 'Probar envíos', { legacy: true }),
     app('/settings/organization', 'Organización'),
     app('/settings/privacy', 'Privacidad', { gate: 'privacy' }),
     app('/settings/privacy-requests', 'Solicitudes de privacidad', { gate: 'privacy' }),
@@ -41,15 +37,23 @@ export function routeList(ctx) {
     app('/dashboard/admin/credits', 'Créditos del equipo', { gate: 'admin' }),
     app('/ayuda', 'Centro de ayuda'),
     app('/ayuda/primeros-pasos', 'Ayuda: primeros pasos'),
-    app('/antonia', 'ANTON.IA (archivado)', { legacy: true }),
-    app('/planner', 'Planificador', { legacy: true }),
-    app('/suplia', 'Suplia', { legacy: true }),
-    app('/suplia/review', 'Suplia: revisión', { legacy: true }),
-    app('/debug', 'Debug', { legacy: true, gate: 'debug' }),
     app('/extension/connect', 'Conectar extensión'),
     app('/gmail', 'Retorno de Gmail', { oauth: true }),
     app('/outlook', 'Retorno de Outlook', { oauth: true }),
     app('/esta-pagina-no-existe', 'Página inexistente', { notFound: true }),
+    app('/suplia', 'SUPL.IA (retirado)', { notFound: true }),
+    app('/debug', 'Debug (retirado)', { notFound: true }),
+    // Retired addresses (Plan 9, PR-2 and PR-3) and where they lead now.
+    app('/contacted/replied', 'Respondidos (retirado)', { redirectsTo: '/contacted?view=reply' }),
+    app('/contacted/analytics', 'Analítica (retirada)', { redirectsTo: '/contacted' }),
+    app('/planner', 'Planificador (retirado)', { redirectsTo: '/contacted?view=scheduled' }),
+    app('/settings/email-studio/test', 'Probar envíos (retirado)', { redirectsTo: '/settings/email-studio' }),
+    app('/saved/opportunities', 'Empresas guardadas (retirada)', { redirectsTo: '/opportunities' }),
+    app('/saved/opportunities/enriched', 'Oportunidades enriquecidas (retirada)', { redirectsTo: '/opportunities' }),
+    // The retired mission agent sends whoever has Cowork there (the owner here), and everyone else to /dashboard.
+    app('/antonia', 'ANTON.IA (retirado)', { redirectsTo: '/cowork' }),
+    app('/antonia/misiones', 'ANTON.IA: subpágina (retirada)', { redirectsTo: '/cowork' }),
+    app('/admin/suggestions', 'Sugerencias (retirada)', { redirectsTo: '/dashboard' }),
     { path: '/login', name: 'Ingresar', area: 'public' },
     { path: '/invite/audit-invite-token', name: 'Invitación', area: 'public' },
     { path: '/privacy', name: 'Política de privacidad', area: 'public' },
@@ -68,8 +72,10 @@ export function planVisits(routes, { personas, datasets }) {
       if (persona === 'anon' && dataset !== 'full') continue;
       for (const route of routes) {
         if (persona === 'anon' && route.area === 'app' && !['/', '/cowork'].includes(route.path)) continue;
+        if (route.redirectsTo && (persona !== 'owner' || dataset !== 'full')) continue; // One check is enough.
         if (persona !== 'anon' && route.area === 'public' && route.path === '/login') continue;
         if (dataset === 'empty' && (route.notFound || route.legacy || route.area === 'public')) continue;
+        if (persona === 'member' && route.notFound) continue;
         visits.push({ persona, dataset, route });
       }
     }

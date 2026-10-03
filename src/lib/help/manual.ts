@@ -115,12 +115,12 @@ export const HELP_SECTIONS: HelpSection[] = [
     steps: [
       'Busca ofertas de empleo por cargo y ubicación, y elige la antigüedad de la publicación (24 horas, 7 días o 30 días).',
       'Revisa las empresas y guarda las que quieras trabajar.',
-      'En «Empresas guardadas», busca contactos dentro de cada empresa.',
+      'Desde una empresa, busca a sus decisores: la búsqueda se abre lista y los guardas en «Por completar».',
     ],
     faqs: [
       { q: '¿Para qué sirve saber que una empresa está contratando?', a: 'Es una razón concreta para escribirle: si busca personal, puede necesitar lo que ofreces.' },
     ],
-    related: ['empresas-guardadas', 'buscar'],
+    related: ['buscar', 'por-completar'],
   },
   {
     id: 'por-completar',
@@ -195,24 +195,6 @@ export const HELP_SECTIONS: HelpSection[] = [
       { q: '¿Puedo cambiar el estilo de los correos?', a: 'Sí: elige un «Perfil de estilo» al preparar, o crea estilos en «Firmas y estilo».' },
     ],
     related: ['por-escribir', 'firmas', 'conexiones'],
-  },
-  {
-    id: 'empresas-guardadas',
-    title: 'Empresas guardadas',
-    group: 'Contactos',
-    href: '/saved/opportunities',
-    routes: /^\/saved\/opportunities\/?$/,
-    feature: 'opportunities',
-    summary: 'Las empresas que guardaste desde «Oportunidades». Busca contactos dentro de cada una.',
-    steps: [
-      'Selecciona una o varias empresas.',
-      'Pulsa «Buscar contactos» para encontrar a sus decisores.',
-      'Guarda a las personas que te interesen: pasan a «Por completar» o a «Por escribir» si ya tienen correo.',
-    ],
-    faqs: [
-      { q: 'No tengo empresas guardadas. ¿De dónde salen?', a: 'De «Oportunidades»: busca empresas que están contratando y guarda las que te interesen.' },
-    ],
-    related: ['oportunidades', 'por-completar'],
   },
   {
     id: 'tabla',
@@ -477,7 +459,7 @@ export type HelpIconKey = 'start' | 'today' | 'search' | 'opportunities' | 'cont
 
 export const HELP_ICONS: Record<string, HelpIconKey> = {
   'primeros-pasos': 'start', hoy: 'today', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
-  'por-escribir': 'write', correo: 'mail', 'empresas-guardadas': 'companies', tabla: 'table', conversaciones: 'conversations',
+  'por-escribir': 'write', correo: 'mail', tabla: 'table', conversaciones: 'conversations',
   campanas: 'campaigns', pipeline: 'pipeline', perfil: 'profile', conexiones: 'connections', firmas: 'signature',
   privacidad: 'privacy', creditos: 'credits', administracion: 'admin',
 };
