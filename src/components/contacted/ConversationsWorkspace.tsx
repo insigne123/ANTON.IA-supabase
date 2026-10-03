@@ -162,6 +162,9 @@ export default function ConversationsWorkspace() {
     if (readConversationUrl(window.location.search).conversationId) window.history.replaceState(null, '', conversationUrl(window.location.href, { conversationId: null }));
   }, []);
 
+  const groups = useMemo(() => groupConversations(rows), [rows]);
+  const plansFor = useCallback((row: ConversationRow) => touches.filter(t => t.email.toLowerCase() === row.email?.toLowerCase() && t.ownerId === row.user_id && activeTouch(t)), [touches]);
+
   // «Hoy» links to one conversation (?c=<id>): open it once, in the view that shows it.
   const deepLinked = useRef(false);
   useEffect(() => {
@@ -169,9 +172,15 @@ export default function ConversationsWorkspace() {
     const target = readConversationUrl(window.location.search).conversationId;
     if (!target) { deepLinked.current = true; return; }
     const row = rows.find(item => item.id === target);
-    if (row) { deepLinked.current = true; setView(needsReply(row) ? 'reply' : 'all'); void open(row, 'none'); }
+    if (row) {
+      deepLinked.current = true;
+      // Keep the view the address asks for when it shows this conversation; otherwise the one that does.
+      const requested = readConversationUrl(window.location.search).view;
+      setView(requested && matchesConversationView(row, requested, plansFor(row).length > 0) ? requested : needsReply(row) ? 'reply' : 'all');
+      void open(row, 'none');
+    }
     else if (nextOffset === null) deepLinked.current = true;
-  }, [rows, loading, nextOffset, open]);
+  }, [rows, loading, nextOffset, open, plansFor]);
 
   // The back button closes the open conversation (or opens the one the address names).
   useEffect(() => {
@@ -185,8 +194,6 @@ export default function ConversationsWorkspace() {
     return () => window.removeEventListener('popstate', onPop);
   }, [rows, selected?.id, open]);
 
-  const groups = useMemo(() => groupConversations(rows), [rows]);
-  const plansFor = useCallback((row: ConversationRow) => touches.filter(t => t.email.toLowerCase() === row.email?.toLowerCase() && t.ownerId === row.user_id && activeTouch(t)), [touches]);
   const filtered = groups.filter(({ row }) => {
     if (mine && row.user_id !== userId) return false;
     if (provider !== 'all' && row.provider !== provider) return false;
