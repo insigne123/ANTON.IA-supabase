@@ -348,7 +348,7 @@ export default function ConversationsWorkspace() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Select value={provider} onValueChange={setProvider}>
-          <SelectTrigger aria-label="Canal" className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Canal" className="h-9 w-[176px]"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">Todos los canales</SelectItem><SelectItem value="gmail">Gmail</SelectItem><SelectItem value="outlook">Outlook</SelectItem><SelectItem value="linkedin">LinkedIn</SelectItem><SelectItem value="phone">Teléfono</SelectItem></SelectContent>
         </Select>
         <Button type="button" size="sm" variant={mine ? 'secondary' : 'outline'} aria-pressed={mine} onClick={() => setMine(value => !value)}>Solo mías</Button>
