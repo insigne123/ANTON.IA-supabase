@@ -3,15 +3,21 @@ import test from 'node:test';
 
 import {
   buildLinkedInProfileNotice,
+  companyFilterSignature,
+  contactedKeys,
+  contactStateBadge,
   displayDomain,
   getFriendlySearchErrorMessage,
   hasBatchSearchFilters,
   hasVisibleLeadEmail,
   hasVisibleLeadPhone,
+  isLeadContacted,
+  isLeadSaved,
   isPendingEnrichmentStatus,
   mapLeadToEnriched,
   normalizeLeadForUI,
   normalizeUiPhoneNumbers,
+  peopleFilterSignature,
   splitFilterInput,
 } from './lead-ui';
 import { DEFAULT_LEAD_SEARCH_FILTERS } from './saved-search-criteria';
@@ -84,4 +90,39 @@ test('batch search needs at least one real filter; blanks and lone commas do not
   assert.equal(hasBatchSearchFilters({ ...DEFAULT_LEAD_SEARCH_FILTERS, companyKeywords: ' , ' }), false);
   assert.equal(hasBatchSearchFilters({ ...DEFAULT_LEAD_SEARCH_FILTERS, title: 'Gerente de Personas' }), true);
   assert.equal(hasBatchSearchFilters({ ...DEFAULT_LEAD_SEARCH_FILTERS, seniorities: ['director'] }), true);
+});
+
+test('a result is «Guardado» when its provider id was saved, not only when the row ids match', () => {
+  const saved = { ids: new Set(['00000000-0000-4000-8000-000000001000']), providerIds: new Set(['apollo-qa-0', 'legacy-apollo-7']) };
+  assert.equal(isLeadSaved({ id: 'apollo-qa-0', sourceProviderId: 'apollo-qa-0' }, saved), true, 'search rows carry the provider id');
+  assert.equal(isLeadSaved({ id: 'x', sourceProviderId: 'legacy-apollo-7' }, saved), true);
+  assert.equal(isLeadSaved({ id: '00000000-0000-4000-8000-000000001000' }, saved), true, 'a saved row itself');
+  assert.equal(isLeadSaved({ id: 'apollo-qa-9', sourceProviderId: 'apollo-qa-9' }, saved), false);
+  assert.equal(isLeadSaved({ id: '' }, { ids: new Set(['']), providerIds: new Set(['']) }), false, 'empty ids never match');
+});
+
+test('contacted matches the lead id or the email, whatever its case', () => {
+  const contacted = contactedKeys([{ leadId: 'lead-1', email: 'Ana.Soto@Retail.cl' }, { leadId: null, email: ' luis@x.cl ' }]);
+  assert.equal(isLeadContacted({ id: 'lead-1', email: null }, contacted), true);
+  assert.equal(isLeadContacted({ id: 'other', email: 'ana.soto@retail.cl' }, contacted), true);
+  assert.equal(isLeadContacted({ id: 'other', email: 'LUIS@X.CL' }, contacted), true);
+  assert.equal(isLeadContacted({ id: 'other', email: null }, contacted), false);
+});
+
+test('filter signatures change only with what each list depends on', () => {
+  const base = { ...DEFAULT_LEAD_SEARCH_FILTERS, companyKeywords: 'Retail, logística', location: 'Chile', title: 'Gerente de Personas' };
+  assert.equal(companyFilterSignature(base), companyFilterSignature({ ...base, companyKeywords: ' logística ,retail' }), 'order, case and spaces do not matter');
+  assert.notEqual(companyFilterSignature(base), companyFilterSignature({ ...base, sizeRange: '51-200' }));
+  const otherTitle = { ...base, title: 'Jefe de Selección' };
+  const otherCountry = { ...base, location: 'Perú' };
+  assert.equal(companyFilterSignature(base), companyFilterSignature(otherTitle), 'a person filter keeps the companies');
+  assert.notEqual(peopleFilterSignature(base), peopleFilterSignature(otherTitle));
+  assert.equal(peopleFilterSignature(base), peopleFilterSignature(otherCountry), 'a company filter keeps the contacts signature');
+});
+
+test('profile contact states read as palette badges with a word', () => {
+  assert.deepEqual(contactStateBadge('ready'), { variant: 'success', label: 'Disponible' });
+  assert.deepEqual(contactStateBadge('queued'), { variant: 'info', label: 'Buscando…' });
+  assert.deepEqual(contactStateBadge('missing'), { variant: 'warning', label: 'No disponible' });
+  assert.deepEqual(contactStateBadge('not_requested'), { variant: 'neutral', label: 'No solicitado' });
 });
