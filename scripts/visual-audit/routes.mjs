@@ -1,3 +1,5 @@
+import { AUDIT_INVITE_TOKEN } from './fixtures/people.mjs';
+
 // Every page of the app, with who may see it. `gate` names the allowlist a page sits behind: the owner is on every list and
 // the member on none, so for the member a gated page must end in a 404, a redirect or an access notice. Public pages also
 // run without a session; two private pages check that an anonymous visit goes to /login. `redirectsTo` is a retired
@@ -25,7 +27,8 @@ export function routeList(ctx) {
     app('/connections', 'Conexiones'),
     app('/settings/email-studio', 'Firmas y estilo'),
     app('/settings/organization', 'Organización'),
-    app('/settings/privacy', 'Privacidad', { gate: 'privacy' }),
+    // Everyone manages their opt-outs here; only its requests and incidents entries are for PRIVACY_ADMIN_EMAILS.
+    app('/settings/privacy', 'Privacidad'),
     app('/settings/privacy-requests', 'Solicitudes de privacidad', { gate: 'privacy' }),
     app('/settings/privacy-incidents', 'Incidentes de privacidad', { gate: 'privacy' }),
     app('/settings/unsubscribes', 'Bajas'),
@@ -55,7 +58,7 @@ export function routeList(ctx) {
     app('/antonia/misiones', 'ANTON.IA: subpágina (retirada)', { redirectsTo: '/cowork' }),
     app('/admin/suggestions', 'Sugerencias (retirada)', { redirectsTo: '/dashboard' }),
     { path: '/login', name: 'Ingresar', area: 'public' },
-    { path: '/invite/audit-invite-token', name: 'Invitación', area: 'public' },
+    { path: `/invite/${AUDIT_INVITE_TOKEN}`, name: 'Invitación', area: 'public' },
     { path: '/privacy', name: 'Política de privacidad', area: 'public' },
     { path: '/privacy/extension', name: 'Privacidad de la extensión', area: 'public' },
     { path: '/privacy/request', name: 'Solicitud de privacidad', area: 'public' },

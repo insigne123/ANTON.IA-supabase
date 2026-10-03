@@ -1,6 +1,10 @@
 // The organization, its two members and their profiles. The owner is on every allowlist (Cowork, admin, opportunities,
 // privacy); the member on none, so the audit can check that gated pages stay hidden.
+import { createHash } from 'node:crypto';
+
 export const keepInEmpty = ['organizations', 'organization_members', 'profiles', 'organization_invites'];
+/** The pending invitation's link token; only its SHA-256 is stored, as in production. */
+export const AUDIT_INVITE_TOKEN = 'audit-invite-token-yago-qa-0001';
 
 export function personas(ctx) {
   const user = (id, email, fullName) => ({
@@ -47,7 +51,7 @@ export default function people(ctx) {
           default_mail_provider: null, signature: null, signatures: {}, company_profile: {}, created_at: '2025-03-01T00:00:00Z', updated_at: ctx.daysAgo(20) },
       ],
       organization_invites: [
-        { id: ctx.uid(21), organization_id: ctx.ORG, email: 'valentina.rios@yago-qa.cl', role: 'member', token: 'audit-invite-token', token_hash: null, invited_by: ctx.OWNER,
+        { id: ctx.uid(21), organization_id: ctx.ORG, email: 'valentina.rios@yago-qa.cl', role: 'member', token: null, token_hash: createHash('sha256').update(AUDIT_INVITE_TOKEN, 'utf8').digest('hex'), invited_by: ctx.OWNER,
           created_at: ctx.daysAgo(2), expires_at: ctx.daysAhead(5), accepted_at: null, accepted_by: null, revoked_at: null, revoked_by: null },
       ],
     },
