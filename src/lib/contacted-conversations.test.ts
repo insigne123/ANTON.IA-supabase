@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { activeTouch, conversationStatus, groupConversations, needsReply } from './contacted-conversations';
+import { activeTouch, conversationStatus, conversationTone, conversationUrl, groupConversations, matchesConversationView, needsReply, readConversationUrl } from './contacted-conversations';
 
 const row = (overrides: Record<string, unknown> = {}) => ({ id: 'a', organization_id: 'org', user_id: 'user', email: 'ana@example.com', provider: 'gmail', status: 'replied', replied_at: '2026-09-22T10:00:00Z', ...overrides });
 
@@ -27,4 +27,33 @@ test('planned touch is active only when sequence remains active and step is unre
   assert.equal(activeTouch(touch), true);
   assert.equal(activeTouch({ ...touch, state: 'sent' }), false);
   assert.equal(activeTouch({ ...touch, enrollmentState: 'stopped' }), false);
+});
+
+test('each view counts what it shows: replies waiting for you, sent without answer, scheduled, everything', () => {
+  const replied = row() as any;
+  const waiting = row({ id: 'w', replied_at: null, sent_at: '2026-09-21T10:00:00Z', status: 'sent' }) as any;
+  const scheduled = row({ id: 's', replied_at: null, status: 'scheduled' }) as any;
+  assert.equal(matchesConversationView(replied, 'reply', false), true);
+  assert.equal(matchesConversationView(waiting, 'reply', false), false);
+  assert.equal(matchesConversationView(waiting, 'waiting', false), true);
+  assert.equal(matchesConversationView(scheduled, 'scheduled', false), true);
+  assert.equal(matchesConversationView(waiting, 'scheduled', true), true, 'an active follow-up counts as scheduled');
+  assert.equal(matchesConversationView(waiting, 'all', false), true);
+});
+
+test('the address keeps the view and the open conversation', () => {
+  assert.deepEqual(readConversationUrl('?view=waiting&c=abc'), { view: 'waiting', conversationId: 'abc' });
+  assert.deepEqual(readConversationUrl('?view=nope'), { view: null, conversationId: null });
+  assert.equal(conversationUrl('https://app.test/contacted?x=1', { view: 'scheduled', conversationId: 'k1' }), '/contacted?x=1&view=scheduled&c=k1');
+  assert.equal(conversationUrl('https://app.test/contacted?view=all&c=k1', { conversationId: null }), '/contacted?view=all', 'closing keeps the view');
+  assert.equal(conversationUrl('https://app.test/contacted?view=all', { view: 'reply' }), '/contacted', '«Por responder» is the default and needs no parameter');
+});
+
+test('statuses that need you stand out; closed ones stay quiet', () => {
+  assert.equal(conversationTone('Por responder'), 'warning');
+  assert.equal(conversationTone('Solicitó una reunión'), 'success');
+  assert.equal(conversationTone('Envío fallido'), 'danger');
+  assert.equal(conversationTone('No contactar · Baja solicitada'), 'danger');
+  assert.equal(conversationTone('Programado'), 'info');
+  assert.equal(conversationTone('Resuelto'), 'neutral');
 });
