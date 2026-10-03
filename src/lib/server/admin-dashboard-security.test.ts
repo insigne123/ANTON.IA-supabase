@@ -13,6 +13,7 @@ const dashboardData = readFileSync('src/lib/server/admin-dashboard-data.ts', 'ut
 const creditData = readFileSync('src/lib/server/admin-credit-data.ts', 'utf8');
 const valueData = readFileSync('src/lib/server/admin-value-data.ts', 'utf8');
 const sidebarSource = readFileSync('src/components/app-sidebar.tsx', 'utf8');
+const navigationSource = readFileSync('src/lib/navigation.ts', 'utf8');
 const hostingConfig = readFileSync('apphosting.yaml', 'utf8');
 const peoplePage = readFileSync('src/app/(app)/dashboard/admin/users/page.tsx', 'utf8');
 const teamsPage = readFileSync('src/app/(app)/dashboard/admin/teams/page.tsx', 'utf8');
@@ -70,7 +71,7 @@ test('admin routes derive tenant scope from authorization instead of request inp
 });
 
 test('admin navigation shows the panel to owners and admins, and hosting keeps only the credit operators', () => {
-  assert.match(sidebarSource, /href: '\/dashboard\/admin'.*label: 'Administración'/);
+  assert.match(navigationSource, /href: '\/dashboard\/admin'.*label: 'Administración'/);
   assert.match(sidebarSource, /organizationRole === 'owner' \|\| organizationRole === 'admin'/);
   assert.doesNotMatch(sidebarSource, /NEXT_PUBLIC_ADMIN_DASHBOARD/);
   assert.doesNotMatch(hostingConfig, /ADMIN_DASHBOARD_ORGANIZATION_ID/);

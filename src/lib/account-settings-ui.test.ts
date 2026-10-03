@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 test('organization entry is removed while profile and admin invitation access remain', () => {
-  const sidebar = readFileSync('src/components/app-sidebar.tsx', 'utf8');
+  const sidebar = readFileSync('src/lib/navigation.ts', 'utf8');
   const oldRoute = readFileSync('src/app/(app)/settings/organization/page.tsx', 'utf8');
   const people = readFileSync('src/app/(app)/dashboard/admin/users/page.tsx', 'utf8');
   assert.doesNotMatch(sidebar, /settings\/organization/);
