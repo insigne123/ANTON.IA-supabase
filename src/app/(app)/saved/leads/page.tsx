@@ -711,7 +711,7 @@ export default function SavedLeadsPage() {
           label={`${selectedLeads.length} ${selectedLeads.length === 1 ? 'contacto seleccionado' : 'contactos seleccionados'}`}
           hint={[
             selectedToSearch.length ? `${selectedToSearch.length} sin correo: buscarlo usa ${selectedToSearch.length * APOLLO_EMAIL_ENRICHMENT_CREDITS} ${selectedToSearch.length * APOLLO_EMAIL_ENRICHMENT_CREDITS === 1 ? 'crédito' : 'créditos'}` : '',
-            selectedWithEmail.length ? `${selectedWithEmail.length} con correo pasan sin costo` : '',
+            selectedWithEmail.length ? `${selectedWithEmail.length} con correo ${selectedWithEmail.length === 1 ? 'pasa' : 'pasan'} sin costo` : '',
           ].filter(Boolean).join(' · ')}
         >
           <Button type="button" variant="ghost" onClick={() => setSelLead({})}>Quitar selección</Button>
