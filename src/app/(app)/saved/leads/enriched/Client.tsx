@@ -14,7 +14,7 @@ import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/le
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, CheckCircle2, AlertTriangle, MoreHorizontal, ArrowLeft, ChevronDown, ListFilter, MailCheck, Search } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, AlertTriangle, MoreHorizontal, ArrowRight, ChevronDown, ListFilter, MailCheck, Search } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
@@ -48,19 +48,29 @@ import { useTeamLocks } from '@/hooks/use-team-locks';
 import { normalizeLockEmail } from '@/lib/team-lock';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { useConfirm } from '@/components/confirm-dialog';
+import { PageHeader } from '@/components/page-header';
+import { Badge } from '@/components/ui/badge';
+import { ActionBar } from '@/components/ui/action-bar';
+import { InitialsAvatar } from '@/components/initials-avatar';
+import { cn } from '@/lib/utils';
 import * as Quota from '@/lib/quota-client';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 import { createCoalescedRunner } from '@/lib/leads-workspace/coalesced-runner';
 import {
   ENRICHED_EXPORT_HEADERS,
+  ENRICHED_STAGE_LABELS,
+  ENRICHED_STAGE_ORDER,
   enrichedExportRow,
-  enrichedLeadPhoneState,
+  enrichedSelectionAction,
+  enrichedStage,
   filterEnrichedLeads,
+  hasUsableEmail,
   hasNativeResearchResult,
   isNativeResearchReport,
   nativeResearchCanCreateDraft,
   pendingPhoneLookupKey,
   withCompanyFromSaved,
+  type EnrichedStage,
 } from '@/lib/leads-workspace/enriched-view';
 
 const PAGE_SIZE = 50;
@@ -73,7 +83,6 @@ export default function EnrichedLeadsClient() {
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [sel, setSel] = useState<Record<string, boolean>>({});           // selección para INVESTIGAR
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
   const [nativeResearchByLeadId, setNativeResearchByLeadId] = useState<Record<string, NativeResearchLeadStatus>>({});
   const [nativeResearchStatusState, setNativeResearchStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -100,7 +109,9 @@ export default function EnrichedLeadsClient() {
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
   const [reportLead, setReportLead] = useState<EnrichedLead | null>(null);
 
-  const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
+  // One selection for both steps: the action bar says whether it will research, write or both.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [stageFilter, setStageFilter] = useState<'all' | EnrichedStage>('all');
 
   // --- Enrichment Options ---
   const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
@@ -582,164 +593,111 @@ export default function EnrichedLeadsClient() {
     [enriched, applied, searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo],
   );
 
+  // One stage per contact (src/lib/leads-workspace/enriched-view.ts). «Listo para escribir» counts here when the report
+  // can draft; the row's «Escribir» still waits for the full report to load, as before.
+  const stageOf = useCallback((lead: EnrichedLead): EnrichedStage => {
+    const native = nativeResearchForLead(lead);
+    return enrichedStage({
+      hasEmail: hasUsableEmail(lead.email),
+      researching: ['queued', 'running'].includes(native?.status || ''),
+      viewable: hasViewableReport(lead),
+      ready: native?.result ? nativeResearchCanCreateDraft(lead, native) : hasReport(lead),
+    });
+  }, [hasReport, hasViewableReport, nativeResearchForLead]);
+
+  const stageCounts = useMemo(() => {
+    const counts: Record<EnrichedStage, number> = { to_research: 0, researching: 0, review: 0, ready: 0, no_email: 0 };
+    for (const lead of enriched) counts[stageOf(lead)] += 1;
+    return counts;
+  }, [enriched, stageOf]);
+
+  const listed = useMemo(
+    () => stageFilter === 'all' ? filtered : filtered.filter((lead) => stageOf(lead) === stageFilter),
+    [filtered, stageFilter, stageOf],
+  );
+
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, applied]);
+  }, [searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, applied, stageFilter]);
 
   // Mantener número de página válido si cambia la cantidad total
   useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const totalPages = Math.max(1, Math.ceil(listed.length / pageSize));
     if (page > totalPages) setPage(totalPages);
-  }, [filtered.length, pageSize, page]);
+  }, [listed.length, pageSize, page]);
 
-  // --- Cálculo de la página actual (sobre filtrados) ---
-  const total = filtered.length;
+  // --- Cálculo de la página actual (sobre la lista que se ve) ---
+  const total = listed.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const startIdx = (page - 1) * pageSize;
   const endIdx = Math.min(startIdx + pageSize, total);
-  const pageLeads = useMemo(() => filtered.slice(startIdx, endIdx), [filtered, startIdx, endIdx]);
+  const pageLeads = useMemo(() => listed.slice(startIdx, endIdx), [listed, startIdx, endIdx]);
   // Who in the team already holds each contact on this page (Plan 5, PR-9b); empty without collaboration.
   const teamLocks = useTeamLocks({ emails: pageLeads.map(e => normalizeLockEmail(e.email)).filter(email => email.includes('@')) });
   const teamLockFor = (lead: EnrichedLead) => teamLocks?.byEmail[normalizeLockEmail(lead.email)];
 
-  // Elegibles totales (sobre la lista filtrada completa)
-  const researchEligible = useMemo(
-    () => nativeResearchStatusKnown ? filtered.filter(e => !!e.email && !hasReportStrict(e)).length : 0,
-    [filtered, hasReportStrict, nativeResearchStatusKnown]
-  );
   const pendingPhoneCount = useMemo(
     () => enriched.filter((lead) => hasActivePhoneLookup(lead)).length,
     [enriched],
   );
 
-  // === Métricas para los "seleccionar todos" ===
-  const researchEligiblePage = useMemo(
-    () => nativeResearchStatusKnown ? pageLeads.filter(e => e.email && !hasReportStrict(e)).length : 0,
-    [pageLeads, hasReportStrict, nativeResearchStatusKnown]
-  );
-  const contactEligiblePage = useMemo(() => pageLeads.filter(canContact).length, [pageLeads, canContact]);
-
-  const allResearchChecked = useMemo(
-    () => researchEligiblePage > 0 && pageLeads.filter(e => e.email && !hasReportStrict(e)).every(e => sel[e.id]),
-    [pageLeads, sel, researchEligiblePage, hasReportStrict]
-  );
-  const allContactChecked = useMemo(
-    () => contactEligiblePage > 0 && pageLeads.filter(canContact).every(l => selectedToContact.has(l.id)),
-    [pageLeads, selectedToContact, contactEligiblePage, canContact]
-  );
-  const researchCount = Object.values(sel).filter(Boolean).length;
+  const selectedLeads = useMemo(() => enriched.filter((lead) => selected.has(lead.id)), [enriched, selected]);
+  const selectedToResearch = selectedLeads.filter((lead) => stageOf(lead) === 'to_research').length;
+  const selectedReady = selectedLeads.filter((lead) => stageOf(lead) === 'ready').length;
+  const selectablePage = pageLeads.filter((lead) => hasUsableEmail(lead.email));
+  const allPageChecked = selectablePage.length > 0 && selectablePage.every((lead) => selected.has(lead.id));
 
   useEffect(() => {
-    const availableIds = enriched.map((lead) => lead.id);
-    const nextResearchSelection = retainVisibleSelection(
-      Object.keys(sel).filter((id) => sel[id]),
-      availableIds,
-    );
-    const currentResearchSelection = new Set(Object.keys(sel).filter((id) => sel[id]));
-    if (!haveSameSelection(currentResearchSelection, nextResearchSelection)) {
-      setSel(Object.fromEntries(Array.from(nextResearchSelection).map((id) => [id, true])));
-    }
-
-    const nextContactSelection = retainVisibleSelection(selectedToContact, availableIds);
-    if (!haveSameSelection(selectedToContact, nextContactSelection)) {
-      setSelectedToContact(nextContactSelection);
-    }
-  }, [enriched, sel, selectedToContact]);
+    const next = retainVisibleSelection(selected, enriched.map((lead) => lead.id));
+    if (!haveSameSelection(selected, next)) setSelected(next);
+  }, [enriched, selected]);
 
   const investigatedInList = useMemo(
-    () => filtered.filter(hasReportStrict).length,
-    [filtered, hasReportStrict]
+    () => listed.filter(hasReportStrict).length,
+    [listed, hasReportStrict]
   );
 
-  const toggleAllResearch = (checked: boolean) => {
+  const selectionLimitToast = () => toast({
+    title: `Puedes elegir hasta ${MAX_RESEARCH_BATCH_SIZE} contactos a la vez`,
+    description: 'La selección actual se mantuvo. Abre esta selección o quita algunos antes de sumar más.',
+  });
+
+  const toggleAllPage = (checked: boolean) => {
     if (!checked) {
-      // desmarca solo los visibles
-      setSel(prev => {
-        const copy = { ...prev };
-        pageLeads.forEach(e => { delete copy[e.id]; });
-        return copy;
+      setSelected((current) => {
+        const next = new Set(current);
+        pageLeads.forEach((lead) => next.delete(lead.id));
+        return next;
       });
       return;
     }
-
-    const candidates = pageLeads.filter((lead) => (
-      lead.email && !hasReportStrict(lead) && !sel[lead.id]
-    ));
-    const remainingCapacity = Math.max(0, MAX_RESEARCH_BATCH_SIZE - researchCount);
-    const leadsToAdd = candidates.slice(0, remainingCapacity);
-
-    setSel(prev => {
-      const next = { ...prev };
-      leadsToAdd.forEach((lead) => { next[lead.id] = true; });
-      return next;
-    });
-
-    if (leadsToAdd.length < candidates.length) {
-      toast({
-        title: `Puedes investigar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
-        description: 'La selección actual se mantuvo. Desmarca algunos leads antes de agregar más.',
-      });
-    }
+    const next = new Set(selected);
+    const candidates = selectablePage.filter((lead) => !next.has(lead.id));
+    const room = Math.max(0, MAX_RESEARCH_BATCH_SIZE - next.size);
+    candidates.slice(0, room).forEach((lead) => next.add(lead.id));
+    setSelected(next);
+    if (candidates.length > room) selectionLimitToast();
   };
 
-  const toggleResearchLead = (leadId: string, checked: boolean) => {
+  const toggleLead = (leadId: string, checked: boolean) => {
     if (!checked) {
-      setSel((prev) => ({ ...prev, [leadId]: false }));
-      return;
-    }
-    if (sel[leadId]) return;
-    if (researchCount >= MAX_RESEARCH_BATCH_SIZE) {
-      toast({
-        title: `Puedes investigar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
-        description: 'Inicia esta selección o desmarca un lead antes de agregar otro.',
-      });
-      return;
-    }
-    setSel((prev) => ({ ...prev, [leadId]: true }));
-  };
-  const toggleAllContact = (checked: boolean) => {
-    if (!checked) {
-      const next = new Set<string>(selectedToContact);
-      pageLeads.forEach(l => next.delete(l.id));
-      setSelectedToContact(next);
-      return;
-    }
-
-    const next = new Set<string>(selectedToContact);
-    const candidates = pageLeads.filter((lead) => canContact(lead) && !next.has(lead.id));
-    const remainingCapacity = Math.max(0, MAX_RESEARCH_BATCH_SIZE - next.size);
-    candidates.slice(0, remainingCapacity).forEach((lead) => next.add(lead.id));
-    setSelectedToContact(next);
-    if (candidates.length > remainingCapacity) {
-      toast({
-        title: `Puedes seleccionar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
-        description: 'Desmarca algunos leads antes de agregar más.',
-      });
-    }
-  };
-
-  const toggleContactLead = (leadId: string, checked: boolean) => {
-    if (!checked) {
-      setSelectedToContact((current) => {
+      setSelected((current) => {
         const next = new Set(current);
         next.delete(leadId);
         return next;
       });
       return;
     }
-    if (selectedToContact.has(leadId)) return;
-    if (selectedToContact.size >= MAX_RESEARCH_BATCH_SIZE) {
-      toast({
-        title: `Puedes seleccionar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
-        description: 'Desmarca un lead antes de agregar otro.',
-      });
+    if (selected.has(leadId)) return;
+    if (selected.size >= MAX_RESEARCH_BATCH_SIZE) {
+      selectionLimitToast();
       return;
     }
-    setSelectedToContact((current) => new Set(current).add(leadId));
+    setSelected((current) => new Set(current).add(leadId));
   };
 
   const openResearchWorkspace = (
-    leadIds: Iterable<string> = Object.keys(sel).filter((id) => sel[id]),
+    leadIds: Iterable<string> = selected,
     options: { refresh?: boolean } = {},
   ) => {
     if (!nativeResearchStatusKnown) return;
@@ -796,11 +754,6 @@ export default function EnrichedLeadsClient() {
     });
 
     unmarkResearched([ref]);
-    setSelectedToContact((current) => {
-      const next = new Set(current);
-      next.delete(lead.id);
-      return next;
-    });
     setReports(getLeadReports());
     setReportToView(null);
     setReportLead(null);
@@ -813,7 +766,7 @@ export default function EnrichedLeadsClient() {
 
   /** Borra los reportes de los contactos que se ven en la lista (con los filtros actuales) y limpia marcas legacy. */
   async function clearInvestigations() {
-    const targets = filtered.filter(hasReportStrict);
+    const targets = listed.filter(hasReportStrict);
     if (!targets.length) return;
     const accepted = await confirm({
       title: `¿Borrar ${targets.length === 1 ? 'la investigación de 1 contacto' : `las investigaciones de ${targets.length} contactos`}?`,
@@ -837,8 +790,7 @@ export default function EnrichedLeadsClient() {
 
     // 4) Refrescar estado
     setReports(getLeadReports());
-    setSel({});                         // limpiar selección de investigar
-    setSelectedToContact(new Set());    // limpiar selección de contactar
+    setSelected(new Set());
 
     // 5) Aviso
     toast({
@@ -851,7 +803,7 @@ export default function EnrichedLeadsClient() {
 
   /** Borra reportes e investigación SOLO de los "Contactar seleccionados". */
   async function clearInvestigationsSelected() {
-    const targets = enriched.filter(l => selectedToContact.has(l.id));
+    const targets = selectedLeads;
     if (!targets.length) return;
     const accepted = await confirm({
       title: `¿Borrar la investigación de ${targets.length === 1 ? '1 contacto seleccionado' : `${targets.length} contactos seleccionados`}?`,
@@ -868,12 +820,6 @@ export default function EnrichedLeadsClient() {
     });
 
     unmarkResearched(refs);
-
-    // Limpiar selección de contactar para los que ya no tienen reporte
-    const nextSel = new Set<string>(selectedToContact);
-    targets.forEach(t => nextSel.delete(t.id));
-    setSelectedToContact(nextSel);
-
     setReports(getLeadReports());
     toast({
       title: 'Investigaciones borradas (seleccionados)',
@@ -934,9 +880,11 @@ export default function EnrichedLeadsClient() {
     try {
       const next = await removeEnrichedLeadById(id);
       setEnriched(next);
-      // limpia selecciones
-      setSel(prev => { const p = { ...prev }; delete p[id]; return p; });
-      const s = new Set(selectedToContact); s.delete(id); setSelectedToContact(s);
+      setSelected((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
       toast({ title: 'Eliminado', description: 'Se quitó el contacto de «Por escribir».' });
     } catch (error) {
       console.error('[enriched-leads] Delete failed:', error);
@@ -944,18 +892,15 @@ export default function EnrichedLeadsClient() {
     }
   }
 
-  // Contadores para toda la selección (no solo la página actual)
-  const contactCount = selectedToContact.size;
-
   // ---------- Export helpers ----------
   const buildRows = (list: EnrichedLead[]) => list.map(enrichedExportRow);
   const handleExportCsv = () => {
-    if (!filtered.length) return;
-    exportToCsv(ENRICHED_EXPORT_HEADERS, buildRows(filtered), `contactos-por-escribir-${new Date().toISOString().slice(0, 10)}.csv`);
+    if (!listed.length) return;
+    exportToCsv(ENRICHED_EXPORT_HEADERS, buildRows(listed), `contactos-por-escribir-${new Date().toISOString().slice(0, 10)}.csv`);
   };
   const handleExportXlsx = async () => {
-    if (!filtered.length) return;
-    await exportToXlsx(ENRICHED_EXPORT_HEADERS, buildRows(filtered), `contactos-por-escribir-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    if (!listed.length) return;
+    await exportToXlsx(ENRICHED_EXPORT_HEADERS, buildRows(listed), `contactos-por-escribir-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const clearFilters = () => {
@@ -974,18 +919,15 @@ export default function EnrichedLeadsClient() {
     setFExcLead('');
     setFExcTitle('');
     setApplied({ incCompany: '', incLead: '', incTitle: '', excCompany: '', excLead: '', excTitle: '' });
+    setStageFilter('all');
     setPage(1);
   };
 
   const hasActiveFilters = Boolean(
     searchTerm || companyFilter || nameFilter || titleFilter || industryFilter !== 'all' ||
-    phoneFilter !== 'all' || createdFrom || createdTo || Object.values(applied).some(Boolean),
+    phoneFilter !== 'all' || createdFrom || createdTo || Object.values(applied).some(Boolean) || stageFilter !== 'all',
   );
 
-  const phoneReadyCount = useMemo(
-    () => enriched.filter((lead) => enrichedLeadPhoneState(lead) === 'ready').length,
-    [enriched],
-  );
   const nativeReportToView = reportLead ? nativeResearchForLead(reportLead) : null;
   const nativeReportIdToView = String(nativeReportToView?.reportId || '').trim();
   const nativeReportDetailToView = nativeReportIdToView ? nativeReportDetails[nativeReportIdToView] || null : null;
@@ -1036,495 +978,445 @@ export default function EnrichedLeadsClient() {
     return () => window.clearInterval(interval);
   }, [loadNativeResearchDetail, pageLeads, nativeResearchForLead, nativeReportDetails, nativeReportDetailErrors, nativeReportToView, openReport]);
 
+  const STAGE_CHIP_LABELS: Record<EnrichedStage, string> = {
+    to_research: 'Por investigar',
+    researching: 'Investigando',
+    review: 'Revisar informe',
+    ready: 'Listos para escribir',
+    no_email: 'Sin correo',
+  };
+  // «Por investigar» and «Listos para escribir» always show (the tour points at them); the rest only when someone is there.
+  const stageChips: Array<{ value: 'all' | EnrichedStage; label: string; count: number }> = [
+    { value: 'all', label: 'Todos', count: enriched.length },
+    ...ENRICHED_STAGE_ORDER
+      .filter((stage) => stage === 'to_research' || stage === 'ready' || stageCounts[stage] > 0 || stageFilter === stage)
+      .map((stage) => ({ value: stage, label: STAGE_CHIP_LABELS[stage], count: stageCounts[stage] })),
+  ];
+
+  const stageBadge = (lead: EnrichedLead) => {
+    const stage = stageOf(lead);
+    const native = nativeResearchForLead(lead);
+    const detail = reportStatusLabelFor(lead);
+    const withDetail = (badge: JSX.Element) => (
+      <span className="inline-flex flex-col items-start gap-0.5">
+        {badge}
+        {detail ? <span className="text-xs text-foreground/70">{detail}</span> : null}
+      </span>
+    );
+    if (stage === 'ready') return withDetail(<Badge variant="success">{ENRICHED_STAGE_LABELS.ready}</Badge>);
+    if (stage === 'researching') return <Badge variant="info">{ENRICHED_STAGE_LABELS.researching}</Badge>;
+    if (stage === 'review') {
+      const limited = native?.status === 'insufficient_data' || !isNativeResearchReport(native);
+      return withDetail(<Badge variant="warning">{limited ? 'Información limitada' : ENRICHED_STAGE_LABELS.review}</Badge>);
+    }
+    if (stage === 'no_email') return <Badge variant="neutral">{lead.emailStatus === 'locked' ? 'Correo no revelado' : ENRICHED_STAGE_LABELS.no_email}</Badge>;
+    return <Badge variant="neutral">{ENRICHED_STAGE_LABELS.to_research}</Badge>;
+  };
+
+  /** The one button each row needs now: write when the report is ready, otherwise look at it, follow it or start it. */
+  const rowAction = (lead: EnrichedLead) => {
+    const stage = stageOf(lead);
+    if (canContact(lead)) return <Button size="sm" onClick={() => openResearchWorkspace([lead.id])}>Escribir</Button>;
+    if (stage === 'no_email') return <Button size="sm" variant="ghost" onClick={() => initiateEnrichment([lead])}>Actualizar datos</Button>;
+    if (hasViewableReport(lead)) return <Button size="sm" variant="outline" onClick={() => openResearchWorkspace([lead.id])}>Ver investigación</Button>;
+    return (
+      <Button size="sm" variant="outline" onClick={() => openResearchWorkspace([lead.id])} disabled={!nativeResearchStatusKnown}>
+        {stage === 'researching' ? 'Ver avance' : 'Investigar'}
+      </Button>
+    );
+  };
+
+  const rowMenu = (lead: EnrichedLead) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Más acciones para ${lead.fullName}`}>
+          <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {canContact(lead) && hasViewableReport(lead) ? <DropdownMenuItem onClick={() => openResearchWorkspace([lead.id])}>Ver investigación</DropdownMenuItem> : null}
+        <DropdownMenuItem onClick={() => initiateEnrichment([lead])}>Actualizar datos</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => void handleDeleteEnriched(lead.id)}>
+          <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />Eliminar
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  const leadIdentity = (lead: EnrichedLead) => (
+    <div className="flex min-w-0 items-center gap-3">
+      <InitialsAvatar name={lead.fullName} email={lead.email} />
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-medium"><LeadName name={lead.fullName} fallback="Contacto sin nombre" /></span>
+          {lead.linkedinUrl ? (
+            <a href={lead.linkedinUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded text-foreground/70 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Perfil de LinkedIn de ${lead.fullName || 'este contacto'}`}>
+              <Linkedin className="h-3.5 w-3.5" aria-hidden="true" />
+            </a>
+          ) : null}
+        </div>
+        <div className="truncate text-xs text-foreground/70">{lead.title || 'Sin cargo'}</div>
+        <TeamLockBadge lock={teamLockFor(lead)} className="mt-0.5" />
+      </div>
+    </div>
+  );
+
+  const companyCell = (lead: EnrichedLead) => (
+    <div className="min-w-0">
+      <div className="truncate font-medium">{lead.companyName || 'Empresa no informada'}</div>
+      <div className="truncate text-xs text-foreground/70">{lead.companyDomain || 'Sin dominio'}</div>
+    </div>
+  );
+
+  const contactCell = (lead: EnrichedLead) => {
+    const fallbackPhone = lead.phoneNumbers?.length ? lead.phoneNumbers[0].sanitized_number : undefined;
+    const shownPhone = lead.primaryPhone || fallbackPhone;
+    const noPhone = lead.primaryPhone === 'Not Found' || (!shownPhone && !hasActivePhoneLookup(lead));
+    return (
+      <div className="min-w-0 space-y-1">
+        {hasUsableEmail(lead.email) ? (
+          <>
+            <div className="truncate">{lead.email}</div>
+            <EmailOwnerWarning email={lead.email as string} name={lead.fullName} />
+          </>
+        ) : (
+          <div className="text-xs text-foreground/70">{lead.emailStatus === 'locked' ? 'Correo no revelado' : 'Sin correo'}</div>
+        )}
+        {noPhone ? (
+          <div className="text-xs text-foreground/70">Sin teléfono</div>
+        ) : shownPhone ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded text-xs font-medium text-cw-success underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => {
+              setLeadToCall(lead);
+              setReportToView(reportForLead(lead) || null);
+              setCallModalOpen(true);
+            }}
+            aria-label={`Llamar a ${lead.fullName} al ${shownPhone}`}
+          >
+            <Phone className="h-3 w-3" aria-hidden="true" />
+            <span>{shownPhone}</span>
+            {lead.phoneNumbers && lead.phoneNumbers.length > 1 ? <span className="text-[10px] text-foreground/70">+{lead.phoneNumbers.length - 1}</span> : null}
+          </button>
+        ) : (
+          <div className="inline-flex items-center gap-1.5 text-xs text-primary">
+            <RotateCw className="h-3 w-3 motion-safe:animate-spin" aria-hidden="true" />
+            Buscando teléfono
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const selectionHint = [
+    selectedToResearch ? `${selectedToResearch} por investigar` : '',
+    selectedReady ? `${selectedReady} ${selectedReady === 1 ? 'listo' : 'listos'} para escribir` : '',
+    `hasta ${MAX_RESEARCH_BATCH_SIZE} a la vez`,
+  ].filter(Boolean).join(' · ');
+
   return (
     <div className="space-y-4 pb-8">
-      <header className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <Button variant="ghost" size="sm" className="-ml-3 mb-1 rounded-full text-muted-foreground" onClick={() => router.push('/saved/leads')}>
-            <ArrowLeft className="h-4 w-4" />
-            Por completar
+      <PageHeader
+        title="Por escribir"
+        count={enriched.length}
+        description="Contactos con correo. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas antes de enviar."
+        actions={(
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => router.push('/saved/leads')}>
+            Ir a «Por completar»
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Button>
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-2xl font-semibold tracking-[-0.025em] sm:text-[2rem]">Por escribir</h1>
-            <span className="text-sm tabular-nums text-muted-foreground">{enriched.length}</span>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">Contactos con correo. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas.</p>
-        </div>
-        {contactCount > 0 ? <Button className="w-full rounded-full sm:w-auto" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Contactar seleccionados ({contactCount})</Button> : null}
-      </header>
+        )}
+      />
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-sm shadow-[0_14px_35px_-32px_rgba(15,23,42,0.28)]">
-        <span><strong className="font-semibold tabular-nums">{phoneReadyCount}</strong> <span className="text-muted-foreground">con teléfono</span></span>
-        <span><strong className="font-semibold tabular-nums">{nativeResearchStatusKnown ? researchEligible : '—'}</strong> <span className="text-muted-foreground">por investigar</span></span>
-        {pendingPhoneCount > 0 ? <span><strong className="font-semibold tabular-nums">{pendingPhoneCount}</strong> <span className="text-muted-foreground">teléfono en curso</span></span> : null}
-        <span className="ml-auto text-xs text-muted-foreground">{filtered.length} visibles</span>
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtrar por etapa">
+        {stageChips.map((option) => {
+          const active = stageFilter === option.value;
+          const chip = (
+            <button
+              type="button"
+              aria-pressed={active}
+              onClick={() => setStageFilter(option.value)}
+              className={cn(
+                'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                active ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border/70 bg-card text-foreground/70 hover:text-foreground',
+              )}
+            >
+              {option.label}
+              <span className="tabular-nums text-foreground/70">{option.count}</span>
+            </button>
+          );
+          // The tour points at the first and the last step of the work: research, then write.
+          if (option.value === 'to_research') return <span key={option.value} data-tour="enriched-research" className="inline-flex rounded-full">{chip}</span>;
+          if (option.value === 'ready') return <span key={option.value} data-tour="enriched-contact" className="inline-flex rounded-full">{chip}</span>;
+          return <span key={option.value} className="inline-flex">{chip}</span>;
+        })}
       </div>
 
       {pendingPhoneCount > 0 ? (
-        <Alert className="border-sky-500/25 bg-sky-500/5 text-foreground dark:border-sky-400/25">
-          <RotateCw className={`h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : 'animate-pulse'}`} />
+        <Alert variant="info" role="status">
+          <RotateCw className={cn('h-4 w-4', syncingPendingPhones ? 'motion-safe:animate-spin' : 'motion-safe:animate-pulse')} aria-hidden="true" />
           <AlertTitle>Búsqueda de teléfono en curso</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <span className="text-muted-foreground">{pendingPhoneCount} {pendingPhoneCount === 1 ? 'teléfono solicitado recientemente' : 'teléfonos solicitados recientemente'}; comprobaremos si el proveedor entregó un resultado. Puedes seguir trabajando.</span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-full bg-background"
-              onClick={() => syncPendingPhoneLeads()}
-              disabled={syncingPendingPhones}
-            >
-              <RotateCw className={`mr-2 h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : ''}`} />
-              {syncingPendingPhones ? 'Comprobando...' : 'Comprobar ahora'}
+            <span>{pendingPhoneCount} {pendingPhoneCount === 1 ? 'teléfono solicitado hace poco' : 'teléfonos solicitados hace poco'}: comprobamos si el proveedor entregó un resultado. Puedes seguir trabajando.</span>
+            <Button variant="outline" size="sm" className="shrink-0 bg-background" onClick={() => syncPendingPhoneLeads()} disabled={syncingPendingPhones}>
+              <RotateCw className={cn('h-4 w-4', syncingPendingPhones && 'motion-safe:animate-spin')} aria-hidden="true" />
+              {syncingPendingPhones ? 'Comprobando…' : 'Comprobar ahora'}
             </Button>
           </AlertDescription>
         </Alert>
       ) : null}
 
-      <Card className="overflow-hidden rounded-3xl border-border/60 bg-card/85 shadow-[0_18px_50px_-44px_rgba(15,23,42,0.28)] dark:bg-card/70">
+      <Card className="overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_18px_50px_-44px_rgba(15,23,42,0.28)]">
         <CardContent className="p-0">
           <div className="space-y-3 border-b border-border/60 bg-muted/10 p-4 sm:p-5">
             <Collapsible open={showFilters} onOpenChange={setShowFilters}>
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="h-10 rounded-full border-border/70 bg-background/90 pl-10"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Buscar por lead, empresa, cargo o email"
-                  aria-label="Buscar leads enriquecidos"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <CollapsibleTrigger asChild>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground/70" aria-hidden="true" />
+                  <Input
+                    className="h-10 rounded-full border-border/70 bg-background/90 pl-10"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Buscar por nombre, empresa, cargo o correo"
+                    aria-label="Buscar en «Por escribir»"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <CollapsibleTrigger asChild>
                     <Button type="button" variant="outline" size="sm" className="rounded-full" aria-expanded={showFilters}>
-                      <ListFilter className="h-4 w-4" />
+                      <ListFilter className="h-4 w-4" aria-hidden="true" />
                       Filtros
-                      <ChevronDown className={`h-4 w-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+                      <ChevronDown className={cn('h-4 w-4 transition-transform', showFilters && 'rotate-180')} aria-hidden="true" />
                     </Button>
-                </CollapsibleTrigger>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="rounded-full" disabled={filtered.length === 0}>
-                      <Download className="h-4 w-4" />
-                      Exportar ({filtered.length})
-                      <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={handleExportCsv}><Download className="mr-2 h-4 w-4" />CSV</DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleExportXlsx}><FileSpreadsheet className="mr-2 h-4 w-4" />Excel</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  </CollapsibleTrigger>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="rounded-full" disabled={listed.length === 0}>
+                        <Download className="h-4 w-4" aria-hidden="true" />
+                        Exportar ({listed.length})
+                        <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={handleExportCsv}><Download className="mr-2 h-4 w-4" aria-hidden="true" />CSV</DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleExportXlsx}><FileSpreadsheet className="mr-2 h-4 w-4" aria-hidden="true" />Excel</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
-            </div>
 
-          {/* Panel de filtros (colapsable) */}
               <CollapsibleContent>
-            <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="space-y-1.5"><Label htmlFor="enriched-company">Empresa</Label><Input id="enriched-company" value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} placeholder="Contiene…" /></div>
-                <div className="space-y-1.5"><Label htmlFor="enriched-name">Nombre</Label><Input id="enriched-name" value={nameFilter} onChange={e => setNameFilter(e.target.value)} placeholder="Contiene…" /></div>
-                <div className="space-y-1.5"><Label htmlFor="enriched-title">Cargo</Label><Input id="enriched-title" value={titleFilter} onChange={e => setTitleFilter(e.target.value)} placeholder="Contiene…" /></div>
-                <div className="space-y-1.5"><Label>Industria</Label><Select value={industryFilter} onValueChange={setIndustryFilter}><SelectTrigger aria-label="Filtrar por industria"><SelectValue placeholder="Todas" /></SelectTrigger><SelectContent><SelectItem value="all">Todas</SelectItem>{industryOptions.map((industry) => <SelectItem key={industry} value={industry}>{industry}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-1.5"><Label>Teléfono</Label><Select value={phoneFilter} onValueChange={(value) => setPhoneFilter(value as typeof phoneFilter)}><SelectTrigger aria-label="Filtrar por estado del teléfono"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="ready">Disponible</SelectItem><SelectItem value="pending">En proceso</SelectItem><SelectItem value="missing">Sin teléfono</SelectItem></SelectContent></Select></div>
-                <div className="space-y-1.5"><Label htmlFor="enriched-from">Creado desde</Label><Input id="enriched-from" type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} /></div>
-                <div className="space-y-1.5"><Label htmlFor="enriched-to">Creado hasta</Label><Input id="enriched-to" type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} /></div>
-              </div>
+                <div className="mt-3 rounded-2xl border border-border/60 bg-background/60 p-4">
+                  <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-1.5"><Label htmlFor="enriched-company">Empresa</Label><Input id="enriched-company" value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} placeholder="Contiene…" /></div>
+                    <div className="space-y-1.5"><Label htmlFor="enriched-name">Nombre</Label><Input id="enriched-name" value={nameFilter} onChange={e => setNameFilter(e.target.value)} placeholder="Contiene…" /></div>
+                    <div className="space-y-1.5"><Label htmlFor="enriched-title">Cargo</Label><Input id="enriched-title" value={titleFilter} onChange={e => setTitleFilter(e.target.value)} placeholder="Contiene…" /></div>
+                    <div className="space-y-1.5"><Label htmlFor="enriched-industry">Industria</Label><Select value={industryFilter} onValueChange={setIndustryFilter}><SelectTrigger id="enriched-industry"><SelectValue placeholder="Todas" /></SelectTrigger><SelectContent><SelectItem value="all">Todas</SelectItem>{industryOptions.map((industry) => <SelectItem key={industry} value={industry}>{industry}</SelectItem>)}</SelectContent></Select></div>
+                    <div className="space-y-1.5"><Label htmlFor="enriched-phone">Teléfono</Label><Select value={phoneFilter} onValueChange={(value) => setPhoneFilter(value as typeof phoneFilter)}><SelectTrigger id="enriched-phone"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="ready">Disponible</SelectItem><SelectItem value="pending">En proceso</SelectItem><SelectItem value="missing">Sin teléfono</SelectItem></SelectContent></Select></div>
+                    <div className="space-y-1.5"><Label htmlFor="enriched-from">Creado desde</Label><Input id="enriched-from" type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} /></div>
+                    <div className="space-y-1.5"><Label htmlFor="enriched-to">Creado hasta</Label><Input id="enriched-to" type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} /></div>
+                  </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <Label htmlFor="enriched-include-company" className="text-xs font-semibold uppercase text-muted-foreground">Incluir · Empresa</Label>
-                    <Input id="enriched-include-company" className="mt-1" value={fIncCompany} onChange={e => setFIncCompany(e.target.value)} placeholder="contiene… (separa con comas)" />
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div>
+                      <Label htmlFor="enriched-include-company" className="text-xs font-semibold uppercase text-foreground/70">Incluir · Empresa</Label>
+                      <Input id="enriched-include-company" className="mt-1" value={fIncCompany} onChange={e => setFIncCompany(e.target.value)} placeholder="contiene… (separa con comas)" />
+                    </div>
+                    <div>
+                      <Label htmlFor="enriched-include-name" className="text-xs font-semibold uppercase text-foreground/70">Incluir · Nombre</Label>
+                      <Input id="enriched-include-name" className="mt-1" value={fIncLead} onChange={e => setFIncLead(e.target.value)} placeholder="contiene… (separa con comas)" />
+                    </div>
+                    <div>
+                      <Label htmlFor="enriched-include-title" className="text-xs font-semibold uppercase text-foreground/70">Incluir · Cargo</Label>
+                      <Input id="enriched-include-title" className="mt-1" value={fIncTitle} onChange={e => setFIncTitle(e.target.value)} placeholder="contiene… (separa con comas)" />
+                    </div>
+                    <div>
+                      <Label htmlFor="enriched-exclude-company" className="text-xs font-semibold uppercase text-foreground/70">Excluir · Empresa</Label>
+                      <Input id="enriched-exclude-company" className="mt-1" value={fExcCompany} onChange={e => setFExcCompany(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                    </div>
+                    <div>
+                      <Label htmlFor="enriched-exclude-name" className="text-xs font-semibold uppercase text-foreground/70">Excluir · Nombre</Label>
+                      <Input id="enriched-exclude-name" className="mt-1" value={fExcLead} onChange={e => setFExcLead(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                    </div>
+                    <div>
+                      <Label htmlFor="enriched-exclude-title" className="text-xs font-semibold uppercase text-foreground/70">Excluir · Cargo</Label>
+                      <Input id="enriched-exclude-title" className="mt-1" value={fExcTitle} onChange={e => setFExcTitle(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="enriched-include-name" className="text-xs font-semibold uppercase text-muted-foreground">Incluir · Nombre</Label>
-                    <Input id="enriched-include-name" className="mt-1" value={fIncLead} onChange={e => setFIncLead(e.target.value)} placeholder="contiene… (separa con comas)" />
+                  <div className="mt-4 flex flex-wrap justify-end gap-2">
+                    <Button variant="ghost" onClick={clearFilters} disabled={!hasActiveFilters}>Limpiar</Button>
+                    <Button
+                      onClick={() => {
+                        setApplied({
+                          incCompany: fIncCompany,
+                          incLead: fIncLead,
+                          incTitle: fIncTitle,
+                          excCompany: fExcCompany,
+                          excLead: fExcLead,
+                          excTitle: fExcTitle,
+                        });
+                        setPage(1);
+                      }}
+                    >
+                      Aplicar términos
+                    </Button>
                   </div>
-                  <div>
-                    <Label htmlFor="enriched-include-title" className="text-xs font-semibold uppercase text-muted-foreground">Incluir · Cargo</Label>
-                    <Input id="enriched-include-title" className="mt-1" value={fIncTitle} onChange={e => setFIncTitle(e.target.value)} placeholder="contiene… (separa con comas)" />
-                  </div>
-                  <div>
-                    <Label htmlFor="enriched-exclude-company" className="text-xs font-semibold uppercase text-muted-foreground">Excluir · Empresa</Label>
-                    <Input id="enriched-exclude-company" className="mt-1" value={fExcCompany} onChange={e => setFExcCompany(e.target.value)} placeholder="no contenga… (separa con comas)" />
-                  </div>
-                  <div>
-                    <Label htmlFor="enriched-exclude-name" className="text-xs font-semibold uppercase text-muted-foreground">Excluir · Nombre</Label>
-                    <Input id="enriched-exclude-name" className="mt-1" value={fExcLead} onChange={e => setFExcLead(e.target.value)} placeholder="no contenga… (separa con comas)" />
-                  </div>
-                  <div>
-                    <Label htmlFor="enriched-exclude-title" className="text-xs font-semibold uppercase text-muted-foreground">Excluir · Cargo</Label>
-                    <Input id="enriched-exclude-title" className="mt-1" value={fExcTitle} onChange={e => setFExcTitle(e.target.value)} placeholder="no contenga… (separa con comas)" />
-                  </div>
-              </div>
-              <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <Button variant="ghost" onClick={clearFilters} disabled={!hasActiveFilters}>Limpiar</Button>
-
-                <Button
-                  onClick={() => {
-                    setApplied({
-                      incCompany: fIncCompany,
-                      incLead: fIncLead,
-                      incTitle: fIncTitle,
-                      excCompany: fExcCompany,
-                      excLead: fExcLead,
-                      excTitle: fExcTitle,
-                    });
-                    setPage(1);
-                  }}
-                >
-                  Aplicar términos
-                </Button>
-              </div>
-            </div>
+                </div>
               </CollapsibleContent>
             </Collapsible>
+
+            <p className="text-xs text-foreground/70" role="status" aria-live="polite">
+              {listed.length} de {enriched.length} contactos
+            </p>
           </div>
 
           <div className="p-4 sm:p-5">
-          {!loadingLeads && nativeResearchStatusState === 'loading' ? (
-            <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground" role="status">
-              <RotateCw className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              Comprobando el estado de investigación…
-            </div>
-          ) : null}
-
-          {!loadingLeads && nativeResearchStatusState === 'error' ? (
-            <Alert className="mb-4 border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100" role="alert">
-              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
-              <AlertTitle>Estado de investigación no disponible</AlertTitle>
-              <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <span>{nativeResearchStatusError}</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 rounded-full bg-background/80"
-                  onClick={() => void loadNativeResearchStatuses(enriched)}
-                  aria-label="Reintentar comprobar el estado de investigación de los leads"
-                >
-                  <RotateCw aria-hidden="true" />
-                  Reintentar
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
-          {loadError ? (
-            <Alert className="border-destructive/25 bg-destructive/5">
-              <AlertTriangle className="h-4 w-4 text-destructive" />
-              <AlertTitle>No pudimos cargar los leads</AlertTitle>
-              <AlertDescription className="flex flex-col items-start gap-3 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <span>{loadError}</span>
-                <Button variant="outline" size="sm" onClick={() => { setLoadingLeads(true); void loadData(); }}>Reintentar</Button>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
-          {(researchCount > 0 || contactCount > 0) ? (
-            <div className="sticky top-14 z-20 mb-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-background/95 p-3 shadow-lg shadow-black/5 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
-              <div className="text-sm font-medium" aria-live="polite">
-                {researchCount > 0 ? `${researchCount} para investigar · máximo ${MAX_RESEARCH_BATCH_SIZE}` : ''}
-                {researchCount > 0 && contactCount > 0 ? ' · ' : ''}
-                {contactCount > 0 ? `${contactCount} seleccionados para contactar` : ''}
+            {!loadingLeads && nativeResearchStatusState === 'loading' ? (
+              <div className="mb-4 flex items-center gap-2 text-sm text-foreground/70" role="status">
+                <RotateCw className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
+                Comprobando el estado de investigación…
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={() => { setSel({}); setSelectedToContact(new Set()); }}>Cancelar</Button>
-                {researchCount > 0 ? <Button variant="secondary" size="sm" onClick={() => openResearchWorkspace()} disabled={!nativeResearchStatusKnown}>Investigar selección ({researchCount})</Button> : null}
-                {contactCount > 0 ? <Button size="sm" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Contactar ({contactCount})</Button> : null}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Más acciones para la selección"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-64">
-                    <DropdownMenuItem onClick={() => initiateEnrichment(filtered.filter(e => selectedToContact.has(e.id)))} disabled={contactCount === 0}>Actualizar datos</DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => void clearInvestigationsSelected()} disabled={contactCount === 0}>Borrar investigación de seleccionados</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => void clearInvestigations()} disabled={investigatedInList === 0} className="text-destructive focus:text-destructive">Borrar investigaciones de la lista ({investigatedInList})</DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          {loadingLeads ? (
-            <div className="overflow-hidden rounded-2xl border border-border/60" aria-busy="true" aria-live="polite">
-              <span className="sr-only">Cargando leads enriquecidos</span>
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div key={index} className="grid grid-cols-[32px_minmax(0,1fr)] items-center gap-3 border-b border-border/50 p-4 last:border-b-0 md:grid-cols-[40px_minmax(180px,1fr)_minmax(140px,0.8fr)_160px] md:gap-4">
-                  <Skeleton className="h-4 w-4" />
-                  <div className="space-y-2"><Skeleton className="h-4 w-36" /><Skeleton className="h-3 w-28" /></div>
-                  <Skeleton className="hidden h-4 w-28 md:block" />
-                  <Skeleton className="hidden h-8 w-24 md:ml-auto md:block" />
-                </div>
-              ))}
-            </div>
-          ) : !loadError ? (
-          <>
-          <div className="space-y-3 lg:hidden">
-            {pageLeads.map((e) => {
-              const native = nativeResearchForLead(e);
-              const viewable = hasViewableReport(e);
-              const draftable = canContact(e);
-              const researching = ['queued', 'running'].includes(native?.status || '');
-              return (
-                <article key={e.id} className="rounded-2xl border border-border/60 bg-background/60 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="truncate font-semibold"><LeadName name={e.fullName} fallback="Lead sin nombre" /></h2>
-                      <p className="mt-0.5 truncate text-sm text-muted-foreground">{e.title || 'Sin cargo'} · {e.companyName || 'Sin empresa'}</p>
-                      <TeamLockBadge lock={teamLockFor(e)} className="mt-1" />
-                    </div>
-                    {reportStatusLabelFor(e) ? <span className="shrink-0 text-xs font-medium text-muted-foreground">{reportStatusLabelFor(e)}</span> : viewable ? (
-                      native?.status === 'insufficient_data' || !isNativeResearchReport(native) ? (
-                        <span className="shrink-0 text-xs font-medium text-amber-700 dark:text-amber-300">Información limitada</span>
-                      ) : <span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-300">Investigado</span>
-                    ) : researching ? <span className="shrink-0 text-xs font-medium text-sky-700 dark:text-sky-300">En curso</span> : null}
+            {!loadingLeads && nativeResearchStatusState === 'error' ? (
+              <Alert variant="warning" className="mb-4">
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                <AlertTitle>Estado de investigación no disponible</AlertTitle>
+                <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{nativeResearchStatusError}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 bg-background/80"
+                    onClick={() => void loadNativeResearchStatuses(enriched)}
+                    aria-label="Reintentar comprobar el estado de investigación de los contactos"
+                  >
+                    <RotateCw className="h-4 w-4" aria-hidden="true" />
+                    Reintentar
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {loadError ? (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                <AlertTitle>No pudimos cargar los contactos</AlertTitle>
+                <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{loadError}</span>
+                  <Button variant="outline" size="sm" onClick={() => { setLoadingLeads(true); void loadData(); }}>Reintentar</Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {loadingLeads ? (
+              <div className="space-y-2" aria-busy="true" aria-label="Cargando contactos">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div key={index} className="flex items-center gap-3 rounded-xl border border-border/60 p-3">
+                    <Skeleton className="h-4 w-4" />
+                    <Skeleton className="h-9 w-9 rounded-full" />
+                    <div className="flex-1 space-y-2"><Skeleton className="h-4 w-40 max-w-full" /><Skeleton className="h-3 w-56 max-w-full" /></div>
+                    <Skeleton className="hidden h-8 w-28 sm:block" />
                   </div>
-
-                  <div className="mt-3 space-y-1 text-sm text-muted-foreground">
-                    <p className="truncate">{e.email && e.email !== 'Not Found' ? e.email : e.emailStatus === 'locked' ? 'Email no revelado' : 'Sin email'}</p>
-                    <p className="truncate">{e.companyDomain || 'Sin dominio'}</p>
-                    {e.linkedinUrl ? <a className="inline-flex text-xs font-medium text-primary underline-offset-4 hover:underline" href={e.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn</a> : null}
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-muted/25 p-2 text-xs">
-                    <label className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1">
-                      <Checkbox
-                        checked={!!sel[e.id]}
-                        onCheckedChange={(value) => toggleResearchLead(e.id, Boolean(value))}
-                        disabled={!nativeResearchStatusKnown || !e.email || hasReportStrict(e)}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para investigar`}
-                      />
-                      <span className="truncate">Investigar</span>
-                    </label>
-                    <label className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1">
-                      <Checkbox
-                        checked={selectedToContact.has(e.id)}
-                        onCheckedChange={(value) => {
-                          toggleContactLead(e.id, Boolean(value));
-                        }}
-                        disabled={!nativeResearchStatusKnown || !draftable}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para contactar`}
-                      />
-                      <span>Contacto</span>
-                    </label>
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
-                    {viewable ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => openResearchWorkspace([e.id])}>Ver investigación</Button> : null}
-                    {draftable ? (
-                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])}>Contactar</Button>
-                    ) : !viewable ? (
-                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])} disabled={!nativeResearchStatusKnown || !e.email}>Investigar</Button>
-                    ) : null}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" aria-label={`Más acciones para ${e.fullName}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => initiateEnrichment([e])}>Actualizar datos</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteEnriched(e.id)}><Trash2 className="mr-2 h-4 w-4" />Eliminar</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-          <div className="hidden overflow-x-auto rounded-2xl border border-border/60 bg-background/60 lg:block">
-            <Table className="min-w-[1040px]">
-              <TableHeader>
-                <TableRow className="bg-muted/20 hover:bg-muted/20">
-                  <TableHead data-tour="enriched-research" className="w-24 bg-muted/20 text-center" title="Marcar para investigar">
-                    <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Invest.</span>
-                      <Checkbox
-                        checked={allResearchChecked}
-                        disabled={!nativeResearchStatusKnown || researchEligiblePage === 0}
-                        onCheckedChange={(v) => toggleAllResearch(Boolean(v))}
-                        aria-label="Seleccionar todos para investigar"
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead data-tour="enriched-contact" className="w-24 bg-muted/20 text-center" title="Marcar para contactar contactos investigados">
-                    <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Contacto</span>
-                      <Checkbox
-                        checked={contactEligiblePage > 0 ? allContactChecked : false}
-                        disabled={!nativeResearchStatusKnown || contactEligiblePage === 0}
-                        onCheckedChange={(v) => toggleAllContact(Boolean(v))}
-                        aria-label="Seleccionar todos para contactar"
-                      />
-                    </div>
-                  </TableHead>
-                  <TableHead>Lead</TableHead>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead>Contacto</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="w-52 text-right"><span className="sr-only">Acciones</span></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pageLeads.map(e => (
-                  <TableRow key={e.id} className="group align-middle">
-                    <TableCell className="py-3 text-center">
-                      <Checkbox
-                        checked={!!sel[e.id]}
-                        onCheckedChange={(v) => toggleResearchLead(e.id, Boolean(v))}
-                        disabled={
-                          !nativeResearchStatusKnown ||
-                          !e.email ||
-                          hasReportStrict(e)
-                        }
-                        title={
-                          !e.email
-                            ? 'Este lead no tiene email revelado'
-                            : hasReportStrict(e)
-                              ? 'Este lead ya fue investigado'
-                              : ''
-                        }
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para investigar`}
-                      />
-                    </TableCell>
-                    <TableCell className="py-3 text-center">
-                      <Checkbox
-                        disabled={!nativeResearchStatusKnown || !canContact(e)}
-                        checked={selectedToContact.has(e.id)}
-                        onCheckedChange={(v) => {
-                          toggleContactLead(e.id, Boolean(v));
-                        }}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para contactar`}
-                      />
-                    </TableCell>
-                    <TableCell className="py-3">
-                      <div className="max-w-[240px] truncate font-medium"><LeadName name={e.fullName} fallback="Lead sin nombre" /></div>
-                      <div className="max-w-[220px] truncate text-xs text-muted-foreground">{e.title || 'Sin cargo'}</div>
-                      <TeamLockBadge lock={teamLockFor(e)} className="mt-0.5 max-w-[240px]" />
-                    </TableCell>
-                    <TableCell className="py-3">
-                      <div className="max-w-[180px] truncate font-medium">{e.companyName || '—'}</div>
-                      <div className="max-w-[180px] truncate text-xs text-muted-foreground">{e.companyDomain || 'Sin dominio'}</div>
-                    </TableCell>
-                    <TableCell className="py-3">
-                      {(!e.email || e.email === 'Not Found')
-                        ? (e.emailStatus === 'locked'
-                          ? <span className="text-xs text-muted-foreground">Email no revelado</span>
-                          : <span className="text-xs text-muted-foreground">Sin email</span>)
-                        : <><div className="max-w-[260px] truncate">{e.email}</div><EmailOwnerWarning email={e.email} name={e.fullName} className="max-w-[260px]" /></>}
-                      {(() => {
-                        const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
-                        const shownPhone = e.primaryPhone || fallbackPhone;
-
-                        if (e.primaryPhone === 'Not Found' || (!shownPhone && !hasActivePhoneLookup(e))) {
-                          return <div className="mt-1 text-xs text-muted-foreground">Sin teléfono</div>;
-                        }
-
-                        if (shownPhone) {
-                          return (
-                            <button
-                              type="button"
-                              className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-emerald-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-300"
-                              onClick={() => {
-                                  const rep = reportForLead(e);
-                                setLeadToCall(e);
-                                setReportToView(rep || null); // Reusamos estado o pasamos directo
-                                setCallModalOpen(true);
-                              }}
-                              aria-label={`Llamar a ${e.fullName} al ${shownPhone}`}
-                            >
-                              <Phone className="h-3 w-3" />
-                              <span>{shownPhone}</span>
-                              {e.phoneNumbers && e.phoneNumbers.length > 1 && (
-                                <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1}</span>
-                              )}
-                            </button>
-                          );
-                        }
-
-                        if (hasActivePhoneLookup(e)) {
-                          return (
-                            <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300" title="Actualizando teléfono">
-                              <RotateCw className="h-3 w-3 animate-spin" />
-                              En proceso
-                            </div>
-                          );
-                        }
-
-                        return <span className="text-muted-foreground text-xs italic">—</span>;
-                      })()}
-                    </TableCell>
-                    <TableCell className="py-3">
-                      {reportStatusLabelFor(e) ? <span className="text-xs font-medium text-muted-foreground">{reportStatusLabelFor(e)}</span> : hasViewableReport(e) ? (
-                        nativeResearchForLead(e)?.status === 'insufficient_data' || !isNativeResearchReport(nativeResearchForLead(e)) ? (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300"><AlertTriangle className="h-3.5 w-3.5" />Información limitada</span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" />Investigado</span>
-                        )
-                      ) : ['queued', 'running'].includes(nativeResearchForLead(e)?.status || '') ? (
-                        <span className="text-xs font-medium text-sky-700 dark:text-sky-300">Investigación en curso</span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Pendiente de investigación</span>
-                      )}
-                      {e.linkedinUrl ? <a className="mt-1 block text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground" target="_blank" rel="noreferrer" href={e.linkedinUrl}>LinkedIn</a> : null}
-                    </TableCell>
-                    <TableCell className="py-3">
-                      <div className="flex min-w-[180px] items-center justify-end gap-1">
-                          {hasViewableReport(e) ? <Button size="sm" variant="outline" className="h-8 rounded-full px-3" onClick={() => openResearchWorkspace([e.id])}>Ver investigación</Button> : null}
-                          {canContact(e) ? (
-                            <Button
-                              size="sm"
-                              className="h-8 rounded-full px-3 shadow-none"
-                              onClick={() => openResearchWorkspace([e.id])}
-                            >
-                              Contactar
-                            </Button>
-                          ) : !hasViewableReport(e) ? (
-                            <Button
-                              size="sm"
-                              className="h-8 rounded-full px-3 shadow-none"
-                              onClick={() => openResearchWorkspace([e.id])}
-                              disabled={!nativeResearchStatusKnown || !e.email}
-                            >
-                              Investigar
-                            </Button>
-                          ) : null}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" aria-label={`Más acciones para ${e.fullName}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => initiateEnrichment([e])}>Actualizar datos</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteEnriched(e.id)}><Trash2 className="mr-2 h-4 w-4" />Eliminar</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </TableCell>
-                  </TableRow>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
-          </>
-          ) : null}
+              </div>
+            ) : !loadError && pageLeads.length === 0 ? (
+              <EmptyState
+                className="min-h-56 max-w-none justify-center rounded-2xl border border-dashed border-border/70"
+                icon={enriched.length === 0 ? MailCheck : Search}
+                title={enriched.length === 0 ? 'Aún no tienes contactos con correo' : 'No hay contactos con estos filtros'}
+                description={enriched.length === 0
+                  ? 'Busca el correo de tus contactos en «Por completar». Cuando lo encontremos, aparecerán aquí listos para escribirles.'
+                  : 'Cambia la etapa, ajusta la búsqueda o limpia los filtros para volver a ver la lista.'}
+                action={<Button size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/saved/leads') : clearFilters()}>{enriched.length === 0 ? 'Ir a «Por completar»' : 'Limpiar filtros'}</Button>}
+              />
+            ) : !loadError ? (
+              <>
+                <ul className="space-y-2 lg:hidden" aria-label="Contactos por escribir">
+                  {pageLeads.map((e) => (
+                    <li key={e.id} className={cn('rounded-xl border border-border/60 bg-card p-3', selected.has(e.id) && 'border-primary/50 bg-primary/5')}>
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          className="mt-2.5"
+                          checked={selected.has(e.id)}
+                          disabled={!hasUsableEmail(e.email)}
+                          onCheckedChange={(value) => toggleLead(e.id, Boolean(value))}
+                          aria-label={`Seleccionar a ${e.fullName || 'este contacto'}`}
+                        />
+                        <div className="min-w-0 flex-1 space-y-2">
+                          {leadIdentity(e)}
+                          <div>{stageBadge(e)}</div>
+                          <div className="text-sm">{companyCell(e)}</div>
+                          <div className="text-sm">{contactCell(e)}</div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            {rowAction(e)}
+                            <span className="ml-auto flex">{rowMenu(e)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="hidden overflow-x-auto rounded-2xl border border-border/60 bg-background/60 lg:block">
+                  <Table className="min-w-[980px]">
+                    <TableHeader>
+                      <TableRow className="bg-muted/20 hover:bg-muted/20">
+                        <TableHead className="w-10">
+                          <Checkbox
+                            checked={allPageChecked}
+                            disabled={selectablePage.length === 0}
+                            onCheckedChange={(value) => toggleAllPage(Boolean(value))}
+                            aria-label="Seleccionar los contactos de esta página"
+                          />
+                        </TableHead>
+                        <TableHead>Contacto</TableHead>
+                        <TableHead>Empresa</TableHead>
+                        <TableHead>Correo y teléfono</TableHead>
+                        <TableHead>Etapa</TableHead>
+                        <TableHead className="text-right"><span className="sr-only">Acciones</span></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pageLeads.map((e) => (
+                        <TableRow key={e.id} data-state={selected.has(e.id) ? 'selected' : undefined}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selected.has(e.id)}
+                              disabled={!hasUsableEmail(e.email)}
+                              onCheckedChange={(value) => toggleLead(e.id, Boolean(value))}
+                              aria-label={`Seleccionar a ${e.fullName || 'este contacto'}`}
+                            />
+                          </TableCell>
+                          <TableCell className="max-w-[300px]">{leadIdentity(e)}</TableCell>
+                          <TableCell className="max-w-[220px]">{companyCell(e)}</TableCell>
+                          <TableCell className="max-w-[280px]">{contactCell(e)}</TableCell>
+                          <TableCell>{stageBadge(e)}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1">
+                              {rowAction(e)}
+                              {rowMenu(e)}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            ) : null}
 
-          {!loadingLeads && !loadError && pageLeads.length === 0 ? (
-            <EmptyState
-              className="min-h-56 max-w-none justify-center rounded-2xl border border-dashed border-border/70"
-              icon={enriched.length === 0 ? MailCheck : Search}
-              title={enriched.length === 0 ? 'Aún no tienes contactos con correo' : 'No hay resultados con estos filtros'}
-              description={enriched.length === 0
-                ? 'Busca el correo de tus contactos en «Por completar». Cuando lo encontremos, aparecerán aquí listos para escribirles.'
-                : 'Ajusta la búsqueda o limpia los filtros para volver a ver la lista.'}
-              action={<Button size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/saved/leads') : clearFilters()}>{enriched.length === 0 ? 'Ir a «Por completar»' : 'Limpiar filtros'}</Button>}
-            />
-          ) : null}
           {/* Paginador inferior (igual al superior) */}
           {!loadingLeads && !loadError && total > 0 ? <div className="mt-3 flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-muted-foreground">
+            <div className="text-foreground/70">
               Mostrando {total === 0 ? 0 : startIdx + 1}–{endIdx} de {total}
             </div>
             <div className="flex max-w-full items-center gap-1">
               <Button variant="outline" size="sm" className="hidden sm:inline-flex" aria-label="Primera página" onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>«</Button>
               <Button variant="outline" size="sm" aria-label="Página anterior" onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>‹</Button>
-              <span className="min-w-20 px-2 text-center text-xs font-medium tabular-nums text-muted-foreground sm:hidden" aria-live="polite">Página {page} de {totalPages}</span>
+              <span className="min-w-20 px-2 text-center text-xs font-medium tabular-nums text-foreground/70 sm:hidden" aria-live="polite">Página {page} de {totalPages}</span>
               {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
                 const half = 3;
                 let start = Math.max(1, page - half);
@@ -1552,6 +1444,37 @@ export default function EnrichedLeadsClient() {
           </div>
         </CardContent>
       </Card>
+
+      {selected.size > 0 ? (
+        <ActionBar
+          ariaLabel="Acciones con los contactos seleccionados"
+          label={`${selected.size} ${selected.size === 1 ? 'contacto seleccionado' : 'contactos seleccionados'}`}
+          hint={selectionHint}
+        >
+          <Button type="button" variant="ghost" onClick={() => setSelected(new Set())}>Quitar selección</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" aria-label="Más acciones para la selección">
+                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                Más
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuItem onClick={() => initiateEnrichment(selectedLeads)}>Actualizar datos ({selected.size})</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => void clearInvestigationsSelected()}>Borrar investigación de seleccionados</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void clearInvestigations()} disabled={investigatedInList === 0} className="text-destructive focus:text-destructive">Borrar investigaciones de la lista ({investigatedInList})</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            type="button"
+            onClick={() => openResearchWorkspace(selectedLeads.filter((lead) => hasUsableEmail(lead.email)).map((lead) => lead.id))}
+            disabled={!nativeResearchStatusKnown}
+          >
+            {enrichedSelectionAction({ total: selected.size, toResearch: selectedToResearch, ready: selectedReady })}
+          </Button>
+        </ActionBar>
+      ) : null}
 
       <Sheet open={researchOpen} onOpenChange={(open) => {
         setResearchOpen(open);
