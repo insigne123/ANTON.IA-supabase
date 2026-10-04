@@ -157,6 +157,10 @@ export function BulkCampaignWorkspace() {
         ready = result.progress.ready;
         if (!ready || !result.summary.attempted) break;
       }
+    } catch (error) {
+      // The error shows above; say what already went out so nobody sends it again by hand.
+      setFeedback(total.sent ? `${plural(total.sent, 'correo enviado', 'correos enviados')} antes de detenerse.` : '');
+      throw error;
     } finally {
       await open(campaign.id);
     }
