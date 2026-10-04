@@ -1,146 +1,144 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { CsvLeadInput, CsvLeadSchema, ColumnMapping } from '@/lib/csv-import-utils';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Input } from '@/components/ui/input';
+import { useMemo, useState } from 'react';
+import { ArrowLeft, Loader2, Trash2, Upload } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, CheckCircle, Trash2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { csvRowDestination, csvRowProblem, type CsvLeadInput } from '@/lib/csv-import-utils';
 import { cn } from '@/lib/utils';
-import { z } from 'zod';
 
 interface DataReviewGridProps {
-    initialData: any[];
-    mapping: ColumnMapping[];
+    initialRows: CsvLeadInput[];
+    /** Emails already contacted: those rows are shown but not imported, so nobody is written twice. */
+    contactedEmails?: Set<string> | null;
     onBack: () => void;
-    onSubmit: (cleanedData: CsvLeadInput[]) => void;
+    onSubmit: (rows: CsvLeadInput[]) => void;
     isSubmitting: boolean;
 }
 
-export function DataReviewGrid({ initialData, mapping, onBack, onSubmit, isSubmitting }: DataReviewGridProps) {
-    // 1. Convertir raw data a CsvLeadInput[] basado en el mapping
-    const [rows, setRows] = useState<CsvLeadInput[]>(() => {
-        return initialData.map(rawRow => {
-            const lead: any = {};
-            mapping.forEach(m => {
-                if (m.leadField !== 'ignore') {
-                    lead[m.leadField] = rawRow[m.csvHeader] || '';
-                }
-            });
-            return lead as CsvLeadInput;
+/** Big files stay quick: the table shows this many rows at a time; the rest import the same when they are ready. */
+const ROW_LIMIT = 200;
+
+type EditableField = 'name' | 'email' | 'phone' | 'company' | 'title' | 'linkedinUrl';
+const COLUMNS: Array<{ field: EditableField; label: string; placeholder?: string }> = [
+    { field: 'name', label: 'Nombre' },
+    { field: 'email', label: 'Correo' },
+    { field: 'phone', label: 'Teléfono' },
+    { field: 'company', label: 'Empresa' },
+    { field: 'title', label: 'Cargo' },
+    { field: 'linkedinUrl', label: 'LinkedIn', placeholder: 'https://' },
+];
+
+const contacts = (count: number) => `${count} ${count === 1 ? 'contacto' : 'contactos'}`;
+
+/**
+ * Step 3: every row with where it goes («Por escribir» with an email or a phone, «Por completar» without) or what to fix.
+ * Cells can be edited and rows removed; only the ready rows are imported.
+ */
+export function DataReviewGrid({ initialRows, contactedEmails = null, onBack, onSubmit, isSubmitting }: DataReviewGridProps) {
+    const [rows, setRows] = useState<CsvLeadInput[]>(initialRows);
+    const [onlyProblems, setOnlyProblems] = useState(false);
+    const problems = useMemo(() => rows.map(csvRowProblem), [rows]);
+    const isContacted = (row: CsvLeadInput) => Boolean(row.email && contactedEmails?.has(row.email.toLowerCase()));
+    const counts = useMemo(() => {
+        const result = { porEscribir: 0, porCompletar: 0, contacted: 0, problems: 0 };
+        rows.forEach((row, index) => {
+            if (problems[index]) result.problems += 1;
+            else if (row.email && contactedEmails?.has(row.email.toLowerCase())) result.contacted += 1;
+            else if (csvRowDestination(row) === 'por-escribir') result.porEscribir += 1;
+            else result.porCompletar += 1;
         });
-    });
+        return result;
+    }, [rows, problems, contactedEmails]);
+    const ready = counts.porEscribir + counts.porCompletar;
+    const filtered = useMemo(
+        () => rows.map((row, index) => ({ row, index })).filter(({ index }) => !onlyProblems || problems[index]),
+        [rows, problems, onlyProblems],
+    );
+    const shown = filtered.slice(0, ROW_LIMIT);
 
-    const [editCell, setEditCell] = useState<{ rowIdx: number; field: keyof CsvLeadInput } | null>(null);
-
-    // Validación fila por fila
-    const validationResults = useMemo(() => {
-        return rows.map(r => CsvLeadSchema.safeParse(r));
-    }, [rows]);
-
-    const validCount = validationResults.filter(r => r.success).length;
-    const invalidCount = rows.length - validCount;
-
-    const updateCell = (rowIdx: number, field: keyof CsvLeadInput, val: string) => {
-        setRows(prev => {
-            const next = [...prev];
-            next[rowIdx] = { ...next[rowIdx], [field]: val };
-            return next;
-        });
+    const updateCell = (index: number, field: EditableField, value: string) => {
+        setRows((current) => current.map((row, rowIndex) => {
+            if (rowIndex !== index) return row;
+            const next = field === 'email' ? value.trim().toLowerCase() : value;
+            return { ...row, [field]: next };
+        }));
     };
-
-    const removeRow = (idx: number) => {
-        setRows(prev => prev.filter((_, i) => i !== idx));
-    };
-
-    const handleFinish = () => {
-        // Filtrar solo las filas válidas o enviar todo y dejar que el server decida? 
-        // Mejor enviar solo válidas para evitar basura.
-        const validRows = rows.filter(r => CsvLeadSchema.safeParse(r).success);
-        if (validRows.length === 0) return;
-        onSubmit(validRows);
-    };
+    const removeRow = (index: number) => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                    <h3 className="font-semibold text-lg">Revisar Datos ({rows.length})</h3>
-                    <div className="flex gap-3 text-sm">
-                        <span className="text-green-600 flex items-center gap-1"><CheckCircle className="w-4 h-4" /> {validCount} Válidos</span>
-                        {invalidCount > 0 && <span className="text-red-500 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> {invalidCount} Con Errores</span>}
+                    <h2 className="text-lg font-semibold">Revisa antes de importar</h2>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">Corrige lo marcado o quita la fila. Solo se importan las filas listas.</p>
+                    <div className="mt-3 flex flex-wrap gap-2" role="status" aria-live="polite">
+                        <Badge variant="success">{counts.porEscribir} a Por escribir</Badge>
+                        <Badge variant="info">{counts.porCompletar} a Por completar</Badge>
+                        {counts.contacted > 0 ? <Badge variant="neutral">{counts.contacted} ya {counts.contacted === 1 ? 'contactado' : 'contactados'}</Badge> : null}
+                        {counts.problems > 0 ? <Badge variant="danger">{counts.problems} por revisar</Badge> : null}
                     </div>
                 </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" onClick={onBack} disabled={isSubmitting}>Atrás</Button>
-                    <Button onClick={handleFinish} disabled={validCount === 0 || isSubmitting}>
-                        {isSubmitting ? 'Importando...' : `Importar ${validCount} Leads`}
+                {counts.problems > 0 || onlyProblems ? (
+                    <Button type="button" variant="outline" size="sm" aria-pressed={onlyProblems} onClick={() => setOnlyProblems((value) => !value)}>
+                        {onlyProblems ? 'Ver todas las filas' : 'Ver solo las que hay que revisar'}
                     </Button>
-                </div>
+                ) : null}
             </div>
 
-            <div className="border rounded-md max-h-[60vh] overflow-auto relative">
+            <div className="max-h-[60vh] overflow-auto rounded-2xl border border-border">
                 <Table>
-                    <TableHeader className="sticky top-0 bg-background z-10">
+                    <TableHeader className="sticky top-0 z-10 bg-background">
                         <TableRow>
-                            <TableHead className="w-[50px]">Estado</TableHead>
-                            <TableHead>Nombre</TableHead>
-                            <TableHead>Email</TableHead>
-                            <TableHead>Empresa</TableHead>
-                            <TableHead>Cargo</TableHead>
-                            <TableHead>LinkedIn</TableHead>
-                            <TableHead className="w-[50px]"></TableHead>
+                            <TableHead className="min-w-40">Destino</TableHead>
+                            {COLUMNS.map((column) => <TableHead key={column.field} className="min-w-40">{column.label}</TableHead>)}
+                            <TableHead className="w-12"><span className="sr-only">Quitar</span></TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {rows.map((row, i) => {
-                            const validation = validationResults[i];
-                            const errors = !validation.success ? validation.error.flatten().fieldErrors : {};
-                            const hasErr = !validation.success;
-
+                        {shown.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={COLUMNS.length + 2} className="py-8 text-center text-sm text-muted-foreground">
+                                    {onlyProblems ? 'No quedan filas por revisar.' : 'No quedan filas. Vuelve atrás para elegir otro archivo.'}
+                                </TableCell>
+                            </TableRow>
+                        ) : shown.map(({ row, index }) => {
+                            const problem = problems[index];
+                            const who = row.name || `la fila ${index + 1}`;
                             return (
-                                <TableRow key={i} className={cn(hasErr ? "bg-red-50/50" : "")}>
-                                    <TableCell>
-                                        {hasErr ? (
-                                            <div className="text-red-500" title={JSON.stringify(errors)}>
-                                                <AlertCircle className="w-5 h-5" />
-                                            </div>
-                                        ) : (
-                                            <CheckCircle className="w-5 h-5 text-green-500/50" />
-                                        )}
+                                <TableRow key={index}>
+                                    <TableCell className="align-top">
+                                        {problem ? (
+                                            <>
+                                                <Badge variant="danger">Revisar</Badge>
+                                                <p className="mt-1 max-w-56 text-xs leading-5 text-destructive">{problem}</p>
+                                            </>
+                                        ) : isContacted(row) ? (
+                                            <>
+                                                <Badge variant="neutral">Ya contactado</Badge>
+                                                <p className="mt-1 max-w-56 text-xs leading-5 text-foreground/70">No se importa: ya le escribiste.</p>
+                                            </>
+                                        ) : csvRowDestination(row) === 'por-escribir'
+                                            ? <Badge variant="success">Por escribir</Badge>
+                                            : <Badge variant="info">Por completar</Badge>}
                                     </TableCell>
-
-                                    {/* Nombre */}
-                                    <EditableCell
-                                        value={row.name}
-                                        onChange={v => updateCell(i, 'name', v)}
-                                        error={!!errors.name}
-                                    />
-
-                                    {/* Email */}
-                                    <EditableCell
-                                        value={row.email}
-                                        onChange={v => updateCell(i, 'email', v)}
-                                        error={!!errors.email}
-                                    />
-
-                                    {/* Empresa */}
-                                    <EditableCell value={row.company} onChange={v => updateCell(i, 'company', v)} />
-
-                                    {/* Cargo */}
-                                    <EditableCell value={row.title} onChange={v => updateCell(i, 'title', v)} />
-
-                                    {/* LinkedIn */}
-                                    <EditableCell
-                                        value={row.linkedinUrl}
-                                        onChange={v => updateCell(i, 'linkedinUrl', v)}
-                                        error={!!errors.linkedinUrl}
-                                        placeholder="https://"
-                                    />
-
-                                    <TableCell>
-                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-red-500" onClick={() => removeRow(i)}>
-                                            <Trash2 className="w-4 h-4" />
+                                    {COLUMNS.map((column) => (
+                                        <TableCell key={column.field} className="p-1 align-top">
+                                            <Input
+                                                value={String(row[column.field] || '')}
+                                                onChange={(event) => updateCell(index, column.field, event.target.value)}
+                                                placeholder={column.placeholder || '—'}
+                                                aria-label={`${column.label} de ${who}`}
+                                                className={cn('h-8 border-transparent bg-transparent px-2 shadow-none focus-visible:border-input focus-visible:bg-background')}
+                                            />
+                                        </TableCell>
+                                    ))}
+                                    <TableCell className="align-top">
+                                        <Button type="button" size="icon" variant="ghost" className="size-8 text-muted-foreground hover:text-destructive"
+                                            onClick={() => removeRow(index)} aria-label={`Quitar a ${who}`}>
+                                            <Trash2 className="size-4" aria-hidden="true" />
                                         </Button>
                                     </TableCell>
                                 </TableRow>
@@ -149,23 +147,21 @@ export function DataReviewGrid({ initialData, mapping, onBack, onSubmit, isSubmi
                     </TableBody>
                 </Table>
             </div>
-        </div>
-    );
-}
+            {filtered.length > ROW_LIMIT ? (
+                <p className="text-xs text-muted-foreground">
+                    Mostramos las primeras {ROW_LIMIT} de {filtered.length.toLocaleString('es-CL')} filas. Las demás se importan igual si están listas.
+                </p>
+            ) : null}
 
-function EditableCell({ value, onChange, error, placeholder }: { value?: string, onChange: (v: string) => void, error?: boolean, placeholder?: string }) {
-    return (
-        <TableCell className="p-1">
-            <Input
-                className={cn(
-                    "h-8 border-transparent focus-visible:bg-background focus-visible:border-input px-2 shadow-none",
-                    error && "bg-red-100 text-red-900 border-red-200 focus-visible:border-red-500",
-                    !value && "text-muted-foreground italic"
-                )}
-                value={value || ''}
-                onChange={e => onChange(e.target.value)}
-                placeholder={placeholder || '-'}
-            />
-        </TableCell>
+            <div className="sticky bottom-3 z-20 flex flex-col-reverse gap-2 rounded-2xl border border-border bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                <Button type="button" variant="ghost" onClick={onBack} disabled={isSubmitting}>
+                    <ArrowLeft className="size-4" aria-hidden="true" />Volver a las columnas
+                </Button>
+                <Button type="button" onClick={() => onSubmit(rows)} disabled={ready === 0 || isSubmitting} aria-busy={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />}
+                    {isSubmitting ? 'Importando…' : `Importar ${contacts(ready)}`}
+                </Button>
+            </div>
+        </div>
     );
 }
