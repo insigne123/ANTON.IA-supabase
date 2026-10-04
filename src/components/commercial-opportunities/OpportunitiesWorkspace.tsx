@@ -741,7 +741,7 @@ function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
               <div>
                 <p className="font-medium text-foreground">{source.label}</p>
                 <p className="text-xs text-muted-foreground">
-                  {source.enabled ? (source.source === 'jsearch' ? `${source.requests} consultas, avisos del último mes` : `hasta ${source.requests} avisos de los últimos 7 días`) : `Sin clave (${source.missing})`}
+                  {source.enabled ? (source.source === 'jsearch' ? `${source.requests} consultas, avisos del último mes` : `hasta ${source.requests} avisos de los últimos 7 días`) : 'No está conectada'}
                 </p>
               </div>
               <span className={cn('shrink-0 tabular-nums', source.enabled ? 'text-foreground' : 'text-muted-foreground')}>{source.enabled ? `hasta ${formatUsd(source.estimateUsd)}` : 'no se usa'}</span>
