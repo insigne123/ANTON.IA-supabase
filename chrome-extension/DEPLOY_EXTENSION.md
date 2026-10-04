@@ -1,4 +1,4 @@
-# Anton.IA — LinkedIn Workspace 4.1.0
+# Anton.IA — LinkedIn Workspace 4.1.1
 
 ## Compilar e instalar
 
@@ -17,6 +17,13 @@ npm run extension:build
 La aplicación elegida debe incluir `/extension/connect` y `/api/extension/workspace` de esta versión. Instalar solo la extensión contra una app anterior no habilita los nuevos flujos. Para probar localmente, inicia `npm run dev` y elige **Local · puerto 9003** en «Dirección de la app».
 
 Después de actualizar la extensión, recarga las pestañas de LinkedIn y conexión. Chrome no reemplaza los scripts ya inyectados.
+
+## Cambios de 4.1.1
+
+- La investigación presenta los bloques del informe como contenido comercial, sin campos internos ni IDs sin resolver.
+- Las fuentes se abren mediante enlaces válidos. Hipótesis, estimaciones, supuestos, comité y pendientes conservan su significado.
+- Panel y PDF comparten la lectura de los bloques del documento validado; no se genera ni se cobra otra investigación al abrirlos.
+- Sin nuevos permisos ni hosts. Al actualizar, recarga también las pestañas de LinkedIn.
 
 ## Cambios de 4.1.0
 

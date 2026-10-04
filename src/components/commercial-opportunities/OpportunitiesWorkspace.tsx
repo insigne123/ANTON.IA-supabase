@@ -58,9 +58,9 @@ type Overview = {
 type Tab = 'hiring' | 'tenders' | 'projects';
 type ProjectResult = { status: 'done'; read: number; skipped: number; matched: number; created: number };
 type HiringResult =
-  | { status: 'done'; fetched: number; qualifying: number; newQualifying: number; costUsd: number; sources: Array<{ source: string; error: string | null }> }
+  | { status: 'done' | 'partial' | 'failed'; fetched: number; qualifying: number; newQualifying: number; costUsd: number; sources: Array<{ source: string; error: string | null }> }
   | { status: 'capped'; message: string };
-type TenderResult = { status: 'done'; found: number; matched: number; created: number; sources: Array<{ source: string; error: string | null }> };
+type TenderResult = { status: 'done' | 'partial' | 'failed'; found: number; matched: number; created: number; sources: Array<{ source: string; error: string | null }> };
 const TAB_SOURCES: Record<Tab, string[]> = { hiring: ['jsearch', 'linkedin'], tenders: ['mercado_publico', 'compra_agil'], projects: ['seia'] };
 const SEIA_MAP_URL = 'https://sig.sea.gob.cl/mapadeproyectos/';
 
@@ -108,8 +108,9 @@ export function OpportunitiesWorkspace() {
         const result = await readJson<TenderResult>(response);
         const failed = result.sources.filter(source => source.error).map(source => sourceLabel(source.source));
         toast({
-          title: `${result.matched} ${result.matched === 1 ? 'licitación abierta calza' : 'licitaciones abiertas calzan'}${result.created ? ` (${result.created} nuevas)` : ''}`,
-          description: `${result.found} revisadas en Mercado Público y Compra Ágil · sin costo${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
+          title: result.status === 'failed' ? 'No se pudo consultar las fuentes' : `${result.status === 'partial' ? 'Búsqueda parcial: ' : ''}${result.matched} ${result.matched === 1 ? 'licitación abierta calza' : 'licitaciones abiertas calzan'}${result.created ? ` (${result.created} nuevas)` : ''}`,
+          description: result.status === 'failed' ? 'La búsqueda falló; no significa que no existan licitaciones. Revisa los errores de cada fuente.' : `${result.found} revisadas en Mercado Público y Compra Ágil · sin costo${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
+          variant: result.status === 'failed' ? 'destructive' : 'default',
         });
       } else {
         const result = await readJson<HiringResult>(response);
@@ -117,8 +118,9 @@ export function OpportunitiesWorkspace() {
         else {
           const failed = result.sources.filter(source => source.error).map(source => sourceLabel(source.source));
           toast({
-            title: `${result.qualifying} ${result.qualifying === 1 ? 'empresa contratando' : 'empresas contratando'}${result.newQualifying ? ` (${result.newQualifying} nuevas)` : ''}`,
-            description: `${result.fetched} avisos revisados · costo ${formatUsd(result.costUsd)}${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
+            title: result.status === 'failed' ? 'No se pudo consultar las fuentes' : `${result.status === 'partial' ? 'Búsqueda parcial: ' : ''}${result.qualifying} ${result.qualifying === 1 ? 'empresa contratando' : 'empresas contratando'}${result.newQualifying ? ` (${result.newQualifying} nuevas)` : ''}`,
+            description: result.status === 'failed' ? `La búsqueda falló; no confirma que no haya empresas contratando. Costo estimado o reservado: ${formatUsd(result.costUsd)}. Revisa el estado de las fuentes.` : `${result.fetched} avisos revisados · costo estimado ${formatUsd(result.costUsd)}${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
+            variant: result.status === 'failed' ? 'destructive' : 'default',
           });
         }
       }
@@ -336,14 +338,14 @@ function SearchSummary({ overview, running }: { overview: Overview; running: boo
           ) : last ? (
             <p className="mt-0.5 text-sm text-foreground">
               {relativeTime(last.at)} · {last.status === 'skipped' ? 'no se buscó (tope mensual)' : last.status === 'failed' ? 'falló' : `${last.fetched} avisos`}
-              {last.status === 'partial' ? ' · una fuente falló' : ''}
+              {last.status === 'partial' ? ' · búsqueda incompleta' : ''}
             </p>
           ) : <p className="mt-0.5 text-sm text-foreground">Aún no buscas</p>}
-          {!running && last?.errors.length ? <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{last.errors[0]}</p> : null}
+          {!running && last?.errors.length ? <ul className="mt-2 space-y-1 break-words text-xs text-cw-warning" aria-label="Problemas de las fuentes">{last.errors.map((message, index) => <li key={index}>{message}</li>)}</ul> : null}
         </div>
         <div>
           <div className="flex items-baseline justify-between text-xs">
-            <span className="font-medium text-muted-foreground">Gasto del mes</span>
+            <span className="font-medium text-muted-foreground">Gasto estimado del mes</span>
             <span className="tabular-nums text-foreground">{formatUsd(month.spentUsd)} de {formatUsd(month.capUsd)}</span>
           </div>
           <Progress value={spentShare} className="mt-1.5 h-1.5" aria-label={`Gasto del mes: ${formatUsd(month.spentUsd)} de ${formatUsd(month.capUsd)}`} />
@@ -469,7 +471,13 @@ function ListEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }
   if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin empresas con ese nombre" description="Prueba con otra parte del nombre o cambia de pestaña." />;
   if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguna" description="Usa «Me interesa» en las empresas que quieras trabajar: quedan a tu nombre y aparecen aquí." />;
   if (filter === 'dismissed') return <EmptyState icon={X} headingLevel="h3" title="No hay descartadas" description="Las empresas que descartes quedan aquí y las puedes recuperar." />;
-  if (!overview.runs.length) {
+  const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.hiring.includes(run.source)));
+  if (last?.status === 'failed') return <EmptyState icon={AlertCircle} headingLevel="h3" title="La búsqueda no se pudo completar"
+    description="Las fuentes fallaron. Revisa sus errores arriba antes de reintentar; bajar el mínimo de avisos no resuelve una búsqueda fallida."
+    action={<Button onClick={onSearch} disabled={searchDisabled}><RotateCcw className="h-4 w-4" aria-hidden="true" />Revisar y reintentar</Button>} />;
+  if (last?.status === 'running') return <EmptyState icon={Loader2} headingLevel="h3" title="La búsqueda sigue en curso" description="Esperamos el resultado de las fuentes. Los datos guardados se conservarán." />;
+  if (last?.status === 'skipped') return <EmptyState icon={AlertCircle} headingLevel="h3" title="No se buscó: tope mensual" description="El saldo estimado no alcanza para esta búsqueda. No se consultaron las fuentes." />;
+  if (!last) {
     return (
       <EmptyState icon={Briefcase} headingLevel="h3" title="Aún no hay empresas"
         description="Busca en Google for Jobs y LinkedIn las empresas que publican avisos para tus cargos. Antes de buscar verás el costo."
@@ -477,8 +485,8 @@ function ListEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }
     );
   }
   return (
-    <EmptyState icon={Briefcase} headingLevel="h3" title={`Ninguna empresa llega a ${overview.profile.minAds} avisos`}
-      description="Con lo encontrado en los últimos 30 días, ninguna empresa nueva publica tantos avisos para tus cargos. Puedes sumar cargos o bajar el mínimo."
+    <EmptyState icon={Briefcase} headingLevel="h3" title={last.status === 'partial' ? 'Búsqueda incompleta, sin empresas para mostrar' : `Ninguna empresa llega a ${overview.profile.minAds} avisos`}
+      description={last.status === 'partial' ? 'Solo se consultó parte de las fuentes. Revisa sus errores antes de cambiar los criterios; los resultados están incompletos.' : 'Con lo encontrado en los últimos 30 días, ninguna empresa nueva publica tantos avisos para tus cargos. Puedes sumar cargos o bajar el mínimo.'}
       action={<Button variant="outline" onClick={onEdit}><Pencil className="h-4 w-4" aria-hidden="true" />Editar búsqueda</Button>} />
   );
 }
@@ -508,10 +516,10 @@ function TenderSummary({ overview, running }: { overview: Overview; running: boo
             <p className="mt-0.5 flex items-center gap-1.5 text-sm text-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Buscando…</p>
           ) : last ? (
             <p className="mt-0.5 text-sm text-foreground">
-              {relativeTime(last.at)} · {last.status === 'failed' ? 'falló' : `${last.fetched} revisadas`}{last.status === 'partial' ? ' · una fuente falló' : ''}
+              {relativeTime(last.at)} · {last.status === 'failed' ? 'falló' : `${last.fetched} revisadas`}{last.status === 'partial' ? ' · búsqueda incompleta' : ''}
             </p>
           ) : <p className="mt-0.5 text-sm text-foreground">Aún no buscas</p>}
-          {!running && last?.errors.length ? <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{last.errors[0]}</p> : null}
+          {!running && last?.errors.length ? <ul className="mt-2 space-y-1 break-words text-xs text-cw-warning" aria-label="Problemas de las fuentes">{last.errors.map((message, index) => <li key={index}>{message}</li>)}</ul> : null}
         </div>
         <p className="text-xs text-muted-foreground">Sin costo: usa la cuota diaria del ticket de Mercado Público. Se actualiza sola cada mañana.</p>
         {!tenderSearch.ticket ? (
@@ -596,7 +604,12 @@ function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit
   if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin licitaciones con ese texto" description="Prueba con otra palabra del nombre o del organismo." />;
   if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguna" description="Usa «Me interesa» en las licitaciones que quieras preparar: quedan a tu nombre y aparecen aquí." />;
   if (filter === 'dismissed') return <EmptyState icon={X} headingLevel="h3" title="No hay descartadas" description="Las licitaciones que descartes quedan aquí y las puedes recuperar." />;
-  if (!overview.runs.some(run => TAB_SOURCES.tenders.includes(run.source))) {
+  const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.tenders.includes(run.source)));
+  if (last?.status === 'failed') return <EmptyState icon={AlertCircle} headingLevel="h3" title="No se pudo consultar las licitaciones"
+    description="Las fuentes fallaron. Revisa sus errores arriba; esto no confirma que no existan compras abiertas."
+    action={<Button onClick={onSearch} disabled={searchDisabled}><RotateCcw className="h-4 w-4" aria-hidden="true" />Reintentar búsqueda</Button>} />;
+  if (last?.status === 'running') return <EmptyState icon={Loader2} headingLevel="h3" title="La búsqueda sigue en curso" description="Esperamos las respuestas de Mercado Público y Compra Ágil." />;
+  if (!last) {
     return (
       <EmptyState icon={Gavel} headingLevel="h3" title="Aún no hay licitaciones"
         description="Busca en Mercado Público y Compra Ágil las compras abiertas que nombran lo que ofreces. No tiene costo."
@@ -604,8 +617,8 @@ function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit
     );
   }
   return (
-    <EmptyState icon={Gavel} headingLevel="h3" title="Ninguna licitación abierta calza"
-      description="Con tus palabras no hay compras abiertas ahora. Prueba con otras palabras o agrega códigos UNSPSC."
+    <EmptyState icon={Gavel} headingLevel="h3" title={last.status === 'partial' ? 'Búsqueda incompleta, sin licitaciones para mostrar' : 'Ninguna licitación abierta calza'}
+      description={last.status === 'partial' ? 'La búsqueda quedó incompleta. Revisa los errores de las fuentes antes de cambiar tus palabras.' : 'Con tus palabras no hay compras abiertas ahora. Prueba con otras palabras o agrega códigos UNSPSC.'}
       action={<Button variant="outline" onClick={onEdit}><Pencil className="h-4 w-4" aria-hidden="true" />Editar búsqueda</Button>} />
   );
 }

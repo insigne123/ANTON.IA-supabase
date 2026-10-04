@@ -159,10 +159,11 @@ env:
     value: gmeneses@grupoexpro.com,nicolas.yarur.g@yago.cl
     availability: [RUNTIME]
 
-  # Oportunidades comerciales (plan 8, fase 3): la sección y sus rutas solo para estas cuentas; cualquier otra recibe 404.
+  # Oportunidades: miembros actuales de GrupoExpro, verificados contra la organización en producción el 4 oct 2026.
+  # El servidor exige correo confirmado y mantiene el alcance de la organización activa.
   # Las fuentes usan secretos RUNTIME de Secret Manager, con permiso del backend studio.
   - variable: OPPORTUNITIES_ALLOWED_EMAILS
-    value: nicolas.yarur.g@yago.cl
+    value: gmeneses@grupoexpro.com,lgordo@grupoexpro.com,cortega@grupoexpro.com,ribanez@grupoexpro.com,laramirez@grupoexpro.com,kmory@grupoexpro.com,nicolas.yarur.g@yago.cl,cflores@grupoexpro.com,rperezm@grupoexpro.com,sgutierrez@grupoexpro.com,cmoya@grupoexpro.com,malvarado@grupoexpro.com,cmolina@grupoexpro.com,mcoloma@grupoexpro.com,cpizarro@grupoexpro.com,fneira@grupoexpro.com,fperalta@grupoexpro.com,dmanriquez@grupoexpro.com,ptapia@grupoexpro.com,casenjo@grupoexpro.com,drey@grupoexpro.com,kgomez@grupoexpro.com,josorio@grupoexpro.com,culloag@grupoexpro.com,kzorrilla@grupoexpro.com,jfranco@grupoexpro.com,dpinzon@grupoexpro.com,ddevia@grupoexpro.com
     availability: [RUNTIME]
   - variable: OPPORTUNITIES_MONTHLY_USD_CAP
     value: "10"
@@ -314,7 +315,7 @@ env:
     availability: [RUNTIME]
 
   - variable: BULK_CAMPAIGNS_AUTOMATION_ENABLED
-    value: "false"
+    value: "true"
     availability: [RUNTIME]
 
   - variable: SERPER_TIMEOUT_MS

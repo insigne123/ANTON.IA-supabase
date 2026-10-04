@@ -61,9 +61,20 @@ test('a spent quota stops asking Compra Ágil, and the tenders still come', asyn
     },
   });
   assert.equal(calls, 1);
+  assert.equal(result.status, 'partial');
   assert.equal(result.matched, 1, 'a missing detail keeps the listing');
   assert.equal(memory.runs[0].status, 'failed');
   assert.match(String(memory.runs[0].error), /cuota diaria/);
+});
+
+test('both tender sources failing are a failed search, not proof of no matches', async () => {
+  const memory = memoryStore();
+  const result = await runTenderSync({ store: memory.store, profile: PROFILE, ticket: 't', organizationId: ORG, now: NOW,
+    sources: { compraAgil: async () => { throw new Error('Ticket rechazado'); }, listLicitaciones: async () => { throw new Error('Ticket rechazado'); },
+      getLicitacion: async () => assert.fail('not asked') } });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.matched, 0);
+  assert.deepEqual(memory.runs.map(run => run.status), ['failed', 'failed']);
 });
 
 test('without a ticket or without words nothing starts; if saving fails both runs close as failed', async () => {

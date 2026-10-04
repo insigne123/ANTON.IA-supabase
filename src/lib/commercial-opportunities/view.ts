@@ -36,7 +36,7 @@ export function lastSearch(runs: RunListItem[]) {
   const failed = group.filter(run => run.status === 'failed');
   const status = group.some(run => run.status === 'running') ? 'running'
     : group.every(run => run.status === 'skipped') ? 'skipped'
-      : failed.length === group.length ? 'failed' : failed.length ? 'partial' : 'done';
+      : failed.length === group.length ? 'failed' : failed.length || group.some(run => run.error) ? 'partial' : 'done';
   return {
     status, at: runs[0].startedAt,
     fetched: group.reduce((sum, run) => sum + run.fetched, 0),

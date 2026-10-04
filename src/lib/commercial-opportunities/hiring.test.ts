@@ -53,6 +53,18 @@ test('JSearch and Fantastic Jobs ads become the same shape, without the person w
   assert.equal(jobAdFromJSearch({ job_title: 'Sin id' }), null);
 });
 
+test('Fantastic Jobs integer IDs and current organization fields produce usable opportunities', () => {
+  const item = jobAdFromFantastic({ id: 90210, linkedin_id: 4100, title: 'Operario', organization: 'Acme',
+    organization_url: 'https://www.linkedin.com/company/acme', org_linkedin_website: 'https://www.acme.cl', org_linkedin_slug: 'acme',
+    date_posted: '2026-09-30T12:00:00Z' });
+  assert.equal(item?.externalId, '90210');
+  assert.equal(item?.companyDomain, 'acme.cl');
+  assert.equal(item?.companyLinkedinUrl, 'https://www.linkedin.com/company/acme');
+  assert.equal(groupHiring([item!], { ...PROFILE, minAds: 1 }, { now: NOW }).opportunities.length, 1);
+  assert.equal(jobAdFromFantastic({ id: Number.NaN, title: 'Operario' }), null);
+  assert.equal(jobAdFromFantastic({ id: {}, title: 'Operario' }), null);
+});
+
 test('companies with enough ads, each ad once across boards, scored with their reasons', () => {
   const ads = [
     ad('a1', 'Operario de bodega', 'Acme S.A.', { companyDomain: 'acme.cl' }),

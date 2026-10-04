@@ -3,7 +3,7 @@ import { jobAdFromFantastic, type JobAd } from '@/lib/commercial-opportunities/h
 /**
  * The LinkedIn Job Search API of Fantastic Jobs, run as an Apify actor with the APIFY_TOKEN the app already has. Apify bills
  * each job by plan (US$0.005 on the free and Bronze plans, 0.0035 on Silver, 0.0015 from Gold): APIFY_FANTASTIC_USD_PER_JOB
- * says which one applies. Agencies are removed at the source, descriptions are not requested, and the recruiter fields that
+ * says which one applies. Agencies are removed at the source, descriptions are not retained, and the recruiter fields that
  * come with each job are dropped by jobAdFromFantastic.
  */
 export const FANTASTIC_ACTOR = 'fantastic-jobs~advanced-linkedin-job-search-api';
@@ -43,6 +43,10 @@ export function fantasticRunPlan(requested = 200, usdPerJob = fantasticUsdPerJob
 export type FantasticQuery = { titles: string[]; locations?: string[]; timeRange?: '24h' | '7d' | '6m'; limit?: number };
 type Dependencies = { fetch: typeof fetch; token: string | undefined; usdPerJob?: number; maxRunUsd?: number; startUsd?: number };
 
+export class FantasticJobsError extends Error {
+  constructor(message: string, readonly mayHaveCharged: boolean) { super(message); this.name = 'FantasticJobsError'; }
+}
+
 export async function searchFantasticJobs(input: FantasticQuery, dependencies: Dependencies = {
   fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, usdPerJob: fantasticUsdPerJob(),
 }) {
@@ -52,7 +56,9 @@ export async function searchFantasticJobs(input: FantasticQuery, dependencies: D
   if (!plan.enabled) throw new Error('El tope por búsqueda de Apify no alcanza para consultar 10 avisos.');
   const limit = plan.limit;
   const body = {
-    timeRange: input.timeRange ?? '7d', limit, removeAgency: true, descriptionType: '',
+    // The published enum accepts only text/html, not an empty string. Text is
+    // discarded by jobAdFromFantastic; no recruiter add-on is requested.
+    timeRange: input.timeRange ?? '7d', limit, removeAgency: true, descriptionType: 'text', recruiterOnly: false,
     // «operari:*» also finds «operaria» and «operarios»; a title of several words goes as a phrase.
     titleSearch: input.titles.slice(0, 30).map(title => /\s/.test(title.trim()) ? title.trim() : `${title.trim().replace(/[oa]s?$/i, '')}:*`),
     locationSearch: input.locations?.length ? input.locations.slice(0, 20) : ['Chile'],
@@ -63,8 +69,10 @@ export async function searchFantasticJobs(input: FantasticQuery, dependencies: D
     method: 'POST', headers: { authorization: `Bearer ${dependencies.token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body), signal: AbortSignal.timeout(120_000),
   });
-  if (response.status === 401 || response.status === 403) throw new Error('Apify rechazó el token.');
-  if (response.status === 402) throw new Error('Apify: no queda saldo en la cuenta.');
+  if (response.status === 400) throw new FantasticJobsError('Apify rechazó los parámetros de búsqueda; no se inició la corrida.', false);
+  if (response.status === 401 || response.status === 403) throw new FantasticJobsError('Apify rechazó el token; revisa el acceso a la cuenta.', false);
+  if (response.status === 402) throw new FantasticJobsError('Apify: no queda saldo en la cuenta.', false);
+  if (response.status === 404) throw new FantasticJobsError('El actor de búsqueda de LinkedIn no está disponible en Apify.', false);
   if (!response.ok) throw new Error(`Apify respondió ${response.status}.`);
   const items = await response.json() as unknown;
   if (!Array.isArray(items)) throw new Error('Apify no entregó una lista de avisos; no se puede confirmar el resultado ni el costo.');
