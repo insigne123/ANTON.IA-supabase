@@ -2,8 +2,9 @@
 // they do for users, then local stand-ins for every URL, key and allowlist. No `.env*` file is read, and none may exist.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+export const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 export const SUPABASE_PORT = 54321;
 export const APP_PORT = Number(process.env.AUDIT_APP_PORT || 9005);
 export const SUPABASE_URL = `http://127.0.0.1:${SUPABASE_PORT}`;
