@@ -19,10 +19,10 @@ export function ProfileIcpSummary({ profile, dirty, onEdit }: {
 }) {
   const { defined, rows } = icpSummary(profile);
   return (
-    <section aria-labelledby="profile-icp-summary-title" className="mb-4 rounded-[24px] border border-border/60 bg-card/90 p-5 dark:bg-card/75 sm:p-6">
+    <section aria-label="Resumen de tu cliente ideal" className="mb-4 rounded-[24px] border border-border/60 bg-card/90 p-5 dark:bg-card/75 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 basis-64">
-          <h2 id="profile-icp-summary-title" className="flex items-center gap-2 text-sm font-semibold">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
             <Target className="h-4 w-4 text-primary" aria-hidden="true" />Tu cliente ideal
           </h2>
           <p className="mt-1 text-sm leading-5 text-muted-foreground">

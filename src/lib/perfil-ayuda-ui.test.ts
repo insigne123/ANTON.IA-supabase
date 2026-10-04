@@ -47,4 +47,6 @@ test('Perfil waits for the saved profile before reading the site, uses the palet
   const summary = read('src/components/profile/ProfileIcpSummary.tsx');
   assert.match(summary, /\{defined && !dirty \? \(/, '«Buscar prospectos» only when the search would use what is on screen');
   assert.match(summary, /href="\/search"/);
+  // Its own name: the form's section is also «Tu cliente ideal», and two regions with one name confuse a screen reader.
+  assert.match(summary, /<section aria-label="Resumen de tu cliente ideal"/);
 });
