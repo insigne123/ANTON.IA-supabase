@@ -47,9 +47,9 @@ export default function campaigns(ctx) {
 
   const sequence = [
     { id: 'campaign-qa-1', user_id: ctx.OWNER, organization_id: ctx.ORG, name: 'Bienvenida 2025 · RR. HH.', status: 'completed', steps: [], created_at: ctx.daysAgo(140), updated_at: ctx.daysAgo(100),
-      excluded_lead_ids: [], settings: {}, sent_records: { 'contacted-qa-13': { sentAt: ctx.daysAgo(120), step: 0 } }, campaign_type: 'sequence', last_run_at: ctx.daysAgo(100), last_run_status: 'completed', last_run_summary: { sent: 24 } },
+      excluded_lead_ids: [], settings: {}, sent_records: { 'contacted-qa-13': { sentAt: ctx.daysAgo(120), step: 0 } }, campaign_type: 'reconnection', outreach_version: 1, last_run_at: ctx.daysAgo(100), last_run_status: 'success', last_run_summary: { sent: 24 } },
     { id: 'campaign-qa-2', user_id: ctx.MEMBER, organization_id: ctx.ORG, name: 'Ferias laborales · seguimiento', status: 'paused', steps: [], created_at: ctx.daysAgo(80), updated_at: ctx.daysAgo(60),
-      excluded_lead_ids: [], settings: {}, sent_records: {}, campaign_type: 'sequence', last_run_at: ctx.daysAgo(60), last_run_status: 'paused', last_run_summary: { sent: 9 } },
+      excluded_lead_ids: [], settings: {}, sent_records: {}, campaign_type: 'follow_up', outreach_version: 1, last_run_at: ctx.daysAgo(60), last_run_status: 'idle', last_run_summary: { sent: 9 } },
   ];
   const steps = sequence.flatMap((campaign, campaignIndex) => MESSAGES.map((message, index) => ({
     id: ctx.uid(8000 + campaignIndex * 10 + index), campaign_id: campaign.id, order_index: index, offset_days: message.delayDays, name: index ? 'Seguimiento' : 'Primer correo',
