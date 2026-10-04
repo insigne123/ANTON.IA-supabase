@@ -7,6 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -94,6 +95,7 @@ function nextFollowUpStep(plan?: FirstContactFollowUpPlanData | null) {
 
 function ComposeInner() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const sp = useSearchParams();
   const id = sp.get('id') || '';
@@ -989,8 +991,10 @@ function ComposeInner() {
           <Button
             type="button"
             className="w-full sm:w-auto"
-            onClick={() => {
-              if ((hasNativeEdits || proposal || followUpDirty || followUpBusy) && !window.confirm('¿Recargar y descartar los cambios o propuestas sin guardar?')) return;
+            onClick={async () => {
+              if ((hasNativeEdits || proposal || followUpDirty || followUpBusy) && !(await confirm({
+                title: '¿Recargar y descartar lo que no guardaste?', description: 'Se pierden los cambios y las propuestas sin guardar de este correo.', confirmLabel: 'Recargar', tone: 'danger',
+              }))) return;
               setProposal(null);
               setSaveError(null);
               if (campaignStepId) setCampaignSendContextReloadKey((value) => value + 1);

@@ -12,6 +12,7 @@ import { es } from 'date-fns/locale';
 import { Loader2, Send, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/confirm-dialog';
 
 interface CommentsSectionProps {
     entityType: 'lead' | 'campaign';
@@ -21,6 +22,7 @@ interface CommentsSectionProps {
 export function CommentsSection({ entityType, entityId }: CommentsSectionProps) {
     const { user } = useAuth();
     const { toast } = useToast();
+    const confirm = useConfirm();
     const [comments, setComments] = useState<Comment[]>([]);
     const [newComment, setNewComment] = useState('');
     const [loading, setLoading] = useState(true);
@@ -88,7 +90,7 @@ export function CommentsSection({ entityType, entityId }: CommentsSectionProps) 
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('¿Borrar comentario?')) return;
+        if (!(await confirm({ title: '¿Borrar el comentario?', description: 'Se borra para todo el equipo y no se puede recuperar.', confirmLabel: 'Borrar', tone: 'danger' }))) return;
         try {
             await commentsService.deleteComment(id);
         } catch (error) {

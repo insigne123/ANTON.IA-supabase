@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -197,6 +198,7 @@ export function FirstContactFollowUpPlan({
   onBusyChange,
 }: FirstContactFollowUpPlanProps) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const confirm = useConfirm();
   const [plan, setPlan] = useState<FirstContactFollowUpPlan | null>(null);
   const planRef = useRef<FirstContactFollowUpPlan | null>(null);
   const [editors, setEditors] = useState<Record<string, DraftEditor>>({});
@@ -1129,10 +1131,13 @@ export function FirstContactFollowUpPlan({
       <Sheet
         open={Boolean(noteTarget)}
         onOpenChange={(open) => {
-          if (!open && !applyingNote) {
-            if (noteInstruction.trim() && !noteSuccess && !window.confirm('¿Cerrar y descartar esta nota para IA? Las propuestas preparadas se conservan.')) return;
-            setNoteTarget(null);
+          if (open || applyingNote) return;
+          if (noteInstruction.trim() && !noteSuccess) {
+            void confirm({ title: '¿Descartar la nota para la IA?', description: 'Las propuestas que ya preparó se conservan.', confirmLabel: 'Descartar nota', tone: 'danger' })
+              .then((ok) => { if (ok) setNoteTarget(null); });
+            return;
           }
+          setNoteTarget(null);
         }}
       >
         <SheetContent
