@@ -19,12 +19,20 @@ function withAutomaticFlag<T extends { parent_run_id?: string | null; request_id
   return { ...rest, automatic: research || derived('cowork:continuation'), ...(research ? { automaticReason: 'research' as const } : {}) };
 }
 
-export async function listCoworkRuns(auth: AuthContext) {
+const RUN_LIST_LIMIT = 50;
+
+/** The latest runs, without the conversations the person deleted (hid): those leave the list, not the database. */
+export async function listCoworkRuns(auth: AuthContext, { hiddenRootIds = [] }: { hiddenRootIds?: string[] } = {}) {
+  const hidden = new Set(hiddenRootIds);
+  // Hidden conversations still hold runs: read further back so the list keeps its 50 visible runs.
   const { data, error } = await auth.supabase.from('cowork_runs')
-    .select('id,message,mode,status,created_at,parent_run_id,request_id').eq('user_id', auth.user.id)
-    .eq('organization_id', auth.organizationId).order('created_at', { ascending: false }).limit(50);
+    .select('id,message,mode,status,created_at,parent_run_id,root_run_id,request_id').eq('user_id', auth.user.id)
+    .eq('organization_id', auth.organizationId).order('created_at', { ascending: false }).limit(hidden.size ? 200 : RUN_LIST_LIMIT);
   if (error) throw error;
-  return (data || []).map(withAutomaticFlag);
+  return (data || [])
+    .filter((run: { root_run_id?: string | null }) => !run.root_run_id || !hidden.has(run.root_run_id))
+    .slice(0, RUN_LIST_LIMIT)
+    .map(withAutomaticFlag);
 }
 
 /** Newest run that continues `id` (a worker continuation or a user follow-up). */

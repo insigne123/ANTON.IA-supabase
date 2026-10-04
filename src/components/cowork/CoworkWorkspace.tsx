@@ -11,7 +11,10 @@ import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
   coworkCardStatuses, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+  type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
+import { ToastAction } from '@/components/ui/toast';
+import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { CoworkArtifactPanel } from './CoworkArtifactPanel';
 import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
@@ -98,6 +101,10 @@ function PendingTurn({ text }: { text: string }) {
 /** userId scopes the unsent draft; the page passes it from the server session. */
 export function CoworkWorkspace({ userId = null }: { userId?: string | null } = {}) {
   const [runs, setRuns] = useState<CoworkRun[]>([]);
+  // Names the person gave and conversations they deleted (hidden), when the server can keep them (cowork_thread_settings).
+  const [threadNames, setThreadNames] = useState<{ available: boolean; titles: Record<string, string> }>({ available: false, titles: {} });
+  const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(() => new Set());
+  const { toast } = useToast();
   const [selected, setSelected] = useState<string | null>(null);
   const [state, setState] = useState<ThreadState | null>(null);
   const [message, setMessage] = useState('');
@@ -208,6 +215,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     request('/api/cowork/runs').then(data => {
       if (disposed) return;
       setRuns(Array.isArray(data.runs) ? data.runs : []); setReady(data.canSubmit === true); setError('');
+      const names = data.threads && typeof data.threads === 'object' ? data.threads : null;
+      setThreadNames({ available: names?.available === true, titles: names?.titles && typeof names.titles === 'object' ? names.titles : {} });
       setSearchQuota(data.searchQuota && typeof data.searchQuota.remaining === 'number' ? data.searchQuota : null);
       setCanAutonomous(data.canAutonomous === true);
       if (!data.canAutonomous) setMode('approval');
@@ -398,13 +407,15 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const pendingDecision = Boolean(latest && latest.run.status === 'waiting_approval' && proposal?.state === 'pending');
   const active = Boolean(latest && isCoworkActive(latest.run.status));
   const busy = (active && !pendingDecision) || awaitingContinuation;
-  const threads = useMemo(() => groupCoworkThreads(runs), [runs]);
+  const threads = useMemo(() => groupCoworkThreads(runs, threadNames.titles).filter(thread => !hiddenRoots.has(thread.rootId)),
+    [runs, threadNames.titles, hiddenRoots]);
 
   const selectedRoot = useMemo(() => {
     if (!selected) return null;
     const byId = new Map(runs.map(run => [run.id, run]));
     let cursor = byId.get(selected);
     if (!cursor) return turns[0]?.run.id ?? selected;
+    if (cursor.root_run_id) return cursor.root_run_id;
     const seen = new Set<string>();
     while (cursor.parent_run_id && byId.has(cursor.parent_run_id) && !seen.has(cursor.id)) {
       seen.add(cursor.id);
@@ -412,6 +423,52 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     }
     return cursor.id;
   }, [runs, selected, turns]);
+
+  const renameThread = useCallback(async (rootId: string, title: string) => {
+    try {
+      const data = await request(`/api/cowork/threads/${rootId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) });
+      const saved = typeof data?.thread?.title === 'string' ? data.thread.title : null;
+      setThreadNames(current => {
+        const titles = { ...current.titles };
+        if (saved) titles[rootId] = saved; else delete titles[rootId];
+        return { ...current, titles };
+      });
+      return true;
+    } catch (problem) {
+      toast({ variant: 'destructive', title: 'No pudimos renombrar el trabajo', description: problem instanceof Error ? problem.message : undefined });
+      return false;
+    }
+  }, [request, toast]);
+
+  const restoreThread = useCallback(async (thread: CoworkThreadSummary) => {
+    try {
+      await request(`/api/cowork/threads/${thread.rootId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: false }) });
+      setHiddenRoots(current => { const next = new Set(current); next.delete(thread.rootId); return next; });
+      setListVersion(version => version + 1);
+    } catch (problem) {
+      toast({ variant: 'destructive', title: 'No pudimos recuperar el trabajo', description: problem instanceof Error ? problem.message : undefined });
+    }
+  }, [request, toast]);
+
+  // «Eliminar» hides the conversation at once and offers «Deshacer»; if the server says no, it comes back.
+  const deleteThread = useCallback(async (thread: CoworkThreadSummary) => {
+    setHiddenRoots(current => new Set(current).add(thread.rootId));
+    if (selectedRoot === thread.rootId) choose(null);
+    try {
+      await request(`/api/cowork/threads/${thread.rootId}`, { method: 'DELETE' });
+      toast({
+        title: 'Trabajo eliminado',
+        description: `«${thread.title}» ya no está en tu lista.`,
+        action: <ToastAction altText="Deshacer la eliminación" onClick={() => void restoreThread(thread)}>Deshacer</ToastAction>,
+      });
+    } catch (problem) {
+      setHiddenRoots(current => { const next = new Set(current); next.delete(thread.rootId); return next; });
+      toast({ variant: 'destructive', title: 'No pudimos eliminar el trabajo', description: problem instanceof Error ? problem.message : undefined });
+    }
+  }, [choose, request, restoreThread, selectedRoot, toast]);
+  const threadActions = threadNames.available
+    ? { onRename: renameThread, onDelete: (thread: CoworkThreadSummary) => void deleteThread(thread) }
+    : {};
   const title = useMemo(() => {
     const summary = threads.find(thread => thread.rootId === selectedRoot);
     if (summary) return summary.title;
@@ -725,12 +782,12 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
 
   return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
-      <CoworkThreadList threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} />
+      <CoworkThreadList threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} {...threadActions} />
     </div>
     <AnimatePresence>
       {drawerOpen && <m.div key="drawer" initial="hidden" animate="shown" exit="gone" className="absolute inset-0 z-40 flex">
         <m.div custom={-1} variants={cwPanel} className="w-[86%] max-w-[300px] border-r border-cw-border bg-cw-rail shadow-[var(--cw-shadow-lg)]">
-          <CoworkThreadList idPrefix="cowork-drawer" threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} />
+          <CoworkThreadList idPrefix="cowork-drawer" threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} {...threadActions} />
         </m.div>
         <m.button type="button" variants={cwSwap} aria-label="Cerrar lista de trabajos" className="flex-1 bg-black/25" onClick={() => setDrawerOpen(false)} />
       </m.div>}
