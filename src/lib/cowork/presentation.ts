@@ -653,8 +653,12 @@ export function coworkCleanTitle(message: string, max = 90) {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
-/** Collapses follow-up runs into conversations, newest activity first. */
-export function groupCoworkThreads(runs: CoworkRun[]): CoworkThreadSummary[] {
+/**
+ * Collapses follow-up runs into conversations, newest activity first. The conversation is the run's root_run_id when the
+ * server sends it (it holds even when the first run is older than the list), else the chain of parents; `titles` are the
+ * names the person gave (cowork_thread_settings), which replace the first message.
+ */
+export function groupCoworkThreads(runs: CoworkRun[], titles: Record<string, string> = {}): CoworkThreadSummary[] {
   const byId = new Map(runs.map(run => [run.id, run]));
   const rootOf = (run: CoworkRun) => {
     let cursor = run;
@@ -667,8 +671,8 @@ export function groupCoworkThreads(runs: CoworkRun[]): CoworkThreadSummary[] {
   };
   const groups = new Map<string, CoworkRun[]>();
   for (const run of runs) {
-    const root = rootOf(run);
-    groups.set(root.id, [...(groups.get(root.id) || []), run]);
+    const rootId = run.root_run_id || rootOf(run).id;
+    groups.set(rootId, [...(groups.get(rootId) || []), run]);
   }
   const time = (value: string) => Date.parse(value) || 0;
   return [...groups.entries()].map(([rootId, members]) => {
@@ -677,7 +681,7 @@ export function groupCoworkThreads(runs: CoworkRun[]): CoworkThreadSummary[] {
     const titled = chronological.find(run => !run.automatic) || chronological[0];
     return {
       id: latest.id, rootId,
-      title: coworkCleanTitle(titled.automatic ? 'Continuación de un trabajo anterior' : titled.message),
+      title: titles[rootId] || coworkCleanTitle(titled.automatic ? 'Continuación de un trabajo anterior' : titled.message),
       status: latest.status, updatedAt: latest.created_at,
       turns: chronological.filter(run => !run.automatic).length,
     };
