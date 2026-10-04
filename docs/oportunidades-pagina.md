@@ -42,7 +42,7 @@
 - **Lectura y escritura:**
   - todo va por la clave de servicio, porque las tablas no dan permisos a los miembros;
   - siempre en la organización activa de la persona, nunca con un id que venga en la petición.
-- **Se va del menú:** «Empresas guardadas» y la sección vieja. Sus rutas siguen apagadas con `NEXT_PUBLIC_OPPORTUNITIES_ENABLED=false` y se retiran en PR-3g.
+- **Se fue del menú:** «Empresas guardadas» y la sección vieja. Sus rutas se retiraron y redirigen a `/opportunities`; el Centro de ayuda y «Pregúntale a la IA» muestran Oportunidades con la misma regla que el menú (`OPPORTUNITIES_ALLOWED_EMAILS`).
 
 ## Cómo busca (`src/lib/server/commercial-opportunities/sync.ts`)
 
