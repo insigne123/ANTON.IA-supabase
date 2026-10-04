@@ -10,6 +10,13 @@ export async function getCampaignAttempts(client: any, campaign: BulkCampaign): 
   return data || [];
 }
 
+/** Persist where one message stands (product copy only), through the same RPC the sender uses. */
+export async function recordCampaignAttempt(campaign: BulkCampaign, draftId: string, state: CampaignAttempt['state'], code: string, copy: string, retryAt: string | null) {
+  const { error } = await getSupabaseAdminClient().rpc('record_bulk_campaign_attempt_v1', { p_campaign_id: campaign.id,
+    p_draft_id: draftId, p_state: state, p_code: code, p_message: copy, p_retry_at: retryAt });
+  if (error) throw error;
+}
+
 export async function sendTrackedCampaignMessage(campaign: BulkCampaign, message: CampaignRecipient['messages'][number]) {
   const admin = getSupabaseAdminClient();
   const attempts = await getCampaignAttempts(admin, campaign);
@@ -17,11 +24,8 @@ export async function sendTrackedCampaignMessage(campaign: BulkCampaign, message
   // A confirmed send is terminal even if dispatch retention later removes its row.
   if (prior?.state === 'sent') return { status: 'sent' as const, dispatch: null, replayed: true };
   if (!campaignAttemptAllowsRetry(prior)) return { status: 'deferred' as const, dispatch: null, replayed: false };
-  async function record(state: CampaignAttempt['state'], code: string, copy: string, retryAt: string | null) {
-    const { error } = await admin.rpc('record_bulk_campaign_attempt_v1', { p_campaign_id: campaign.id,
-      p_draft_id: message.draftId, p_state: state, p_code: code, p_message: copy, p_retry_at: retryAt });
-    if (error) throw error;
-  }
+  const record = (state: CampaignAttempt['state'], code: string, copy: string, retryAt: string | null) =>
+    recordCampaignAttempt(campaign, message.draftId, state, code, copy, retryAt);
   let result;
   try { result = await sendBulkCampaignMessage(campaign, message); }
   catch (error) {

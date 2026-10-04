@@ -5,7 +5,9 @@ import { getBrowserStorage } from './browser-storage';
 const SCHEMA_KEY = 'leadflow-sheet-columns-v1';
 const CUSTOM_DATA_KEY = 'leadflow-sheet-custom-v1';
 const COLUMNS_VERSION_KEY = 'unified_sheet_columns_v';
-const CURRENT_COLUMNS_VERSION = 4;
+const CURRENT_COLUMNS_VERSION = 5;
+// Autopilot was retired: its two columns leave the sheet (the data stays, nothing reads it anymore).
+const RETIRED_COLUMNS = new Set<ColumnKey>(['autopilotStatus', 'lastAutopilotEvent']);
 
 
 export function defaultColumns(): ColumnDef[] {
@@ -27,8 +29,6 @@ export function defaultColumns(): ColumnDef[] {
     { key: 'nextAction', label: 'Próximo paso', visible: false, width: 220, editable: true },
     { key: 'nextActionType', label: 'Tipo de paso', visible: false, width: 150, editable: true },
     { key: 'nextActionDueAt', label: 'Próxima fecha', visible: false, width: 170, editable: true },
-    { key: 'autopilotStatus', label: 'Autopilot', visible: false, width: 160, editable: true },
-    { key: 'lastAutopilotEvent', label: 'Último evento', visible: false, width: 220, editable: true },
     { key: 'meetingLink', label: 'Link reunión', visible: false, width: 220, editable: true },
   ];
   return cols;
@@ -74,9 +74,7 @@ export function loadColumns(): ColumnDef[] {
     ensureColumn({ key: 'nextAction', label: 'Próximo paso', visible: false, width: 220, editable: true }, 'notes');
     ensureColumn({ key: 'nextActionType', label: 'Tipo de paso', visible: false, width: 150, editable: true }, 'nextAction');
     ensureColumn({ key: 'nextActionDueAt', label: 'Próxima fecha', visible: false, width: 170, editable: true }, 'nextActionType');
-    ensureColumn({ key: 'autopilotStatus', label: 'Autopilot', visible: false, width: 160, editable: true }, 'nextActionDueAt');
-    ensureColumn({ key: 'lastAutopilotEvent', label: 'Último evento', visible: false, width: 220, editable: true }, 'autopilotStatus');
-    ensureColumn({ key: 'meetingLink', label: 'Link reunión', visible: false, width: 220, editable: true }, 'lastAutopilotEvent');
+    ensureColumn({ key: 'meetingLink', label: 'Link reunión', visible: false, width: 220, editable: true }, 'nextActionDueAt');
 
     if (version < 4) {
       cols = cols.map((column) => {
@@ -87,7 +85,7 @@ export function loadColumns(): ColumnDef[] {
       });
     }
 
-    cols = cols.filter((column, index, arr) => arr.findIndex((item) => item.key === column.key) === index);
+    cols = cols.filter((column, index, arr) => !RETIRED_COLUMNS.has(column.key) && arr.findIndex((item) => item.key === column.key) === index);
 
     if (version < CURRENT_COLUMNS_VERSION || !hasEmail) {
       // Persistimos migración para no rehacerla en cada carga
