@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
 import { answerHelpQuestion, createHelpRateLimiter, HELP_QUESTION_MAX } from '@/lib/help/answer-help-question';
 import { visibleHelpSections } from '@/lib/help/manual';
-import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +29,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Hiciste varias preguntas seguidas. Espera unos minutos y vuelve a intentarlo.' }, { status: 429, headers: noStore });
     }
     const sections = visibleHelpSections({
-      opportunities: isOpportunitiesEnabled(),
+      // The same rule as the page and the menu: the confirmed accounts in OPPORTUNITIES_ALLOWED_EMAILS.
+      opportunities: isOpportunitiesUserAllowed(auth.user, process.env.OPPORTUNITIES_ALLOWED_EMAILS),
       admin: auth.organizationRole === 'owner' || auth.organizationRole === 'admin',
     });
     const answer = await answerHelpQuestion({ question: body.data.question, sectionId: body.data.sectionId, sections });

@@ -97,8 +97,8 @@ export function ProfileSuggestionDialog({ suggestion, selection, profile, onSele
                         <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
                           {PROFILE_FIELD_LABELS[field]}
                           {current
-                            ? <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">Reemplaza lo actual</span>
-                            : <span className="inline-flex items-center gap-1 text-xs font-normal text-emerald-700 dark:text-emerald-300"><Check className="h-3 w-3" aria-hidden="true" />Campo vacío</span>}
+                            ? <span className="rounded-full bg-cw-warning-soft px-2 py-0.5 text-[11px] font-medium text-cw-warning">Reemplaza lo actual</span>
+                            : <span className="inline-flex items-center gap-1 text-xs font-normal text-cw-success"><Check className="h-3 w-3" aria-hidden="true" />Campo vacío</span>}
                         </span>
                         <ValuePreview field={field} value={value} />
                         {sources.length > 0 ? (

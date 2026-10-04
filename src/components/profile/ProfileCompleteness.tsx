@@ -17,8 +17,8 @@ export function ProfileCompleteness({ profile, onComplete }: { profile: ProfileF
       </div>
       <Progress value={percent} className="mt-3 h-2" aria-label={`Perfil completo al ${percent} %`} />
       {!canDraft ? (
-        <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-amber-300/60 bg-amber-50/80 p-3 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+        <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-cw-border bg-cw-warning-soft p-3 text-sm text-foreground">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-cw-warning" aria-hidden="true" />
           Sin productos y servicios o una propuesta de valor, la IA no puede redactar tus correos. Complétalos con IA o escríbelos abajo.
         </p>
       ) : null}

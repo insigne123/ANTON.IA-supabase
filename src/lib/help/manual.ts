@@ -212,7 +212,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     faqs: [
       { q: '¿Exporta todo o solo lo que veo?', a: 'Solo las filas visibles, con los filtros y columnas que elegiste.' },
-      { q: '¿Puedo importar contactos?', a: 'Sí, desde un archivo CSV en «Importar leads» (/leads/import).' },
+      { q: '¿Puedo importar contactos?', a: 'Sí, desde un archivo CSV: en «Tabla de datos», pulsa «Importar».' },
     ],
     related: ['por-escribir', 'por-completar'],
   },

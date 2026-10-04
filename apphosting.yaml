@@ -155,10 +155,6 @@ env:
     value: openai
     availability: [RUNTIME]
 
-  - variable: NEXT_PUBLIC_OPPORTUNITIES_ENABLED
-    value: "false"
-    availability: [BUILD, RUNTIME]
-
   - variable: ADMIN_DASHBOARD_ALLOWED_EMAILS
     value: gmeneses@grupoexpro.com,nicolas.yarur.g@yago.cl
     availability: [RUNTIME]
