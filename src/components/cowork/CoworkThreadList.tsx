@@ -75,7 +75,7 @@ export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect,
       {loading && threads.length === 0 && <p role="status" className="flex items-center gap-2 px-3 py-2 text-[13px] text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Cargando trabajos…</p>}
       {!loading && threads.length === 0 && <p className="px-3 py-2 text-[13px] leading-5 text-cw-muted">Tus trabajos aparecerán aquí.</p>}
       {groups.map(group => <div key={group.label} className="mt-3 first:mt-1">
-        <h2 className="px-3 pb-1 text-[11.5px] font-medium text-cw-faint">{group.label}</h2>
+        <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}</h2>
         <ul className="space-y-px">
           {group.items.map(thread => {
             const status = coworkStatusCopy(thread.status);
@@ -108,7 +108,7 @@ export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect,
                 <span className="min-w-0 flex-1 truncate">{thread.title}</span>
                 {flagged
                   ? <span className={cn('flex shrink-0 items-center gap-1.5 text-[11.5px] text-cw-muted', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}><CwStatusDot tone={status.tone} pulse={working && thread.status !== 'waiting_approval'} /><span className="sr-only">{status.label}</span></span>
-                  : <span className={cn('shrink-0 text-[11.5px] text-cw-faint', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}>{coworkShortTime(thread.updatedAt)}</span>}
+                  : <span className={cn('shrink-0 text-[11.5px] text-foreground/70', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}>{coworkShortTime(thread.updatedAt)}</span>}
               </button>
               {manageable && <DropdownMenu>
                 <DropdownMenuTrigger asChild>
