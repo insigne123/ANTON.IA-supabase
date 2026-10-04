@@ -33,6 +33,7 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       const errors = []; page.on('pageerror', error => errors.push(error.message));
       let saved = null;
       let assistCalls = 0;
+      const sendCalls = [];
       const assistInputs = [];
       const person = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', reasons: ['Sin envíos registrados'], blockedReason: null };
       const ranked = { ...person, score: 88 };
@@ -52,6 +53,11 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
             : { proposal: { subject: 'Propuesta de conversación', body: 'Hola Ana, ¿podemos conversar esta semana?', delayDays: 0 } };
         }
         else if (url.pathname.endsWith('/profiles')) result = route.request().method() === 'GET' ? { profiles: [] } : { profile: { id: 'profile', name: 'Perfil', criteria: {}, created_at: 'now' } };
+        else if (url.pathname.endsWith('/dispatch') || url.pathname.endsWith('/process')) {
+          sendCalls.push(url.pathname.split('/').pop());
+          result = { summary: { attempted: 1, sent: 1, held: 0, deferred: 0, attention: 0, campaigns: 1 }, progress: { ready: 0, waiting: 0, done: 1, attention: 0, total: 1 } };
+        }
+        else if (url.pathname.endsWith('/campaign') && route.request().method() === 'GET') result = { campaign: saved, deliveries: [], attempts: [] };
         else if (url.pathname.endsWith('/history')) result = { recipient: { email: person.email, name: person.name }, events: [{ at: '2026-09-05T00:00:00Z', kind: 'campaign_sent', label: 'Correo inicial de campaña', detail: 'Asunto' }] };
         else if (url.pathname.endsWith('/revise')) {
           saved = { ...saved, status: 'draft', approved_at: null, revision: saved.revision + 1, definition: body.definition, recipients: [{ ...person,
@@ -184,6 +190,12 @@ test('campaign workspace: AI rank, manual filters, profiles, AI proposal, indivi
       await page.getByRole('button', { name: 'Aprobar campaña' }).click();
       await page.getByRole('button', { name: 'Pausar campaña' }).waitFor();
       assert.equal(saved.status, 'approved'); assert.deepEqual(errors, []);
+      // Plan 9, PR-16: the server sends in batches; one click is one request per batch, never one per recipient.
+      await page.getByRole('button', { name: 'Enviar correos disponibles' }).click();
+      await page.getByText('1 correo enviado.', { exact: false }).waitFor();
+      assert.deepEqual(sendCalls, ['dispatch']);
+      assert.deepEqual(errors, []);
+      sendCalls.length = 0;
       await page.close();
     }
   } finally { await browser?.close(); rmSync(temp, { recursive: true, force: true }); }

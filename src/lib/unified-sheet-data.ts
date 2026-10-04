@@ -245,25 +245,27 @@ export async function buildUnifiedRows(): Promise<UnifiedRow[]> {
   const rows: UnifiedRow[] = [];
 
   try {
+    // Each source falls back on its own: without `await`, a rejected source escaped its try/catch and Promise.all dropped
+    // every other source with it, leaving the whole sheet (and the pipeline) empty.
     const [savedRaw, enrichedRaw, oppsRaw, contactedRaw, customDataMap] = await Promise.all([
       (async () => {
-        try { return supabaseService.getLeads(); }
+        try { return await supabaseService.getLeads(); }
         catch (e) { console.error('[sheet] getSavedLeads error', e); return []; }
       })(),
       (async () => {
-        try { return getEnrichedLeads(); }
+        try { return await getEnrichedLeads(); }
         catch (e) { console.error('[sheet] getEnrichedLeads error', e); return []; }
       })(),
       (async () => {
-        try { return savedOpportunitiesStorage.get(); }
+        try { return await savedOpportunitiesStorage.get(); }
         catch (e) { console.error('[sheet] getSavedOpportunities error', e); return []; }
       })(),
       (async () => {
-        try { return contactedLeadsStorage.get(); }
+        try { return await contactedLeadsStorage.get(); }
         catch (e) { console.error('[sheet] getContactedLeads error', e); return []; }
       })(),
       (async () => {
-        try { return unifiedSheetService.getAllCustom(); }
+        try { return await unifiedSheetService.getAllCustom(); }
         catch (e) { console.error('[sheet] getAllCustom error', e); return {}; }
       })(),
     ]);
