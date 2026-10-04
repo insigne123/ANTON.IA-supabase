@@ -350,7 +350,7 @@ function SearchSummary({ overview, running }: { overview: Overview; running: boo
         </div>
         {missing.length ? (
           <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">
-            Sin clave: {missing.map(source => `${source.label} (${source.missing})`).join(' y ')}. La configura el mantenedor.
+            {missing.map(source => source.label).join(' y ')} {missing.length === 1 ? 'no está conectado' : 'no están conectados'}. Pide a quien administra ANTON.IA que {missing.length === 1 ? 'lo active' : 'los active'}.
           </p>
         ) : null}
       </div>
@@ -515,7 +515,7 @@ function TenderSummary({ overview, running }: { overview: Overview; running: boo
         </div>
         <p className="text-xs text-muted-foreground">Sin costo: usa la cuota diaria del ticket de Mercado Público. Se actualiza sola cada mañana.</p>
         {!tenderSearch.ticket ? (
-          <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">Sin ticket de Mercado Público (MERCADO_PUBLICO_TICKET). Lo configura el mantenedor.</p>
+          <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">Mercado Público no está conectado. Pide a quien administra ANTON.IA que lo active.</p>
         ) : null}
       </div>
     </section>
@@ -751,7 +751,7 @@ function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
         <p className="text-sm text-foreground">
           Costo máximo: <strong>{formatUsd(plan.estimateUsd)}</strong>. Este mes llevas {formatUsd(month.spentUsd)} de {formatUsd(month.capUsd)}.
         </p>
-        {overCap ? <p className="rounded-lg bg-cw-warning-soft px-3 py-2 text-sm text-cw-warning">Esta búsqueda pasaría el tope del mes. Pide al mantenedor subir OPPORTUNITIES_MONTHLY_USD_CAP o espera al próximo mes.</p> : null}
+        {overCap ? <p className="rounded-lg bg-cw-warning-soft px-3 py-2 text-sm text-cw-warning">Esta búsqueda pasaría el tope de gasto del mes. Espera al próximo mes o pide a quien administra ANTON.IA que suba el tope.</p> : null}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancelar</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm} disabled={overCap}>Buscar ahora</AlertDialogAction>

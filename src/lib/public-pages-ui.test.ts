@@ -33,3 +33,10 @@ test('connecting the extension says at once when the link has no code, and sends
   assert.match(page, /disabled=\{status === 'pending' \|\| !nonce\}/);
   assert.doesNotMatch(page, /4\.0\.9|(slate|indigo|emerald|red)-\d/);
 });
+
+test('«Oportunidades» never shows environment variable names or the word «mantenedor» to the person', () => {
+  const page = read('src/components/commercial-opportunities/OpportunitiesWorkspace.tsx');
+  assert.doesNotMatch(page, /mantenedor/);
+  assert.doesNotMatch(page, /MERCADO_PUBLICO_TICKET|OPPORTUNITIES_MONTHLY_USD_CAP|\$\{source\.missing\}/);
+  assert.match(page, /Pide a quien administra ANTON\.IA/);
+});
