@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import { OUTSOURCING_EMAIL_STYLE_PRESETS, outsourcingEmailStylePresetSelection, styleProfileFromOutsourcingEmailStylePreset } from '@/lib/outsourcing-email-style-presets';
 import { canPublishEmailTemplates } from '@/lib/email-studio/library-contract';
-import { GRUPOEXPRO_REFERENCE_TEMPLATES } from '@/lib/email-studio/grupoexpro-templates';
+import { canUseGrupoExproReferences, GRUPOEXPRO_REFERENCE_TEMPLATES } from '@/lib/email-studio/grupoexpro-templates';
 import { handleAuthError, requireAuth, type AuthContext } from '@/lib/server/auth-utils';
 import { materializedOutsourcingEmailStylePresetId, type EmailStyleProfileRow } from '@/lib/server/email-style-profiles';
 
@@ -102,10 +102,11 @@ export async function GET(req: NextRequest) {
         return { id, name: profile.name, profile: { ...profile, id }, revision: 1,
           isDefault: false, updatedAt: '1970-01-01T00:00:00.000Z', libraryScope: 'reference' };
       }) : [];
-    // Explicit request only. References are never presented as organization-approved templates.
-    const references = req.nextUrl.searchParams.get('referenceCollection') === 'grupoexpro'
+    // Explicit request only, and only for GrupoExpro accounts. References are never presented as organization-approved templates.
+    const referencesAvailable = canUseGrupoExproReferences(auth.user, process.env.OPPORTUNITIES_ALLOWED_EMAILS);
+    const references = referencesAvailable && req.nextUrl.searchParams.get('referenceCollection') === 'grupoexpro'
       ? GRUPOEXPRO_REFERENCE_TEMPLATES : [];
-    return NextResponse.json({ styles: [...rows.map(serializeEmailStyle), ...presets], references,
+    return NextResponse.json({ styles: [...rows.map(serializeEmailStyle), ...presets], references, referencesAvailable,
       canPublish: canPublishEmailTemplates(auth.organizationRole), organizationId: auth.organizationId,
     }, { headers: NO_STORE_HEADERS });
   } catch (error: any) {
