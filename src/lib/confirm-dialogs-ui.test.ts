@@ -20,3 +20,11 @@ test('comments, campaigns and the composer ask with the app dialog, never the br
     assert.match(source, /tone: 'danger'/, `${file} marks the destructive choice`);
   }
 });
+
+test('«Firmas y estilo» asks with the app dialog to archive or publish a template', () => {
+  const source = readFileSync('src/components/email-studio/EmailStyleDesigner.tsx', 'utf8');
+  assert.match(source, /const confirm = useConfirm\(\);/);
+  assert.match(source, /title: '¿Archivar esta plantilla\?'[^}]*tone: 'danger'/);
+  assert.match(source, /title: '¿Publicar para tu equipo\?'/);
+  assert.doesNotMatch(source, /window\.confirm\('¿(Archivar|Confirmas)/, 'archive and publish leave the browser confirm()');
+});

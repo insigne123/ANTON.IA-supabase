@@ -28,6 +28,8 @@ function harness(options: { readOnly?: boolean; busy?: boolean; error?: string; 
   const dependencies: Record<string, any> = {
     isBusy: options.busy || false, readOnly: options.readOnly || false, libraryScope: 'personal',
     discardChanges: () => options.discard !== false, window: { confirm: () => true },
+    // The app's confirmation dialog (useConfirm), accepting.
+    confirm: async () => true,
     styleName: saved.name, profile: saved.profile, selectedStyleId: saved.id, selectedRevision: 3,
     styles: [saved], isDefault: false, sourceCollection: null, styleNameRef: { current: null },
     normalizeSavedStyle: (value: any) => value, createStyleDraft: () => draft,
