@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { format } from 'date-fns';
-
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { PageHeader } from '@/components/page-header';
+import { useConfirm } from '@/components/confirm-dialog';
+import { formatDateTime } from '@/lib/dates';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -81,29 +83,33 @@ const statusOptions = [
   { value: 'rejected', label: 'Rechazadas' },
 ] as const;
 
-function statusBadgeVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+function statusBadgeVariant(status: string): 'success' | 'info' | 'danger' | 'neutral' {
   switch (status) {
     case 'resolved':
-      return 'default';
+      return 'success';
     case 'in_review':
-      return 'secondary';
+      return 'info';
     case 'rejected':
-      return 'destructive';
+      return 'danger';
     default:
-      return 'outline';
+      return 'neutral';
   }
 }
+
+const STATUS_LABELS: Record<string, string> = { submitted: 'Recibida', in_review: 'En revisión', resolved: 'Resuelta', rejected: 'Rechazada' };
+const statusLabel = (status: string) => STATUS_LABELS[status] || 'Sin estado';
+const dateTime = (value: string | null | undefined) => (value ? formatDateTime(value) : 'sin fecha');
 
 function requestTypeLabel(value: string) {
   switch (value) {
     case 'access':
       return 'Acceso';
     case 'rectification':
-      return 'Rectificacion';
+      return 'Rectificación';
     case 'deletion':
-      return 'Supresion';
+      return 'Supresión';
     case 'opposition':
-      return 'Oposicion';
+      return 'Oposición';
     case 'portability':
       return 'Portabilidad';
     case 'blocking':
@@ -125,14 +131,15 @@ export default function PrivacyRequestsSettingsPage() {
   const [lookupResult, setLookupResult] = useState<SubjectLookupResponse | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<{ tone: 'success' | 'warning'; message: string } | null>(null);
+  const confirm = useConfirm();
 
-  const loadRequests = useCallback(async (nextStatus = status) => {
+  const loadRequests = useCallback(async () => {
     setLoading(true);
     setError('');
 
     try {
+      // Every request, once: the status filter narrows the list on the page, so the totals above count all of them.
       const params = new URLSearchParams();
-      if (nextStatus !== 'all') params.set('status', nextStatus);
       params.set('limit', '100');
 
       const response = await fetch(`/api/privacy/requests?${params.toString()}`, { cache: 'no-store' });
@@ -149,7 +156,7 @@ export default function PrivacyRequestsSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, []);
 
   async function updateStatus(id: string, nextStatus: 'submitted' | 'in_review' | 'resolved' | 'rejected') {
     setUpdatingId(id);
@@ -210,10 +217,20 @@ export default function PrivacyRequestsSettingsPage() {
     if (!targetEmail) return;
 
       if (action === 'delete') {
-        const confirmed = window.confirm(`Esto eliminara datos comerciales asociados a ${targetEmail} y mantendra una supresion minima para no volver a contactarlo. ¿Continuar?`);
+        const confirmed = await confirm({
+          title: `¿Eliminar los datos de ${targetEmail}?`,
+          description: 'Se borran sus datos comerciales y queda una supresión mínima para no volver a contactarlo.',
+          confirmLabel: 'Eliminar datos',
+          tone: 'danger',
+        });
         if (!confirmed) return;
       } else if (action === 'suspend_account') {
-        const confirmed = window.confirm(`Esto bloqueara el acceso al SaaS para ${targetEmail}. ¿Continuar?`);
+        const confirmed = await confirm({
+          title: `¿Suspender la cuenta de ${targetEmail}?`,
+          description: 'Esa persona deja de poder entrar a la app.',
+          confirmLabel: 'Suspender cuenta',
+          tone: 'danger',
+        });
         if (!confirmed) return;
       }
 
@@ -238,7 +255,7 @@ export default function PrivacyRequestsSettingsPage() {
             ? `El contacto para ${targetEmail} quedó bloqueado. Vuelve a ejecutar la eliminación cuando termine el trabajo en curso.${reasonText}`
             : `El contacto para ${targetEmail} quedo bloqueado. La eliminacion no se ejecuto y requiere revision manual.${reasonText}`,
         });
-        await loadRequests(status);
+        await loadRequests();
         if (lookupEmail === targetEmail || lookupResult?.email === targetEmail) {
           await runLookup(targetEmail);
         }
@@ -271,7 +288,7 @@ export default function PrivacyRequestsSettingsPage() {
         setActionNotice({ tone: 'success', message: `Se eliminaron los datos comerciales para ${targetEmail} y se mantuvo una supresion minima.${warningText}` });
       }
 
-      await loadRequests(status);
+      await loadRequests();
       if (lookupEmail === targetEmail || lookupResult?.email === targetEmail) {
         await runLookup(targetEmail);
       }
@@ -283,8 +300,10 @@ export default function PrivacyRequestsSettingsPage() {
   }
 
   useEffect(() => {
-    loadRequests(status);
-  }, [loadRequests, status]);
+    void loadRequests();
+  }, [loadRequests]);
+
+  const visibleRequests = useMemo(() => (status === 'all' ? requests : requests.filter((request) => request.status === status)), [requests, status]);
 
   const summary = useMemo(() => {
     return requests.reduce(
@@ -301,16 +320,16 @@ export default function PrivacyRequestsSettingsPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Solicitudes de privacidad</h1>
-          <p className="text-sm text-muted-foreground">
-            Revisa las solicitudes registradas desde el formulario publico de derechos sobre datos personales.
-          </p>
-        </div>
+      <PageHeader
+        title="Solicitudes de privacidad"
+        back={{ href: '/settings/privacy', label: 'Privacidad' }}
+        count={loading ? null : requests.length}
+        description="Las solicitudes que llegan desde el formulario público de derechos sobre datos personales."
+      />
+      <div className="flex flex-wrap items-center justify-end gap-4">
         <div className="flex items-center gap-2">
           <Select value={status} onValueChange={(value) => setStatus(value as (typeof statusOptions)[number]['value'])}>
-            <SelectTrigger className="w-[190px]">
+            <SelectTrigger className="w-[190px]" aria-label="Filtrar por estado">
               <SelectValue placeholder="Filtrar por estado" />
             </SelectTrigger>
             <SelectContent>
@@ -319,8 +338,8 @@ export default function PrivacyRequestsSettingsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => loadRequests(status)} disabled={loading}>
-            {loading ? 'Actualizando...' : 'Actualizar'}
+          <Button variant="outline" onClick={() => void loadRequests()} disabled={loading}>
+            {loading ? 'Actualizando…' : 'Actualizar'}
           </Button>
         </div>
       </div>
@@ -360,32 +379,26 @@ export default function PrivacyRequestsSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {error ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </div>
-          ) : null}
+          {error ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null}
 
           {actionNotice ? (
-            <div className={actionNotice.tone === 'warning'
-              ? 'rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
-              : 'rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200'}>
-              {actionNotice.message}
-            </div>
+            <Alert variant={actionNotice.tone === 'warning' ? 'warning' : 'success'} role="status">
+              <AlertDescription>{actionNotice.message}</AlertDescription>
+            </Alert>
           ) : null}
 
-          {!loading && requests.length === 0 ? (
+          {!loading && visibleRequests.length === 0 ? (
             <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
               No hay solicitudes para el filtro actual.
             </div>
           ) : null}
 
-          {requests.map((request) => (
+          {visibleRequests.map((request) => (
             <div key={request.id} className="rounded-xl border p-4 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={statusBadgeVariant(request.status)}>{request.status}</Badge>
+                    <Badge variant={statusBadgeVariant(request.status)}>{statusLabel(request.status)}</Badge>
                     <Badge variant="outline">{requestTypeLabel(request.request_type)}</Badge>
                   </div>
                   <div className="text-sm font-medium">
@@ -398,7 +411,7 @@ export default function PrivacyRequestsSettingsPage() {
                   </div>
                 </div>
                 <div className="text-right text-xs text-muted-foreground">
-                  <div>{format(new Date(request.submitted_at), 'dd/MM/yyyy HH:mm')}</div>
+                  <div>{dateTime(request.submitted_at)}</div>
                   <div className="font-mono">{request.id}</div>
                 </div>
               </div>
@@ -421,7 +434,7 @@ export default function PrivacyRequestsSettingsPage() {
                   {request.last_action_type ? (
                     <div>
                       Ultima accion: {request.last_action_type}
-                      {request.last_action_at ? ` · ${format(new Date(request.last_action_at), 'dd/MM/yyyy HH:mm')}` : ''}
+                      {request.last_action_at ? ` · ${dateTime(request.last_action_at)}` : ''}
                     </div>
                   ) : null}
                 </div>
@@ -432,7 +445,7 @@ export default function PrivacyRequestsSettingsPage() {
                     disabled={actionLoadingId === request.id}
                     onClick={() => runSubjectAction(request, 'export')}
                   >
-                    {actionLoadingId === request.id ? 'Procesando...' : 'Exportar JSON'}
+                    {actionLoadingId === request.id ? 'Procesando…' : 'Exportar JSON'}
                   </Button>
                   <Button
                     variant="secondary"
@@ -521,18 +534,14 @@ export default function PrivacyRequestsSettingsPage() {
               onChange={(event) => setLookupEmail(event.target.value)}
             />
             <Button onClick={() => runLookup(lookupEmail)} disabled={lookupLoading}>
-              {lookupLoading ? 'Buscando...' : 'Buscar'}
+              {lookupLoading ? 'Buscando…' : 'Buscar'}
             </Button>
           </div>
 
-          {lookupError ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {lookupError}
-            </div>
-          ) : null}
+          {lookupError ? <Alert variant="destructive"><AlertDescription>{lookupError}</AlertDescription></Alert> : null}
 
           {lookupResult?.warnings?.length ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="rounded-md border border-cw-border bg-cw-warning-soft px-3 py-2 text-sm text-foreground">
               {lookupResult.warnings.map((warning) => (
                 <div key={warning}>{warning}</div>
               ))}
@@ -562,7 +571,7 @@ export default function PrivacyRequestsSettingsPage() {
                     {lookupResult.records.contactedLeads.length === 0 ? <div className="text-muted-foreground">Sin coincidencias.</div> : lookupResult.records.contactedLeads.map((row) => (
                       <div key={row.id} className="rounded-lg border p-3">
                         <div>{row.name || 'Sin nombre'} · {row.company || 'Sin empresa'}</div>
-                        <div className="text-muted-foreground">Estado: {row.status || 'sin estado'} · Ultimo envio: {row.sent_at ? format(new Date(row.sent_at), 'dd/MM/yyyy HH:mm') : 'sin fecha'}</div>
+                        <div className="text-muted-foreground">Estado: {row.status || 'sin estado'} · Último envío: {dateTime(row.sent_at)}</div>
                       </div>
                     ))}
                   </div>
@@ -574,7 +583,7 @@ export default function PrivacyRequestsSettingsPage() {
                     {lookupResult.records.enrichedLeads.length === 0 ? <div className="text-muted-foreground">Sin coincidencias.</div> : lookupResult.records.enrichedLeads.map((row) => (
                       <div key={row.id} className="rounded-lg border p-3">
                         <div>{row.full_name || 'Sin nombre'} · {row.company_name || 'Sin empresa'}</div>
-                        <div className="text-muted-foreground">Cargo: {row.title || 'sin cargo'} · Actualizado: {row.updated_at ? format(new Date(row.updated_at), 'dd/MM/yyyy HH:mm') : 'sin fecha'}</div>
+                        <div className="text-muted-foreground">Cargo: {row.title || 'sin cargo'} · Actualizado: {dateTime(row.updated_at)}</div>
                       </div>
                     ))}
                   </div>
@@ -586,7 +595,7 @@ export default function PrivacyRequestsSettingsPage() {
                     {lookupResult.records.unsubscribedEntries.length === 0 ? <div className="text-muted-foreground">Sin coincidencias.</div> : lookupResult.records.unsubscribedEntries.map((row) => (
                       <div key={row.id} className="rounded-lg border p-3">
                         <div>{row.email}</div>
-                        <div className="text-muted-foreground">Motivo: {row.reason || 'sin motivo'} · Fecha: {row.created_at ? format(new Date(row.created_at), 'dd/MM/yyyy HH:mm') : 'sin fecha'}</div>
+                        <div className="text-muted-foreground">Motivo: {row.reason || 'sin motivo'} · Fecha: {dateTime(row.created_at)}</div>
                       </div>
                     ))}
                   </div>
