@@ -1,7 +1,9 @@
-import { nextCampaignMessage, type BulkCampaign, type CampaignDelivery } from '@/lib/bulk-campaigns';
+import { nextCampaignMessage, type AudiencePerson, type BulkCampaign, type CampaignDelivery, type CampaignRecipient } from '@/lib/bulk-campaigns';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { getCampaignAttempts, sendTrackedCampaignMessage } from '@/lib/server/bulk-campaign-attempts';
+import { getCampaignAttempts, recordCampaignAttempt, sendTrackedCampaignMessage } from '@/lib/server/bulk-campaign-attempts';
+import { loadAudienceForScope } from '@/lib/server/bulk-campaign-audience';
 import { campaignAttemptAllowsRetry, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { recipientEligibility, type RecipientEligibility } from '@/lib/bulk-campaign-eligibility';
 
 export type BulkWorkerDependencies = {
   list: () => Promise<BulkCampaign[]>;
@@ -13,12 +15,19 @@ export type BulkWorkerDependencies = {
   /** 4.1: espaciado minimo entre envios del mismo lote Cowork, en minutos.
    * Ausente en dependencias heredadas: sin fila de lote no hay espaciado. */
   batchSpacing?: (campaign: BulkCampaign) => Promise<number>;
+  /** The current audience of the campaign's owner, read once per campaign and only when something is due. Ausente en
+   * dependencias heredadas: sin audiencia no hay revisión previa (the sender's guards still run). */
+  audience?: (campaign: BulkCampaign) => Promise<AudiencePerson[]>;
+  /** Holds one message for review when the audience no longer allows it, so it is not retried on every pass. */
+  hold?: (campaign: BulkCampaign, message: CampaignRecipient['messages'][number], check: Extract<RecipientEligibility, { ok: false }>) => Promise<void>;
 };
-function dependencies(): BulkWorkerDependencies {
+export function bulkWorkerDependencies(): BulkWorkerDependencies {
   const admin = getSupabaseAdminClient();
   return {
     now: Date.now, send: sendTrackedCampaignMessage,
     attempts: campaign => getCampaignAttempts(admin, campaign),
+    audience: campaign => loadAudienceForScope({ client: admin, organizationId: campaign.organization_id }),
+    hold: (campaign, message, check) => recordCampaignAttempt(campaign, message.draftId, 'attention', check.code, check.message, null),
     async list() {
       // Touching attempted batches rotates the queue so one failing campaign cannot starve others.
       const { data, error } = await admin.from('bulk_campaigns').select('*').eq('status', 'approved').order('updated_at').order('id').limit(20);
@@ -47,14 +56,15 @@ function dependencies(): BulkWorkerDependencies {
   };
 }
 
-export async function runBulkCampaignWorker(deps: BulkWorkerDependencies = dependencies(), budgetMs = 45000) {
+export async function runBulkCampaignWorker(deps: BulkWorkerDependencies = bulkWorkerDependencies(), budgetMs = 45000, maxAttempts = 20) {
   const started = deps.now();
-  const summary = { attempted: 0, sent: 0, deferred: 0, attention: 0, campaigns: 0 };
+  const summary = { attempted: 0, sent: 0, deferred: 0, attention: 0, held: 0, campaigns: 0 };
   for (const campaign of await deps.list()) {
-    if (deps.now() - started >= budgetMs || summary.attempted >= 20) break;
+    if (deps.now() - started >= budgetMs || summary.attempted >= maxAttempts) break;
     if (campaign.status !== 'approved' || !campaign.approved_at) continue;
     summary.campaigns++;
     try {
+      let audience: Map<string, AudiencePerson> | null = null;
       const attempts = await deps.attempts(campaign);
       const deliveries = withSentAttemptsAsDeliveries(await deps.deliveries(campaign), attempts);
       const spacingMinutes = deps.batchSpacing ? await deps.batchSpacing(campaign) : 0;
@@ -68,10 +78,19 @@ export async function runBulkCampaignWorker(deps: BulkWorkerDependencies = depen
         }
       }
       for (const person of campaign.recipients) {
-        if (deps.now() - started >= budgetMs || summary.attempted >= 20) break;
+        if (deps.now() - started >= budgetMs || summary.attempted >= maxAttempts) break;
         const next = nextCampaignMessage(person, deliveries, campaign.approved_at, deps.now());
         if (!next || next.state !== 'ready') continue;
         if (!campaignAttemptAllowsRetry(attempts.find(value => value.draft_id === next.message.draftId), deps.now())) continue;
+        if (deps.audience) {
+          audience ??= new Map((await deps.audience(campaign)).map(value => [value.email.trim().toLowerCase(), value]));
+          const check = recipientEligibility(audience.get(person.email.trim().toLowerCase()), next.index, campaign.definition.criteria, deps.now());
+          if (!check.ok) {
+            summary.held++;
+            try { await deps.hold?.(campaign, next.message, check); } catch { summary.attention++; }
+            continue;
+          }
+        }
         summary.attempted++;
         try {
           const result = await deps.send(campaign, next.message);
