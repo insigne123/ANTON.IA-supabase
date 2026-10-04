@@ -1,373 +1,341 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+// «Bajas y bloqueos» (Plan 9, PR-18): who must not receive emails, by address or by whole domain. Blocking a single address
+// is new (before, only domains could be added); removing either asks first; «Probar bloqueo» says plainly whether an
+// address can be written to, without treating a contactable address as an error.
+import { useCallback, useEffect, useState } from 'react';
+import { Loader2, Plus, RefreshCw, ShieldBan, ShieldCheck, Trash2 } from 'lucide-react';
+
 import { PageHeader } from '@/components/page-header';
+import { useConfirm } from '@/components/confirm-dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useToast } from '@/hooks/use-toast';
-import { unsubscribeService, type UnsubscribedEmail } from '@/lib/services/unsubscribe-service';
-import { domainService, type ExcludedDomain } from '@/lib/services/domain-service';
-import { Trash2, Loader2, RefreshCw, Plus, ShieldBan } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import { formatDate } from '@/lib/dates';
+import { domainService, type ExcludedDomain } from '@/lib/services/domain-service';
+import { organizationService } from '@/lib/services/organization-service';
+import { unsubscribeService, type UnsubscribedEmail } from '@/lib/services/unsubscribe-service';
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DOMAIN_PATTERN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+type TestResult = { tone: 'blocked' | 'review' | 'clear' | 'error'; message: string };
+
+const TEST_ALERT: Record<TestResult['tone'], 'success' | 'warning' | 'info' | 'destructive'> = {
+  blocked: 'success', review: 'warning', clear: 'info', error: 'destructive',
+};
 
 export default function UnsubscribesPage() {
-    const { toast } = useToast();
-    const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+  const confirm = useConfirm();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [emailList, setEmailList] = useState<UnsubscribedEmail[]>([]);
+  const [domainList, setDomainList] = useState<ExcludedDomain[]>([]);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
-    // Email List State
-    const [emailList, setEmailList] = useState<UnsubscribedEmail[]>([]);
-    const [removingEmailId, setRemovingEmailId] = useState<string | null>(null);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [addingEmail, setAddingEmail] = useState(false);
+  const [domainOpen, setDomainOpen] = useState(false);
+  const [newDomain, setNewDomain] = useState('');
+  const [addingDomain, setAddingDomain] = useState(false);
 
-    // Domain List State
-    const [domainList, setDomainList] = useState<ExcludedDomain[]>([]);
-    const [removingDomainId, setRemovingDomainId] = useState<string | null>(null);
+  const [testOpen, setTestOpen] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
 
-    // Add Domain State
-    const [isAddDomainOpen, setIsAddDomainOpen] = useState(false);
-    const [newDomain, setNewDomain] = useState('');
-    const [addingDomain, setAddingDomain] = useState(false);
-
-    const loadData = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [emails, domains] = await Promise.all([
-                unsubscribeService.getBlacklist(),
-                domainService.getExcludedDomains()
-            ]);
-            setEmailList(emails);
-            setDomainList(domains);
-        } catch (e) {
-            console.error(e);
-            toast({ variant: 'destructive', title: 'Error', description: 'No se pudieron cargar las listas.' });
-        } finally {
-            setLoading(false);
-        }
-    }, [toast]);
-
-    useEffect(() => {
-        loadData();
-    }, [loadData]);
-
-    // --- Actions: Emails ---
-    async function removeEmail(id: string) {
-        if (!confirm('¿Estás seguro de desbloquear este correo?')) return;
-        setRemovingEmailId(id);
-        try {
-            await unsubscribeService.removeFromBlacklist(id);
-            setEmailList(prev => prev.filter(x => x.id !== id));
-            toast({ title: 'Correo desbloqueado' });
-        } catch (err) {
-            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo eliminar.' });
-        } finally {
-            setRemovingEmailId(null);
-        }
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [emails, domains] = await Promise.all([unsubscribeService.getBlacklist(), domainService.getExcludedDomains()]);
+      setEmailList(emails);
+      setDomainList(domains);
+    } catch {
+      toast({ variant: 'destructive', title: 'No pudimos cargar los bloqueos', description: 'Intenta de nuevo en unos minutos.' });
+    } finally {
+      setLoading(false);
     }
+  }, [toast]);
 
-    // --- Actions: Domains ---
-    async function handleAddDomain() {
-        if (!newDomain.trim()) return;
-        setAddingDomain(true);
-        try {
-            await domainService.addDomain(newDomain);
-            toast({ title: 'Dominio Bloqueado', description: `${newDomain} ha sido añadido a la lista negra.` });
-            setIsAddDomainOpen(false);
-            setNewDomain('');
-            // Reload list
-            const domains = await domainService.getExcludedDomains();
-            setDomainList(domains);
-        } catch (e) {
-            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo agregar el dominio.' });
-        } finally {
-            setAddingDomain(false);
-        }
+  useEffect(() => { void loadData(); }, [loadData]);
+
+  const cleanEmail = newEmail.trim().toLowerCase();
+  const cleanDomain = newDomain.trim().toLowerCase().replace(/^@/, '');
+
+  async function addEmail() {
+    if (!EMAIL_PATTERN.test(cleanEmail) || !user) return;
+    setAddingEmail(true);
+    try {
+      const organizationId = await organizationService.getCurrentOrganizationId();
+      await unsubscribeService.addToBlacklist(cleanEmail, user.id, organizationId, 'Bloqueado a mano');
+      toast({ title: 'Correo bloqueado', description: `${cleanEmail} no recibirá más correos.` });
+      setEmailOpen(false);
+      setNewEmail('');
+      setEmailList(await unsubscribeService.getBlacklist());
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo bloquear el correo', description: 'Revisa la dirección e intenta de nuevo.' });
+    } finally {
+      setAddingEmail(false);
     }
+  }
 
-    async function removeDomain(id: string) {
-        if (!confirm('¿Estás seguro de desbloquear este dominio? Se podrán volver a contactar correos de este dominio.')) return;
-        setRemovingDomainId(id);
-        try {
-            await domainService.removeDomain(id);
-            setDomainList(prev => prev.filter(x => x.id !== id));
-            toast({ title: 'Dominio desbloqueado' });
-        } catch (err) {
-            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo eliminar.' });
-        } finally {
-            setRemovingDomainId(null);
-        }
+  async function addDomain() {
+    if (!DOMAIN_PATTERN.test(cleanDomain)) return;
+    setAddingDomain(true);
+    try {
+      await domainService.addDomain(cleanDomain);
+      toast({ title: 'Dominio bloqueado', description: `Ningún correo de @${cleanDomain} será contactado.` });
+      setDomainOpen(false);
+      setNewDomain('');
+      setDomainList(await domainService.getExcludedDomains());
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo bloquear el dominio', description: 'Intenta de nuevo en unos minutos.' });
+    } finally {
+      setAddingDomain(false);
     }
+  }
 
-    // --- Actions: Test Block ---
-    const [isTestOpen, setIsTestOpen] = useState(false);
-    const [testEmail, setTestEmail] = useState('');
-    const [testing, setTesting] = useState(false);
-    const [testResult, setTestResult] = useState<{ status: 'success' | 'blocked' | 'error', message: string } | null>(null);
-
-    async function handleTestEmail() {
-        if (!testEmail.trim()) return;
-        setTesting(true);
-        setTestResult(null);
-        try {
-            const res = await fetch(`/api/privacy/contactability?email=${encodeURIComponent(testEmail.trim())}`, {
-                cache: 'no-store',
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data?.error || 'No pudimos comprobar este correo.');
-
-            if (data?.status === 'blocked') {
-                setTestResult({ status: 'blocked', message: data?.description || 'Correcto: este correo no puede recibir envíos.' });
-            } else if (data?.status === 'warning') {
-                setTestResult({ status: 'success', message: data?.description || 'Este correo requiere revisión antes de contactar.' });
-            } else {
-                setTestResult({ status: 'success', message: 'No encontramos bloqueos para este correo. No se envió ningún mensaje.' });
-            }
-        } catch (e: any) {
-            setTestResult({ status: 'error', message: 'Error de red: ' + e.message });
-        } finally {
-            setTesting(false);
-        }
+  async function removeEmail(item: UnsubscribedEmail) {
+    const ok = await confirm({
+      title: `¿Desbloquear ${item.email}?`,
+      description: 'Se le podrá volver a escribir. Si se dio de baja, respeta su decisión antes de hacerlo.',
+      confirmLabel: 'Desbloquear',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setRemovingId(item.id);
+    try {
+      await unsubscribeService.removeFromBlacklist(item.id);
+      setEmailList((current) => current.filter((value) => value.id !== item.id));
+      toast({ title: 'Correo desbloqueado' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo desbloquear', description: 'Intenta de nuevo en unos minutos.' });
+    } finally {
+      setRemovingId(null);
     }
+  }
 
-    return (
-        <div className="container mx-auto space-y-6">
-            <PageHeader
-                title="Bajas y Bloqueos"
-                description="Gestiona quien no debe recibir correos de Antonia, ya sea por dirección individual o dominio completo."
-            >
-                <Dialog open={isTestOpen} onOpenChange={(open) => { setIsTestOpen(open); if (!open) setTestResult(null); }}>
-                    <DialogTrigger asChild>
-                        <Button variant="secondary">
-                            <ShieldBan className="h-4 w-4 mr-2" />
-                            Probar Bloqueo
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Probar Bloqueo de Correos</DialogTitle>
-                            <DialogDescription>
-                                Ingresa un correo para verificar si el sistema lo bloquearía.
-                                Intenta con un correo de un dominio bloqueado.
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="grid gap-4 py-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="test-email">Correo de prueba</Label>
-                                <Input
-                                    id="test-email"
-                                    placeholder="ej: prueba@dominio-bloqueado.com"
-                                    value={testEmail}
-                                    onChange={(e) => setTestEmail(e.target.value)}
-                                />
-                            </div>
+  async function removeDomain(item: ExcludedDomain) {
+    const ok = await confirm({
+      title: `¿Desbloquear @${item.domain}?`,
+      description: 'Se podrá volver a escribir a los correos de ese dominio.',
+      confirmLabel: 'Desbloquear',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setRemovingId(item.id);
+    try {
+      await domainService.removeDomain(item.id);
+      setDomainList((current) => current.filter((value) => value.id !== item.id));
+      toast({ title: 'Dominio desbloqueado' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo desbloquear', description: 'Intenta de nuevo en unos minutos.' });
+    } finally {
+      setRemovingId(null);
+    }
+  }
 
-                            {testResult && (
-                                <div className={`p-3 rounded-md text-sm font-medium ${testResult.status === 'blocked' ? 'bg-green-100 text-green-800 border border-green-200' :
-                                    testResult.status === 'success' ? 'bg-red-100 text-red-800 border border-red-200' :
-                                        'bg-yellow-100 text-yellow-800 border border-yellow-200'
-                                    }`}>
-                                    {testResult.status === 'blocked' && "✅ "}
-                                    {testResult.status === 'success' && "⚠️ "}
-                                    {testResult.message}
-                                </div>
-                            )}
-                        </div>
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setIsTestOpen(false)}>Cerrar</Button>
-                            <Button onClick={handleTestEmail} disabled={testing || !testEmail}>
-                                {testing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                Verificar
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
-            </PageHeader>
+  async function runTest() {
+    const email = testEmail.trim();
+    if (!email) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const response = await fetch(`/api/privacy/contactability?email=${encodeURIComponent(email)}`, { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'No pudimos comprobar este correo.');
+      if (data?.status === 'blocked') setTestResult({ tone: 'blocked', message: data?.description || 'Bloqueado: este correo no recibirá envíos.' });
+      else if (data?.status === 'warning') setTestResult({ tone: 'review', message: data?.description || 'Requiere revisión antes de escribirle.' });
+      else setTestResult({ tone: 'clear', message: 'Sin bloqueos: se le puede escribir. No se envió ningún mensaje.' });
+    } catch (error) {
+      setTestResult({ tone: 'error', message: error instanceof Error && error.message ? error.message : 'No pudimos comprobar este correo.' });
+    } finally {
+      setTesting(false);
+    }
+  }
 
-            <Tabs defaultValue="emails" className="w-full">
-                <div className="flex justify-between items-center mb-4">
-                    <TabsList>
-                        <TabsTrigger value="emails">Correos Individuales</TabsTrigger>
-                        <TabsTrigger value="domains">Dominios Bloqueados</TabsTrigger>
-                    </TabsList>
+  const removeButton = (label: string, busy: boolean, onClick: () => void) => (
+    <Button size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={onClick} aria-label={label}>
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Trash2 className="h-4 w-4" aria-hidden="true" />}
+    </Button>
+  );
+  const loadingRow = (columns: number) => (
+    <TableRow><TableCell colSpan={columns} className="py-8 text-center text-foreground/70" role="status">Cargando…</TableCell></TableRow>
+  );
 
-                    <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
-                        <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                        Actualizar
-                    </Button>
+  return (
+    <div className="mx-auto w-full max-w-5xl space-y-6">
+      <PageHeader
+        title="Bajas y bloqueos"
+        back={{ href: '/settings/privacy', label: 'Privacidad' }}
+        description="Quién no debe recibir correos, por dirección o por dominio completo."
+        actions={
+          <Dialog open={testOpen} onOpenChange={(open) => { setTestOpen(open); if (!open) setTestResult(null); }}>
+            <DialogTrigger asChild>
+              <Button variant="outline"><ShieldCheck className="h-4 w-4" aria-hidden="true" /> Probar bloqueo</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Probar bloqueo</DialogTitle>
+                <DialogDescription>Escribe un correo para saber si se le puede escribir. No se envía nada.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <div className="space-y-2">
+                  <Label htmlFor="test-email">Correo</Label>
+                  <Input id="test-email" type="email" placeholder="persona@empresa.com" value={testEmail} onChange={(event) => setTestEmail(event.target.value)} />
                 </div>
+                {testResult ? (
+                  <Alert variant={TEST_ALERT[testResult.tone]} role="status">
+                    <AlertDescription>{testResult.message}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setTestOpen(false)}>Cerrar</Button>
+                <Button onClick={() => void runTest()} disabled={testing || !testEmail.trim()}>
+                  {testing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Comprobar
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        }
+      />
 
-                {/* --- TAB: EMAILS --- */}
-                <TabsContent value="emails">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Correos Bloqueados</CardTitle>
-                            <CardDescription>
-                                Correos específicos que se han dado de baja o han sido bloqueados manualmente.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="border rounded-md">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Email</TableHead>
-                                            <TableHead>Razón</TableHead>
-                                            <TableHead>Fecha</TableHead>
-                                            <TableHead className="text-right">Acciones</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {loading && emailList.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                                                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                                                    Cargando...
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : emailList.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                                                    No hay correos bloqueados.
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            emailList.map(item => (
-                                                <TableRow key={item.id}>
-                                                    <TableCell className="font-medium">{item.email}</TableCell>
-                                                    <TableCell className="text-muted-foreground text-sm">
-                                                        {item.reason || 'Suscripción cancelada'}
-                                                    </TableCell>
-                                                    <TableCell className="text-muted-foreground text-sm">
-                                                        {new Date(item.created_at).toLocaleDateString()}
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <Button
-                                                            size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                            onClick={() => removeEmail(item.id)}
-                                                            disabled={removingEmailId === item.id}
-                                                        >
-                                                            {removingEmailId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                                                        </Button>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-
-                {/* --- TAB: DOMAINS --- */}
-                <TabsContent value="domains">
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between">
-                            <div>
-                                <CardTitle>Dominios Excluidos</CardTitle>
-                                <CardDescription>
-                                    Si bloqueas un dominio (ej: @thesheriff.cl), ningún correo perteneciente a ese dominio será contactado.
-                                </CardDescription>
-                            </div>
-                            <Dialog open={isAddDomainOpen} onOpenChange={setIsAddDomainOpen}>
-                                <DialogTrigger asChild>
-                                    <Button size="sm">
-                                        <ShieldBan className="h-4 w-4 mr-2" />
-                                        Bloquear Dominio
-                                    </Button>
-                                </DialogTrigger>
-                                <DialogContent>
-                                    <DialogHeader>
-                                        <DialogTitle>Bloquear Nuevo Dominio</DialogTitle>
-                                        <DialogDescription>
-                                            Ingresa el dominio a bloquear (ej: gmail.com, thesheriff.cl). No incluyas @.
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <div className="grid gap-4 py-4">
-                                        <div className="grid grid-cols-4 items-center gap-4">
-                                            <Label htmlFor="domain" className="text-right">
-                                                Dominio
-                                            </Label>
-                                            <Input
-                                                id="domain"
-                                                placeholder="ej: competitors.com"
-                                                className="col-span-3"
-                                                value={newDomain}
-                                                onChange={(e) => setNewDomain(e.target.value)}
-                                            />
-                                        </div>
-                                    </div>
-                                    <DialogFooter>
-                                        <Button variant="outline" onClick={() => setIsAddDomainOpen(false)}>Cancelar</Button>
-                                        <Button onClick={handleAddDomain} disabled={addingDomain || !newDomain}>
-                                            {addingDomain && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                            Bloquear
-                                        </Button>
-                                    </DialogFooter>
-                                </DialogContent>
-                            </Dialog>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="border rounded-md">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Dominio</TableHead>
-                                            <TableHead>Fecha</TableHead>
-                                            <TableHead className="text-right">Acciones</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {loading && domainList.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
-                                                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                                                    Cargando...
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : domainList.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
-                                                    No hay dominios bloqueados.
-                                                </TableCell>
-                                            </TableRow>
-                                        ) : (
-                                            domainList.map(item => (
-                                                <TableRow key={item.id}>
-                                                    <TableCell className="font-medium">@{item.domain}</TableCell>
-                                                    <TableCell className="text-muted-foreground text-sm">
-                                                        {new Date(item.created_at).toLocaleDateString()}
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <Button
-                                                            size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                            onClick={() => removeDomain(item.id)}
-                                                            disabled={removingDomainId === item.id}
-                                                        >
-                                                            {removingDomainId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                                                        </Button>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))
-                                        )}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-            </Tabs>
+      <Tabs defaultValue="emails" className="w-full">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <TabsList>
+            <TabsTrigger value="emails">Correos ({emailList.length})</TabsTrigger>
+            <TabsTrigger value="domains">Dominios ({domainList.length})</TabsTrigger>
+          </TabsList>
+          <Button variant="ghost" size="sm" onClick={() => void loadData()} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true" /> Actualizar
+          </Button>
         </div>
-    );
+
+        <TabsContent value="emails">
+          <Card>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="text-base">Correos bloqueados</CardTitle>
+                <CardDescription>Quienes se dieron de baja o pidieron no ser contactados, y los que bloqueas a mano.</CardDescription>
+              </div>
+              <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm"><Plus className="h-4 w-4" aria-hidden="true" /> Bloquear correo</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Bloquear un correo</DialogTitle>
+                    <DialogDescription>Esa dirección no recibirá más correos de tu organización.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-2 py-2">
+                    <Label htmlFor="block-email">Correo</Label>
+                    <Input id="block-email" type="email" placeholder="persona@empresa.com" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} aria-invalid={Boolean(cleanEmail) && !EMAIL_PATTERN.test(cleanEmail)} />
+                    {cleanEmail && !EMAIL_PATTERN.test(cleanEmail) ? <p className="text-xs text-destructive">Escribe un correo completo, como persona@empresa.com.</p> : null}
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setEmailOpen(false)}>Cancelar</Button>
+                    <Button onClick={() => void addEmail()} disabled={addingEmail || !EMAIL_PATTERN.test(cleanEmail)}>
+                      {addingEmail ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Bloquear
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-foreground/70">Correo</TableHead>
+                      <TableHead className="hidden text-foreground/70 sm:table-cell">Motivo</TableHead>
+                      <TableHead className="text-foreground/70">Fecha</TableHead>
+                      <TableHead className="text-right text-foreground/70"><span className="sr-only">Acciones</span></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading && emailList.length === 0 ? loadingRow(4) : emailList.length === 0 ? (
+                      <TableRow><TableCell colSpan={4} className="py-8 text-center text-foreground/70">No hay correos bloqueados.</TableCell></TableRow>
+                    ) : emailList.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className="break-all font-medium">{item.email}</TableCell>
+                        <TableCell className="hidden text-sm text-foreground/70 sm:table-cell">{item.reason || 'Sin motivo'}</TableCell>
+                        <TableCell className="whitespace-nowrap text-sm text-foreground/70">{formatDate(item.created_at, { year: true })}</TableCell>
+                        <TableCell className="text-right">{removeButton(`Desbloquear ${item.email}`, removingId === item.id, () => void removeEmail(item))}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="domains">
+          <Card>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="text-base">Dominios bloqueados</CardTitle>
+                <CardDescription>Si bloqueas un dominio, no se contacta a ningún correo de ese dominio.</CardDescription>
+              </div>
+              <Dialog open={domainOpen} onOpenChange={setDomainOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm"><ShieldBan className="h-4 w-4" aria-hidden="true" /> Bloquear dominio</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Bloquear un dominio</DialogTitle>
+                    <DialogDescription>Escribe el dominio sin @, por ejemplo competencia.cl.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-2 py-2">
+                    <Label htmlFor="block-domain">Dominio</Label>
+                    <Input id="block-domain" placeholder="competencia.cl" value={newDomain} onChange={(event) => setNewDomain(event.target.value)} aria-invalid={Boolean(cleanDomain) && !DOMAIN_PATTERN.test(cleanDomain)} />
+                    {cleanDomain && !DOMAIN_PATTERN.test(cleanDomain) ? <p className="text-xs text-destructive">Escribe un dominio, como empresa.cl.</p> : null}
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setDomainOpen(false)}>Cancelar</Button>
+                    <Button onClick={() => void addDomain()} disabled={addingDomain || !DOMAIN_PATTERN.test(cleanDomain)}>
+                      {addingDomain ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Bloquear
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-foreground/70">Dominio</TableHead>
+                      <TableHead className="text-foreground/70">Fecha</TableHead>
+                      <TableHead className="text-right text-foreground/70"><span className="sr-only">Acciones</span></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading && domainList.length === 0 ? loadingRow(3) : domainList.length === 0 ? (
+                      <TableRow><TableCell colSpan={3} className="py-8 text-center text-foreground/70">No hay dominios bloqueados.</TableCell></TableRow>
+                    ) : domainList.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className="break-all font-medium">@{item.domain}</TableCell>
+                        <TableCell className="whitespace-nowrap text-sm text-foreground/70">{formatDate(item.created_at, { year: true })}</TableCell>
+                        <TableCell className="text-right">{removeButton(`Desbloquear @${item.domain}`, removingId === item.id, () => void removeDomain(item))}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
 }

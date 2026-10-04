@@ -115,12 +115,12 @@ export const HELP_SECTIONS: HelpSection[] = [
     steps: [
       'Busca ofertas de empleo por cargo y ubicación, y elige la antigüedad de la publicación (24 horas, 7 días o 30 días).',
       'Revisa las empresas y guarda las que quieras trabajar.',
-      'En «Empresas guardadas», busca contactos dentro de cada empresa.',
+      'Desde una empresa, busca a sus decisores: la búsqueda se abre lista y los guardas en «Por completar».',
     ],
     faqs: [
       { q: '¿Para qué sirve saber que una empresa está contratando?', a: 'Es una razón concreta para escribirle: si busca personal, puede necesitar lo que ofreces.' },
     ],
-    related: ['empresas-guardadas', 'buscar'],
+    related: ['buscar', 'por-completar'],
   },
   {
     id: 'por-completar',
@@ -128,19 +128,20 @@ export const HELP_SECTIONS: HelpSection[] = [
     group: 'Contactos',
     href: '/saved/leads',
     routes: /^\/saved\/leads\/?$/,
-    summary: 'Contactos guardados que aún no tienen correo. Busca su correo y pasarán a «Por escribir».',
+    summary: 'Contactos guardados que aún no tienen correo. Busca su correo: quien lo recibe pasa a «Por escribir» y quien no, queda aquí marcado.',
     steps: [
-      'Filtra por nombre, empresa, cargo, industria o fecha en que se guardó.',
-      'Selecciona a quienes quieras y pulsa «Buscar correo». Puedes pedir también el teléfono.',
-      'Los contactos con correo encontrado pasan a «Por escribir».',
+      'Arriba ves cuántos están «Sin buscar», «Sin correo» (se buscó y no apareció) y «Con correo». Cada uno filtra la lista.',
+      'Pulsa «Buscar correo» en una fila, o selecciona varios: la barra de abajo dice cuántos créditos usa. Puedes pedir también el teléfono.',
+      'Quien recibe correo pasa a «Por escribir». Quien no, queda aquí marcado «Sin correo», con la fecha de la búsqueda.',
+      'Si alguien ya tiene correo, «Pasar a «Por escribir»» lo mueve sin buscar y sin usar créditos.',
     ],
     tips: [
       'Buscar el correo usa tu cupo diario de enriquecimiento: una unidad por contacto.',
       'Con «Exportar» descargas las filas visibles.',
     ],
     faqs: [
-      { q: 'Busqué el correo y el contacto desapareció de la lista. ¿Dónde está?', a: 'En «Por escribir», porque ya tiene correo. Esta lista muestra solo a quienes aún no lo tienen.' },
-      { q: '¿Qué pasa si no se encuentra el correo?', a: 'El contacto queda guardado. Puedes intentarlo otro día, buscarlo con otro modo o escribirle por LinkedIn.' },
+      { q: 'Busqué el correo y el contacto desapareció de la lista. ¿Dónde está?', a: 'En «Por escribir», porque ya tiene correo. El aviso de la búsqueda tiene «Ver» para ir directo.' },
+      { q: '¿Qué pasa si no se encuentra el correo?', a: 'El contacto se queda aquí marcado «Sin correo», con la fecha. Puedes pulsar «Buscar de nuevo» otro día o escribirle por LinkedIn.' },
       { q: '¿Quién guardó este contacto?', a: 'La columna «Encontrado por» dice qué persona del equipo lo guardó.' },
     ],
     related: ['por-escribir', 'buscar', 'creditos'],
@@ -153,9 +154,9 @@ export const HELP_SECTIONS: HelpSection[] = [
     routes: /^\/saved\/leads\/enriched\/?$/,
     summary: 'Contactos con correo. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas.',
     steps: [
-      'Marca en la columna «Investigar» a quienes quieras investigar (hasta 50 por vez) y pulsa «Investigar selección». La IA reúne evidencia de su empresa y su rol para que el correo no sea genérico.',
-      'Cuando un contacto está «Investigado», abre «Ver investigación» para leer el informe y sus fuentes.',
-      'Pulsa «Contactar» (uno o varios): se abre la investigación con el contacto listo para preparar su secuencia.',
+      'Arriba ves cuántos contactos están en cada etapa: «Por investigar», «Investigando», «Revisar informe» y «Listos para escribir». Cada una filtra la lista.',
+      'Marca a quienes quieras (hasta 50 por vez). La barra de abajo dice qué hará: «Investigar», «Escribir» o ambas. La IA reúne evidencia de su empresa y su rol para que el correo no sea genérico.',
+      'Con la investigación lista, «Ver investigación» muestra el informe y sus fuentes, y «Escribir» abre el contacto listo para preparar su secuencia.',
       'La IA prepara un correo inicial y sus seguimientos como borradores. Preparar no envía nada.',
       'Pulsa «Revisar y editar correos» para revisarlos y enviarlos.',
     ],
@@ -167,7 +168,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       { q: '¿Tengo que investigar antes de escribir?', a: 'Es lo recomendado: con evidencia de la empresa y del rol, el correo es más concreto.' },
       { q: '¿Cuánto tarda una investigación?', a: 'Unos minutos. Puedes seguir usando la app; el estado se actualiza en la lista.' },
       { q: 'La IA no puede redactar y dice que falta mi oferta. ¿Qué hago?', a: 'Completa «Lo que vendes» en «Perfil» (servicios o propuesta de valor). La IA solo afirma lo que está en tu perfil.' },
-      { q: '¿Puedo borrar una investigación?', a: 'Sí: desde el informe («Eliminar investigación de este lead») o con «Más acciones» para los seleccionados.' },
+      { q: '¿Puedo borrar una investigación?', a: 'Sí: desde el informe («Eliminar investigación») o con «Más» en la barra de la selección.' },
     ],
     related: ['correo', 'perfil', 'conversaciones'],
   },
@@ -197,24 +198,6 @@ export const HELP_SECTIONS: HelpSection[] = [
     related: ['por-escribir', 'firmas', 'conexiones'],
   },
   {
-    id: 'empresas-guardadas',
-    title: 'Empresas guardadas',
-    group: 'Contactos',
-    href: '/saved/opportunities',
-    routes: /^\/saved\/opportunities\/?$/,
-    feature: 'opportunities',
-    summary: 'Las empresas que guardaste desde «Oportunidades». Busca contactos dentro de cada una.',
-    steps: [
-      'Selecciona una o varias empresas.',
-      'Pulsa «Buscar contactos» para encontrar a sus decisores.',
-      'Guarda a las personas que te interesen: pasan a «Por completar» o a «Por escribir» si ya tienen correo.',
-    ],
-    faqs: [
-      { q: 'No tengo empresas guardadas. ¿De dónde salen?', a: 'De «Oportunidades»: busca empresas que están contratando y guarda las que te interesen.' },
-    ],
-    related: ['oportunidades', 'por-completar'],
-  },
-  {
     id: 'tabla',
     title: 'Tabla de datos',
     group: 'Contactos',
@@ -229,7 +212,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     faqs: [
       { q: '¿Exporta todo o solo lo que veo?', a: 'Solo las filas visibles, con los filtros y columnas que elegiste.' },
-      { q: '¿Puedo importar contactos?', a: 'Sí, desde un archivo CSV en «Importar leads» (/leads/import).' },
+      { q: '¿Puedo importar contactos?', a: 'Sí, desde un archivo CSV: en «Tabla de datos», pulsa «Importar».' },
     ],
     related: ['por-escribir', 'por-completar'],
   },
@@ -241,20 +224,21 @@ export const HELP_SECTIONS: HelpSection[] = [
     routes: /^\/contacted(\/.*)?$/,
     summary: 'Cada conversación, su estado y el próximo paso. Aquí contestas a quien te respondió.',
     steps: [
-      'Empieza por «Por responder»: quienes esperan tu respuesta.',
-      'Las otras vistas son «Esperando respuesta», «Programados» y «Todos».',
-      'Abre una conversación para ver el hilo, la actividad del correo y los próximos pasos.',
-      'Escribe tu respuesta: se envía en el hilo original. Revisa el texto antes de enviarlo.',
+      'Empieza por «Por responder»: quienes esperan tu respuesta. Cada vista muestra cuántas conversaciones tiene.',
+      'Las otras vistas son «Esperando», «Programados» y «Todas».',
+      'Abre una conversación: en pantallas anchas se ve al lado de la lista, con el hilo, la actividad del correo y los próximos pasos.',
+      'Pulsa «Responder» para escribir tú, o «Sugerir con IA» para partir de un borrador. Se envía en el hilo original; revisa el texto antes de enviarlo.',
       '«Detener seguimientos» cancela los correos pendientes de esa secuencia; lo enviado y el historial se conservan.',
       'Cuando termine, toca «Cerrar conversación» y elige cómo terminó: Sin acuerdo, Ganado, No interesado o Lo retomo yo. Ganado, Sin acuerdo y No interesado también cambian la etapa en el pipeline.',
     ],
     tips: [
-      'Las respuestas se revisan solas en segundo plano. «Actualizar mis respuestas» las trae en el momento desde tus cuentas.',
-      'Activa «Solo mis conversaciones» para ver solo las tuyas.',
+      'Las respuestas se revisan solas en segundo plano. «Traer respuestas» las trae en el momento desde tus cuentas.',
+      'Activa «Solo mías» para ver solo tus conversaciones.',
+      'La dirección guarda la vista y la conversación abierta: puedes compartirla, recargar o usar «atrás» sin perder el lugar.',
       'Una apertura no demuestra que la persona leyó el correo: los filtros de correo pueden generar o bloquear esas señales.',
     ],
     faqs: [
-      { q: 'Alguien me respondió y no aparece. ¿Qué hago?', a: 'Pulsa «Actualizar mis respuestas». Si sigue sin aparecer, revisa en «Conexiones» que tu correo esté conectado.' },
+      { q: 'Alguien me respondió y no aparece. ¿Qué hago?', a: 'Pulsa «Traer respuestas». Si sigue sin aparecer, revisa en «Conexiones» que tu correo esté conectado.' },
       { q: '¿Qué pasa con los seguimientos si la persona responde?', a: 'Se detienen solos.' },
       { q: '¿Qué pasa al cerrar una conversación si trabajo en equipo?', a: '«Sin acuerdo» la deja libre para que otra persona del equipo la retome; «Ganado» y «No interesado» hacen que nadie más vuelva a contactarla; «Lo retomo yo» la mantiene tuya. Si alguien no responde, queda libre 30 días después del último envío.' },
       { q: '¿Puedo responder desde mi bandeja de correo?', a: 'Sí. «Abrir en correo» abre el hilo en tu cuenta. Al responder desde la app, la respuesta queda en el mismo hilo.' },
@@ -282,7 +266,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     faqs: [
       { q: '¿Cuántas personas puede tener una campaña?', a: 'Hasta 100 por campaña.' },
-      { q: '¿Aprobar envía todo al instante?', a: 'Aprobar autoriza los mensajes para toda la audiencia. Según la configuración de tu organización, los envíos parten solos o los inicias desde la misma página.' },
+      { q: '¿Aprobar envía todo al instante?', a: 'Aprobar autoriza los mensajes para toda la audiencia. Según la configuración de tu organización, los envíos parten solos o los inicias con «Enviar correos disponibles», que los envía desde el servidor por tandas.' },
+      { q: '¿Por qué un contacto quedó en revisión?', a: 'Antes de cada envío se revisa que siga entre tus contactos, que no esté bloqueado, que no haya respondido (para los seguimientos) y que el primer correo siga cumpliendo los criterios aprobados. Si algo cambió, ese correo no sale y la persona queda en revisión; «Volver a comprobar» lo revisa de nuevo.' },
       { q: '¿Puedo usar contactos sin correo?', a: 'No. Las campañas usan tus contactos guardados con correo. Primero busca su correo en «Por completar».' },
     ],
     related: ['conversaciones', 'por-escribir', 'privacidad'],
@@ -343,9 +328,9 @@ export const HELP_SECTIONS: HelpSection[] = [
     routes: /^\/(connections|gmail|outlook)\/?$/,
     summary: 'Conecta Gmail u Outlook para enviar desde tu propia cuenta y recibir las respuestas en la app.',
     steps: [
-      'Elige Gmail u Outlook.',
-      'Pulsa conectar y acepta los permisos en la ventana del proveedor.',
-      'Vuelve a la app: el estado de la conexión dice si quedó lista.',
+      'En «Correo», pulsa «Conectar» en Gmail u Outlook.',
+      'Acepta los permisos en la ventana del proveedor.',
+      'Vuelve a la app: la cuenta aparece como «Conectado».',
       'Si conectas las dos, elige en «Remitente predeterminado» cuál envía.',
     ],
     tips: [
@@ -355,7 +340,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     faqs: [
       { q: '¿Puedo conectar Gmail y Outlook a la vez?', a: 'Sí. Elige en «Remitente predeterminado» cuál envía: Cowork y tus campañas la usan sin preguntarte. En cada correo, la línea «De:» muestra desde qué cuenta saldrá.' },
       { q: '¿ANTON.IA lee todo mi correo?', a: 'Lee los hilos de los correos enviados desde la app para detectar respuestas cuando se sincroniza la bandeja.' },
-      { q: 'Dice que hay credenciales guardadas pero no envía. ¿Qué hago?', a: 'Su vigencia se comprueba al usarlas. Si el proveedor revocó el acceso, vuelve a conectar la cuenta.' },
+      { q: 'Dice que hay credenciales guardadas pero no envía. ¿Qué hago?', a: 'Su vigencia se comprueba al usarlas. Si el proveedor revocó el acceso, pulsa «Reconectar» en la cuenta.' },
+      { q: '¿Cómo desconecto una cuenta?', a: 'En «Conexiones», pulsa «Desconectar» en la cuenta y confírmalo. ANTON.IA deja de enviar desde ella y de leer sus respuestas. Si tienes la otra conectada, esa pasa a enviar; si no, los envíos pendientes esperan hasta que conectes una.' },
     ],
     related: ['correo', 'conversaciones'],
   },
@@ -477,7 +463,7 @@ export type HelpIconKey = 'start' | 'today' | 'search' | 'opportunities' | 'cont
 
 export const HELP_ICONS: Record<string, HelpIconKey> = {
   'primeros-pasos': 'start', hoy: 'today', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
-  'por-escribir': 'write', correo: 'mail', 'empresas-guardadas': 'companies', tabla: 'table', conversaciones: 'conversations',
+  'por-escribir': 'write', correo: 'mail', tabla: 'table', conversaciones: 'conversations',
   campanas: 'campaigns', pipeline: 'pipeline', perfil: 'profile', conexiones: 'connections', firmas: 'signature',
   privacidad: 'privacy', creditos: 'credits', administracion: 'admin',
 };

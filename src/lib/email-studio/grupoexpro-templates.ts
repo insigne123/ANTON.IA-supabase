@@ -1,5 +1,22 @@
 import type { StyleProfile } from '@/lib/types';
 
+import { isOpportunitiesUserAllowed, type OpportunitiesIdentity } from '@/lib/commercial-opportunities/access';
+
+/** Mail domains of GrupoExpro accounts. The references below are theirs: other organizations never see them. */
+export const GRUPOEXPRO_EMAIL_DOMAINS = ['grupoexpro.com'];
+
+/**
+ * Whether an account may load the GrupoExpro references: a confirmed GrupoExpro mailbox, or one of the pilot accounts
+ * (OPPORTUNITIES_ALLOWED_EMAILS, the GrupoExpro pilot). Everyone else gets no references and no «Ver referencias» entry.
+ */
+export function canUseGrupoExproReferences(user: OpportunitiesIdentity | null | undefined, pilotEmails: string | undefined) {
+  const email = user?.email?.trim().toLowerCase() || '';
+  const confirmed = Boolean(user?.email_confirmed_at && Number.isFinite(Date.parse(user.email_confirmed_at)));
+  const domain = email.split('@')[1] || '';
+  const grupoExproMailbox = confirmed && GRUPOEXPRO_EMAIL_DOMAINS.some((value) => domain === value || domain.endsWith(`.${value}`));
+  return grupoExproMailbox || isOpportunitiesUserAllowed(user, pilotEmails);
+}
+
 // References, not marketing-approved copy. Never include in global presets.
 export const GRUPOEXPRO_REFERENCE_TEMPLATES = [
   ['est', 'Servicios Transitorios (EST)', 'dotacion temporal', 'Para una necesidad temporal de personal, partiria por los turnos y la fecha de termino, no por una dotacion permanente.', '¿Revisamos los turnos y el periodo que quieren cubrir?', 'Usar ante temporada, proyecto o reemplazo documentado. Hablar con operaciones de turnos; con personas, de administracion laboral. No convertir vacantes en un peak confirmado.'],

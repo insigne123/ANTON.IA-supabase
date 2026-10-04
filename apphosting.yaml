@@ -155,22 +155,6 @@ env:
     value: openai
     availability: [RUNTIME]
 
-  - variable: SUPLIA_CONTEXT_COMPACT_THRESHOLD_TOKENS
-    value: "150000"
-    availability: [RUNTIME]
-
-  - variable: SUPLIA_CONTEXT_RECENT_MESSAGES
-    value: "12"
-    availability: [RUNTIME]
-
-  - variable: NEXT_PUBLIC_SUPLIA_ENABLED
-    value: "false"
-    availability: [BUILD, RUNTIME]
-
-  - variable: NEXT_PUBLIC_OPPORTUNITIES_ENABLED
-    value: "false"
-    availability: [BUILD, RUNTIME]
-
   - variable: ADMIN_DASHBOARD_ALLOWED_EMAILS
     value: gmeneses@grupoexpro.com,nicolas.yarur.g@yago.cl
     availability: [RUNTIME]
@@ -275,20 +259,12 @@ env:
     value: "25000"
     availability: [RUNTIME]
 
-  - variable: SUPLIA_APOLLO_CONCURRENCY_PER_ORG
-    value: "1"
-    availability: [RUNTIME]
-
   - variable: ENRICHMENT_SERVICE_SECRET
     secret: ENRICHMENT_SERVICE_SECRET
     availability: [RUNTIME]
 
   - variable: INTERNAL_API_SECRET
     secret: INTERNAL_API_SECRET
-    availability: [RUNTIME]
-
-  - variable: DEBUG_API_ENABLED
-    value: "false"
     availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID

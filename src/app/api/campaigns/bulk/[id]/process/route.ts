@@ -4,14 +4,18 @@ import { getCampaignAttempts, sendTrackedCampaignMessage } from '@/lib/server/bu
 import { withSentAttemptsAsDeliveries } from '@/lib/bulk-campaign-attempts';
 import { AuthError } from '@/lib/server/auth-utils';
 import { requireBulkCampaignAuth as requireAuth } from '@/lib/server/bulk-campaigns';
-import { nextCampaignMessage, matchAudience } from '@/lib/bulk-campaigns';
+import { nextCampaignMessage } from '@/lib/bulk-campaigns';
 import { loadAudience } from '@/lib/server/bulk-campaign-audience';
+import { recipientEligibility } from '@/lib/bulk-campaign-eligibility';
 import { assertCampaignRecipientAllowed, bulkCampaignError, campaignDeliveries, getBulkCampaign } from '@/lib/server/bulk-campaigns';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-/** One durable, idempotent send per request. The browser may resume without regenerating or duplicating content. */
+/**
+ * One durable, idempotent send per request. Kept for one release while open tabs still call it; the screen now uses
+ * `…/dispatch`, which runs the same checks (`recipientEligibility`) on the server for the whole campaign.
+ */
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireAuth();
@@ -25,8 +29,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     const next = nextCampaignMessage(recipient, withSentAttemptsAsDeliveries(deliveries, attempts), campaign.approved_at);
     if (!next || next.state !== 'ready') return NextResponse.json({ sent: false, state: next?.state || 'completed', dueAt: next?.dueAt });
     const current = (await loadAudience(auth)).find(person => person.email === recipient.email);
-    if (!current || current.blockedReason || (next.index > 0 && current.replied)
-      || (next.index === 0 && !matchAudience(current, campaign.definition.criteria))) throw new AuthError('El contacto cambió, respondió o ya no está disponible. Revisa su historial antes de continuar.', 409);
+    const check = recipientEligibility(current, next.index, campaign.definition.criteria);
+    if (!check.ok) throw new AuthError(check.message, 409);
     await assertCampaignRecipientAllowed(auth, recipient.email);
     // Recheck pause after potentially slow eligibility queries.
     if ((await getBulkCampaign(auth, id)).status !== 'approved') throw new AuthError('La campaña está en pausa.', 409);

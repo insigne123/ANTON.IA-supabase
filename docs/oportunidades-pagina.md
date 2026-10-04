@@ -6,7 +6,7 @@
 - **Qué buscamos:** la oferta, los cargos, el mínimo de avisos y las regiones. Se edita con «Editar búsqueda».
 - **Última búsqueda:** cuándo fue y cuántos avisos trajo. Si una fuente falló, dice cuál y por qué.
 - **Gasto del mes,** contra el tope.
-- **Fuentes sin clave:** si falta una clave, lo dice; la configura el mantenedor.
+- **Fuentes sin conectar:** si a una fuente le falta su clave, la página lo dice sin mostrar nombres de variables; la activa quien administra ANTON.IA.
 
 **«Buscar ahora»** muestra antes qué se consulta en cada fuente y cuánto puede costar, junto con el gasto del mes. Si la búsqueda pasaría el tope, no deja buscar.
 
@@ -42,7 +42,7 @@
 - **Lectura y escritura:**
   - todo va por la clave de servicio, porque las tablas no dan permisos a los miembros;
   - siempre en la organización activa de la persona, nunca con un id que venga en la petición.
-- **Se va del menú:** «Empresas guardadas» y la sección vieja. Sus rutas siguen apagadas con `NEXT_PUBLIC_OPPORTUNITIES_ENABLED=false` y se retiran en PR-3g.
+- **Se fue del menú:** «Empresas guardadas» y la sección vieja. Sus rutas se retiraron y redirigen a `/opportunities`; el Centro de ayuda y «Pregúntale a la IA» muestran Oportunidades con la misma regla que el menú (`OPPORTUNITIES_ALLOWED_EMAILS`).
 
 ## Cómo busca (`src/lib/server/commercial-opportunities/sync.ts`)
 

@@ -40,9 +40,10 @@ test('the retired mission agent has no scheduler, manual trigger, legacy worker 
     assert.match(functionsSource, /x-manual-trigger-secret/);
 });
 
-test('Firebase owns all production scheduler bridges and Vercel only schedules Suplia', () => {
+test('Firebase owns all production scheduler bridges and Vercel schedules nothing', () => {
     const scheduledPaths = (vercelConfig.crons || []).map((cron) => cron.path);
-    assert.deepEqual(scheduledPaths, ['/api/cron/suplia']);
+    assert.deepEqual(scheduledPaths, []);
+    assert.equal(existsSync('src/app/api/cron/suplia/route.ts'), false); // SUPL.IA was retired with its cron.
 
     const schedules = [
         ['researchSequencePreparationTick', 'every 1 minutes', '/api/cron/research-sequences'],

@@ -5,7 +5,7 @@ import ts from 'typescript';
 import { z } from 'zod';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import { canPublishEmailTemplates } from '@/lib/email-studio/library-contract';
-import { GRUPOEXPRO_REFERENCE_TEMPLATES } from '@/lib/email-studio/grupoexpro-templates';
+import { canUseGrupoExproReferences, GRUPOEXPRO_REFERENCE_TEMPLATES } from '@/lib/email-studio/grupoexpro-templates';
 import { OUTSOURCING_EMAIL_STYLE_PRESETS, outsourcingEmailStylePresetSelection, styleProfileFromOutsourcingEmailStylePreset } from '@/lib/outsourcing-email-style-presets';
 
 const source = await readFile(new URL('./route.ts', import.meta.url), 'utf8');
@@ -19,7 +19,7 @@ const valid = { name: 'Directo', profile: { tone: 'direct' }, isDefault: false }
 const row = { id, name: 'Directo', profile: valid.profile, content_hash: canonicalSha256(valid.profile),
   revision: 2, is_default: false, library_scope: 'personal', user_id: 'user-a', updated_at: '2026-09-09' };
 
-function harness(options: { role?: string; rows?: any[]; rpcError?: any } = {}) {
+function harness(options: { role?: string; rows?: any[]; rpcError?: any; email?: string } = {}) {
   const calls: any[] = [];
   const filters: any[] = [];
   const query: any = {};
@@ -27,9 +27,9 @@ function harness(options: { role?: string; rows?: any[]; rpcError?: any } = {}) 
     filters.push([method, ...args]); return query;
   };
   query.range = async () => ({ data: options.rows || [row], error: null });
-  const auth = { organizationId: 'org-a', user: { id: 'user-a' }, organizationRole: options.role || 'member',
+  const auth = { organizationId: 'org-a', user: { id: 'user-a', email: options.email || 'ana@cliente.cl', email_confirmed_at: '2026-01-01T00:00:00Z' }, organizationRole: options.role || 'member',
     supabase: { from: () => query, rpc: async (...args: any[]) => { calls.push(args); return { data: row, error: options.rpcError }; } } };
-  const dependencies = { z, canonicalSha256, canPublishEmailTemplates, GRUPOEXPRO_REFERENCE_TEMPLATES,
+  const dependencies = { z, canonicalSha256, canPublishEmailTemplates, GRUPOEXPRO_REFERENCE_TEMPLATES, canUseGrupoExproReferences,
     OUTSOURCING_EMAIL_STYLE_PRESETS, outsourcingEmailStylePresetSelection, styleProfileFromOutsourcingEmailStylePreset,
     materializedOutsourcingEmailStylePresetId: () => null, requireAuth: async () => auth,
     handleAuthError: () => { throw new Error('unexpected auth error'); },
@@ -118,10 +118,25 @@ test('GET scopes personal/team rows to active organization and hides references 
   assert.ok(route.filters.some((filter: any[]) => filter[0] === 'is' && filter[1] === 'archived_at' && filter[2] === null));
 });
 
-test('explicit reference request returns six unapproved starters separately from saved styles', async () => {
-  const route = harness();
+test('explicit reference request returns six unapproved starters separately from saved styles, only to GrupoExpro', async () => {
+  const route = harness({ email: 'ana@grupoexpro.com' });
   const response = await route.GET({ nextUrl: new URL('https://example.test/api/email-styles?referenceCollection=grupoexpro') });
+  assert.equal(response.body.referencesAvailable, true);
   assert.equal(response.body.references.length, 6);
   assert.equal(response.body.styles.length, 1);
   assert.ok(response.body.references.every((reference: any) => reference.status === 'editable-reference'));
+  // Plan 9, PR-18: another organization gets neither the references nor the entry to load them.
+  const other = await harness({ email: 'ana@cliente.cl' }).GET({ nextUrl: new URL('https://example.test/api/email-styles?referenceCollection=grupoexpro') });
+  assert.equal(other.body.referencesAvailable, false);
+  assert.deepEqual(other.body.references, []);
+});
+
+test('GrupoExpro references: a confirmed GrupoExpro mailbox or a pilot account, nobody else', () => {
+  const confirmed = '2026-01-01T00:00:00Z';
+  assert.equal(canUseGrupoExproReferences({ email: 'Ana@GrupoExpro.com', email_confirmed_at: confirmed }, ''), true);
+  assert.equal(canUseGrupoExproReferences({ email: 'ana@cl.grupoexpro.com', email_confirmed_at: confirmed }, ''), true);
+  assert.equal(canUseGrupoExproReferences({ email: 'ana@grupoexpro.com', email_confirmed_at: null }, ''), false, 'unconfirmed');
+  assert.equal(canUseGrupoExproReferences({ email: 'ana@notgrupoexpro.com', email_confirmed_at: confirmed }, ''), false);
+  assert.equal(canUseGrupoExproReferences({ email: 'piloto@gmail.com', email_confirmed_at: confirmed }, 'piloto@gmail.com'), true, 'pilot list');
+  assert.equal(canUseGrupoExproReferences({ email: 'ana@cliente.cl', email_confirmed_at: confirmed }, 'piloto@gmail.com'), false);
 });

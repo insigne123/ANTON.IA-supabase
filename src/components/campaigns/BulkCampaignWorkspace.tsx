@@ -7,12 +7,13 @@ import { CampaignAudienceTable } from './CampaignAudienceTable';
 import { CampaignSteps } from './CampaignSteps';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
-import { campaignAttemptAllowsRetry, describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
 import { AudienceCriteriaSchema, CampaignInputSchema, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 
 async function request(path: string, body?: unknown, method = 'POST') {
@@ -32,9 +33,12 @@ const STEPS = [
   { label: 'Revisión', hint: 'Cómo le llega a cada persona' },
 ];
 const MAX_RECIPIENTS = 100;
+/** Server batches one click may chain (each sends up to 25), so 100 recipients go out in one click. */
+const SEND_BATCHES_PER_CLICK = 4;
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 export function BulkCampaignWorkspace() {
+  const confirm = useConfirm();
   const [items, setItems] = useState<BulkCampaign[]>([]);
   const [editing, setEditing] = useState(false);
   const [step, setStep] = useState(0);
@@ -140,20 +144,34 @@ export function BulkCampaignWorkspace() {
     if (action === 'reject') { setStep(1); setFeedback('Puedes editar el mensaje o pedir cambios a la IA y volver a revisar.'); }
     if (action === 'approve') setFeedback('Contenido y audiencia aprobados. Ya puedes iniciar los envíos disponibles.');
   }
+  // The server sends what is due in batches (…/dispatch): one request per batch instead of one per person, with the same
+  // checks and idempotency as the scheduled worker. A batch stops at its own limit; the next one continues.
   async function sendAvailable() {
     if (!campaign?.approved_at) return;
-    let sent = 0;
-    let failed = 0;
-    for (const recipient of campaign.recipients) {
-      const next = nextCampaignMessage(recipient, deliveries, campaign.approved_at);
-      if (next?.state !== 'ready' || !campaignAttemptAllowsRetry(attempts.find(value => value.draft_id === next.message.draftId))) continue;
-      setFeedback(`Enviando a ${recipient.email}…`);
-      try {
-        const result = await request(`/${campaign.id}/process`, { email: recipient.email, reviewHash: campaign.review_hash });
-        if (result.sent) sent++;
-      } catch { failed++; }
+    const total = { sent: 0, held: 0, deferred: 0, attention: 0 };
+    let ready = 0;
+    try {
+      for (let batch = 0; batch < SEND_BATCHES_PER_CLICK; batch++) {
+        setFeedback(batch === 0 ? 'Enviando desde el servidor…' : `Enviando… ${plural(total.sent, 'correo enviado', 'correos enviados')} hasta ahora.`);
+        const result = await request(`/${campaign.id}/dispatch`, { reviewHash: campaign.review_hash });
+        total.sent += result.summary.sent; total.held += result.summary.held;
+        total.deferred += result.summary.deferred; total.attention += result.summary.attention;
+        ready = result.progress.ready;
+        if (!ready || !result.summary.attempted) break;
+      }
+    } catch (error) {
+      // The error shows above; say what already went out so nobody sends it again by hand.
+      setFeedback(total.sent ? `${plural(total.sent, 'correo enviado', 'correos enviados')} antes de detenerse.` : '');
+      throw error;
+    } finally {
+      await open(campaign.id);
     }
-    await open(campaign.id); setFeedback(`${sent} correos enviados.${failed ? ` ${failed} no se pudieron completar; revisa el estado de cada persona.` : ''} Los seguimientos respetan el tiempo desde el envío confirmado.`);
+    const parts = [`${plural(total.sent, 'correo enviado', 'correos enviados')}.`];
+    if (total.held) parts.push(`${plural(total.held, 'contacto quedó', 'contactos quedaron')} en revisión porque cambió, respondió o ya no cumple los criterios.`);
+    if (total.deferred || total.attention) parts.push(`${plural(total.deferred + total.attention, 'envío espera', 'envíos esperan')}: revisa el estado de cada persona.`);
+    if (ready) parts.push(`Quedan ${plural(ready, 'correo listo', 'correos listos')}: vuelve a pulsar «Enviar correos disponibles».`);
+    parts.push('Los seguimientos respetan el tiempo desde el envío confirmado.');
+    setFeedback(parts.join(' '));
   }
   const selectedPreview = campaign?.recipients[recipientIndex];
   const reviseLocked = (index: number) => reviseMode && campaign
@@ -175,7 +193,7 @@ export function BulkCampaignWorkspace() {
           <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.definition.emails.length} destinatarios · {item.definition.messages.length} correos por persona</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>
           <Link className="inline-block text-sm text-muted-foreground underline underline-offset-4" href="/campaigns/history">Ver campañas anteriores</Link>
         </> : <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={() => { if ((!dirty && !individual) || window.confirm('Tienes cambios sin guardar. ¿Quieres salir?')) { setEditing(false); setDirty(false); setIndividual(null); void run(refresh); } }}>← Tus campañas</Button><span className="text-sm text-muted-foreground">{campaign ? stateLabels[campaign.status] : 'Nueva campaña'}{dirty ? ' · Sin guardar' : ''}</span></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={async () => { if ((dirty || individual) && !(await confirm({ title: '¿Salir sin guardar?', description: 'Tienes cambios sin guardar en esta campaña.', confirmLabel: 'Salir sin guardar', tone: 'danger' }))) return; setEditing(false); setDirty(false); setIndividual(null); void run(refresh); }}>← Tus campañas</Button><span className="text-sm text-muted-foreground">{campaign ? stateLabels[campaign.status] : 'Nueva campaña'}{dirty ? ' · Sin guardar' : ''}</span></div>
           <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !frozen && !reviseMode} onGo={setStep} />
           <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-7" aria-busy={busy}>
             {step === 0 && <>
@@ -270,7 +288,7 @@ export function BulkCampaignWorkspace() {
                   <li>Puedes pausar la campaña cuando quieras.</li>
                 </ol>
               </section><div className="flex flex-wrap justify-end gap-3"><Button variant="ghost" disabled={busy || Boolean(individual)} onClick={() => setStep(0)}>Editar audiencia</Button><Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('reject'))}>Rechazar y editar</Button><Button disabled={busy || dirty || Boolean(individual)} onClick={() => void run(() => decide('approve'))}>Aprobar campaña</Button></div></> : <>
-                <p className="text-sm text-muted-foreground">{deliveries.filter(value => value.status === 'sent').length} envíos confirmados. {automationEnabled ? 'Los correos aprobados se procesan automáticamente, incluso con esta página cerrada. Los seguimientos esperan su fecha y se detienen ante una respuesta.' : 'Inicia los disponibles desde aquí; mantén esta página abierta mientras se procesan. Los seguimientos futuros se inician al volver, cuando corresponda su fecha.'}</p>
+                <p className="text-sm text-muted-foreground">{deliveries.filter(value => value.status === 'sent').length} envíos confirmados. {automationEnabled ? 'Los correos aprobados se procesan automáticamente, incluso con esta página cerrada. Los seguimientos esperan su fecha y se detienen ante una respuesta.' : '«Enviar correos disponibles» los envía desde el servidor, por tandas. Los seguimientos futuros se envían al volver a pulsarlo, cuando corresponda su fecha.'}</p>
                 <div className="flex flex-wrap gap-3"><Button variant="outline" disabled={busy} onClick={() => void run(() => decide(campaign.status === 'paused' ? 'resume' : 'pause'))}>{campaign.status === 'paused' ? 'Reanudar campaña' : 'Pausar campaña'}</Button><Button variant="ghost" disabled={busy} onClick={() => void run(() => open(campaign.id))}>Actualizar estado</Button><Button disabled={busy || campaign.status !== 'approved'} onClick={() => void run(sendAvailable)}>{busy ? 'Procesando…' : 'Enviar correos disponibles'}</Button>{campaign.recipients.some(person => person.messages.some(message => !isCampaignMessageLocked(message.draftId, deliveries))) && <Button variant="outline" disabled={busy} onClick={() => { setDefinition({ ...campaign.definition }); setReviseMode(true); setStep(1); setMessageIndex(0); setDirty(false); setFeedback('Edita solo los mensajes pendientes. Los enviados o en curso están bloqueados.'); }}>Editar mensajes pendientes</Button>}</div>
                 <section aria-label="Estado por destinatario" className="divide-y rounded-xl border">
                   {campaign.recipients.map(person => {

@@ -50,10 +50,10 @@ export const PRODUCT_TOUR_STEPS: ProductTourStep[] = [
     body: 'Aquí llegan tus guardados sin correo. Selecciónalos y pulsa «Buscar correo»: pasan a «Por escribir».' },
   { id: 'enriched-research', target: 'enriched-research', route: '/saved/leads/enriched', section: 'Por escribir',
     title: 'Investiga antes de escribir',
-    body: 'Marca a quién investigar: la IA lee su empresa y su rol para que el correo no sea genérico.' },
+    body: 'En «Por investigar», marca a quiénes y pulsa «Investigar»: la IA lee su empresa y su rol para que el correo no sea genérico.' },
   { id: 'enriched-contact', target: 'enriched-contact', route: '/saved/leads/enriched', section: 'Por escribir',
     title: 'La IA prepara, tú envías',
-    body: '«Contactar» prepara el correo y sus seguimientos. Los revisas, confirmas y pulsas «Enviar ahora».' },
+    body: 'En «Listos para escribir», «Escribir» prepara el correo y sus seguimientos. Los revisas, confirmas y pulsas «Enviar ahora».' },
   { id: 'conversations', target: 'conv-views', route: '/contacted', section: 'Conversaciones', title: 'Responde a quien te escribió',
     body: '«Por responder» junta a quienes esperan tu respuesta. Contestas en el mismo hilo, desde la app.' },
   { id: 'campaigns', target: 'campaigns-tabs', route: '/campaigns', section: 'Campañas', title: 'Escribe a un grupo',
@@ -132,11 +132,11 @@ export const PAGE_GUIDES: PageGuide[] = [
   ] },
   { id: 'enriched', title: 'Por escribir', routes: /^\/saved\/leads\/enriched\/?$/, steps: [
     { id: 'research', target: 'enriched-research', title: 'Investiga antes de escribir',
-      body: 'Marca a quién investigar: la IA lee su empresa y su rol para que el correo no sea genérico.' },
+      body: 'Filtra «Por investigar», marca a quiénes y pulsa «Investigar»: la IA lee su empresa y su rol.' },
     { id: 'contact', target: 'enriched-contact', title: 'Escríbeles',
-      body: 'Marca a quién contactar: la IA prepara el correo y los seguimientos, y tú los revisas antes de enviar.' },
+      body: 'En «Listos para escribir», «Escribir» prepara el correo y los seguimientos; tú los revisas antes de enviar.' },
   ] },
-  { id: 'conversations', title: 'Conversaciones', routes: /^\/contacted(\/replied)?\/?$/, steps: [
+  { id: 'conversations', title: 'Conversaciones', routes: /^\/contacted\/?$/, steps: [
     { id: 'views', target: 'conv-views', title: 'Primero, quien te respondió',
       body: '«Por responder» junta a quienes esperan tu respuesta. Ábrelos y contesta en el mismo hilo.' },
     { id: 'sync', target: 'conv-sync', title: 'Trae respuestas nuevas',

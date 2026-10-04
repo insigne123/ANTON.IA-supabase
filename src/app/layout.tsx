@@ -8,6 +8,7 @@ import { ThemeProvider } from '@/components/providers/theme-provider';
 import { AuthProvider } from '@/context/AuthContext';
 import { PresenceProvider } from '@/context/PresenceContext';
 import { ExtensionInitializer } from '@/components/extension-initializer';
+import { ConfirmProvider } from '@/components/confirm-dialog';
 import { Poppins, PT_Sans } from 'next/font/google';
 
 const poppins = Poppins({
@@ -25,8 +26,9 @@ const ptSans = PT_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'ANTON.IA - Lead Automation',
-  description: 'AI-powered lead search, research, and outreach.',
+  // Each page names itself («Conversaciones») and the tab reads «Conversaciones · ANTON.IA».
+  title: { default: 'ANTON.IA', template: '%s · ANTON.IA' },
+  description: 'Prospección con IA: busca contactos, investígalos y escríbeles por correo y LinkedIn.',
   icons: {
     icon: [{ url: '/icon-192.png', type: 'image/png', sizes: '192x192' }],
     apple: [{ url: '/icon-192.png', type: 'image/png', sizes: '192x192' }],
@@ -46,9 +48,11 @@ export default function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system">
           <AuthProvider>
             <PresenceProvider>
-              {children}
-              <ExtensionInitializer />
-              <Toaster />
+              <ConfirmProvider>
+                {children}
+                <ExtensionInitializer />
+                <Toaster />
+              </ConfirmProvider>
             </PresenceProvider>
           </AuthProvider>
         </ThemeProvider>

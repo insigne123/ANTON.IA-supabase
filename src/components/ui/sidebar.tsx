@@ -141,7 +141,7 @@ const SidebarProvider = React.forwardRef<
               } as React.CSSProperties
             }
             className={cn(
-              "group/sidebar-wrapper flex min-h-svh w-full overflow-x-hidden has-[[data-variant=inset]]:bg-sidebar",
+              "group/sidebar-wrapper flex min-h-svh w-full overflow-x-clip has-[[data-variant=inset]]:bg-sidebar",
               className
             )}
             ref={ref}
@@ -206,7 +206,7 @@ const Sidebar = React.forwardRef<
             }
             side={side}
           >
-            <SheetTitle className="sr-only">Navegacion principal</SheetTitle>
+            <SheetTitle className="sr-only">Navegación principal</SheetTitle>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
         </Sheet>
@@ -264,7 +264,8 @@ const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
   React.ComponentProps<typeof Button>
 >(({ className, onClick, ...props }, ref) => {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, isMobile, open, openMobile } = useSidebar()
+  const label = isMobile ? "Abrir menú" : open ? "Contraer menú" : "Mostrar menú"
 
   return (
     <Button
@@ -277,11 +278,11 @@ const SidebarTrigger = React.forwardRef<
         onClick?.(event)
         toggleSidebar()
       }}
-      aria-label="Alternar navegacion principal"
+      aria-label={label}
+      aria-expanded={isMobile ? openMobile : open}
       {...props}
     >
-      <PanelLeft />
-      <span className="sr-only">Alternar navegacion principal</span>
+      <PanelLeft aria-hidden="true" />
     </Button>
   )
 })
@@ -297,10 +298,10 @@ const SidebarRail = React.forwardRef<
     <button
       ref={ref}
       data-sidebar="rail"
-      aria-label="Toggle Sidebar"
+      aria-label="Contraer o mostrar el menú"
       tabIndex={-1}
       onClick={toggleSidebar}
-      title="Toggle Sidebar"
+      title="Contraer o mostrar el menú"
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex",
         "[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize",
@@ -316,15 +317,16 @@ const SidebarRail = React.forwardRef<
 })
 SidebarRail.displayName = "SidebarRail"
 
+/** A plain container: the page's own <main> goes inside it (app-shell.tsx), so there is one main landmark. */
 const SidebarInset = React.forwardRef<
   HTMLDivElement,
-  React.ComponentProps<"main">
+  React.ComponentProps<"div">
 >(({ className, ...props }, ref) => {
   return (
-    <main
+    <div
       ref={ref}
       className={cn(
-        "relative flex min-h-svh min-w-0 flex-1 flex-col overflow-x-hidden bg-background",
+        "relative flex min-h-svh min-w-0 flex-1 flex-col overflow-x-clip bg-background",
         "peer-data-[variant=inset]:min-h-[calc(100svh-theme(spacing.4))] md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
         className
       )}

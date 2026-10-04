@@ -7,6 +7,7 @@ import {
   FIRST_EMAIL_PATH, HELP_GROUPS, HELP_ICONS, HELP_SECTIONS, POPULAR_QUESTIONS, helpSectionFor, helpSectionHref, helpSectionIdFrom,
   manualAsText, popularHelpQuestions, searchHelp, visibleHelpSections,
 } from './manual';
+import { NAV_SECTIONS } from '../navigation';
 
 test('every section is complete, unique and points at real screens and sections', () => {
   const ids = HELP_SECTIONS.map((section) => section.id);
@@ -28,7 +29,7 @@ test('every section is complete, unique and points at real screens and sections'
 
 test('every entry of the menu has its help', () => {
   const sidebar = readFileSync('src/components/app-sidebar.tsx', 'utf8');
-  const hrefs = [...sidebar.matchAll(/href: '([^']+)'/g)].map((match) => match[1]).filter((href) => href !== '/cowork');
+  const hrefs = NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.href)).filter((href) => href !== '/cowork');
   assert.ok(hrefs.length >= 14, 'the menu was read');
   for (const href of hrefs) assert.ok(helpSectionFor(href), `${href} has a section in the manual`);
   assert.match(sidebar, /href="\/ayuda"/, 'the menu links to the Centro de ayuda');
@@ -47,7 +48,7 @@ test('the «?» of each screen opens its section, including the screens behind a
 
 test('hidden features stay out of the manual for the people who cannot use them', () => {
   const member = visibleHelpSections({ opportunities: false, admin: false }).map((section) => section.id);
-  assert.ok(!member.includes('administracion') && !member.includes('oportunidades') && !member.includes('empresas-guardadas'));
+  assert.ok(!member.includes('administracion') && !member.includes('oportunidades'));
   const admin = visibleHelpSections({ opportunities: true, admin: true }).map((section) => section.id);
   assert.equal(admin.length, HELP_SECTIONS.length);
   assert.doesNotMatch(manualAsText(visibleHelpSections({ opportunities: false, admin: false })), /\[administracion\]/);

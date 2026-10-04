@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 
 import type { QuotaKind } from '@/lib/quota-client';
 import { setClientQuotaSnapshot } from '@/lib/quota-client';
+import { fetchQuotaStatus } from '@/lib/quota-status-client';
 
 type QuotaStatus = {
   resource: QuotaKind;
@@ -13,15 +14,8 @@ type QuotaStatus = {
 
 async function syncQuota(signal?: AbortSignal) {
   try {
-    const res = await fetch('/api/quota/status', {
-      method: 'GET',
-      cache: 'no-store',
-      signal,
-    });
-
-    if (!res.ok) return;
-
-    const data = await res.json().catch(() => null);
+    const data = await fetchQuotaStatus();
+    if (signal?.aborted) return;
     const statuses = Array.isArray(data?.statuses) ? data.statuses as QuotaStatus[] : [];
     for (const status of statuses) {
       if (!status?.resource) continue;

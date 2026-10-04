@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { AlertCircle, CheckCircle2, Loader2, Mail, Plus, RefreshCw, Save, Sparkles } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -129,6 +130,7 @@ function toneLabel(tone: StyleProfile['tone']) {
 
 export default function EmailStyleDesigner() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const styleNameRef = useRef<HTMLInputElement>(null);
   const [styles, setStyles] = useState<SavedEmailStyle[]>([]);
   const [selectedStyleId, setSelectedStyleId] = useState('');
@@ -139,6 +141,8 @@ export default function EmailStyleDesigner() {
   const [libraryScope, setLibraryScope] = useState<EmailLibraryScope>('personal');
   const [sourceCollection, setSourceCollection] = useState<string | null>(null);
   const [canPublish, setCanPublish] = useState(false);
+  // The service references are GrupoExpro's: the server offers them only to those accounts.
+  const [referencesAvailable, setReferencesAvailable] = useState(false);
   const [references, setReferences] = useState<typeof GRUPOEXPRO_REFERENCE_TEMPLATES>([]);
   const [isLoadingReferences, setIsLoadingReferences] = useState(false);
   const baseline = useRef(emailStyleDraftKey('Mi estilo de correo', profile, true, 'personal'));
@@ -173,7 +177,7 @@ export default function EmailStyleDesigner() {
     try {
       const response = await fetch('/api/email-styles', { cache: 'no-store' });
       const payload = (await response.json().catch(() => null)) as
-        | { styles?: SavedEmailStyle[]; error?: string; canPublish?: boolean }
+        | { styles?: SavedEmailStyle[]; error?: string; canPublish?: boolean; referencesAvailable?: boolean }
         | null;
 
       if (!response.ok || !Array.isArray(payload?.styles)) {
@@ -183,6 +187,7 @@ export default function EmailStyleDesigner() {
       const nextStyles = payload.styles.map(normalizeSavedStyle);
       setStyles(nextStyles);
       setCanPublish(payload.canPublish === true);
+      setReferencesAvailable(payload.referencesAvailable === true);
 
       if (replaceDraft && nextStyles.length > 0) {
         const next = nextStyles.find((style) => style.isDefault && style.libraryScope === 'personal')
@@ -457,9 +462,15 @@ export default function EmailStyleDesigner() {
   async function saveStyle(action: 'save' | 'duplicate' | 'archive' = 'save', targetScope = libraryScope) {
     if (isBusy || (readOnly && action !== 'duplicate')) return;
     if (action !== 'save' && !discardChanges()) return;
-    if (action === 'archive' && !window.confirm('¿Archivar esta plantilla? Dejaria de estar disponible para nuevos correos.')) return;
+    if (action === 'archive' && !(await confirm({
+      title: '¿Archivar esta plantilla?', description: 'Dejará de estar disponible para correos nuevos.', confirmLabel: 'Archivar', tone: 'danger',
+    }))) return;
     const publishConfirmed = targetScope === 'team'
-      ? window.confirm('¿Confirmas que revisaste el contenido y autorizas su publicacion para tu equipo? Esto no acredita aprobacion de marketing externa.') : false;
+      ? await confirm({
+        title: '¿Publicar para tu equipo?',
+        description: 'Confirmas que revisaste el contenido y autorizas que tu equipo lo use. Esto no reemplaza una aprobación de marketing externa.',
+        confirmLabel: 'Publicar',
+      }) : false;
     if (targetScope === 'team' && !publishConfirmed) return;
     const name = styleName.trim();
     if (!name) {
@@ -624,7 +635,7 @@ export default function EmailStyleDesigner() {
                 {selectedStyleId && !readOnly ? <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void saveStyle('archive')}>Archivar</Button> : null}
               </div>
               {readOnly ? <p className="text-sm text-muted-foreground">Plantilla del equipo. Puedes duplicarla en tu espacio personal para editarla.</p> : null}
-              <details className="rounded-xl border border-border p-3">
+              {referencesAvailable ? <details className="rounded-xl border border-border p-3">
                 <summary className="cursor-pointer text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Importar referencias de servicio</summary>
                 <p className="my-3 text-xs leading-5 text-muted-foreground">Referencias editables inspiradas en GrupoExpro, sin aprobacion de marketing acreditada. No se agregan al equipo hasta que un administrador las revise y publique.</p>
                 {references.length === 0 ? <Button type="button" variant="outline" disabled={isBusy} onClick={() => void loadReferences()}>Ver referencias GrupoExpro</Button> : (
@@ -636,7 +647,7 @@ export default function EmailStyleDesigner() {
                     </Select>
                   </div>
                 )}
-              </details>
+              </details> : null}
             </div>
 
             <fieldset disabled={isBusy || readOnly} className="min-w-0 space-y-6">

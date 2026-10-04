@@ -14,7 +14,8 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground",
+      // Inactive tabs read at 6.4:1 on bg-muted (muted-foreground gave 4.3:1, under WCAG AA for 14 px text).
+      "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-foreground/70",
       className
     )}
     {...props}

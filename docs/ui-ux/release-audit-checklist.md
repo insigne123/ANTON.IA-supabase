@@ -40,3 +40,9 @@ Checklist minimo antes de compilar o desplegar cambios visuales.
 - [ ] no hay mezcla arbitraria de estilos
 - [ ] la experiencia se siente producto y no panel tecnico
 - [ ] la interfaz se siente simple y obvia en pocos segundos
+
+## Auditoria visual
+
+- [ ] `npm run audit:visual -- --routes=<rutas tocadas> --baseline=<recorrido base>` sin hallazgos nuevos (ver `docs/ui-ux/auditoria-visual.md`)
+- [ ] 0 errores de pagina, 0 respuestas 500 y 0 desbordes a 390 px en las rutas tocadas
+- [ ] capturas antes y despues en el PR

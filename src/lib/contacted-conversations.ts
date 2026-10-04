@@ -45,3 +45,48 @@ export function groupConversations(rows: ConversationRow[]) {
     return { row: history.find(needsReply) || history[0], history };
   }).sort((a, b) => Number(needsReply(b.row)) - Number(needsReply(a.row)) || Date.parse(b.row.replied_at || b.row.sent_at || '') - Date.parse(a.row.replied_at || a.row.sent_at || ''));
 }
+
+// The inbox (Plan 9, PR-14): one list with a count per view, the conversation open beside it, and an address that keeps
+// both (?view=…&c=…) so a link, a reload and the back button land on the same place.
+export const CONVERSATION_VIEWS: ConversationView[] = ['reply', 'waiting', 'scheduled', 'all'];
+export const CONVERSATION_VIEW_LABELS: Record<ConversationView, string> = { reply: 'Por responder', waiting: 'Esperando', scheduled: 'Programados', all: 'Todas' };
+
+export function matchesConversationView(row: ConversationRow, view: ConversationView, hasActivePlans: boolean) {
+  if (view === 'reply') return needsReply(row);
+  if (view === 'waiting') return conversationStatus(row) === 'Esperando respuesta';
+  if (view === 'scheduled') return hasActivePlans || row.status === 'scheduled';
+  return true;
+}
+
+/** The view and the open conversation an address asks for; an unknown view reads as none. */
+export function readConversationUrl(search: string) {
+  const params = new URLSearchParams(search);
+  const view = params.get('view') || '';
+  return {
+    view: (CONVERSATION_VIEWS as string[]).includes(view) ? view as ConversationView : null,
+    conversationId: params.get('c')?.trim() || null,
+  };
+}
+
+/** The same address with the view and the open conversation set (or cleared), other parameters kept. */
+export function conversationUrl(href: string, state: { view?: ConversationView | null; conversationId?: string | null }) {
+  const url = new URL(href);
+  if (state.view !== undefined) {
+    if (state.view && state.view !== 'reply') url.searchParams.set('view', state.view); else url.searchParams.delete('view');
+  }
+  if (state.conversationId !== undefined) {
+    if (state.conversationId) url.searchParams.set('c', state.conversationId); else url.searchParams.delete('c');
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export type ConversationTone = 'warning' | 'success' | 'danger' | 'info' | 'neutral';
+
+/** The badge tone of each status: what needs you stands out, what is closed stays quiet. */
+export function conversationTone(status: string): ConversationTone {
+  if (status === 'Por responder') return 'warning';
+  if (status === 'Solicitó una reunión') return 'success';
+  if (status === 'Envío fallido' || status.startsWith('No contactar')) return 'danger';
+  if (status === 'Programado') return 'info';
+  return 'neutral';
+}

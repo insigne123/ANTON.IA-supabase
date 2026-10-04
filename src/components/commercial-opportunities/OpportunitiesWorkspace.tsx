@@ -224,11 +224,11 @@ export function OpportunitiesWorkspace() {
           <Tabs value={tab} onValueChange={value => { setTab(value as Tab); setFilter('new'); setQuery(''); }}>
             <TabsList className="mb-4 h-auto flex-wrap">
               <TabsTrigger value="hiring" className="gap-1.5"><Building2 className="h-4 w-4" aria-hidden="true" />Empresas contratando
-                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.opportunities.length}</span></TabsTrigger>
+                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground/70">{overview.opportunities.length}</span></TabsTrigger>
               <TabsTrigger value="tenders" className="gap-1.5"><Gavel className="h-4 w-4" aria-hidden="true" />Licitaciones y Compra Ágil
-                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.tenders.length}</span></TabsTrigger>
+                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground/70">{overview.tenders.length}</span></TabsTrigger>
               <TabsTrigger value="projects" className="gap-1.5"><Factory className="h-4 w-4" aria-hidden="true" />Proyectos de inversión
-                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{overview.projects.length}</span></TabsTrigger>
+                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground/70">{overview.projects.length}</span></TabsTrigger>
             </TabsList>
             {(['hiring', 'tenders', 'projects'] as Tab[]).map(kind => (
               <TabsContent key={kind} value={kind} className="mt-0">
@@ -242,7 +242,7 @@ export function OpportunitiesWorkspace() {
                       <Button key={item} size="sm" variant={filter === item ? 'default' : 'outline'} aria-pressed={filter === item} onClick={() => setFilter(item)}
                         className="h-9 rounded-full">
                         {FILTER_LABELS[item]}
-                        <span className={cn('ml-1 rounded-full px-1.5 text-xs tabular-nums', filter === item ? 'bg-primary-foreground/20' : 'bg-muted text-muted-foreground')}>{counts[item]}</span>
+                        <span className={cn('ml-1 rounded-full px-1.5 text-xs tabular-nums', filter === item ? 'bg-primary-foreground/20' : 'bg-muted text-foreground/70')}>{counts[item]}</span>
                       </Button>
                     ))}
                   </div>
@@ -324,7 +324,7 @@ function SearchSummary({ overview, running }: { overview: Overview; running: boo
         {profile.offer ? <p className="line-clamp-2 text-sm text-foreground">{profile.offer}</p> : null}
         <ul className="flex flex-wrap gap-1.5" aria-label="Cargos">
           {profile.roles.slice(0, 8).map(role => <li key={role} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{role}</li>)}
-          {profile.roles.length > 8 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">+{profile.roles.length - 8} más</li> : null}
+          {profile.roles.length > 8 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground/70">+{profile.roles.length - 8} más</li> : null}
         </ul>
         <p className="text-xs text-muted-foreground">
           {profile.minAds} o más avisos en 30 días · {profile.regions.length ? profile.regions.join(', ') : 'todo Chile'}
@@ -352,7 +352,7 @@ function SearchSummary({ overview, running }: { overview: Overview; running: boo
         </div>
         {missing.length ? (
           <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">
-            Sin clave: {missing.map(source => `${source.label} (${source.missing})`).join(' y ')}. La configura el mantenedor.
+            {missing.map(source => source.label).join(' y ')} {missing.length === 1 ? 'no está conectado' : 'no están conectados'}. Pide a quien administra ANTON.IA que {missing.length === 1 ? 'lo active' : 'los active'}.
           </p>
         ) : null}
       </div>
@@ -405,13 +405,13 @@ function OpportunityCard({ item, minAds, busy, onStatus }: { item: Opportunity; 
       {data.roles.length ? (
         <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Cargos que busca">
           {data.roles.slice(0, 5).map(entry => (
-            <li key={entry.role} className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">{entry.role} <span className="text-muted-foreground">({entry.ads})</span></li>
+            <li key={entry.role} className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">{entry.role} <span className="text-foreground/70">({entry.ads})</span></li>
           ))}
         </ul>
       ) : null}
       <p className="mt-3">
         <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium',
-          data.isClient ? 'bg-cw-success-soft text-cw-success' : data.isContact ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground')}>
+          data.isClient ? 'bg-cw-success-soft text-cw-success' : data.isContact ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground/70')}>
           {data.isClient ? 'Ya es cliente' : data.isContact ? 'Ya tienes contactos ahí' : 'Aún no es contacto'}
         </span>
       </p>
@@ -501,7 +501,7 @@ function TenderSummary({ overview, running }: { overview: Overview; running: boo
         {tenderSearch.keywords.length ? (
           <ul className="flex flex-wrap gap-1.5" aria-label="Palabras">
             {tenderSearch.keywords.slice(0, 10).map(keyword => <li key={keyword} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{keyword}</li>)}
-            {tenderSearch.keywords.length > 10 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">+{tenderSearch.keywords.length - 10} más</li> : null}
+            {tenderSearch.keywords.length > 10 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground/70">+{tenderSearch.keywords.length - 10} más</li> : null}
           </ul>
         ) : <p className="text-sm text-muted-foreground">Aún no hay palabras para buscar. Agrégalas en «Editar búsqueda».</p>}
         <p className="text-xs text-muted-foreground">
@@ -523,7 +523,7 @@ function TenderSummary({ overview, running }: { overview: Overview; running: boo
         </div>
         <p className="text-xs text-muted-foreground">Sin costo: usa la cuota diaria del ticket de Mercado Público. Se actualiza sola cada mañana.</p>
         {!tenderSearch.ticket ? (
-          <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">Sin ticket de Mercado Público (MERCADO_PUBLICO_TICKET). Lo configura el mantenedor.</p>
+          <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">Mercado Público no está conectado. Pide a quien administra ANTON.IA que lo active.</p>
         ) : null}
       </div>
     </section>
@@ -754,7 +754,7 @@ function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
               <div>
                 <p className="font-medium text-foreground">{source.label}</p>
                 <p className="text-xs text-muted-foreground">
-                  {source.enabled ? (source.source === 'jsearch' ? `${source.requests} consultas, avisos del último mes` : `hasta ${source.requests} avisos de los últimos 7 días`) : `Sin clave (${source.missing})`}
+                  {source.enabled ? (source.source === 'jsearch' ? `${source.requests} consultas, avisos del último mes` : `hasta ${source.requests} avisos de los últimos 7 días`) : 'No está conectada'}
                 </p>
               </div>
               <span className={cn('shrink-0 tabular-nums', source.enabled ? 'text-foreground' : 'text-muted-foreground')}>{source.enabled ? `hasta ${formatUsd(source.estimateUsd)}` : 'no se usa'}</span>
@@ -764,7 +764,7 @@ function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
         <p className="text-sm text-foreground">
           Costo máximo: <strong>{formatUsd(plan.estimateUsd)}</strong>. Este mes llevas {formatUsd(month.spentUsd)} de {formatUsd(month.capUsd)}.
         </p>
-        {overCap ? <p className="rounded-lg bg-cw-warning-soft px-3 py-2 text-sm text-cw-warning">Esta búsqueda pasaría el tope del mes. Pide al mantenedor subir OPPORTUNITIES_MONTHLY_USD_CAP o espera al próximo mes.</p> : null}
+        {overCap ? <p className="rounded-lg bg-cw-warning-soft px-3 py-2 text-sm text-cw-warning">Esta búsqueda pasaría el tope de gasto del mes. Espera al próximo mes o pide a quien administra ANTON.IA que suba el tope.</p> : null}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancelar</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm} disabled={overCap}>Buscar ahora</AlertDialogAction>

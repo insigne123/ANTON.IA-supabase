@@ -90,12 +90,14 @@ function OfferCard({ draft, onDraftChange, onSave, onHide }: {
 }
 
 /** Start screen: one clear action (the composer), your account at a glance, a few concrete starting points. */
-export function CoworkHome({ composer, threads, ready, loading, onSuggestion, onOpenThread, overview = null, overviewLoading = false, onSaveOffer = null,
-  offerDraft = { offer: '', website: '' }, onOfferDraftChange = () => {} }: {
+export function CoworkHome({ composer, threads, ready, loading, listFailed = false, onSuggestion, onOpenThread, overview = null, overviewLoading = false,
+  onSaveOffer = null, offerDraft = { offer: '', website: '' }, onOfferDraftChange = () => {} }: {
   composer: ReactNode;
   threads: CoworkThreadSummary[];
   ready: boolean;
   loading: boolean;
+  /** The list could not be read: the workspace's notice explains it, so «not available yet» would mislead. */
+  listFailed?: boolean;
   onSuggestion: (prompt: string) => void;
   onOpenThread: (id: string) => void;
   /** Real figures of your account and whether Cowork knows what you sell (GET /api/cowork/overview). */
@@ -132,7 +134,7 @@ export function CoworkHome({ composer, threads, ready, loading, onSuggestion, on
         <p className="mt-2 max-w-[34rem] text-[14.5px] leading-6 text-cw-muted">Escribo correos y mensajes de LinkedIn para tus contactos, busco prospectos nuevos y te cuento cómo vas. Antes de enviar o cambiar algo te pido aprobación.</p>
       </div>
       <div className="cw-rise [animation-delay:60ms]">{composer}</div>
-      {!ready && !loading && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
+      {!ready && !loading && !listFailed && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
       <HomeFigures overview={overview} loading={overviewLoading} />
       <CwCollapse show={askOffer}>
         {onSaveOffer && <div className="pt-6"><OfferCard draft={offerDraft} onDraftChange={onOfferDraftChange} onSave={onSaveOffer} onHide={hideOffer} /></div>}
@@ -167,7 +169,7 @@ export function CoworkHome({ composer, threads, ready, loading, onSuggestion, on
                 className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]">
                 <span className="min-w-0 flex-1 truncate text-[14px] text-cw-text">{thread.title}</span>
                 <CwStatusPill tone={status.tone}>{status.label}</CwStatusPill>
-                <span className="hidden w-12 shrink-0 text-right text-[12px] text-cw-faint sm:inline">{coworkShortTime(thread.updatedAt)}</span>
+                <span className="hidden w-12 shrink-0 text-right text-[12px] text-foreground/70 sm:inline">{coworkShortTime(thread.updatedAt)}</span>
                 <ArrowRight className="h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
               </button>
             </li>;

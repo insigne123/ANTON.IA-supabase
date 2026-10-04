@@ -15,6 +15,13 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
+        // States, on the app's own status colors (design-tokens.css, light and dark): always next to a word, never alone.
+        success: "border-transparent bg-cw-success-soft text-cw-success",
+        warning: "border-transparent bg-cw-warning-soft text-cw-warning",
+        danger: "border-transparent bg-cw-danger-soft text-rose-800 dark:text-rose-200",
+        info: "border-transparent bg-cw-accent-soft text-primary",
+        // text-foreground/70 reads at 6.4:1 on bg-muted; muted-foreground gave 4.3:1, too low for 12 px text.
+        neutral: "border-transparent bg-muted text-foreground/70",
       },
     },
     defaultVariants: {

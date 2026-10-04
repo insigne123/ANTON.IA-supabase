@@ -480,7 +480,7 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
     await notificationService.sendAlert(
       row.organization_id,
       'Respuesta positiva detectada',
-      `${who} respondio: ${summary}. Revisar: ${appUrl}/contacted/replied`
+      `${who} respondio: ${summary}. Revisar: ${appUrl}/contacted?view=reply`
     ).catch(() => null);
 
     await createAntoniaException(supabase, {

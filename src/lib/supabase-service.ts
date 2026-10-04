@@ -177,5 +177,18 @@ export const supabaseService = {
         }
 
         return toRemove.length;
+    },
+
+    /** «Por completar»: the email search found nothing; the contact stays and shows «Sin correo» with the date. */
+    async markEmailNotFound(ids: string[], attemptedAt = new Date().toISOString()): Promise<void> {
+        if (ids.length === 0) return;
+        const { error } = await supabase
+            .from(TABLE)
+            .update({ email_enrichment: { enriched: false, status: 'not_found', attemptedAt } })
+            .in('id', ids);
+        if (error) {
+            console.error('Error marking leads without email:', error);
+            throw error;
+        }
     }
 };

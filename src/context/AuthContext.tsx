@@ -8,6 +8,8 @@ import { setEmailDraftStorageScope } from '@/lib/email-drafts-storage';
 import { setResearchedLeadsStorageScope } from '@/lib/researched-leads-storage';
 import { setQuotaStorageScope } from '@/lib/quota-client';
 import { organizationService, type OrganizationRole } from '@/lib/services/organization-service';
+import { safeNextPath } from '@/lib/safe-next-path';
+import { authScopeKey, readCachedAuthScope, writeCachedAuthScope } from '@/lib/auth-scope-cache';
 
 interface AuthContextType {
     user: User | null;
@@ -18,12 +20,24 @@ interface AuthContextType {
     error: string | null;
     signInWithGoogle: (nextPath?: string) => Promise<void>;
     signInWithPassword: (email: string, password: string) => Promise<void>;
-    signUpWithPassword: (email: string, password: string) => Promise<void>;
+    /** `needsConfirmation`: Supabase asks the person to confirm the email before the first sign-in. */
+    signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
+    /** Sends the reset link; Supabase answers the same whether or not the account exists. */
+    requestPasswordReset: (email: string) => Promise<void>;
+    updatePassword: (password: string) => Promise<void>;
     signOut: () => Promise<void>;
     refreshOrganization: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+/** Points the per-person and per-organization browser stores (research, drafts, researched leads, quota) at one scope. */
+function primeStorageScopes(userId: string, organizationId: string | null) {
+    setLeadResearchStorageScope(userId, organizationId);
+    setEmailDraftStorageScope(userId);
+    setResearchedLeadsStorageScope(userId);
+    setQuotaStorageScope(userId, organizationId);
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
@@ -34,10 +48,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const sessionRef = useRef<Session | null>(null);
     const scopeRequestRef = useRef(0);
+    // The last session's scope, read on the first client render. The stores point at it before any screen reads them, and
+    // when the session resolves to the same person and organization the key below does not change: the app mounts once.
+    // Before, every load mounted the whole app twice (anonymous, then the person), so each screen asked for its data twice.
+    const [initialScope] = useState(() => {
+        const cached = readCachedAuthScope();
+        if (cached) primeStorageScopes(cached.userId, cached.organizationId);
+        return cached;
+    });
+    const primedUserIdRef = useRef(initialScope?.userId || null);
+    const [scopeResolved, setScopeResolved] = useState(false);
 
     const applySessionScope = useCallback(async (nextSession: Session | null, forceScopeRefresh = false) => {
         const requestId = ++scopeRequestRef.current;
-        const previousUserId = sessionRef.current?.user?.id || null;
+        // On the first resolution the primed scope counts as the previous one, so the same person's stores are not emptied
+        // while the organization loads.
+        const previousUserId = sessionRef.current?.user?.id || primedUserIdRef.current || null;
+        primedUserIdRef.current = null;
         sessionRef.current = nextSession;
         const userId = nextSession?.user?.id || null;
 
@@ -70,6 +97,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setOrganizationId(nextOrganizationId);
         setOrganizationRole(nextOrganizationRole);
         setLoading(false);
+        setScopeResolved(true);
+        writeCachedAuthScope(userId ? { userId, organizationId: nextOrganizationId } : null);
     }, []);
 
     const refreshOrganization = useCallback(async () => {
@@ -101,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const signInWithGoogle = async (nextPath?: string) => {
         setError(null);
 
-        const safeNext = typeof nextPath === 'string' && nextPath.startsWith('/') ? nextPath : '';
+        const safeNext = safeNextPath(nextPath, '');
         const redirectTo = safeNext
             ? `${window.location.origin}/api/auth/callback?next=${encodeURIComponent(safeNext)}`
             : `${window.location.origin}/api/auth/callback`;
@@ -129,7 +158,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const signUpWithPassword = async (email: string, password: string) => {
         setError(null);
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
             email,
             password,
             options: {
@@ -140,16 +169,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setError(error.message);
             throw error;
         }
+        return { needsConfirmation: !data.session };
+    };
+
+    const requestPasswordReset = async (email: string) => {
+        setError(null);
+        const next = encodeURIComponent('/restablecer-clave');
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+            redirectTo: `${window.location.origin}/api/auth/callback?next=${next}`,
+        });
+        if (error) {
+            setError(error.message);
+            throw error;
+        }
+    };
+
+    const updatePassword = async (password: string) => {
+        setError(null);
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) {
+            setError(error.message);
+            throw error;
+        }
     };
 
     const signOut = async () => {
         await supabase.auth.signOut();
+        // The redirect below can leave before the auth listener runs; the next person on this browser starts clean.
+        writeCachedAuthScope(null);
         window.location.href = '/login'; // Force full reload/redirect to clear state
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, organizationId, organizationRole, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, signOut, refreshOrganization }}>
-            <Fragment key={`${user?.id || 'anonymous'}:${organizationId || 'personal'}`}>
+        <AuthContext.Provider value={{ user, session, organizationId, organizationRole, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, requestPasswordReset, updatePassword, signOut, refreshOrganization }}>
+            <Fragment key={scopeResolved ? authScopeKey({ userId: user?.id, organizationId }) : authScopeKey(initialScope)}>
                 {children}
             </Fragment>
         </AuthContext.Provider>

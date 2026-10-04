@@ -80,7 +80,7 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 | Rollups ANTON.IA | `antoniaRollupsTick` | 00:10 UTC diario | Invoca `/api/cron/antonia-rollups`. |
 | Oportunidades comerciales | `commercialOpportunitiesTick` | 11:15 UTC diario (08:15 en Chile) | Invoca `/api/cron/commercial-opportunities`: licitaciones y Compra Ágil (con `MERCADO_PUBLICO_TICKET`) y avisos de JSearch dentro del tope mensual. |
 
-No agregues estas cargas a Vercel, App Hosting ni a un Cloud Scheduler HTTP externo. `vercel.json` conserva exclusivamente el cron de SUPL.IA, que no forma parte de este traspaso.
+No agregues estas cargas a Vercel, App Hosting ni a un Cloud Scheduler HTTP externo. `vercel.json` ya no programa ningún cron: SUPL.IA se retiró junto con el suyo (3 oct 2026).
 
 El agente de misiones (`antoniaTick`, `antoniaTickHttp`, el worker legacy y `GET /api/cron/antonia`) se retiró el 1 de octubre de 2026; su trabajo lo asume Cowork (`docs/retiro-agente-antonia.md`). Los ticks restantes usan `onSchedule`, por lo que Firebase configura su binding IAM con Cloud Scheduler al desplegar; verificarla antes de habilitarlos. El bridge `/api/cron/native-research` acepta solo `LEAD_RESEARCH_WORKER_SECRET`. Los bridges de campanas, reconciliacion, uso Apollo, replies, privacidad y rollups aceptan solo `FIREBASE_SCHEDULER_SECRET` en `x-firebase-scheduler-secret` junto con `x-scheduler-owner: firebase-functions`; no aceptan `CRON_SECRET` ni `x-cron-secret`.
 

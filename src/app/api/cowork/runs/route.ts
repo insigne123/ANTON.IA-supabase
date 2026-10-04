@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { admitCoworkRun, coworkWorkerConfigured, listCoworkRuns } from '@/lib/server/cowork/runs';
+import { readCoworkThreadSettings } from '@/lib/server/cowork/thread-settings';
 import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,14 @@ async function coworkSearchQuota(auth: { user: { id: string }; organizationId: s
 export async function GET() {
   try {
     const auth = await requireCoworkAccess();
-    return NextResponse.json({ runs: await listCoworkRuns(auth), canSubmit: coworkWorkerConfigured(), canAutonomous: process.env.COWORK_AUTONOMY_ENABLED === 'true', searchQuota: await coworkSearchQuota(auth) }, { headers });
+    // Names and hidden conversations; without the table (or on a failed read) the list stays as it was and the menu hides.
+    const threads = await readCoworkThreadSettings(auth.supabase, { userId: auth.user.id, organizationId: auth.organizationId })
+      .catch(() => ({ available: false, hiddenRootIds: [] as string[], titles: {} as Record<string, string> }));
+    const runs = await listCoworkRuns(auth, { hiddenRootIds: threads.hiddenRootIds });
+    return NextResponse.json({
+      runs, threads: { available: threads.available, titles: threads.titles },
+      canSubmit: coworkWorkerConfigured(), canAutonomous: process.env.COWORK_AUTONOMY_ENABLED === 'true', searchQuota: await coworkSearchQuota(auth),
+    }, { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     return NextResponse.json({ error: 'No se pudieron cargar los trabajos.' }, { status: 503, headers });

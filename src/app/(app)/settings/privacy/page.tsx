@@ -1,16 +1,23 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Ban, FileText, ShieldAlert, UserRoundCheck } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
 import { SettingsLinkRow } from '@/components/settings/settings-link-row';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useAuth } from '@/context/AuthContext';
-import { legalConfig } from '@/lib/legal-config';
 
 export default function PrivacySettingsPage() {
-  const { user } = useAuth();
-  const canAccessPrivacyAdmin = String(user?.email || '').trim().toLowerCase() === legalConfig.privacyContactEmail.toLowerCase();
+  // The server answers with PRIVACY_ADMIN_EMAILS, the same list the requests and incidents pages and APIs check.
+  const [canAccessPrivacyAdmin, setCanAccessPrivacyAdmin] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/privacy/access', { cache: 'no-store', signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => { if (!controller.signal.aborted) setCanAccessPrivacyAdmin(data?.admin === true); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 pb-20">
