@@ -79,6 +79,42 @@ export function enrichedLeadPhoneState(lead: EnrichedLead): EnrichedPhoneState {
   return 'missing';
 }
 
+/**
+ * Where each contact of «Por escribir» stands, in the order a person works them: research first, then write. One stage per
+ * row replaces the two checkbox columns («Invest.» and «Contacto») the list had: the selection is one, and the action bar
+ * says what it will do with it.
+ */
+export type EnrichedStage = 'to_research' | 'researching' | 'review' | 'ready' | 'no_email';
+
+export const ENRICHED_STAGE_LABELS: Record<EnrichedStage, string> = {
+  to_research: 'Por investigar',
+  researching: 'Investigando',
+  review: 'Revisar informe',
+  ready: 'Listo para escribir',
+  no_email: 'Sin correo',
+};
+
+/** The stage chips, in working order; «Investigando» and «Revisar informe» show only when someone is there. */
+export const ENRICHED_STAGE_ORDER: EnrichedStage[] = ['to_research', 'researching', 'review', 'ready', 'no_email'];
+
+export function enrichedStage(input: { hasEmail: boolean; researching: boolean; viewable: boolean; ready: boolean }): EnrichedStage {
+  if (!input.hasEmail) return 'no_email';
+  if (input.ready) return 'ready';
+  if (input.researching) return 'researching';
+  if (input.viewable) return 'review';
+  return 'to_research';
+}
+
+/** The main button of the action bar for a selection: write, research, or both. */
+export function enrichedSelectionAction(counts: { total: number; toResearch: number; ready: number }) {
+  if (counts.total === 0) return null;
+  if (counts.ready === counts.total) return counts.total === 1 ? 'Escribir a 1 contacto' : `Escribir a ${counts.total} contactos`;
+  if (counts.ready === 0) return `Investigar (${counts.total})`;
+  return `Investigar y escribir (${counts.total})`;
+}
+
+export const hasUsableEmail = (email?: string | null) => Boolean(email && email !== 'Not Found' && email.includes('@'));
+
 /** The ids with a phone lookup still running, sorted: a key that changes only when that set changes. */
 export function pendingPhoneLookupKey(leads: EnrichedLead[]) {
   return leads.filter((lead) => hasActivePhoneLookup(lead)).map((lead) => String(lead.id || '').trim()).filter(Boolean).sort().join(',');
