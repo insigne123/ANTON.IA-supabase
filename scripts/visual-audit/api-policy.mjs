@@ -8,6 +8,8 @@ export const BLOCKED_MESSAGE = 'Bloqueado por la auditoría visual: esta acción
 const PASS_WRITES = [
   /^\/api\/onboarding\/tour$/,
   /^\/api\/leads\/search\/checkpoint$/,
+  // Renaming and hiding a Cowork conversation only writes cowork_thread_settings.
+  /^\/api\/cowork\/threads\/[0-9a-f-]{36}$/,
 ];
 /** Reads sent as POST (a body with many ids): they run and are not reported. */
 const PASS_READS = [
