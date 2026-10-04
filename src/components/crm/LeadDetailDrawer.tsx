@@ -28,7 +28,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
-import { Calendar, Clock3, Loader2, Mail, MessageSquare, MessageSquareWarning, RotateCcw, UserRound, UsersRound } from 'lucide-react';
+import { Calendar, Clock3, Linkedin, Loader2, Mail, MessageSquare, MessageSquareWarning, RotateCcw, UserRound, UsersRound } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -44,6 +44,7 @@ import {
     type LeadContactState,
 } from '@/lib/services/lead-collaboration-service';
 import Link from 'next/link';
+import { formatDateTime } from '@/lib/dates';
 
 interface Props {
     lead: UnifiedRow | null;
@@ -442,7 +443,7 @@ function LeadCollaborationPanel({
                         </dl>
 
                         {(threadIsActive || contactIsSuppressed || contactThread?.status === 'closed') && (
-                            <div className={`mt-4 flex gap-2.5 rounded-lg border px-3 py-3 ${contactIsBlocked ? 'border-amber-300/70 bg-amber-50/70 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100' : 'border-border/70 bg-background/70 text-foreground'}`}>
+                            <div className={`mt-4 flex gap-2.5 rounded-lg border px-3 py-3 ${contactIsBlocked ? 'border-cw-border bg-cw-warning-soft text-foreground' : 'border-border/70 bg-background/70 text-foreground'}`}>
                                 {contactIsBlocked
                                     ? <MessageSquareWarning className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                                     : <MessageSquare className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />}
@@ -619,12 +620,18 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                                 {lead.linkedinUrl && (
                                     <Button asChild size="sm" variant="outline" className="h-8 text-xs">
                                       <a href={lead.linkedinUrl} target="_blank" rel="noreferrer">
-                                        <span className="mr-1 font-bold text-sky-700 dark:text-sky-300">in</span> LinkedIn
+                                        <Linkedin className="mr-1 h-3 w-3" aria-hidden="true" /> LinkedIn
                                       </a>
                                     </Button>
                                 )}
+                                {lead.kind === 'contacted' && lead.sourceId && (
+                                    <Button asChild size="sm" variant="outline" className="h-8 text-xs">
+                                      <Link href={`/contacted?c=${encodeURIComponent(lead.sourceId)}`}>
+                                        <MessageSquare className="mr-1 h-3 w-3" /> Ver conversación
+                                      </Link>
+                                    </Button>
+                                )}
                                 <Badge variant="secondary">{humanizeValue(String(lead.stage || 'inbox'))}</Badge>
-                                {lead.autopilotStatus && <Badge variant="outline">{humanizeValue(lead.autopilotStatus)}</Badge>}
                             </div>
                         </div>
                     </div>
@@ -642,12 +649,12 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                 />
 
                 {(lead.nextAction || lead.nextActionDueAt || lead.meetingLink) && (
-                    <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-                        <h4 className="mb-1 text-sm font-semibold text-amber-900 dark:text-amber-100">Próxima acción registrada</h4>
-                        {lead.nextAction && <p className="text-sm text-amber-800 dark:text-amber-100/80">{lead.nextAction}</p>}
+                    <div className="mb-6 rounded-lg border border-cw-border bg-cw-warning-soft p-4">
+                        <h4 className="mb-1 text-sm font-semibold text-foreground">Próxima acción registrada</h4>
+                        {lead.nextAction && <p className="text-sm text-foreground/80">{lead.nextAction}</p>}
                         {lead.nextActionDueAt && (
-                            <p className="mt-2 text-xs text-amber-700 dark:text-amber-200/80">
-                                Vence: {new Date(lead.nextActionDueAt).toLocaleString()}
+                            <p className="mt-2 text-xs text-foreground/70">
+                                Vence: {formatDateTime(lead.nextActionDueAt)}
                             </p>
                         )}
                         {lead.meetingLink && (

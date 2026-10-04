@@ -10,6 +10,9 @@ import { SmartAlerts } from '@/components/crm/SmartAlerts';
 import { StageSuggestions } from '@/components/crm/StageSuggestions';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { DocumentTitle } from '@/components/document-title';
+import Link from 'next/link';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useToast } from '@/hooks/use-toast';
 import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
@@ -32,10 +35,13 @@ export default function CRMPage() {
     const [suggestions, setSuggestions] = useState<CrmStageSuggestion[]>([]);
     const [deciding, setDeciding] = useState(false);
     // «Gráfico» shows the flow by stage (Plan 5, PR-10b); «Tablero» is the board to move leads. The choice is remembered.
-    const [view, setView] = useState<'graph' | 'board'>('graph');
+    // null until the remembered choice is read, so the toggle never shows «Gráfico» and then jumps to «Tablero».
+    const [view, setView] = useState<'graph' | 'board' | null>(null);
     const [openStage, setOpenStage] = useState<PipelineStage | null>(null);
     useEffect(() => {
-        try { if (window.localStorage.getItem('anton.crm.view') === 'board') setView('board'); } catch { /* storage unavailable */ }
+        let stored: 'graph' | 'board' = 'graph';
+        try { if (window.localStorage.getItem('anton.crm.view') === 'board') stored = 'board'; } catch { /* storage unavailable */ }
+        setView(stored);
     }, []);
     function chooseView(next: 'graph' | 'board') {
         setView(next);
@@ -134,9 +140,10 @@ export default function CRMPage() {
             <header className="border-b border-border/70 bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:px-6">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
+                        <DocumentTitle title="Pipeline" />
                         <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
-                        <p className="mt-0.5 text-sm text-muted-foreground">Prioriza oportunidades y mueve cada lead a su siguiente etapa.</p>
-                        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <p className="mt-0.5 text-sm text-foreground/70">Prioriza oportunidades y mueve cada lead a su siguiente etapa.</p>
+                        <p className="mt-1 flex items-center gap-1.5 text-xs text-foreground/70">
                             <Sparkles className="h-3.5 w-3.5" />
                             Los envíos y las respuestas proponen cambios de etapa; nada se mueve hasta que los aceptes.
                         </p>
@@ -189,11 +196,14 @@ export default function CRMPage() {
                         Cargando pipeline…
                     </div>
                 ) : rows.length === 0 && !loadError ? (
-                    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                        <p className="font-medium">Aún no hay leads en el pipeline</p>
-                        <p className="max-w-sm text-sm text-muted-foreground">Cuando guardes o contactes leads, aparecerán aquí para que puedas organizar su avance.</p>
-                    </div>
-                ) : view === 'graph' ? (
+                    <EmptyState
+                        className="h-full max-w-none justify-center"
+                        icon={Workflow}
+                        title="Aún no hay leads en el pipeline"
+                        description="Cuando guardes o contactes leads, aparecerán aquí para que organices su avance."
+                        action={<div className="flex flex-wrap justify-center gap-2"><Button asChild size="sm"><Link href="/search">Buscar prospectos</Link></Button><Button asChild size="sm" variant="outline"><Link href="/saved/leads/enriched">Ir a «Por escribir»</Link></Button></div>}
+                    />
+                ) : view !== 'board' ? (
                     <div className="h-full overflow-y-auto">
                         <PipelineFlowView rows={rows} onOpenStage={setOpenStage} pending={pendingByStage} />
                     </div>
