@@ -18,6 +18,8 @@ export type CoworkRun = {
   created_at: string;
   /** Previous turn in the same conversation, when this run continues one. */
   parent_run_id?: string | null;
+  /** First run of the conversation (kept by the database); the key for its name and «Eliminar». */
+  root_run_id?: string | null;
   /** True when the worker admitted this run to resume after an effect or search, or to tell that research finished. */
   automatic?: boolean;
   /** Why an automatic run started, when it was not to resume: the research the conversation asked for finished. */

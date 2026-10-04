@@ -1,15 +1,22 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { LoaderCircle, PanelLeftClose, Search, SquarePen } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, Search, SquarePen, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
   coworkDateBucket, coworkShortTime, coworkStatusCopy, isCoworkActive, type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { CwButton, CwStatusDot } from './ui';
 
-/** Conversations grouped by recency, like a chat sidebar. */
-export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect, onNew, onClose, idPrefix = 'cowork-rail' }: {
+const TITLE_MAX = 120;
+
+/**
+ * Conversations grouped by recency, like a chat sidebar. With `onRename`/`onDelete` (the server can keep names), each one
+ * has a menu: «Renombrar» edits the name in place (Enter saves, Esc cancels) and «Eliminar» hides it, with «Deshacer»
+ * in the notice; a conversation that is still working cannot be deleted.
+ */
+export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete, idPrefix = 'cowork-rail' }: {
   idPrefix?: string;
   threads: CoworkThreadSummary[];
   loading: boolean;
@@ -17,8 +24,13 @@ export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect,
   onSelect: (id: string) => void;
   onNew: () => void;
   onClose: () => void;
+  onRename?: (rootId: string, title: string) => Promise<boolean>;
+  onDelete?: (thread: CoworkThreadSummary) => void;
 }) {
   const [filter, setFilter] = useState('');
+  const [editing, setEditing] = useState<{ rootId: string; draft: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const skipBlurSave = useRef(false);
   const term = filter.trim().toLocaleLowerCase('es');
   const groups = useMemo(() => {
     const now = new Date();
@@ -31,6 +43,17 @@ export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect,
     }
     return result;
   }, [threads, term]);
+
+  const save = async () => {
+    if (!editing || !onRename || saving) return;
+    const current = threads.find(thread => thread.rootId === editing.rootId);
+    const next = editing.draft.replace(/\s+/g, ' ').trim();
+    if (current && next === current.title) { setEditing(null); return; }
+    setSaving(true);
+    const ok = await onRename(editing.rootId, next);
+    setSaving(false);
+    if (ok) setEditing(null);
+  };
 
   return <nav aria-label="Trabajos recientes" className="flex h-full min-h-0 flex-col">
     <div className="flex items-center gap-1 px-3 pb-2 pt-3">
@@ -57,17 +80,54 @@ export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect,
           {group.items.map(thread => {
             const status = coworkStatusCopy(thread.status);
             const current = selectedThreadId === thread.rootId;
-            const flagged = isCoworkActive(thread.status) || thread.status === 'failed';
-            return <li key={thread.rootId}>
+            const working = isCoworkActive(thread.status);
+            const flagged = working || thread.status === 'failed';
+            const manageable = Boolean(onRename || onDelete);
+            if (editing?.rootId === thread.rootId) {
+              return <li key={thread.rootId} className="px-1 py-0.5">
+                <label htmlFor={`${idPrefix}-rename`} className="sr-only">Nombre del trabajo</label>
+                <input id={`${idPrefix}-rename`} autoFocus value={editing.draft} maxLength={TITLE_MAX} disabled={saving}
+                  onChange={event => setEditing({ rootId: thread.rootId, draft: event.target.value })}
+                  onFocus={event => event.currentTarget.select()}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') { event.preventDefault(); void save(); }
+                    if (event.key === 'Escape') { event.preventDefault(); skipBlurSave.current = true; setEditing(null); }
+                  }}
+                  onBlur={() => { if (skipBlurSave.current) { skipBlurSave.current = false; return; } void save(); }}
+                  aria-describedby={`${idPrefix}-rename-help`}
+                  className="h-8 w-full rounded-lg border border-cw-border-strong bg-cw-elevated px-2.5 text-[13.5px] text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]" />
+                <p id={`${idPrefix}-rename-help`} className="px-1 pt-1 text-[11.5px] text-cw-muted">Enter guarda · Esc cancela · vacío vuelve al primer mensaje</p>
+              </li>;
+            }
+            return <li key={thread.rootId} className="group/thread relative">
               <button type="button" onClick={() => onSelect(thread.id)} aria-current={current ? 'page' : undefined}
                 title={thread.title}
-                className={cn('group flex w-full items-center gap-2 rounded-lg px-3 py-[7px] text-left text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
+                className={cn('flex w-full items-center gap-2 rounded-lg px-3 py-[7px] text-left text-[13.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
+                  manageable && 'pr-9',
                   current ? 'bg-cw-active font-medium text-cw-text' : 'text-cw-text hover:bg-cw-hover')}>
                 <span className="min-w-0 flex-1 truncate">{thread.title}</span>
                 {flagged
-                  ? <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-cw-muted"><CwStatusDot tone={status.tone} pulse={isCoworkActive(thread.status) && thread.status !== 'waiting_approval'} /><span className="sr-only">{status.label}</span></span>
-                  : <span className="shrink-0 text-[11.5px] text-cw-faint">{coworkShortTime(thread.updatedAt)}</span>}
+                  ? <span className={cn('flex shrink-0 items-center gap-1.5 text-[11.5px] text-cw-muted', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}><CwStatusDot tone={status.tone} pulse={working && thread.status !== 'waiting_approval'} /><span className="sr-only">{status.label}</span></span>
+                  : <span className={cn('shrink-0 text-[11.5px] text-cw-faint', manageable && 'transition-opacity group-focus-within/thread:opacity-0 group-hover/thread:opacity-0 [@media(hover:none)]:opacity-0')}>{coworkShortTime(thread.updatedAt)}</span>}
               </button>
+              {manageable && <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" aria-label={`Opciones de «${thread.title}»`}
+                    className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-cw-muted opacity-0 transition-opacity hover:bg-cw-hover hover:text-cw-text focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] group-focus-within/thread:opacity-100 group-hover/thread:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100">
+                    <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48 rounded-xl border-cw-border bg-cw-elevated p-1 text-cw-text shadow-[var(--cw-shadow)]">
+                  {onRename && <DropdownMenuItem onSelect={() => setEditing({ rootId: thread.rootId, draft: thread.title })}
+                    className="gap-2 rounded-lg px-2.5 py-2 text-[13px] focus:bg-cw-hover focus:text-cw-text">
+                    <Pencil className="h-4 w-4 text-cw-muted" aria-hidden="true" />Renombrar
+                  </DropdownMenuItem>}
+                  {onDelete && <DropdownMenuItem disabled={working} onSelect={() => onDelete(thread)}
+                    className="gap-2 rounded-lg px-2.5 py-2 text-[13px] text-cw-danger focus:bg-cw-danger-soft focus:text-cw-danger data-[disabled]:text-cw-muted">
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />{working ? 'Eliminar (espera a que termine)' : 'Eliminar'}
+                  </DropdownMenuItem>}
+                </DropdownMenuContent>
+              </DropdownMenu>}
             </li>;
           })}
         </ul>
