@@ -22,6 +22,10 @@ test('the browser policy aborts other hosts, blocks app writes and lets reads th
   assert.deepEqual(classify(request('GET', 'http://localhost:9005/api/home/today'), origins), { action: 'continue' });
   assert.deepEqual(classify(request('POST', 'http://localhost:9005/api/team-locks'), origins), { action: 'continue' });
   assert.deepEqual(classify(request('PUT', 'http://localhost:9005/api/leads/search/checkpoint'), origins), { action: 'continue', record: 'app-write' });
+  // Renaming or hiding a Cowork conversation only writes the stand-in database; starting a run stays blocked.
+  assert.deepEqual(classify(request('PATCH', 'http://localhost:9005/api/cowork/threads/00000000-0000-4000-8000-000000009001'), origins), { action: 'continue', record: 'app-write' });
+  assert.deepEqual(classify(request('DELETE', 'http://localhost:9005/api/cowork/threads/00000000-0000-4000-8000-000000009001'), origins), { action: 'continue', record: 'app-write' });
+  assert.deepEqual(classify(request('POST', 'http://localhost:9005/api/cowork/runs'), origins), { action: 'block', record: 'app-write' });
   assert.deepEqual(classify(request('POST', 'http://localhost:9005/search'), origins), { action: 'continue', record: 'server-action' });
   assert.deepEqual(classify(request('PATCH', 'http://127.0.0.1:54321/rest/v1/leads?id=eq.1'), origins), { action: 'continue', record: 'supabase-write' });
   assert.deepEqual(classify(request('GET', 'http://127.0.0.1:54321/rest/v1/leads'), origins), { action: 'continue', record: null });
