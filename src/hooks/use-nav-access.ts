@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { getBrowserStorage } from '@/lib/browser-storage';
 import { COWORK_OWNER_EMAIL } from '@/lib/cowork/access';
@@ -82,4 +82,13 @@ export function useNavAccess({ userId, email, organizationId }: {
     cowork: isCoworkOwner && (answered.cowork ?? cached.cowork),
     opportunities: answered.opportunities ?? cached.opportunities,
   };
+}
+
+const NavAccessContext = createContext<NavAccess>(NO_ACCESS);
+
+/** The app shell shares its answer, so a page that shows the same parts of the app as the menu (the help) asks nothing. */
+export const NavAccessProvider = NavAccessContext.Provider;
+
+export function useSharedNavAccess(): NavAccess {
+  return useContext(NavAccessContext);
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { AppSidebar } from '@/components/app-sidebar';
@@ -11,14 +11,15 @@ import QuotaSync from '@/components/quota/quota-sync';
 import ThemeToggle from '@/components/theme-toggle';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/context/AuthContext';
-import { useNavAccess } from '@/hooks/use-nav-access';
+import { NavAccessProvider, useNavAccess } from '@/hooks/use-nav-access';
 import { navLabelFor } from '@/lib/navigation';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, organizationId, organizationRole } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const access = useNavAccess({ userId: user?.id, email: user?.email, organizationId });
+  const navAccess = useNavAccess({ userId: user?.id, email: user?.email, organizationId });
+  const access = useMemo(() => ({ cowork: navAccess.cowork, opportunities: navAccess.opportunities }), [navAccess.cowork, navAccess.opportunities]);
   // The help shows the same parts of the app as the menu.
   const helpVisibility = { opportunities: access.opportunities, admin: organizationRole === 'owner' || organizationRole === 'admin' };
   const screenLabel = navLabelFor(pathname);
@@ -66,7 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             tabIndex={-1}
             className="min-h-0 min-w-0 flex-1 overflow-x-clip px-4 py-4 outline-none md:px-6 md:py-5"
           >
-            {children}
+            <NavAccessProvider value={access}>{children}</NavAccessProvider>
           </main>
         </SidebarInset>
       </ProductTourProvider>
