@@ -3,8 +3,8 @@ import {
   HIRING_WINDOW_DAYS, hiringOpportunityRow, hiringSignalRow, type HiringOpportunityRow, type HiringSignalRow,
 } from '@/lib/commercial-opportunities/records';
 import { formatUsd } from '@/lib/commercial-opportunities/view';
-import { JSEARCH_USD_PER_REQUEST, searchJSearch } from './jsearch';
-import { fantasticMaxRunUsd, fantasticRunPlan, fantasticStartUsd, fantasticUsdPerJob, searchFantasticJobs } from './fantastic-jobs';
+import { JSEARCH_USD_PER_REQUEST, JSearchRequestError, searchJSearch } from './jsearch';
+import { FantasticJobsError, fantasticMaxRunUsd, fantasticRunPlan, fantasticStartUsd, fantasticUsdPerJob, searchFantasticJobs } from './fantastic-jobs';
 
 /**
  * One search of «empresas contratando» (plan 8, phase 3): asks each source with a key for the ads of the profile's roles,
@@ -77,22 +77,28 @@ type SourceResult = { source: HiringSyncSource; runId: string; ads: JobAd[]; cos
 /** A source's message is kept short and never carries a key (the clients already keep keys out of their errors). */
 const message = (error: unknown) => (error instanceof Error ? error.message : 'Error desconocido.').slice(0, 300);
 
-async function runJSearch(roles: string[], search: Sources['jsearch'], key: string) {
+async function runJSearch(roles: string[], search: Sources['jsearch'], key: string, wait: (ms: number) => Promise<void>) {
   const ads: JobAd[] = [];
   const failures: string[] = [];
   let costUsd = 0, asked = 0, answered = 0;
-  // Three at a time: the whole search stays within seconds and under the plan's rate limit.
-  for (let index = 0; index < roles.length; index += 3) {
-    const batch = roles.slice(index, index + 3);
-    asked += batch.length;
-    const results = await Promise.allSettled(batch.map(role => search({ query: role, numPages: 1, datePosted: 'month' },
-      { fetch: globalThis.fetch, key })));
-    for (const result of results) {
-      if (result.status === 'fulfilled') { answered++; ads.push(...result.value.ads); costUsd += result.value.costUsd; }
-      else failures.push(message(result.reason));
+  // Do not burst three requests at once: low-tier plans rate-limit those even
+  // when the monthly quota still has room. No automatic paid retries.
+  for (const role of roles) {
+    if (asked) await wait(1100);
+    asked++;
+    try {
+      const result = await search({ query: role, numPages: 1, datePosted: 'month' }, { fetch: globalThis.fetch, key });
+      answered++; ads.push(...result.ads); costUsd += result.costUsd;
+    } catch (error) {
+      failures.push(message(error));
+      if (error instanceof JSearchRequestError) {
+        costUsd += error.costUsd;
+        ads.push(...error.ads);
+        if (error.ads.length) answered++;
+        if (error.stopQueries) break;
+      } else costUsd += JSEARCH_USD_PER_REQUEST; // uncertain delivered request
+      if (/clave|suscripci|cupo|limitó temporalmente/i.test(message(error))) break;
     }
-    // A rejected key or an exhausted plan fails every query: stop asking.
-    if (failures.some(item => /clave|suscripci|cupo/i.test(item))) break;
   }
   return {
     ads, costUsd: round(costUsd), failed: answered === 0,
@@ -105,6 +111,7 @@ export async function runHiringSync(input: {
   now?: string; sources?: Sources;
   /** Only these sources (the daily sync asks the cheap one); every source with its key when absent. */
   only?: HiringSyncSource[];
+  wait?: (ms: number) => Promise<void>;
 }) {
   const now = input.now ?? new Date().toISOString();
   const sources = input.sources ?? { jsearch: searchJSearch, fantastic: searchFantasticJobs };
@@ -131,7 +138,8 @@ export async function runHiringSync(input: {
   const results: SourceResult[] = await Promise.all(runs.map(async ({ source, runId }): Promise<SourceResult> => {
     try {
       if (source === 'jsearch') {
-        const result = await runJSearch(profile.roles.slice(0, JSEARCH_QUERIES), sources.jsearch, env.jsearchKey!);
+        const result = await runJSearch(profile.roles.slice(0, JSEARCH_QUERIES), sources.jsearch, env.jsearchKey!,
+          input.wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms))));
         return { source, runId, ...result };
       }
       const result = await sources.fantastic({ titles: profile.roles, limit: LINKEDIN_LIMIT, timeRange: '7d' },
@@ -140,9 +148,10 @@ export async function runHiringSync(input: {
     } catch (error) {
       // A timeout or malformed result may follow a paid actor start. Conservatively
       // reserve its whole hard cap in the monthly ledger instead of counting zero.
-      const costUsd = source === 'linkedin' ? fantasticMaxRunUsd(String(env.maxRunUsd ?? 1)) : 0;
+      const costUsd = source === 'linkedin' && !(error instanceof FantasticJobsError && !error.mayHaveCharged)
+        ? fantasticMaxRunUsd(String(env.maxRunUsd ?? 1)) : 0;
       return { source, runId, ads: [], costUsd,
-        error: source === 'linkedin' ? `${message(error)} Se reserva el tope de esta corrida como costo estimado; revisa el recibo de Apify.` : message(error), failed: true };
+        error: source === 'linkedin' && costUsd > 0 ? `${message(error)} Se reserva el tope de esta corrida como costo estimado; revisa el recibo de Apify.` : message(error), failed: true };
     }
   }));
 
@@ -183,7 +192,7 @@ export async function runHiringSync(input: {
     for (const result of results) await finish(result, counts.get(result.source)!);
     const qualifying = grouped.opportunities.filter(item => item.ads >= profile.minAds);
     return {
-      status: 'done' as const,
+      status: results.every(result => result.failed) ? 'failed' as const : results.some(result => result.error) ? 'partial' as const : 'done' as const,
       fetched: fresh.length,
       companies: rows.length,
       qualifying: qualifying.length,
@@ -191,7 +200,8 @@ export async function runHiringSync(input: {
       newQualifying: qualifying.filter(item => !existing.has(item.key.slice(0, 300))).length,
       costUsd: round(results.reduce((sum, result) => sum + result.costUsd, 0)),
       skipped: grouped.skipped,
-      sources: results.map(result => ({ source: result.source, fetched: result.ads.length, costUsd: result.costUsd, error: result.error })),
+      sources: results.map(result => ({ source: result.source, status: result.failed ? 'failed' as const : 'succeeded' as const,
+        fetched: result.ads.length, costUsd: result.costUsd, error: result.error })),
     };
   } catch (error) {
     const failure = `No se pudo guardar: ${message(error)}`;

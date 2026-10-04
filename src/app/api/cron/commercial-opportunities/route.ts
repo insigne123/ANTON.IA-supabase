@@ -37,12 +37,13 @@ export async function POST(request: Request) {
       const storeScope = { ...scope, profileId: profile.id };
       if (item.tenders) {
         outcome.tenders = await runTenderSync({ store: supabaseTenderStore(client, storeScope, 'schedule'), profile, ticket, organizationId: item.organizationId })
-          .then(result => ({ matched: result.matched, created: result.created }), failure => ({ error: failure instanceof Error ? failure.message : 'error' }));
+          .then(result => ({ status: result.status, matched: result.matched, created: result.created, errors: result.sources.filter(source => source.error).map(source => source.error) }), failure => ({ error: failure instanceof Error ? failure.message : 'error' }));
       }
       if (item.hiring) {
         outcome.hiring = await runHiringSync({ store: supabaseHiringStore(client, storeScope, 'schedule'), profile, env, capUsd: monthlyCapUsd(),
           organizationId: item.organizationId, only: ['jsearch'] })
-          .then(result => (result.status === 'done' ? { qualifying: result.qualifying, costUsd: result.costUsd } : { capped: true }),
+          .then(result => (result.status === 'capped' ? { capped: true } : { status: result.status, qualifying: result.qualifying, costUsd: result.costUsd,
+            errors: result.sources.filter(source => source.error).map(source => source.error) }),
             failure => ({ error: failure instanceof Error ? failure.message : 'error' }));
       }
     } catch (failure) {

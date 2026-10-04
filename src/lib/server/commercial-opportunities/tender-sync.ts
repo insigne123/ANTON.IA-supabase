@@ -111,7 +111,7 @@ export async function runTenderSync(input: {
       await finish(result, { created, updated: own.length - created });
     }
     return {
-      status: 'done' as const,
+      status: results.every(result => result.failed) ? 'failed' as const : results.some(result => result.error) ? 'partial' as const : 'done' as const,
       found: results.reduce((sum, result) => sum + result.found, 0),
       matched: rows.length,
       created: rows.filter(row => !existing.has(row.dedupe_key)).length,

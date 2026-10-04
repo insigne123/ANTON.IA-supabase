@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { reportReady } from './research-state';
-import { blockLines } from './report-blocks';
+import { presentReportBlock } from './report-blocks';
 
 export const researchWarnings: Record<string, string> = {
   official_site_fetch_failed: 'No se pudo consultar el sitio oficial de la empresa.',
@@ -72,21 +72,10 @@ export function createResearchPdf(profile: { fullName: string; linkedinUrl: stri
       if (entry.claimIds?.length) paragraph(`Referencias: ${entry.claimIds.join(', ')}`, { size: 8, color: muted });
     }
     for (const block of item.blocks || []) {
-      if (block.type === 'committee') {
-        for (const person of report.analysis?.buyingCommittee || []) {
-          paragraph(`${person.name || 'Rol por identificar'} · ${person.title}`, { bold: true }); paragraph(person.rationale);
-        }
-      }
-      if (block.type !== 'committee') {
-        if (block.title) paragraph(block.title, { bold: true });
-        const graphItems = Object.values(report.evidenceGraph || {}).filter(Array.isArray).flat() as any[];
-        const payload = Array.isArray(block.payload) ? block.payload.map((value: unknown) => {
-          if (typeof value !== 'string') return value;
-          const item = graphItems.find((item: any) => item?.id === value);
-          return item ? item.statement || item.content || item.howToFind || (item.title ? `${item.title} · ${item.url || item.canonicalUrl || ''}` : item.text) || value : value;
-        }) : block.payload;
-        for (const line of blockLines(payload)) paragraph(line);
-      }
+      const reading = presentReportBlock(block, report);
+      if (reading.title && (reading.lines.length || reading.links.length)) paragraph(reading.title, { bold: true });
+      for (const line of reading.lines) paragraph(line);
+      for (const source of reading.links) { paragraph(source.label, { bold: true }); link(source.url); }
     }
   }
   const graph = report.evidenceGraph;
@@ -99,7 +88,7 @@ export function createResearchPdf(profile: { fullName: string; linkedinUrl: stri
       for (const factId of claim.evidenceIds || []) {
         const fact = graph.facts?.find((fact: any) => fact.id === factId);
         const source = graph.sources?.find((source: any) => source.id === fact?.sourceId);
-        if (source?.url) urls.add(source.url);
+        if (source?.canonicalUrl || source?.url) urls.add(source.canonicalUrl || source.url);
       }
       urls.forEach(url => link(url));
     }

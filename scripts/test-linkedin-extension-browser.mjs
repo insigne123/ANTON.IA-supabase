@@ -60,7 +60,10 @@ try {
               if (request.body.action === 'lookup') result = { lead: request.body.profile.linkedinUrl === profile.linkedinUrl ? saved : null };
               if (request.body.action === 'save') { saved = { ...row, data: { extensionDetails: window.omitDetails ? {} : request.body.profile.details } }; result = { lead: saved }; }
               if (request.body.action === 'research') { researched = true; result = { status: 'queued' }; }
-              if (request.body.action === 'research-status') result = { research: researched ? { status: 'partial', researchSnapshotId: 'snapshot', reportVersion: 'doc:1', reportSynthesisV2: { status: 'completed' }, reportDocumentV2: { synthesis: { status: 'completed' }, sections: [{ key: 'verdict', title: 'Resumen y decisión', paragraphs: [{ text: 'Análisis comercial de demostración.' }], blocks: [] }], evidenceGraph: {} }, result: { evidence: [{ id: 'fact', kind: 'fact', statement: 'Empresa de demostración', sourceUrl: 'https://example.test' }] } } : null };
+              if (request.body.action === 'research-status') result = { research: researched ? { status: 'partial', researchSnapshotId: 'snapshot', reportVersion: 'doc:1', reportSynthesisV2: { status: 'completed' }, reportDocumentV2: { synthesis: { status: 'completed' }, sections: [
+                { key: 'verdict', title: 'Resumen y decisión', paragraphs: [{ text: 'Análisis comercial de demostración.' }], blocks: [{ type: 'facts', title: 'Contexto confirmado', claimIds: [], payload: ['f_1234567890'] }] },
+                { key: 'sources', title: 'Fuentes consultadas', paragraphs: [], blocks: [{ type: 'sources', title: null, claimIds: [], payload: ['src_1234567890'] }] },
+              ], evidenceGraph: { facts: [{ id: 'f_1234567890', sourceId: 'src_1234567890', text: 'La empresa opera en Chile.' }], sources: [{ id: 'src_1234567890', title: 'Sitio oficial de la empresa', canonicalUrl: 'https://example.test/', url: 'https://example.test/' }] } }, result: { evidence: [{ id: 'fact', kind: 'fact', statement: 'Empresa de demostración', sourceUrl: 'https://example.test' }] } } : null };
               if (['sequence', 'email-draft'].includes(request.body.action)) result = { composeUrl: '/contact/compose?draftId=test' };
               if (request.body.action === 'research-status' && researched && !window.finalReportReady) result = { research: { status: 'partial', researchSnapshotId: 'snapshot', result: { evidence: [{ statement: 'Cita preliminar' }] }, reportSynthesisV2: { status: 'running' } } };
               if (request.body.action === 'message') result = { message: 'Hola María, ¿te parece si conversamos sobre tu equipo?', personalized: Boolean(request.body.recentActivity?.length), activityRead: request.body.recentActivity?.length || 0,
@@ -112,6 +115,13 @@ try {
     await page.evaluate(() => { window.finalReportReady = true; });
     await page.getByRole('button', { name: 'Actualizar estado', exact: true }).click();
     await page.getByText('Informe comercial listo', { exact: true }).waitFor();
+    await page.getByText('1: La empresa opera en Chile.', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('link', { name: /Sitio oficial de la empresa/ }).getAttribute('href'), 'https://example.test/');
+    assert.doesNotMatch(await page.locator('.evidence').textContent(), /payload|claim Ids|src_1234567890|f_1234567890|Type: facts/);
+    for (const width of [320, 380, 520]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Research overflow at ${width}/${colorScheme}`);
+    }
     assert.equal(downloads, 0, 'Completing research must not download automatically');
     const manualDownload = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Descargar PDF', exact: true }).click();

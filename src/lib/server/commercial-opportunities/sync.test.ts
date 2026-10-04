@@ -3,6 +3,8 @@ import test from 'node:test';
 import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import type { HiringOpportunityRow, HiringSignalRow } from '@/lib/commercial-opportunities/records';
 import { hiringSyncPlan, monthStart, monthlyCapUsd, runHiringSync, type HiringStore } from './sync';
+import { FantasticJobsError } from './fantastic-jobs';
+import { JSearchRequestError } from './jsearch';
 
 const NOW = '2026-10-02T12:00:00Z';
 const ORG = '00000000-0000-4000-8000-000000000002';
@@ -97,11 +99,10 @@ test('a source that fails does not stop the other; a rejected key stops asking t
       fantastic: async () => ({ ads: [1, 2, 3].map(index => ad('linkedin', `l${index}`, `Bodeguero ${index}`, 'Sodimac')), fetched: 3, costUsd: 0.015 }),
     },
   });
-  assert.equal(calls, 3, 'the first batch fails on the key and the rest is not asked');
-  assert.equal(result.status, 'done');
-  if (result.status !== 'done') return;
+  assert.equal(calls, 1, 'a rejected key stops immediately, without a three-query burst');
+  assert.equal(result.status, 'partial');
   assert.equal(result.qualifying, 1);
-  assert.match(result.sources[0].error || '', /^3 de 3 consultas fallaron: JSearch rechazó la clave/);
+  assert.match(result.sources[0].error || '', /^1 de 1 consultas fallaron: JSearch rechazó la clave/);
   assert.equal(memory.runs[0].status, 'failed');
   assert.equal(memory.runs[1].status, 'succeeded');
   assert.match(String(memory.opportunities.get('name:sodimac')?.reasons.join(' ')), /ya tienes contactos ahí/);
@@ -132,7 +133,7 @@ test('an uncertain paid Apify run reserves its hard cap in the monthly estimate;
   const memory = memoryStore();
   const result = await runHiringSync({ store: memory.store, profile: PROFILE, env: ENV, capUsd: 10, organizationId: ORG, now: NOW,
     only: ['linkedin'], sources: { jsearch: async () => assert.fail('not selected'), fantastic: async () => { throw Error('Apify timeout'); } } });
-  assert.equal(result.status, 'done');
+  assert.equal(result.status, 'failed');
   assert.equal(memory.runs[0].status, 'failed');
   assert.equal(memory.runs[0].costUsd, 1);
   assert.match(String(memory.runs[0].error), /reserva el tope/);
@@ -141,4 +142,36 @@ test('an uncertain paid Apify run reserves its hard cap in the monthly estimate;
     only: ['jsearch'], sources: { jsearch: async () => ({ ads: [], requests: 1, costUsd: 0.0025 }), fantastic: async () => assert.fail('daily sync never spends on Apify') } });
   assert.equal(daily.runs.length, 1);
   assert.equal(daily.runs[0].source, 'jsearch');
+});
+
+test('rejected Apify input is not recorded as a paid run; all sources failing is not an empty success', async () => {
+  const memory = memoryStore({ stored: [ad('jsearch', 'old', 'Operario', 'Empresa anterior')] });
+  const result = await runHiringSync({ store: memory.store, profile: PROFILE, env: ENV, capUsd: 10, organizationId: ORG, now: NOW,
+    sources: {
+      jsearch: async () => { throw new JSearchRequestError('JSearch limitó temporalmente las consultas.', 0, [], true); },
+      fantastic: async () => { throw new FantasticJobsError('Apify rechazó los parámetros.', false); },
+    } });
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(memory.runs.map(run => [run.status, run.costUsd]), [['failed', 0], ['failed', 0]]);
+  assert.equal(result.costUsd, 0);
+  assert.doesNotMatch(String(memory.runs[1].error), /reserva/);
+});
+
+test('JSearch queries are spaced, uncertainty is counted and useful partial results survive', async () => {
+  const memory = memoryStore();
+  const waits: number[] = [];
+  const asked: string[] = [];
+  const result = await runHiringSync({ store: memory.store, profile: PROFILE, env: ENV, capUsd: 10, organizationId: ORG, now: NOW,
+    only: ['jsearch'], wait: async ms => { waits.push(ms); }, sources: {
+      jsearch: async input => {
+        asked.push(input.query);
+        if (input.query === 'bodeguero') throw new JSearchRequestError('JSearch respondió 500.', 0.0025);
+        return { ads: [ad('jsearch', input.query, input.query, 'Acme')], requests: 1, costUsd: 0.0025 };
+      }, fantastic: async () => assert.fail('not selected'),
+    } });
+  assert.deepEqual(waits, [1100, 1100]);
+  assert.deepEqual(asked, PROFILE.roles);
+  assert.equal(result.status, 'partial');
+  assert.equal(memory.runs[0].costUsd, 0.0075);
+  assert.equal(memory.signals.length, 2);
 });

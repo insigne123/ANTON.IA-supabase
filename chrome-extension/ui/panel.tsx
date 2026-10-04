@@ -11,7 +11,7 @@ import { downloadResearchPdf } from './research-pdf';
 import { reportReady, reportPending, reportStatusLabel } from './research-state';
 import { restoreProfileEdits } from './profile-cache';
 import { researchFindings } from './research-findings';
-import { blockLines } from './report-blocks';
+import { presentReportBlock } from './report-blocks';
 import { personChips, personNextStep, researchSteps, type ChipTone, type NextStep } from './person-status';
 import { BATCH_LIMIT, availableResults, batchSummary, chosenProfiles, type ResultPresence, type SearchResult } from './search-batch';
 import { companyFacts, companyRequest, contactsHeading, emptyCompanyText, type CompanyPage, type CompanyView } from './company-card';
@@ -588,7 +588,11 @@ function App() {
         <span className="step-mark" aria-hidden="true">{item.state === 'done' ? <Check size={13} /> : item.state === 'current' ? <Loader2 size={13} className="spin" /> : <Circle size={9} />}</span>
         {item.label}<span className="sr-only">{item.state === 'done' ? ' (hecho)' : item.state === 'current' ? ' (en curso)' : ' (pendiente)'}</span>
       </li>)}</ol>}
-      {reportReady(research) && <div className="evidence">{research.reportDocumentV2.sections.map((section: any) => <article key={section.key}><h3>{section.title}</h3>{section.paragraphs.map((paragraph: any, i: number) => <p key={i}>{paragraph.text}</p>)}{(section.blocks || []).map((block: any, i: number) => <div key={i}>{blockLines(block).map((line: string, j: number) => <p key={j}>{line}</p>)}</div>)}</article>)}</div>}
+      {reportReady(research) && <div className="evidence">{research.reportDocumentV2.sections.map((section: any) => <article key={section.key}><h3>{section.title}</h3>{section.paragraphs.map((paragraph: any, i: number) => <p key={i}>{paragraph.basis === 'recommendation' && <strong>Recomendación: </strong>}{paragraph.text}</p>)}{(section.blocks || []).map((block: any, i: number) => {
+        const reading = presentReportBlock(block, research.reportDocumentV2);
+        if (!reading.lines.length && !reading.links.length) return null;
+        return <div key={i}>{reading.title && <h4>{reading.title}</h4>}{reading.lines.map((line, j) => <p key={j}>{line}</p>)}{reading.links.map(link => <p key={link.url}><a href={link.url} target="_blank" rel="noopener noreferrer">{link.label}<span className="sr-only"> (se abre en otra pestaña)</span></a></p>)}</div>;
+      })}</article>)}</div>}
       {!reportReady(research) && researchFindings(research).length > 0 && <div className="evidence"><h3>Información recopilada</h3><p className="helper">Extractos de las fuentes encontradas. Pueden incluir empleos anteriores u otras personas; el informe comercial aún no ha sido validado.</p>{researchFindings(research).map((finding: any, i: number) => <article key={i}><p>{finding.text}</p>{finding.url && <a href={finding.url} target="_blank" rel="noreferrer">{finding.label}<span className="sr-only"> (se abre en otra pestaña)</span></a>}</article>)}</div>}
       {research.errorCode && <p className="helper">{research.errorCode}</p>}
       {!reportReady(research) && <p className="helper">Puedes leer lo recopilado aquí sin investigar de nuevo. El informe y su PDF estarán disponibles cuando termine la revisión de las fuentes.</p>}

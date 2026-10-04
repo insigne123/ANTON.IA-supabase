@@ -112,7 +112,10 @@ export function jobAdFromJSearch(raw: Record<string, unknown>): JobAd | null {
 
 /** One ad from the LinkedIn Job Search API of Fantastic Jobs (Apify actor fantastic-jobs/advanced-linkedin-job-search-api). */
 export function jobAdFromFantastic(raw: Record<string, unknown>): JobAd | null {
-  const externalId = text(raw.id ?? raw.linkedin_id, 300), title = text(raw.title, 300), company = text(raw.organization, 300);
+  // Fantastic.jobs changed IDs from strings to integers in June 2026.
+  const id = raw.id ?? raw.linkedin_id;
+  const externalId = typeof id === 'number' && Number.isSafeInteger(id) && id > 0 ? String(id) : text(id, 300);
+  const title = text(raw.title, 300), company = text(raw.organization, 300);
   if (!externalId || !title) return null;
   const derived = Array.isArray(raw.locations_derived) ? raw.locations_derived : [];
   const first = derived[0];
@@ -122,7 +125,9 @@ export function jobAdFromFantastic(raw: Record<string, unknown>): JobAd | null {
   const headcount = typeof raw.org_linkedin_headcount === 'number' ? String(raw.org_linkedin_headcount) : text(raw.org_linkedin_size ?? raw.linkedin_org_size, 40);
   return {
     source: 'linkedin', externalId, title, company,
-    companyDomain: domainOf(raw.organization_url ?? raw.linkedin_org_url_website ?? raw.linkedin_org_url), companyLinkedinUrl: https(raw.organization_linkedin_url ?? raw.linkedin_org_url),
+    companyDomain: domainOf(raw.org_linkedin_website) || domainOf(raw.organization_url ?? raw.linkedin_org_url_website ?? raw.linkedin_org_url),
+    companyLinkedinUrl: https(raw.organization_linkedin_url ?? raw.linkedin_org_url)
+      || (/^[a-z0-9-]+$/i.test(text(raw.org_linkedin_slug)) ? `https://www.linkedin.com/company/${text(raw.org_linkedin_slug)}` : null),
     companySize: headcount || null, companyIndustry: text(raw.org_linkedin_industry ?? raw.linkedin_org_industry, 120) || null,
     location: location || null, region: chileanRegion(location), publisher: 'LinkedIn', url: https(raw.url), postedAt: iso(raw.date_posted),
   };
