@@ -7,6 +7,7 @@ import { CampaignAudienceTable } from './CampaignAudienceTable';
 import { CampaignSteps } from './CampaignSteps';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -37,6 +38,7 @@ const SEND_BATCHES_PER_CLICK = 4;
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 export function BulkCampaignWorkspace() {
+  const confirm = useConfirm();
   const [items, setItems] = useState<BulkCampaign[]>([]);
   const [editing, setEditing] = useState(false);
   const [step, setStep] = useState(0);
@@ -191,7 +193,7 @@ export function BulkCampaignWorkspace() {
           <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.definition.emails.length} destinatarios · {item.definition.messages.length} correos por persona</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>
           <Link className="inline-block text-sm text-muted-foreground underline underline-offset-4" href="/campaigns/history">Ver campañas anteriores</Link>
         </> : <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={() => { if ((!dirty && !individual) || window.confirm('Tienes cambios sin guardar. ¿Quieres salir?')) { setEditing(false); setDirty(false); setIndividual(null); void run(refresh); } }}>← Tus campañas</Button><span className="text-sm text-muted-foreground">{campaign ? stateLabels[campaign.status] : 'Nueva campaña'}{dirty ? ' · Sin guardar' : ''}</span></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={async () => { if ((dirty || individual) && !(await confirm({ title: '¿Salir sin guardar?', description: 'Tienes cambios sin guardar en esta campaña.', confirmLabel: 'Salir sin guardar', tone: 'danger' }))) return; setEditing(false); setDirty(false); setIndividual(null); void run(refresh); }}>← Tus campañas</Button><span className="text-sm text-muted-foreground">{campaign ? stateLabels[campaign.status] : 'Nueva campaña'}{dirty ? ' · Sin guardar' : ''}</span></div>
           <CampaignSteps steps={STEPS} current={step} canGoTo={() => !busy && !individual && !frozen && !reviseMode} onGo={setStep} />
           <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-7" aria-busy={busy}>
             {step === 0 && <>
