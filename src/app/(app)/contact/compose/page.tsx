@@ -135,6 +135,7 @@ function ComposeInner() {
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [sendOperation, setSendOperation] = useState<ManualEmailOperation | null>(null);
   const [sendReceipt, setSendReceipt] = useState<DurableSendReceipt | null>(null);
+  const [sendAfterReview, setSendAfterReview] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendProvider, setSendProvider] = useState<'outlook' | 'gmail'>('outlook');
   // The real mailbox for the chosen provider (/api/integrations/sender), shown as «De:» before sending.
@@ -684,8 +685,8 @@ function ComposeInner() {
     }
   };
 
-  const approveNativeDraft = async () => {
-    if (!nativeDraftId || !nativeDraft?.versionId || hasNativeEdits || nativeDraftArchived || campaignQaBlocksSend || contactabilityChecking || proposal || rewriteInstruction.trim() || draftOperationRef.current || followUpDirty || followUpBusy || isLoading || sendReceipt || sendOperation) return;
+  const approveNativeDraft = async ({ quiet = false }: { quiet?: boolean } = {}): Promise<boolean> => {
+    if (!nativeDraftId || !nativeDraft?.versionId || hasNativeEdits || nativeDraftArchived || campaignQaBlocksSend || contactabilityChecking || proposal || rewriteInstruction.trim() || draftOperationRef.current || followUpDirty || followUpBusy || isLoading || sendReceipt || sendOperation) return false;
     draftOperationRef.current = true;
     setNativeDraftApproving(true);
     try {
@@ -701,10 +702,12 @@ function ComposeInner() {
         setCampaignSendContextLoading(true);
         setCampaignSendContextReloadKey((value) => value + 1);
       }
-      toast({ title: 'Correo revisado', description: 'Registramos la revisión. El correo aún no se ha enviado.' });
+      if (!quiet) toast({ title: 'Correo revisado', description: 'Registramos la revisión. El correo aún no se ha enviado.' });
+      return true;
     } catch (error) {
       console.error('No se pudo confirmar la revisión del correo', error);
       toast({ variant: 'destructive', title: 'No se pudo confirmar la revisión', description: 'Revisa el correo e inténtalo nuevamente.' });
+      return false;
     } finally {
       draftOperationRef.current = false;
       setNativeDraftApproving(false);
@@ -935,6 +938,17 @@ function ComposeInner() {
     void (sendProvider === 'outlook' ? doSendOutlook() : doSendGmail());
   }
 
+  // «Confirmar y enviar» waits for the approved version in state (and, in a sequence, for its refreshed context), then
+  // sends with the latest send() and blocking state, which the render below the early returns keeps in this ref.
+  const confirmedSendRef = useRef<{ send: () => unknown; blocked: boolean } | null>(null);
+  useEffect(() => {
+    if (!sendAfterReview || nativeDraftApproving || !nativeReviewComplete) return;
+    if (campaignStepId && campaignSendContextLoading) return;
+    setSendAfterReview(false);
+    const latest = confirmedSendRef.current;
+    if (latest && !latest.blocked) void latest.send();
+  }, [sendAfterReview, nativeDraftApproving, nativeReviewComplete, campaignStepId, campaignSendContextLoading]);
+
   const loadError = campaignSendContextError
     || (campaignSendContextMismatch ? 'El correo abierto ya no coincide con la versión autorizada para este seguimiento.' : null)
     || nativeDraftLoadError
@@ -1063,13 +1077,13 @@ function ComposeInner() {
     const hasFollowUpContext = Boolean(followUpPlan || campaignStepId);
     return (
       <div className="mx-auto flex min-h-[70vh] w-full max-w-2xl items-center px-4 py-8 sm:px-6">
-        <Card className="w-full overflow-hidden rounded-2xl border-emerald-200/80 shadow-[0_24px_70px_-50px_rgba(15,23,42,0.35)] dark:border-emerald-500/30">
+        <Card className="w-full overflow-hidden rounded-2xl border-border shadow-[0_24px_70px_-50px_rgba(15,23,42,0.35)]">
           <CardContent className="p-6 sm:p-8">
-            <div className="flex size-11 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+            <div className="flex size-11 items-center justify-center rounded-full bg-cw-success-soft text-cw-success">
               <CheckCircle2 className="size-6" aria-hidden="true" />
             </div>
             <div className="mt-5 space-y-2">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">Envío confirmado</p>
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-cw-success">Envío confirmado</p>
               <h1
                 ref={successHeadingRef}
                 tabIndex={-1}
@@ -1083,8 +1097,9 @@ function ComposeInner() {
             </div>
 
             <div className="mt-6 rounded-xl border border-border/60 bg-muted/20 px-4 py-3.5">
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Confirmación de envío</p>
-              <p className="mt-1 break-all font-mono text-sm text-foreground">{sendReceipt.dispatchId}</p>
+              <p className="text-sm text-foreground">
+                {`Salió con ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}${sender.state === 'connected' ? ` desde ${sender.email}` : ''}. Queda en «Conversaciones», donde verás su respuesta.`}
+              </p>
             </div>
 
             {activeFollowUpPlan ? (
@@ -1129,6 +1144,12 @@ function ComposeInner() {
     else router.back();
   };
   const isSafeRequestRetry = Boolean(sendError && sendOperation && !sendReceipt);
+  // «Confirmar y enviar» (Plan 9, PR-17): one click confirms the review and, once the approved version is in state, sends
+  // it through the same send() and its checks. A failed confirmation, or a send that is blocked after it, sends nothing.
+  const confirmAndSend = async () => {
+    setSendAfterReview(true);
+    if (!(await approveNativeDraft({ quiet: true }))) setSendAfterReview(false);
+  };
   const isSendBlocked = isLoading
     || sender.state === 'not_connected'
     || Boolean(rewriteInstruction.trim())
@@ -1145,6 +1166,8 @@ function ComposeInner() {
     || followUpBusy
     || Boolean(campaignStepId && campaignSendDecision?.kind === 'blocked')
     || dispatchLocksCompose;
+  confirmedSendRef.current = { send, blocked: isSendBlocked };
+  const canConfirmAndSend = sender.state === 'connected';
   const isReviewActionBlocked = nativeDraftApproving
     || Boolean(rewriteInstruction.trim())
     || followUpDirty
@@ -1167,20 +1190,20 @@ function ComposeInner() {
       ? {
         title: proposal ? 'Propuesta pendiente' : 'Cambios pendientes de revisión',
         description: proposal ? 'Compara el antes y después. Aplica o descarta la propuesta para continuar.' : 'Guárdalos y confirma la revisión antes de enviar.',
-        className: 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
+        className: 'border-cw-border bg-cw-warning-soft text-foreground',
         icon: RefreshCw,
       }
       : nativeReviewComplete
         ? {
           title: 'Correo revisado',
           description: 'Está listo para enviarse cuando tú decidas.',
-          className: 'border-emerald-200 bg-emerald-50/80 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100',
+          className: 'border-cw-border bg-cw-success-soft text-foreground',
           icon: CheckCircle2,
         }
         : {
           title: 'Revisión pendiente',
           description: 'Este correo no se enviará hasta que confirmes la revisión.',
-          className: 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
+          className: 'border-cw-border bg-cw-warning-soft text-foreground',
           icon: FileText,
         };
   const ReviewStatusIcon = reviewStatus.icon;
@@ -1251,7 +1274,7 @@ function ComposeInner() {
           <Alert
             variant={sendReceipt.status === 'failed' ? 'destructive' : 'default'}
             className={sendReceipt.status === 'deferred'
-              ? 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'
+              ? 'border-cw-border bg-cw-warning-soft text-foreground'
               : undefined}
           >
             <AlertTitle>
@@ -1274,7 +1297,7 @@ function ComposeInner() {
                     : 'No vuelvas a enviar este correo. Revisa su estado desde Campañas antes de realizar otra acción.'}
               </p>
               {sendReceipt.error?.message ? <p className="text-xs opacity-80">{sendReceipt.error.message}</p> : null}
-              <p className="break-all font-mono text-xs">Dispatch: {sendReceipt.dispatchId}</p>
+              <p className="break-all font-mono text-xs">Código del intento: {sendReceipt.dispatchId}</p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 {safeRetryAvailable ? (
                   <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={retryDurableSend} disabled={isLoading}>
@@ -1442,7 +1465,7 @@ function ComposeInner() {
                         />
                       </div>
                       {hasNativeEdits ? (
-                        <p className="text-xs leading-5 text-amber-700 dark:text-amber-300">Guarda primero tus cambios manuales para aplicar un ajuste con IA.</p>
+                        <p className="text-xs leading-5 text-cw-warning">Guarda primero tus cambios manuales para aplicar un ajuste con IA.</p>
                       ) : null}
                       <div aria-live="polite">
                         {rewriteError ? <p className="text-sm leading-5 text-destructive">{rewriteError}</p> : null}
@@ -1538,7 +1561,9 @@ function ComposeInner() {
                   : hasNativeEdits
                     ? 'Guarda los cambios y vuelve a revisar el correo antes de enviarlo.'
                     : nativeReviewRequired
-                      ? 'Léelo y confirma la revisión: confirmar no lo envía todavía.'
+                      ? canConfirmAndSend
+                        ? `Léelo antes de confirmar. «Confirmar y enviar» lo envía ahora desde ${sender.state === 'connected' ? sender.email : 'tu correo'}; «Solo confirmar» lo deja listo para después.`
+                        : 'Léelo y confirma la revisión: confirmar no lo envía todavía.'
                       : sender.state === 'not_connected'
                         ? `Conecta ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'} para poder enviarlo.`
                         : sender.state === 'connected'
@@ -1575,16 +1600,41 @@ function ComposeInner() {
               {nativeDraftSaving ? 'Guardando…' : 'Guardar cambios'}
             </Button>
           ) : isCanonicalDraft && !nativeReviewComplete ? (
-            <Button
-              type="button"
-              className="w-full sm:w-auto"
-              onClick={() => void approveNativeDraft()}
-              disabled={isReviewActionBlocked}
-              aria-describedby="review-status"
-            >
-              {nativeDraftApproving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <CheckCircle2 data-icon="inline-start" />}
-              {nativeDraftApproving ? 'Confirmando…' : contactabilityChecking ? 'Verificando contacto…' : 'Confirmar revisión'}
-            </Button>
+            canConfirmAndSend ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={() => void approveNativeDraft()}
+                  disabled={isReviewActionBlocked || sendAfterReview}
+                  aria-describedby="review-status"
+                >
+                  Solo confirmar
+                </Button>
+                <Button
+                  type="button"
+                  className="min-h-11 w-full sm:w-auto"
+                  onClick={() => void confirmAndSend()}
+                  disabled={isReviewActionBlocked || sendAfterReview}
+                  aria-describedby="send-summary"
+                >
+                  {nativeDraftApproving || sendAfterReview || isLoading ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <SendHorizontal data-icon="inline-start" />}
+                  {nativeDraftApproving || sendAfterReview ? 'Confirmando…' : isLoading ? 'Enviando…' : contactabilityChecking ? 'Verificando contacto…' : 'Confirmar y enviar'}
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                className="w-full sm:w-auto"
+                onClick={() => void approveNativeDraft()}
+                disabled={isReviewActionBlocked}
+                aria-describedby="review-status"
+              >
+                {nativeDraftApproving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <CheckCircle2 data-icon="inline-start" />}
+                {nativeDraftApproving ? 'Confirmando…' : contactabilityChecking ? 'Verificando contacto…' : 'Confirmar revisión'}
+              </Button>
+            )
           ) : (
             <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={send} disabled={isSendBlocked} aria-describedby="send-summary">
               {isLoading
