@@ -11,9 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useAuth } from '@/context/AuthContext';
+import { useSharedNavAccess } from '@/hooks/use-nav-access';
 import { helpSectionById, helpSectionHref, helpSectionIdFrom, visibleHelpSections } from '@/lib/help/manual';
 import { pageGuideFor } from '@/lib/onboarding/product-tour';
-import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
 
 const HEADING = 'text-base font-semibold tracking-tight';
 
@@ -26,7 +26,9 @@ export default function HelpSectionPage() {
   const id = helpSectionIdFrom(params?.seccion);
   const { organizationRole } = useAuth();
   const admin = organizationRole === 'owner' || organizationRole === 'admin';
-  const sections = useMemo(() => visibleHelpSections({ opportunities: isOpportunitiesEnabled(), admin }), [admin]);
+  // The same parts of the app as the menu: «Oportunidades» only for the accounts the server lets in.
+  const { opportunities } = useSharedNavAccess();
+  const sections = useMemo(() => visibleHelpSections({ opportunities, admin }), [opportunities, admin]);
   const section = sections.find((item) => item.id === id) || null;
 
   if (!section) {
