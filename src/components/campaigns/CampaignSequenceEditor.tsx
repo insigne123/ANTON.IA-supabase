@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -24,6 +25,7 @@ type Props = {
 const label = (index: number) => index === 0 ? 'Primer correo' : `Seguimiento ${index}`;
 
 export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseMode, isLocked, onSelect, onChange, onBusyChange, onAssist, onBack, onSave }: Props) {
+  const confirm = useConfirm();
   const [followUpCount, setFollowUpCount] = useState<number | null>(() =>
     reviseMode || definition.messages.length > 1 || definition.messages.some(value => value.subject.trim() || value.body.trim())
       ? definition.messages.length - 1 : null);
@@ -51,9 +53,14 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
     onChange({ messages: definition.messages.map((value, index) => index === messageIndex ? { ...value, ...patch } : value) });
     setProposal(null); setMessageError(''); setMessageFeedback(''); invalidateSequence();
   }
-  function chooseCount(count: number) {
+  async function chooseCount(count: number) {
     const removed = definition.messages.slice(count + 1);
-    if (removed.some(value => value.subject.trim() || value.body.trim()) && !window.confirm('Al reducir los seguimientos se quitarán sus correos. ¿Quieres continuar?')) return;
+    const written = removed.filter(value => value.subject.trim() || value.body.trim()).length;
+    if (written > 0 && !(await confirm({
+      title: written === 1 ? '¿Quitar un seguimiento escrito?' : `¿Quitar ${written} seguimientos escritos?`,
+      description: 'Al reducir los seguimientos se borran sus correos de esta campaña.',
+      confirmLabel: 'Quitar', tone: 'danger',
+    }))) return;
     const messages = Array.from({ length: count + 1 }, (_, index) => definition.messages[index] || { subject: '', body: '', delayDays: 3 });
     setFollowUpCount(count); onChange({ messages });
     if (messageIndex >= messages.length) onSelect(0);
@@ -101,7 +108,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
       {!reviseMode && <>
         <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-2"><Label htmlFor="follow-up-count">¿Cuántos seguimientos quieres?</Label>
-            <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={followUpCount ?? ''} onChange={event => chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
+            <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={followUpCount ?? ''} onChange={event => void chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
               <option value="" disabled>Elige antes de generar</option>
               {[0, 1, 2, 3, 4].map(count => <option key={count} value={count}>{count === 0 ? 'Solo el correo inicial' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'} + correo inicial`}</option>)}
             </select>

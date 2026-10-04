@@ -120,6 +120,8 @@ test('rendered editors preserve edits across proposals/conflicts/overlapping sav
       if (name.startsWith('@/components/ui/')) return ui;
       if (name === './draft-editor-behavior') return behavior;
       if (name === '@/lib/utils') return { cn: (...args: unknown[]) => args.filter(Boolean).join(' ') };
+      // The app's confirmation dialog, accepting, as window.confirm did before (Plan 9).
+      if (name === '@/components/confirm-dialog') return { useConfirm: () => async () => true };
       if (name === 'lucide-react') return new Proxy({}, { get: () => () => null });
       return require(name);
     }, exports);
