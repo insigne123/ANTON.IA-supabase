@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { Check, CircleSlash, LoaderCircle, PanelRightClose, ShieldCheck, TriangleAlert, Zap } from 'lucide-react';
+import { Check, CircleSlash, LoaderCircle, PanelRightClose, ShieldCheck, TriangleAlert, X, Zap } from 'lucide-react';
 import type { CoworkArtifact, CoworkProgressStep } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { CoworkArtifactIcon, coworkArtifactMeta } from './CoworkTurn';
@@ -40,8 +40,10 @@ function Section({ title, children, aside }: { title: string; children: ReactNod
   </section>;
 }
 
-/** Right rail of the conversation: what is happening, what came out of it and what it used. */
-export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, onOpenArtifact, sources, mode, budget, searchQuota, onClose }: {
+/** Right rail of the conversation: what is happening, what came out of it and what it used. Below xl it opens in a
+ * sheet, where `closeStyle` «dismiss» closes it with an X. */
+export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, onOpenArtifact, sources, mode, budget, searchQuota, onClose,
+  closeStyle = 'collapse' }: {
   steps: CoworkProgressStep[];
   turnCount: number;
   artifacts: CoworkArtifact[];
@@ -52,11 +54,14 @@ export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, o
   budget?: { depth: number; maxDepth: number; exhausted: boolean } | null;
   searchQuota: { remaining: number; limit: number } | null;
   onClose: () => void;
+  closeStyle?: 'collapse' | 'dismiss';
 }) {
   return <aside aria-label="Resumen del trabajo" className="flex h-full min-h-0 flex-col">
     <div className="flex h-12 shrink-0 items-center justify-between border-b border-cw-border px-4">
       <p className="text-[13px] font-medium text-cw-muted">Resumen</p>
-      <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar resumen" title="Ocultar"><PanelRightClose aria-hidden="true" /></CwButton>
+      {closeStyle === 'dismiss'
+        ? <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Cerrar resumen" title="Cerrar"><X aria-hidden="true" /></CwButton>
+        : <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar resumen" title="Ocultar"><PanelRightClose aria-hidden="true" /></CwButton>}
     </div>
     <div className="cw-scroll min-h-0 flex-1 overflow-y-auto">
       <Section title="Progreso" aside={turnCount > 1 ? <span className="text-[11.5px] text-cw-faint">Turno {turnCount}</span> : null}>

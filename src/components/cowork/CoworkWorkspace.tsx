@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, CornerDownRight, PanelLeft, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { ArrowDown, ArrowUp, CornerDownRight, History, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
@@ -13,6 +13,7 @@ import {
   coworkCardStatuses, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
   type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -27,7 +28,7 @@ import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
-import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwSwap, cwVariants, m } from './motion';
+import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwVariants, m } from './motion';
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
 
 type ThreadState = CoworkTurnData & {
@@ -80,6 +81,16 @@ function useMedia(query: string) {
   return matches;
 }
 
+/** Radix gives focus back only to its own trigger, and these sheets open from buttons that also do other things: focus
+ * goes back to the button that opened the sheet, unless closing it already moved focus somewhere useful («Nuevo trabajo»
+ * focuses the composer; a result focuses its panel). */
+function returnFocusTo(opener: RefObject<HTMLElement | null>) {
+  return (event: Event) => {
+    event.preventDefault();
+    if (!document.activeElement || document.activeElement === document.body) opener.current?.focus();
+  };
+}
+
 function setWorkUrl(id: string | null, mode: 'push' | 'replace') {
   const url = new URL(window.location.href);
   if (id) url.searchParams.set('work', id); else url.searchParams.delete('work');
@@ -120,6 +131,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+  // Below xl the summary has no room beside the chat: it opens in a sheet.
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  // The list could not be read: the thread list says so instead of «no work yet».
+  const [listError, setListError] = useState('');
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -139,8 +154,12 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const [summaryReturns, setSummaryReturns] = useState(false);
 
   const isDesktop = useMedia('(min-width: 1024px)');
+  const isWide = useMedia('(min-width: 1280px)');
+  useEffect(() => { if (isWide) setSummaryOpen(false); }, [isWide]);
   const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
   const composer = useRef<CoworkComposerHandle>(null);
+  const listOpener = useRef<HTMLButtonElement>(null);
+  const summaryOpener = useRef<HTMLButtonElement>(null);
   const contactRef = useRef<string | null>(null);
   // Contacts picked with «@» in the composer, sent as references with the next message (V6).
   const mentions = useRef<CoworkMention[]>([]);
@@ -214,13 +233,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     setLoading(true);
     request('/api/cowork/runs').then(data => {
       if (disposed) return;
-      setRuns(Array.isArray(data.runs) ? data.runs : []); setReady(data.canSubmit === true); setError('');
+      setRuns(Array.isArray(data.runs) ? data.runs : []); setReady(data.canSubmit === true); setError(''); setListError('');
       const names = data.threads && typeof data.threads === 'object' ? data.threads : null;
       setThreadNames({ available: names?.available === true, titles: names?.titles && typeof names.titles === 'object' ? names.titles : {} });
       setSearchQuota(data.searchQuota && typeof data.searchQuota.remaining === 'number' ? data.searchQuota : null);
       setCanAutonomous(data.canAutonomous === true);
       if (!data.canAutonomous) setMode('approval');
-    }).catch(problem => { if (!disposed) setError(problem.message); })
+    }).catch(problem => { if (!disposed) { setError(problem.message); setListError(problem.message); } })
       .finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
   }, [listVersion, request]);
@@ -387,7 +406,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const choose = useCallback((id: string | null, options: { pin?: boolean } = {}) => {
     pinnedRun.current = options.pin ? id : null;
     setWorkUrl(id, 'push');
-    setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError(''); setLiveAnswer(null);
+    setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setSummaryOpen(false); setError(''); setLiveAnswer(null);
     // Attached files belong to the message being written in this conversation.
     setOptimistic(null); setQueued(null); setShowFiles(false); clearAttachments();
     stickToBottom.current = true;
@@ -469,6 +488,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const threadActions = threadNames.available
     ? { onRename: renameThread, onDelete: (thread: CoworkThreadSummary) => void deleteThread(thread) }
     : {};
+  const retryList = useCallback(() => { setError(''); setListVersion(value => value + 1); }, []);
   const title = useMemo(() => {
     const summary = threads.find(thread => thread.rootId === selectedRoot);
     if (summary) return summary.title;
@@ -482,6 +502,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     focusArtifact.current = focus;
     setArtifactId(artifact.id);
     setDrawerOpen(false);
+    setSummaryOpen(false);
   }, []);
 
   const closeArtifact = useCallback(() => {
@@ -782,26 +803,27 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
 
   return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
-      <CoworkThreadList threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} {...threadActions} />
+      <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} {...threadActions} />
     </div>
-    <AnimatePresence>
-      {drawerOpen && <m.div key="drawer" initial="hidden" animate="shown" exit="gone" className="absolute inset-0 z-40 flex">
-        <m.div custom={-1} variants={cwPanel} className="w-[86%] max-w-[300px] border-r border-cw-border bg-cw-rail shadow-[var(--cw-shadow-lg)]">
-          <CoworkThreadList idPrefix="cowork-drawer" threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} {...threadActions} />
-        </m.div>
-        <m.button type="button" variants={cwSwap} aria-label="Cerrar lista de trabajos" className="flex-1 bg-black/25" onClick={() => setDrawerOpen(false)} />
-      </m.div>}
-    </AnimatePresence>
+    <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+      <SheetContent side="left" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={returnFocusTo(listOpener)}
+        className="w-[86%] max-w-[300px] border-cw-border bg-cw-rail p-0 text-cw-text sm:max-w-[300px]">
+        <SheetTitle className="sr-only">Trabajos</SheetTitle>
+        <CoworkThreadList idPrefix="cowork-drawer" closeStyle="dismiss" threads={threads} loading={loading} error={listError} onRetry={retryList}
+          selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} {...threadActions} />
+      </SheetContent>
+    </Sheet>
 
     <div className={cn('relative flex min-w-0 flex-1 flex-col', artifactOpen && 'hidden lg:flex', artifactOpen && maximized && 'lg:hidden')}>
       <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-cw-border px-2.5 sm:px-3">
-        <CwButton variant="ghost" size="icon-sm" className={cn(railVisible && 'lg:hidden')} aria-label="Mostrar trabajos" title="Trabajos"
+        <CwButton ref={listOpener} variant="ghost" size="icon-sm" className={cn(railVisible && 'lg:hidden')} aria-label="Mostrar trabajos" title="Trabajos"
           onClick={() => { if (isDesktop && !artifactOpen) setRailCollapsed(false); else setDrawerOpen(true); }}>
-          <PanelLeft aria-hidden="true" />
+          <History aria-hidden="true" />
         </CwButton>
         <h1 className="min-w-0 flex-1 truncate px-1 text-[14px] font-medium text-cw-text">{inConversation ? title : 'Cowork'}</h1>
         {inConversation && status && <CwStatusPill tone={status.tone} pulse={busy} className="hidden sm:inline-flex">{status.label}</CwStatusPill>}
         {inConversation && !artifactOpen && !panelOpen && <CwButton variant="ghost" size="icon-sm" className="hidden xl:inline-flex" onClick={() => setPanelOpen(true)} aria-label="Mostrar resumen" title="Resumen"><PanelRight aria-hidden="true" /></CwButton>}
+        {inConversation && latest && !artifactOpen && <CwButton ref={summaryOpener} variant="ghost" size="icon-sm" className="xl:hidden" onClick={() => setSummaryOpen(true)} aria-label="Ver resumen del trabajo" title="Resumen" aria-haspopup="dialog"><PanelRight aria-hidden="true" /></CwButton>}
         <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden')} title="Nuevo trabajo">
           <SquarePen aria-hidden="true" /><span className="hidden sm:inline">Nuevo trabajo</span>
         </CwButton>
@@ -817,7 +839,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       </CwCollapse>
 
       {!inConversation
-        ? <CoworkHome composer={homeComposer} threads={threads} ready={ready} loading={loading} onSuggestion={applySuggestion} onOpenThread={choose}
+        ? <CoworkHome composer={homeComposer} threads={threads} ready={ready} loading={loading} listFailed={Boolean(listError)} onSuggestion={applySuggestion} onOpenThread={choose}
           overview={overview} overviewLoading={overviewLoading} offerDraft={offerDraft} onOfferDraftChange={setOfferDraft}
           onSaveOffer={ready && !sending ? async text => {
             const sent = await post(text, null);
@@ -847,18 +869,19 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
               </div>}
             </div>
           </div>
-          <AnimatePresence>
-            {decisionAway && <m.button key="decision" type="button" onClick={goToDecision} {...cwVariants(cwPop)} style={{ x: '-50%' }}
-              className="absolute bottom-[132px] left-1/2 z-10 flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3 text-[12.5px] font-medium text-cw-text shadow-[var(--cw-shadow)] hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
-              <span className="h-1.5 w-1.5 rounded-full bg-cw-warning" aria-hidden="true" />Cowork espera tu decisión
-              {decisionAway === 'up' ? <ArrowUp className="h-3.5 w-3.5 text-cw-muted" aria-hidden="true" /> : <ArrowDown className="h-3.5 w-3.5 text-cw-muted" aria-hidden="true" />}
-            </m.button>}
-            {showJump && !decisionAway && <m.button key="jump" type="button" onClick={jumpToEnd} aria-label="Ir al final" {...cwVariants(cwPop)} style={{ x: '-50%' }}
-              className="absolute bottom-[132px] left-1/2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-cw-border bg-cw-elevated text-cw-muted shadow-[var(--cw-shadow)] hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
-              <ArrowDown className="h-4 w-4" aria-hidden="true" />
-            </m.button>}
-          </AnimatePresence>
-          <div className="shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-4">
+          <div className="relative shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-4">
+            {/* Anchored to this dock, not to a fixed offset: it grows with quick actions, files or a queued message. */}
+            <AnimatePresence>
+              {decisionAway && <m.button key="decision" type="button" onClick={goToDecision} {...cwVariants(cwPop)} style={{ x: '-50%' }}
+                className="absolute bottom-full left-1/2 z-10 mb-2 flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3 text-[12.5px] font-medium text-cw-text shadow-[var(--cw-shadow)] hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+                <span className="h-1.5 w-1.5 rounded-full bg-cw-warning" aria-hidden="true" />Cowork espera tu decisión
+                {decisionAway === 'up' ? <ArrowUp className="h-3.5 w-3.5 text-cw-muted" aria-hidden="true" /> : <ArrowDown className="h-3.5 w-3.5 text-cw-muted" aria-hidden="true" />}
+              </m.button>}
+              {showJump && !decisionAway && <m.button key="jump" type="button" onClick={jumpToEnd} aria-label="Ir al final" {...cwVariants(cwPop)} style={{ x: '-50%' }}
+                className="absolute bottom-full left-1/2 z-10 mb-2 flex h-8 w-8 items-center justify-center rounded-full border border-cw-border bg-cw-elevated text-cw-muted shadow-[var(--cw-shadow)] hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+                <ArrowDown className="h-4 w-4" aria-hidden="true" />
+              </m.button>}
+            </AnimatePresence>
             <div className="mx-auto w-full max-w-[46rem]">
               {latest && state?.canResearch && <ResearchProgress runId={latest.run.id} onAccessDenied={clearPrivateResults} />}
               {canFollowUp && !message.trim() && attach.files.length === 0 && <CoworkQuickActions id="cowork-quick-actions" onPick={followUp} />}
@@ -896,6 +919,16 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
       </m.div>}
     </AnimatePresence>
+    <Sheet open={summaryOpen} onOpenChange={setSummaryOpen}>
+      <SheetContent side="right" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={returnFocusTo(summaryOpener)}
+        className="w-[86%] max-w-[320px] border-cw-border bg-cw-rail p-0 text-cw-text sm:max-w-[320px]">
+        <SheetTitle className="sr-only">Resumen del trabajo</SheetTitle>
+        {latest && <CoworkSidePanel closeStyle="dismiss" steps={coworkTurnProgress(latest.run, latest.events)} turnCount={turns.filter(turn => !turn.run.automatic).length}
+          artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
+          sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
+          budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setSummaryOpen(false)} />}
+      </SheetContent>
+    </Sheet>
     {!openArtifact && inConversation && latest && panelOpen && <m.div key="summary" initial={summaryReturns ? 'hidden' : false} animate="shown" variants={cwPanel}
       className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">
       <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)} turnCount={turns.filter(turn => !turn.run.automatic).length}
