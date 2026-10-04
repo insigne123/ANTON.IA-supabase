@@ -105,12 +105,17 @@ export async function searchAudiencePage(auth: AuthContext, input: unknown) {
 }
 
 export async function loadAudience(auth: AuthContext, criteria?: AudienceCriteria) {
+  return loadAudienceForScope({ client: auth.supabase, organizationId: auth.organizationId }, criteria);
+}
+
+/** The audience of an organization as `client` sees it: a user session (RLS) or, for the server worker, the service role. */
+export async function loadAudienceForScope(scope: { client: any; organizationId: string }, criteria?: AudienceCriteria) {
   const admin = getSupabaseAdminClient();
-  const visible = (table: string) => () => auth.supabase.from(table).select('*').eq('organization_id', auth.organizationId);
+  const visible = (table: string) => () => scope.client.from(table).select('*').eq('organization_id', scope.organizationId);
   const [leads, enriched, contacted, history, dispatches] = await Promise.all([
     readAudienceRows(visible('leads')), readAudienceRows(visible('enriched_leads')), readAudienceRows(visible('contacted_leads')),
-    readAudienceRows(() => admin.from('contacted_leads').select('id,email,status,sent_at,last_follow_up_at,replied_at,campaign_followup_allowed,bounced_at,delivery_status').eq('organization_id', auth.organizationId)),
-    readAudienceRows(() => admin.from('outbound_dispatches').select('id,metadata,status,completed_at').eq('organization_id', auth.organizationId).eq('channel', 'email')),
+    readAudienceRows(() => admin.from('contacted_leads').select('id,email,status,sent_at,last_follow_up_at,replied_at,campaign_followup_allowed,bounced_at,delivery_status').eq('organization_id', scope.organizationId)),
+    readAudienceRows(() => admin.from('outbound_dispatches').select('id,metadata,status,completed_at').eq('organization_id', scope.organizationId).eq('channel', 'email')),
   ]);
   const enrichedEmails = new Set(enriched
     .map(row => String(row.email || '').trim().toLowerCase())
