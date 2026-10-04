@@ -8,6 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { PageHeader } from '@/components/page-header';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { formatDateTime } from '@/lib/dates';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { privacyIncidentSeverities, privacyIncidentStatuses, type PrivacyIncidentSeverity, type PrivacyIncidentStatus } from '@/lib/privacy-incident';
 
@@ -116,34 +119,37 @@ export default function PrivacyIncidentsPage() {
   }
 
   function badgeVariant(severityValue: PrivacyIncidentSeverity) {
-    if (severityValue === 'high') return 'destructive' as const;
-    if (severityValue === 'medium') return 'secondary' as const;
-    return 'outline' as const;
+    if (severityValue === 'high') return 'danger' as const;
+    if (severityValue === 'medium') return 'warning' as const;
+    return 'neutral' as const;
   }
+  const severityLabel = (value: PrivacyIncidentSeverity) => privacyIncidentSeverities.find((item) => item.value === value)?.label || value;
+  const statusLabel = (value: PrivacyIncidentStatus) => privacyIncidentStatuses.find((item) => item.value === value)?.label || value;
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Incidentes de privacidad</h1>
-          <p className="text-sm text-muted-foreground">Registro operativo para deteccion, contencion y cierre de incidentes de datos personales.</p>
-        </div>
+      <PageHeader
+        title="Incidentes de privacidad"
+        back={{ href: '/settings/privacy', label: 'Privacidad' }}
+        description="Registro para documentar la detección, la contención y el cierre de incidentes de datos personales."
+      />
+      <div className="flex flex-wrap items-center justify-end gap-4">
         <div className="flex items-center gap-2">
           <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as 'all' | PrivacyIncidentStatus)}>
-            <SelectTrigger className="w-[190px]"><SelectValue placeholder="Filtrar por estado" /></SelectTrigger>
+            <SelectTrigger className="w-[190px]" aria-label="Filtrar por estado"><SelectValue placeholder="Filtrar por estado" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
               {privacyIncidentStatuses.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => loadIncidents(statusFilter)} disabled={loading}>{loading ? 'Actualizando...' : 'Actualizar'}</Button>
+          <Button variant="outline" onClick={() => loadIncidents(statusFilter)} disabled={loading}>{loading ? 'Actualizando…' : 'Actualizar'}</Button>
         </div>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>{editingId ? 'Editar incidente' : 'Registrar incidente'}</CardTitle>
-          <CardDescription>Usa esta bandeja para documentar deteccion, alcance, contencion y cierre.</CardDescription>
+          <CardDescription>Documenta la detección, el alcance, la contención y el cierre.</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={submitIncident}>
@@ -175,7 +181,7 @@ export default function PrivacyIncidentsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="incident-scope">Alcance afectado</Label>
-                <Input id="incident-scope" value={affectedScope} onChange={(e) => setAffectedScope(e.target.value)} placeholder="Ej. 1 organizacion, 45 leads, tokens Outlook" />
+                <Input id="incident-scope" value={affectedScope} onChange={(e) => setAffectedScope(e.target.value)} placeholder="Ej. 1 organización, 45 leads, tokens Outlook" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="incident-data-types">Tipos de datos</Label>
@@ -193,10 +199,10 @@ export default function PrivacyIncidentsPage() {
               <Textarea id="incident-resolution" value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} />
             </div>
 
-            {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+            {error ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null}
 
             <div className="flex gap-2">
-              <Button type="submit" disabled={saving}>{saving ? 'Guardando...' : editingId ? 'Actualizar incidente' : 'Registrar incidente'}</Button>
+              <Button type="submit" disabled={saving}>{saving ? 'Guardando…' : editingId ? 'Actualizar incidente' : 'Registrar incidente'}</Button>
               {editingId ? <Button type="button" variant="outline" onClick={resetForm}>Cancelar</Button> : null}
             </div>
           </form>
@@ -215,11 +221,11 @@ export default function PrivacyIncidentsPage() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant={badgeVariant(incident.severity)}>{incident.severity}</Badge>
-                    <Badge variant="outline">{incident.status}</Badge>
+                    <Badge variant={badgeVariant(incident.severity)}>Severidad {severityLabel(incident.severity).toLowerCase()}</Badge>
+                    <Badge variant="neutral">{statusLabel(incident.status)}</Badge>
                   </div>
                   <div className="font-medium">{incident.title}</div>
-                  <div className="text-xs text-muted-foreground">Reportado por: {incident.reported_by_email || 'sin email'} · Detectado: {new Date(incident.detected_at).toLocaleString()}</div>
+                  <div className="text-xs text-muted-foreground">Reportado por: {incident.reported_by_email || 'sin email'} · Detectado: {formatDateTime(incident.detected_at)}</div>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => startEdit(incident)}>Editar</Button>
               </div>
