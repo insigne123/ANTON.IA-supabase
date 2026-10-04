@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, Search, SquarePen, Trash2 } from 'lucide-react';
+import { LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
   coworkDateBucket, coworkShortTime, coworkStatusCopy, isCoworkActive, type CoworkThreadSummary,
@@ -15,11 +15,17 @@ const TITLE_MAX = 120;
  * Conversations grouped by recency, like a chat sidebar. With `onRename`/`onDelete` (the server can keep names), each one
  * has a menu: «Renombrar» edits the name in place (Enter saves, Esc cancels) and «Eliminar» hides it, with «Deshacer»
  * in the notice; a conversation that is still working cannot be deleted.
+ * When the list could not be read it says so, with «Reintentar», instead of looking empty.
+ * `closeStyle` «dismiss» closes with an X, as in a sheet; «collapse» folds the side rail.
  */
-export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete, idPrefix = 'cowork-rail' }: {
+export function CoworkThreadList({ threads, loading, error = '', onRetry, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete,
+  idPrefix = 'cowork-rail', closeStyle = 'collapse' }: {
   idPrefix?: string;
   threads: CoworkThreadSummary[];
   loading: boolean;
+  error?: string;
+  onRetry?: () => void;
+  closeStyle?: 'collapse' | 'dismiss';
   selectedThreadId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
@@ -61,7 +67,9 @@ export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect,
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent text-cw-on-accent"><SquarePen className="!size-3.5" aria-hidden="true" /></span>
         Nuevo trabajo
       </CwButton>
-      <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar trabajos" title="Ocultar"><PanelLeftClose aria-hidden="true" /></CwButton>
+      {closeStyle === 'dismiss'
+        ? <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Cerrar trabajos" title="Cerrar"><X aria-hidden="true" /></CwButton>
+        : <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar trabajos" title="Ocultar"><PanelLeftClose aria-hidden="true" /></CwButton>}
     </div>
     {threads.length > 6 && <div className="px-3 pb-2">
       <label htmlFor={`${idPrefix}-filter`} className="sr-only">Buscar trabajos</label>
@@ -73,7 +81,18 @@ export function CoworkThreadList({ threads, loading, selectedThreadId, onSelect,
     </div>}
     <div className="cw-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4">
       {loading && threads.length === 0 && <p role="status" className="flex items-center gap-2 px-3 py-2 text-[13px] text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Cargando trabajos…</p>}
-      {!loading && threads.length === 0 && <p className="px-3 py-2 text-[13px] leading-5 text-cw-muted">Tus trabajos aparecerán aquí.</p>}
+      {!loading && error && threads.length === 0 && <div className="space-y-2 px-3 py-2">
+        <p className="text-[13px] leading-5 text-cw-text">No pudimos cargar tus trabajos.</p>
+        {onRetry && <CwButton size="xs" variant="secondary" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
+      </div>}
+      {!loading && !error && threads.length === 0 && <div className="px-3 py-2">
+        <p className="text-[13px] font-medium leading-5 text-cw-text">Aún no tienes trabajos</p>
+        <p className="mt-0.5 text-[12.5px] leading-5 text-cw-muted">Lo que le pidas a Cowork queda aquí para retomarlo.</p>
+      </div>}
+      {term && threads.length > 0 && groups.length === 0 && <div className="space-y-1.5 px-3 py-2">
+        <p className="text-[13px] leading-5 text-cw-muted">Ningún trabajo coincide con «{filter.trim()}».</p>
+        <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
+      </div>}
       {groups.map(group => <div key={group.label} className="mt-3 first:mt-1">
         <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}</h2>
         <ul className="space-y-px">
