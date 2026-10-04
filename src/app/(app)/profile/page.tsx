@@ -32,6 +32,7 @@ import { profileService } from '@/lib/services/profile-service';
 import { PasswordChangeForm } from '@/components/profile/password-change-form';
 import { ProfileAutofillCard } from '@/components/profile/ProfileAutofillCard';
 import { ProfileCompleteness } from '@/components/profile/ProfileCompleteness';
+import { ProfileIcpSummary } from '@/components/profile/ProfileIcpSummary';
 import { IcpResultsPanel } from '@/components/profile/IcpResultsPanel';
 import { appendTerm } from '@/lib/icp/view';
 import { ProfileSuggestionDialog } from '@/components/profile/ProfileSuggestionDialog';
@@ -186,6 +187,8 @@ export default function ProfilePage() {
   };
 
   const handleAutofill = async () => {
+    // Suggestions are compared with the saved profile: before it loads, every field would look empty.
+    if (isLoading) return;
     const website = aiWebsite.trim();
     if (website && !normalizeCompanyWebsite(website).domain) {
       setAiError('Ese sitio no parece una dirección pública. Escríbelo como empresa.com.');
@@ -246,12 +249,12 @@ export default function ProfilePage() {
       />
 
       {loadError ? (
-        <Alert className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-          <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+        <Alert variant="warning" className="mb-4 rounded-2xl">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>El perfil no está disponible</AlertTitle>
-          <AlertDescription className="text-amber-800 dark:text-amber-100/80">
+          <AlertDescription>
             <p>{loadError}</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className="mt-3 rounded-xl border-amber-300 bg-amber-50 shadow-none hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:hover:bg-amber-500/10">
+            <Button type="button" variant="outline" size="sm" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className="mt-3 rounded-xl">
               Intentar de nuevo
             </Button>
           </AlertDescription>
@@ -263,6 +266,7 @@ export default function ProfilePage() {
           website={aiWebsite}
           websiteFromEmail={!aiWebsiteTouched && !profile.website.trim() && Boolean(emailWebsite) && aiWebsite === emailWebsite}
           companyName={profile.companyName}
+          loading={isLoading}
           running={isGenerating}
           error={aiError}
           onWebsiteChange={(value) => { setAiWebsiteTouched(true); setAiWebsite(value); setAiError(''); }}
@@ -271,6 +275,7 @@ export default function ProfilePage() {
       ) : null}
 
       {!isLoading && !loadError ? <ProfileCompleteness profile={profile} onComplete={focusField} /> : null}
+      {!isLoading && !loadError ? <ProfileIcpSummary profile={profile} dirty={isDirty} onEdit={() => focusField('targetRoles')} /> : null}
 
       <form id="profile-form" onSubmit={handleSave}>
         <fieldset disabled={Boolean(loadError) || isSaving} className="min-w-0 border-0 p-0">
@@ -387,7 +392,7 @@ export default function ProfilePage() {
       {isDirty ? (
         <div className="sticky bottom-3 z-20 mt-4 flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/90 p-3 shadow-[0_18px_45px_-20px_rgba(15,23,42,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/75 sm:flex-row sm:items-center sm:justify-between" role="status">
           <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
-            <PenLine className="h-4 w-4 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+            <PenLine className="h-4 w-4 text-cw-warning" aria-hidden="true" />
             Cambios sin guardar
           </div>
           <Button type="submit" form="profile-form" disabled={isSaving || Boolean(websiteError)} aria-busy={isSaving} className="w-full rounded-xl sm:w-auto">

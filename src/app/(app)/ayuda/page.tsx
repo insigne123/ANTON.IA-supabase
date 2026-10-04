@@ -14,10 +14,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
+import { useSharedNavAccess } from '@/hooks/use-nav-access';
 import {
   FIRST_EMAIL_PATH, HELP_GROUPS, helpSectionHref, helpSectionIdFrom, popularHelpQuestions, searchHelp, visibleHelpSections,
 } from '@/lib/help/manual';
-import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
 
 const CARD_LINK = 'flex h-full gap-3 rounded-2xl border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
@@ -31,7 +31,9 @@ export default function HelpCenterPage() {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const admin = organizationRole === 'owner' || organizationRole === 'admin';
-  const sections = useMemo(() => visibleHelpSections({ opportunities: isOpportunitiesEnabled(), admin }), [admin]);
+  // The same parts of the app as the menu: «Oportunidades» only for the accounts the server lets in.
+  const { opportunities } = useSharedNavAccess();
+  const sections = useMemo(() => visibleHelpSections({ opportunities, admin }), [opportunities, admin]);
   const visibleIds = useMemo(() => new Set(sections.map((section) => section.id)), [sections]);
   const groups = useMemo(() => HELP_GROUPS
     .map((group) => ({ group, items: sections.filter((section) => section.group === group) }))
