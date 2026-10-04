@@ -72,6 +72,12 @@ export default function SavedLeadsPage() {
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
+  // «Abrir» in the data sheet lands here with ?q=<name>: the search starts with it, so that contact is the one in view.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('q')?.trim();
+    if (requested) setSearchTerm(requested.slice(0, 120));
+  }, []);
+
   // Dialog state
   const [enrichOptionsOpen, setEnrichOptionsOpen] = useState(false);
   const [leadsToEnrich, setLeadsToEnrich] = useState<Lead[]>([]);
