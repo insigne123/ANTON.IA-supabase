@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { AlertCircle, CheckCircle2, Loader2, Mail, Plus, RefreshCw, Save, Sparkles } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -129,6 +130,7 @@ function toneLabel(tone: StyleProfile['tone']) {
 
 export default function EmailStyleDesigner() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const styleNameRef = useRef<HTMLInputElement>(null);
   const [styles, setStyles] = useState<SavedEmailStyle[]>([]);
   const [selectedStyleId, setSelectedStyleId] = useState('');
@@ -460,9 +462,15 @@ export default function EmailStyleDesigner() {
   async function saveStyle(action: 'save' | 'duplicate' | 'archive' = 'save', targetScope = libraryScope) {
     if (isBusy || (readOnly && action !== 'duplicate')) return;
     if (action !== 'save' && !discardChanges()) return;
-    if (action === 'archive' && !window.confirm('¿Archivar esta plantilla? Dejaria de estar disponible para nuevos correos.')) return;
+    if (action === 'archive' && !(await confirm({
+      title: '¿Archivar esta plantilla?', description: 'Dejará de estar disponible para correos nuevos.', confirmLabel: 'Archivar', tone: 'danger',
+    }))) return;
     const publishConfirmed = targetScope === 'team'
-      ? window.confirm('¿Confirmas que revisaste el contenido y autorizas su publicacion para tu equipo? Esto no acredita aprobacion de marketing externa.') : false;
+      ? await confirm({
+        title: '¿Publicar para tu equipo?',
+        description: 'Confirmas que revisaste el contenido y autorizas que tu equipo lo use. Esto no reemplaza una aprobación de marketing externa.',
+        confirmLabel: 'Publicar',
+      }) : false;
     if (targetScope === 'team' && !publishConfirmed) return;
     const name = styleName.trim();
     if (!name) {
