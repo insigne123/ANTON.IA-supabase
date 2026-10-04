@@ -144,13 +144,13 @@ export function LeadCard({ lead, onClick, onStageChange, isSaving = false }: Pro
                     <div className="space-y-1.5 text-xs text-muted-foreground">
                         {lead.email && <div className="flex min-w-0 items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{lead.email}</span></div>}
                         {!lead.email && lead.company && <div className="flex min-w-0 items-center gap-1.5"><Building2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{lead.company}</span></div>}
-                        {dueDate && <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300"><CalendarClock className="h-3.5 w-3.5" /><span>Próximo paso: {dueDate}</span></div>}
+                        {dueDate && <div className="flex items-center gap-1.5 text-cw-warning"><CalendarClock className="h-3.5 w-3.5" aria-hidden="true" /><span>Próximo paso: {dueDate}</span></div>}
                     </div>
 
                     {collaboration && collaborationData && (claimIsActive || threadConflict || collaboration.contact_state === 'suppressed') && (
                         <div className="space-y-1.5 border-t border-border/60 pt-2 text-xs text-muted-foreground">
                             {claimIsActive && collaboration.claimed_by_user_id && (
-                                <div className="flex min-w-0 items-center gap-1.5 text-sky-700 dark:text-sky-300">
+                                <div className="flex min-w-0 items-center gap-1.5 text-primary">
                                     <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                                     <span className="truncate">
                                         {collaborationMemberName(collaborationData.members, collaboration.claimed_by_user_id, user?.id)} está preparando
@@ -159,7 +159,7 @@ export function LeadCard({ lead, onClick, onStageChange, isSaving = false }: Pro
                                 </div>
                             )}
                             {(threadConflict || collaboration.contact_state === 'suppressed') && (
-                                <div className="flex min-w-0 items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                                <div className="flex min-w-0 items-center gap-1.5 text-cw-warning">
                                     <MessageSquareWarning className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                                     <span className="truncate">
                                         {threadConflict
