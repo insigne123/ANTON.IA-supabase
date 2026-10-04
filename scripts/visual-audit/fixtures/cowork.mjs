@@ -1,4 +1,4 @@
-// Cowork: two finished threads for the owner (one with a follow-up turn) and the access RPC, which only the owner passes.
+// Cowork: two finished threads for the owner (one with a follow-up turn, one renamed) and the access RPC, which only the owner passes.
 export default function cowork(ctx) {
   const run = (n, message, { parent = null, root, status = 'completed', at }) => ({
     id: ctx.uid(9000 + n), user_id: ctx.OWNER, organization_id: ctx.ORG, request_id: ctx.uid(9100 + n), message, mode: 'approval', status,
@@ -21,7 +21,11 @@ export default function cowork(ctx) {
     { sequence: index * 2 + 2, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null }, created_at: item.updated_at },
   ]);
   return {
-    tables: { cowork_runs: runs, cowork_run_events: events },
+    tables: {
+      cowork_runs: runs, cowork_run_events: events,
+      // The campaign conversation was renamed (Plan 9, PR-20); the other keeps its first message as the name.
+      cowork_thread_settings: [{ root_run_id: second, user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Campaña logística · reclutamiento', hidden_at: null, updated_at: ctx.hoursAgo(2) }],
+    },
     rpc: { cowork_has_access: (_args, { user, service }) => service || user?.id === ctx.OWNER },
   };
 }
