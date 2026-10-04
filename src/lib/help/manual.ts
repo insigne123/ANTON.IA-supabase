@@ -266,7 +266,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     faqs: [
       { q: '¿Cuántas personas puede tener una campaña?', a: 'Hasta 100 por campaña.' },
-      { q: '¿Aprobar envía todo al instante?', a: 'Aprobar autoriza los mensajes para toda la audiencia. Según la configuración de tu organización, los envíos parten solos o los inicias desde la misma página.' },
+      { q: '¿Aprobar envía todo al instante?', a: 'Aprobar autoriza los mensajes para toda la audiencia. Según la configuración de tu organización, los envíos parten solos o los inicias con «Enviar correos disponibles», que los envía desde el servidor por tandas.' },
+      { q: '¿Por qué un contacto quedó en revisión?', a: 'Antes de cada envío se revisa que siga entre tus contactos, que no esté bloqueado, que no haya respondido (para los seguimientos) y que el primer correo siga cumpliendo los criterios aprobados. Si algo cambió, ese correo no sale y la persona queda en revisión; «Volver a comprobar» lo revisa de nuevo.' },
       { q: '¿Puedo usar contactos sin correo?', a: 'No. Las campañas usan tus contactos guardados con correo. Primero busca su correo en «Por completar».' },
     ],
     related: ['conversaciones', 'por-escribir', 'privacidad'],
