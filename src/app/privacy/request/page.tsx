@@ -101,7 +101,7 @@ export default function PrivacyRequestPage() {
           </CardHeader>
           <CardContent>
             {status === 'success' ? (
-              <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              <div role="status" className="space-y-3 rounded-lg border border-cw-border bg-cw-success-soft p-4 text-sm text-foreground">
                 <p className="font-medium">{message}</p>
                 {requestId ? <p>ID de solicitud: <code>{requestId}</code></p> : null}
                 <p>Guardamos este identificador para ayudarte a hacer seguimiento interno de la solicitud.</p>
@@ -182,7 +182,7 @@ export default function PrivacyRequestPage() {
                 </div>
 
                 {status === 'error' && message ? (
-                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-foreground">
                     {message}
                   </div>
                 ) : null}
