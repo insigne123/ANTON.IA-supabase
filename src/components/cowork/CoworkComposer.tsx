@@ -220,6 +220,6 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         </div>
       </div>
     </form>
-    {footnote && <div className="mt-2 px-1 text-center text-[11.5px] text-cw-faint">{footnote}</div>}
+    {footnote && <div className="mt-2 px-1 text-center text-[11.5px] text-foreground/70">{footnote}</div>}
   </div>;
 });
