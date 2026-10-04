@@ -295,6 +295,36 @@ test('rendered editors preserve edits across proposals/conflicts/overlapping sav
     await click('Crear borrador para revisar');
     assert.deepEqual(calls.at(-1)?.body, { researchSnapshotId: 'snapshot-1' });
     assert.equal(replacement, '/contact/compose?draftId=canonical');
+
+    // Plan 9, PR-17: with a connected mailbox, «Confirmar y enviar» confirms the review and then sends once, with the
+    // approved version, through the same send path. «Solo confirmar» stays for confirming without sending.
+    const sent: any[] = [];
+    const stopAfterTheCall = async (input: any) => { sent.push(input); throw new Error('stop after the call'); };
+    modules['@/lib/gmail-email-service'].sendGmailEmail = stopAfterTheCall;
+    modules['@/lib/outlook-email-service'].sendEmail = stopAfterTheCall;
+    modules['@/lib/manual-send-idempotency'].resolveManualEmailOperation = () => ({ idempotencyKey: 'manual-key' });
+    const pendingDraft = { ...savedDraft, versionId: 'c9' };
+    const approvedDraft = { ...pendingDraft, lifecycle: 'ready', approval: { status: 'approved' } };
+    calls.length = 0;
+    globals.fetch = async (url: string, init?: RequestInit) => {
+      if (!init?.method) {
+        if (url.startsWith('/api/integrations/sender')) return new Response(JSON.stringify({ state: 'connected', email: 'yo@empresa.cl' }));
+        return new Response(JSON.stringify(url.startsWith('/api/email-styles') ? { styles: [] } : { draft: pendingDraft }));
+      }
+      calls.push({ url, method: init.method, body: JSON.parse(String(init.body)) });
+      if (url.endsWith('/approve')) return new Response(JSON.stringify({ draft: approvedDraft }));
+      return new Response('{}', { status: 500 });
+    };
+    params = new URLSearchParams('draftId=canonical');
+    await React.act(async () => root.render(React.createElement(ComposePage)));
+    assert.equal(buttons('Solo confirmar').length, 1);
+    assert.match(dom.window.document.body.textContent!, /«Confirmar y enviar» lo envía ahora desde yo@empresa\.cl/);
+    await click('Confirmar y enviar');
+    await React.act(async () => {});
+    assert.deepEqual(calls.map((call) => [call.url, call.body.versionId]), [['/api/native-drafts/canonical/approve', 'c9']]);
+    assert.equal(sent.length, 1, 'one send, after the confirmation');
+    assert.equal(sent[0].versionId, 'c9');
+    assert.equal(sent[0].draftId, 'canonical');
   } finally {
     await React.act(async () => root.unmount());
     dom.window.close();
