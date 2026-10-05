@@ -51,8 +51,9 @@ const bundle = await build({
       </div>;
     }
     const root = createRoot(document.getElementById('root'));
-    window.mount = (key, sidebarOpen = true) => root.render(<SidebarProvider key={key} defaultOpen={sidebarOpen}>
-      <ProductTourProvider userId="${USER}" onNavigate={href => window.__router.push(href)}><Shell/></ProductTourProvider>
+    // AuthContext mounts the app again once the account is known: a new key, and userId null while it loads.
+    window.mount = (key, sidebarOpen = true, userId = "${USER}") => root.render(<SidebarProvider key={key} defaultOpen={sidebarOpen}>
+      <ProductTourProvider userId={userId} onNavigate={href => window.__router.push(href)}><Shell/></ProductTourProvider>
       <Toaster/>
     </SidebarProvider>);`,
     resolveDir: process.cwd(), loader: 'tsx',
@@ -102,7 +103,7 @@ async function open({ width = 1280, offer = true, sidebarOpen = true, at = '/das
     if (url !== '/api/onboarding/tour') return json({ error: 'No encontrado' }, 404);
     if (options.method === 'POST') {
       calls.posts.push(JSON.parse(options.body));
-      return json({ record: { version: 3, status: JSON.parse(options.body).status, updatedAt: '2026-10-01T15:00:00Z' } });
+      return json({ record: { version: 4, status: JSON.parse(options.body).status, updatedAt: '2026-10-01T15:00:00Z' } });
     }
     calls.gets += 1;
     return json({ record: null, offer, guides: {} });
@@ -126,20 +127,21 @@ const waitFor = async (predicate, label, tries = 400) => {
   throw new Error(`Timed out: ${label}`);
 };
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/connections', '/search', '/search', '/saved/leads',
-  '/saved/leads/enriched', '/saved/leads/enriched', '/contacted', '/campaigns', '/crm', '/crm', '/crm'];
+// Tour v4: the path to a first email. «?» and «Centro de ayuda» have no screen of their own: they stay on the last one.
+const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/connections', '/search', '/saved/leads',
+  '/saved/leads/enriched', '/saved/leads/enriched', '/saved/leads/enriched', '/saved/leads/enriched'];
 
-// 1. A new account on desktop: welcome, steps across screens, keyboard, back, skip, replay of the whole app.
+// 1. A new account on desktop: welcome, steps across screens, keyboard, back, skip, replay of the whole path.
 {
   const app = await open();
   try {
     await waitFor(() => app.text().includes('Te damos la bienvenida a ANTON.IA'), 'welcome for a new account');
-    assert.match(app.text(), /En 15 pasos te llevamos por cada pantalla/);
+    assert.match(app.text(), /En 10 pasos te llevamos hasta tu primer correo/);
     assert.match(app.text(), /puedes verlo cuando quieras desde «Ver tutorial»/);
     await waitFor(() => app.doc.activeElement === app.button('Empezar recorrido'), 'focus on the main action');
     app.button('Empezar recorrido').click();
 
-    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 15 · Hoy'), 'first step, with its section');
+    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 10 · Hoy'), 'first step, with its section');
     assert.match(app.card().textContent, /Empieza cada día aquí/);
     assert.equal(app.card().getAttribute('role'), 'dialog');
     assert.equal(app.doc.getElementById(app.card().getAttribute('aria-labelledby')).textContent, 'Empieza cada día aquí');
@@ -148,23 +150,23 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
     assert.ok(app.scrolled.includes('today'), 'the page control is brought into view');
     await waitFor(() => app.doc.activeElement === app.button('Siguiente'), 'focus on «Siguiente»');
     assert.equal(app.button('Atrás'), undefined);
-    assert.deepEqual(app.progress(), { version: 3, index: 0 });
+    assert.deepEqual(app.progress(), { version: 4, index: 0 });
 
     app.key('ArrowRight');
-    await waitFor(() => app.card().textContent.includes('Paso 2 de 15 · Hoy'), 'arrow key goes forward');
-    assert.match(app.card().textContent, /Paso 2 de 15 · Hoy: Prepara tu cuenta\./, 'the new step is announced with its section');
+    await waitFor(() => app.card().textContent.includes('Paso 2 de 10 · Hoy'), 'arrow key goes forward');
+    assert.match(app.card().textContent, /Paso 2 de 10 · Hoy: Prepara tu cuenta\./, 'the new step is announced with its section');
     app.key('ArrowRight');
-    await waitFor(() => app.card().textContent.includes('Paso 3 de 15 · Perfil'), 'third step');
+    await waitFor(() => app.card().textContent.includes('Paso 3 de 10 · Perfil'), 'third step');
     assert.match(app.card().textContent, /Cuéntanos qué vendes/);
     assert.deepEqual(app.navigations, ['/profile'], 'the tour opens the screen of the step');
     await waitFor(() => app.doc.querySelector('[data-tour="profile-ai"]') && app.spotlight()?.style.top === '196px', 'spotlight once the screen renders the control');
-    assert.deepEqual(app.progress(), { version: 3, index: 2 });
+    assert.deepEqual(app.progress(), { version: 4, index: 2 });
 
     app.button('Atrás').click();
-    await waitFor(() => app.card().textContent.includes('Paso 2 de 15'), 'back');
+    await waitFor(() => app.card().textContent.includes('Paso 2 de 10'), 'back');
     await waitFor(() => app.path() === '/dashboard', 'back opens the previous screen');
     app.button('Atrás').click();
-    await waitFor(() => app.card().textContent.includes('Paso 1 de 15'), 'back to the first step');
+    await waitFor(() => app.card().textContent.includes('Paso 1 de 10'), 'back to the first step');
     await waitFor(() => app.doc.activeElement === app.button('Siguiente'), 'focus stays in the card when «Atrás» goes away');
 
     app.button('Omitir').click();
@@ -177,32 +179,32 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
 
     // Replayed: every screen, in order, ending where help lives.
     app.doc.querySelector('[data-tour="tour-help"]').click();
-    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 15'), 'replay starts at the first step');
+    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 10'), 'replay starts at the first step');
     assert.doesNotMatch(app.text(), /Te damos la bienvenida/, 'replay skips the welcome');
-    for (let step = 2; step <= 15; step++) {
+    for (let step = 2; step <= 10; step++) {
       app.key('ArrowRight');
-      await waitFor(() => app.card().textContent.includes(`Paso ${step} de 15`), `step ${step}`);
+      await waitFor(() => app.card().textContent.includes(`Paso ${step} de 10`), `step ${step}`);
       await waitFor(() => app.path() === DESKTOP_PATH[step - 1], `step ${step} is on ${DESKTOP_PATH[step - 1]}`);
-      if (step === 9) {
+      if (step === 7 || step === 8) {
         // «Por escribir» without contacts: no spotlight on nothing, and the card says why.
         await waitFor(() => app.card().textContent.includes('Esta pantalla aún no muestra este control'), 'the empty screen is explained', 400);
         assert.equal(app.spotlight(), null);
       }
     }
-    assert.deepEqual(app.navigations.slice(1), ['/dashboard', '/profile', '/connections', '/search', '/saved/leads', '/saved/leads/enriched', '/contacted', '/campaigns', '/crm']);
-    assert.match(app.card().textContent, /Paso 15 de 15 · Ayuda/);
+    assert.deepEqual(app.navigations.slice(1), ['/dashboard', '/profile', '/connections', '/search', '/saved/leads', '/saved/leads/enriched']);
+    assert.match(app.card().textContent, /Paso 10 de 10 · Ayuda/);
     assert.match(app.card().textContent, /El manual completo/);
     await waitFor(() => app.spotlight()?.style.top === '636px', 'spotlight on «Centro de ayuda» in the menu');
     assert.equal(app.button('Omitir'), undefined, 'nothing to skip on the last step');
     assert.ok(app.button('Terminar'));
     app.key('ArrowRight');
     await pause(30);
-    assert.match(app.card().textContent, /Paso 15 de 15/);
+    assert.match(app.card().textContent, /Paso 10 de 10/);
     app.button('Empezar en Hoy').click();
     await waitFor(() => !app.card(), 'last step closes the tour');
     assert.equal(app.path(), '/dashboard', 'it ends on «Hoy», which says what to do first');
     await waitFor(() => app.calls.posts.length === 2, 'the guides it walked are remembered');
-    assert.deepEqual(app.calls.posts[1].guides.sort(), ['campaigns', 'connections', 'conversations', 'crm', 'enriched', 'home', 'profile', 'saved', 'search']);
+    assert.deepEqual(app.calls.posts[1].guides.sort(), ['connections', 'enriched', 'home', 'profile', 'saved', 'search']);
     assert.ok(!app.calls.posts.some(post => post.status === 'completed'), 'a replay leaves the tour record as it is');
     assert.equal(app.stored().status, 'completed');
 
@@ -223,10 +225,10 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
     for (let step = 2; step <= 4; step++) {
       await waitFor(() => app.button('Siguiente'), 'next');
       app.button('Siguiente').click();
-      await waitFor(() => app.card()?.textContent.includes(`Paso ${step} de 15`), `step ${step}`);
+      await waitFor(() => app.card()?.textContent.includes(`Paso ${step} de 10`), `step ${step}`);
     }
     app.window.mount('reloaded');
-    await waitFor(() => app.card()?.textContent.includes('Paso 4 de 15 · Perfil'), 'resumed at the same step');
+    await waitFor(() => app.card()?.textContent.includes('Paso 4 de 10 · Conexiones'), 'resumed at the same step');
     await pause(80);
     assert.doesNotMatch(app.text(), /Te damos la bienvenida/, 'the welcome does not interrupt it');
     app.button('Omitir').click();
@@ -234,6 +236,27 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
     app.window.mount('reloaded-again');
     await pause(80);
     assert.equal(app.card(), null, 'a closed tour does not come back on reload');
+  } finally { app.close(); }
+}
+
+// 2b. «Ver tutorial» pressed while the account is still loading: the tour opens its first screen and goes on when the app
+//     mounts again with the account, instead of vanishing.
+{
+  const app = await open({ offer: false, at: '/ayuda' });
+  try {
+    app.window.mount('loading', true, null);
+    await waitFor(() => app.button('Ver tutorial'), 'the menu while the account loads');
+    app.button('Ver tutorial').click();
+    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 10 · Hoy'), 'started before the account is known');
+    assert.equal(app.path(), '/dashboard');
+    app.window.mount('signed-in');
+    await pause(80);
+    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 10 · Hoy'), 'goes on once the account is known');
+    assert.deepEqual(app.progress(), { version: 4, index: 0 }, 'the step is kept for the account');
+    assert.equal(app.window.sessionStorage.getItem('antonia:tour-progress:pending'), null, 'and nothing is left apart');
+    app.button('Omitir').click();
+    await waitFor(() => !app.card(), 'skipped');
+    assert.equal(app.progress(), null, 'nothing left to resume');
   } finally { app.close(); }
 }
 
@@ -303,21 +326,21 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
 {
   const app = await open({ width: 390 });
   try {
-    await waitFor(() => app.text().includes('En 16 pasos'), 'welcome on a phone');
+    await waitFor(() => app.text().includes('En 11 pasos'), 'welcome on a phone');
     app.button('Empezar recorrido').click();
-    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 16 · Menú'), 'first phone step');
+    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 11 · Menú'), 'first phone step');
     assert.match(app.card().textContent, /Todo está en este menú/);
     await waitFor(() => app.spotlight()?.style.top === '4px', 'spotlight on the menu button');
     assert.equal(app.card().style.left, '12px');
     assert.equal(app.card().style.right, '12px');
 
     app.button('Siguiente').click();
-    await waitFor(() => app.card().textContent.includes('Paso 2 de 16 · Hoy'), 'second phone step');
+    await waitFor(() => app.card().textContent.includes('Paso 2 de 11 · Hoy'), 'second phone step');
     await waitFor(() => app.spotlight()?.style.top === '116px', 'the page control itself, not the menu button');
     assert.ok(![...app.card().querySelectorAll('p')].some(node => node.textContent.startsWith('En el menú:')), 'a page control needs no menu hint');
-    for (let step = 3; step <= 16; step++) {
+    for (let step = 3; step <= 11; step++) {
       app.button('Siguiente').click();
-      await waitFor(() => app.card().textContent.includes(`Paso ${step} de 16`), `phone step ${step}`);
+      await waitFor(() => app.card().textContent.includes(`Paso ${step} de 11`), `phone step ${step}`);
     }
     const where = [...app.card().querySelectorAll('p')].find(node => node.textContent.startsWith('En el menú:'));
     assert.equal(where.textContent, 'En el menú: Centro de ayuda');
@@ -327,14 +350,14 @@ const DESKTOP_PATH = ['/dashboard', '/dashboard', '/profile', '/profile', '/conn
     await waitFor(() => !app.card(), 'finished');
     await waitFor(() => app.calls.posts.length === 2, 'saved');
     assert.deepEqual(app.calls.posts[0], { status: 'completed' });
-    assert.equal(app.path(), '/crm', '«Terminar» stays where the tour ended');
+    assert.equal(app.path(), '/saved/leads/enriched', '«Terminar» stays where the tour ended');
 
     // Replayed from inside the open menu sheet: the sheet closes first.
     app.doc.getElementById('open-sheet').click();
     await waitFor(() => app.doc.getElementById('sidebar-state').textContent === 'sheet-open', 'sheet open');
     app.doc.querySelector('[data-tour="tour-help"]').click();
     await waitFor(() => app.doc.getElementById('sidebar-state').textContent === 'sheet-closed', 'sheet closes');
-    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 16'), 'tour after the sheet closed');
+    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 11'), 'tour after the sheet closed');
   } finally { app.close(); }
 }
 

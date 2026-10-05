@@ -18,7 +18,7 @@
 - **Dónde se ven:**
   - en el Centro de ayuda, en «Videos por módulo»;
   - en la página de cada sección, en «En video»;
-  - en el panel «?» de cada pantalla;
+  - en el panel «?» de cada pantalla, también en Cowork, que no tiene sección en el manual;
   - en cada paso del recorrido, con «Ver video».
 
   La lista está en `src/lib/help/tutorial-videos.ts` y los archivos en `public/tutorial-videos/` (`.mp4`, póster `.jpg` y subtítulos `.vtt`).
@@ -30,6 +30,7 @@
   - Más corto: solo el camino al primer correo, 10 pasos en escritorio (antes 15). Son Hoy, Perfil, Conexiones, Buscar prospectos, Por completar, Por escribir, «?» y Centro de ayuda.
   - Conversaciones, Campañas y Pipeline salen del recorrido. Se ofrecen como guía corta en la primera visita de cada pantalla, y siguen en «?».
   - Se vuelve a ofrecer una vez a cuentas de menos de 30 días que no vieron la v4.
+  - Si se pulsa «Ver tutorial» o «Ver recorrido por la app» mientras la cuenta aún carga, el recorrido sigue cuando termina de cargar. Antes se perdía al llegar a «Hoy», porque la app se vuelve a montar al conocer la cuenta.
 
 ## Qué hay ahora
 

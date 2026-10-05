@@ -87,6 +87,12 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
   // A tour interrupted by a reload goes on from the same step (this tab only).
   useEffect(() => {
     if (!userId) return;
+    // Started while the account was still loading: the app mounts again once it is known, and the tour goes on.
+    const pending = readProgress(PENDING_PROGRESS);
+    if (pending !== null) {
+      clearProgress(PENDING_PROGRESS);
+      storeProgress(userId, pending);
+    }
     const saved = readProgress(userId);
     if (saved === null) return;
     const tourSteps = productTourSteps(sidebar.isMobile);
@@ -236,7 +242,7 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     setIndex(0);
     setAnnouncement('');
     setPhase('touring');
-    if (userId) storeProgress(userId, 0);
+    storeProgress(userId || PENDING_PROGRESS, 0);
   }, [sidebar, userId]);
 
   const start = useCallback(() => {
@@ -263,7 +269,7 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     }
     setPhase('idle');
     save(status);
-    if (userId) clearProgress(userId);
+    clearProgress(userId || PENDING_PROGRESS);
     // The tour already showed these screens: their guides stay in «?» instead of being offered again.
     if (status === 'completed') markGuidesSeen(pageGuidesInTour(steps));
     if (collapseSidebarAfter.current) {
@@ -283,7 +289,7 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     const step = steps[next];
     if (!step) return;
     setIndex(next);
-    if (phase === 'touring' && userId) storeProgress(userId, next);
+    if (phase === 'touring') storeProgress(userId || PENDING_PROGRESS, next);
     setAnnouncement(`Paso ${next + 1} de ${steps.length}${step.section ? ` · ${step.section}` : ''}: ${step.title}. ${step.body}`);
   }, [phase, steps, userId]);
 
@@ -352,7 +358,7 @@ function WelcomeDialog({ open, stepCount, onStart, onDecline }: {
           </span>
           <DialogTitle className="text-xl tracking-tight">Te damos la bienvenida a ANTON.IA</DialogTitle>
           <DialogDescription className="leading-relaxed">
-            En {stepCount} pasos te llevamos por cada pantalla: para qué sirve y cómo se usa. Puedes salir cuando quieras.
+            En {stepCount} pasos te llevamos hasta tu primer correo: qué pantalla usar y cómo. Puedes salir cuando quieras.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2 sm:space-x-0">
@@ -671,6 +677,8 @@ function storeRecord(userId: string, record: ProductTourRecord) {
 }
 
 const progressKey = (userId: string) => `antonia:tour-progress:${userId}`;
+/** The progress of a tour started before the account was known in this tab. */
+const PENDING_PROGRESS = 'pending';
 
 /** The step a tour in progress was on, in this tab; null when there is none. */
 function readProgress(userId: string): number | null {
