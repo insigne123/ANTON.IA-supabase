@@ -20,6 +20,8 @@
     "test": "npm run test:unit",
     "test:unit": "node scripts/run-node-tests.mjs",
     "audit:visual": "node scripts/visual-audit/run.mjs",
+    "audit:interactions": "node scripts/visual-audit/interactions.mjs",
+    "audit:simplicity": "node scripts/usability/run.mjs",
     "test:env:local": "node scripts/setup-local-test-env.mjs",
     "test:env:nonprod": "node scripts/setup-nonprod-test-env.mjs",
     "test:identity:ensure": "node scripts/bootstrap-test-identities.mjs",

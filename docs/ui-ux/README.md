@@ -17,6 +17,8 @@ Esta carpeta define como mejorar interfaces en este proyecto sin caer en UI gene
 - `docs/ui-ux/reference-workflow.md`: flujo obligatorio antes de tocar UI
 - `docs/ui-ux/release-audit-checklist.md`: checklist de revision visual antes de deploy
 - `docs/ui-ux/auditoria-visual.md`: banco de pruebas que recorre cada pantalla con sesion iniciada (`npm run audit:visual`) y el recorrido base contra el que se compara cada cambio
+- `scripts/visual-audit/README.md` (seccion «Recorrido de interacciones»): `npm run audit:interactions` usa cada pantalla (menus, dialogos, pestañas, teclado) y la prueba con lecturas que fallan, lentas y textos largos
+- `scripts/usability/README.md`: `npm run audit:simplicity`, el indice de sencillez de 12 tareas clave en escritorio y telefono
 - `docs/ui-ux/email-studio-notes.md`: referencias y decisiones especificas de Email Studio
 - `docs/ui-ux/tutorial-guiado.md`: recorrido guiado para cuentas nuevas, como omitirlo, volver a verlo y cambiarlo
 - `docs/ui-ux/ayuda-y-manual.md`: recorrido v3 por toda la app, boton «?» de cada pantalla, «Preguntale a la IA» y Centro de ayuda (`/ayuda`)

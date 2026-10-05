@@ -78,3 +78,35 @@ Para una tabla nueva, agrega sus filas en el archivo de su dominio. El reporte l
 - `build.log` y `app.log`.
 
 Los hallazgos se comparan por clave, sin comparar píxeles. Así, un recorrido con `--baseline` solo marca lo que cambió.
+
+## Recorrido de interacciones
+
+`npm run audit:interactions` usa el mismo banco, pero en vez de mirar la vista quieta de cada página la usa:
+
+```bash
+npm run audit:interactions                                      # todo: owner y member, 33 páginas
+npm run audit:interactions -- --routes=/crm,/sheet --checks=error,slow
+npm run audit:interactions -- --skip-build --out=.visual-audit/interacciones-antes
+```
+
+Opciones: `--routes`, `--persona` (`owner`, `member`), `--checks` (`overlays`, `tabs`, `keyboard`, `error`, `slow`, `long`), `--concurrency` (3), `--skip-build` y `--out`.
+
+Qué revisa en cada página:
+
+| Revisión | Qué hace | Qué cuenta como hallazgo |
+|---|---|---|
+| `overlays` | Abre cada menú, diálogo, hoja, selector y desplegable (hasta 14 por página) | Abrirlo escribe datos; el foco no entra; axe falla dentro; Esc no lo cierra; el foco no vuelve a lo que lo abrió |
+| `tabs` | Elige cada pestaña con clic y con las flechas | La pestaña no queda elegida o no muestra su panel; las flechas no mueven |
+| `keyboard` | Recorre la página con Tab (16 paradas) | Una parada sin foco visible, o el foco que se pierde |
+| `error` | Todas las lecturas (`/api/*` y Supabase) responden 500 | La página se rompe, queda en blanco, dice «vacío» o no avisa nada. Una página que se ve igual con y sin datos no cuenta |
+| `slow` | Todas las lecturas tardan 3 s | Mientras espera no se ve que carga, o dice «vacío» y después muestra datos |
+| `long` | Nombres, empresas y cargos 3 veces más largos | Algo empuja la página hacia el lado |
+
+`error`, `slow` y `long` corren solo como owner, a 1440 px. Una promesa rechazada sin capturar sale como error de página, con el último `console.error` de la app antes de ella, que suele nombrar la lectura que falló.
+
+Salida en `--out` (o `.visual-audit/interacciones-<fecha>/`): `interactions.md` con la cobertura por página y los hallazgos, `interactions.json` con todo, y en `shots/` la captura de cada página con errores (`-error.png`) y con carga lenta (`-slow.png`).
+
+
+## Compilación compartida
+
+`build.mjs` compila una sola vez para los tres recorridos (`audit:visual`, `audit:interactions` y `audit:simplicity`). Reutiliza `.next-audit/` mientras el código de la app no cambie: la huella ignora `scripts/visual-audit`, `scripts/usability`, `docs` y las pruebas.
