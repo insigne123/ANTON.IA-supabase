@@ -18,6 +18,7 @@ import { AlertCircle, ArrowRight, ChevronDown, Download, Linkedin, ListFilter, M
 import { EmptyState } from '@/components/ui/empty-state';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { enrichWithLeadsFinder } from '@/lib/leads-finder-client';
 import * as Quota from '@/lib/quota-client';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 import { Label } from '@/components/ui/label';
@@ -270,53 +271,75 @@ export default function SavedLeadsPage() {
 
     setEnriching(true);
     try {
-      const payloadLeads = chosen.map(l => ({
-        fullName: l.name,
-        linkedinUrl: l.linkedinUrl || undefined,
-        companyName: l.company || undefined,
-        companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
-        clientRef: l.id,
-        id: l.id,
-        sourceProviderId: l.sourceProvider === 'apollo' ? l.sourceProviderId : undefined,
-      }));
-      const operationId = uuid();
+      // People found with Leads Finder (Plan 11) are revealed from what that search already brought; the rest, with Apollo.
+      const isLeadsFinder = (lead: Lead) => lead.sourceProvider === 'leads_finder' && Boolean(lead.sourceProviderId);
+      const fromLeadsFinder = chosen.filter(isLeadsFinder);
+      const forApollo = chosen.filter(lead => !isLeadsFinder(lead));
+      const results: any[] = [];
+      let consumed = 0;
+      let expiredCount = 0;
 
-      const r = await fetch('/api/opportunities/enrich-apollo', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': operationId,
-          'x-quota-ticket': getQuotaTicket() || '',
-        },
-        body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),
-      });
-      const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
-
-      if (process.env.NODE_ENV !== 'production' && j?.debug?.serverLogs && Array.isArray(j.debug.serverLogs)) {
-        console.groupCollapsed('[Server Logs] Apollo Enrichment');
-        j.debug.serverLogs.forEach((l: string) => console.log(l));
-        console.groupEnd();
+      if (fromLeadsFinder.length > 0) {
+        const revealed = await enrichWithLeadsFinder({
+          leads: fromLeadsFinder.map(lead => ({ sourceProviderId: String(lead.sourceProviderId), clientRef: lead.id })),
+          revealEmail,
+          revealPhone,
+          operationId: uuid(),
+        });
+        // An expired result stays here as it was, without a «Sin correo» mark: searching it again brings it back.
+        results.push(...revealed.enriched.filter(item => item.enrichmentStatus !== 'expired'));
+        expiredCount = revealed.expired.length;
+        consumed += Number(revealed.usage?.consumed ?? 0);
       }
 
-      if (!r.ok) {
-        const snippet = (j as any)?.error || (j as any)?.message || (j as any)?.text || 'Error interno';
-        throw new Error(`HTTP ${r.status}: ${String(snippet).slice(0, 200)}`);
-      }
+      if (forApollo.length > 0) {
+        const payloadLeads = forApollo.map(l => ({
+          fullName: l.name,
+          linkedinUrl: l.linkedinUrl || undefined,
+          companyName: l.company || undefined,
+          companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
+          clientRef: l.id,
+          id: l.id,
+          sourceProviderId: l.sourceProvider === 'apollo' ? l.sourceProviderId : undefined,
+        }));
+        const operationId = uuid();
 
-      if (j.note && typeof j.note === 'string' && j.note.includes('Quota')) {
-        toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: j.note });
-      }
+        const r = await fetch('/api/opportunities/enrich-apollo', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': operationId,
+            'x-quota-ticket': getQuotaTicket() || '',
+          },
+          body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),
+        });
+        const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
 
-      const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
-      if (ticket) setQuotaTicket(ticket);
+        if (process.env.NODE_ENV !== 'production' && j?.debug?.serverLogs && Array.isArray(j.debug.serverLogs)) {
+          console.groupCollapsed('[Server Logs] Apollo Enrichment');
+          j.debug.serverLogs.forEach((l: string) => console.log(l));
+          console.groupEnd();
+        }
 
-      const enrichedCountFromServer = Number(j?.usage?.consumed ?? 0);
-      if (enrichedCountFromServer > 0) {
-        Quota.incClientQuota('enrich', enrichedCountFromServer);
+        if (!r.ok) {
+          const snippet = (j as any)?.error || (j as any)?.message || (j as any)?.text || 'Error interno';
+          throw new Error(`HTTP ${r.status}: ${String(snippet).slice(0, 200)}`);
+        }
+
+        if (j.note && typeof j.note === 'string' && j.note.includes('Quota')) {
+          toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: j.note });
+        }
+
+        const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
+        if (ticket) setQuotaTicket(ticket);
+
+        consumed += Number(j?.usage?.consumed ?? 0);
+        results.push(...(Array.isArray(j.enriched) ? j.enriched : []));
       }
+      if (consumed > 0) Quota.incClientQuota('enrich', consumed);
 
       // Who got an email or a phone (or is still being looked up) moves; a search that found nothing stays here, marked.
-      const outcome = classifyEnrichmentResults(chosen, Array.isArray(j.enriched) ? j.enriched : [], { revealPhone });
+      const outcome = classifyEnrichmentResults(chosen, results, { revealPhone });
       if (outcome.toEnriched.length > 0) await enrichedLeadsStorage.addDedup(outcome.toEnriched);
       const moved = new Set(outcome.removeFromSaved);
       if (moved.size > 0) await supabaseService.removeWhere(l => moved.has(l.id));
@@ -343,6 +366,7 @@ export default function SavedLeadsPage() {
         phoneOnly ? `${phoneOnly} con teléfono ${phoneOnly === 1 ? 'pasa' : 'pasan'} a «Por escribir»` : '',
         stillLooking ? `${stillLooking} ${stillLooking === 1 ? 'sigue' : 'siguen'} en búsqueda y ${stillLooking === 1 ? 'aparecerá' : 'aparecerán'} en «Por escribir»` : '',
         outcome.notFound.length ? `${outcome.notFound.length} sin correo: ${outcome.notFound.length === 1 ? 'queda' : 'quedan'} aquí, ${markedNotFound ? 'marcados' : 'aunque no pudimos marcarlos'}` : '',
+        expiredCount ? `${expiredCount} de Leads Finder ${expiredCount === 1 ? 'venció' : 'vencieron'} (se guardan 30 días): ${expiredCount === 1 ? 'búscalo' : 'búscalos'} de nuevo en Buscar prospectos, no se cobró` : '',
       ].filter(Boolean);
       toast({
         title: outcome.toEnriched.length > 0 ? 'Búsqueda de correo lista' : 'No encontramos correos',
