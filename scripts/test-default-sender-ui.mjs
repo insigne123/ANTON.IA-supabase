@@ -48,7 +48,7 @@ try {
   const text = view.dom.window.document.body.textContent;
   assert.match(text, /Se usa Gmail, tu única cuenta conectada\./);
   assert.equal(radio(view.dom, 'outlook').disabled, true);
-  assert.match(text, /No conectada: conéctala abajo para elegirla/);
+  assert.match(text, /No conectada: conéctala en «Correo» para elegirla/, 'the card points to the «Correo» section, where the account is connected');
   assert.equal(radio(view.dom, 'google').getAttribute('aria-checked'), 'true');
 } finally { view.dom.window.close(); }
 
