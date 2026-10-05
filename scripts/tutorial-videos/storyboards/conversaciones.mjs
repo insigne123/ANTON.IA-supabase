@@ -33,6 +33,12 @@ export default {
       title: 'Envía', text: 'Incluye la opción de dejar de recibir mensajes comerciales.',
       say: 'Y envíala.',
       target: { role: 'button', name: 'Enviar respuesta' }, zoom: 1.5, arrow: true,
+      waitFor: { text: /Respuesta enviada/, exact: false },
+    },
+    {
+      title: 'Enviada', text: 'Queda registrada en esta conversación.',
+      say: 'Listo: se envió en el hilo original.',
+      target: { text: /Respuesta enviada/, exact: false }, action: 'none', zoom: 1.5,
     },
   ],
   outro: { title: 'Respondida', text: 'La conversación sigue en el mismo hilo.', items: ['«Por responder» primero', 'El hilo completo', 'Respuesta desde tu correo'] },

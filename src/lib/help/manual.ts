@@ -48,12 +48,12 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     tips: [
       '«Hoy» muestra en «Prepara tu cuenta» qué te falta (perfil, correo conectado, primeros contactos y primer envío).',
-      'El botón «?» de la barra superior explica la pantalla en la que estás, y «Ver tutorial», al final del menú, repite el recorrido completo.',
+      'El botón «?» de la barra superior explica la pantalla en la que estás, con su video, y «Ver tutorial», al final del menú, repite el recorrido.',
     ],
     faqs: [
       { q: '¿Por dónde empiezo?', a: 'Por «Perfil» y «Conexiones». Sin tu oferta la IA no puede redactar, y sin correo conectado no puedes enviar. «Hoy» te dice cuál de los dos te falta.' },
       { q: '¿La IA envía correos sola?', a: 'No. La IA prepara borradores. Un correo individual sale cuando pulsas «Enviar ahora», y una campaña cuando la apruebas.' },
-      { q: '¿Cómo vuelvo a ver el tutorial?', a: 'Con «Ver tutorial», al final del menú. Lo puedes cerrar en cualquier paso con «Omitir».' },
+      { q: '¿Cómo vuelvo a ver el tutorial?', a: 'Con «Ver tutorial», al final del menú. Lo puedes cerrar en cualquier paso con «Omitir». Cada módulo tiene además su video en el Centro de ayuda.' },
     ],
     related: ['perfil', 'conexiones', 'buscar', 'por-escribir'],
   },

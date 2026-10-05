@@ -151,7 +151,8 @@ const SEARCH = ['search-modes', 'search-starters', 'search-run'];
   } finally { app.close(); }
 }
 
-// 4. A screen without a guide still has its help from the manual; a screen without either shows no «Ayuda».
+// 4. A screen without a guide still has its help from the manual; Cowork has its video; a screen without any of them
+//    shows no «Ayuda». (Nodes are compared as booleans: a failing assert would print the whole JSDOM tree.)
 {
   const app = await open({ pathname: '/settings/privacy', anchors: [] });
   try {
@@ -163,11 +164,22 @@ const SEARCH = ['search-modes', 'search-starters', 'search-run'];
     assert.ok(![...app.panel().querySelectorAll('button')].some((node) => node.textContent.includes('Ver guía de esta pantalla')), 'no guide to offer');
   } finally { app.close(); }
 
-  const none = await open({ pathname: '/cowork', anchors: [] });
+  const cowork = await open({ pathname: '/cowork', anchors: [] });
   try {
     await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.equal(none.doc.querySelector('[data-tour="page-help"]'), null);
+    cowork.doc.querySelector('[data-tour="page-help"]').click();
+    await cowork.waitFor(() => cowork.panel(), 'the help panel of Cowork');
+    assert.match(cowork.panel().textContent, /En video/);
+    assert.equal(Boolean(cowork.panel().querySelector('button[aria-label="Ver video: Cowork (0:50)"]')), true, 'its video, not loaded yet');
+    assert.equal(cowork.panel().querySelectorAll('video').length, 0, 'nothing plays until it is asked for');
+    assert.ok(![...cowork.panel().querySelectorAll('button')].some((node) => node.textContent.includes('Ver guía de esta pantalla')), 'no guide to offer');
+  } finally { cowork.close(); }
+
+  const none = await open({ pathname: '/pantalla-sin-ayuda', anchors: [] });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(Boolean(none.doc.querySelector('[data-tour="page-help"]')), false, 'no «Ayuda» without help');
   } finally { none.close(); }
 }
 
-console.log('PASS: screen guides offered once, walked, declined, replayed from the «Ayuda» panel and explained when empty. DOM only, not visual certification.');
+console.log('PASS: screen guides offered once, walked, declined, replayed from the «Ayuda» panel and explained when empty; Cowork offers its video. DOM only, not visual certification.');

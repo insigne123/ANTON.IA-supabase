@@ -1,5 +1,7 @@
 # Tutorial guiado: recorrido por la app y guías por pantalla
 
+> **Actualizado el 5 oct (v4):** el recorrido es más corto (solo el camino al primer correo) y cada paso ofrece el video de su módulo. Ver «Actualización del 5 oct» en `docs/ui-ux/ayuda-y-manual.md`.
+>
 > **Actualizado el 1 oct (v3):** el recorrido ahora abre cada pantalla y resalta sus controles, y «Ayuda» abre el panel de ayuda de la pantalla (guía, preguntas frecuentes y «Pregúntale a la IA»). Lo vigente está en `docs/ui-ux/ayuda-y-manual.md`. Lo que sigue describe la v2: las reglas de cuándo se ofrece, cómo se omite y dónde se guarda no cambiaron.
 
 Desde la versión 2 (1 oct 2026) hay **dos capas**:

@@ -3,7 +3,7 @@
  * tutorial» (docs/ui-ux/ayuda-y-manual.md). */
 
 /** Bump when the steps change enough to offer the tour again to new accounts. */
-export const PRODUCT_TOUR_VERSION = 3;
+export const PRODUCT_TOUR_VERSION = 4;
 /** Accounts younger than this are offered the tour once. */
 export const PRODUCT_TOUR_NEW_ACCOUNT_DAYS = 30;
 /** Key inside the Supabase user metadata. */
@@ -26,44 +26,40 @@ export type ProductTourStep = {
   body: string;
   /** Only on small screens, where the menu is folded behind its button. */
   mobileOnly?: boolean;
+  /** The tutorial video of the module (lib/help/tutorial-videos), offered from the step. */
+  video?: string;
 };
 
-/** The path to a first email, screen by screen, and then where help lives. Each page step is anchored on a real control. */
+/**
+ * The path to a first email, screen by screen, and then where help lives (v4, Plan 11): only what that first email needs.
+ * Each page step is anchored on a real control and offers the video of its module. The other screens (Conversaciones,
+ * Campañas, Pipeline…) have their own short guide, offered on the first visit and from «?».
+ */
 export const PRODUCT_TOUR_STEPS: ProductTourStep[] = [
   { id: 'menu', target: 'menu', mobileOnly: true, section: 'Menú', title: 'Todo está en este menú',
-    body: 'Desde aquí llegas a cada pantalla. Ahora te llevamos por cada una y te mostramos cómo se usa.' },
-  { id: 'today', target: 'today', route: '/dashboard', section: 'Hoy', title: 'Empieza cada día aquí',
+    body: 'Desde aquí llegas a cada pantalla. Te mostramos lo justo para enviar tu primer correo.' },
+  { id: 'today', target: 'today', route: '/dashboard', section: 'Hoy', title: 'Empieza cada día aquí', video: 'hoy',
     body: 'Una sola acción, la más importante: a quién responder, qué te falta para enviar o a quién escribir hoy.' },
   { id: 'setup', target: 'setup', route: '/dashboard', section: 'Hoy', title: 'Prepara tu cuenta',
     body: 'Cuatro pasos comprobados: perfil, correo conectado, primeros contactos y primer envío. Cada uno trae su enlace.' },
-  { id: 'profile-ai', target: 'profile-ai', route: '/profile', section: 'Perfil', title: 'Cuéntanos qué vendes',
+  { id: 'profile-ai', target: 'profile-ai', route: '/profile', section: 'Perfil', title: 'Cuéntanos qué vendes', video: 'perfil',
     body: 'Escribe el sitio de tu empresa: la IA propone qué vendes y a quién, con su fuente. Tú eliges qué guardar.' },
-  { id: 'profile-offer', target: 'profile-offer', route: '/profile', section: 'Perfil', title: 'La IA solo dice lo que está aquí',
-    body: 'Servicios, propuesta de valor, problemas que resuelves y pruebas. Sin tu oferta, la IA no puede redactar.' },
-  { id: 'connections', target: 'connections-list', route: '/connections', section: 'Conexiones', title: 'Conecta tu correo',
+  { id: 'connections', target: 'connections-list', route: '/connections', section: 'Conexiones', title: 'Conecta tu correo', video: 'conexiones',
     body: 'Gmail u Outlook: los correos salen desde tu cuenta y las respuestas vuelven solas a la app.' },
-  { id: 'search-modes', target: 'search-modes', route: '/search', section: 'Buscar prospectos', title: 'Tres formas de buscar',
-    body: 'Por filtros (cargo, sector, tamaño), dentro de una empresa o pegando un perfil de LinkedIn.' },
-  { id: 'search-starters', target: 'search-starters', route: '/search', section: 'Buscar prospectos', title: 'Parte de lo que vendes',
+  { id: 'search-starters', target: 'search-starters', route: '/search', section: 'Buscar prospectos', title: 'Parte de lo que vendes', video: 'buscar',
     body: 'Un punto de partida rellena cargos e industrias. Busca, marca a quienes te interesan y guárdalos.' },
-  { id: 'saved', target: 'saved-list', route: '/saved/leads', section: 'Por completar', title: 'Busca su correo',
+  { id: 'saved', target: 'saved-list', route: '/saved/leads', section: 'Por completar', title: 'Busca su correo', video: 'contactos',
     body: 'Aquí llegan tus guardados sin correo. Selecciónalos y pulsa «Buscar correo»: pasan a «Por escribir».' },
   { id: 'enriched-research', target: 'enriched-research', route: '/saved/leads/enriched', section: 'Por escribir',
     title: 'Investiga antes de escribir',
     body: 'En «Por investigar», marca a quiénes y pulsa «Investigar»: la IA lee su empresa y su rol para que el correo no sea genérico.' },
   { id: 'enriched-contact', target: 'enriched-contact', route: '/saved/leads/enriched', section: 'Por escribir',
-    title: 'La IA prepara, tú envías',
+    title: 'La IA prepara, tú envías', video: 'contactos',
     body: 'En «Listos para escribir», «Escribir» prepara el correo y sus seguimientos. Los revisas, confirmas y pulsas «Enviar ahora».' },
-  { id: 'conversations', target: 'conv-views', route: '/contacted', section: 'Conversaciones', title: 'Responde a quien te escribió',
-    body: '«Por responder» junta a quienes esperan tu respuesta. Contestas en el mismo hilo, desde la app.' },
-  { id: 'campaigns', target: 'campaigns-tabs', route: '/campaigns', section: 'Campañas', title: 'Escribe a un grupo',
-    body: 'Hasta 100 contactos con una sola aprobación. Los seguimientos se detienen si la persona responde.' },
-  { id: 'pipeline', target: 'crm-board', route: '/crm', section: 'Pipeline', title: 'Cada contacto, en su etapa',
-    body: 'Mueve a cada contacto según avanza: contactado, interesado, reunión, negociación y ganado.' },
   { id: 'page-help', target: 'page-help', section: 'Ayuda', title: 'Ayuda en cada pantalla',
-    body: 'El botón «?» explica la pantalla en la que estás, con preguntas frecuentes y una IA que responde tus dudas.' },
+    body: 'El botón «?» explica la pantalla en la que estás: su video, una guía corta, preguntas frecuentes y una IA que responde.' },
   { id: 'help-center', target: 'help-center', menuLabel: 'Centro de ayuda', section: 'Ayuda', title: 'El manual completo',
-    body: 'En «Centro de ayuda» está todo, con buscador. «Ver tutorial» repite este recorrido cuando quieras.' },
+    body: 'En «Centro de ayuda» hay un video de cada módulo y el manual con buscador. «Ver tutorial» repite este recorrido.' },
 ];
 
 export function productTourSteps(isMobile: boolean): ProductTourStep[] {

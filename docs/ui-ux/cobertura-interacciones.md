@@ -96,4 +96,4 @@ Queda aceptado:
 | Página | Hallazgo | Por qué se acepta |
 |---|---|---|
 | Privacidad | Las filas de solicitudes e incidentes aparecen después de comprobar el acceso, sin indicador | La página se usa de inmediato. Lo que aparece después es solo para administradores, y si falla la comprobación ahora se dice |
-| Centro de ayuda | Si no se puede comprobar el acceso, no aparecen las secciones de Oportunidades ni las de administración, y no se avisa (grave, según el motor). Con carga lenta aparecen después, sin indicador (leve) | Es la misma comprobación del menú, que tampoco muestra esos módulos si no se pudo comprobar. El resto de la ayuda se usa de inmediato y no depende de ninguna lectura |
+| Centro de ayuda | Si no se puede comprobar el acceso, no aparecen las secciones de Oportunidades ni su video, ni las de administración, y no se avisa (grave, según el motor). Con carga lenta aparecen después, sin indicador (leve) | Es la misma comprobación del menú, que tampoco muestra esos módulos si no se pudo comprobar. El resto de la ayuda se usa de inmediato y no depende de ninguna lectura |

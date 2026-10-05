@@ -7,6 +7,31 @@
 - «Ayuda» solo repetía la guía corta de la pantalla, y no aparecía en pantallas sin guía (Privacidad, Firmas y estilo, Tabla de datos).
 - No había manual dentro de la app. `docs/manual-de-usuario-antonia.html` es un documento aparte, anterior al menú actual.
 
+## Actualización del 5 oct: videos por módulo y recorrido v4 (Plan 11, sección 7)
+
+- **12 videos**, uno por módulo:
+  - Hoy, Perfil, Buscar prospectos, Importar tu lista y Por completar y Por escribir;
+  - Firmas y estilo, Campañas, Conversaciones y Pipeline;
+  - Oportunidades, Cowork y Conexiones.
+
+  Cada uno dura entre 40 s y 2 min. Se graban sobre la app real con datos de ejemplo, con zoom, cursor lento, notas, flechas, post-its, subtítulos y música (`scripts/tutorial-videos/README.md`).
+- **Dónde se ven:**
+  - en el Centro de ayuda, en «Videos por módulo»;
+  - en la página de cada sección, en «En video»;
+  - en el panel «?» de cada pantalla, también en Cowork, que no tiene sección en el manual;
+  - en cada paso del recorrido, con «Ver video».
+
+  La lista está en `src/lib/help/tutorial-videos.ts` y los archivos en `public/tutorial-videos/` (`.mp4`, póster `.jpg` y subtítulos `.vtt`).
+- **El reproductor** (`src/components/help/TutorialVideo.tsx`):
+  - no carga nada hasta que se pulsa «Ver video»;
+  - usa los controles del navegador, con los que se silencia la música;
+  - trae una pista de subtítulos para lectores de pantalla, apagada por defecto porque los subtítulos ya vienen en la imagen.
+- **Recorrido v4** (`PRODUCT_TOUR_VERSION = 4`):
+  - Más corto: solo el camino al primer correo, 10 pasos en escritorio (antes 15). Son Hoy, Perfil, Conexiones, Buscar prospectos, Por completar, Por escribir, «?» y Centro de ayuda.
+  - Conversaciones, Campañas y Pipeline salen del recorrido. Se ofrecen como guía corta en la primera visita de cada pantalla, y siguen en «?».
+  - Se vuelve a ofrecer una vez a cuentas de menos de 30 días que no vieron la v4.
+  - Si se pulsa «Ver tutorial» o «Ver recorrido por la app» mientras la cuenta aún carga, el recorrido sigue cuando termina de cargar. Antes se perdía al llegar a «Hoy», porque la app se vuelve a montar al conocer la cuenta.
+
 ## Qué hay ahora
 
 ### 1. Un manual, una sola fuente (`src/lib/help/manual.ts`)

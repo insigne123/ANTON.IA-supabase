@@ -45,7 +45,7 @@ export default {
       target: { role: 'button', name: 'Filtros manuales' }, zoom: 1.5,
     },
     {
-      title: 'Por cargo', text: 'Cargos, industrias, países o tamaño, separados por comas.',
+      title: 'Por cargo', text: 'Cargos, industrias o países separados por comas, y el nivel del cargo en una lista.',
       say: 'Escribe el cargo y busca.',
       target: { label: 'Cargos (separados por comas)' }, type: 'Gerente de Personas', zoom: 1.6,
     },
@@ -53,12 +53,12 @@ export default {
       title: 'Busca', text: 'Entre tus contactos enriquecidos.',
       say: 'Busca con esos filtros.',
       target: { role: 'button', name: 'Buscar con filtros' }, zoom: 1.5,
-      waitFor: { role: 'button', name: 'Seleccionar todos' },
+      waitFor: { text: /4 seleccionados/, exact: false },
     },
     {
-      title: 'Elige a quiénes', text: 'Puedes quitar a cualquiera antes de seguir.',
-      say: 'Selecciónalos y continúa.',
-      target: { role: 'button', name: 'Seleccionar todos' }, zoom: 1.5,
+      title: 'Ya quedan elegidos', text: 'Los resultados quedan marcados. Quita a quien no quieras con su casilla o «Quitar todos».',
+      say: 'Quedan marcados: quita a quien sobre.',
+      target: { text: /4 seleccionados/, exact: false }, action: 'none', zoom: 1.5,
     },
     {
       title: 'A los correos', text: 'El primero y sus seguimientos.',

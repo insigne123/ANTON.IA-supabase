@@ -7,6 +7,7 @@ import { ChevronDown, PlayCircle, Search, X } from 'lucide-react';
 
 import { AskHelp } from '@/components/help/AskHelp';
 import { HelpIcon } from '@/components/help/help-icons';
+import { TutorialVideoCard } from '@/components/help/TutorialVideo';
 import { useProductTour } from '@/components/onboarding/ProductTour';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { useSharedNavAccess } from '@/hooks/use-nav-access';
 import {
   FIRST_EMAIL_PATH, HELP_GROUPS, helpSectionHref, helpSectionIdFrom, popularHelpQuestions, searchHelp, visibleHelpSections,
 } from '@/lib/help/manual';
+import { visibleTutorialVideos } from '@/lib/help/tutorial-videos';
 
 const CARD_LINK = 'flex h-full gap-3 rounded-2xl border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
@@ -41,6 +43,7 @@ export default function HelpCenterPage() {
   const results = useMemo(() => (query.trim().length >= 2 ? searchHelp(query, sections, 8) : null), [query, sections]);
   const popular = useMemo(() => popularHelpQuestions(sections), [sections]);
   const path = FIRST_EMAIL_PATH.filter((step) => visibleIds.has(step.section));
+  const videos = useMemo(() => visibleTutorialVideos({ opportunities }), [opportunities]);
 
   // Older links point at a section of this page (/ayuda#perfil): each section now has its own page.
   useEffect(() => {
@@ -122,6 +125,18 @@ export default function HelpCenterPage() {
                   </li>
                 ))}
               </ol>
+            </section>
+          )}
+
+          {videos.length > 0 && (
+            <section aria-labelledby="help-videos-title" className="space-y-3">
+              <div>
+                <h2 id="help-videos-title" className="text-base font-semibold tracking-tight">Videos por módulo</h2>
+                <p className="text-sm text-muted-foreground">Cada módulo en uno o dos minutos, paso a paso y con datos de ejemplo.</p>
+              </div>
+              <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {videos.map((video) => <li key={video.id}><TutorialVideoCard video={video} /></li>)}
+              </ul>
             </section>
           )}
 
