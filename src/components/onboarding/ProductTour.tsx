@@ -8,6 +8,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { usePathname } from 'next/navigation';
 import { CircleHelp, Compass, X } from 'lucide-react';
 
+import { TutorialVideoButton } from '@/components/help/TutorialVideo';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -15,6 +16,7 @@ import {
 import { useSidebar } from '@/components/ui/sidebar';
 import { toast } from '@/hooks/use-toast';
 import { getBrowserStorage } from '@/lib/browser-storage';
+import { TUTORIAL_VIDEOS } from '@/lib/help/tutorial-videos';
 import {
   PAGE_GUIDES, PAGE_GUIDES_METADATA_KEY, PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, onTourRoute, pageGuideFor, pageGuidesInTour,
   productTourRecord, productTourSteps, seenPageGuides,
@@ -389,6 +391,8 @@ function TourStep({ kind, steps, index, isMobile, announcement, scrolledAreas, o
   const step = steps[index];
   const last = index === steps.length - 1;
   const guide = kind === 'guide';
+  // The tour offers the video of the module the step is in; screen guides stay short.
+  const tourVideo = !guide && step.video ? TUTORIAL_VIDEOS.find((video) => video.id === step.video) || null : null;
   // Menu entries live in the folded menu on phones: its button stands in for them. Page controls are on the page.
   const inMenu = !guide && (Boolean(step.menuLabel) || step.target === 'menu');
   const layout = useTargetLayout(step.target, isMobile && inMenu, scrolledAreas, !inMenu);
@@ -459,6 +463,7 @@ function TourStep({ kind, steps, index, isMobile, announcement, scrolledAreas, o
               {step.body}
             </DialogPrimitive.Description>
           </div>
+          {tourVideo && <TutorialVideoButton video={tourVideo} />}
           {missing && (
             <p className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
               Esta pantalla aún no muestra este control: aparece cuando hay datos aquí.

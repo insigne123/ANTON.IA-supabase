@@ -86,11 +86,12 @@ test('the tour walks every main screen, in the order of the work, and ends where
   const { existsSync, readFileSync, readdirSync, statSync } = await import('node:fs');
   const { join } = await import('node:path');
   const { onTourRoute, pageGuidesInTour } = await import('./product-tour');
+  // v4: only the path to a first email; Conversaciones, Campañas and Pipeline have their own guide, offered on the first visit.
   assert.deepEqual(productTourSteps(false).map((step) => step.route || step.target), [
-    '/dashboard', '/dashboard', '/profile', '/profile', '/connections', '/search', '/search', '/saved/leads',
-    '/saved/leads/enriched', '/saved/leads/enriched', '/contacted', '/campaigns', '/crm', 'page-help', 'help-center',
+    '/dashboard', '/dashboard', '/profile', '/connections', '/search', '/saved/leads',
+    '/saved/leads/enriched', '/saved/leads/enriched', 'page-help', 'help-center',
   ]);
-  assert.ok(PRODUCT_TOUR_VERSION >= 3, 'the new tour is offered again to new accounts');
+  assert.ok(PRODUCT_TOUR_VERSION >= 4, 'the new tour is offered again to new accounts');
   assert.doesNotMatch(JSON.stringify(PRODUCT_TOUR_STEPS), /agente|misiones/i, 'the retired agent is not in the tour');
 
   const sources: string[] = [];
@@ -111,5 +112,13 @@ test('the tour walks every main screen, in the order of the work, and ends where
   assert.equal(onTourRoute('/search/', '/search'), true);
   assert.equal(onTourRoute('/search?mode=filters', '/search'), true);
   assert.equal(onTourRoute('/saved/leads/enriched', '/saved/leads'), false);
-  assert.deepEqual(pageGuidesInTour().sort(), ['campaigns', 'connections', 'conversations', 'crm', 'enriched', 'home', 'profile', 'saved', 'search']);
+  assert.deepEqual(pageGuidesInTour().sort(), ['connections', 'enriched', 'home', 'profile', 'saved', 'search']);
+});
+
+test('the videos the tour offers exist, one per module of the path', async () => {
+  const { TUTORIAL_VIDEOS } = await import('../help/tutorial-videos');
+  const ids = new Set(TUTORIAL_VIDEOS.map((video) => video.id));
+  const offered = PRODUCT_TOUR_STEPS.flatMap((step) => (step.video ? [step.video] : []));
+  assert.ok(offered.length >= 5, 'most steps of the path offer their video');
+  for (const id of offered) assert.ok(ids.has(id), `${id} is a tutorial video`);
 });

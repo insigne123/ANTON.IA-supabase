@@ -7,10 +7,12 @@ import { BookOpen, CircleHelp, Compass, PlayCircle } from 'lucide-react';
 
 import { AskHelp } from '@/components/help/AskHelp';
 import { HelpSectionContent } from '@/components/help/HelpSectionContent';
+import { TutorialVideoInline } from '@/components/help/TutorialVideo';
 import { useProductTour } from '@/components/onboarding/ProductTour';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { helpSectionFor, helpSectionHref, visibleHelpSections, type HelpVisibility } from '@/lib/help/manual';
+import { videoForPath, visibleTutorialVideos } from '@/lib/help/tutorial-videos';
 import { cn } from '@/lib/utils';
 
 /** The help panel closes before a guide or the tour opens, so their focus is not trapped inside it. */
@@ -30,11 +32,15 @@ export function PageHelpButton({ visibility, className }: { visibility: HelpVisi
   );
   const visibleIds = useMemo(() => new Set(sections.map((section) => section.id)), [sections]);
   const section = useMemo(() => helpSectionFor(pathname, sections), [pathname, sections]);
+  const video = useMemo(
+    () => videoForPath(pathname, sections, visibleTutorialVideos({ opportunities: visibility.opportunities })),
+    [pathname, sections, visibility.opportunities],
+  );
 
   useEffect(() => { setOpen(false); }, [pathname]);
 
-  if (!section && !guide) return null;
-  const title = section?.title || guide?.title || 'Ayuda';
+  if (!section && !guide && !video) return null;
+  const title = section?.title || guide?.title || video?.title || 'Ayuda';
   const afterClosing = (action: () => void) => {
     setOpen(false);
     window.setTimeout(action, PANEL_CLOSE_MS);
@@ -70,6 +76,13 @@ export function PageHelpButton({ visibility, className }: { visibility: HelpVisi
                 </span>
               </span>
             </Button>
+          )}
+
+          {video && (
+            <section aria-labelledby="page-help-video-title" className="space-y-2">
+              <h3 id="page-help-video-title" className="text-sm font-semibold">En video</h3>
+              <TutorialVideoInline video={video} compact />
+            </section>
           )}
 
           {section && <HelpSectionContent section={section} visibleIds={visibleIds} onNavigate={() => setOpen(false)} />}

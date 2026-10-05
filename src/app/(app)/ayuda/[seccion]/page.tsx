@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, BookOpen, ChevronDown, Lightbulb, PlayCircle } from 'lucide-react';
 
 import { AskHelp } from '@/components/help/AskHelp';
+import { TutorialVideoCard, TutorialVideoInline } from '@/components/help/TutorialVideo';
 import { HelpIcon } from '@/components/help/help-icons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -13,6 +14,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useAuth } from '@/context/AuthContext';
 import { useSharedNavAccess } from '@/hooks/use-nav-access';
 import { helpSectionById, helpSectionHref, helpSectionIdFrom, visibleHelpSections } from '@/lib/help/manual';
+import { videosForSection, visibleTutorialVideos } from '@/lib/help/tutorial-videos';
 import { pageGuideFor } from '@/lib/onboarding/product-tour';
 
 const HEADING = 'text-base font-semibold tracking-tight';
@@ -47,6 +49,7 @@ export default function HelpSectionPage() {
     return item ? [item] : [];
   });
   const guide = section.href ? pageGuideFor(section.href.split('?')[0]) : null;
+  const videos = videosForSection(section.id, visibleTutorialVideos({ opportunities }));
   const guideHref = section.href ? `${section.href}${section.href.includes('?') ? '&' : '?'}guia=1` : null;
 
   return (
@@ -82,6 +85,18 @@ export default function HelpSectionPage() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <div className="min-w-0 space-y-8">
+          {videos.length > 0 && (
+            <section aria-labelledby="help-video-title" className="space-y-3">
+              <h2 id="help-video-title" className={HEADING}>En video</h2>
+              <TutorialVideoInline video={videos[0]} className="max-w-2xl" />
+              {videos.length > 1 && (
+                <ul className="grid max-w-2xl gap-3 sm:grid-cols-2">
+                  {videos.slice(1).map((video) => <li key={video.id}><TutorialVideoCard video={video} /></li>)}
+                </ul>
+              )}
+            </section>
+          )}
+
           <section aria-labelledby="help-steps-title" className="space-y-3">
             <h2 id="help-steps-title" className={HEADING}>Paso a paso</h2>
             <ol className="grid gap-3 sm:grid-cols-2">
