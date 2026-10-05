@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { GRUPOEXPRO_PILOT, GRUPOEXPRO_TENDER_KEYWORDS } from '@/lib/commercial-opportunities/pilot';
 import { PILOT_SEIA_SECTORS, SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
 import {
-  HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, type HiringOpportunityData, type OpportunityStatus, type ProjectOpportunityData,
-  type TenderOpportunityData,
+  HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, tenderFromStoredRow, type HiringOpportunityData, type OpportunityStatus,
+  type ProjectOpportunityData, type StoredTenderRow, type TenderOpportunityData,
 } from '@/lib/commercial-opportunities/records';
+import type { Tender } from '@/lib/commercial-opportunities/tenders';
 import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import type { HiringSearchProfile, HiringStore, HiringSyncSource } from './sync';
@@ -292,10 +293,25 @@ async function existingKeysOf(client: SupabaseClient, scope: Scope, kinds: strin
   return found;
 }
 
+/** Mercado Público tenders already saved with their detail (the buyer is known): reused instead of asked again. */
+async function storedTendersOf(client: SupabaseClient, scope: Scope, codes: string[]) {
+  const found = new Map<string, Tender>();
+  for (let index = 0; index < codes.length; index += 200) {
+    const { data, error } = await client.from('commercial_opportunities')
+      .select('dedupe_key,title,buyer_name,region,amount,currency,deadline_at,published_at,data')
+      .eq('organization_id', scope.organizationId).eq('kind', 'tender').in('dedupe_key', codes.slice(index, index + 200))
+      .not('buyer_name', 'is', null);
+    if (error) fail('revisar las licitaciones guardadas', error);
+    for (const row of (data || []) as StoredTenderRow[]) found.set(row.dedupe_key, tenderFromStoredRow(row));
+  }
+  return found;
+}
+
 export function supabaseTenderStore(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule'): TenderStore {
   return {
     ...runLog(client, scope, trigger),
     existingKeys: (keys, kinds) => existingKeysOf(client, scope, kinds, keys),
+    storedTenders: codes => storedTendersOf(client, scope, codes),
     saveOpportunities: rows => upsertOpportunities(client, rows),
     saveSignals: rows => upsertSignals(client, rows),
   };

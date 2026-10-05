@@ -134,6 +134,22 @@ export function tenderOpportunityRow(tender: Tender, match: { score: number; rea
 }
 export type TenderOpportunityRow = ReturnType<typeof tenderOpportunityRow>;
 
+export type StoredTenderRow = {
+  dedupe_key: string; title: string; buyer_name: string | null; region: string | null; amount: number | string | null; currency: string | null;
+  deadline_at: string | null; published_at: string | null; data: Partial<TenderOpportunityData> | null;
+};
+/** A Mercado Público tender as it was saved with its detail, so the next search reuses it instead of asking again. */
+export function tenderFromStoredRow(row: StoredTenderRow): Tender {
+  const data = row.data || {};
+  const amount = row.amount === null || row.amount === undefined ? null : Number(row.amount);
+  return {
+    source: 'mercado_publico', code: data.code || row.dedupe_key, name: row.title, description: data.description ?? null,
+    buyer: row.buyer_name, buyerUnit: data.buyerUnit ?? null, region: row.region, amount: Number.isFinite(amount) ? amount : null,
+    currency: row.currency, publishedAt: row.published_at, closesAt: row.deadline_at, status: data.status ?? null,
+    items: Array.isArray(data.items) ? data.items : [],
+  };
+}
+
 /** The tender as its own evidence: source, code, buyer and dates, without the official who published it. */
 export function tenderSignalRow(tender: Tender, scope: { organizationId: string; opportunityId: string }, now: string) {
   return {
