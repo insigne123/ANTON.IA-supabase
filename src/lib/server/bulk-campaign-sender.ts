@@ -4,6 +4,7 @@ import { getCurrentMessagingDraftVersionV1 } from '@/lib/server/messaging-drafts
 import { createMessagingSendMetadataV1, resolveApprovedEmailSendV1 } from '@/lib/messaging-contracts';
 import { dispatchOutboundMessage, OutboundPreProviderDeferredError } from '@/lib/server/outbound-dispatch';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
+import { readSendSignature } from '@/lib/server/email-signature';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { tokenService } from '@/lib/services/token-service';
 import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
@@ -23,7 +24,8 @@ export async function sendBulkCampaignMessage(campaign: BulkCampaign, message: C
   const canonical = resolveApprovedEmailSendV1(current);
   if (canonical.subject !== message.subject || canonical.text !== message.body) throw new Error('BULK_CAMPAIGN_REVIEW_CHANGED');
   const unsubscribeUrl = generateUnsubscribeLink(canonical.to, scope.userId, scope.organizationId);
-  const prepared = prepareOutboundEmail({ text: canonical.text || undefined, html: canonical.html || undefined, unsubscribeUrl });
+  const signature = await readSendSignature(getSupabaseAdminClient(), scope.userId, campaign.definition.provider);
+  const prepared = prepareOutboundEmail({ text: canonical.text || undefined, html: canonical.html || undefined, unsubscribeUrl, signature });
   const check = validateOutboundEmail({ to: canonical.to, subject: canonical.subject, ...prepared, requireUnsubscribe: true, unsubscribeUrl });
   if (!check.ok) throw new Error(check.errors.join(' '));
   const provider = campaign.definition.provider;

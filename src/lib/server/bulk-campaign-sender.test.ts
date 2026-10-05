@@ -29,6 +29,9 @@ function harness(options: { replay?: boolean; paused?: boolean; suppressed?: boo
       createMessagingSendMetadataV1: (_draft: unknown, metadata: any) => { assert.equal(metadata.idempotencyKey, 'bulk:campaign:draft'); return metadata; },
     },
     '@/lib/email-outbound': { prepareOutboundEmail: () => ({ text: message.body, html: '<p>Contenido aprobado</p>' }), validateOutboundEmail: () => ({ ok: true }) },
+    '@/lib/server/email-signature': { readSendSignature: async (_client: unknown, userId: string, provider: string) => {
+      assert.equal(userId, 'owner'); assert.equal(provider, options.provider || 'google'); return null;
+    } },
     '@/lib/unsubscribe-helpers': { generateUnsubscribeLink: () => 'https://example.test/unsubscribe' },
     '@/lib/server/privacy-subject-data': { isEmailSuppressedForScope: async () => { calls.push('privacy'); if (options.suppressionError) throw new Error('db unavailable'); return options.suppressed; } },
     '@/lib/services/token-service': { tokenService: { getToken: async () => { calls.push('token'); return options.tokenMissing ? null : { refresh_token: 'fixture' }; } } },

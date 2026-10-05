@@ -106,6 +106,7 @@ export function normalizeLeadForUI(raw: Lead, options?: {
     city: raw.city || null,
     status: 'saved',
     emailEnrichment: revealEmail && raw.email ? { enriched: true } : undefined,
+    hasEmailOnFile: (raw as { has_email?: unknown }).has_email === true || undefined,
   };
 }
 
