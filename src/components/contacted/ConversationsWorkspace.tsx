@@ -88,6 +88,11 @@ export default function ConversationsWorkspace() {
   const observedAt = useRef('');
   const request = useRef(0);
   const opener = useRef<HTMLButtonElement | null>(null);
+  // «Responder» or a suggestion opens the editor: it comes into view whole, «Enviar respuesta» included, with the cursor
+  // in the reply. Only when the person asked for it, not when a pending draft is restored on load.
+  const replyEditor = useRef<HTMLDivElement | null>(null);
+  const [sentNotice, setSentNotice] = useState('');
+  const revealReply = useRef(false);
   // Wide screens show the open conversation beside the list; narrower ones open it over the list.
   const wide = useMediaQuery('(min-width: 1024px)');
 
@@ -137,7 +142,7 @@ export default function ConversationsWorkspace() {
       if (address === 'push') window.history.pushState(null, '', next); else window.history.replaceState(null, '', next);
     }
     setSelected(row); setDetail(null); setDetailError(''); setDetailLoading(true); observedAt.current = new Date().toISOString();
-    setDraftingReply(false); setReplyEditorOpen(false); setReplyError(''); setReplyStatus(''); setReplySubject(''); setReplyBody(''); setReplyIdempotencyKey(''); setTrackReplyActivity(false);
+    setDraftingReply(false); setReplyEditorOpen(false); setReplyError(''); setReplyStatus(''); setReplySubject(''); setReplyBody(''); setReplyIdempotencyKey(''); setTrackReplyActivity(false); setSentNotice('');
     try {
       const data = await json(await fetch(`/api/contacted/${encodeURIComponent(row.id)}/conversation`, { cache: 'no-store' }));
       if (version === request.current) {
@@ -240,6 +245,7 @@ export default function ConversationsWorkspace() {
       setReplySubject(`Re: ${(selected.subject || '').replace(/^(?:re:\s*)+/i, '')}`);
       setReplyBody(data.draft.bodyText || '');
       setReplyIdempotencyKey(crypto.randomUUID());
+      revealReply.current = true;
       setReplyEditorOpen(true);
     } catch (e) { if (version !== request.current) return; setReplyError((e as Error).message); setReplySubject(`Re: ${(selected.subject || '').replace(/^(?:re:\s*)+/i, '')}`); setReplyBody(''); setReplyIdempotencyKey(crypto.randomUUID()); setReplyEditorOpen(true); }
     finally { if (version === request.current) setDraftingReply(false); }
@@ -260,6 +266,8 @@ export default function ConversationsWorkspace() {
         const updated = { ...selected, conversation_outbound_at: new Date().toISOString() };
         setReplyStatus('Respuesta enviada y registrada en esta conversación.'); setDraftingReply(false); setReplyEditorOpen(false);
         setSelected(updated); await load(); await open(updated);
+        // Answered, the conversation hides its «Responder» block (and the status inside it): the confirmation goes outside.
+        setSentNotice('Respuesta enviada en el hilo original y registrada en esta conversación.');
         return;
       }
       if (['pending', 'sending', 'unknown'].includes(String(data?.status || ''))) {
@@ -285,8 +293,19 @@ export default function ConversationsWorkspace() {
     setReplySubject(`Re: ${(selected.subject || '').replace(/^(?:re:\s*)+/i, '')}`);
     setReplyBody('');
     setReplyIdempotencyKey(crypto.randomUUID());
+    revealReply.current = true;
     setReplyEditorOpen(true);
   }
+
+  useEffect(() => {
+    if (!replyEditorOpen || !revealReply.current) return;
+    revealReply.current = false;
+    const frame = requestAnimationFrame(() => {
+      replyEditor.current?.scrollIntoView({ block: 'nearest' });
+      (document.getElementById('reply-body') as HTMLTextAreaElement | null)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [replyEditorOpen]);
 
 
   const renderDetail = (current: ConversationRow) => {
@@ -316,9 +335,10 @@ export default function ConversationsWorkspace() {
           <Button disabled={draftingReply || detailLoading} onClick={startManualReply}>Responder</Button>
           <Button variant="outline" disabled={draftingReply || detailLoading} onClick={() => void prepareReply()}>{draftingReply ? 'Preparando…' : 'Sugerir con IA'}</Button>
         </div>}
-        {replyEditorOpen && <div className="space-y-3"><div><Label htmlFor="reply-subject">Asunto</Label><Input id="reply-subject" value={replySubject} onChange={event => { setReplySubject(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} disabled={replyBusy || Boolean(replyStatus)} /></div><div><Label htmlFor="reply-body">Tu respuesta</Label><textarea id="reply-body" value={replyBody} onChange={event => { setReplyBody(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} rows={7} maxLength={12000} disabled={replyBusy || Boolean(replyStatus)} className="flex w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60" /></div><label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={trackReplyActivity} onChange={event => setTrackReplyActivity(event.target.checked)} disabled={replyBusy || Boolean(replyStatus)} /><span>Registrar señales de apertura y clic <span className="block text-xs text-foreground/70">Opcional; una apertura no demuestra que la persona haya leído el correo.</span></span></label><p className="text-xs text-foreground/70">El correo incluirá la opción de dejar de recibir mensajes comerciales.</p><div className="flex flex-wrap gap-2"><Button disabled={replyBusy || !replyBody.trim() || !replySubject.trim()} onClick={() => void sendReply()}>{replyBusy ? 'Enviando…' : replyStatus ? 'Comprobar estado' : 'Enviar respuesta'}</Button><Button variant="ghost" disabled={replyBusy} onClick={() => { setReplyEditorOpen(false); setReplyBody(''); setReplyStatus(''); setReplyIdempotencyKey(''); }}>Cancelar</Button></div></div>}
+        {replyEditorOpen && <div ref={replyEditor} className="scroll-mb-4 space-y-3"><div><Label htmlFor="reply-subject">Asunto</Label><Input id="reply-subject" value={replySubject} onChange={event => { setReplySubject(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} disabled={replyBusy || Boolean(replyStatus)} /></div><div><Label htmlFor="reply-body">Tu respuesta</Label><textarea id="reply-body" value={replyBody} onChange={event => { setReplyBody(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} rows={7} maxLength={12000} disabled={replyBusy || Boolean(replyStatus)} className="flex w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60" /></div><label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={trackReplyActivity} onChange={event => setTrackReplyActivity(event.target.checked)} disabled={replyBusy || Boolean(replyStatus)} /><span>Registrar señales de apertura y clic <span className="block text-xs text-foreground/70">Opcional; una apertura no demuestra que la persona haya leído el correo.</span></span></label><p className="text-xs text-foreground/70">El correo incluirá la opción de dejar de recibir mensajes comerciales.</p><div className="flex flex-wrap gap-2"><Button disabled={replyBusy || !replyBody.trim() || !replySubject.trim()} onClick={() => void sendReply()}>{replyBusy ? 'Enviando…' : replyStatus ? 'Comprobar estado' : 'Enviar respuesta'}</Button><Button variant="ghost" disabled={replyBusy} onClick={() => { setReplyEditorOpen(false); setReplyBody(''); setReplyStatus(''); setReplyIdempotencyKey(''); }}>Cancelar</Button></div></div>}
         {replyError && <p role="alert" className="text-sm text-destructive">{replyError}</p>}{replyStatus && <p role="status" className="text-sm text-foreground/70">{replyStatus}</p>}
       </section>}
+      {sentNotice && <p role="status" className="rounded-xl bg-cw-success-soft px-3 py-2 text-sm text-foreground">{sentNotice}</p>}
       {detailError && <div role="alert" className="space-y-2 rounded-xl border p-3"><p>{detailError}</p><Button variant="outline" onClick={() => void open(current, 'none')}>Reintentar</Button></div>}
           {detailLoading && <p role="status">Consultando conversación y seguimientos…</p>}
           {detail && <>

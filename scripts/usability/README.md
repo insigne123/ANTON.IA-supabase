@@ -10,6 +10,8 @@ npm run audit:simplicity -- --skip-build --out=.visual-audit/sencillez-antes
 
 Es una medición experta y automática: no reemplaza una prueba con personas.
 
+La última medición, con el antes y el después y la evaluación heurística, está en `docs/ui-ux/sencillez.md`.
+
 ## Las tareas
 
 `tasks.mjs` describe cada tarea como la haría alguien que no conoce la app: los pasos nombran el control por lo que la persona lee en pantalla («Buscar empresas», «Nombre de campaña»), con nombres exactos, y en teléfono abren antes el menú cuando hace falta. Cada tarea tiene:

@@ -71,7 +71,7 @@ export const unsubscribeService = {
     /**
      * Gets the list of blocked emails for the current context (User + Org).
      */
-    async getBlacklist(): Promise<UnsubscribedEmail[]> {
+    async getBlacklist(options: { strict?: boolean } = {}): Promise<UnsubscribedEmail[]> {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return [];
 
@@ -91,6 +91,8 @@ export const unsubscribeService = {
         const { data, error } = await query;
         if (error) {
             console.error('Error fetching blacklist:', error);
+            // `strict`: the screen that lists them must say it could not read them, not «none».
+            if (options.strict) throw error;
             return [];
         }
         return data as UnsubscribedEmail[];

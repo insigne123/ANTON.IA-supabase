@@ -52,11 +52,7 @@ import {
   type ProfileSearchAction, type ProfileSearchMessage,
 } from '@/lib/search/profile-search-outcome';
 import type { Lead, LeadSearchResponse } from '@/lib/schemas/leads';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
 import { DuplicateSavedSearchNameError, savedSearchesService } from '@/lib/services/saved-searches-service';
 import { getLeadsFinderAvailability, LeadsFinderClientError, searchWithLeadsFinder } from '@/lib/leads-finder-client';
@@ -100,6 +96,8 @@ export default function SearchPage() {
   const [leads, setLeads] = useState<UILaed[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  // The «Guardado» and «Contactado» marks could not be read: the results say so, so nobody saves someone twice unaware.
+  const [marksUnavailable, setMarksUnavailable] = useState(false);
   const [contactedIds, setContactedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const [profileOnlyRetry, setProfileOnlyRetry] = useState(false);
@@ -126,6 +124,8 @@ export default function SearchPage() {
   const [isShared, setIsShared] = useState(false);
   const [savingSearch, setSavingSearch] = useState(false);
   const [savedSearchPendingDelete, setSavedSearchPendingDelete] = useState<SavedSearch | null>(null);
+  // The saved searches open in a panel with a list: each row loads a search or deletes it (two actions, not a menu).
+  const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
   const [deletingSavedSearch, setDeletingSavedSearch] = useState(false);
   const [savedSearchesLoading, setSavedSearchesLoading] = useState(true);
   const [savedSearchesError, setSavedSearchesError] = useState('');
@@ -500,12 +500,17 @@ export default function SearchPage() {
 
   // Cargar leads guardados y contactados para verificar estado
   useEffect(() => {
+    // Best effort: the «Guardado» and «Contactado» marks are a hint, so a failed read leaves them out instead of
+    // rejecting a promise nobody handles.
     Promise.all([
       supabaseService.getLeads(),
       contactedLeadsStorage.get()
     ]).then(([saved, contacted]) => {
       setSavedIds(new Set(saved.map(l => l.id)));
       setContactedIds(contactedKeys(contacted));
+    }).catch((loadError) => {
+      console.error('[search] saved and contacted marks unavailable:', loadError);
+      setMarksUnavailable(true);
     });
 
     // Load saved searches
@@ -1627,7 +1632,18 @@ export default function SearchPage() {
     return next;
   });
 
-  useEffect(() => { if (missingFilterError) setCriteriaOpen(true); }, [missingFilterError]);
+  // A search without a company filter does not run: the reason is said next to the button the person just pressed, and
+  // the focus goes to the first company field, at the top of the criteria (which scroll on their own).
+  useEffect(() => {
+    if (!missingFilterError) return;
+    setCriteriaOpen(true);
+    const frame = window.requestAnimationFrame(() => {
+      const field = document.getElementById('companyKeywords');
+      field?.scrollIntoView({ block: 'center' });
+      field?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [missingFilterError]);
   const runSearch = () => {
     setCriteriaOpen(false);
     void handleSearch();
@@ -1715,14 +1731,14 @@ export default function SearchPage() {
   ) : null);
 
   const savedSearchesMenu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Popover open={savedSearchesOpen} onOpenChange={setSavedSearchesOpen}>
+      <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" className="h-8 px-2 shadow-none" aria-label={`Abrir búsquedas guardadas${savedSearches.length > 0 ? ` (${savedSearches.length})` : ''}`}>
           {savedSearchesLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Bookmark className="h-4 w-4" aria-hidden="true" />}
           <span>Guardadas{savedSearches.length > 0 ? ` (${savedSearches.length})` : ''}</span>
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-80 w-[min(20rem,calc(100vw-2rem))] overflow-auto">
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-label="Búsquedas guardadas" className="max-h-80 w-[min(20rem,calc(100vw-2rem))] overflow-auto p-1">
         {savedSearchesLoading ? (
           <div className="flex items-center gap-2 p-3 text-sm text-foreground/70">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -1736,13 +1752,14 @@ export default function SearchPage() {
         ) : savedSearches.length === 0 ? (
           <div className="p-3 text-sm text-foreground/70">Aún no guardas búsquedas. Usa «Guardar» para volver a estos criterios.</div>
         ) : (
-          savedSearches.map((savedSearch) => (
-            <div key={savedSearch.id} className="group flex items-center gap-1 rounded-md p-1 hover:bg-muted focus-within:bg-muted">
+          <ul className="space-y-0.5" aria-label="Búsquedas guardadas">
+          {savedSearches.map((savedSearch) => (
+            <li key={savedSearch.id} className="group flex items-center gap-1 rounded-md p-1 hover:bg-muted focus-within:bg-muted">
               <button
                 type="button"
                 aria-current={activeSavedSearchId === savedSearch.id ? 'true' : undefined}
                 className="min-w-0 flex-1 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => handleLoadSearch(savedSearch)}
+                onClick={() => { setSavedSearchesOpen(false); handleLoadSearch(savedSearch); }}
               >
                 <span className="block min-w-0">
                   <span className="flex items-center gap-2">
@@ -1757,11 +1774,12 @@ export default function SearchPage() {
               <Button variant="ghost" size="icon" className="h-8 w-8 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100" onClick={(event) => handleRequestDeleteSearch(event, savedSearch)} aria-label={`Eliminar búsqueda guardada ${savedSearch.name}`}>
                 <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
               </Button>
-            </div>
-          ))
+            </li>
+          ))}
+          </ul>
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   );
 
   const criteriaFields = filters.searchMode === 'linkedin_profile' ? (
@@ -2454,6 +2472,12 @@ export default function SearchPage() {
           </Button>
         )}
       />
+      {marksUnavailable ? (
+        <Alert variant="warning" role="status">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
+          <AlertDescription>No pudimos revisar a quién ya guardaste o contactaste: en los resultados pueden faltar las marcas «Guardado» y «Contactado».</AlertDescription>
+        </Alert>
+      ) : null}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <aside aria-label="Criterios de búsqueda" className="min-w-0 space-y-3 lg:sticky lg:top-16">
           {hasResults ? (
@@ -2519,6 +2543,12 @@ export default function SearchPage() {
               </fieldset>
             </CardContent>
             <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/60 bg-card p-3">
+              {missingFilterError ? (
+                <p role="alert" className="flex w-full items-start gap-1.5 text-sm text-destructive">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  Falta un dato de la empresa: escribe palabras clave, sede, nombre o tamaño.
+                </p>
+              ) : null}
               <Button variant="ghost" className="shadow-none" onClick={handleClear} disabled={isLoading}>
                 <X className="h-4 w-4" aria-hidden="true" />Limpiar
               </Button>

@@ -19,7 +19,7 @@ import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
 import { stageDecisionNotice, type CrmStageSuggestion } from '@/lib/crm-stage-suggestions';
 import { flowStage } from '@/lib/pipeline-flow';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
-import { buildUnifiedRows } from '@/lib/unified-sheet-data';
+import { loadUnifiedRows, unifiedFailureText } from '@/lib/unified-sheet-data';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
 export default function CRMPage() {
@@ -28,6 +28,8 @@ export default function CRMPage() {
     const rowsRef = useRef<UnifiedRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
+    // Some reads failed but others answered: the board shows what it has and says what is missing.
+    const [partialError, setPartialError] = useState<string | null>(null);
     const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
     const [focusMode, setFocusMode] = useState(false);
     const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted');
@@ -58,12 +60,21 @@ export default function CRMPage() {
         if (!silent) {
             setLoading(true);
             setLoadError(null);
+            setPartialError(null);
         }
         try {
-            const data = await buildUnifiedRows();
+            const { rows: data, failed } = await loadUnifiedRows();
+            // The automatic refresh keeps the last good render when a read fails, instead of emptying the board.
+            if (silent && failed.length) return;
+            // Nothing could be read: that is an error, not an empty pipeline.
+            if (failed.length && !data.length) {
+                setLoadError('No pudimos cargar el pipeline. Revisa tu conexión e inténtalo de nuevo.');
+                return;
+            }
             rowsRef.current = data;
             setRows(data);
             setRefreshedAt(Date.now());
+            setPartialError(failed.length ? `${unifiedFailureText(failed)} Lo que ves puede estar incompleto.` : null);
         } catch (error) {
             console.error('[crm] load error', error);
             if (!silent) setLoadError('No pudimos cargar el pipeline. Revisa tu conexión e inténtalo de nuevo.');
@@ -206,6 +217,13 @@ export default function CRMPage() {
                     <AlertCircle className="h-4 w-4" />
                     <AlertTitle>Pipeline no disponible</AlertTitle>
                     <AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void loadData()}>Reintentar</Button></AlertDescription>
+                </Alert>
+            )}
+            {!loadError && partialError && (
+                <Alert variant="warning" className="m-4 mb-0 w-auto">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Faltan datos</AlertTitle>
+                    <AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{partialError}</span><Button variant="outline" size="sm" onClick={() => void loadData()}>Reintentar</Button></AlertDescription>
                 </Alert>
             )}
 
