@@ -98,7 +98,7 @@ Qué revisa en cada página:
 | `overlays` | Abre cada menú, diálogo, hoja, selector y desplegable (hasta 14 por página) | Abrirlo escribe datos; el foco no entra; axe falla dentro; Esc no lo cierra; el foco no vuelve a lo que lo abrió |
 | `tabs` | Elige cada pestaña con clic y con las flechas | La pestaña no queda elegida o no muestra su panel; las flechas no mueven |
 | `keyboard` | Recorre la página con Tab (16 paradas) | Una parada sin foco visible, o el foco que se pierde |
-| `error` | Todas las lecturas (`/api/*` y Supabase) responden 500 | La página se rompe, queda en blanco, dice «vacío» o no avisa nada. Una página que se ve igual con y sin datos no cuenta |
+| `error` | Todas las lecturas (`/api/*` y Supabase) responden 500 | La página se rompe, queda en blanco, dice «vacío» o no avisa nada. Se compara con la misma página con datos: si se ve igual no cuenta, y un «aún no…» que ya estaba con datos no es un vacío. Mostrar el mensaje del servidor cuenta como aviso |
 | `slow` | Todas las lecturas tardan 3 s | Mientras espera no se ve que carga, o dice «vacío» y después muestra datos |
 | `long` | Nombres, empresas y cargos 3 veces más largos | Algo empuja la página hacia el lado |
 

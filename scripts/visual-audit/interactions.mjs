@@ -407,6 +407,10 @@ async function checkErrorMode(browser, data, route, persona, add, coverage) {
       };
     }, { errorWords: ERROR_WORDS.source, emptyWords: EMPTY_WORDS.source });
     const unchanged = normal !== null && normal === state.text;
+    // «Empty» counts only when it is new: a help text that says «aún no…» with or without data is not an empty state.
+    const emptyPhrases = text => new Set((text.match(new RegExp(`.{0,30}(?:${EMPTY_WORDS.source}).{0,30}`, 'gi')) || []).map(phrase => phrase.trim()));
+    const before = normal === null ? new Set() : emptyPhrases(normal);
+    state.emptyShown = [...emptyPhrases(state.text)].some(phrase => !before.has(phrase));
     if (state.crashed || state.length < 20) add('crash-on-error', 'error', `Con las lecturas fallando, la página ${state.crashed ? 'muestra el error genérico' : 'queda en blanco'}: «${state.sample}»`);
     else if (unchanged) { /* nothing on the page depends on the reads */ }
     else if (!state.errorShown && state.emptyShown) add('empty-on-error', 'error', `Con las lecturas fallando, la página dice que está vacía en vez de avisar el error: «${state.sample}»`);
