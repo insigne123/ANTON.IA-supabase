@@ -184,7 +184,7 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
                 <RadioGroupItem id={`${baseId}-design-${option.id}`} value={option.id} className="mt-0.5" />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-foreground">{option.label}</span>
-                  <span className="block text-xs font-normal leading-5 text-muted-foreground">{option.description}</span>
+                  <span className="block text-xs font-normal leading-5 text-foreground/75">{option.description}</span>
                 </span>
               </Label>
             ))}

@@ -835,7 +835,7 @@ export default function EmailStyleDesigner({ onOpenSignature, signatureVersion =
                       className={cn('min-w-0 rounded-xl border border-border/70 bg-background p-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
                         activePreset === preset.id && 'border-primary bg-primary/5')}>
                       <span className="block text-sm font-medium text-foreground">{preset.label}</span>
-                      <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{preset.description}</span>
+                      <span className="mt-0.5 block text-xs leading-5 text-foreground/75">{preset.description}</span>
                     </button>
                   ))}
                 </div>
