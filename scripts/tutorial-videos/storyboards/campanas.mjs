@@ -45,7 +45,7 @@ export default {
       target: { role: 'button', name: 'Filtros manuales' }, zoom: 1.5,
     },
     {
-      title: 'Por cargo', text: 'Cargos, industrias, países o tamaño, separados por comas.',
+      title: 'Por cargo', text: 'Cargos, industrias o países separados por comas, y el nivel del cargo en una lista.',
       say: 'Escribe el cargo y busca.',
       target: { label: 'Cargos (separados por comas)' }, type: 'Gerente de Personas', zoom: 1.6,
     },
