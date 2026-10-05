@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Factory, Gavel, Landmark, Loader2, Pencil, RotateCcw, Search, Star, Upload, Users, X } from 'lucide-react';
+import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Factory, Gavel, KeyRound, Landmark, Loader2, Pencil, RotateCcw, Search, Star, Upload, Users, X } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
+import { MercadoPublicoTicketCard, TicketGuide } from '@/components/commercial-opportunities/MercadoPublicoTicket';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -24,6 +25,7 @@ import { CHILE_REGIONS } from '@/lib/commercial-opportunities/hiring';
 import { DECISION_MAKER_TITLES } from '@/lib/commercial-opportunities/pilot';
 import type { HiringOpportunityData, OpportunityStatus, ProjectOpportunityData, TenderOpportunityData } from '@/lib/commercial-opportunities/records';
 import { SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
+import { ticketNeedsAction, type TicketStatus } from '@/lib/commercial-opportunities/ticket';
 import {
   FILTER_LABELS, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, lastSearch, parseList, relativeTime, sourceLabel, statusCounts,
   type OpportunityFilter,
@@ -52,7 +54,7 @@ type ProjectOpportunity = {
 };
 type Overview = {
   profile: Profile; plan: { sources: PlanSource[]; estimateUsd: number }; month: { spentUsd: number; capUsd: number };
-  tenderSearch: { ticket: boolean; keywords: string[]; unspscCodes: string[] };
+  tenderSearch: { ticket: boolean; ticketStatus?: TicketStatus; keywords: string[]; unspscCodes: string[] };
   opportunities: Opportunity[]; tenders: TenderOpportunity[]; projects: ProjectOpportunity[]; runs: Run[];
 };
 type Tab = 'hiring' | 'tenders' | 'projects';
@@ -84,6 +86,7 @@ export function OpportunitiesWorkspace() {
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>('hiring');
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
@@ -96,6 +99,10 @@ export function OpportunitiesWorkspace() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // The person's own Mercado Público ticket changed (saved, replaced or removed): tenders follow it without reloading.
+  const updateTicket = (status: TicketStatus) => setOverview(current => current && {
+    ...current, tenderSearch: { ...current.tenderSearch, ticketStatus: status, ticket: status.connected || status.shared },
+  });
 
   const runSearch = async (kind: Tab) => {
     setConfirmOpen(false);
@@ -233,7 +240,14 @@ export function OpportunitiesWorkspace() {
             {(['hiring', 'tenders', 'projects'] as Tab[]).map(kind => (
               <TabsContent key={kind} value={kind} className="mt-0">
                 {kind === 'hiring' ? <SearchSummary overview={overview} running={running} />
-                  : kind === 'tenders' ? <TenderSummary overview={overview} running={running} />
+                  : kind === 'tenders' ? (
+                    <>
+                      {ticketNeedsAction(overview.tenderSearch.ticketStatus) ? (
+                        <MercadoPublicoTicketCard status={overview.tenderSearch.ticketStatus} onChange={updateTicket} onOpenGuide={() => setGuideOpen(true)} className="mb-4" />
+                      ) : null}
+                      <TenderSummary overview={overview} running={running} onTicketChange={updateTicket} onOpenGuide={() => setGuideOpen(true)} />
+                    </>
+                  )
                     : <ProjectSummary overview={overview} running={running} onUpload={() => fileInput.current?.click()} />}
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -284,7 +298,8 @@ export function OpportunitiesWorkspace() {
                       ))}
                     </ul>
                   ) : (
-                    <TenderEmpty overview={overview} filter={filter} query={query} searchDisabled={tendersDisabled} onSearch={() => void runSearch('tenders')} onEdit={() => setEditOpen(true)} />
+                    <TenderEmpty overview={overview} filter={filter} query={query} searchDisabled={tendersDisabled} onSearch={() => void runSearch('tenders')} onEdit={() => setEditOpen(true)}
+                      onGuide={() => setGuideOpen(true)} />
                   ))}
                 </section>
               </TabsContent>
@@ -292,6 +307,7 @@ export function OpportunitiesWorkspace() {
           </Tabs>
 
           <RunDialog open={confirmOpen} onOpenChange={setConfirmOpen} overview={overview} overCap={overCap} onConfirm={() => void runSearch('hiring')} />
+          <TicketGuide open={guideOpen} onOpenChange={setGuideOpen} onSaved={updateTicket} />
           <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.profile}
             onSaved={next => { setOverview(current => current && { ...current, profile: next.profile, plan: next.plan }); void load(); }} />
         </>
@@ -491,7 +507,9 @@ function ListEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }
   );
 }
 
-function TenderSummary({ overview, running }: { overview: Overview; running: boolean }) {
+function TenderSummary({ overview, running, onTicketChange, onOpenGuide }: {
+  overview: Overview; running: boolean; onTicketChange: (status: TicketStatus) => void; onOpenGuide: () => void;
+}) {
   const { tenderSearch, profile } = overview;
   const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.tenders.includes(run.source)));
   return (
@@ -521,10 +539,11 @@ function TenderSummary({ overview, running }: { overview: Overview; running: boo
           ) : <p className="mt-0.5 text-sm text-foreground">Aún no buscas</p>}
           {!running && last?.errors.length ? <ul className="mt-2 space-y-1 break-words text-xs text-cw-warning" aria-label="Problemas de las fuentes">{last.errors.map((message, index) => <li key={index}>{message}</li>)}</ul> : null}
         </div>
-        <p className="text-xs text-muted-foreground">Sin costo: usa la cuota diaria del ticket de Mercado Público. Se actualiza sola cada mañana.</p>
-        {!tenderSearch.ticket ? (
-          <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">Mercado Público no está conectado. Pide a quien administra ANTON.IA que lo active.</p>
+        {/* Without a ticket, the card above the summary asks for it; here only the connected one is shown. */}
+        {!ticketNeedsAction(tenderSearch.ticketStatus) ? (
+          <MercadoPublicoTicketCard status={tenderSearch.ticketStatus} onChange={onTicketChange} onOpenGuide={onOpenGuide} />
         ) : null}
+        <p className="text-xs text-muted-foreground">Sin costo: usa tu ticket de Mercado Público. Se actualiza sola cada mañana.</p>
       </div>
     </section>
   );
@@ -532,6 +551,8 @@ function TenderSummary({ overview, running }: { overview: Overview; running: boo
 
 function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: boolean; onStatus: (status: OpportunityStatus) => void }) {
   const { toast } = useToast();
+  // `data` is stored JSON: a row written before a field existed must not take the whole tab down.
+  const keywords = Array.isArray(item.data?.keywords) ? item.data.keywords : [];
   const interested = item.status === 'interested' || item.status === 'converted';
   const isCompraAgil = item.kind === 'compra_agil';
   const copyCode = async () => {
@@ -560,9 +581,9 @@ function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: b
       <p className="mt-3 text-sm text-foreground">
         <strong className="font-semibold">{formatClp(item.amount, item.currency)}</strong> · {closesIn(item.deadlineAt)}
       </p>
-      {item.data.keywords.length ? (
+      {keywords.length ? (
         <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Palabras que calzan">
-          {item.data.keywords.slice(0, 4).map(keyword => <li key={keyword} className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">{keyword}</li>)}
+          {keywords.slice(0, 4).map(keyword => <li key={keyword} className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">{keyword}</li>)}
         </ul>
       ) : null}
       {item.data.description ? <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{item.data.description}</p> : null}
@@ -598,8 +619,8 @@ function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: b
   );
 }
 
-function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }: {
-  overview: Overview; filter: OpportunityFilter; query: string; searchDisabled: boolean; onSearch: () => void; onEdit: () => void;
+function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit, onGuide }: {
+  overview: Overview; filter: OpportunityFilter; query: string; searchDisabled: boolean; onSearch: () => void; onEdit: () => void; onGuide: () => void;
 }) {
   if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin licitaciones con ese texto" description="Prueba con otra palabra del nombre o del organismo." />;
   if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguna" description="Usa «Me interesa» en las licitaciones que quieras preparar: quedan a tu nombre y aparecen aquí." />;
@@ -609,6 +630,13 @@ function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit
     description="Las fuentes fallaron. Revisa sus errores arriba; esto no confirma que no existan compras abiertas."
     action={<Button onClick={onSearch} disabled={searchDisabled}><RotateCcw className="h-4 w-4" aria-hidden="true" />Reintentar búsqueda</Button>} />;
   if (last?.status === 'running') return <EmptyState icon={Loader2} headingLevel="h3" title="La búsqueda sigue en curso" description="Esperamos las respuestas de Mercado Público y Compra Ágil." />;
+  if (!last && !overview.tenderSearch.ticket) {
+    return (
+      <EmptyState icon={KeyRound} headingLevel="h3" title="Conecta tu ticket para buscar licitaciones"
+        description="Con tu ticket gratuito de Mercado Público buscamos cada mañana las compras abiertas que nombran lo que ofreces."
+        action={<Button onClick={onGuide}><KeyRound className="h-4 w-4" aria-hidden="true" />Cómo conseguirlo</Button>} />
+    );
+  }
   if (!last) {
     return (
       <EmptyState icon={Gavel} headingLevel="h3" title="Aún no hay licitaciones"
@@ -683,7 +711,7 @@ function ProjectCard({ item, busy, onStatus }: { item: ProjectOpportunity; busy:
       </div>
       <p className="mt-3 text-sm text-foreground">
         <strong className="font-semibold">
-          {item.data.investmentMusd !== null ? `US$ ${item.data.investmentMusd.toLocaleString('es-CL', { maximumFractionDigits: 1 })} millones` : 'Inversión no informada'}
+          {typeof item.data.investmentMusd === 'number' ? `US$ ${item.data.investmentMusd.toLocaleString('es-CL', { maximumFractionDigits: 1 })} millones` : 'Inversión no informada'}
         </strong>
         {item.presentedAt ? <> · presentado el {formatDay(item.presentedAt)}</> : null}
       </p>

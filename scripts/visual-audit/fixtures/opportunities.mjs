@@ -1,5 +1,16 @@
 // The new Opportunities page: a search profile, six opportunities across sources (hiring, tenders, Compra Ágil, SEIA) and
 // the last sync of each source.
+// The JSON each kind stores, as the app writes it (records.ts): the tender tabs read these fields.
+const DATA = {
+  tender: { source: 'mercado_publico', code: '1057-88-LE26', buyerUnit: 'Unidad de Abastecimiento', status: 'publicada', keywords: ['antecedentes'],
+    description: 'Servicio de verificación de antecedentes laborales y judiciales para el personal externo de la municipalidad.',
+    items: [{ code: '80111600', name: 'Servicios de personal temporal' }] },
+  compra_agil: { source: 'compra_agil', code: '1057539-228-COT26', buyerUnit: 'Abastecimiento', status: 'publicada', keywords: ['antecedentes'],
+    description: null, items: [] },
+  project: { owner: 'Inmobiliaria Pacífico', presentation: 'DIA', typology: 'Centro de distribución', sector: 'inmobiliario', state: 'En Calificación',
+    communes: 'Pudahuel', presentedAt: null, qualifiedAt: null, investmentMusd: 45 },
+};
+
 export default function opportunities(ctx) {
   const profile = ctx.uid(9501);
   const items = [
@@ -7,7 +18,7 @@ export default function opportunities(ctx) {
     ['hiring', 'Logística Sur busca 25 operarios de bodega', 'Logística Sur', 'logisticasur.cl', 'Biobío', null, null, 81, ['Contratación masiva']],
     ['tender', 'Servicio de verificación de antecedentes para personal externo', 'Municipalidad de Providencia', null, 'Región Metropolitana', 18000000, 'CLP', 76, ['Palabra clave: antecedentes']],
     ['compra_agil', 'Compra Ágil: revisión de antecedentes de postulantes', 'Servicio de Salud Maule', null, 'Maule', 2400000, 'CLP', 70, ['Monto dentro de rango']],
-    ['seia', 'Proyecto Centro de Distribución Pudahuel', 'Inmobiliaria Pacífico', 'grupopacifico.cl', 'Región Metropolitana', 45000000, 'USD', 64, ['Inversión sobre el mínimo']],
+    ['project', 'Proyecto Centro de Distribución Pudahuel', 'Inmobiliaria Pacífico', 'grupopacifico.cl', 'Región Metropolitana', 45000000, 'USD', 64, ['Inversión sobre el mínimo']],
     ['hiring', 'Seguridad Austral recluta 60 guardias', 'Seguridad Austral', 'seguridadaustral.cl', 'Valparaíso', null, null, 58, ['Rubro objetivo']],
   ];
   return {
@@ -18,7 +29,7 @@ export default function opportunities(ctx) {
         company_linkedin_url: null, buyer_name: kind === 'tender' || kind === 'compra_agil' ? company : null, region, amount, currency,
         deadline_at: kind === 'tender' || kind === 'compra_agil' ? ctx.daysAhead(6 + index) : null, published_at: ctx.daysAgo(index + 1), url: `https://example.org/oportunidad/${index + 1}`,
         score, reasons, status: index === 5 ? 'dismissed' : 'new', claimed_by: index === 0 ? ctx.OWNER : null, signal_count: kind === 'hiring' ? 3 + index : 1,
-        first_seen_at: ctx.daysAgo(index + 3), last_seen_at: ctx.daysAgo(index), data: {}, created_at: ctx.daysAgo(index + 3), updated_at: ctx.daysAgo(index),
+        first_seen_at: ctx.daysAgo(index + 3), last_seen_at: ctx.daysAgo(index), data: DATA[kind] ?? {}, created_at: ctx.daysAgo(index + 3), updated_at: ctx.daysAgo(index),
       })),
       commercial_opportunity_runs: ['jsearch', 'mercado_publico', 'compra_agil', 'seia'].map((source, index) => ({
         id: ctx.uid(9530 + index), organization_id: ctx.ORG, profile_id: profile, source, trigger: 'schedule', status: 'completed', requested_by: null,
