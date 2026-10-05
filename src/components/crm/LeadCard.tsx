@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Building2, CalendarClock, Clock3, GripVertical, Loader2, Mail, MessageSquareWarning, MoveRight } from 'lucide-react';
+import { Banknote, Building2, CalendarClock, Clock3, GripVertical, Loader2, Mail, MessageSquareWarning, MoveRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,6 +17,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/context/AuthContext';
+import { formatDealValue, hasDealValue, isDealCurrency } from '@/lib/crm-deal-values';
 import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
 import {
     collaborationMemberName,
@@ -142,6 +143,12 @@ export function LeadCard({ lead, onClick, onStageChange, isSaving = false }: Pro
                     </div>
 
                     <div className="space-y-1.5 text-xs text-muted-foreground">
+                        {hasDealValue(lead) && (
+                            <div className="flex items-center gap-1.5 font-medium text-foreground">
+                                <Banknote className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                                <span className="tabular-nums"><span className="sr-only">Valor del negocio: </span>{formatDealValue(Number(lead.dealValue), isDealCurrency(lead.dealCurrency) ? lead.dealCurrency : 'CLP')}</span>
+                            </div>
+                        )}
                         {lead.email && <div className="flex min-w-0 items-center gap-1.5"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{lead.email}</span></div>}
                         {!lead.email && lead.company && <div className="flex min-w-0 items-center gap-1.5"><Building2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{lead.company}</span></div>}
                         {dueDate && <div className="flex items-center gap-1.5 text-cw-warning"><CalendarClock className="h-3.5 w-3.5" aria-hidden="true" /><span>Próximo paso: {dueDate}</span></div>}

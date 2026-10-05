@@ -85,6 +85,18 @@ function extractEmailFromSavedLead(l: any): string | null {
 
 // --- Mapeos seguros --- //
 
+/** The value of the deal (Plan 11, PR 4c): only when the page asked for it (CRM_DEAL_VALUES_ENABLED). */
+function dealFields(custom: CustomData | undefined): Partial<UnifiedRow> {
+  if (!custom || custom.dealValue === undefined) return {};
+  return {
+    dealValue: custom.dealValue ?? null,
+    dealCurrency: custom.dealCurrency ?? null,
+    stageChangedAt: custom.stageChangedAt ?? null,
+    wonAt: custom.wonAt ?? null,
+    lostAt: custom.lostAt ?? null,
+  };
+}
+
 function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow | null {
   try {
     const idBase = l?.id ?? (l as any)?._id ?? (l as any)?.gid ?? safeUUID();
@@ -114,6 +126,7 @@ function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow
       autopilotStatus: custom?.autopilotStatus ?? null,
       lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
       meetingLink: custom?.meetingLink ?? null,
+      ...dealFields(custom),
       hasEmail: !!email,
     };
   } catch (err) {
@@ -151,6 +164,7 @@ function mapEnrichedLead(e: any, customMap: Record<string, CustomData>): Unified
       autopilotStatus: custom?.autopilotStatus ?? null,
       lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
       meetingLink: custom?.meetingLink ?? null,
+      ...dealFields(custom),
       hasEmail: !!email,
     };
   } catch (err) {
@@ -187,6 +201,7 @@ function mapOpportunity(o: any, customMap: Record<string, CustomData>): UnifiedR
       autopilotStatus: custom?.autopilotStatus ?? null,
       lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
       meetingLink: custom?.meetingLink ?? null,
+      ...dealFields(custom),
       hasEmail: false,
     };
   } catch (err) {
@@ -235,6 +250,7 @@ function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow
       autopilotStatus: custom?.autopilotStatus ?? null,
       lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
       meetingLink: custom?.meetingLink ?? null,
+      ...dealFields(custom),
       hasEmail: !!email,
     };
   } catch (err) {
@@ -257,7 +273,8 @@ export async function buildUnifiedRows(): Promise<UnifiedRow[]> {
  * The rows and the reads that failed. A failed read still leaves the others (one source never empties the rest), but
  * the screen can tell «no data yet» from «could not read it»: with every row missing it says so instead of «empty».
  */
-export async function loadUnifiedRows(): Promise<UnifiedRowsReport> {
+/** `dealValues`: also read the value of each deal (CRM_DEAL_VALUES_ENABLED, Plan 11, PR 4c). */
+export async function loadUnifiedRows(options: { dealValues?: boolean } = {}): Promise<UnifiedRowsReport> {
   const rows: UnifiedRow[] = [];
   const failed: UnifiedSource[] = [];
 
@@ -273,7 +290,7 @@ export async function loadUnifiedRows(): Promise<UnifiedRowsReport> {
       read('enriched', () => getEnrichedLeads(), []),
       read('opportunities', () => savedOpportunitiesStorage.get({ strict: true }), []),
       read('contacted', () => contactedLeadsStorage.get({ strict: true }), []),
-      read('custom', () => unifiedSheetService.getAllCustom({ strict: true }), {}),
+      read('custom', () => unifiedSheetService.getAllCustom({ strict: true, dealValues: options.dealValues }), {}),
     ]);
 
     for (const l of safeArray(savedRaw)) {
