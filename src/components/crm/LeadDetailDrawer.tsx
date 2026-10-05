@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import {
     Sheet,
     SheetContent,
@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/sheet';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 import { activityService } from '@/lib/services/activity-service';
-import type { Activity } from '@/lib/crm-types';
+import { PIPELINE_STAGES, type Activity } from '@/lib/crm-types';
 import { CommercialTimeline } from '@/components/commercial/CommercialTimeline';
 import { ContactabilityStatusCard } from '@/components/commercial/ContactabilityStatusCard';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -45,11 +46,87 @@ import {
 } from '@/lib/services/lead-collaboration-service';
 import Link from 'next/link';
 import { formatDateTime } from '@/lib/dates';
+import { flowStage } from '@/lib/pipeline-flow';
+import { DEAL_CURRENCIES, DEAL_CURRENCY_LABEL, formatDealValue, hasDealValue, isDealCurrency, parseDealValue, type DealCurrency } from '@/lib/crm-deal-values';
+import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 
 interface Props {
     lead: UnifiedRow | null;
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    /** Shows «Valor del negocio» (CRM_DEAL_VALUES_ENABLED). */
+    dealValues?: boolean;
+    /** A field of the lead was saved here; the page updates its row. */
+    onChanged?: (gid: string, patch: Partial<UnifiedRow>) => void;
+}
+
+const plainAmount = (lead: UnifiedRow) => (hasDealValue(lead) ? new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(Number(lead.dealValue)) : '');
+
+/**
+ * «Valor del negocio» (Plan 11, PR 4c): the amount and its currency, as people type them («1.200.000», «85,5»). The
+ * panel adds it to «Pipeline abierto» while the lead is open and to «Ganado» once it is won. An empty amount removes it.
+ */
+function DealValueEditor({ lead, onChanged }: { lead: UnifiedRow; onChanged?: Props['onChanged'] }) {
+    const { toast } = useToast();
+    const id = useId();
+    const inputRef = useRef<HTMLInputElement>(null);
+    const savedCurrency: DealCurrency = isDealCurrency(lead.dealCurrency) ? lead.dealCurrency : 'CLP';
+    const savedValue = hasDealValue(lead) ? Number(lead.dealValue) : null;
+    const [amount, setAmount] = useState(() => plainAmount(lead));
+    const [currency, setCurrency] = useState<DealCurrency>(savedCurrency);
+    const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
+    const parsed = parseDealValue(amount);
+    const changed = parsed !== savedValue || (parsed !== null && currency !== savedCurrency);
+
+    const save = async (event: FormEvent) => {
+        event.preventDefault();
+        if (parsed === 'invalid') {
+            setError('Escribe solo el monto, por ejemplo 1.200.000 o 85,5.');
+            inputRef.current?.focus();
+            return;
+        }
+        setError('');
+        setSaving(true);
+        try {
+            await unifiedSheetService.setCustom(lead.gid, { dealValue: parsed, dealCurrency: currency });
+            onChanged?.(lead.gid, { dealValue: parsed, dealCurrency: currency });
+            toast({ title: parsed === null ? 'Valor quitado' : `Valor guardado: ${formatDealValue(parsed, currency)}` });
+        } catch (err) {
+            toast({ variant: 'destructive', title: 'No pudimos guardar el valor', description: err instanceof Error ? err.message : 'Inténtalo de nuevo.' });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <form onSubmit={save} noValidate aria-labelledby={`${id}-title`} className="mb-6 rounded-lg border border-border/70 p-4">
+            <h4 id={`${id}-title`} className="text-sm font-semibold text-foreground">Valor del negocio</h4>
+            <p className="mt-0.5 text-xs text-muted-foreground">Se suma en el Panel: en «Pipeline abierto» mientras siga abierto, y en «Ganado» cuando lo marques como ganado.</p>
+            <div className="mt-3 grid grid-cols-[minmax(0,1fr)_8rem] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_8.5rem_auto]">
+                <div className="space-y-1.5">
+                    <Label htmlFor={`${id}-amount`}>Monto</Label>
+                    <Input id={`${id}-amount`} ref={inputRef} inputMode="decimal" autoComplete="off" placeholder="Ej.: 1.200.000" value={amount}
+                        onChange={event => { setAmount(event.target.value); setError(''); }}
+                        aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-error` : undefined} />
+                </div>
+                <div className="space-y-1.5">
+                    <Label htmlFor={`${id}-currency`}>Moneda</Label>
+                    <Select value={currency} onValueChange={value => setCurrency(value as DealCurrency)}>
+                        <SelectTrigger id={`${id}-currency`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {DEAL_CURRENCIES.map(code => <SelectItem key={code} value={code}>{DEAL_CURRENCY_LABEL[code]}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <Button type="submit" className="col-span-2 sm:col-span-1" disabled={saving || !changed}>
+                    {saving && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}
+                    {parsed === null && savedValue !== null ? 'Quitar valor' : 'Guardar valor'}
+                </Button>
+            </div>
+            {error && <p id={`${id}-error`} role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
+        </form>
+    );
 }
 
 function getAISuggestion(lead: UnifiedRow, activities: Activity[]): string {
@@ -93,11 +170,8 @@ function getAISuggestion(lead: UnifiedRow, activities: Activity[]): string {
     return `Revisa el historial de actividad y decide el próximo paso según el contexto del lead.`;
 }
 
-function humanizeValue(value: string) {
-    return value
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (character) => character.toUpperCase());
-}
+/** The stage as the board names it («Reunión», «Ganado»), never its internal id («meeting»). */
+const stageLabel = (lead: UnifiedRow) => PIPELINE_STAGES.find((stage) => stage.id === flowStage(lead))?.label || 'Nuevos';
 
 const CONTACT_STATE_LABELS: Record<LeadContactState, string> = {
     uncontacted: 'Sin contactar',
@@ -553,7 +627,7 @@ function LeadCollaborationPanel({
 }
 
 
-export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
+export function LeadDetailDrawer({ lead, open, onOpenChange, dealValues = false, onChanged }: Props) {
     const [activities, setActivities] = useState<Activity[]>([]);
     const [activitiesLoading, setActivitiesLoading] = useState(false);
     const [activitiesError, setActivitiesError] = useState(false);
@@ -631,11 +705,16 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                                       </Link>
                                     </Button>
                                 )}
-                                <Badge variant="secondary">{humanizeValue(String(lead.stage || 'inbox'))}</Badge>
+                                <Badge variant="secondary">{stageLabel(lead)}</Badge>
                             </div>
                         </div>
                     </div>
                 </SheetHeader>
+
+                {dealValues && (
+                    // A new key when the saved value changes, so the form starts from what is saved.
+                    <DealValueEditor key={`${lead.gid}:${lead.dealValue ?? ''}:${lead.dealCurrency ?? ''}`} lead={lead} onChanged={onChanged} />
+                )}
 
                 <div className="mb-6">
                     <ContactabilityStatusCard email={lead.email} compact />

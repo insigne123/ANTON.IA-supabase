@@ -1,4 +1,4 @@
-# Pipeline: panel tipo CRM (Plan 11, PR 4a)
+# Pipeline: panel tipo CRM (Plan 11, PR 4a y 4c)
 
 El usuario pidió que el Pipeline se viera como un CRM, con la referencia de un panel de Zoho: cifras con comparación, donas por etapa, barras por período con una línea de referencia y una línea de tendencia. La vista «Gráfico» del Plan 5 era un flujo en línea; **«Panel»** la reemplaza y sigue siendo la vista por defecto. «Tablero» no cambia.
 
@@ -43,7 +43,7 @@ El usuario pidió que el Pipeline se viera como un CRM, con la referencia de un 
   - la respuesta (`repliedAt`).
 
   Este PR agrega `sentAt` y `repliedAt` a las filas de conversaciones, y usa el envío como fecha de creación de una conversación, que antes quedaba vacía.
-- **La etapa es una foto de hoy.** Para comparar ganados o reuniones por período hace falta el historial de etapas (`crm_stage_events`, PR 4b). El valor de cada negocio (ingreso esperado, ganado y donas por monto) llega en 4c, detrás de `CRM_DEAL_VALUES_ENABLED`.
+- **La etapa es una foto de hoy.** Para comparar ganados o reuniones por período hace falta el historial de etapas (`crm_stage_events`, PR 4b). El valor de cada negocio llega en 4c (abajo), detrás de `CRM_DEAL_VALUES_ENABLED`.
 - **Colores de las etapas:** `--pipeline-stage-1..6`, pasos del azul primario de claro a oscuro (en modo oscuro, de tenue a brillante). Pasan las pruebas de rampa ordinal del validador dataviz:
   - luminosidad monótona;
   - pasos visibles;
@@ -51,16 +51,43 @@ El usuario pidió que el Pipeline se viera como un CRM, con la referencia de un 
 
   Ganado usa `--cw-success`.
 
+## Valor del negocio (PR 4c, detrás de `CRM_DEAL_VALUES_ENABLED`)
+
+Apagado por defecto. Se enciende cuando la migración `20261005150000_crm_deal_values_stage_events` (PR 4b) está aplicada: agrega `deal_value`, `deal_currency`, `stage_changed_at`, `won_at` y `lost_at` a `unified_crm_data`, y la tabla `crm_stage_events`.
+
+- **En el detalle del lead:** «Valor del negocio».
+  - Lleva monto y moneda: CLP, USD, UF o EUR.
+  - El monto se escribe como en Chile: «1.200.000», «$ 1.200.000» o «85,5».
+  - Si el monto no se entiende, se avisa cómo escribirlo y no se guarda nada.
+  - Un monto vacío quita el valor («Quitar valor»).
+- **En el tablero:**
+  - cada tarjeta muestra su monto;
+  - cada columna suma los suyos, en la moneda de la mayoría.
+- **En el Panel:**
+  - **«Pipeline abierto»:** la suma de los negocios abiertos y cuántos tienen valor;
+  - **«Ganado»:** lo ganado en el período, con su diferencia contra el período anterior del mismo largo;
+  - **la dona:** se puede ver por «Cantidad» o por «Monto», con su tabla.
+- **Monedas:**
+  - los montos nunca mezclan monedas: se suman en la que usa la mayoría de los negocios;
+  - los de otras monedas se nombran aparte («Aparte: 1 negocio en dólares (USD)»).
+- **Fechas:**
+  - cuándo se ganó o se perdió lo escribe la base con el trigger de 4b, igual que el historial de etapas, sin código en la app;
+  - al mover una tarjeta, el Panel aplica en el momento las mismas fechas que escribirá la base, así un negocio recién ganado suma de inmediato.
+- **Si el flag se enciende antes de la migración:** la lectura recibe 42703 (no existe la columna) y vuelve a leer sin esas columnas, así el Pipeline no se rompe. Guardar un valor sí falla, con el aviso «No pudimos guardar el valor».
+- **Flag apagado:** la app nunca pide esas columnas, y el Panel y el detalle quedan como antes.
+
 ## Archivos
 
 - `src/lib/pipeline-dashboard.ts` y sus pruebas: la lógica, pura.
+- `src/lib/crm-deal-values.ts` y sus pruebas: leer y escribir montos, sumar por moneda y las fechas de un cambio de etapa (4c).
+- `src/app/api/crm/deal-values/route.ts` y `src/hooks/use-crm-deal-values.ts`: si el flag está encendido (4c).
 - `src/components/crm/PipelineDashboard.tsx`: el panel.
 - `src/app/(app)/crm/page.tsx`: «Panel» y «Tablero», con la actualización automática.
 
 ## Pruebas
 
 - **Unitarias:** `src/lib/pipeline-dashboard.test.ts`.
-- **DOM:** `scripts/test-pipeline-dashboard-ui.mjs`, que corre dentro de `scripts/verify-cowork.mjs` y reemplaza a `test-pipeline-flow-ui.mjs`.
+- **DOM:** `scripts/test-pipeline-dashboard-ui.mjs`, que corre dentro de `scripts/verify-cowork.mjs` y reemplaza a `test-pipeline-flow-ui.mjs`; y `scripts/test-pipeline-deal-values-ui.mjs`, con los montos (4c).
 
 ---
 

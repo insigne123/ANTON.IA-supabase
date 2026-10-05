@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { ChartContainer, ChartTooltipContent } from '@/components/ui/chart';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DEAL_CURRENCY_NAME, dealTotals, dealTrendText, formatDealValue, formatDealValueShort } from '@/lib/crm-deal-values';
 import type { PipelineStage } from '@/lib/crm-types';
 import {
   DASHBOARD_ORIGINS, DASHBOARD_PERIODS, buildPipelineDashboard, filterPipelineRows, pipelineOwners, trendText,
@@ -20,7 +21,8 @@ import { cn } from '@/lib/utils';
  * The pipeline as a CRM panel (Plan 11, PR 4a), after the reference the user shared: figures with their comparison, the
  * open pipeline by stage (a donut), how far each stage gets, contacts per month against their recent average, the new
  * leads of 13 months, and sentences that read it. One filter row scopes everything below it. The stage colors are the
- * ordinal ramp of the primary blue (--pipeline-stage-1..6); every chart has its table.
+ * ordinal ramp of the primary blue (--pipeline-stage-1..6); every chart has its table. With the value of each deal
+ * (CRM_DEAL_VALUES_ENABLED, PR 4c) it also adds up the open pipeline and what was won, and the donut can show amounts.
  */
 const STAGE_COLOR: Record<PipelineStage, string> = {
   inbox: 'hsl(var(--pipeline-stage-1))', qualified: 'hsl(var(--pipeline-stage-2))', contacted: 'hsl(var(--pipeline-stage-3))',
@@ -31,7 +33,7 @@ const PERIOD_KEY = 'anton.crm.period';
 const number = new Intl.NumberFormat('es-CL');
 const percent = (value: number | null) => (value === null ? '—' : `${Math.round(value * 100)} %`);
 
-export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now }: {
+export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now, dealValues = false }: {
   rows: UnifiedRow[];
   onOpenStage: (stage: PipelineStage) => void;
   /** Suggested stage changes waiting for confirmation, by the stage they propose. */
@@ -39,8 +41,11 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
   /** When the rows were last read; the panel says how fresh it is. */
   refreshedAt?: number | null;
   now?: number;
+  /** The rows carry the value of each deal (CRM_DEAL_VALUES_ENABLED). */
+  dealValues?: boolean;
 }) {
   const [period, setPeriod] = useState<DashboardPeriod>('30d');
+  const [measure, setMeasure] = useState<'count' | 'value'>('count');
   const [owner, setOwner] = useState('all');
   const [origin, setOrigin] = useState<DashboardOrigin>('all');
   useEffect(() => {
@@ -58,6 +63,16 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
   const filtered = useMemo(() => filterPipelineRows(rows, { owner, origin }), [rows, owner, origin]);
   const panel = useMemo(() => buildPipelineDashboard(filtered, { now, period }), [filtered, now, period]);
   const previous = panel.period.short;
+  // Amounts never mix currencies: they go in the one most deals use, and the rest are named apart.
+  const deals = useMemo(() => (dealValues ? dealTotals(filtered, { days: panel.period.days, now }) : null), [dealValues, filtered, panel.period.days, now]);
+  const byValue = Boolean(deals) && measure === 'value';
+  const donut = useMemo(() => panel.stages.map(slice => {
+    if (!byValue || !deals) return { stage: slice.stage, label: slice.label, value: slice.count, share: slice.share };
+    const value = deals.openByStage.find(item => item.stage === slice.stage)?.value ?? 0;
+    return { stage: slice.stage, label: slice.label, value, share: deals.open ? value / deals.open : 0 };
+  }), [panel.stages, byValue, deals]);
+  const donutTotal = byValue && deals ? deals.open : panel.open;
+  const show = (value: number) => (byValue && deals ? formatDealValueShort(value, deals.currency) : number.format(value));
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
@@ -100,7 +115,16 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
         </section>
       ) : null}
 
-      <section aria-label="Cifras del pipeline" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <section aria-label="Cifras del pipeline" className={cn('grid grid-cols-2 gap-3', dealValues ? 'md:grid-cols-4' : 'md:grid-cols-3 xl:grid-cols-6')}>
+        {dealValues ? (
+          <>
+            <Tile label="Pipeline abierto" value={deals ? formatDealValueShort(deals.open, deals.currency) : '—'}
+              caption={deals ? `en ${number.format(deals.openDeals)} ${deals.openDeals === 1 ? 'negocio abierto' : 'negocios abiertos'} con valor` : 'Escribe el valor en el detalle de cada lead'} />
+            <Tile label="Ganado" value={deals ? formatDealValueShort(deals.won, deals.currency) : '—'}
+              caption={deals ? dealTrendText(deals.won - deals.wonPrevious, deals.currency, previous) : panel.period.label.toLowerCase()}
+              direction={deals ? (deals.won > deals.wonPrevious ? 'up' : deals.won < deals.wonPrevious ? 'down' : 'flat') : undefined} />
+          </>
+        ) : null}
         <Tile label="Abiertos" value={number.format(panel.open)} caption={`de ${number.format(panel.total)} en el pipeline`} />
         <Tile label="Leads nuevos" value={number.format(panel.newLeads.value)} trend={panel.newLeads} previous={previous} />
         <Tile label="Contactados" value={number.format(panel.contacted.value)} trend={panel.contacted} previous={previous} />
@@ -112,41 +136,57 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
         <Tile label="En reunión o más" value={number.format(panel.meetings)} caption="reunión, negociación o ganado" />
         <Tile label="% ganados" value={percent(panel.winRate)} caption={`${panel.won} ${panel.won === 1 ? 'ganado' : 'ganados'} · ${panel.lost} ${panel.lost === 1 ? 'perdido' : 'perdidos'}`} />
       </section>
+      {deals?.others.length ? (
+        <p className="-mt-1 text-xs text-muted-foreground">
+          Los montos suman los negocios en {DEAL_CURRENCY_NAME[deals.currency]}, la moneda de la mayoría. Aparte: {deals.others.map(item => `${number.format(item.deals)} ${item.deals === 1 ? 'negocio' : 'negocios'} en ${DEAL_CURRENCY_NAME[item.currency]}`).join(' y ')}.
+        </p>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Pipeline abierto por etapa" subtitle={`${number.format(panel.open)} leads abiertos · toca una etapa para verlos`}
-          table={<DataTable head={['Etapa', 'Leads', '% del abierto']} rows={panel.stages.map(slice => [slice.label, number.format(slice.count), percent(slice.share)])} />}>
+        <ChartCard title="Pipeline abierto por etapa"
+          subtitle={byValue && deals ? `${formatDealValue(deals.open, deals.currency)} en negocios abiertos · toca una etapa para verlos` : `${number.format(panel.open)} leads abiertos · toca una etapa para verlos`}
+          action={deals ? (
+            <div role="group" aria-label="Medir por" className="flex shrink-0 gap-1">
+              <Button size="sm" variant={byValue ? 'outline' : 'default'} aria-pressed={!byValue} className="h-7 px-2 text-xs" onClick={() => setMeasure('count')}>Cantidad</Button>
+              <Button size="sm" variant={byValue ? 'default' : 'outline'} aria-pressed={byValue} className="h-7 px-2 text-xs" onClick={() => setMeasure('value')}>Monto</Button>
+            </div>
+          ) : undefined}
+          table={<DataTable head={['Etapa', byValue ? 'Monto' : 'Leads', '% del abierto']}
+            rows={donut.map(slice => [slice.label, byValue && deals ? formatDealValue(slice.value, deals.currency) : number.format(slice.value), percent(slice.share)])} />}>
           <div className="grid items-center gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <div className="relative mx-auto aspect-square w-full max-w-[240px]">
-              <ChartContainer config={{}} className="aspect-square h-full w-full" aria-label={`Pipeline abierto por etapa: ${panel.stages.map(slice => `${slice.label} ${slice.count}`).join(', ')}`}>
+              <ChartContainer config={{}} className="aspect-square h-full w-full" aria-label={`Pipeline abierto por etapa: ${donut.map(slice => `${slice.label} ${show(slice.value)}`).join(', ')}`}>
                 <PieChart>
-                  <Tooltip cursor={false} content={<ChartTooltipContent hideIndicator formatter={(value, name) => <StageReadout name={String(name)} value={Number(value)} total={panel.open} />} />} />
-                  <Pie data={panel.stages.filter(slice => slice.count > 0)} dataKey="count" nameKey="label" rootTabIndex={-1} innerRadius="62%" outerRadius="92%" stroke="hsl(var(--card))" strokeWidth={2}
+                  <Tooltip cursor={false} content={<ChartTooltipContent hideIndicator formatter={(value, name) => <StageReadout name={String(name)} value={Number(value)} total={donutTotal} format={show} />} />} />
+                  <Pie data={donut.filter(slice => slice.value > 0)} dataKey="value" nameKey="label" rootTabIndex={-1} innerRadius="62%" outerRadius="92%" stroke="hsl(var(--card))" strokeWidth={2}
                     isAnimationActive={false} onClick={(slice: { stage?: PipelineStage }) => slice?.stage && onOpenStage(slice.stage)} className="cursor-pointer">
-                    {panel.stages.filter(slice => slice.count > 0).map(slice => (
-                      <Cell key={slice.stage} fill={STAGE_COLOR[slice.stage]} aria-label={`${slice.label}: ${slice.count} (${percent(slice.share)})`} />
+                    {donut.filter(slice => slice.value > 0).map(slice => (
+                      <Cell key={slice.stage} fill={STAGE_COLOR[slice.stage]} aria-label={`${slice.label}: ${show(slice.value)} (${percent(slice.share)})`} />
                     ))}
                   </Pie>
                 </PieChart>
               </ChartContainer>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-2xl font-semibold text-foreground">{number.format(panel.open)}</span>
-                <span className="text-xs text-muted-foreground">abiertos</span>
+                <span className="text-2xl font-semibold text-foreground">{show(donutTotal)}</span>
+                <span className="text-xs text-muted-foreground">{byValue ? 'abierto' : 'abiertos'}</span>
               </div>
             </div>
             <ul className="space-y-1" aria-label="Etapas">
-              {panel.stages.map(slice => (
+              {donut.map(slice => (
                 <li key={slice.stage}>
                   <button type="button" onClick={() => onOpenStage(slice.stage)}
                     className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: STAGE_COLOR[slice.stage] }} aria-hidden="true" />
                     <span className="min-w-0 flex-1 truncate text-foreground">{slice.label}</span>
                     {pending?.[slice.stage] ? <span className="rounded-full bg-primary/10 px-1.5 text-[11px] font-medium text-primary">{pending[slice.stage]} por confirmar</span> : null}
-                    <span className="tabular-nums text-foreground">{number.format(slice.count)}</span>
+                    <span className="tabular-nums text-foreground">{show(slice.value)}</span>
                     <span className="w-11 text-right tabular-nums text-xs text-muted-foreground">{percent(slice.share)}</span>
                   </button>
                 </li>
               ))}
+              {byValue && deals && !deals.open ? (
+                <li className="px-2 pt-1 text-xs text-muted-foreground">Ningún lead abierto tiene valor todavía: escríbelo en su detalle.</li>
+              ) : null}
             </ul>
           </div>
         </ChartCard>
@@ -240,11 +280,18 @@ function Tile({ label, value, caption, trend, previous, direction }: {
   );
 }
 
-function ChartCard({ title, subtitle, table, children }: { title: string; subtitle: string; table: React.ReactNode; children: React.ReactNode }) {
+function ChartCard({ title, subtitle, table, action, children }: {
+  title: string; subtitle: string; table: React.ReactNode; action?: React.ReactNode; children: React.ReactNode;
+}) {
   return (
     <section aria-label={title} className="min-w-0 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-      <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+        {action}
+      </div>
       <div className="mt-3">{children}</div>
       <Collapsible className="mt-2">
         <CollapsibleTrigger asChild>
@@ -277,11 +324,11 @@ function DataTable({ head, rows }: { head: string[]; rows: string[][] }) {
   );
 }
 
-function StageReadout({ name, value, total }: { name: string; value: number; total: number }) {
+function StageReadout({ name, value, total, format = number.format }: { name: string; value: number; total: number; format?: (value: number) => string }) {
   return (
     <span className="flex w-full items-baseline justify-between gap-3">
       <span className="text-muted-foreground">{name}</span>
-      <span className="font-semibold tabular-nums text-foreground">{number.format(value)} <span className="font-normal text-muted-foreground">({percent(total ? value / total : 0)})</span></span>
+      <span className="font-semibold tabular-nums text-foreground">{format(value)} <span className="font-normal text-muted-foreground">({percent(total ? value / total : 0)})</span></span>
     </span>
   );
 }
