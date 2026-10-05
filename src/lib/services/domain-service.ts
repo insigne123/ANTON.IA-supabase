@@ -11,7 +11,7 @@ export interface ExcludedDomain {
 }
 
 export const domainService = {
-    async getExcludedDomains(): Promise<ExcludedDomain[]> {
+    async getExcludedDomains(options: { strict?: boolean } = {}): Promise<ExcludedDomain[]> {
         const orgId = await organizationService.getCurrentOrganizationId();
         if (!orgId) return [];
 
@@ -23,6 +23,8 @@ export const domainService = {
 
         if (error) {
             console.error('Error fetching excluded domains:', error);
+            // `strict`: the screen that lists them must say it could not read them, not «none».
+            if (options.strict) throw error;
             return [];
         }
         return data as ExcludedDomain[];

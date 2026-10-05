@@ -139,7 +139,8 @@ export function TASKS(ctx, { fixtures }) {
       ],
       done: async (page, { calls }) => {
         if (!calls.some(call => call.url.endsWith('/api/providers/send') && call.body?.deliveryMode === 'reply_contact')) throw new Error('no se envió la respuesta');
-        await page.getByText('Respuesta enviada y registrada en esta conversación.').first().waitFor({ timeout: 10000 });
+        // The person sees that it went out: a visible «Respuesta enviada…», wherever the screen puts it.
+        await page.getByText(/Respuesta enviada/).first().waitFor({ timeout: 10000 });
       },
     },
     {

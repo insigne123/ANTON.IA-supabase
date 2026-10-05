@@ -58,7 +58,8 @@ function mapOpportunityToRow(opp: JobOpportunity, userId: string) {
     };
 }
 
-export async function getOpps(): Promise<JobOpportunity[]> {
+/** `strict` throws when the read fails, for screens that must tell an error from an empty list. */
+export async function getOpps(options: { strict?: boolean } = {}): Promise<JobOpportunity[]> {
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -66,6 +67,7 @@ export async function getOpps(): Promise<JobOpportunity[]> {
 
     if (error) {
         console.error('Error fetching opportunities:', error);
+        if (options.strict) throw error;
         return [];
     }
 

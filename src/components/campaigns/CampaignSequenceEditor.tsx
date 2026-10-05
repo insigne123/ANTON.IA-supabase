@@ -42,7 +42,9 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
   const message = definition.messages[messageIndex];
   const hasContent = definition.messages.some(value => value.subject.trim() || value.body.trim());
   const scheduleValid = definition.messages.slice(1).every(value => Number.isInteger(value.delayDays) && value.delayDays >= 1 && value.delayDays <= 90);
-  const canSave = followUpCount !== null && scheduleValid && definition.messages.every(value => CampaignMessageSchema.safeParse(value).success);
+  // Writing the emails by hand is choosing how many there are: the count is asked only to generate them with AI.
+  const effectiveCount = followUpCount ?? (hasContent ? definition.messages.length - 1 : null);
+  const canSave = effectiveCount !== null && scheduleValid && definition.messages.every(value => CampaignMessageSchema.safeParse(value).success);
 
   useEffect(() => { setInstruction(''); setProposal(null); setMessageError(''); setMessageFeedback(''); }, [messageIndex]);
   useEffect(() => { if (sequenceError || sequenceFeedback || sequenceProposal) sequenceResultRef.current?.focus(); }, [sequenceError, sequenceFeedback, sequenceProposal]);
@@ -108,7 +110,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
       {!reviseMode && <>
         <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-2"><Label htmlFor="follow-up-count">¿Cuántos seguimientos quieres?</Label>
-            <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={followUpCount ?? ''} onChange={event => void chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
+            <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={effectiveCount ?? ''} onChange={event => void chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
               <option value="" disabled>Elige antes de generar</option>
               {[0, 1, 2, 3, 4].map(count => <option key={count} value={count}>{count === 0 ? 'Solo el correo inicial' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'} + correo inicial`}</option>)}
             </select>
@@ -134,7 +136,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
         <h3 className="text-lg font-medium">{label(messageIndex)}</h3>
         {messageIndex > 0 && <div className="space-y-2"><Label htmlFor="delay">Días después del envío anterior</Label><Input id="delay" className="max-w-32" type="number" min={1} max={90} disabled={busy || isLocked(messageIndex)} value={message.delayDays} onChange={event => updateMessage({ delayDays: Number(event.target.value) })} /><p className="text-sm text-muted-foreground">El plazo empieza cuando se confirma el envío anterior. Los seguimientos se detienen si la persona responde.</p></div>}
         <div className="space-y-2"><Label htmlFor="subject">Asunto</Label><Input id="subject" maxLength={300} disabled={busy || isLocked(messageIndex)} value={message.subject} onChange={event => updateMessage({ subject: event.target.value })} /></div>
-        <div className="space-y-2"><Label htmlFor="body">Correo</Label><Textarea id="body" className="min-h-64" maxLength={12000} disabled={busy || isLocked(messageIndex)} value={message.body} onChange={event => updateMessage({ body: event.target.value })} /><p className="text-sm text-muted-foreground">Puedes usar {'{{nombre}}'}, {'{{empresa}}'} y {'{{cargo}}'}. Incluye tu firma en el mensaje.</p></div>
+        <div className="space-y-2"><Label htmlFor="body">Correo</Label><Textarea id="body" className="min-h-64" maxLength={12000} disabled={busy || isLocked(messageIndex)} value={message.body} onChange={event => updateMessage({ body: event.target.value })} /><p className="text-sm text-muted-foreground">Puedes usar {'{{nombre}}'}, {'{{empresa}}'} y {'{{cargo}}'}. Tu firma se agrega sola al enviar, desde «Firmas y estilo».</p></div>
       </div>
       <aside aria-label="Asistente de IA" className="min-w-0 space-y-4 rounded-xl border bg-muted/30 p-4 lg:sticky lg:top-6">
         <header className="space-y-1"><h3 className="font-semibold">Editar con IA</h3><p className="text-sm text-muted-foreground">{label(messageIndex)} · {isLocked(messageIndex) ? 'Este correo está bloqueado.' : 'Los cambios se proponen solo para este correo.'}</p></header>

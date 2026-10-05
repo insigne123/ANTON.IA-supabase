@@ -1336,10 +1336,24 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                         <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-center">
                           <BrainCircuit className="mx-auto mb-3 size-7 text-muted-foreground" aria-hidden="true" />
                           <p className="text-sm font-medium">Aún no hay una investigación para este lead</p>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">Inclúyelo en la selección para reunir evidencia antes de redactar.</p>
-                          <Button type="button" size="sm" variant="outline" className="mt-4 rounded-full" onClick={includeActiveLead} disabled={!canSelectActiveLead || selectionLocked}>
-                            {selectedKeys.includes(activeLead.key) ? 'Incluido en la selección' : 'Incluir para investigar'}
-                          </Button>
+                          {/* Once included, the next step is right here: on a phone the list and its «Investigar» button are a screen away. */}
+                          {selectedKeys.includes(activeLead.key) ? (
+                            <>
+                              <p className="mt-1 text-sm leading-6 text-muted-foreground">Está en tu selección. Investigar reúne evidencia de su empresa antes de redactar.</p>
+                              <Button type="button" size="sm" className="mt-4 rounded-full" onClick={() => void startResearch()}
+                                disabled={researchUnavailable || selectionLocked || selectedLeads.length === 0}>
+                                {creatingBatch ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <BrainCircuit />}
+                                {creatingBatch ? 'Guardando selección…' : handoffPending ? 'Preparando selección…' : `Investigar ${selectedLeads.length}`}
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <p className="mt-1 text-sm leading-6 text-muted-foreground">Inclúyelo en la selección para reunir evidencia antes de redactar.</p>
+                              <Button type="button" size="sm" variant="outline" className="mt-4 rounded-full" onClick={includeActiveLead} disabled={!canSelectActiveLead || selectionLocked}>
+                                Incluir para investigar
+                              </Button>
+                            </>
+                          )}
                         </div>
                       )}
                     </article>

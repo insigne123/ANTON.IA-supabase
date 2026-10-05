@@ -123,7 +123,8 @@ export const unifiedSheetService = {
 
     // Helper to fetch all custom data at once (e.g. for initial load of a page)
     // This is more efficient than calling getCustom for each row.
-    async getAllCustom(): Promise<Record<string, CustomData>> {
+    // `strict` throws when the read fails, for screens that must tell an error from an empty list.
+    async getAllCustom(options: { strict?: boolean } = {}): Promise<Record<string, CustomData>> {
         try {
             const { data, error } = await supabase
                 .from(TABLE_NAME)
@@ -131,6 +132,7 @@ export const unifiedSheetService = {
 
             if (error) {
                 console.error('[unified-sheet-service] getAllCustom error:', error);
+                if (options.strict) throw error;
                 return {};
             }
 
@@ -152,6 +154,7 @@ export const unifiedSheetService = {
             return result;
         } catch (err) {
             console.error('[unified-sheet-service] getAllCustom unexpected error:', err);
+            if (options.strict) throw err;
             return {};
         }
     }
