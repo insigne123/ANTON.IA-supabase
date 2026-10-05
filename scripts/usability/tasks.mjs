@@ -134,10 +134,12 @@ export function TASKS(ctx, { fixtures }) {
       ],
       mocks: [
         { url: '**/api/contacted/*/work', method: 'POST', respond: { ok: true } },
-        { url: '**/api/providers/send', method: 'POST', respond: { ok: true, status: 'sent', messageId: 'usab-reply-1' } },
+        // The same answer as the server's send route when it goes out: `success` and `status: 'sent'`.
+        { url: '**/api/providers/send', method: 'POST', respond: { success: true, status: 'sent', messageId: 'usab-reply-1' } },
       ],
-      done: (page, { calls }) => {
+      done: async (page, { calls }) => {
         if (!calls.some(call => call.url.endsWith('/api/providers/send') && call.body?.deliveryMode === 'reply_contact')) throw new Error('no se envió la respuesta');
+        await page.getByText('Respuesta enviada y registrada en esta conversación.').first().waitFor({ timeout: 10000 });
       },
     },
     {
