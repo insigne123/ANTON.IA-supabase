@@ -26,6 +26,8 @@ const { window } = dom;
 window.__opened = [];
 // The charts size themselves with ResizeObserver; jsdom has no layout, so they stay empty here and their tables carry the data.
 window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+const warn = window.console.warn.bind(window.console);
+window.console.warn = (...args) => { if (!/of chart should be greater than 0/.test(String(args[0]))) warn(...args); };
 window.eval(bundle.outputFiles[0].text);
 const settle = async (ms = 100) => { for (let i = 0; i < ms / 10; i++) await new Promise(resolve => setTimeout(resolve, 10)); };
 const section = label => window.document.querySelector(`section[aria-label="${label}"]`);
