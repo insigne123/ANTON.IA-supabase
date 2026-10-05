@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { matchTender, tenderFromCompraAgil, tenderFromLicitacion, tenderUrl } from './tenders';
-import { tenderOpportunityRow, tenderSignalRow } from './records';
+import { tenderFromStoredRow, tenderOpportunityRow, tenderSignalRow } from './records';
 
 const NOW = '2026-10-02T12:00:00Z';
 const compraAgil = {
@@ -57,4 +57,12 @@ test('rows and evidence keep the code, buyer and deadline; only a tender has a p
   assert.match(tenderUrl(tender)!, /DetailsAcquisition\.aspx\?idlicitacion=1509-5-LE26$/);
   const signal = tenderSignalRow(tender, { organizationId: 'org', opportunityId: 'o1' }, NOW);
   assert.deepEqual([signal.source, signal.external_id, signal.publisher], ['mercado_publico', '1509-5-LE26', 'Municipalidad de Maipú']);
+});
+
+test('a tender saved with its detail comes back the same, so the next search reuses it instead of asking again', () => {
+  const tender = tenderFromLicitacion(licitacion)!;
+  const row = tenderOpportunityRow(tender, matchTender(tender, profile, NOW)!, { organizationId: 'org', profileId: 'p1' }, NOW);
+  const again = tenderFromStoredRow({ ...row, amount: row.amount === null ? null : String(row.amount) });
+  assert.deepEqual(again, { ...tender, description: tender.description, items: tender.items.slice(0, 10) });
+  assert.deepEqual(tenderFromStoredRow({ ...row, amount: null, data: null }).items, []);
 });
