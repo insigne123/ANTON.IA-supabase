@@ -24,15 +24,15 @@ export type TutorialVideo = {
 export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'hoy', title: 'Hoy', summary: 'Lo más urgente primero, lo que te espera y tu semana en cifras.', seconds: 39, sections: ['hoy', 'primeros-pasos'] },
   { id: 'perfil', title: 'Perfil', summary: 'Cuenta qué vendes: tu oferta y tu cliente ideal guían la búsqueda y los correos.', seconds: 48, sections: ['perfil'] },
-  { id: 'buscar', title: 'Buscar prospectos', summary: 'De un punto de partida a las empresas, sus contactos y guardarlos.', seconds: 65, sections: ['buscar'] },
+  { id: 'buscar', title: 'Buscar prospectos', summary: 'De un punto de partida a las empresas, sus contactos y guardarlos.', seconds: 62, sections: ['buscar'] },
   { id: 'importar', title: 'Importar tu lista', summary: 'Sube tu Excel o CSV, revisa las columnas y los repetidos, e impórtala.', seconds: 42, sections: ['tabla', 'por-completar'] },
-  { id: 'contactos', title: 'Por completar y Por escribir', summary: 'Busca sus correos, investiga a quienes eliges y escríbeles.', seconds: 64, sections: ['por-completar', 'por-escribir', 'correo'] },
-  { id: 'firmas', title: 'Firmas y estilo', summary: 'Arma tu firma y crea estilos de correo que la IA usa al escribir.', seconds: 71, sections: ['firmas', 'correo'] },
-  { id: 'campanas', title: 'Campañas', summary: 'Elige a quiénes, escribe el correo y los seguimientos, revisa y aprueba.', seconds: 117, sections: ['campanas'] },
-  { id: 'conversaciones', title: 'Conversaciones', summary: 'Quién te respondió primero, el hilo completo y tu respuesta en el mismo hilo.', seconds: 47, sections: ['conversaciones'] },
+  { id: 'contactos', title: 'Por completar y Por escribir', summary: 'Busca sus correos, investiga a quienes eliges y escríbeles.', seconds: 61, sections: ['por-completar', 'por-escribir', 'correo'] },
+  { id: 'firmas', title: 'Firmas y estilo', summary: 'Arma tu firma y crea estilos de correo que la IA usa al escribir.', seconds: 70, sections: ['firmas', 'correo'] },
+  { id: 'campanas', title: 'Campañas', summary: 'Elige a quiénes, escribe el correo y los seguimientos, revisa y aprueba.', seconds: 115, sections: ['campanas'] },
+  { id: 'conversaciones', title: 'Conversaciones', summary: 'Quién te respondió primero, el hilo completo y tu respuesta en el mismo hilo.', seconds: 53, sections: ['conversaciones'] },
   { id: 'pipeline', title: 'Pipeline', summary: 'El panel con tus cifras y etapas, y cómo mover un lead en el tablero.', seconds: 85, sections: ['pipeline'] },
-  { id: 'oportunidades', title: 'Oportunidades', summary: 'Empresas que están contratando, licitaciones y cómo ajustar lo que buscamos.', seconds: 70, sections: ['oportunidades'], feature: 'opportunities' },
-  { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus trabajos guardados.', seconds: 51, sections: ['primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
+  { id: 'oportunidades', title: 'Oportunidades', summary: 'Empresas que están contratando, licitaciones y cómo ajustar lo que buscamos.', seconds: 75, sections: ['oportunidades'], feature: 'opportunities' },
+  { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus trabajos guardados.', seconds: 50, sections: ['primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
   { id: 'conexiones', title: 'Conexiones', summary: 'Conecta tu correo, elige la cuenta que envía y consigue tu ticket de Mercado Público.', seconds: 61, sections: ['conexiones'] },
 ];
 
