@@ -239,6 +239,8 @@ export const privacyRetentionTick = functions.scheduler.onSchedule({
 export const commercialOpportunitiesTick = functions.scheduler.onSchedule({
     schedule: '15 11 * * *',
     timeZone: 'Etc/UTC',
+    // A retry would repeat the paid JSearch queries of a run that already spent them; the next morning searches again.
+    retryCount: 0,
     timeoutSeconds: 540,
     memory: '512MiB',
     secrets: ['FIREBASE_SCHEDULER_SECRET'],

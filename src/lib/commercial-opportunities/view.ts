@@ -61,6 +61,17 @@ export function relativeTime(value: string, now = Date.now()) {
   return days === 1 ? 'ayer' : `hace ${days} días`;
 }
 
+/** The SEIA file is uploaded by hand once a month (Plan 10): after this many days the page and Cowork remind it. */
+export const SEIA_REMINDER_DAYS = 30;
+export const seiaUploadAgeDays = (uploadedAt: string, now: string | number) =>
+  Math.max(0, Math.floor(((typeof now === 'number' ? now : Date.parse(now)) - Date.parse(uploadedAt)) / 86_400_000));
+/** How many days ago the last SEIA file was uploaded, once it is time for the next one; null before that or without a file. */
+export function seiaReminderDays(uploadedAt: string | null | undefined, now: string | number = Date.now()) {
+  if (!uploadedAt || !Number.isFinite(Date.parse(uploadedAt))) return null;
+  const days = seiaUploadAgeDays(uploadedAt, now);
+  return days >= SEIA_REMINDER_DAYS ? days : null;
+}
+
 /** Roles typed one per line or separated by commas, without repeats. */
 export function parseList(value: string) {
   const items = value.split(/[,;\n]/).map(item => item.replace(/\s+/g, ' ').trim()).filter(Boolean);

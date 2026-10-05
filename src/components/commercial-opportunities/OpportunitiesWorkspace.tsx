@@ -23,11 +23,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { CHILE_REGIONS } from '@/lib/commercial-opportunities/hiring';
 import { DECISION_MAKER_TITLES } from '@/lib/commercial-opportunities/pilot';
+import type { HiringProfileSuggestion } from '@/lib/commercial-opportunities/profile-suggestion';
 import type { HiringOpportunityData, OpportunityStatus, ProjectOpportunityData, TenderOpportunityData } from '@/lib/commercial-opportunities/records';
 import { SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
 import { ticketNeedsAction, type TicketStatus } from '@/lib/commercial-opportunities/ticket';
 import {
-  FILTER_LABELS, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, lastSearch, parseList, relativeTime, sourceLabel, statusCounts,
+  FILTER_LABELS, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, lastSearch, parseList, relativeTime, seiaReminderDays, sourceLabel, statusCounts,
   type OpportunityFilter,
 } from '@/lib/commercial-opportunities/view';
 import { companySearchHref } from '@/lib/search/company-prefill';
@@ -52,11 +53,19 @@ type ProjectOpportunity = {
   id: string; title: string; owner: string | null; region: string | null; investmentUsd: number | null; presentedAt: string | null; url: string | null;
   score: number; reasons: string[]; status: OpportunityStatus; mine: boolean; firstSeenAt: string; data: ProjectOpportunityData;
 };
+/** What «Qué buscamos» holds before it is saved: a saved profile, or the suggestion «Define qué buscas» starts from. */
+type ProfileDraft = Pick<Profile, 'name' | 'offer' | 'roles' | 'regions' | 'minAds' | 'keywords' | 'unspscCodes' | 'sectors' | 'minInvestmentUsd'>;
 type Overview = {
-  profile: Profile; plan: { sources: PlanSource[]; estimateUsd: number }; month: { spentUsd: number; capUsd: number };
+  /** Null until the organization saves «Define qué buscas» (Plan 10): opening the page creates nothing. */
+  profile: Profile | null; suggestion?: HiringProfileSuggestion;
+  plan: { sources: PlanSource[]; estimateUsd: number }; month: { spentUsd: number; capUsd: number };
   tenderSearch: { ticket: boolean; ticketStatus?: TicketStatus; keywords: string[]; unspscCodes: string[] };
   opportunities: Opportunity[]; tenders: TenderOpportunity[]; projects: ProjectOpportunity[]; runs: Run[];
 };
+/** The page once there is a profile: every tab reads it. */
+type ReadyOverview = Overview & { profile: Profile };
+const hasProfile = (overview: Overview | null): overview is ReadyOverview => Boolean(overview?.profile);
+const EMPTY_DRAFT: ProfileDraft = { name: 'Qué buscamos', offer: '', roles: [], regions: [], minAds: 5, keywords: [], unspscCodes: [], sectors: [], minInvestmentUsd: null };
 type Tab = 'hiring' | 'tenders' | 'projects';
 type ProjectResult = { status: 'done'; read: number; skipped: number; matched: number; created: number };
 type HiringResult =
@@ -203,14 +212,19 @@ export function OpportunitiesWorkspace() {
         title="Oportunidades"
         description="Empresas que están contratando para los cargos de tu oferta, licitaciones públicas que calzan con ella y proyectos de inversión por partir, con la evidencia de cada una."
       >
-        <Button variant="outline" onClick={() => setEditOpen(true)} disabled={!overview}>
-          <Pencil className="h-4 w-4" aria-hidden="true" />
-          Editar búsqueda
-        </Button>
-        <Button onClick={startSearch} disabled={searchDisabled}>
-          {running ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-          {running ? (tab === 'projects' ? 'Leyendo…' : 'Buscando…') : tab === 'hiring' ? 'Buscar ahora' : tab === 'tenders' ? 'Buscar licitaciones' : 'Subir archivo del SEIA'}
-        </Button>
+        {/* Without a profile the only action is «Definir búsqueda», in the welcome below. */}
+        {overview && !overview.profile ? null : (
+          <>
+            <Button variant="outline" onClick={() => setEditOpen(true)} disabled={!overview}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Editar búsqueda
+            </Button>
+            <Button onClick={startSearch} disabled={searchDisabled}>
+              {running ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
+              {running ? (tab === 'projects' ? 'Leyendo…' : 'Buscando…') : tab === 'hiring' ? 'Buscar ahora' : tab === 'tenders' ? 'Buscar licitaciones' : 'Subir archivo del SEIA'}
+            </Button>
+          </>
+        )}
         <input ref={fileInput} type="file" accept=".csv,.xlsx,text/csv" className="hidden" aria-hidden="true" tabIndex={-1}
           onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void uploadProjects(file); }} />
       </PageHeader>
@@ -226,7 +240,19 @@ export function OpportunitiesWorkspace() {
         </Alert>
       ) : null}
 
-      {loading ? <LoadingState /> : overview ? (
+      {loading ? <LoadingState /> : overview && !hasProfile(overview) ? (
+        <>
+          <Welcome overview={overview} onStart={() => setEditOpen(true)} onGuide={() => setGuideOpen(true)} />
+          <TicketGuide open={guideOpen} onOpenChange={setGuideOpen} onSaved={updateTicket} />
+          <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.suggestion || EMPTY_DRAFT} firstTime pilot={Boolean(overview.suggestion?.pilot)}
+            onSaved={next => {
+              setOverview(current => current && { ...current, profile: next.profile, plan: next.plan });
+              void load();
+              // «Guardar y buscar»: the search of companies costs money, so it goes through the same confirmation as «Buscar ahora».
+              if (next.plan.sources.some(source => source.enabled)) setConfirmOpen(true);
+            }} />
+        </>
+      ) : hasProfile(overview) ? (
         <>
           <Tabs value={tab} onValueChange={value => { setTab(value as Tab); setFilter('new'); setQuery(''); }}>
             <TabsList className="mb-4 h-auto flex-wrap">
@@ -318,6 +344,47 @@ export function OpportunitiesWorkspace() {
   );
 }
 
+/**
+ * The page before the organization says what it looks for (Plan 10): what each source brings and one action, «Definir
+ * búsqueda». Tenders also need the person's own ticket, so its guide is one click away when it is missing.
+ */
+function Welcome({ overview, onStart, onGuide }: { overview: Overview; onStart: () => void; onGuide: () => void }) {
+  const needsTicket = ticketNeedsAction(overview.tenderSearch.ticketStatus);
+  const sources = [
+    { icon: Building2, title: 'Empresas contratando', body: 'Las que publican avisos para los cargos que cubres, con la evidencia de cada aviso.' },
+    { icon: Gavel, title: 'Licitaciones y Compra Ágil', body: 'Compras públicas abiertas que nombran lo que ofreces. Sin costo, con tu ticket de Mercado Público.' },
+    { icon: Factory, title: 'Proyectos de inversión', body: 'Proyectos del SEIA por partir, con la empresa titular. Subes el archivo una vez al mes.' },
+  ];
+  const origin = overview.suggestion?.pilot ? 'Parte con valores sugeridos para tu organización, que revisas antes de guardar.'
+    : overview.suggestion?.offer ? 'Parte con la oferta de tu Perfil.' : 'Toma un par de minutos.';
+  return (
+    <section aria-labelledby="opportunities-welcome-title" className="rounded-xl border border-border/70 bg-card p-5 shadow-sm sm:p-6">
+      <h2 id="opportunities-welcome-title" className="text-lg font-semibold text-foreground">Define qué buscas</h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+        Cuéntanos qué ofreces, los cargos que cubres y cómo nombran tu servicio los organismos públicos. Con eso buscamos cada mañana a quién ofrecérselo.
+      </p>
+      <ul className="mt-5 grid gap-3 md:grid-cols-3">
+        {sources.map(source => (
+          <li key={source.title} className="rounded-lg border border-border/60 p-3">
+            <p className="flex items-center gap-2 text-sm font-medium text-foreground"><source.icon className="h-4 w-4 text-primary" aria-hidden="true" />{source.title}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{source.body}</p>
+            {source.icon === Gavel && needsTicket ? (
+              <button type="button" onClick={onGuide}
+                className="mt-2 inline-flex items-center gap-1 rounded text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />Cómo conseguir tu ticket
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-5 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-4">
+        <Button onClick={onStart}><Search className="h-4 w-4" aria-hidden="true" />Definir búsqueda</Button>
+        <p className="text-xs text-muted-foreground">{origin} Nada se guarda hasta que lo confirmes.</p>
+      </div>
+    </section>
+  );
+}
+
 function LoadingState() {
   return (
     <div aria-busy="true" aria-label="Cargando oportunidades">
@@ -328,7 +395,7 @@ function LoadingState() {
   );
 }
 
-function SearchSummary({ overview, running }: { overview: Overview; running: boolean }) {
+function SearchSummary({ overview, running }: { overview: ReadyOverview; running: boolean }) {
   const { profile, plan, month } = overview;
   const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.hiring.includes(run.source)));
   const missing = plan.sources.filter(source => !source.enabled && source.missing);
@@ -482,7 +549,7 @@ function OpportunityCard({ item, minAds, busy, onStatus }: { item: Opportunity; 
 }
 
 function ListEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }: {
-  overview: Overview; filter: OpportunityFilter; query: string; searchDisabled: boolean; onSearch: () => void; onEdit: () => void;
+  overview: ReadyOverview; filter: OpportunityFilter; query: string; searchDisabled: boolean; onSearch: () => void; onEdit: () => void;
 }) {
   if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin empresas con ese nombre" description="Prueba con otra parte del nombre o cambia de pestaña." />;
   if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguna" description="Usa «Me interesa» en las empresas que quieras trabajar: quedan a tu nombre y aparecen aquí." />;
@@ -508,7 +575,7 @@ function ListEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit }
 }
 
 function TenderSummary({ overview, running, onTicketChange, onOpenGuide }: {
-  overview: Overview; running: boolean; onTicketChange: (status: TicketStatus) => void; onOpenGuide: () => void;
+  overview: ReadyOverview; running: boolean; onTicketChange: (status: TicketStatus) => void; onOpenGuide: () => void;
 }) {
   const { tenderSearch, profile } = overview;
   const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.tenders.includes(run.source)));
@@ -620,7 +687,7 @@ function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: b
 }
 
 function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit, onGuide }: {
-  overview: Overview; filter: OpportunityFilter; query: string; searchDisabled: boolean; onSearch: () => void; onEdit: () => void; onGuide: () => void;
+  overview: ReadyOverview; filter: OpportunityFilter; query: string; searchDisabled: boolean; onSearch: () => void; onEdit: () => void; onGuide: () => void;
 }) {
   if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin licitaciones con ese texto" description="Prueba con otra palabra del nombre o del organismo." />;
   if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguna" description="Usa «Me interesa» en las licitaciones que quieras preparar: quedan a tu nombre y aparecen aquí." />;
@@ -651,10 +718,11 @@ function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit
   );
 }
 
-function ProjectSummary({ overview, running, onUpload }: { overview: Overview; running: boolean; onUpload: () => void }) {
+function ProjectSummary({ overview, running, onUpload }: { overview: ReadyOverview; running: boolean; onUpload: () => void }) {
   const { profile } = overview;
   const last = lastSearch(overview.runs.filter(run => TAB_SOURCES.projects.includes(run.source)));
   const sectors = SEIA_SECTORS.filter(sector => profile.sectors.includes(sector.id)).map(sector => sector.label);
+  const reminderDays = last ? seiaReminderDays(last.at) : null;
   return (
     <section aria-label="Qué buscamos en el SEIA" className="grid gap-4 rounded-xl border border-border/70 bg-card p-4 shadow-sm md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-2">
@@ -675,6 +743,11 @@ function ProjectSummary({ overview, running, onUpload }: { overview: Overview; r
           {running ? <p className="mt-0.5 flex items-center gap-1.5 text-sm text-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Leyendo…</p>
             : last ? <p className="mt-0.5 text-sm text-foreground">{relativeTime(last.at)} · {last.status === 'failed' ? 'falló' : `${last.fetched.toLocaleString('es-CL')} proyectos leídos`}</p>
               : <p className="mt-0.5 text-sm text-foreground">Aún no subes uno</p>}
+          {!running && reminderDays !== null ? (
+            <p className="mt-2 rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">
+              Hace {reminderDays} días que no subes proyectos del SEIA. Descarga el archivo del mes y súbelo para ver los proyectos nuevos.
+            </p>
+          ) : null}
         </div>
         <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
           <li>Abre el <a href={SEIA_MAP_URL} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline-offset-4 hover:underline">mapa de proyectos del SEIA<span className="sr-only"> (se abre en otra pestaña)</span></a> y filtra si quieres.</li>
@@ -751,7 +824,7 @@ function ProjectCard({ item, busy, onStatus }: { item: ProjectOpportunity; busy:
 }
 
 function ProjectEmpty({ overview, filter, query, disabled, onUpload }: {
-  overview: Overview; filter: OpportunityFilter; query: string; disabled: boolean; onUpload: () => void;
+  overview: ReadyOverview; filter: OpportunityFilter; query: string; disabled: boolean; onUpload: () => void;
 }) {
   if (query.trim()) return <EmptyState icon={Search} headingLevel="h3" title="Sin proyectos con ese texto" description="Prueba con otra palabra del nombre o del titular." />;
   if (filter === 'interested') return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguno" description="Usa «Me interesa» en los proyectos que quieras seguir: quedan a tu nombre y aparecen aquí." />;
@@ -766,7 +839,7 @@ function ProjectEmpty({ overview, filter, query, disabled, onUpload }: {
 }
 
 function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
-  open: boolean; onOpenChange: (open: boolean) => void; overview: Overview; overCap: boolean; onConfirm: () => void;
+  open: boolean; onOpenChange: (open: boolean) => void; overview: ReadyOverview; overCap: boolean; onConfirm: () => void;
 }) {
   const { plan, month } = overview;
   return (
@@ -802,8 +875,12 @@ function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
   );
 }
 
-function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
-  open: boolean; onOpenChange: (open: boolean) => void; profile: Profile;
+function ProfileSheet({ open, onOpenChange, profile, firstTime = false, pilot = false, onSaved }: {
+  open: boolean; onOpenChange: (open: boolean) => void; profile: ProfileDraft;
+  /** «Define qué buscas»: the first save creates the profile and goes on to search. */
+  firstTime?: boolean;
+  /** The values come from the pilot's suggestion, to be reviewed before saving. */
+  pilot?: boolean;
   onSaved: (next: { profile: Profile; plan: Overview['plan'] }) => void;
 }) {
   const { toast } = useToast();
@@ -846,7 +923,7 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
       }));
       onSaved(next);
       onOpenChange(false);
-      toast({ title: 'Búsqueda guardada', description: 'La próxima búsqueda usa estos cargos y regiones.' });
+      toast({ title: 'Búsqueda guardada', description: firstTime ? 'Desde mañana se busca sola cada mañana con estos criterios.' : 'La próxima búsqueda usa estos cargos y regiones.' });
     } catch (failure) {
       setProblem(failure instanceof Error ? failure.message : 'No se pudo guardar.');
     } finally {
@@ -858,8 +935,13 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle>Qué buscamos</SheetTitle>
-          <SheetDescription>Los cargos definen qué avisos se buscan; las regiones y el tamaño suben el calce.</SheetDescription>
+          <SheetTitle>{firstTime ? 'Define qué buscas' : 'Qué buscamos'}</SheetTitle>
+          <SheetDescription>
+            {!firstTime ? 'Los cargos definen qué avisos se buscan; las regiones y el tamaño suben el calce.'
+              : pilot ? 'Partimos de valores sugeridos para tu organización. Revísalos y ajústalos: nada se guarda hasta que pulses «Guardar y buscar».'
+                : profile.offer ? 'Partimos de la oferta de tu Perfil. Agrega los cargos que cubres y cómo nombran tu servicio los organismos públicos.'
+                  : 'Cuenta qué ofreces, los cargos que cubres y cómo nombran tu servicio los organismos públicos. Nada se guarda hasta que lo confirmes.'}
+          </SheetDescription>
         </SheetHeader>
         <form className="mt-4 flex flex-1 flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
           <div className="space-y-1.5">
@@ -921,7 +1003,7 @@ function ProfileSheet({ open, onOpenChange, profile, onSaved }: {
           {problem ? <p role="alert" className="text-sm text-destructive">{problem}</p> : null}
           <SheetFooter className="mt-auto gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-            <Button type="submit" disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}Guardar</Button>
+            <Button type="submit" disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{firstTime ? 'Guardar y buscar' : 'Guardar'}</Button>
           </SheetFooter>
         </form>
       </SheetContent>

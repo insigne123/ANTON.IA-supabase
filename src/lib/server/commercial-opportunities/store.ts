@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { GRUPOEXPRO_PILOT, GRUPOEXPRO_TENDER_KEYWORDS } from '@/lib/commercial-opportunities/pilot';
-import { PILOT_SEIA_SECTORS, SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
+import { suggestedHiringProfile } from '@/lib/commercial-opportunities/profile-suggestion';
+import { SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
 import {
   HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, tenderFromStoredRow, type HiringOpportunityData, type OpportunityStatus,
   type ProjectOpportunityData, type StoredTenderRow, type TenderOpportunityData,
@@ -9,6 +9,7 @@ import {
 import type { Tender } from '@/lib/commercial-opportunities/tenders';
 import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { profileOffer, readOrganizationOffer } from '@/lib/server/suplia-context';
 import type { HiringSearchProfile, HiringStore, HiringSyncSource } from './sync';
 import type { TenderStore } from './tender-sync';
 import type { ProjectStore } from './project-import';
@@ -52,22 +53,31 @@ export async function findHiringProfile(client: SupabaseClient, scope: Scope) {
   return found.data ? toProfile(found.data as ProfileRow) : null;
 }
 
-/** The organization's «contratando» profile; the first time, the pilot's starting point (editable in the page). */
-export async function ensureHiringProfile(client: SupabaseClient, scope: Scope) {
-  const read = () => readHiringProfile(client, scope);
-  const found = await read();
-  if (found.error) fail('leer el perfil de búsqueda', found.error);
-  if (found.data) return toProfile(found.data as ProfileRow);
+/**
+ * What «Define qué buscas» starts with while the organization has no profile (Plan 10): GrupoExpro's pilot values for
+ * GrupoExpro, and for anyone else their own offer from «Perfil». Reads only: the profile is created when the person saves.
+ */
+export async function readHiringProfileSuggestion(client: SupabaseClient, scope: Scope) {
+  const [organization, person] = await Promise.all([
+    client.from('organizations').select('name').eq('id', scope.organizationId).maybeSingle(),
+    client.from('profiles').select('*').eq('id', scope.userId).maybeSingle(),
+  ]);
+  const offer = profileOffer((person.data as Record<string, unknown> | null) || null) || await readOrganizationOffer(client, scope.organizationId);
+  return suggestedHiringProfile({ organizationName: (organization.data as { name?: string } | null)?.name ?? null, offer });
+}
+
+/** The organization's first profile, from what the person saved in «Define qué buscas». */
+export async function createHiringProfile(client: SupabaseClient, scope: Scope, patch: z.infer<typeof hiringProfilePatchSchema>) {
   const created = await client.from('commercial_opportunity_profiles').insert({
-    organization_id: scope.organizationId, created_by: scope.userId, name: GRUPOEXPRO_PILOT.name, offer: GRUPOEXPRO_PILOT.offer,
-    roles: [...GRUPOEXPRO_PILOT.roles], regions: [...GRUPOEXPRO_PILOT.regions], min_ads: GRUPOEXPRO_PILOT.minAds,
-    keywords: [...GRUPOEXPRO_TENDER_KEYWORDS], seia_sectors: [...PILOT_SEIA_SECTORS], min_investment_usd: 10_000_000, sources: ALL_SOURCES,
+    organization_id: scope.organizationId, created_by: scope.userId, name: patch.name, offer: patch.offer, roles: patch.roles,
+    regions: patch.regions, min_ads: patch.minAds, keywords: patch.keywords ?? [], unspsc_codes: [...new Set(patch.unspscCodes ?? [])],
+    seia_sectors: [...new Set(patch.sectors ?? [])], min_investment_usd: patch.minInvestmentUsd ?? null, sources: ALL_SOURCES,
   }).select(PROFILE_COLUMNS).single();
   if (created.data) return toProfile(created.data as ProfileRow);
-  // Two tabs opening the page at once: the other one created it.
-  const again = await read();
-  if (again.error || !again.data) fail('crear el perfil de búsqueda', created.error || again.error);
-  return toProfile(again.data as ProfileRow);
+  // Two tabs saving at once: the other one created it, so this save updates it.
+  const existing = await findHiringProfile(client, scope);
+  if (!existing) fail('crear el perfil de búsqueda', created.error);
+  return updateHiringProfile(client, scope, existing.id, patch);
 }
 
 const list = (max: number, length: number) => z.array(z.string().transform(value => value.replace(/\s+/g, ' ').trim()).pipe(z.string().min(2).max(length)))
@@ -134,16 +144,35 @@ export async function setOpportunityStatus(client: SupabaseClient, scope: Scope,
 }
 
 export type OpportunityRunView = { id: string; source: HiringSyncSource; status: string; startedAt: string; finishedAt: string | null; fetched: number; created: number; updated: number; costUsd: number; error: string | null };
+const RUN_COLUMNS = 'id,source,status,started_at,finished_at,fetched,created,updated,cost_estimate_usd,error';
+const RUN_SOURCES = ['jsearch', 'linkedin', 'mercado_publico', 'compra_agil', 'seia'];
+const toRun = (row: Record<string, any>): OpportunityRunView => ({
+  id: row.id, source: row.source, status: row.status, startedAt: row.started_at, finishedAt: row.finished_at, fetched: row.fetched,
+  created: row.created, updated: row.updated, costUsd: Number(row.cost_estimate_usd) || 0, error: row.error,
+});
+/**
+ * The last 12 runs, plus the last one of each source even when it is older (Plan 10): the daily sync writes three runs a
+ * day, so the SEIA upload of the month fell out of the last 12 in four days and the page said there was none.
+ */
 export async function recentRuns(client: SupabaseClient, scope: Scope) {
-  const { data, error } = await client.from('commercial_opportunity_runs')
-    .select('id,source,status,started_at,finished_at,fetched,created,updated,cost_estimate_usd,error')
-    .eq('organization_id', scope.organizationId)
-    .order('started_at', { ascending: false }).limit(12);
+  const runs = () => client.from('commercial_opportunity_runs').select(RUN_COLUMNS).eq('organization_id', scope.organizationId);
+  const [recent, ...latest] = await Promise.all([
+    runs().order('started_at', { ascending: false }).limit(12),
+    ...RUN_SOURCES.map(source => runs().eq('source', source).order('started_at', { ascending: false }).limit(1)),
+  ]);
+  const failed = [recent, ...latest].find(result => result.error);
+  if (failed) fail('leer las búsquedas', failed.error);
+  const byId = new Map<string, Record<string, any>>();
+  for (const row of [...(recent.data || []), ...latest.flatMap(result => result.data || [])]) byId.set(String((row as { id: string }).id), row as Record<string, any>);
+  return [...byId.values()].map(toRun).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+}
+
+/** The last run of one source of the organization, or null. */
+export async function lastRunOf(client: SupabaseClient, scope: Scope, source: string) {
+  const { data, error } = await client.from('commercial_opportunity_runs').select(RUN_COLUMNS)
+    .eq('organization_id', scope.organizationId).eq('source', source).order('started_at', { ascending: false }).limit(1);
   if (error) fail('leer las búsquedas', error);
-  return (data || []).map((row: Record<string, any>): OpportunityRunView => ({
-    id: row.id, source: row.source, status: row.status, startedAt: row.started_at, finishedAt: row.finished_at, fetched: row.fetched,
-    created: row.created, updated: row.updated, costUsd: Number(row.cost_estimate_usd) || 0, error: row.error,
-  }));
+  return data?.[0] ? toRun(data[0] as Record<string, any>) : null;
 }
 
 export async function monthSpentUsd(client: SupabaseClient, scope: Scope, since: string) {
