@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/sheet';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 import { activityService } from '@/lib/services/activity-service';
-import type { Activity } from '@/lib/crm-types';
+import { PIPELINE_STAGES, type Activity } from '@/lib/crm-types';
 import { CommercialTimeline } from '@/components/commercial/CommercialTimeline';
 import { ContactabilityStatusCard } from '@/components/commercial/ContactabilityStatusCard';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +46,7 @@ import {
 } from '@/lib/services/lead-collaboration-service';
 import Link from 'next/link';
 import { formatDateTime } from '@/lib/dates';
+import { flowStage } from '@/lib/pipeline-flow';
 import { DEAL_CURRENCIES, DEAL_CURRENCY_LABEL, formatDealValue, hasDealValue, isDealCurrency, parseDealValue, type DealCurrency } from '@/lib/crm-deal-values';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 
@@ -169,11 +170,8 @@ function getAISuggestion(lead: UnifiedRow, activities: Activity[]): string {
     return `Revisa el historial de actividad y decide el próximo paso según el contexto del lead.`;
 }
 
-function humanizeValue(value: string) {
-    return value
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (character) => character.toUpperCase());
-}
+/** The stage as the board names it («Reunión», «Ganado»), never its internal id («meeting»). */
+const stageLabel = (lead: UnifiedRow) => PIPELINE_STAGES.find((stage) => stage.id === flowStage(lead))?.label || 'Nuevos';
 
 const CONTACT_STATE_LABELS: Record<LeadContactState, string> = {
     uncontacted: 'Sin contactar',
@@ -707,7 +705,7 @@ export function LeadDetailDrawer({ lead, open, onOpenChange, dealValues = false,
                                       </Link>
                                     </Button>
                                 )}
-                                <Badge variant="secondary">{humanizeValue(String(lead.stage || 'inbox'))}</Badge>
+                                <Badge variant="secondary">{stageLabel(lead)}</Badge>
                             </div>
                         </div>
                     </div>

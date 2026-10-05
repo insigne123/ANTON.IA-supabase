@@ -14,6 +14,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { DocumentTitle } from '@/components/document-title';
 import Link from 'next/link';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { useCrmDealValues } from '@/hooks/use-crm-deal-values';
+import { stageDates } from '@/lib/crm-deal-values';
 import { useToast } from '@/hooks/use-toast';
 import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
 import { stageDecisionNotice, type CrmStageSuggestion } from '@/lib/crm-stage-suggestions';
@@ -24,6 +26,8 @@ import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
 export default function CRMPage() {
     const { toast } = useToast();
+    // The value of each deal (Plan 11, PR 4c), behind CRM_DEAL_VALUES_ENABLED; null until the app knows.
+    const dealValues = useCrmDealValues();
     const [rows, setRows] = useState<UnifiedRow[]>([]);
     const rowsRef = useRef<UnifiedRow[]>([]);
     const [loading, setLoading] = useState(true);
@@ -63,7 +67,7 @@ export default function CRMPage() {
             setPartialError(null);
         }
         try {
-            const { rows: data, failed } = await loadUnifiedRows();
+            const { rows: data, failed } = await loadUnifiedRows({ dealValues: dealValues === true });
             // The automatic refresh keeps the last good render when a read fails, instead of emptying the board.
             if (silent && failed.length) return;
             // Nothing could be read: that is an error, not an empty pipeline.
@@ -81,7 +85,7 @@ export default function CRMPage() {
         } finally {
             if (!silent) setLoading(false);
         }
-    }, []);
+    }, [dealValues]);
 
     // Stage suggestions (Plan 5, PR-10): events propose, the person confirms. If they cannot be read, the board still works.
     const loadSuggestions = useCallback(async () => {
@@ -95,9 +99,14 @@ export default function CRMPage() {
     }, []);
 
     useEffect(() => {
+        // Read the rows once it is known whether they carry the value of each deal.
+        if (dealValues === null) return;
         void loadData();
+    }, [dealValues, loadData]);
+
+    useEffect(() => {
         void loadSuggestions();
-    }, [loadData, loadSuggestions]);
+    }, [loadSuggestions]);
 
     // Automatic: while the page is visible and nobody is moving a lead, it rereads every minute and when the person comes
     // back to the tab, so the panel follows sends, replies and accepted suggestions without a reload.
@@ -133,19 +142,23 @@ export default function CRMPage() {
     }
 
     async function handleLeadMove(leadId: string, newStage: PipelineStage) {
-        const previousStage = rowsRef.current.find((row) => row.gid === leadId)?.stage;
+        const previous = rowsRef.current.find((row) => row.gid === leadId);
+        const previousStage = previous?.stage;
         if (previousStage === newStage || movingLeadIds.has(leadId)) return;
+        // With deal values, the dates of the move as the database writes them, so «Ganado» counts it at once.
+        const moved = dealValues === true && previous ? { stage: newStage, ...stageDates(previous, newStage) } : { stage: newStage };
+        const restored = previous ? { stage: previousStage, stageChangedAt: previous.stageChangedAt, wonAt: previous.wonAt, lostAt: previous.lostAt } : { stage: previousStage };
 
         setMovingLeadIds((current) => new Set(current).add(leadId));
-        rowsRef.current = rowsRef.current.map((row) => row.gid === leadId ? { ...row, stage: newStage } : row);
-        setRows((current) => current.map((row) => row.gid === leadId ? { ...row, stage: newStage } : row));
+        rowsRef.current = rowsRef.current.map((row) => row.gid === leadId ? { ...row, ...moved } : row);
+        setRows((current) => current.map((row) => row.gid === leadId ? { ...row, ...moved } : row));
 
         try {
             await unifiedSheetService.setCustom(leadId, { stage: newStage });
         } catch (error) {
             console.error('[crm] stage save error', error);
-            rowsRef.current = rowsRef.current.map((row) => row.gid === leadId ? { ...row, stage: previousStage } : row);
-            setRows((current) => current.map((row) => row.gid === leadId ? { ...row, stage: previousStage } : row));
+            rowsRef.current = rowsRef.current.map((row) => row.gid === leadId ? { ...row, ...restored } : row);
+            setRows((current) => current.map((row) => row.gid === leadId ? { ...row, ...restored } : row));
             toast({
                 variant: 'destructive',
                 title: 'No se guardó el cambio de etapa',
@@ -243,7 +256,7 @@ export default function CRMPage() {
                     />
                 ) : view !== 'board' ? (
                     <div className="h-full overflow-y-auto">
-                        <PipelineDashboard rows={rows} onOpenStage={setOpenStage} pending={pendingByStage} refreshedAt={refreshedAt} />
+                        <PipelineDashboard rows={rows} onOpenStage={setOpenStage} pending={pendingByStage} refreshedAt={refreshedAt} dealValues={dealValues === true} />
                     </div>
                 ) : (
                     <KanbanBoard
@@ -281,6 +294,8 @@ export default function CRMPage() {
                 lead={selectedLead}
                 open={Boolean(selectedLead)}
                 onOpenChange={(open) => { if (!open) setSelectedLeadId(null); }}
+                dealValues={dealValues === true}
+                onChanged={(gid, patch) => setRows((current) => current.map((row) => row.gid === gid ? { ...row, ...patch } : row))}
             />
         </div>
     );

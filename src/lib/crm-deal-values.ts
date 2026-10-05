@@ -125,3 +125,13 @@ export function sumDealValues(rows: UnifiedRow[]): DealSum | null {
   const mine = valued.filter(row => currencyOf(row) === currency);
   return { currency, value: sum(mine), deals: mine.length, otherCurrencies: valued.length - mine.length };
 }
+
+/**
+ * The dates the database writes when a lead changes stage (trigger crm_stage_dates of the migration), applied right
+ * away to the row on screen so the panel counts a deal that was just won without waiting for the next read.
+ */
+export function stageDates(row: Pick<UnifiedRow, 'wonAt' | 'lostAt'>, stage: PipelineStage, now = new Date().toISOString()) {
+  if (stage === 'closed_won') return { stageChangedAt: now, wonAt: row.wonAt || now, lostAt: null };
+  if (stage === 'closed_lost') return { stageChangedAt: now, wonAt: null, lostAt: row.lostAt || now };
+  return { stageChangedAt: now, wonAt: null, lostAt: null };
+}

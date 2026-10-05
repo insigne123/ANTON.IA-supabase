@@ -124,11 +124,19 @@ export const unifiedSheetService = {
     // Helper to fetch all custom data at once (e.g. for initial load of a page)
     // This is more efficient than calling getCustom for each row.
     // `strict` throws when the read fails, for screens that must tell an error from an empty list.
-    async getAllCustom(options: { strict?: boolean } = {}): Promise<Record<string, CustomData>> {
+    async getAllCustom(options: { strict?: boolean; dealValues?: boolean } = {}): Promise<Record<string, CustomData>> {
         try {
-            const { data, error } = await supabase
+            const columns = 'id, stage, owner, notes, next_action, next_action_type, next_action_due_at, autopilot_status, last_autopilot_event, meeting_link, updated_at';
+            // The value of each deal (Plan 11, PR 4c) only when CRM_DEAL_VALUES_ENABLED asks for it.
+            const read = (deal: boolean) => supabase
                 .from(TABLE_NAME)
-                .select('id, stage, owner, notes, next_action, next_action_type, next_action_due_at, autopilot_status, last_autopilot_event, meeting_link, updated_at');
+                .select(deal ? `${columns}, deal_value, deal_currency, stage_changed_at, won_at, lost_at` : columns);
+            let { data, error } = await read(Boolean(options.dealValues));
+            // The switch went on before the migration that adds those columns (42703: no such column): read without them.
+            if (error && options.dealValues && error.code === '42703') {
+                console.warn('[unified-sheet-service] getAllCustom: the deal value columns are missing, reading without them');
+                ({ data, error } = await read(false));
+            }
 
             if (error) {
                 console.error('[unified-sheet-service] getAllCustom error:', error);
@@ -148,6 +156,13 @@ export const unifiedSheetService = {
                     autopilotStatus: row.autopilot_status,
                     lastAutopilotEvent: row.last_autopilot_event,
                     meetingLink: row.meeting_link,
+                    ...(options.dealValues && 'deal_value' in row ? {
+                        dealValue: row.deal_value === null ? null : Number(row.deal_value),
+                        dealCurrency: row.deal_currency ?? null,
+                        stageChangedAt: row.stage_changed_at ?? null,
+                        wonAt: row.won_at ?? null,
+                        lostAt: row.lost_at ?? null,
+                    } : {}),
                     updated_at: row.updated_at
                 };
             });

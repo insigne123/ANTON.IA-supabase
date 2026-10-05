@@ -17,6 +17,7 @@ const checks = [
   ['scripts/test-stage-suggestions-ui.mjs'],
   ['scripts/test-team-lock-ui.mjs'],
   ['scripts/test-pipeline-dashboard-ui.mjs'],
+  ['scripts/test-pipeline-deal-values-ui.mjs'],
   ['scripts/test-default-sender-ui.mjs'],
   ['scripts/test-cowork-guide-ui.mjs'],
   ['scripts/test-conversation-close-ui.mjs'],

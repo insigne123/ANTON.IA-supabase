@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { dealTotals, dealTrendText, formatDealValue, formatDealValueShort, parseDealValue, sumDealValues } from './crm-deal-values';
+import { dealTotals, dealTrendText, formatDealValue, formatDealValueShort, parseDealValue, stageDates, sumDealValues } from './crm-deal-values';
 import type { UnifiedRow } from './unified-sheet-types';
 
 const NOW = Date.parse('2026-10-05T12:00:00Z');
@@ -76,4 +76,15 @@ test('a column of the board adds its deals in the currency most of them use', ()
     row('c', { stage: 'meeting', dealValue: 3_000, dealCurrency: 'USD' }),
     row('d', { stage: 'meeting', dealValue: 0, dealCurrency: 'USD' }),
   ]), { currency: 'CLP', value: 3_500_000.5, deals: 2, otherCurrencies: 1 });
+});
+
+test('a move on the board dates the change as the database does, so a deal just won counts at once', () => {
+  const at = '2026-10-05T12:00:00.000Z';
+  assert.deepEqual(stageDates({}, 'closed_won', at), { stageChangedAt: at, wonAt: at, lostAt: null });
+  assert.deepEqual(stageDates({ lostAt: daysAgo(3) }, 'closed_won', at), { stageChangedAt: at, wonAt: at, lostAt: null });
+  assert.deepEqual(stageDates({}, 'closed_lost', at), { stageChangedAt: at, wonAt: null, lostAt: at });
+  assert.deepEqual(stageDates({ wonAt: daysAgo(3) }, 'meeting', at), { stageChangedAt: at, wonAt: null, lostAt: null });
+  const won = row('w', { stage: 'meeting', dealValue: 900_000 });
+  const moved = { ...won, stage: 'closed_won', ...stageDates(won, 'closed_won', new Date(NOW).toISOString()) };
+  assert.equal(dealTotals([moved], { days: 30, now: NOW })?.won, 900_000);
 });
