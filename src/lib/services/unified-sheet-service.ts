@@ -6,7 +6,8 @@ import { loadColumns, saveColumns } from '@/lib/unified-sheet-storage';
 // Table: unified_crm_data
 // Columns: id (text, PK), stage (text), owner (text), notes (text), updated_at (timestamptz)
 
-export type CustomData = Partial<Pick<UnifiedRow, 'stage' | 'owner' | 'notes' | 'nextAction' | 'nextActionType' | 'nextActionDueAt' | 'autopilotStatus' | 'lastAutopilotEvent' | 'meetingLink'>> & { updated_at?: string };
+export type CustomData = Partial<Pick<UnifiedRow, 'stage' | 'owner' | 'notes' | 'nextAction' | 'nextActionType' | 'nextActionDueAt' | 'autopilotStatus' | 'lastAutopilotEvent' | 'meetingLink'
+    | 'dealValue' | 'dealCurrency' | 'stageChangedAt' | 'wonAt' | 'lostAt'>> & { updated_at?: string };
 
 const TABLE_NAME = 'unified_crm_data';
 
@@ -167,6 +168,9 @@ function mapCustomPatchToDb(patch: CustomData) {
     if (patch.autopilotStatus !== undefined) out.autopilot_status = patch.autopilotStatus;
     if (patch.lastAutopilotEvent !== undefined) out.last_autopilot_event = patch.lastAutopilotEvent;
     if (patch.meetingLink !== undefined) out.meeting_link = patch.meetingLink;
+    // The value of the deal (Plan 11, PR 4c). When it changed stage, was won or lost is written by the database itself.
+    if (patch.dealValue !== undefined) out.deal_value = patch.dealValue;
+    if (patch.dealCurrency !== undefined) out.deal_currency = patch.dealCurrency;
     if (patch.updated_at !== undefined) out.updated_at = patch.updated_at;
     return out;
 }

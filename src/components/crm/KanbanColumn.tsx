@@ -3,6 +3,7 @@
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 
+import { formatDealValueShort, formatDealValue, sumDealValues } from '@/lib/crm-deal-values';
 import type { PipelineStage } from '@/lib/crm-types';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 import { LeadCard } from './LeadCard';
@@ -40,6 +41,8 @@ export function KanbanColumn({
     onLeadMove,
 }: Props) {
     const { setNodeRef, isOver } = useDroppable({ id });
+    // What the column adds up, once its leads have a deal value (Plan 11, PR 4c).
+    const total = sumDealValues(leads);
 
     return (
         <section
@@ -55,7 +58,15 @@ export function KanbanColumn({
                     <span className={`h-2 w-2 shrink-0 rounded-full ${STAGE_ACCENT[id]}`} aria-hidden="true" />
                     <h2 id={`stage-${id}`} className={`truncate text-sm ${closed ? 'font-medium text-muted-foreground' : 'font-semibold'}`}>{title}</h2>
                 </div>
-                <span className="min-w-6 rounded-full bg-background px-1.5 py-0.5 text-center text-xs tabular-nums text-muted-foreground" aria-label={`${count} leads`}>{count}</span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                    {total && (
+                        <span className="text-xs font-medium tabular-nums text-foreground"
+                            title={`${formatDealValue(total.value, total.currency)} en ${total.deals} ${total.deals === 1 ? 'negocio' : 'negocios'}${total.otherCurrencies ? ` (y ${total.otherCurrencies} en otra moneda, aparte)` : ''}`}>
+                            <span className="sr-only">Suma: </span>{formatDealValueShort(total.value, total.currency)}
+                        </span>
+                    )}
+                    <span className="min-w-6 rounded-full bg-background px-1.5 py-0.5 text-center text-xs tabular-nums text-muted-foreground" aria-label={`${count} leads`}>{count}</span>
+                </div>
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">

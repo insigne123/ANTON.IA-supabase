@@ -43,6 +43,13 @@ export interface UnifiedRow {
   autopilotStatus?: string | null;
   lastAutopilotEvent?: string | null;
   meetingLink?: string | null;
+  /** The value of the deal and its currency, and when it changed stage or was won or lost (Plan 11, PR 4c, behind
+   *  CRM_DEAL_VALUES_ENABLED: read only once the migration that adds them is applied). */
+  dealValue?: number | null;
+  dealCurrency?: string | null;
+  stageChangedAt?: string | null;
+  wonAt?: string | null;
+  lostAt?: string | null;
 }
 
 export type ColumnKey =
