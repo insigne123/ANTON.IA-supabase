@@ -59,6 +59,9 @@ test('canonical route passes only server-derived target and never sends on unres
       '@/lib/server/privacy-subject-data': { isEmailSuppressedForScope: async () => false },
       '@/lib/unsubscribe-helpers': { generateUnsubscribeLink: () => 'https://example.test/unsubscribe?test' },
       '@/lib/email-outbound': { prepareOutboundEmail: () => ({ html: '<p>Approved</p>', text: 'Approved' }), validateOutboundEmail: () => ({ ok: true }) },
+      '@/lib/server/email-signature': { readSendSignature: async (_client: unknown, userId: string, signatureProvider: string) => {
+        assert.equal(userId, 'owner'); assert.equal(signatureProvider, provider === 'google' ? 'gmail' : 'outlook'); return null;
+      } },
       '@/lib/services/token-service': { tokenService: { getToken: async () => ({ refresh_token: 'fake' }) } },
       '@/lib/server-auth-helpers': { refreshGoogleToken: async () => ({ access_token: 'fake' }), refreshMicrosoftToken: async () => ({ access_token: 'fake' }) },
       '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({}) },

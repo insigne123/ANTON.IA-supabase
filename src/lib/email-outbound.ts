@@ -4,6 +4,12 @@ export type PreparedOutboundEmail = {
   warnings: string[];
 };
 
+/** The person's email signature (Plan 11, PR 3a), already sanitized by the server. `separator: false` leaves out the
+ * «-- » line before it in the plain-text version, as chosen in «Firmas y estilo». */
+export type OutboundSignature = { html: string; text: string; separator?: boolean };
+/** Marks the signature block, so a body prepared twice (the senders prepare again) never carries it twice. */
+export const SIGNATURE_MARKER = 'data-anton-signature';
+
 function escapeHtml(text: string) {
   return String(text || '')
     .replace(/&/g, '&amp;')
@@ -68,6 +74,8 @@ export function prepareOutboundEmail(input: {
   html?: string;
   text?: string;
   unsubscribeUrl?: string | null;
+  /** Goes right after the body and before the unsubscribe footer. */
+  signature?: OutboundSignature | null;
 }): PreparedOutboundEmail {
   const warnings: string[] = [];
   let html = String(input.html || '').trim();
@@ -86,6 +94,15 @@ export function prepareOutboundEmail(input: {
     html = '<div></div>';
     text = '';
     warnings.push('Email body was empty; generated a minimal body.');
+  }
+
+  const signature = input.signature;
+  if (signature && (signature.html || signature.text) && !html.includes(SIGNATURE_MARKER)) {
+    const block = `<div ${SIGNATURE_MARKER}="1" style="margin-top:16px;">${signature.html || textToHtml(signature.text)}</div>`;
+    if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, `${block}</body>`);
+    else html += block;
+    const signatureText = (signature.text || stripHtmlToText(signature.html)).trim();
+    if (signatureText && !text.includes(signatureText)) text += `\n\n${signature.separator === false ? '' : '-- \n'}${signatureText}`;
   }
 
   if (unsubscribeUrl) {

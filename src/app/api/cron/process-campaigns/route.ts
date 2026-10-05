@@ -6,6 +6,7 @@ import { evaluateLeadForReactivation, getLeadLastContactAt, normalizeCampaignSet
 import { buildCampaignPersonalization } from '@/lib/server/campaign-reconnection';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { prepareOutboundEmail } from '@/lib/email-outbound';
+import { readSendSignature } from '@/lib/server/email-signature';
 import { findPriorReplyMatch, hasLeadReplied } from '@/lib/contact-history-guard';
 import { decryptTokenRecords, encryptStoredToken } from '@/lib/server/token-crypto';
 import { syncRepliesForOrganization } from '@/lib/server/reply-sync';
@@ -585,7 +586,8 @@ export async function GET(req: NextRequest) {
                         }
 
                         const unsubscribeUrl = generateUnsubscribeLink(lead.email, userId, organizationId);
-                        const prepared = prepareOutboundEmail({ html: body, unsubscribeUrl });
+                        const signature = await readSendSignature(supabase, userId, tokenProvider);
+                        const prepared = prepareOutboundEmail({ html: body, unsubscribeUrl, signature });
                         body = prepared.html;
 
                         const providerLabel = tokenProvider === 'google' ? 'gmail' : 'outlook';
