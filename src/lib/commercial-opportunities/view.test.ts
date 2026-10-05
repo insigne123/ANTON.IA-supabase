@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterOpportunities, formatDay, formatUsd, lastSearch, parseList, relativeTime, statusCounts } from './view';
+import { SEIA_REMINDER_DAYS, filterOpportunities, formatDay, formatUsd, lastSearch, parseList, relativeTime, seiaReminderDays, statusCounts } from './view';
 
 const items = [
   { id: '1', company: 'Sodimac', status: 'new' as const, score: 80 },
@@ -41,4 +41,14 @@ test('money, dates and lists read in Chilean Spanish', () => {
   assert.equal(relativeTime('2026-10-02T09:00:00Z', now), 'hace 3 h');
   assert.equal(relativeTime('2026-10-01T10:00:00Z', now), 'ayer');
   assert.deepEqual(parseList('Operario, bodeguero\nOperario\n\n  guardia  ;cajero'), ['Operario', 'bodeguero', 'guardia', 'cajero']);
+});
+
+test('the SEIA file is reminded from its 30th day, never without a file or with an unreadable date', () => {
+  const now = Date.parse('2026-10-05T12:00:00Z');
+  assert.equal(SEIA_REMINDER_DAYS, 30);
+  assert.equal(seiaReminderDays(null, now), null);
+  assert.equal(seiaReminderDays('no es fecha', now), null);
+  assert.equal(seiaReminderDays('2026-09-06T13:00:00Z', now), null, '29 days: not yet');
+  assert.equal(seiaReminderDays('2026-09-05T12:00:00Z', now), 30);
+  assert.equal(seiaReminderDays('2026-08-20T12:00:00Z', '2026-10-05T12:00:00Z'), 46, 'the date can come as text, as Cowork passes it');
 });

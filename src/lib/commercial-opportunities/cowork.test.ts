@@ -67,7 +67,7 @@ test('what is missing is said: no profile, no keys, no SEIA file, a failed sourc
   const empty = summary({ profile: null, runs: [], ready: { hiring: false, tenders: false } });
   assert.equal(empty.profile, null);
   assert.equal(empty.gaps.length, 4);
-  assert.match(empty.gaps.join(' '), /Aún no se abre «Oportunidades»/);
+  assert.match(empty.gaps.join(' '), /Aún no se define qué buscar: se hace en Oportunidades → «Definir búsqueda»/);
   assert.match(empty.gaps.join(' '), /JSearch o LinkedIn/);
   assert.match(empty.gaps.join(' '), /falta tu ticket de Mercado Público: es gratis, se pide una vez en chilecompra\.cl\/api con tu Clave Única/);
   assert.doesNotMatch(empty.gaps.join(' '), /lo agrega el administrador/, 'each person brings their own ticket');
@@ -81,4 +81,10 @@ test('what is missing is said: no profile, no keys, no SEIA file, a failed sourc
   assert.deepEqual(failed.gaps, ['La última búsqueda falló en LinkedIn.']);
   assert.deepEqual(failed.lastSearches.map(run => [run.source, run.status]), [['LinkedIn', 'failed'], ['Archivo del SEIA', 'succeeded']]);
   assert.deepEqual(failed.profile?.seiaSectors, ['Minería']);
+});
+
+test('a SEIA file older than a month is reminded, with where to upload it', () => {
+  const late = summary({ runs: [{ source: 'seia', status: 'succeeded', startedAt: '2026-08-20T12:00:00Z', fetched: 10, created: 1, error: null }] });
+  assert.deepEqual(late.gaps, ['Hace 36 días que no se sube un archivo del SEIA: descarga el del mes en el mapa de proyectos y súbelo en Oportunidades → «Proyectos de inversión».']);
+  assert.deepEqual(summary().gaps, [], 'uploaded 24 days ago: nothing to remind');
 });
