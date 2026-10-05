@@ -18,7 +18,7 @@ export const defaultStyle: StyleProfile = {
   tokens: ['{{lead.firstName}}','{{lead.title}}','{{company.name}}','{{company.domain}}'],
 
   // 🔥 NUEVO: plantillas
-  subjectTemplate: '[[lead.firstName]], idea rápida para [[company.name]]',
+  subjectTemplate: '{{lead.firstName}}, idea rápida para {{company.name}}',
   bodyTemplate:
 `Hola {{lead.firstName}},
 

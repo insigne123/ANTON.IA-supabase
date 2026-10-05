@@ -164,10 +164,9 @@ export function generateMailFromStyle(
 
   // 3) Ajustes rápidos según estilo (tono/longitud/cta)
   const tone = (profile.tone || "").toString().toLowerCase();
+  // A warm tone is the AI's job when it writes the draft: the preview never adds emoji the real email would not have.
   if (tone.includes("direct")) {
     body = body.replace(/\n\n+/g, "\n\n").replace(/\b(muy|sumamente)\b/gi, "");
-  } else if (tone.includes("warm") || tone.includes("cálid") || tone.includes("calid")) {
-    body = body.replace(/\n\n/g, "\n\n🙂 ");
   }
 
   const length = (profile.length || "").toString().toLowerCase();

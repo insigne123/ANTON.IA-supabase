@@ -23,6 +23,7 @@ import { v4 as uuid } from 'uuid';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { renderTemplate } from '@/lib/template';
 import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
+import { emailSignatureStorage } from '@/lib/email-signature-storage';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { ensureSubjectPrefix } from '@/lib/outreach-templates';
 import { generateCompanyOutreachV2 } from '@/lib/outreach-templates';
@@ -140,6 +141,17 @@ function ComposeInner() {
   const [sendAfterReview, setSendAfterReview] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendProvider, setSendProvider] = useState<'outlook' | 'gmail'>('outlook');
+  // Whether the signature of «Firmas y estilo» goes out with this email: the server adds it when sending (PR 3a).
+  const [signatureOn, setSignatureOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSignatureOn(null);
+    Promise.resolve()
+      .then(() => emailSignatureStorage.get(sendProvider))
+      .then((config) => { if (!cancelled) setSignatureOn(config?.enabled === true && Boolean(config.html || config.text)); })
+      .catch(() => { if (!cancelled) setSignatureOn(null); });
+    return () => { cancelled = true; };
+  }, [sendProvider]);
   // The real mailbox for the chosen provider (/api/integrations/sender), shown as «De:» before sending.
   const [sender, setSender] = useState<SenderState>({ state: 'loading' });
   useEffect(() => {
@@ -1535,6 +1547,9 @@ function ComposeInner() {
                     >
                       {styleProfiles.length === 0 ? <option value="">No hay estilos guardados</option> : styleProfiles.map((profile) => <option key={profile.id || profile.name} value={profile.id}>{profile.name}</option>)}
                     </select>
+                    <Link href="/settings/email-studio?tab=estilos" className="inline-block text-xs font-medium text-foreground underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      {styleProfiles.length === 0 ? 'Crear un estilo' : 'Crear o editar estilos'}
+                    </Link>
                   </div>
                 </CardContent>
               </Card>
@@ -1545,6 +1560,7 @@ function ComposeInner() {
       </div>
 
       <footer aria-label="Acciones del correo" className="sticky bottom-3 z-10 flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-0.5">
         <p id="send-summary" className="text-xs leading-5 text-muted-foreground">
           {proposal
             ? 'Aplica o descarta la propuesta de IA antes de revisar o enviar.'
@@ -1574,6 +1590,15 @@ function ComposeInner() {
                           ? `Saldrá ahora desde ${sender.email}.`
                           : `Saldrá ahora por ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.`}
         </p>
+        {signatureOn !== null && !sendReceipt && !nativeDraftArchived ? (
+          <p className="text-xs leading-5 text-muted-foreground">
+            {signatureOn ? 'Tu firma se agrega al final al enviar. ' : 'Este correo sale sin firma. '}
+            <Link href="/settings/email-studio?tab=firma" className="font-medium text-foreground underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {signatureOn ? 'Cambiar firma' : 'Agregar firma'}
+            </Link>
+          </p>
+        ) : null}
+        </div>
         <div className="flex flex-col-reverse gap-2 sm:flex-row">
           <Button
             type="button"

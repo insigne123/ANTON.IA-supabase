@@ -98,3 +98,11 @@ test('service references render the actual sender, not a hardcoded brand identit
     assert.doesNotMatch(preview.body, /\{\{|\[\[|GrupoExpro/);
   }
 });
+
+test('a warm tone does not put emoji in the preview: the drafts the AI writes never have them', () => {
+  const { body } = generateMailFromStyle({
+    ...OUTSOURCING_EMAIL_STYLE_PRESETS[0].profile, scope: 'leads', name: 'Cercano', tone: 'warm',
+  }, null, { fullName: 'María González', email: 'maria@acme.example', companyName: 'Acme' });
+  assert.doesNotMatch(body, /\p{Extended_Pictographic}/u);
+  assert.ok(body.split(/\n\n+/).length >= 2, 'the paragraphs are still there');
+});
