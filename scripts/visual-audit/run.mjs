@@ -5,11 +5,10 @@
 //                           [--widths=390,1440] [--schemes=light,dark] [--baseline=.visual-audit/<run>] [--skip-build]
 //                           [--concurrency=3] [--out=.visual-audit/<name>]
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createWriteStream, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { APP_LISTEN_URL, APP_PORT, APP_URL, DIST_DIR, ROOT, SERVICE_KEY, SUPABASE_PORT, SUPABASE_URL, assertNoDotEnv, buildEnv, coworkOwnerEmail } from './env.mjs';
+import { APP_LISTEN_URL, APP_PORT, APP_URL, ROOT, SERVICE_KEY, SUPABASE_PORT, SUPABASE_URL, assertNoDotEnv, buildEnv, coworkOwnerEmail } from './env.mjs';
 import { startFakeSupabase } from './fake-supabase/server.mjs';
 import { authCookie } from './fake-supabase/session.mjs';
 import { buildDatasets } from './fixtures/index.mjs';
@@ -17,6 +16,7 @@ import { routeList, planVisits } from './routes.mjs';
 import { installPolicy, installRealtime } from './api-policy.mjs';
 import { axeAvailable, axeViolations, horizontalOverflow, screenshot, settle, trackRequests } from './checks.mjs';
 import { writeReports } from './report.mjs';
+import { ensureBuild } from './build.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map(arg => {
   const [key, ...rest] = arg.replace(/^--/, '').split('=');
@@ -48,24 +48,6 @@ function loadPlaywright() {
     try { const mod = require(candidate); if (mod.chromium) return mod; } catch { /* next */ }
   }
   throw new Error('No encontré Playwright. Instálalo globalmente (npm i -g playwright) o indica su ruta en PLAYWRIGHT_MODULE.');
-}
-
-/** A build is reused while HEAD, the working tree (outside this folder, docs and tests) and the public variables are unchanged. */
-function buildFingerprint(env) {
-  const diff = git('diff', 'HEAD', '--', '.', ':(exclude)scripts/visual-audit', ':(exclude)docs', ':(exclude)__tests__');
-  const untracked = git('ls-files', '--others', '--exclude-standard', '--', 'src', 'public');
-  // Public variables are inlined at build time, so a change in them needs a new build too.
-  const inlined = JSON.stringify(Object.entries(env).filter(([name]) => name.startsWith('NEXT_PUBLIC_')).sort());
-  return createHash('sha256').update(`${git('rev-parse', 'HEAD')}\n${diff}\n${untracked}\n${inlined}`).digest('hex');
-}
-
-function run(command, commandArgs, { env, logFile }) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, commandArgs, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const out = createWriteStream(logFile);
-    child.stdout.pipe(out); child.stderr.pipe(out);
-    child.on('exit', code => (code === 0 ? resolve() : reject(new Error(`${command} ${commandArgs.join(' ')} terminó con código ${code}. Revisa ${logFile}`))));
-  });
 }
 
 async function waitForApp(timeoutMs = 90000) {
@@ -183,17 +165,7 @@ async function main() {
   const head = git('rev-parse', '--short', 'HEAD');
 
   // 1. Build (or reuse) the production bundle in its own folder, with the same public flags production uses.
-  const fingerprintFile = path.join(ROOT, DIST_DIR, 'audit-fingerprint');
-  const fingerprint = buildFingerprint(env);
-  const reusable = existsSync(fingerprintFile) && readFileSync(fingerprintFile, 'utf8') === fingerprint;
-  if (options.skipBuild && !existsSync(path.join(ROOT, DIST_DIR, 'BUILD_ID'))) throw new Error(`--skip-build sin compilación previa en ${DIST_DIR}.`);
-  if (!options.skipBuild && !reusable) {
-    log(`Compilando en ${DIST_DIR} (unos minutos)…`);
-    // The build may fetch Google Fonts, so it keeps the machine's proxy settings; the audited server never gets them.
-    const network = Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(https?_proxy|no_proxy|HTTPS?_PROXY|NO_PROXY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE)$/.test(name)));
-    await run(process.execPath, ['node_modules/next/dist/bin/next', 'build'], { env: { ...env, ...network }, logFile: path.join(outDir, 'build.log') });
-    writeFileSync(fingerprintFile, fingerprint);
-  } else log(`Reutilizo la compilación de ${DIST_DIR}.`);
+  await ensureBuild({ env, logFile: path.join(outDir, 'build.log'), skipBuild: options.skipBuild, log });
 
   // 2. The stand-in Supabase and the app, which can only reach loopback.
   const serverLog = [];
