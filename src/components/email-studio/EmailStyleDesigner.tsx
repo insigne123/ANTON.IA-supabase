@@ -1,9 +1,14 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Mail, Plus, RefreshCw, Save, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { AlertCircle, CheckCircle2, Loader2, Mail, MoreHorizontal, Plus, RefreshCw, Save, Sparkles } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,6 +36,9 @@ import { defaultStyle } from '@/lib/style-profiles-storage';
 import type { CrossReport, EnrichedLead, StyleProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { emailLibraryError, emailStyleDraftKey, type EmailLibraryScope } from '@/lib/email-studio/library-contract';
+import { buildSignatureHtml } from '@/lib/email-studio/signature-builder';
+import { EMAIL_VARIABLES, friendlyToken, toCanonicalTemplate, toFriendlyTemplate, type EmailVariable } from '@/lib/email-studio/variables';
+import { emailSignatureStorage } from '@/lib/email-signature-storage';
 import type { GRUPOEXPRO_REFERENCE_TEMPLATES } from '@/lib/email-studio/grupoexpro-templates';
 
 type SavedEmailStyle = {
@@ -114,6 +122,23 @@ function reportForLead(lead: EnrichedLead): CrossReport | null {
   return embedded.cross || null;
 }
 
+/** The voices a style can take, as chips: the first is what the AI writes by default. */
+const TONES: Array<{ id: NonNullable<StyleProfile['tone']>; label: string }> = [
+  { id: 'professional', label: 'Profesional' }, { id: 'warm', label: 'Cercano' }, { id: 'direct', label: 'Directo' },
+  { id: 'consultative', label: 'Consultivo' }, { id: 'challenger', label: 'Desafiante' }, { id: 'executive', label: 'Ejecutivo' },
+  { id: 'commercial', label: 'Comercial' }, { id: 'brief', label: 'Muy breve' },
+];
+const LENGTHS: Array<{ id: NonNullable<StyleProfile['length']>; label: string }> = [
+  { id: 'short', label: 'Breve' }, { id: 'medium', label: 'Medio' }, { id: 'long', label: 'Extenso' },
+];
+
+/** Where a style reaches, said plainly (Plan 11): the default one is used whenever nobody picks another. */
+function styleUse(style: Pick<SavedEmailStyle, 'isDefault'>) {
+  return style.isDefault
+    ? 'Se usa solo cuando no eliges otro: Redactar, Secuencias, Investigación, Campañas y Cowork.'
+    : 'Elígelo al redactar, en una secuencia, en la investigación o al armar una campaña.';
+}
+
 function toneLabel(tone: StyleProfile['tone']) {
   const labels: Partial<Record<NonNullable<StyleProfile['tone']>, string>> = {
     brief: 'Breve',
@@ -128,7 +153,12 @@ function toneLabel(tone: StyleProfile['tone']) {
   return tone ? labels[tone] || tone : 'Profesional';
 }
 
-export default function EmailStyleDesigner() {
+export default function EmailStyleDesigner({ onOpenSignature, signatureVersion = 0 }: {
+  /** Opens «Firma» from the preview, when the page has it. */
+  onOpenSignature?: () => void;
+  /** Changes when the signature is saved, so the preview shows the new one. */
+  signatureVersion?: number;
+} = {}) {
   const { toast } = useToast();
   const confirm = useConfirm();
   const styleNameRef = useRef<HTMLInputElement>(null);
@@ -168,6 +198,11 @@ export default function EmailStyleDesigner() {
   const [leadError, setLeadError] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [profileError, setProfileError] = useState(false);
+  // The signature that goes out with every email (PR 3a), shown at the end of the preview.
+  const [signatureHtml, setSignatureHtml] = useState('');
+  const [signatureOn, setSignatureOn] = useState(false);
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const loadStyles = useCallback(async (replaceDraft = true) => {
     if (replaceDraft && dirtyRef.current && !window.confirm('Hay cambios sin guardar. ¿Quieres descartarlos y recargar?')) return;
@@ -252,7 +287,6 @@ export default function EmailStyleDesigner() {
       ]);
 
       if (!active) return;
-
       if (leadsResult.status === 'fulfilled') {
         const researched = (leadsResult.value || []).reduce<ResearchLeadOption[]>((items, lead) => {
           const report = reportForLead(lead);
@@ -281,6 +315,24 @@ export default function EmailStyleDesigner() {
       active = false;
     };
   }, []);
+
+  // The signature at the end of the preview: read again whenever «Firma» saves one.
+  useEffect(() => {
+    let active = true;
+    void emailSignatureStorage.get('gmail')
+      .then(async (gmail) => gmail || emailSignatureStorage.get('outlook'))
+      .then((saved) => {
+        if (!active) return;
+        // Rebuilt from its fields (or its image), never the stored HTML as is.
+        const image = saved?.html?.match(/<img[^>]+src="(https:[^"]+)"/i)?.[1] || '';
+        setSignatureHtml(saved?.builder ? buildSignatureHtml(saved.builder.fields, saved.builder.design) : image ? buildSignatureHtml({ imageUrl: image }, 'imagen') : '');
+        setSignatureOn(saved?.enabled === true);
+      })
+      .catch((error) => console.error('[email-studio/signature/get]', error));
+    return () => {
+      active = false;
+    };
+  }, [signatureVersion]);
 
   const selectedLeadOption = useMemo(
     () => leadOptions.find(({ lead }) => lead.id === selectedLeadId) || null,
@@ -404,6 +456,69 @@ export default function EmailStyleDesigner() {
     setSaveError(null); setSaveStatus(null);
     // A reference remains an unsaved draft until an explicit save or publication.
     baseline.current = '';
+  }
+
+  /** «Más» on a card: copy, publish or archive that style, leaving the editor as it is unless it shows that style. */
+  async function runCardAction(style: SavedEmailStyle, action: 'duplicate' | 'archive', targetScope: EmailLibraryScope = 'personal') {
+    if (isBusy) return;
+    if (action === 'archive' && !(await confirm({
+      title: `¿Archivar «${style.name}»?`, description: 'Dejará de estar disponible para correos nuevos.', confirmLabel: 'Archivar', tone: 'danger',
+    }))) return;
+    const publishConfirmed = targetScope === 'team'
+      ? await confirm({
+        title: '¿Publicar para tu equipo?',
+        description: 'Confirmas que revisaste el contenido y autorizas que tu equipo lo use. Esto no reemplaza una aprobación de marketing externa.',
+        confirmLabel: 'Publicar',
+      }) : false;
+    if (targetScope === 'team' && !publishConfirmed) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const response = await fetch('/api/email-styles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: style.id, expectedRevision: style.revision, action, libraryScope: action === 'archive' ? style.libraryScope : targetScope,
+          publishConfirmed, sourceCollection: style.sourceCollection || null,
+          name: action === 'duplicate' ? `${style.name.slice(0, 110)} (copia)` : style.name,
+          profile: { ...style.profile, scope: 'leads' }, isDefault: false,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { style?: SavedEmailStyle; error?: string } | null;
+      if (!response.ok || !payload?.style) throw new Error(payload?.error || 'No se pudo completar la acción.');
+      if (action === 'archive' && style.id === selectedStyleId) {
+        const draft = createStyleDraft();
+        setSelectedStyleId(''); setSelectedRevision(undefined); setStyleName(draft.name); setProfile(draft); setIsDefault(false);
+        setLibraryScope('personal'); setSourceCollection(null);
+        baseline.current = emailStyleDraftKey(draft.name, draft, false, 'personal');
+        dirtyRef.current = false;
+      }
+      await loadStyles(false);
+      const done = action === 'archive' ? 'archivado' : targetScope === 'team' ? 'publicado para tu equipo' : 'copiado en tu espacio personal';
+      setSaveStatus(`«${style.name}» ${done}.`);
+      toast({ title: action === 'archive' ? 'Estilo archivado' : 'Listo', description: `«${style.name}» ${done}.` });
+    } catch (error) {
+      console.error('[email-studio/styles/card]', error);
+      setSaveError(emailLibraryError(error));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  /** «Insertar: Nombre» puts «{Nombre}» where the cursor is; what is stored stays `{{lead.firstName}}`. */
+  function insertVariable(field: 'subjectTemplate' | 'bodyTemplate', variable: EmailVariable) {
+    const element = field === 'subjectTemplate' ? subjectRef.current : bodyRef.current;
+    const current = toFriendlyTemplate(profile[field] || '');
+    const start = element?.selectionStart ?? current.length;
+    const end = element?.selectionEnd ?? start;
+    const token = friendlyToken(variable);
+    const next = `${current.slice(0, start)}${token}${current.slice(end)}`;
+    setProfile((value) => ({ ...value, [field]: toCanonicalTemplate(next) }));
+    setSaveStatus(null);
+    window.requestAnimationFrame(() => {
+      element?.focus();
+      element?.setSelectionRange(start + token.length, start + token.length);
+    });
   }
 
   async function adjustWithAi(event: FormEvent<HTMLFormElement>) {
@@ -564,339 +679,354 @@ export default function EmailStyleDesigner() {
     }
   }
 
+  const selectedStyle = styles.find((style) => style.id === selectedStyleId) || null;
+  const lengthLabel = (length: StyleProfile['length']) => LENGTHS.find((item) => item.id === length)?.label || 'Medio';
+  const pills = (field: 'subjectTemplate' | 'bodyTemplate', label: string) => (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={`Insertar en ${label}`}>
+      <span className="text-xs text-muted-foreground">Insertar:</span>
+      {EMAIL_VARIABLES.map((variable) => (
+        <button key={variable.token} type="button" title={variable.hint} onClick={() => insertVariable(field, variable)}
+          className="rounded-full border border-border/70 bg-background px-2 py-0.5 text-xs text-foreground transition-colors hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+          {variable.label}
+        </button>
+      ))}
+    </div>
+  );
+  const step = (number: number, title: string, description: string) => (
+    <div className="flex items-start gap-3">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground" aria-hidden="true">{number}</span>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-foreground"><span className="sr-only">Paso {number}: </span>{title}</p>
+        <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  );
+
   return (
-    <section
-      aria-label="Diseñador de estilo de correo"
-      className="min-w-0 overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-[0_22px_70px_-52px_rgba(15,23,42,0.45)] dark:shadow-[0_22px_70px_-52px_rgba(0,0,0,0.9)]"
-    >
-      <div className="grid min-w-0 lg:grid-cols-[minmax(0,0.86fr)_minmax(0,1.14fr)]">
-        <section aria-labelledby="style-definition-title" className="min-w-0 p-4 sm:p-7 lg:border-r lg:border-border/70">
-          <div className="max-w-xl">
-            <h2 id="style-definition-title" className="text-xl font-semibold tracking-tight text-foreground">
-              Define tu estilo
-            </h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Describe una voz consistente y comprueba el resultado antes de guardarla.
-            </p>
+    <div className="min-w-0 space-y-6">
+      <section aria-labelledby="styles-gallery-title" className="min-w-0 space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <h2 id="styles-gallery-title" className="text-lg font-semibold tracking-tight text-foreground">Tus estilos</h2>
+            <p className="text-sm leading-6 text-muted-foreground">Un estilo dice cómo suenan los correos que la IA te prepara. El predeterminado se usa solo.</p>
           </div>
-
-          <div className="mt-7 space-y-6">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="saved-email-style">Estilos guardados</Label>
-                <Button type="button" variant="ghost" size="sm" onClick={startNewStyle} disabled={isBusy} className="h-8 px-2 text-muted-foreground">
-                  <Plus aria-hidden="true" />
-                  Nuevo
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" onClick={startNewStyle} disabled={isBusy}>
+              <Plus className="h-4 w-4" aria-hidden="true" />Crear estilo
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" aria-label="Más opciones de la biblioteca" disabled={isBusy}>
+                  <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
                 </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => void loadStyles()}>Recargar estilos</DropdownMenuItem>
+                {referencesAvailable ? (
+                  <DropdownMenuItem onSelect={() => void loadReferences()}>Ver referencias de servicio</DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {stylesError ? (
+          <div role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
+            <span className="flex min-w-0 items-start gap-2"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{stylesError}</span>
+            <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void loadStyles()} className="h-7 shrink-0 px-2 text-current">
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />Reintentar
+            </Button>
+          </div>
+        ) : null}
+
+        {isLoadingStyles ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+            {[0, 1, 2].map((item) => <Skeleton key={item} className="h-40 w-full rounded-2xl" />)}
+            <span className="sr-only">Cargando tus estilos</span>
+          </div>
+        ) : styles.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-muted/20 px-4 py-6 text-center">
+            <p className="font-medium text-foreground">Aún no tienes estilos guardados</p>
+            <p className="mt-1 text-sm text-muted-foreground">Arma el primero abajo: elige un punto de partida, el tono y guárdalo.</p>
+          </div>
+        ) : (
+          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Estilos guardados">
+            {styles.map((style) => {
+              const open = style.id === selectedStyleId;
+              const canEdit = style.libraryScope === 'personal' || canPublish;
+              return (
+                <li key={style.id} className="min-w-0">
+                  <article aria-label={style.name} className={cn('flex h-full min-w-0 flex-col rounded-2xl border border-border/70 bg-card p-4 shadow-sm', open && 'border-primary ring-1 ring-primary/30')}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="truncate font-medium text-foreground">{style.name}</h3>
+                        <p className="text-xs text-muted-foreground">{toneLabel(style.profile.tone)} · {lengthLabel(style.profile.length)}</p>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label={`Más acciones de «${style.name}»`} disabled={isBusy}>
+                            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel className="max-w-56 truncate">{style.name}</DropdownMenuLabel>
+                          <DropdownMenuItem onSelect={() => void runCardAction(style, 'duplicate', 'personal')}>Duplicar en Personal</DropdownMenuItem>
+                          {canPublish && style.libraryScope === 'personal' ? (
+                            <DropdownMenuItem onSelect={() => void runCardAction(style, 'duplicate', 'team')}>Publicar copia para el equipo</DropdownMenuItem>
+                          ) : null}
+                          {canEdit ? (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => void runCardAction(style, 'archive')}>Archivar</DropdownMenuItem>
+                            </>
+                          ) : null}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {style.isDefault ? <Badge variant="success">Predeterminado</Badge> : null}
+                      <Badge variant={style.libraryScope === 'team' ? 'info' : 'neutral'}>{style.libraryScope === 'team' ? 'Equipo' : 'Personal'}</Badge>
+                    </div>
+                    <p className="mt-2 line-clamp-2 text-sm leading-6 text-foreground/80">{style.profile.instructions?.trim() || 'Sin guía escrita.'}</p>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{styleUse(style)}</p>
+                    <div className="mt-auto pt-3">
+                      <Button type="button" size="sm" variant={open ? 'secondary' : 'outline'} aria-pressed={open} onClick={() => selectSavedStyle(style.id)} disabled={isBusy}>
+                        {open ? 'Abierto abajo' : canEdit ? 'Editar' : 'Ver'}
+                      </Button>
+                    </div>
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {references.length > 0 ? (
+          <div className="max-w-md space-y-2 rounded-xl border border-border/70 p-3">
+            <Label htmlFor="email-reference">Partir de una referencia de servicio</Label>
+            <p className="text-xs leading-5 text-muted-foreground">Referencias editables, sin aprobación de marketing acreditada. No llegan al equipo hasta que un administrador las revise y publique.</p>
+            <Select onValueChange={useReference} disabled={isBusy} value="">
+              <SelectTrigger id="email-reference"><SelectValue placeholder="Elegir una referencia" /></SelectTrigger>
+              <SelectContent>{references.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        ) : null}
+      </section>
+
+      <section aria-labelledby="style-definition-title" className="min-w-0 overflow-hidden rounded-[24px] border border-border/70 bg-card shadow-sm">
+        <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:border-r lg:border-border/70">
+            <div>
+              <h2 id="style-definition-title" className="text-lg font-semibold tracking-tight text-foreground">
+                {selectedStyle ? `Editando «${selectedStyle.name}»` : 'Nuevo estilo'}
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">Tres pasos. La vista previa cambia mientras editas.</p>
+              {readOnly ? <p className="mt-2 text-sm text-muted-foreground">Es un estilo del equipo. Para cambiarlo, usa «Duplicar en Personal» en su tarjeta.</p> : null}
+            </div>
+
+            <fieldset disabled={isBusy || readOnly} className="min-w-0 space-y-7">
+              <legend className="sr-only">Editar el estilo</legend>
+
+              <div className="space-y-3">
+                {step(1, 'Punto de partida', 'Una estructura probada. Puedes cambiarla después.')}
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                  {STYLE_PRESETS.map((preset) => (
+                    <button key={preset.id} type="button" aria-pressed={activePreset === preset.id} onClick={() => applyPreset(preset.id)}
+                      className={cn('min-w-0 rounded-xl border border-border/70 bg-background p-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+                        activePreset === preset.id && 'border-primary bg-primary/5')}>
+                      <span className="block text-sm font-medium text-foreground">{preset.label}</span>
+                      <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{preset.description}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {isLoadingStyles ? (
-                <div className="space-y-2" aria-live="polite">
-                  <Skeleton className="h-11 w-full rounded-xl" />
-                  <span className="sr-only">Cargando estilos guardados</span>
+              <div className="space-y-3">
+                {step(2, 'Tono y largo', 'Cómo suena y cuánto se extiende.')}
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Tono">
+                  {TONES.map((tone) => (
+                    <button key={tone.id} type="button" aria-pressed={profile.tone === tone.id}
+                      onClick={() => { setProfile((current) => ({ ...current, tone: tone.id })); setSaveStatus(null); }}
+                      className={cn('rounded-full border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+                        profile.tone === tone.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border/70 bg-background text-foreground hover:bg-muted/50')}>
+                      {tone.label}
+                    </button>
+                  ))}
                 </div>
-              ) : styles.length > 0 ? (
-                <Select value={selectedStyleId || undefined} onValueChange={selectSavedStyle} disabled={isBusy}>
-                  <SelectTrigger id="saved-email-style" className="h-11 rounded-xl bg-background">
-                    <SelectValue placeholder="Selecciona un estilo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {styles.map((style) => (
-                      <SelectItem key={style.id} value={style.id}>
-                        {style.name} · {style.libraryScope === 'team' ? 'Equipo' : 'Personal'}{style.isDefault ? ' · Predeterminado' : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <div id="saved-email-style" className="rounded-xl border border-dashed border-border bg-muted/25 px-3 py-3 text-sm text-muted-foreground">
-                  {stylesError
-                    ? 'Tus estilos guardados no están disponibles ahora.'
-                    : 'Aún no hay estilos guardados. Define el primero y guárdalo cuando esté listo.'}
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Largo">
+                  {LENGTHS.map((length) => (
+                    <button key={length.id} type="button" aria-pressed={(profile.length || 'medium') === length.id}
+                      onClick={() => { setProfile((current) => ({ ...current, length: length.id })); setSaveStatus(null); }}
+                      className={cn('rounded-full border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+                        (profile.length || 'medium') === length.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border/70 bg-background text-foreground hover:bg-muted/50')}>
+                      {length.label}
+                    </button>
+                  ))}
                 </div>
-              )}
-
-              {stylesError ? (
-                <div role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2.5 text-sm text-rose-800 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-200 sm:flex-row sm:justify-between">
-                  <span className="flex min-w-0 items-start gap-2">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    {stylesError}
-                  </span>
-                  <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void loadStyles()} className="h-7 shrink-0 px-2 text-current hover:bg-rose-100 dark:hover:bg-rose-900/40">
-                    <RefreshCw aria-hidden="true" />
-                    Reintentar
-                  </Button>
-                </div>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void loadStyles()}>Recargar biblioteca</Button>
-                {selectedStyleId ? <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void saveStyle('duplicate', 'personal')}>Duplicar en Personal</Button> : null}
-                {selectedStyleId && canPublish && libraryScope === 'personal' ? <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void saveStyle('duplicate', 'team')}>Publicar copia para el equipo</Button> : null}
-                {selectedStyleId && !readOnly ? <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void saveStyle('archive')}>Archivar</Button> : null}
               </div>
-              {readOnly ? <p className="text-sm text-muted-foreground">Plantilla del equipo. Puedes duplicarla en tu espacio personal para editarla.</p> : null}
-              {referencesAvailable ? <details className="rounded-xl border border-border p-3">
-                <summary className="cursor-pointer text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Importar referencias de servicio</summary>
-                <p className="my-3 text-xs leading-5 text-muted-foreground">Referencias editables inspiradas en GrupoExpro, sin aprobacion de marketing acreditada. No se agregan al equipo hasta que un administrador las revise y publique.</p>
-                {references.length === 0 ? <Button type="button" variant="outline" disabled={isBusy} onClick={() => void loadReferences()}>Ver referencias GrupoExpro</Button> : (
+
+              <div className="space-y-4">
+                {step(3, 'En tus palabras', 'Lo que la IA debe cuidar, y si quieres, el correo base con sus variables.')}
+                <div className="space-y-2">
+                  <Label htmlFor="email-style-instructions">Cómo debe sonar</Label>
+                  <Textarea id="email-style-instructions" value={profile.instructions || ''} maxLength={800} rows={4}
+                    placeholder="Ej. cercano, concreto y sin jerga; abre con algo de su empresa y evita promesas absolutas."
+                    className="resize-y rounded-xl leading-6"
+                    onChange={(event) => { setProfile((current) => ({ ...current, instructions: event.target.value })); setSaveStatus(null); setAiFeedback(null); }} />
+                </div>
+
+                <form onSubmit={adjustWithAi} className="space-y-2">
+                  <Label htmlFor="email-style-ai-adjustment">Pídele un ajuste a la IA</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input id="email-style-ai-adjustment" value={aiInstruction} maxLength={500} placeholder="Ej. hazlo más breve y menos vendedor"
+                      onChange={(event) => { setAiInstruction(event.target.value); setAiError(null); setAiFeedback(null); }} />
+                    <Button type="submit" variant="secondary" disabled={!aiInstruction.trim() || isBusy} className="sm:shrink-0">
+                      {isAdjusting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}
+                      {isAdjusting ? 'Ajustando…' : 'Ajustar'}
+                    </Button>
+                  </div>
+                  <div aria-live="polite">
+                    {aiError ? <p className="text-sm text-destructive">{aiError}</p> : null}
+                    {aiFeedback ? <p className="text-sm text-cw-success">{aiFeedback}</p> : null}
+                  </div>
+                </form>
+
+                <div className="space-y-2">
+                  <Label htmlFor="email-template-subject">Asunto</Label>
+                  <Input ref={subjectRef} id="email-template-subject" value={toFriendlyTemplate(profile.subjectTemplate || '')} maxLength={500}
+                    onChange={(event) => { setProfile((current) => ({ ...current, subjectTemplate: toCanonicalTemplate(event.target.value) })); setSaveStatus(null); }} />
+                  {pills('subjectTemplate', 'el asunto')}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email-template-body">Correo base</Label>
+                  <Textarea ref={bodyRef} id="email-template-body" value={toFriendlyTemplate(profile.bodyTemplate || '')} rows={9} maxLength={30000}
+                    className="resize-y rounded-xl leading-6" aria-describedby="email-template-tokens"
+                    onChange={(event) => { setProfile((current) => ({ ...current, bodyTemplate: toCanonicalTemplate(event.target.value) })); setSaveStatus(null); }} />
+                  {pills('bodyTemplate', 'el correo')}
+                  <p id="email-template-tokens" className="text-xs leading-5 text-muted-foreground">
+                    Lo que va entre llaves, como {'{Nombre}'} o {'{Empresa}'}, se reemplaza por los datos de cada persona. La firma se agrega al enviar.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 border-t border-border/70 pt-5">
+                {!selectedStyleId && canPublish ? (
                   <div className="space-y-2">
-                    <Label htmlFor="email-reference">Servicio de referencia</Label>
-                    <Select onValueChange={useReference} disabled={isBusy} value="">
-                      <SelectTrigger id="email-reference"><SelectValue placeholder="Elegir una referencia editable" /></SelectTrigger>
-                      <SelectContent>{references.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+                    <Label htmlFor="email-library-scope">Guardar en</Label>
+                    <Select value={libraryScope} onValueChange={(value) => setLibraryScope(value as EmailLibraryScope)} disabled={isBusy}>
+                      <SelectTrigger id="email-library-scope"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="personal">Personal: solo yo</SelectItem>
+                        <SelectItem value="team">Equipo: publicar tras revisión</SelectItem>
+                      </SelectContent>
                     </Select>
                   </div>
-                )}
-              </details> : null}
-            </div>
-
-            <fieldset disabled={isBusy || readOnly} className="min-w-0 space-y-6">
-            <legend className="sr-only">Editar plantilla</legend>
-            {!selectedStyleId ? <div className="space-y-2">
-              <Label htmlFor="email-library-scope">Guardar en</Label>
-              <Select value={libraryScope} onValueChange={(value) => setLibraryScope(value as EmailLibraryScope)} disabled={isBusy}>
-                <SelectTrigger id="email-library-scope"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="personal">Personal: solo yo</SelectItem>
-                  {canPublish ? <SelectItem value="team">Equipo: publicar tras revision</SelectItem> : null}
-                </SelectContent>
-              </Select>
-            </div> : null}
-            <div className="space-y-2">
-              <Label htmlFor="email-style-name">Nombre del estilo</Label>
-              <Input
-                ref={styleNameRef}
-                id="email-style-name"
-                value={styleName}
-                onChange={(event) => {
-                  setStyleName(event.target.value);
-                  setNameError(null);
-                  setSaveStatus(null);
-                }}
-                onBlur={() => setNameError(styleName.trim() ? null : 'Escribe un nombre para guardar este estilo.')}
-                aria-invalid={Boolean(nameError)}
-                aria-describedby={nameError ? 'email-style-name-error' : undefined}
-                disabled={isBusy}
-                maxLength={120}
-                className="h-11 rounded-xl"
-              />
-              {nameError ? <p id="email-style-name-error" className="text-sm text-rose-600 dark:text-rose-300">{nameError}</p> : null}
-            </div>
-
-            <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border border-border/70 bg-muted/20 px-3.5 py-3">
-              <div className="min-w-0">
-                <Label htmlFor="email-style-default">Usar como predeterminado</Label>
-                <p id="email-style-default-description" className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {isDefault
-                    ? 'Se elegirá automáticamente al crear nuevos correos.'
-                    : 'Se guardará como una alternativa que podrás elegir manualmente.'}
-                </p>
-              </div>
-              <Switch
-                id="email-style-default"
-                checked={isDefault}
-                onCheckedChange={(checked) => {
-                  setIsDefault(checked);
-                  setSaveStatus(null);
-                  setSaveError(null);
-                }}
-                aria-describedby="email-style-default-description"
-                disabled={isBusy}
-              />
-            </div>
-
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium text-foreground">Punto de partida</legend>
-              <div className="grid min-w-0 grid-cols-1 gap-2 min-[360px]:grid-cols-2">
-                {STYLE_PRESETS.map((preset) => (
-                  <Button
-                    key={preset.id}
-                    type="button"
-                    variant="outline"
-                    aria-pressed={activePreset === preset.id}
-                    onClick={() => applyPreset(preset.id)}
-                    disabled={isBusy}
-                    className={cn(
-                      'h-11 min-w-0 rounded-xl bg-background px-2',
-                      activePreset === preset.id && 'border-primary bg-primary/5 text-primary hover:bg-primary/10'
-                    )}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-              </div>
-              {activePreset ? (
-                <p className="text-xs leading-5 text-muted-foreground">
-                  {STYLE_PRESETS.find((preset) => preset.id === activePreset)?.description}
-                </p>
-              ) : null}
-            </fieldset>
-
-            <div className="space-y-2">
-              <Label htmlFor="email-template-subject">Asunto de la plantilla</Label>
-              <Input id="email-template-subject" value={profile.subjectTemplate || ''} maxLength={500}
-                onChange={(event) => { setProfile((current) => ({ ...current, subjectTemplate: event.target.value })); setSaveStatus(null); }} />
-              <Label htmlFor="email-template-body">Cuerpo de la plantilla</Label>
-              <Textarea id="email-template-body" value={profile.bodyTemplate || ''} rows={10} maxLength={30000}
-                className="resize-y rounded-xl leading-6" aria-describedby="email-template-tokens"
-                onChange={(event) => { setProfile((current) => ({ ...current, bodyTemplate: event.target.value })); setSaveStatus(null); }} />
-              <p id="email-template-tokens" className="text-xs leading-5 text-muted-foreground">Variables: {'{{lead.firstName}}'}, {'{{company.name}}'}, {'{{sender.name}}'} y {'{{sender.company}}'}. Revisa el resultado antes de enviar.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email-style-instructions">Cómo debe sonar</Label>
-              <Textarea
-                id="email-style-instructions"
-                value={profile.instructions || ''}
-                onChange={(event) => {
-                  setProfile((current) => ({ ...current, instructions: event.target.value }));
-                  setSaveStatus(null);
-                  setAiFeedback(null);
-                }}
-                disabled={isBusy}
-                maxLength={800}
-                rows={5}
-                placeholder="Ej. cercano, concreto y sin jerga; abre con una observación relevante y evita promesas absolutas."
-                className="min-h-[132px] resize-y rounded-xl leading-6"
-              />
-              <p className="text-xs leading-5 text-muted-foreground">
-                Esta guía se guarda con el estilo y acompaña sus próximos correos.
-              </p>
-            </div>
-
-            <form onSubmit={adjustWithAi} className="space-y-2">
-              <Label htmlFor="email-style-ai-adjustment">Ajuste con IA</Label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  id="email-style-ai-adjustment"
-                  value={aiInstruction}
-                  onChange={(event) => {
-                    setAiInstruction(event.target.value);
-                    setAiError(null);
-                    setAiFeedback(null);
-                  }}
-                  disabled={isBusy}
-                  maxLength={500}
-                  placeholder="Ej. hazlo más breve y menos vendedor"
-                  className="h-11 rounded-xl"
-                />
-                <Button type="submit" variant="secondary" disabled={!aiInstruction.trim() || isBusy} className="h-11 rounded-xl sm:shrink-0">
-                  {isAdjusting ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-                  {isAdjusting ? 'Aplicando…' : 'Aplicar'}
-                </Button>
-              </div>
-              <div aria-live="polite">
-                {aiError ? <p className="text-sm text-rose-600 dark:text-rose-300">{aiError}</p> : null}
-                {aiFeedback ? <p className="text-sm text-emerald-700 dark:text-emerald-300">{aiFeedback}</p> : null}
-              </div>
-            </form>
-
-            <div className="border-t border-border/70 pt-5">
-              <Button type="button" onClick={() => void saveStyle()} disabled={!styleName.trim() || isBusy} className="h-11 w-full rounded-xl sm:w-auto">
-                {isSaving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-                {isSaving ? 'Guardando…' : libraryScope === 'team' ? 'Revisar y publicar' : 'Guardar estilo'}
-              </Button>
-              <div className="mt-2 min-h-5" aria-live="polite">
-                {saveError ? <p className="text-sm text-rose-600 dark:text-rose-300">{saveError}</p> : null}
-                {saveStatus ? (
-                  <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-300">
-                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                    {saveStatus}
-                  </p>
                 ) : null}
-              </div>
-            </div>
-            </fieldset>
-            {dirty ? <p role="status" className="text-xs text-muted-foreground">Hay cambios sin guardar.</p> : null}
-          </div>
-        </section>
-
-        <section aria-labelledby="email-preview-title" className="min-w-0 bg-muted/20 p-4 sm:p-7">
-          <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <h2 id="email-preview-title" className="text-xl font-semibold tracking-tight text-foreground">Vista previa</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">Vista ilustrativa, no es el borrador final ni una validacion de afirmaciones. Se actualiza mientras editas.</p>
-              <p className="mt-2 max-w-2xl break-words text-xs leading-5 text-muted-foreground">
-                <span className="font-medium text-foreground">Guía activa:</span>{' '}
-                {profile.instructions?.trim() || 'Sin instrucciones adicionales.'}
-              </p>
-            </div>
-
-            <div className="w-full min-w-0 sm:w-[270px] sm:shrink-0">
-              {isLoadingContext ? (
-                <div className="space-y-2" aria-live="polite">
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-10 w-full rounded-xl" />
-                  <span className="sr-only">Cargando contexto de vista previa</span>
-                </div>
-              ) : leadOptions.length > 0 ? (
                 <div className="space-y-2">
-                  <Label htmlFor="email-preview-lead">Lead investigado</Label>
-                  <Select value={selectedLeadId} onValueChange={setSelectedLeadId}>
-                    <SelectTrigger id="email-preview-lead" className="rounded-xl bg-background">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {leadOptions.map(({ lead }) => (
-                        <SelectItem key={lead.id} value={lead.id}>
-                          {lead.fullName}{lead.companyName ? ` · ${lead.companyName}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="email-style-name">Nombre del estilo</Label>
+                  <Input ref={styleNameRef} id="email-style-name" value={styleName} maxLength={120}
+                    onChange={(event) => { setStyleName(event.target.value); setNameError(null); setSaveStatus(null); }}
+                    onBlur={() => setNameError(styleName.trim() ? null : 'Escribe un nombre para guardar este estilo.')}
+                    aria-invalid={Boolean(nameError)} aria-describedby={nameError ? 'email-style-name-error' : undefined} />
+                  {nameError ? <p id="email-style-name-error" className="text-sm text-destructive">{nameError}</p> : null}
                 </div>
-              ) : (
+                <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border border-border/70 bg-muted/20 px-3.5 py-3">
+                  <div className="min-w-0">
+                    <Label htmlFor="email-style-default">Usar como predeterminado</Label>
+                    <p id="email-style-default-description" className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {isDefault ? styleUse({ isDefault: true }) : 'Quedará como alternativa para elegir a mano.'}
+                    </p>
+                  </div>
+                  <Switch id="email-style-default" checked={isDefault} aria-describedby="email-style-default-description"
+                    onCheckedChange={(checked) => { setIsDefault(checked); setSaveStatus(null); setSaveError(null); }} />
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Button type="button" onClick={() => void saveStyle()} disabled={!styleName.trim() || isBusy}>
+                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
+                    {isSaving ? 'Guardando…' : libraryScope === 'team' ? 'Revisar y publicar' : 'Guardar estilo'}
+                  </Button>
+                  {dirty ? <span className="text-xs text-muted-foreground" role="status">Hay cambios sin guardar.</span> : null}
+                </div>
+                <div className="min-h-5" aria-live="polite">
+                  {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
+                  {saveStatus ? <p className="flex items-center gap-1.5 text-sm text-cw-success"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />{saveStatus}</p> : null}
+                </div>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {leadError
-                    ? 'No pudimos cargar tus leads. Usamos un ejemplo temporal.'
-                    : 'Cuando investigues un lead, podrás previsualizar aquí con sus datos reales.'}
+                  Dónde se usa: <Link className="underline underline-offset-2 hover:text-foreground" href="/contact/compose">Redactar</Link> ·{' '}
+                  <Link className="underline underline-offset-2 hover:text-foreground" href="/campaigns">Campañas</Link> ·{' '}
+                  <Link className="underline underline-offset-2 hover:text-foreground" href="/cowork">Cowork</Link>
                 </p>
-              )}
-            </div>
+              </div>
+            </fieldset>
           </div>
 
-          <article aria-labelledby="preview-email-subject" aria-busy={isAdjusting} className="mt-6 min-w-0 overflow-hidden rounded-[22px] border border-border/80 bg-background shadow-[0_20px_55px_-44px_rgba(15,23,42,0.5)] dark:shadow-[0_20px_55px_-44px_rgba(0,0,0,0.95)]">
-            <header className="min-w-0 border-b border-border/70 px-4 py-5 sm:px-7">
-              <div className="flex min-w-0 flex-col items-start gap-2 text-xs text-muted-foreground min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
-                <span className="inline-flex items-center gap-2 font-medium text-foreground">
-                  <Mail className="h-4 w-4 text-primary" aria-hidden="true" />
-                  Correo nuevo
-                </span>
-                <span>{toneLabel(profile.tone)} · {profile.length === 'short' ? 'Breve' : profile.length === 'long' ? 'Extenso' : 'Medio'}</span>
+          <section aria-labelledby="email-preview-title" className="min-w-0 bg-muted/20 p-4 sm:p-6">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h2 id="email-preview-title" className="text-lg font-semibold tracking-tight text-foreground">Vista previa</h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">Un ejemplo con este estilo. La IA lo ajusta a cada persona al redactar.</p>
               </div>
-              <h3 id="preview-email-subject" className="mt-5 break-words text-lg font-semibold leading-7 tracking-tight text-foreground sm:text-xl">
-                {preview.subject || 'Sin asunto'}
-              </h3>
-              <dl className="mt-4 space-y-1.5 text-xs leading-5 text-muted-foreground sm:text-sm">
-                <div className="flex min-w-0 gap-2">
-                  <dt className="w-9 shrink-0">De</dt>
-                  <dd className="min-w-0 truncate text-foreground">{sender.name} &lt;{sender.email}&gt;</dd>
-                </div>
-                <div className="flex min-w-0 gap-2">
-                  <dt className="w-9 shrink-0">Para</dt>
-                  <dd className="min-w-0 truncate text-foreground">{previewLead.fullName} &lt;{previewLead.email}&gt;</dd>
-                </div>
-              </dl>
-            </header>
-
-            <div className="min-h-[360px] min-w-0 px-4 py-7 sm:px-8 sm:py-9">
-              <div className="space-y-5 break-words text-[15px] leading-7 text-foreground [overflow-wrap:anywhere]">
-                {(preview.body || 'El correo aparecerá aquí.').split(/\n\n+/).map((paragraph, index) => (
-                  <p key={`${index}-${paragraph.slice(0, 24)}`} className="whitespace-pre-line">{paragraph}</p>
-                ))}
+              <div className="w-full min-w-0 sm:w-[250px] sm:shrink-0">
+                {isLoadingContext ? (
+                  <div className="space-y-2" aria-busy="true"><Skeleton className="h-4 w-24" /><Skeleton className="h-10 w-full rounded-xl" /><span className="sr-only">Cargando contactos para la vista previa</span></div>
+                ) : leadOptions.length > 0 ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="email-preview-lead">Con el contacto</Label>
+                    <Select value={selectedLeadId} onValueChange={setSelectedLeadId}>
+                      <SelectTrigger id="email-preview-lead" className="rounded-xl bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {leadOptions.map(({ lead }) => (
+                          <SelectItem key={lead.id} value={lead.id}>{lead.fullName}{lead.companyName ? ` · ${lead.companyName}` : ''}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {leadError ? 'No pudimos cargar tus contactos: usamos un ejemplo.' : 'Cuando investigues un contacto, podrás ver el correo con sus datos reales.'}
+                  </p>
+                )}
               </div>
             </div>
 
-            <footer className="break-words border-t border-border/70 bg-muted/20 px-4 py-3 text-xs leading-5 text-muted-foreground sm:px-7">
-              {selectedLeadOption
-                ? `Vista con la investigación de ${previewLead.companyName}.`
-                : 'Vista con datos de ejemplo.'}{' '}
-              Remitente: {sender.name} · {sender.company}.
-              {profileError ? ' Completa tu perfil para usar tus datos reales.' : ''}
-            </footer>
-          </article>
-        </section>
-      </div>
-    </section>
+            <article aria-labelledby="preview-email-subject" aria-busy={isAdjusting} className="mt-5 min-w-0 overflow-hidden rounded-2xl border border-border/80 bg-background shadow-sm">
+              <header className="min-w-0 border-b border-border/70 px-4 py-4 sm:px-6">
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-2 font-medium text-foreground"><Mail className="h-4 w-4 text-primary" aria-hidden="true" />Correo nuevo</span>
+                  <span>{toneLabel(profile.tone)} · {lengthLabel(profile.length)}</span>
+                </div>
+                <h3 id="preview-email-subject" className="mt-4 break-words text-lg font-semibold leading-7 tracking-tight text-foreground">{preview.subject || 'Sin asunto'}</h3>
+                <dl className="mt-3 space-y-1 text-xs leading-5 text-muted-foreground sm:text-sm">
+                  <div className="flex min-w-0 gap-2"><dt className="w-9 shrink-0">De</dt><dd className="min-w-0 truncate text-foreground">{sender.name} &lt;{sender.email}&gt;</dd></div>
+                  <div className="flex min-w-0 gap-2"><dt className="w-9 shrink-0">Para</dt><dd className="min-w-0 truncate text-foreground">{previewLead.fullName} &lt;{previewLead.email}&gt;</dd></div>
+                </dl>
+              </header>
+              <div className="min-w-0 space-y-4 px-4 py-6 sm:px-6">
+                <div className="space-y-4 break-words text-[15px] leading-7 text-foreground [overflow-wrap:anywhere]">
+                  {(preview.body || 'El correo aparecerá aquí.').split(/\n\n+/).map((paragraph, index) => (
+                    <p key={`${index}-${paragraph.slice(0, 24)}`} className="whitespace-pre-line">{paragraph}</p>
+                  ))}
+                </div>
+                {signatureHtml && signatureOn ? (
+                  // Light surface on purpose: the signature is shown as the recipient's email client draws it.
+                  <div role="group" aria-label="Tu firma" className="overflow-x-auto rounded-lg bg-white p-3 ring-1 ring-border/60">
+                    <div dangerouslySetInnerHTML={{ __html: signatureHtml }} />
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-xs text-muted-foreground">
+                    {signatureHtml ? 'Tu firma está apagada: no se agrega al enviar.' : 'Aún no tienes firma.'}{' '}
+                    {onOpenSignature ? <button type="button" className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={onOpenSignature}>Ir a «Firma»</button> : null}
+                  </p>
+                )}
+              </div>
+              <footer className="break-words border-t border-border/70 bg-muted/20 px-4 py-3 text-xs leading-5 text-muted-foreground sm:px-6">
+                {selectedLeadOption ? `Con la investigación de ${previewLead.companyName}.` : 'Con datos de ejemplo.'}{' '}
+                Remitente: {sender.name} · {sender.company}.{profileError ? ' Completa tu perfil para usar tus datos reales.' : ''}
+              </footer>
+            </article>
+          </section>
+        </div>
+      </section>
+    </div>
   );
 }
