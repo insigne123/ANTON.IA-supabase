@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { ensureHiringProfile, supabaseHiringStore, supabaseTenderStore } from '@/lib/server/commercial-opportunities/store';
-import { hiringSyncEnvironment, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
+import { findHiringProfile, lastRunOf, supabaseHiringStore, supabaseTenderStore } from '@/lib/server/commercial-opportunities/store';
+import { hiringSyncEnvironment, monthStart, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
 import { runTenderSync } from '@/lib/server/commercial-opportunities/tender-sync';
-import { dailyOpportunityPlan, dailyTenderSearch } from '@/lib/server/commercial-opportunities/daily';
+import {
+  DAILY_BUDGET_MS, JSEARCH_MONTH_SPENT, dailyOpportunityPlan, dailyTenderSearch, jsearchQuotaSpentThisMonth,
+} from '@/lib/server/commercial-opportunities/daily';
 import { markTicketRejected, resolveTicketForOrganization } from '@/lib/server/commercial-opportunities/tickets';
 
 export const dynamic = 'force-dynamic';
@@ -29,11 +31,16 @@ export async function POST(request: Request) {
   const env = hiringSyncEnvironment();
   const plan = dailyOpportunityPlan((data || []) as Array<{ organization_id: string; created_by: string }>, { jsearch: Boolean(env.jsearchKey) });
   const results = [];
+  const pending: string[] = [];
+  const started = Date.now();
   for (const item of plan) {
+    // Inside the route's 300 s: organizations left for later are named in the answer and searched the next morning.
+    if (Date.now() - started > DAILY_BUDGET_MS) { pending.push(item.organizationId); continue; }
     const scope = { userId: item.userId, organizationId: item.organizationId };
     const outcome: Record<string, unknown> = { organizationId: item.organizationId };
     try {
-      const profile = await ensureHiringProfile(client, scope);
+      const profile = await findHiringProfile(client, scope);
+      if (!profile) { results.push({ ...outcome, skipped: 'sin perfil de búsqueda' }); continue; }
       const storeScope = { ...scope, profileId: profile.id };
       if (item.tenders) {
         // The ticket of a member of the organization (Plan 10); without any, the run is recorded as skipped.
@@ -45,7 +52,11 @@ export async function POST(request: Request) {
           markRejected: userId => markTicketRejected(client, userId),
         });
       }
-      if (item.hiring) {
+      const jsearchSpent = item.hiring && jsearchQuotaSpentThisMonth(await lastRunOf(client, scope, 'jsearch'), monthStart(new Date().toISOString()));
+      if (jsearchSpent) {
+        await supabaseHiringStore(client, storeScope, 'schedule').startRun({ source: 'jsearch', status: 'skipped', error: JSEARCH_MONTH_SPENT });
+        outcome.hiring = { skipped: JSEARCH_MONTH_SPENT };
+      } else if (item.hiring) {
         outcome.hiring = await runHiringSync({ store: supabaseHiringStore(client, storeScope, 'schedule'), profile, env, capUsd: monthlyCapUsd(),
           organizationId: item.organizationId, only: ['jsearch'] })
           .then(result => (result.status === 'capped' ? { capped: true } : { status: result.status, qualifying: result.qualifying, costUsd: result.costUsd,
@@ -57,5 +68,6 @@ export async function POST(request: Request) {
     }
     results.push(outcome);
   }
-  return NextResponse.json({ ok: true, organizations: results.length, results }, { headers });
+  if (pending.length) console.warn(`[cron/commercial-opportunities] ${pending.length} organizations left for tomorrow (time budget).`);
+  return NextResponse.json({ ok: true, organizations: results.length, results, pending }, { headers });
 }

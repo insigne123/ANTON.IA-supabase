@@ -1,6 +1,6 @@
 import { SEIA_SECTORS } from './projects';
 import type { HiringOpportunityData, OpportunityStatus, ProjectOpportunityData, TenderOpportunityData } from './records';
-import { closesIn, formatClp, sourceLabel } from './view';
+import { closesIn, formatClp, seiaReminderDays, sourceLabel } from './view';
 
 /**
  * What Cowork reads of «Oportunidades» (plan 8, phase 3, PR-3f): the best companies hiring, the open tenders and the SEIA
@@ -108,10 +108,13 @@ export function coworkOpportunitiesSummary(input: {
   // The runs come newest first: the first one of each source is its last search.
   const lastRuns = input.runs.filter((run, index, all) => all.findIndex(other => other.source === run.source) === index);
   const gaps: string[] = [];
-  if (!input.profile) gaps.push('Aún no se abre «Oportunidades»: ahí se define qué buscar (la oferta, los cargos, las palabras de las licitaciones y los sectores del SEIA).');
+  if (!input.profile) gaps.push('Aún no se define qué buscar: se hace en Oportunidades → «Definir búsqueda» (la oferta, los cargos, las palabras de las licitaciones y los sectores del SEIA).');
   if (!input.ready.hiring) gaps.push('La búsqueda de empresas contratando aún no tiene sus claves (JSearch o LinkedIn): las agrega el administrador de la cuenta.');
   if (!input.ready.tenders) gaps.push('Para buscar licitaciones falta tu ticket de Mercado Público: es gratis, se pide una vez en chilecompra.cl/api con tu Clave Única, llega a tu correo y se pega en Oportunidades → «Licitaciones y Compra Ágil».');
-  if (!input.runs.some(run => run.source === 'seia')) gaps.push('Aún no se sube un archivo del SEIA: los proyectos se cargan a mano desde la página, una vez al mes.');
+  const seia = lastRuns.find(run => run.source === 'seia');
+  const seiaDays = seia ? seiaReminderDays(seia.startedAt, input.now) : null;
+  if (!seia) gaps.push('Aún no se sube un archivo del SEIA: los proyectos se cargan a mano desde la página, una vez al mes.');
+  else if (seiaDays !== null) gaps.push(`Hace ${seiaDays} días que no se sube un archivo del SEIA: descarga el del mes en el mapa de proyectos y súbelo en Oportunidades → «Proyectos de inversión».`);
   const failed = lastRuns.filter(run => run.status === 'failed');
   if (failed.length) gaps.push(`La última búsqueda falló en ${list(failed.map(run => RUN_SOURCE_LABELS[run.source] || sourceLabel(run.source)))}.`);
 

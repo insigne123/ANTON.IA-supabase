@@ -2,8 +2,9 @@
 
 ## Acceso y worker
 
-`OPPORTUNITIES_ALLOWED_EMAILS=nicolas.yarur.g@yago.cl` mantiene el piloto en una
-sola cuenta confirmada. La página y las rutas lo leen en el servidor. El worker de
+`OPPORTUNITIES_ALLOWED_EMAILS` tiene hoy 28 correos: los miembros de GrupoExpro
+verificados el 4 oct 2026 y nicolas.yarur.g@yago.cl. Solo entran cuentas con el
+correo confirmado. La página y las rutas lo leen en el servidor. El worker de
 Cowork se ejecuta dentro del mismo App Hosting (`POST /api/cron/cowork`); recibe
 el mismo entorno. `coworkTick` de Firebase solo despierta ese worker por HTTP,
 no necesita copiar los secretos de proveedores ni la lista de correos.
@@ -12,7 +13,13 @@ no necesita copiar los secretos de proveedores ni la lista de correos.
 
 - `APIFY_TOKEN`: Secret Manager, cuenta de producción autorizada `nicogun123@gmail.com`.
 - `JSEARCH_API_KEY`: clave propia de RapidAPI suscrita a JSearch.
-- `MERCADO_PUBLICO_TICKET`: ticket de la cuenta de Mercado Público.
+- `MERCADO_PUBLICO_TICKET`: ticket de la cuenta de Mercado Público. Desde el Plan 10 solo
+  lo usan las cuentas de `MERCADO_PUBLICO_SHARED_TICKET_EMAILS` (hoy
+  nicolas.yarur.g@yago.cl). Las demás conectan su propio ticket en Oportunidades;
+  se guarda cifrado en `commercial_opportunity_tickets` (`docs/oportunidades-licitaciones.md`).
+- Recomendado: `TOKEN_ENCRYPTION_SECRET` propio en App Hosting. Hoy el cifrado de
+  tickets y tokens usa la service key, y rotarla los dejaría ilegibles. El
+  descifrado prueba las claves anteriores, así que agregarla no rompe nada.
 
 Se agregan referencias RUNTIME a App Hosting solo cuando sus versiones existen y
 el backend `studio` tiene permiso de lectura. No guardar valores en el repositorio.
@@ -48,6 +55,10 @@ timeout), el registro mensual reserva el tope completo, en vez de asumir costo
 cero. Los importes son estimaciones, no sustituyen el recibo de Apify.
 
 `commercialOpportunitiesTick` solo consulta JSearch y Mercado Público a diario.
+Corre sin reintentos (`retryCount: 0`): un reintento repetiría las consultas
+pagadas de JSearch, y la mañana siguiente vuelve a buscar. La ruta deja de empezar
+organizaciones a los 240 s y nombra las pendientes en su respuesta. Si JSearch
+agotó el cupo del mes, la búsqueda diaria lo omite, sin costo, hasta el mes siguiente.
 Fantastic Jobs se ejecuta únicamente con «Buscar ahora» y su revisión de costo.
 La tarea está programada a las 11:15 UTC; en horario de verano de Santiago son
 las 08:15 y en invierno las 07:15.

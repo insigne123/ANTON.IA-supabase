@@ -23,7 +23,7 @@ export default function opportunities(ctx) {
   ];
   return {
     tables: {
-      commercial_opportunity_profiles: [{ id: profile, organization_id: ctx.ORG, created_by: ctx.OWNER, name: 'Contratación masiva en Chile', offer: 'Verificación de antecedentes laborales y judiciales', roles: ['Gerente de Personas'], regions: ['Región Metropolitana', 'Valparaíso', 'Biobío'], min_ads: 5, keywords: ['antecedentes', 'reclutamiento'], unspsc_codes: ['80111600'], seia_sectors: ['Inmobiliarios'], min_investment_usd: 10000000, sources: ['jsearch', 'mercado_publico', 'compra_agil', 'seia'], active: true, created_at: ctx.daysAgo(20), updated_at: ctx.daysAgo(2) }],
+      commercial_opportunity_profiles: [{ id: profile, organization_id: ctx.ORG, created_by: ctx.OWNER, name: 'Contratación masiva en Chile', offer: 'Verificación de antecedentes laborales y judiciales', roles: ['Gerente de Personas'], regions: ['Región Metropolitana', 'Valparaíso', 'Biobío'], min_ads: 5, keywords: ['antecedentes', 'reclutamiento'], unspsc_codes: ['80111600'], seia_sectors: ['Inmobiliarios'], min_investment_usd: 10000000, sources: ['hiring', 'tender', 'compra_agil', 'project'], active: true, created_at: ctx.daysAgo(20), updated_at: ctx.daysAgo(2) }],
       commercial_opportunities: items.map(([kind, title, company, domain, region, amount, currency, score, reasons], index) => ({
         id: ctx.uid(9510 + index), organization_id: ctx.ORG, profile_id: profile, kind, dedupe_key: `${kind}:${index}`, title, company_name: company, company_domain: domain,
         company_linkedin_url: null, buyer_name: kind === 'tender' || kind === 'compra_agil' ? company : null, region, amount, currency,
