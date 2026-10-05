@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { dailyOpportunityPlan, dailyTenderSearch } from './daily';
+import { JSEARCH_MONTH_SPENT, dailyOpportunityPlan, dailyTenderSearch, jsearchQuotaSpentThisMonth } from './daily';
 import { NO_ORGANIZATION_TICKET } from './tickets';
 
 const done = (errors: Array<string | null> = [null, null]) => ({ status: 'done', matched: 3, created: 1,
@@ -49,4 +49,15 @@ test('a refused own ticket is marked for replacement; the shared ticket and othe
     search: async () => assert.fail('not searched'), skip: async () => assert.fail('a read error is not «nobody has a ticket»'), markRejected: async () => undefined,
   });
   assert.deepEqual(failing, { error: 'No se pudo buscar el ticket de Mercado Público.' });
+});
+
+test('JSearch out of its monthly quota is skipped until the month changes, instead of failing every day', () => {
+  const month = '2026-10-01T00:00:00.000Z';
+  const run = (status: string, startedAt: string, error: string | null) => ({ status, startedAt, error });
+  assert.equal(jsearchQuotaSpentThisMonth(run('failed', '2026-10-04T11:15:00Z', '2 de 3 consultas fallaron: JSearch: se acabó el cupo del plan este mes.'), month), true);
+  assert.equal(jsearchQuotaSpentThisMonth(run('skipped', '2026-10-05T11:15:00Z', JSEARCH_MONTH_SPENT), month), true, 'the skip keeps skipping');
+  assert.equal(jsearchQuotaSpentThisMonth(run('failed', '2026-09-30T11:15:00Z', 'JSearch: se acabó el cupo del plan este mes.'), month), false, 'a new month asks again');
+  assert.equal(jsearchQuotaSpentThisMonth(run('failed', '2026-10-04T11:15:00Z', 'JSearch limitó temporalmente las consultas.'), month), false, 'a short limit is not the month');
+  assert.equal(jsearchQuotaSpentThisMonth(run('succeeded', '2026-10-04T11:15:00Z', null), month), false);
+  assert.equal(jsearchQuotaSpentThisMonth(null, month), false);
 });

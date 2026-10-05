@@ -4,6 +4,8 @@
 
 **Arriba:**
 - **Qué buscamos:** la oferta, los cargos, el mínimo de avisos y las regiones. Se edita con «Editar búsqueda».
+  - **Sin perfil** (Plan 10), la página muestra la bienvenida «Define qué buscas» con un solo botón, «Definir búsqueda». El formulario parte de una sugerencia: los valores del piloto solo para GrupoExpro, y para el resto, la oferta de su Perfil. Nada se crea al abrir la página; el perfil nace con «Guardar y buscar», que además abre la confirmación de costo de «Buscar ahora» cuando hay una fuente de empresas conectada.
+  - **SEIA:** a los 30 días sin subir un archivo, la pestaña «Proyectos de inversión» y Cowork lo recuerdan.
 - **Última búsqueda:** cuándo fue y cuántos avisos trajo. Si una fuente falló, dice cuál y por qué.
 - **Gasto del mes,** contra el tope.
 - **Fuentes sin conectar:** si a una fuente le falta su clave, la página lo dice sin mostrar nombres de variables; la activa quien administra ANTON.IA.
