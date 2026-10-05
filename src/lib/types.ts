@@ -89,6 +89,8 @@ export interface Lead {
   }> | null;
   primaryPhone?: string | null;
   enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
+  /** A search result that says it has an email without showing it (Leads Finder, Plan 11): revealed by enriching. */
+  hasEmailOnFile?: boolean;
   score?: number;
   scoreTier?: 'hot' | 'warm' | 'cool' | 'cold';
   scoreReason?: string | null;
