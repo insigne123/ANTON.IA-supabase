@@ -14,7 +14,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
 import { describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
-import { AudienceCriteriaSchema, CampaignInputSchema, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
+import { firstSelection } from '@/lib/campaign-audience-selection';
+import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 
 async function request(path: string, body?: unknown, method = 'POST') {
   const response = await fetch(`/api/campaigns/bulk${path}`, body === undefined ? { cache: 'no-store' } : {
@@ -118,6 +119,15 @@ export function BulkCampaignWorkspace() {
     change({ criteria });
     const result = await request('/audience', { criteria, search: audienceQuery, page, pageSize: 25 });
     setPeople(result.people); setAudienceTotal(result.total); setAudiencePage(result.page); setSearched(true); setRankMeta(null);
+    if (page === 0) preselect(result.people);
+  }
+  // The first results come selected, so «Continuar» is the next step; «Quitar todos» or each checkbox undoes it. Nothing
+  // is sent before the review and the approval. A selection the person already made is never replaced.
+  function preselect(found: AudiencePerson[]) {
+    setDefinition(value => {
+      const emails = firstSelection(value.emails, found, MAX_RECIPIENTS);
+      return emails ? { ...value, emails } : value;
+    });
   }
   async function rankAudience() {
     const result = await request('/audience/rank', {
@@ -129,6 +139,7 @@ export function BulkCampaignWorkspace() {
     });
     setPeople(result.people); setAudienceTotal(result.people.length); setAudiencePage(0); setSearched(true);
     setRankMeta({ rankedCount: result.rankedCount, candidateCount: result.candidateCount, truncated: result.truncated, ineligibleCount: result.ineligibleCount });
+    preselect(result.people);
   }
   function selectAllResults(select: boolean) {
     const eligible = people.filter(person => !person.blockedReason).map(person => person.email);
@@ -208,8 +219,21 @@ export function BulkCampaignWorkspace() {
                 {rankMeta && <p className="text-sm text-muted-foreground" role="status">La IA evaluó {rankMeta.candidateCount} leads enriquecidos{rankMeta.truncated ? ' (los más recientes)' : ''} y propuso {rankMeta.rankedCount}.{rankMeta.ineligibleCount > 0 ? ` ${rankMeta.ineligibleCount} propuestos no están disponibles para contactar.` : ''}</p>}
               </> : <>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {(['titles', 'industries', 'countries', 'sizes', 'seniorities'] as const).map((field, index) => <div key={field} className="space-y-2"><Label htmlFor={field}>{['Cargos', 'Industrias', 'Países', 'Tamaño de empresa', 'Antigüedad'][index]} (separados por comas)</Label><Input id={field} disabled={busy} value={definition.criteria[field].join(',')} onChange={event => { change({ criteria: { ...definition.criteria, [field]: event.target.value.split(',') } }); setSearched(false); }} /></div>)}
+                  {/* «Tamaño de empresa» only shows to clear a value saved before: the search compares it as text and the
+                      contacts carry the number of employees, so a range never matched (docs/ui-ux/sencillez.md). */}
+                  {(['titles', 'industries', 'countries', ...(definition.criteria.sizes.some(Boolean) ? ['sizes' as const] : [])] as const).map(field => <div key={field} className="space-y-2"><Label htmlFor={field}>{({ titles: 'Cargos', industries: 'Industrias', countries: 'Países', sizes: 'Tamaño de empresa' })[field]} (separados por comas)</Label><Input id={field} disabled={busy} value={definition.criteria[field].join(',')} onChange={event => { change({ criteria: { ...definition.criteria, [field]: event.target.value.split(',') } }); setSearched(false); }} /></div>)}
                 </div>
+                <fieldset className="space-y-2" disabled={busy}>
+                  <legend className="text-sm font-medium">Nivel del cargo <span className="font-normal text-muted-foreground">(opcional, uno o varios)</span></legend>
+                  <div className="flex flex-wrap gap-2">
+                    {/* A level typed before the list existed stays visible, so it can be removed. */}
+                    {[...SENIORITY_LEVELS, ...definition.criteria.seniorities.filter(code => code.trim() && !SENIORITY_LEVELS.some(level => level.code === code)).map(code => ({ code, label: code }))].map(level => {
+                      const chosen = definition.criteria.seniorities.includes(level.code);
+                      return <Button key={level.code} type="button" size="sm" variant={chosen ? 'default' : 'outline'} aria-pressed={chosen} className="h-8 rounded-full"
+                        onClick={() => { change({ criteria: { ...definition.criteria, seniorities: chosen ? definition.criteria.seniorities.filter(code => code !== level.code) : [...definition.criteria.seniorities, level.code] } }); setSearched(false); }}>{level.label}</Button>;
+                    })}
+                  </div>
+                </fieldset>
                 <details onToggle={event => { if ((event.target as HTMLDetailsElement).open) void loadProfiles(); }}>
                   <summary className="cursor-pointer text-sm">Perfiles de audiencia guardados ({profiles.length})</summary>
                   <div className="mt-2 flex flex-wrap gap-2"><Input className="max-w-64" disabled={busy} value={profileName} onChange={event => setProfileName(event.target.value)} placeholder="Nombre del perfil" aria-label="Nombre del perfil" /><Button variant="outline" disabled={busy || !profileName.trim()} onClick={() => void run(async () => { await request('/profiles', { name: profileName.trim(), criteria: definition.criteria }); setProfileName(''); await loadProfiles(); setFeedback('Perfil guardado.'); })}>Guardar criterios actuales</Button></div>

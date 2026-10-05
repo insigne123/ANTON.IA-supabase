@@ -256,7 +256,8 @@ export default function SignatureBuilder({ onSaved }: { onSaved?: () => void } =
           </div>
         </div>
 
-        <div className="space-y-2">
+        {/* Always in view while editing: the form is long and «Guardar firma» took scrolling to reach. */}
+        <div className="sticky bottom-0 z-10 space-y-2 border-t border-border/60 bg-background pb-3 pt-3">
           <Button type="button" onClick={() => void save()} disabled={saving || uploading} aria-busy={saving} className="w-full sm:w-auto">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
             {saving ? 'Guardando…' : 'Guardar firma'}

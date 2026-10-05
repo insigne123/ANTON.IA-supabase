@@ -210,7 +210,8 @@ async function updateWithReplyTraceFallback(run: (data: any) => any, updateData:
     return { error };
 }
 
-export async function getContactedLeads(): Promise<ContactedLead[]> {
+/** `strict` throws when the read fails, for screens that must tell an error from an empty list. */
+export async function getContactedLeads(options: { strict?: boolean } = {}): Promise<ContactedLead[]> {
     const orgId = await organizationService.getCurrentOrganizationId();
 
     let query = supabase
@@ -227,6 +228,7 @@ export async function getContactedLeads(): Promise<ContactedLead[]> {
 
     if (error) {
         console.error('Error fetching contacted leads:', error);
+        if (options.strict) throw error;
         return [];
     }
     return (data || []).map(mapRowToContactedLead);

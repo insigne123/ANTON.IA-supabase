@@ -19,6 +19,8 @@ Esta carpeta define como mejorar interfaces en este proyecto sin caer en UI gene
 - `docs/ui-ux/auditoria-visual.md`: banco de pruebas que recorre cada pantalla con sesion iniciada (`npm run audit:visual`) y el recorrido base contra el que se compara cada cambio
 - `scripts/visual-audit/README.md` (seccion «Recorrido de interacciones»): `npm run audit:interactions` usa cada pantalla (menus, dialogos, pestañas, teclado) y la prueba con lecturas que fallan, lentas y textos largos
 - `scripts/usability/README.md`: `npm run audit:simplicity`, el indice de sencillez de 12 tareas clave en escritorio y telefono
+- `docs/ui-ux/cobertura-interacciones.md`: que interacciones se probaron en cada pantalla, lo que se encontro y como quedo
+- `docs/ui-ux/sencillez.md`: el indice de sencillez antes y despues, la evaluacion con las heuristicas de Nielsen y los arreglos pendientes
 - `scripts/tutorial-videos/README.md`: `npm run tutorial:videos`, los videos por modulo grabados sobre la app con datos de ejemplo (zoom, cursor lento, notas, flechas, post-its, subtitulos y musica original)
 - `docs/ui-ux/email-studio-notes.md`: referencias y decisiones especificas de Email Studio
 - `docs/ui-ux/tutorial-guiado.md`: recorrido guiado para cuentas nuevas, como omitirlo, volver a verlo y cambiarlo

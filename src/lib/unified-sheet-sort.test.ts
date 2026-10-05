@@ -29,9 +29,10 @@ test('text sorts in Spanish with numbers in order, empties last', () => {
 test('each source of the sheet falls back on its own, so one failure does not empty the whole table', async () => {
   const { readFileSync } = await import('node:fs');
   const source = readFileSync('src/lib/unified-sheet-data.ts', 'utf8');
-  const tries = source.match(/try \{ return [^;]+; \}/g) || [];
-  assert.equal(tries.length, 5);
-  assert.ok(tries.every((block) => block.startsWith('try { return await ')), tries.join('\n'));
+  // Every source goes through `read`, which awaits it inside its own try and keeps the others when it fails.
+  const reads = source.match(/read\('(?:saved|enriched|opportunities|contacted|custom)', \(\) => /g) || [];
+  assert.equal(reads.length, 5);
+  assert.match(source, /try \{ return await load\(\); \}\s*catch \(e\) \{[^\n]*failed\.push\(source\); return empty; \}/);
   const page = readFileSync('src/app/(app)/sheet/page.tsx', 'utf8');
   assert.match(page, /compareSheetRows\(a, b, sortKey, sortDirection\)/);
   assert.doesNotMatch(page, /sortKey\.toLowerCase\(\)\.includes\('at'\)/);

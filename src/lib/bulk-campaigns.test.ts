@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AI_RANK_CANDIDATE_LIMIT, audiencePersonStatus, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
+import { AI_RANK_CANDIDATE_LIMIT, SENIORITY_LEVELS, audiencePersonStatus, seniorityLabel, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
 
 const person: AudiencePerson = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', title: 'Operaciones', country: 'Chile', industry: '', size: '11-50', seniority: 'Manager', leadRef: 'lead', contacted: false, lastSentAt: null, replied: false, blockedReason: null, reasons: [], enriched: true };
 test('audience excludes prior contacts and missing industry evidence', () => {
@@ -136,3 +136,14 @@ test('each person of the audience says in one line whether they can be written t
   assert.deepEqual(audiencePersonStatus(person), { text: '', blocked: false });
 });
 
+test('«Nivel del cargo» chooses the codes the contacts carry, and the reason names the level in Spanish', () => {
+  const manager: AudiencePerson = { email: 'ana@empresa.cl', name: 'Ana Pérez', company: 'Empresa', title: 'Gerente de Personas', industry: 'retail', country: 'Chile',
+    size: '220', seniority: 'manager', leadRef: 'lead-1', lastSentAt: null, contacted: false, replied: false, blockedReason: null, reasons: [], enriched: true };
+  assert.ok(SENIORITY_LEVELS.every(level => level.code === level.code.toLowerCase() && level.label));
+  assert.equal(seniorityLabel('manager'), 'Gerente');
+  assert.equal(seniorityLabel('c_suite'), 'Alta dirección (C-level)');
+  assert.equal(seniorityLabel('jefe'), 'jefe', 'an unknown level stays as it came');
+  assert.ok(matchAudience(manager, { ...defaultAudience, seniorities: ['manager', 'director'] })?.includes('Nivel: Gerente'));
+  assert.equal(matchAudience(manager, { ...defaultAudience, seniorities: ['director'] }), null);
+  assert.equal(matchAudience(manager, { ...defaultAudience, seniorities: ['gerente'] }), null, 'the Spanish word never matched the stored code: that is why it is a list');
+});
