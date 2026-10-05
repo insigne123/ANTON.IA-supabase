@@ -220,8 +220,11 @@ function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow
       linkedinUrl: normalizeStr(c?.linkedinUrl) || null,
       status: replied ? 'replied' : ((normalizeStr(c?.status) as UnifiedRow['status']) ?? 'sent'),
       kind: 'contacted',
-      createdAt: (c as any)?.createdAt ?? null,
-      updatedAt: (c as any)?.updatedAt ?? null,
+      // A conversation has no creation date of its own: it starts when the email is sent.
+      createdAt: (c as any)?.createdAt ?? c?.sentAt ?? null,
+      updatedAt: (c as any)?.updatedAt ?? c?.lastEventAt ?? null,
+      sentAt: normalizeStr(c?.sentAt) || null,
+      repliedAt: normalizeStr(c?.repliedAt ?? c?.replied_at) || null,
       stage: custom?.stage ?? null,
       owner: custom?.owner ?? null,
       notes: custom?.notes ?? null,

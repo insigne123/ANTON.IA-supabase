@@ -44,5 +44,5 @@ test('Pipeline and the data sheet open the exact contact, not the whole list', (
   assert.match(drawer, /\/contacted\?c=\$\{encodeURIComponent\(lead\.sourceId\)\}/);
   assert.doesNotMatch(drawer, /autopilotStatus/, 'no Autopilot badge in the drawer');
   const pipeline = readFileSync('src/app/(app)/crm/page.tsx', 'utf8');
-  assert.match(pipeline, /useState<'graph' \| 'board' \| null>\(null\)/, 'the view waits for the remembered choice, so it never jumps');
+  assert.match(pipeline, /useState<'panel' \| 'board' \| null>\(null\)/, 'the view waits for the remembered choice, so it never jumps');
 });

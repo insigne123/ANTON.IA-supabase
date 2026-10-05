@@ -25,6 +25,9 @@ export interface UnifiedRow {
   kind: UnifiedKind;
   createdAt?: string | number | null;
   updatedAt?: string | number | null;
+  /** Conversations only: when the first email went out and when the person replied (the Pipeline panel counts by them). */
+  sentAt?: string | null;
+  repliedAt?: string | null;
   source?: 'search' | 'opportunity' | 'contacted' | 'manual';
 
   // Flags

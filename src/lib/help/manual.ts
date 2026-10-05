@@ -285,13 +285,14 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: 'Ordena a tus contactos por etapa de venta y prioriza a quién mover.',
     steps: [
       'Las etapas son: Nuevos, Calificado, Contactado, Interesado, Reunión, Negociación, Ganado y Perdido.',
-      '«Gráfico» muestra cuántos hay en cada etapa, qué parte pasa a la siguiente, tus cifras y los contactos nuevos por semana. Pasa el mouse por una etapa para ver sus 5 más recientes; tócala para verlos a todos.',
+      '«Panel» es tu tablero tipo CRM: cifras con su comparación contra el período anterior, el pipeline abierto por etapa, cuántos avanzan de una etapa a la siguiente, tus contactos por mes contra tu promedio y los leads nuevos de 13 meses. Arriba eliges el período, el responsable y el origen; toca una etapa para ver sus leads. Se actualiza solo.',
       'En «Tablero», arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
       'Abre un contacto para ver su actividad, el responsable y la próxima acción registrada.',
-      'Arriba aparecen las sugerencias de etapa: un envío propone Contactado; una respuesta con interés, Interesado; una reunión pedida, Reunión; un pedido de propuesta o precio, Negociación; una compra confirmada, Ganado; y un «no me interesa», Perdido. Acéptalas una por una o con «Aceptar todas». En «Gráfico», cada etapa marca cuántos cambios esperan tu confirmación.',
+      'Arriba aparecen las sugerencias de etapa: un envío propone Contactado; una respuesta con interés, Interesado; una reunión pedida, Reunión; un pedido de propuesta o precio, Negociación; una compra confirmada, Ganado; y un «no me interesa», Perdido. Acéptalas una por una o con «Aceptar todas». En «Panel», cada etapa marca cuántos cambios esperan tu confirmación.',
     ],
     faqs: [
       { q: '¿Cómo llegan los contactos al pipeline?', a: 'Aparecen cuando guardas o contactas leads.' },
+      { q: '¿Qué compara cada cifra del «Panel»?', a: 'Los leads nuevos, los contactados y la tasa de respuesta se comparan con el período anterior del mismo largo (por ejemplo, los 30 días anteriores). Las etapas son una foto de hoy. La «Lectura» resume en frases lo más importante y te lleva a la etapa donde hay leads detenidos.' },
       { q: '¿Las etapas cambian solas?', a: 'No. Los envíos y las respuestas proponen el cambio y tú lo aceptas. Nunca se mueve un contacto hacia atrás ni uno ya cerrado.' },
       { q: '¿Puedo asignar un responsable?', a: 'Sí, en el detalle del contacto, en «Colaboración».' },
     ],

@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, Focus, LayoutGrid, Loader2, RefreshCw, Sparkles, Workflow } from 'lucide-react';
+import { AlertCircle, BarChart3, Focus, LayoutGrid, Loader2, RefreshCw, Sparkles, Workflow } from 'lucide-react';
 
 import { KanbanBoard } from '@/components/crm/KanbanBoard';
-import { PipelineFlowView } from '@/components/crm/PipelineFlowView';
+import { PipelineDashboard } from '@/components/crm/PipelineDashboard';
 import { LeadDetailDrawer } from '@/components/crm/LeadDetailDrawer';
 import { SmartAlerts } from '@/components/crm/SmartAlerts';
 import { StageSuggestions } from '@/components/crm/StageSuggestions';
@@ -34,16 +34,17 @@ export default function CRMPage() {
     const [movingLeadIds, setMovingLeadIds] = useState<Set<string>>(new Set());
     const [suggestions, setSuggestions] = useState<CrmStageSuggestion[]>([]);
     const [deciding, setDeciding] = useState(false);
-    // «Gráfico» shows the flow by stage (Plan 5, PR-10b); «Tablero» is the board to move leads. The choice is remembered.
-    // null until the remembered choice is read, so the toggle never shows «Gráfico» and then jumps to «Tablero».
-    const [view, setView] = useState<'graph' | 'board' | null>(null);
+    // «Panel» is the CRM dashboard (Plan 11, PR 4a; it replaces the flow graph of Plan 5); «Tablero» is the board to move
+    // leads. The choice is remembered. null until it is read, so the toggle never shows «Panel» and then jumps to «Tablero».
+    const [view, setView] = useState<'panel' | 'board' | null>(null);
     const [openStage, setOpenStage] = useState<PipelineStage | null>(null);
+    const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
     useEffect(() => {
-        let stored: 'graph' | 'board' = 'graph';
+        let stored: 'panel' | 'board' = 'panel';
         try { if (window.localStorage.getItem('anton.crm.view') === 'board') stored = 'board'; } catch { /* storage unavailable */ }
         setView(stored);
     }, []);
-    function chooseView(next: 'graph' | 'board') {
+    function chooseView(next: 'panel' | 'board') {
         setView(next);
         try { window.localStorage.setItem('anton.crm.view', next); } catch { /* storage unavailable */ }
     }
@@ -52,18 +53,22 @@ export default function CRMPage() {
         rowsRef.current = rows;
     }, [rows]);
 
-    const loadData = useCallback(async () => {
-        setLoading(true);
-        setLoadError(null);
+    // `silent` is the automatic refresh: it keeps the current render (no spinner, no error banner for a passing failure).
+    const loadData = useCallback(async (silent = false) => {
+        if (!silent) {
+            setLoading(true);
+            setLoadError(null);
+        }
         try {
             const data = await buildUnifiedRows();
             rowsRef.current = data;
             setRows(data);
+            setRefreshedAt(Date.now());
         } catch (error) {
             console.error('[crm] load error', error);
-            setLoadError('No pudimos cargar el pipeline. Revisa tu conexión e inténtalo de nuevo.');
+            if (!silent) setLoadError('No pudimos cargar el pipeline. Revisa tu conexión e inténtalo de nuevo.');
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, []);
 
@@ -81,6 +86,21 @@ export default function CRMPage() {
     useEffect(() => {
         void loadData();
         void loadSuggestions();
+    }, [loadData, loadSuggestions]);
+
+    // Automatic: while the page is visible and nobody is moving a lead, it rereads every minute and when the person comes
+    // back to the tab, so the panel follows sends, replies and accepted suggestions without a reload.
+    const busyRef = useRef(false);
+    useEffect(() => { busyRef.current = movingLeadIds.size > 0 || deciding; }, [movingLeadIds, deciding]);
+    useEffect(() => {
+        const refresh = () => {
+            if (document.visibilityState !== 'visible' || busyRef.current) return;
+            void loadData(true);
+            void loadSuggestions();
+        };
+        const timer = window.setInterval(refresh, 60_000);
+        document.addEventListener('visibilitychange', refresh);
+        return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
     }, [loadData, loadSuggestions]);
 
     async function decideSuggestions(ids: string[], decision: 'accept' | 'dismiss') {
@@ -150,8 +170,8 @@ export default function CRMPage() {
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
                         <div role="group" aria-label="Vista del pipeline" className="flex rounded-full border p-0.5">
-                            <Button size="sm" variant={view === 'graph' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'graph'} onClick={() => chooseView('graph')}>
-                                <Workflow className="h-4 w-4" /> Gráfico
+                            <Button size="sm" variant={view === 'panel' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'panel'} onClick={() => chooseView('panel')}>
+                                <BarChart3 className="h-4 w-4" /> Panel
                             </Button>
                             <Button size="sm" variant={view === 'board' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'board'} onClick={() => chooseView('board')}>
                                 <LayoutGrid className="h-4 w-4" /> Tablero
@@ -205,7 +225,7 @@ export default function CRMPage() {
                     />
                 ) : view !== 'board' ? (
                     <div className="h-full overflow-y-auto">
-                        <PipelineFlowView rows={rows} onOpenStage={setOpenStage} pending={pendingByStage} />
+                        <PipelineDashboard rows={rows} onOpenStage={setOpenStage} pending={pendingByStage} refreshedAt={refreshedAt} />
                     </div>
                 ) : (
                     <KanbanBoard
