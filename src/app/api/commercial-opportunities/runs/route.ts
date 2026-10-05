@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunities/access';
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import { ensureHiringProfile, supabaseHiringStore, supabaseTenderStore } from '@/lib/server/commercial-opportunities/store';
-import { hiringSyncEnvironment, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
+import { HiringSyncError, hiringSyncEnvironment, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
 import { runTenderSync } from '@/lib/server/commercial-opportunities/tender-sync';
+import { markTicketRejected, resolveTicketForUser, ticketWasRejected } from '@/lib/server/commercial-opportunities/tickets';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -12,7 +13,7 @@ const bodySchema = z.object({ kind: z.enum(['hiring', 'tenders']).default('hirin
 
 /**
  * «Buscar ahora»: companies that are hiring (paid sources, within the month's cap; the page showed the cost before) or
- * public tenders (free, within the ticket's daily quota).
+ * public tenders (free, with the Mercado Público ticket of whoever clicks).
  */
 export async function POST(request: Request) {
   try {
@@ -22,9 +23,14 @@ export async function POST(request: Request) {
     const profile = await ensureHiringProfile(auth.admin, scope);
     const storeScope = { ...scope, profileId: profile.id };
     if (kind === 'tenders') {
-      return opportunitiesJson(await runTenderSync({
-        store: supabaseTenderStore(auth.admin, storeScope, 'manual'), profile, ticket: process.env.MERCADO_PUBLICO_TICKET, organizationId: auth.organizationId,
-      }));
+      // The ticket of whoever clicks: their own, or the shared one when they are on its list.
+      const resolved = await resolveTicketForUser(auth.admin, auth.user);
+      if (!resolved.ticket) throw new HiringSyncError('Conecta tu ticket de Mercado Público para buscar licitaciones. Es gratis y se pide una sola vez.', 409);
+      const result = await runTenderSync({
+        store: supabaseTenderStore(auth.admin, storeScope, 'manual'), profile, ticket: resolved.ticket, organizationId: auth.organizationId,
+      });
+      if (resolved.source === 'own' && ticketWasRejected(result)) await markTicketRejected(auth.admin, auth.user.id).catch(() => undefined);
+      return opportunitiesJson(result);
     }
     return opportunitiesJson(await runHiringSync({
       store: supabaseHiringStore(auth.admin, storeScope, 'manual'), profile, env: hiringSyncEnvironment(), capUsd: monthlyCapUsd(),

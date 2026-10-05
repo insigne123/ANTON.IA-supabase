@@ -5,6 +5,7 @@ import {
   findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities, recentRuns,
 } from '@/lib/server/commercial-opportunities/store';
 import { hiringSyncEnvironment } from '@/lib/server/commercial-opportunities/sync';
+import { resolveTicketForUser } from '@/lib/server/commercial-opportunities/tickets';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -13,12 +14,17 @@ type Scope = { userId: string; organizationId: string };
  * confirmed email), read from the auth record with the worker's service client. Any doubt is a no.
  */
 export async function coworkOpportunitiesAllowed(client: SupabaseClient, userId: string, configured = process.env.OPPORTUNITIES_ALLOWED_EMAILS) {
-  if (!configured?.trim()) return false;
+  return Boolean(await coworkOpportunitiesUser(client, userId, configured));
+}
+
+/** The auth record of the run owner when they may see «Oportunidades», or null. */
+async function coworkOpportunitiesUser(client: SupabaseClient, userId: string, configured = process.env.OPPORTUNITIES_ALLOWED_EMAILS) {
+  if (!configured?.trim()) return null;
   try {
     const { data, error } = await client.auth.admin.getUserById(userId);
-    return !error && isOpportunitiesUserAllowed(data?.user, configured);
+    return !error && data?.user && isOpportunitiesUserAllowed(data.user, configured) ? data.user : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -28,7 +34,8 @@ export async function coworkOpportunitiesAllowed(client: SupabaseClient, userId:
  * Read only: without a profile it says so instead of creating one, and the access is checked again on every read.
  */
 export async function readCoworkOpportunities(client: SupabaseClient, scope: Scope, value: string) {
-  if (!await coworkOpportunitiesAllowed(client, scope.userId)) throw new Error('Esta consulta no está disponible para esta cuenta.');
+  const user = await coworkOpportunitiesUser(client, scope.userId);
+  if (!user) throw new Error('Esta consulta no está disponible para esta cuenta.');
   const now = new Date().toISOString();
   const profile = await findHiringProfile(client, scope);
   const [hiring, tenders, projects, runs] = profile ? await Promise.all([
@@ -38,8 +45,10 @@ export async function readCoworkOpportunities(client: SupabaseClient, scope: Sco
     recentRuns(client, scope),
   ]) : [[], [], [], []];
   const environment = hiringSyncEnvironment();
+  // Tenders are ready when this person has a ticket (their own, or the shared one when they are on its list).
+  const ticket = await resolveTicketForUser(client, user).catch(() => null);
   return coworkOpportunitiesSummary({
     profile, hiring, tenders, projects, runs, query: value, now,
-    ready: { hiring: Boolean(environment.jsearchKey || environment.apifyToken), tenders: Boolean(process.env.MERCADO_PUBLICO_TICKET) },
+    ready: { hiring: Boolean(environment.jsearchKey || environment.apifyToken), tenders: Boolean(ticket?.ticket) },
   });
 }

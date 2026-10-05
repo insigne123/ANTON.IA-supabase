@@ -4,7 +4,6 @@ import type { Tender } from '@/lib/commercial-opportunities/tenders';
 import type { TenderOpportunityRow, TenderSignalRow } from '@/lib/commercial-opportunities/records';
 import { runTenderSync, type TenderStore } from './tender-sync';
 import { MercadoPublicoBusyError } from './mercado-publico';
-import { dailyOpportunityPlan } from './daily';
 
 const NOW = '2026-10-02T12:00:00Z';
 const ORG = '00000000-0000-4000-8000-000000000002';
@@ -207,11 +206,4 @@ test('without a ticket or without words nothing starts; if saving fails both run
     compraAgil: async () => ({ tenders: [tender('compra_agil', 'A-1-COT26', 'Suministro de personal')], requests: 1, error: null }),
     listLicitaciones: async () => [], getLicitacion: async () => null } }), /guardar/);
   assert.deepEqual(memory.runs.map(run => run.status), ['failed', 'failed']);
-});
-
-test('the daily sync visits each organization once and only with the keys it has', () => {
-  const profiles = [{ organization_id: 'o1', created_by: 'u1' }, { organization_id: 'o1', created_by: 'u2' }, { organization_id: 'o2', created_by: 'u3' }];
-  assert.deepEqual(dailyOpportunityPlan(profiles, { ticket: true, jsearch: false }), [
-    { organizationId: 'o1', userId: 'u1', tenders: true, hiring: false }, { organizationId: 'o2', userId: 'u3', tenders: true, hiring: false }]);
-  assert.deepEqual(dailyOpportunityPlan(profiles, { ticket: false, jsearch: false }), []);
 });
