@@ -15,6 +15,19 @@ export function dailyOpportunityPlan(profiles: Array<{ organization_id: string; 
   });
 }
 
+/** The daily sync stops starting organizations after this, so the route ends inside its 300 s (Plan 10). */
+export const DAILY_BUDGET_MS = 240_000;
+
+export const JSEARCH_MONTH_SPENT = 'JSearch ya usó todo el cupo de este mes: la búsqueda diaria lo vuelve a consultar el 1 del próximo mes.';
+/**
+ * Whether JSearch already ran out of its monthly quota this month (Plan 10). Then the daily sync records a skipped run, at
+ * no cost, until the month changes, instead of asking again and failing every day.
+ */
+export function jsearchQuotaSpentThisMonth(lastRun: { status: string; startedAt: string; error: string | null } | null, monthStartIso: string) {
+  return Boolean(lastRun && Date.parse(lastRun.startedAt) >= Date.parse(monthStartIso) && ['failed', 'skipped'].includes(lastRun.status)
+    && /cupo del plan este mes|cupo de este mes/i.test(lastRun.error || ''));
+}
+
 type TenderOutcome = { status: string; matched: number; created: number; sources: Array<{ source: string; error: string | null }> };
 /**
  * The daily tender search of one organization (Plan 10). With a member's ticket it searches, and a ticket Mercado Público

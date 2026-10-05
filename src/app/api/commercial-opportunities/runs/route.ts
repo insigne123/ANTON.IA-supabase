@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunities/access';
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
-import { ensureHiringProfile, supabaseHiringStore, supabaseTenderStore } from '@/lib/server/commercial-opportunities/store';
+import { findHiringProfile, supabaseHiringStore, supabaseTenderStore } from '@/lib/server/commercial-opportunities/store';
 import { HiringSyncError, hiringSyncEnvironment, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
 import { runTenderSync } from '@/lib/server/commercial-opportunities/tender-sync';
 import { markTicketRejected, resolveTicketForUser, ticketWasRejected } from '@/lib/server/commercial-opportunities/tickets';
@@ -20,7 +20,8 @@ export async function POST(request: Request) {
     const auth = await requireOpportunitiesAccess();
     const { kind } = bodySchema.parse(await request.json().catch(() => ({})));
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
-    const profile = await ensureHiringProfile(auth.admin, scope);
+    const profile = await findHiringProfile(auth.admin, scope);
+    if (!profile) throw new HiringSyncError('Primero define qué buscas: la oferta, los cargos y las palabras de las licitaciones.', 409);
     const storeScope = { ...scope, profileId: profile.id };
     if (kind === 'tenders') {
       // The ticket of whoever clicks: their own, or the shared one when they are on its list.

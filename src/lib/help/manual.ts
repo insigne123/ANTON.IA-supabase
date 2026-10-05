@@ -113,10 +113,11 @@ export const HELP_SECTIONS: HelpSection[] = [
     feature: 'opportunities',
     summary: 'Empresas que están contratando para lo que ofreces, licitaciones y Compra Ágil que calzan con tu oferta y proyectos de inversión por partir, con la evidencia de cada una.',
     steps: [
+      'La primera vez, pulsa «Definir búsqueda»: cuenta qué ofreces, los cargos que cubres y las palabras de las licitaciones, y pulsa «Guardar y buscar». Desde ahí se busca sola cada mañana.',
       'En «Empresas contratando», «Buscar ahora» revisa los avisos de empleo de los cargos de tu búsqueda y los agrupa por empresa. Antes de buscar ves cuánto cuesta.',
       'Desde una empresa, busca a sus decisores: la búsqueda se abre lista y los guardas en «Por completar».',
       'En «Licitaciones y Compra Ágil», conecta tu ticket de Mercado Público (gratis, uno por persona) y pulsa «Buscar licitaciones». Después se actualiza sola cada mañana.',
-      'En «Proyectos de inversión», sube el archivo que descargas del mapa de proyectos del SEIA.',
+      'En «Proyectos de inversión», sube el archivo que descargas del mapa de proyectos del SEIA. Si pasan 30 días sin subir uno, la pestaña te lo recuerda.',
     ],
     faqs: [
       { q: '¿Para qué sirve saber que una empresa está contratando?', a: 'Es una razón concreta para escribirle: si busca personal, puede necesitar lo que ofreces.' },
