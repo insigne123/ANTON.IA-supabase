@@ -69,7 +69,8 @@ test('what is missing is said: no profile, no keys, no SEIA file, a failed sourc
   assert.equal(empty.gaps.length, 4);
   assert.match(empty.gaps.join(' '), /Aún no se abre «Oportunidades»/);
   assert.match(empty.gaps.join(' '), /JSearch o LinkedIn/);
-  assert.match(empty.gaps.join(' '), /ticket de Mercado Público/);
+  assert.match(empty.gaps.join(' '), /falta tu ticket de Mercado Público: es gratis, se pide una vez en chilecompra\.cl\/api con tu Clave Única/);
+  assert.doesNotMatch(empty.gaps.join(' '), /lo agrega el administrador/, 'each person brings their own ticket');
   assert.match(empty.gaps.join(' '), /archivo del SEIA/);
   const failed = summary({ runs: [
     { source: 'linkedin', status: 'failed', startedAt: '2026-09-25T11:15:00Z', fetched: 0, created: 0, error: 'Apify respondió 401' },

@@ -188,6 +188,11 @@ env:
   - variable: MERCADO_PUBLICO_TICKET
     secret: MERCADO_PUBLICO_TICKET
     availability: [RUNTIME]
+  # Plan 10: cada persona conecta su propio ticket de Mercado Público en Oportunidades. El ticket global de arriba
+  # solo lo usan las cuentas confirmadas de esta lista, para sus búsquedas y las de las organizaciones que crearon.
+  - variable: MERCADO_PUBLICO_SHARED_TICKET_EMAILS
+    value: nicolas.yarur.g@yago.cl
+    availability: [RUNTIME]
 
   # === Lead provider ===
   # Apollo runs in-process in this service: server runtime only, never BUILD,
