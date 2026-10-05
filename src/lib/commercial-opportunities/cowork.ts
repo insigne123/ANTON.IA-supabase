@@ -110,7 +110,7 @@ export function coworkOpportunitiesSummary(input: {
   const gaps: string[] = [];
   if (!input.profile) gaps.push('Aún no se abre «Oportunidades»: ahí se define qué buscar (la oferta, los cargos, las palabras de las licitaciones y los sectores del SEIA).');
   if (!input.ready.hiring) gaps.push('La búsqueda de empresas contratando aún no tiene sus claves (JSearch o LinkedIn): las agrega el administrador de la cuenta.');
-  if (!input.ready.tenders) gaps.push('La búsqueda de licitaciones aún no tiene el ticket de Mercado Público: lo agrega el administrador de la cuenta.');
+  if (!input.ready.tenders) gaps.push('Para buscar licitaciones falta tu ticket de Mercado Público: es gratis, se pide una vez en chilecompra.cl/api con tu Clave Única, llega a tu correo y se pega en Oportunidades → «Licitaciones y Compra Ágil».');
   if (!input.runs.some(run => run.source === 'seia')) gaps.push('Aún no se sube un archivo del SEIA: los proyectos se cargan a mano desde la página, una vez al mes.');
   const failed = lastRuns.filter(run => run.status === 'failed');
   if (failed.length) gaps.push(`La última búsqueda falló en ${list(failed.map(run => RUN_SOURCE_LABELS[run.source] || sourceLabel(run.source)))}.`);
