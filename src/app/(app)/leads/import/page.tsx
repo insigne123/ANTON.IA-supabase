@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertCircle, Check, CheckCircle2 } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
@@ -28,6 +28,13 @@ const STEPS: Array<{ id: Exclude<Step, 'done'>; label: string }> = [
     { id: 'review', label: 'Revisión' },
 ];
 const ORDER: Step[] = ['upload', 'map', 'review', 'done'];
+/** «Volver» goes back to where the import was opened (Plan 11): Tabla de datos unless the link says otherwise. */
+const ORIGINS: Record<string, { href: string; label: string }> = {
+    'por-completar': { href: '/saved/leads', label: 'Por completar' },
+    'por-escribir': { href: '/saved/leads/enriched', label: 'Por escribir' },
+    buscar: { href: '/search', label: 'Buscar prospectos' },
+};
+const DEFAULT_BACK = { href: '/sheet', label: 'Tabla de datos' };
 
 /**
  * «Importar contactos» (Plan 9): a CSV in three steps. Rows with an email or a phone go to «Por escribir» and the rest to
@@ -44,6 +51,11 @@ export default function ImportLeadsPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState('');
     const [result, setResult] = useState<CsvImportResult | null>(null);
+    const [back, setBack] = useState(DEFAULT_BACK);
+    useEffect(() => {
+        const from = new URLSearchParams(window.location.search).get('from') || '';
+        if (ORIGINS[from]) setBack(ORIGINS[from]);
+    }, []);
 
     const restart = () => {
         setStep('upload');
@@ -75,6 +87,7 @@ export default function ImportLeadsPage() {
                 porCompletar: saved.addedCount,
                 duplicates: enriched.duplicateCount + saved.duplicateCount,
                 alreadyContacted: plan.alreadyContacted.length,
+                repeated: plan.repeated.length,
             });
             setStep('done');
         } catch (error) {
@@ -92,8 +105,8 @@ export default function ImportLeadsPage() {
         <div className="mx-auto max-w-5xl space-y-6 pb-20">
             <PageHeader
                 title="Importar contactos"
-                description="Sube un CSV: quienes traen correo o teléfono quedan en «Por escribir» y el resto en «Por completar», donde puedes buscar su correo."
-                back={{ href: '/sheet', label: 'Tabla de datos' }}
+                description="Sube tu lista en Excel o CSV: quienes traen correo o teléfono quedan en «Por escribir» y el resto en «Por completar», donde puedes buscar su correo."
+                back={back}
             />
 
             <ol className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm" aria-label="Pasos de la importación">

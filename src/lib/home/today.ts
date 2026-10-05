@@ -68,7 +68,7 @@ export function buildTodayPlan(input: TodayInput): TodayPlan {
     },
     {
       id: 'contacts', title: 'Guarda tus primeros contactos', href: '/search', cta: 'Buscar prospectos',
-      description: 'Busca por cargo y empresa, o pega un perfil de LinkedIn.',
+      description: 'Busca por cargo y empresa, pega un perfil de LinkedIn o importa tu propia lista en Excel o CSV.',
       done: counts.saved + counts.withEmail > 0,
     },
     {

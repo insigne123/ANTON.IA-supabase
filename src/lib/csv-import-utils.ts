@@ -154,21 +154,60 @@ export function csvRowToLead(row: CsvLeadInput, id: string): Lead {
     };
 }
 
-export type CsvImportPlan = { porEscribir: CsvLeadInput[]; porCompletar: CsvLeadInput[]; alreadyContacted: CsvLeadInput[] };
+const fold = (value: unknown) => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-/** Splits the valid rows by destination and leaves out the people already contacted (by email), so nobody is written twice. */
+function linkedinKey(url: string | undefined) {
+    const match = String(url || '').toLowerCase().match(/linkedin\.com\/(in|pub)\/([^/?#\s]+)/);
+    if (!match) return '';
+    try { return `linkedin:${decodeURIComponent(match[2])}`; } catch { return `linkedin:${match[2]}`; }
+}
+
+/** The ways a row names a person: the email, the LinkedIn profile, and the name together with the company. */
+function identityKeys(row: CsvLeadInput) {
+    const keys: string[] = [];
+    if (row.email) keys.push(`email:${row.email.toLowerCase()}`);
+    const linkedin = linkedinKey(row.linkedinUrl);
+    if (linkedin) keys.push(linkedin);
+    if (row.name && row.company) keys.push(`person:${fold(row.name)}|${fold(row.company)}`);
+    return keys;
+}
+
+/**
+ * For each row, the number (from 1) of an earlier row of the same person in the file, or null: the same email, the same
+ * LinkedIn profile, or the same name and company. Rows to fix are not matched, so fixing one never hides another.
+ */
+export function csvRowRepeats(rows: CsvLeadInput[]): Array<number | null> {
+    const seen = new Map<string, number>();
+    return rows.map((row, index) => {
+        if (csvRowProblem(row)) return null;
+        const keys = identityKeys(row);
+        const earlier = keys.map((key) => seen.get(key)).find((value) => value !== undefined);
+        if (earlier !== undefined) return earlier + 1;
+        for (const key of keys) seen.set(key, index);
+        return null;
+    });
+}
+
+export type CsvImportPlan = { porEscribir: CsvLeadInput[]; porCompletar: CsvLeadInput[]; alreadyContacted: CsvLeadInput[]; repeated: CsvLeadInput[] };
+
+/**
+ * Splits the valid rows by destination, imports each person of the file once and leaves out the people already contacted
+ * (by email), so nobody is written twice.
+ */
 export function planCsvImport(rows: CsvLeadInput[], contactedEmails: Set<string>): CsvImportPlan {
-    const plan: CsvImportPlan = { porEscribir: [], porCompletar: [], alreadyContacted: [] };
-    for (const row of rows) {
-        if (csvRowProblem(row)) continue;
-        if (row.email && contactedEmails.has(row.email.toLowerCase())) plan.alreadyContacted.push(row);
+    const plan: CsvImportPlan = { porEscribir: [], porCompletar: [], alreadyContacted: [], repeated: [] };
+    const repeats = csvRowRepeats(rows);
+    rows.forEach((row, index) => {
+        if (csvRowProblem(row)) return;
+        if (repeats[index] !== null) plan.repeated.push(row);
+        else if (row.email && contactedEmails.has(row.email.toLowerCase())) plan.alreadyContacted.push(row);
         else if (csvRowDestination(row) === 'por-escribir') plan.porEscribir.push(row);
         else plan.porCompletar.push(row);
-    }
+    });
     return plan;
 }
 
-export type CsvImportResult = { porEscribir: number; porCompletar: number; duplicates: number; alreadyContacted: number };
+export type CsvImportResult = { porEscribir: number; porCompletar: number; duplicates: number; alreadyContacted: number; repeated: number };
 
 const contacts = (count: number) => `${count} contacto${count === 1 ? '' : 's'}`;
 
@@ -176,6 +215,9 @@ const contacts = (count: number) => `${count} contacto${count === 1 ? '' : 's'}`
 export function csvImportSummary(result: CsvImportResult) {
     const added = result.porEscribir + result.porCompletar;
     const notes: string[] = [];
+    if (result.repeated > 0) {
+        notes.push(`${result.repeated} ${result.repeated === 1 ? 'fila repetida' : 'filas repetidas'} en el archivo: cada persona se importó una sola vez.`);
+    }
     if (result.duplicates > 0) notes.push(`${contacts(result.duplicates)} ya ${result.duplicates === 1 ? 'estaba guardado' : 'estaban guardados'}.`);
     if (result.alreadyContacted > 0) {
         notes.push(`${contacts(result.alreadyContacted)} ya ${result.alreadyContacted === 1 ? 'fue contactado y no se importó' : 'fueron contactados y no se importaron'}.`);
