@@ -101,11 +101,30 @@ test('a later JSearch page failure preserves paid first-page evidence and the es
 });
 
 test('Apify rejections before actor start do not imply a charge', async () => {
-  for (const status of [400, 401, 402, 403, 404]) {
-    const fetch = (async () => json(status, { error: { message: 'private token' } })) as unknown as typeof globalThis.fetch;
+  for (const [status, type] of [[400, 'invalid-input'], [400, 'run-input-body-not-valid-json'], [401, 'invalid-token'], [402, 'x402-payment-required'],
+    [403, 'insufficient-permissions'], [404, 'record-not-found'], [429, 'rate-limit-exceeded']] as const) {
+    const fetch = (async () => json(status, { error: { type, message: 'private token' } })) as unknown as typeof globalThis.fetch;
     await assert.rejects(searchFantasticJobs({ titles: ['operario'] }, { fetch, token: 'private token' }),
-      (error: FantasticJobsError) => error instanceof FantasticJobsError && !error.mayHaveCharged && !error.message.includes('private token'));
+      (error: FantasticJobsError) => error instanceof FantasticJobsError && !error.mayHaveCharged && !error.message.includes('private token'), `${status} ${type}`);
   }
+});
+
+test('a run that started and failed, outlived the wait or does not say which may have charged', async () => {
+  const cases = [
+    [400, { error: { type: 'run-failed', message: 'Actor run did not succeed (run ID: abc, status: FAILED) private token' } }, /empezó y falló \(run-failed\)/],
+    [408, { error: { type: 'run-timeout-exceeded', message: 'Actor run exceeded the timeout of 300 seconds' } }, /más allá del tiempo de espera/],
+    [400, { error: { message: 'private token' } }, /sin decir si la corrida empezó/],
+    [400, 'not json', /sin decir si la corrida empezó/],
+  ] as const;
+  for (const [status, body, expected] of cases) {
+    const fetch = (async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })) as unknown as typeof globalThis.fetch;
+    await assert.rejects(searchFantasticJobs({ titles: ['operario'] }, { fetch, token: 'private token' }),
+      (error: FantasticJobsError) => error instanceof FantasticJobsError && error.mayHaveCharged && expected.test(error.message)
+        && !error.message.includes('private token'), `${status} ${JSON.stringify(body)}`);
+  }
+  const down = (async () => json(503, {})) as unknown as typeof globalThis.fetch;
+  await assert.rejects(searchFantasticJobs({ titles: ['operario'] }, { fetch: down, token: 't' }),
+    (error: Error) => !(error instanceof FantasticJobsError) && error.message === 'Apify respondió 503.', 'a server error stays an unknown outcome');
 });
 
 test('Apify budget includes startup, reduces the requested jobs to the hard cap, and a zero cap never calls the provider', async () => {
