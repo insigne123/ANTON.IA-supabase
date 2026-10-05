@@ -216,7 +216,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     faqs: [
       { q: '¿Exporta todo o solo lo que veo?', a: 'Solo las filas visibles, con los filtros y columnas que elegiste.' },
-      { q: '¿Puedo importar contactos?', a: 'Sí, desde un archivo CSV: en «Tabla de datos», pulsa «Importar».' },
+      { q: '¿Puedo importar contactos?', a: 'Sí, tu propia lista en Excel (.xlsx) o CSV, tal como sale de Excel, Google Sheets o tu CRM: pulsa «Importar lista» en «Por completar» o «Por escribir», o «¿Ya tienes tu lista? Impórtala» en Buscar prospectos. Si el Excel tiene varias hojas, eliges cuál. Quienes traen correo o teléfono quedan en «Por escribir»; el resto, en «Por completar».' },
     ],
     related: ['por-escribir', 'por-completar'],
   },

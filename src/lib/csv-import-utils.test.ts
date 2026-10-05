@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import {
     assignField, csvImportSummary, csvRowDestination, csvRowProblem, csvRowToEnrichedLead, csvRowToLead, guessMapping,
-    mappingHasName, planCsvImport, rowsFromMapping, type CsvLeadInput,
+    csvRowRepeats, mappingHasName, planCsvImport, rowsFromMapping, type CsvLeadInput,
 } from './csv-import-utils';
 
 const fields = (headers: string[]) => guessMapping(headers).map((item) => item.leadField);
@@ -81,12 +81,29 @@ test('the plan leaves out rows with problems and people already contacted', () =
     assert.deepEqual(plan.alreadyContacted.map((row) => row.name), ['Beto']);
 });
 
+test('the same person twice in the file is imported once: same email, LinkedIn profile, or name and company', () => {
+    const rows = [
+        { name: 'Ana Pérez', email: 'ana@empresa.cl', company: 'Empresa SpA' },
+        { name: 'Ana Perez', email: '', company: 'empresa  spa' },
+        { name: 'A. Pérez', email: 'ANA@empresa.cl'.toLowerCase() },
+        { name: 'Jorge Soto', email: '', company: 'Otra', linkedinUrl: 'https://www.linkedin.com/in/jorge-soto/' },
+        { name: 'Jorge S.', email: '', company: 'Otra SA', linkedinUrl: 'https://cl.linkedin.com/in/Jorge-Soto?trk=x' },
+        { name: '', email: 'ana@empresa.cl' },
+        { name: 'Carla', email: '', company: 'Otra' },
+    ] as CsvLeadInput[];
+    assert.deepEqual(csvRowRepeats(rows), [null, 1, 1, null, 4, null, null], 'a row to fix is not a repeat');
+    const plan = planCsvImport(rows, new Set());
+    assert.deepEqual(plan.porEscribir.map((row) => row.name), ['Ana Pérez']);
+    assert.deepEqual(plan.porCompletar.map((row) => row.name), ['Jorge Soto', 'Carla']);
+    assert.deepEqual(plan.repeated.map((row) => row.name), ['Ana Perez', 'A. Pérez', 'Jorge S.']);
+});
+
 test('the summary counts what was really added', () => {
-    assert.deepEqual(csvImportSummary({ porEscribir: 3, porCompletar: 1, duplicates: 2, alreadyContacted: 1 }), {
+    assert.deepEqual(csvImportSummary({ porEscribir: 3, porCompletar: 1, duplicates: 2, alreadyContacted: 1, repeated: 2 }), {
         title: 'Importaste 4 contactos',
-        notes: ['2 contactos ya estaban guardados.', '1 contacto ya fue contactado y no se importó.'],
+        notes: ['2 filas repetidas en el archivo: cada persona se importó una sola vez.', '2 contactos ya estaban guardados.', '1 contacto ya fue contactado y no se importó.'],
     });
-    assert.equal(csvImportSummary({ porEscribir: 0, porCompletar: 0, duplicates: 5, alreadyContacted: 0 }).title, 'No se agregó nadie nuevo');
+    assert.equal(csvImportSummary({ porEscribir: 0, porCompletar: 0, duplicates: 5, alreadyContacted: 0, repeated: 0 }).title, 'No se agregó nadie nuevo');
 });
 
 test('the import page saves each row where it belongs, checks who was contacted and has no raw colors', () => {
@@ -95,7 +112,8 @@ test('the import page saves each row where it belongs, checks who was contacted 
     assert.match(page, /enrichedLeadsStorage\.addDedup\(plan\.porEscribir/);
     assert.match(page, /supabaseService\.addLeadsDedup\(plan\.porCompletar/);
     assert.doesNotMatch(page, /'verified'/);
-    assert.match(page, /back=\{\{ href: '\/sheet', label: 'Tabla de datos' \}\}/);
+    assert.match(page, /const DEFAULT_BACK = \{ href: '\/sheet', label: 'Tabla de datos' \}/);
+    assert.match(page, /'por-completar': \{ href: '\/saved\/leads', label: 'Por completar' \}/, '«Volver» returns to where the import was opened');
     const uploader = readFileSync('src/components/csv-importer/csv-uploader.tsx', 'utf8');
     assert.match(uploader, /<Button type="button" onClick=\{\(\) => inputRef\.current\?\.click\(\)\}/, 'a real button picks the file');
     assert.doesNotMatch(uploader, /document\.getElementById/);

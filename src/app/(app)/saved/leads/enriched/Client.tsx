@@ -1,5 +1,6 @@
 
 'use client';
+import Link from 'next/link';
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 
 import { useRouter } from 'next/navigation';
@@ -14,7 +15,7 @@ import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/le
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, AlertTriangle, MoreHorizontal, ArrowRight, ChevronDown, ListFilter, MailCheck, Search } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, AlertTriangle, MoreHorizontal, ArrowRight, ChevronDown, ListFilter, MailCheck, Search, Upload } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
@@ -1123,10 +1124,15 @@ export default function EnrichedLeadsClient() {
         count={enriched.length}
         description="Contactos con correo. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas antes de enviar."
         actions={(
-          <Button variant="outline" className="w-full sm:w-auto" onClick={() => router.push('/saved/leads')}>
-            Ir a «Por completar»
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Button>
+          <>
+            <Button asChild variant="ghost" className="w-full sm:w-auto">
+              <Link href="/leads/import?from=por-escribir"><Upload className="h-4 w-4" aria-hidden="true" />Importar lista</Link>
+            </Button>
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => router.push('/saved/leads')}>
+              Ir a «Por completar»
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </>
         )}
       />
 

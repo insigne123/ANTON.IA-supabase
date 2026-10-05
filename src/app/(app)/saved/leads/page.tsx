@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import { supabaseService } from '@/lib/supabase-service';
 import type { Lead } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, ArrowRight, ChevronDown, Download, Linkedin, ListFilter, MailSearch, MessageSquare, Search, Trash2, UserSearch } from 'lucide-react';
+import { AlertCircle, ArrowRight, ChevronDown, Download, Linkedin, ListFilter, MailSearch, MessageSquare, Search, Trash2, Upload, UserSearch } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
@@ -503,10 +504,16 @@ export default function SavedLeadsPage() {
         count={savedLeads.length}
         description="Contactos guardados sin correo. Busca su correo: quien lo recibe pasa a «Por escribir» y quien no, queda aquí marcado."
         actions={(
-          <Button data-tour="saved-enriched-link" variant="outline" className="w-full sm:w-auto" onClick={() => router.push('/saved/leads/enriched')}>
-            Ir a «Por escribir»
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
-          </Button>
+          <>
+            {/* Their own list, from Excel or CSV (Plan 11): one click from where the contacts live. */}
+            <Button asChild variant="ghost" className="w-full sm:w-auto">
+              <Link href="/leads/import?from=por-completar"><Upload className="h-4 w-4" aria-hidden="true" />Importar lista</Link>
+            </Button>
+            <Button data-tour="saved-enriched-link" variant="outline" className="w-full sm:w-auto" onClick={() => router.push('/saved/leads/enriched')}>
+              Ir a «Por escribir»
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </>
         )}
       />
 
