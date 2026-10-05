@@ -36,6 +36,8 @@ export default function UnsubscribesPage() {
   const confirm = useConfirm();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  // A failed read is said on the page: «Correos (0)» would read as «nobody is blocked».
+  const [loadError, setLoadError] = useState(false);
   const [emailList, setEmailList] = useState<UnsubscribedEmail[]>([]);
   const [domainList, setDomainList] = useState<ExcludedDomain[]>([]);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -54,16 +56,19 @@ export default function UnsubscribesPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
-      const [emails, domains] = await Promise.all([unsubscribeService.getBlacklist(), domainService.getExcludedDomains()]);
+      const [emails, domains] = await Promise.all([
+        unsubscribeService.getBlacklist({ strict: true }), domainService.getExcludedDomains({ strict: true }),
+      ]);
       setEmailList(emails);
       setDomainList(domains);
     } catch {
-      toast({ variant: 'destructive', title: 'No pudimos cargar los bloqueos', description: 'Intenta de nuevo en unos minutos.' });
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -209,11 +214,20 @@ export default function UnsubscribesPage() {
         }
       />
 
+      {loadError ? (
+        <Alert variant="destructive">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>No pudimos cargar los bloqueos. Revisa tu conexión y vuelve a intentarlo.</span>
+            <Button variant="outline" size="sm" onClick={() => void loadData()} disabled={loading}>Reintentar</Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <Tabs defaultValue="emails" className="w-full">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <TabsList>
-            <TabsTrigger value="emails">Correos ({emailList.length})</TabsTrigger>
-            <TabsTrigger value="domains">Dominios ({domainList.length})</TabsTrigger>
+            <TabsTrigger value="emails">Correos{loadError ? '' : ` (${emailList.length})`}</TabsTrigger>
+            <TabsTrigger value="domains">Dominios{loadError ? '' : ` (${domainList.length})`}</TabsTrigger>
           </TabsList>
           <Button variant="ghost" size="sm" onClick={() => void loadData()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true" /> Actualizar
@@ -263,7 +277,7 @@ export default function UnsubscribesPage() {
                   </TableHeader>
                   <TableBody>
                     {loading && emailList.length === 0 ? loadingRow(4) : emailList.length === 0 ? (
-                      <TableRow><TableCell colSpan={4} className="py-8 text-center text-foreground/70">No hay correos bloqueados.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={4} className="py-8 text-center text-foreground/70">{loadError ? 'No se pudieron leer los correos bloqueados.' : 'No hay correos bloqueados.'}</TableCell></TableRow>
                     ) : emailList.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell className="break-all font-medium">{item.email}</TableCell>
@@ -321,7 +335,7 @@ export default function UnsubscribesPage() {
                   </TableHeader>
                   <TableBody>
                     {loading && domainList.length === 0 ? loadingRow(3) : domainList.length === 0 ? (
-                      <TableRow><TableCell colSpan={3} className="py-8 text-center text-foreground/70">No hay dominios bloqueados.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={3} className="py-8 text-center text-foreground/70">{loadError ? 'No se pudieron leer los dominios bloqueados.' : 'No hay dominios bloqueados.'}</TableCell></TableRow>
                     ) : domainList.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell className="break-all font-medium">@{item.domain}</TableCell>

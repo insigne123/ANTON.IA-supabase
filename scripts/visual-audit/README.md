@@ -106,6 +106,8 @@ Qué revisa en cada página:
 
 Salida en `--out` (o `.visual-audit/interacciones-<fecha>/`): `interactions.md` con la cobertura por página y los hallazgos, `interactions.json` con todo, y en `shots/` la captura de cada página con errores (`-error.png`) y con carga lenta (`-slow.png`).
 
+La matriz de cobertura y lo que salió en la última corrida están en `docs/ui-ux/cobertura-interacciones.md`.
+
 
 ## Compilación compartida
 

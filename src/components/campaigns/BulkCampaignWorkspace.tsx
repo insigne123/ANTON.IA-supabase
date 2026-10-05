@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
 import { describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
+import { firstSelection } from '@/lib/campaign-audience-selection';
 import { AudienceCriteriaSchema, CampaignInputSchema, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 
 async function request(path: string, body?: unknown, method = 'POST') {
@@ -118,6 +119,15 @@ export function BulkCampaignWorkspace() {
     change({ criteria });
     const result = await request('/audience', { criteria, search: audienceQuery, page, pageSize: 25 });
     setPeople(result.people); setAudienceTotal(result.total); setAudiencePage(result.page); setSearched(true); setRankMeta(null);
+    if (page === 0) preselect(result.people);
+  }
+  // The first results come selected, so «Continuar» is the next step; «Quitar todos» or each checkbox undoes it. Nothing
+  // is sent before the review and the approval. A selection the person already made is never replaced.
+  function preselect(found: AudiencePerson[]) {
+    setDefinition(value => {
+      const emails = firstSelection(value.emails, found, MAX_RECIPIENTS);
+      return emails ? { ...value, emails } : value;
+    });
   }
   async function rankAudience() {
     const result = await request('/audience/rank', {
@@ -129,6 +139,7 @@ export function BulkCampaignWorkspace() {
     });
     setPeople(result.people); setAudienceTotal(result.people.length); setAudiencePage(0); setSearched(true);
     setRankMeta({ rankedCount: result.rankedCount, candidateCount: result.candidateCount, truncated: result.truncated, ineligibleCount: result.ineligibleCount });
+    preselect(result.people);
   }
   function selectAllResults(select: boolean) {
     const eligible = people.filter(person => !person.blockedReason).map(person => person.email);

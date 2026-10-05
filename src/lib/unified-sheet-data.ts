@@ -7,6 +7,7 @@ import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service'
 import { unifiedSheetService, type CustomData } from '@/lib/services/unified-sheet-service';
 import type { UnifiedRow } from './unified-sheet-types';
 import { hasReplySignal } from './antonia-reply-metrics';
+import type { UnifiedSource } from './unified-sheet-failures';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -244,33 +245,35 @@ function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow
 
 // --- Principal --- //
 
+export { unifiedFailureText, type UnifiedSource } from './unified-sheet-failures';
+
+export type UnifiedRowsReport = { rows: UnifiedRow[]; failed: UnifiedSource[] };
+
 export async function buildUnifiedRows(): Promise<UnifiedRow[]> {
+  return (await loadUnifiedRows()).rows;
+}
+
+/**
+ * The rows and the reads that failed. A failed read still leaves the others (one source never empties the rest), but
+ * the screen can tell «no data yet» from «could not read it»: with every row missing it says so instead of «empty».
+ */
+export async function loadUnifiedRows(): Promise<UnifiedRowsReport> {
   const rows: UnifiedRow[] = [];
+  const failed: UnifiedSource[] = [];
 
   try {
     // Each source falls back on its own: without `await`, a rejected source escaped its try/catch and Promise.all dropped
     // every other source with it, leaving the whole sheet (and the pipeline) empty.
+    const read = async <T,>(source: UnifiedSource, load: () => Promise<T>, empty: T): Promise<T> => {
+      try { return await load(); }
+      catch (e) { console.error(`[sheet] ${source} read error`, e); failed.push(source); return empty; }
+    };
     const [savedRaw, enrichedRaw, oppsRaw, contactedRaw, customDataMap] = await Promise.all([
-      (async () => {
-        try { return await supabaseService.getLeads(); }
-        catch (e) { console.error('[sheet] getSavedLeads error', e); return []; }
-      })(),
-      (async () => {
-        try { return await getEnrichedLeads(); }
-        catch (e) { console.error('[sheet] getEnrichedLeads error', e); return []; }
-      })(),
-      (async () => {
-        try { return await savedOpportunitiesStorage.get(); }
-        catch (e) { console.error('[sheet] getSavedOpportunities error', e); return []; }
-      })(),
-      (async () => {
-        try { return await contactedLeadsStorage.get(); }
-        catch (e) { console.error('[sheet] getContactedLeads error', e); return []; }
-      })(),
-      (async () => {
-        try { return await unifiedSheetService.getAllCustom(); }
-        catch (e) { console.error('[sheet] getAllCustom error', e); return {}; }
-      })(),
+      read('saved', () => supabaseService.getLeads(), []),
+      read('enriched', () => getEnrichedLeads(), []),
+      read('opportunities', () => savedOpportunitiesStorage.get({ strict: true }), []),
+      read('contacted', () => contactedLeadsStorage.get({ strict: true }), []),
+      read('custom', () => unifiedSheetService.getAllCustom({ strict: true }), {}),
     ]);
 
     for (const l of safeArray(savedRaw)) {
@@ -294,5 +297,6 @@ export async function buildUnifiedRows(): Promise<UnifiedRow[]> {
     console.error('[sheet] buildUnifiedRows fallo general', err);
   }
 
-  return rows;
+  return { rows, failed };
 }
+

@@ -46,7 +46,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { exportToPdf, exportToXlsx } from '@/lib/sheet-export';
-import { buildUnifiedRows } from '@/lib/unified-sheet-data';
+import { loadUnifiedRows, unifiedFailureText } from '@/lib/unified-sheet-data';
 import { defaultColumns } from '@/lib/unified-sheet-storage';
 import type { CustomData } from '@/lib/services/unified-sheet-service';
 import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
@@ -165,6 +165,8 @@ export default function SheetPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Some reads failed but others answered: the sheet shows what it has and says what is missing.
+  const [partialError, setPartialError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
@@ -172,9 +174,16 @@ export default function SheetPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
+    setPartialError(null);
     try {
-      const data = await buildUnifiedRows();
+      const { rows: data, failed } = await loadUnifiedRows();
+      // Nothing could be read: that is an error, not an empty sheet. The rows already on screen stay.
+      if (failed.length && !data.length) {
+        setLoadError('No pudimos cargar la hoja. Revisa tu conexión e inténtalo de nuevo.');
+        return;
+      }
       setRows(data.filter((row) => row.kind !== 'opportunity'));
+      setPartialError(failed.length ? `${unifiedFailureText(failed)} Lo que ves puede estar incompleto.` : null);
     } catch (error) {
       console.error('[sheet] load error', error);
       setLoadError('No pudimos cargar la hoja. Revisa tu conexión e inténtalo de nuevo.');
@@ -441,6 +450,13 @@ export default function SheetPage() {
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void refresh()}>Reintentar</Button></AlertDescription>
         </Alert>
       )}
+      {!loadError && partialError && (
+        <Alert variant="warning" className="mb-3">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Faltan datos</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{partialError}</span><Button variant="outline" size="sm" onClick={() => void refresh()}>Reintentar</Button></AlertDescription>
+        </Alert>
+      )}
       {saveError && (
         <Alert variant="destructive" className="mb-3">
           <AlertCircle className="h-4 w-4" />
@@ -503,7 +519,18 @@ export default function SheetPage() {
                 </TableRow>
               ))}
 
-              {!loading && filteredRows.length === 0 && (
+              {!loading && loadError && rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={Math.max(1, orderedVisibleColumns.length + 1)} className="h-64 text-center">
+                    <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-4">
+                      <AlertCircle className="h-8 w-8 text-muted-foreground/70" />
+                      <p className="font-medium text-foreground">Tus datos no se pudieron leer</p>
+                      <p className="text-sm text-muted-foreground">Usa «Reintentar» en el aviso de arriba.</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+              {!loading && filteredRows.length === 0 && !(loadError && rows.length === 0) && (
                 <TableRow>
                   <TableCell colSpan={Math.max(1, orderedVisibleColumns.length + 1)} className="h-64 text-center">
                     <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-4">

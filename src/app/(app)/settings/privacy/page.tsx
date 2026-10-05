@@ -10,12 +10,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 export default function PrivacySettingsPage() {
   // The server answers with PRIVACY_ADMIN_EMAILS, the same list the requests and incidents pages and APIs check.
   const [canAccessPrivacyAdmin, setCanAccessPrivacyAdmin] = useState(false);
+  // A failed check hides the admin rows like a «no»; the page says it could not tell, so an admin does not think they lost access.
+  const [accessUnknown, setAccessUnknown] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/privacy/access', { cache: 'no-store', signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => {
+        if (response.status >= 500) throw new Error(`privacy access ${response.status}`);
+        return response.ok ? response.json() : null;
+      })
       .then((data) => { if (!controller.signal.aborted) setCanAccessPrivacyAdmin(data?.admin === true); })
-      .catch(() => {});
+      .catch(() => { if (!controller.signal.aborted) setAccessUnknown(true); });
     return () => controller.abort();
   }, []);
 
@@ -53,6 +58,11 @@ export default function PrivacySettingsPage() {
                 description="Registra y da seguimiento a incidentes que requieren atención."
               />
             </>
+          ) : null}
+          {accessUnknown ? (
+            <p role="status" className="px-3 py-3 text-sm text-muted-foreground">
+              No pudimos comprobar si puedes ver las solicitudes y los incidentes de privacidad. Recarga la página para intentarlo de nuevo.
+            </p>
           ) : null}
           <SettingsLinkRow
             href="/privacy"
