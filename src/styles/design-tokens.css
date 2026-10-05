@@ -34,6 +34,14 @@
   --chart-3: 27 96% 61%;
   --chart-4: 0 84% 60%;
   --chart-5: 251 95% 66%;
+  /* Pipeline stages, in order (Nuevos → Negociación): steps of the primary blue, light to dark. Validated as an ordinal
+     ramp (monotone lightness, visible steps, light end ≥ 2:1 on the card) with the dataviz validator. */
+  --pipeline-stage-1: 217.2 91.2% 70%;
+  --pipeline-stage-2: 217.2 91.2% 62%;
+  --pipeline-stage-3: 217.2 91.2% 53%;
+  --pipeline-stage-4: 217.2 91.2% 43.5%;
+  --pipeline-stage-5: 217.2 91.2% 35%;
+  --pipeline-stage-6: 217.2 91.2% 26.5%;
 
   /* Sidebar (LIGHT) */
   --sidebar-background: 220 20% 98%;
@@ -84,6 +92,13 @@ html.dark {
   --chart-3: 27 96% 61%;
   --chart-4: 0 84% 60%;
   --chart-5: 251 95% 66%;
+  /* In dark the ramp runs dim to bright, so the later stages stand out as in light. */
+  --pipeline-stage-1: 217.2 91.2% 32%;
+  --pipeline-stage-2: 217.2 91.2% 40.5%;
+  --pipeline-stage-3: 217.2 91.2% 49.5%;
+  --pipeline-stage-4: 217.2 91.2% 59%;
+  --pipeline-stage-5: 217.2 91.2% 67.5%;
+  --pipeline-stage-6: 217.2 91.2% 75.5%;
 
   /* Sidebar (DARK) */
   --sidebar-background: 222.2 84% 5.5%;
