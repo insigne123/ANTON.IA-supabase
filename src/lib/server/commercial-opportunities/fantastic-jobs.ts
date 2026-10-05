@@ -47,6 +47,36 @@ export class FantasticJobsError extends Error {
   constructor(message: string, readonly mayHaveCharged: boolean) { super(message); this.name = 'FantasticJobsError'; }
 }
 
+/** Apify error types that mean the run never started (Apify API, ErrorResponse.error.type), so nothing was charged. */
+const REJECTED_BEFORE_START = new Set(['invalid-input', 'invalid-input-schema', 'run-input-body-not-valid-json', 'invalid-content-type-header']);
+/**
+ * What an Apify error means for the bill, read from its body (`{ error: { type, message } }`). Only a rejection before the
+ * run starts is free: an invalid input (400 `invalid-input`), the token, the balance or the actor. A run that started and
+ * failed (400 `run-failed`), that outlived the wait (408 `run-timeout-exceeded`, it keeps running at Apify) or a 400 that
+ * does not say which it was may have charged, so the sync reserves the run's cap. Apify's own message is never shown: the
+ * page gets ours, with the error type for the receipt.
+ */
+async function apifyFailure(response: Response) {
+  const body = await response.json().catch(() => null) as { error?: { type?: unknown } } | null;
+  const type = typeof body?.error?.type === 'string' ? body.error.type.slice(0, 60) : null;
+  const tag = type ? ` (${type})` : '';
+  if (response.status === 401 || response.status === 403) return new FantasticJobsError('Apify rechazó el token; revisa el acceso a la cuenta.', false);
+  if (response.status === 402) return new FantasticJobsError('Apify: no queda saldo en la cuenta.', false);
+  if (response.status === 404) return new FantasticJobsError('El actor de búsqueda de LinkedIn no está disponible en Apify.', false);
+  if (response.status === 429) return new FantasticJobsError('Apify limitó las consultas por un momento; no se inició la corrida.', false);
+  if (response.status === 408 || type === 'run-timeout-exceeded') {
+    return new FantasticJobsError('La corrida de Apify siguió más allá del tiempo de espera y puede haber cobrado.', true);
+  }
+  if (response.status === 400 && type && (REJECTED_BEFORE_START.has(type) || type.startsWith('invalid-'))) {
+    return new FantasticJobsError(`Apify rechazó los parámetros de búsqueda${tag}; no se inició la corrida.`, false);
+  }
+  if (response.status === 400 && (type === 'run-failed' || type === 'actor-run-failed')) {
+    return new FantasticJobsError(`La corrida de Apify empezó y falló${tag}.`, true);
+  }
+  if (response.status === 400) return new FantasticJobsError(`Apify respondió 400 sin decir si la corrida empezó${tag}.`, true);
+  return new Error(`Apify respondió ${response.status}.`);
+}
+
 export async function searchFantasticJobs(input: FantasticQuery, dependencies: Dependencies = {
   fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, usdPerJob: fantasticUsdPerJob(),
 }) {
@@ -69,11 +99,7 @@ export async function searchFantasticJobs(input: FantasticQuery, dependencies: D
     method: 'POST', headers: { authorization: `Bearer ${dependencies.token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body), signal: AbortSignal.timeout(120_000),
   });
-  if (response.status === 400) throw new FantasticJobsError('Apify rechazó los parámetros de búsqueda; no se inició la corrida.', false);
-  if (response.status === 401 || response.status === 403) throw new FantasticJobsError('Apify rechazó el token; revisa el acceso a la cuenta.', false);
-  if (response.status === 402) throw new FantasticJobsError('Apify: no queda saldo en la cuenta.', false);
-  if (response.status === 404) throw new FantasticJobsError('El actor de búsqueda de LinkedIn no está disponible en Apify.', false);
-  if (!response.ok) throw new Error(`Apify respondió ${response.status}.`);
+  if (!response.ok) throw await apifyFailure(response);
   const items = await response.json() as unknown;
   if (!Array.isArray(items)) throw new Error('Apify no entregó una lista de avisos; no se puede confirmar el resultado ni el costo.');
   const list = items.slice(0, limit);
