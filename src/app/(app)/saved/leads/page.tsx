@@ -1,7 +1,8 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -15,7 +16,7 @@ import { supabaseService } from '@/lib/supabase-service';
 import type { Lead } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, ArrowRight, ChevronDown, Download, Linkedin, ListFilter, MailSearch, MessageSquare, Search, Trash2, Upload, UserSearch } from 'lucide-react';
+import { AlertCircle, ArrowRight, ChevronDown, Download, Linkedin, ListFilter, MailSearch, MessageSquare, MoreHorizontal, Search, Trash2, Upload, UserSearch } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
@@ -69,6 +70,14 @@ export default function SavedLeadsPage() {
   const [createdTo, setCreatedTo] = useState('');
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [selectedLeadForComments, setSelectedLeadForComments] = useState<Lead | null>(null);
+  // The «Más» that opened the comments or the delete confirmation: closing them puts the focus back on it, since the
+  // menu item that opened them is gone by then.
+  const menuTrigger = useRef<HTMLElement | null>(null);
+  const backToMenu = (event: Event) => {
+    if (!menuTrigger.current?.isConnected) return;
+    event.preventDefault();
+    menuTrigger.current.focus();
+  };
   const [leadPendingDelete, setLeadPendingDelete] = useState<Lead | null>(null);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -439,15 +448,24 @@ export default function SavedLeadsPage() {
     );
   };
 
+  // Comments and delete are occasional: one «Más» per row instead of two icons, so the row shows its main action first.
   const secondaryActions = (lead: Lead) => (
-    <>
-      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setSelectedLeadForComments(lead)} aria-label={`Abrir comentarios de ${lead.name || 'este contacto'}`} title="Comentarios">
-        <MessageSquare className="h-4 w-4" aria-hidden="true" />
-      </Button>
-      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setLeadPendingDelete(lead)} aria-label={`Eliminar a ${lead.name || 'este contacto'}`} title="Eliminar">
-        <Trash2 className="h-4 w-4" aria-hidden="true" />
-      </Button>
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Más acciones para ${lead.name || 'este contacto'}`} title="Más"
+          onPointerDown={event => { menuTrigger.current = event.currentTarget; }} onKeyDown={event => { menuTrigger.current = event.currentTarget; }}>
+          <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => setSelectedLeadForComments(lead)}>
+          <MessageSquare className="h-4 w-4" aria-hidden="true" /> Comentarios
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setLeadPendingDelete(lead)}>
+          <Trash2 className="h-4 w-4" aria-hidden="true" /> Eliminar
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   const leadIdentity = (lead: Lead) => (
@@ -767,7 +785,7 @@ export default function SavedLeadsPage() {
       ) : null}
 
       <Sheet open={!!selectedLeadForComments} onOpenChange={(open) => !open && setSelectedLeadForComments(null)}>
-        <SheetContent className="flex w-full flex-col sm:w-[540px]">
+        <SheetContent className="flex w-full flex-col sm:w-[540px]" onCloseAutoFocus={backToMenu}>
           <SheetHeader>
             <SheetTitle>Comentarios: {selectedLeadForComments?.name}</SheetTitle>
           </SheetHeader>
@@ -779,7 +797,7 @@ export default function SavedLeadsPage() {
         </SheetContent>
       </Sheet>
       <AlertDialog open={!!leadPendingDelete} onOpenChange={(open) => !open && setLeadPendingDelete(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent onCloseAutoFocus={backToMenu}>
           <AlertDialogHeader>
             <AlertDialogTitle>Eliminar contacto guardado</AlertDialogTitle>
             <AlertDialogDescription>

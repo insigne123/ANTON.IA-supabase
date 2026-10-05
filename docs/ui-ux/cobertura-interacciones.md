@@ -89,6 +89,7 @@ Sobre esta PR, con el motor ajustado:
   - 1 hallazgo leve, el de Privacidad que aparece abajo;
   - 0 errores de página;
   - 0 problemas de axe en lo que se abre.
+- **El segundo lote**, todas las revisiones en Firmas y estilo, Campañas y Por completar, como owner y member: 0 hallazgos.
 
 Queda aceptado:
 

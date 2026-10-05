@@ -813,7 +813,7 @@ export default function EmailStyleDesigner({ onOpenSignature, signatureVersion =
         ) : null}
       </section>
 
-      <section aria-labelledby="style-definition-title" className="min-w-0 overflow-hidden rounded-[24px] border border-border/70 bg-card shadow-sm">
+      <section aria-labelledby="style-definition-title" className="min-w-0 overflow-clip rounded-[24px] border border-border/70 bg-card shadow-sm">
         <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="min-w-0 space-y-6 p-4 sm:p-6 lg:border-r lg:border-border/70">
             <div>
@@ -940,6 +940,15 @@ export default function EmailStyleDesigner({ onOpenSignature, signatureVersion =
                   <Switch id="email-style-default" checked={isDefault} aria-describedby="email-style-default-description"
                     onCheckedChange={(checked) => { setIsDefault(checked); setSaveStatus(null); setSaveError(null); }} />
                 </div>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Dónde se usa: <Link className="underline underline-offset-2 hover:text-foreground" href="/contact/compose">Redactar</Link> ·{' '}
+                  <Link className="underline underline-offset-2 hover:text-foreground" href="/campaigns">Campañas</Link> ·{' '}
+                  <Link className="underline underline-offset-2 hover:text-foreground" href="/cowork">Cowork</Link>
+                </p>
+              </div>
+              {/* Always in view while editing (it sat below the preview and took scrolling to reach): the save stays at the
+                  bottom of the screen until the editor ends. */}
+              <div className="sticky bottom-0 z-10 -mx-4 space-y-1 border-t border-border/70 bg-card px-4 py-3 sm:-mx-6 sm:px-6">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <Button type="button" onClick={() => void saveStyle()} disabled={!styleName.trim() || isBusy}>
                     {isSaving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4" aria-hidden="true" />}
@@ -951,11 +960,6 @@ export default function EmailStyleDesigner({ onOpenSignature, signatureVersion =
                   {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
                   {saveStatus ? <p className="flex items-center gap-1.5 text-sm text-cw-success"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />{saveStatus}</p> : null}
                 </div>
-                <p className="text-xs leading-5 text-muted-foreground">
-                  Dónde se usa: <Link className="underline underline-offset-2 hover:text-foreground" href="/contact/compose">Redactar</Link> ·{' '}
-                  <Link className="underline underline-offset-2 hover:text-foreground" href="/campaigns">Campañas</Link> ·{' '}
-                  <Link className="underline underline-offset-2 hover:text-foreground" href="/cowork">Cowork</Link>
-                </p>
               </div>
             </fieldset>
           </div>

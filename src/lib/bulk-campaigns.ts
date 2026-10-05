@@ -11,6 +11,24 @@ export const AudienceCriteriaSchema = z.object({
   enrichedOnly: z.boolean().default(true),
 }).strict();
 export type AudienceCriteria = z.infer<typeof AudienceCriteriaSchema>;
+/**
+ * The job levels enriched contacts carry (Apollo's codes, in English), named as people say them. «Nivel del cargo»
+ * picks from these: typed in Spanish («gerente») a level never matched the stored «manager».
+ */
+export const SENIORITY_LEVELS = [
+  { code: 'c_suite', label: 'Alta dirección (C-level)' },
+  { code: 'owner', label: 'Dueño' },
+  { code: 'founder', label: 'Fundador' },
+  { code: 'partner', label: 'Socio' },
+  { code: 'vp', label: 'Vicepresidente' },
+  { code: 'head', label: 'Jefe de área' },
+  { code: 'director', label: 'Director' },
+  { code: 'manager', label: 'Gerente' },
+  { code: 'senior', label: 'Senior' },
+  { code: 'entry', label: 'Inicial' },
+] as const;
+/** «Gerente» for «manager»; anything else as it came. */
+export const seniorityLabel = (code: string) => SENIORITY_LEVELS.find(level => level.code === code.trim().toLowerCase())?.label || code;
 export const defaultAudience: AudienceCriteria = {
   relationship: 'never_contacted', titles: [], industries: [], countries: [],
   sizes: [], seniorities: [],
@@ -127,12 +145,12 @@ export function matchAudience(person: AudiencePerson, criteria: AudienceCriteria
   for (const [field, choices, label] of [
     [person.title, criteria.titles, 'Cargo'], [person.industry, criteria.industries, 'Industria'],
     [person.country, criteria.countries, 'País'], [person.size, criteria.sizes, 'Tamaño'],
-    [person.seniority, criteria.seniorities, 'Antigüedad'],
+    [person.seniority, criteria.seniorities, 'Nivel'],
   ] as const) {
     if (!choices.length) continue;
     const matched = choices.find(term => field && normalize(field).includes(normalize(term)));
     if (!matched) return null; // Missing evidence is never a match.
-    reasons.push(`${label}: ${field}`);
+    reasons.push(`${label}: ${label === 'Nivel' ? seniorityLabel(field) : field}`);
   }
   if (criteria.relationship === 'previously_contacted' && criteria.minimumDaysSinceSent > 0) {
     const timestamp = person.lastSentAt ? Date.parse(person.lastSentAt) : NaN;
