@@ -29,6 +29,33 @@
 - ninguna empresa llega al mínimo: sugiere editar la búsqueda;
 - error: un botón para reintentar.
 
+## El ticket de Mercado Público (Plan 10)
+
+La pestaña «Licitaciones y Compra Ágil» busca con el ticket propio de cada persona (`docs/oportunidades-licitaciones.md`).
+
+**Sin ticket:**
+- una tarjeta «Conecta tu ticket de Mercado Público» arriba del resumen, con el campo para pegarlo y «Probar y guardar»;
+- el servidor lo prueba con una consulta antes de guardarlo;
+- la lista vacía dice «Conecta tu ticket para buscar licitaciones» y ofrece «Cómo conseguirlo».
+
+**«Cómo conseguirlo»** abre una guía de 3 pasos (`src/components/commercial-opportunities/MercadoPublicoTicket.tsx`):
+1. **Qué es:** gratis, uno por persona, sirve para licitaciones y Compra Ágil, 10.000 consultas al día, guardado cifrado.
+2. **Pídelo en ChileCompra:** los pasos de chilecompra.cl/api, verificados el 5 oct 2026: «Pide tu ticket», Clave Única, el formulario con «Solicitud de Ticket» y el código por correo. El enlace abre el portal en otra pestaña.
+3. **Pégalo aquí:** el mismo campo, con el resultado en la guía.
+
+**Con ticket:**
+- «Tu ticket ••••1A2B · verificado hace 2 días», con «Reemplazar» y «Quitar»;
+- «Quitar» pide confirmación;
+- el ticket nunca vuelve al navegador, solo sus últimos 4 caracteres.
+
+**Ticket rechazado:** si Mercado Público lo rechazó, la tarjeta lo dice y pide reemplazarlo.
+
+**Ticket compartido:** quien usa el compartido (`MERCADO_PUBLICO_SHARED_TICKET_EMAILS`) ve «Usas el ticket compartido de tu cuenta» y puede conectar el suyo.
+
+**Conexiones** tiene la misma tarjeta, solo para quien puede abrir Oportunidades.
+
+**Ayuda:** la sección «Oportunidades» del manual responde «¿Cómo consigo mi ticket de Mercado Público?».
+
 ## Acceso
 
 - **`OPPORTUNITIES_ALLOWED_EMAILS`** (en `apphosting.yaml`) dice quién ve la sección: solo cuentas con correo confirmado de esa lista. Hoy, nicolas.yarur.g@yago.cl.
