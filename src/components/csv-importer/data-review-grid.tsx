@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { csvRowDestination, csvRowProblem, type CsvLeadInput } from '@/lib/csv-import-utils';
+import { csvRowDestination, csvRowProblem, csvRowRepeats, type CsvLeadInput } from '@/lib/csv-import-utils';
 import { cn } from '@/lib/utils';
 
 interface DataReviewGridProps {
@@ -41,17 +41,20 @@ export function DataReviewGrid({ initialRows, contactedEmails = null, onBack, on
     const [rows, setRows] = useState<CsvLeadInput[]>(initialRows);
     const [onlyProblems, setOnlyProblems] = useState(false);
     const problems = useMemo(() => rows.map(csvRowProblem), [rows]);
+    // The same person twice in the file (email, LinkedIn or name and company) is imported once.
+    const repeats = useMemo(() => csvRowRepeats(rows), [rows]);
     const isContacted = (row: CsvLeadInput) => Boolean(row.email && contactedEmails?.has(row.email.toLowerCase()));
     const counts = useMemo(() => {
-        const result = { porEscribir: 0, porCompletar: 0, contacted: 0, problems: 0 };
+        const result = { porEscribir: 0, porCompletar: 0, contacted: 0, problems: 0, repeated: 0 };
         rows.forEach((row, index) => {
             if (problems[index]) result.problems += 1;
+            else if (repeats[index] !== null) result.repeated += 1;
             else if (row.email && contactedEmails?.has(row.email.toLowerCase())) result.contacted += 1;
             else if (csvRowDestination(row) === 'por-escribir') result.porEscribir += 1;
             else result.porCompletar += 1;
         });
         return result;
-    }, [rows, problems, contactedEmails]);
+    }, [rows, problems, repeats, contactedEmails]);
     const ready = counts.porEscribir + counts.porCompletar;
     const filtered = useMemo(
         () => rows.map((row, index) => ({ row, index })).filter(({ index }) => !onlyProblems || problems[index]),
@@ -77,6 +80,7 @@ export function DataReviewGrid({ initialRows, contactedEmails = null, onBack, on
                     <div className="mt-3 flex flex-wrap gap-2" role="status" aria-live="polite">
                         <Badge variant="success">{counts.porEscribir} a Por escribir</Badge>
                         <Badge variant="info">{counts.porCompletar} a Por completar</Badge>
+                        {counts.repeated > 0 ? <Badge variant="neutral">{counts.repeated} {counts.repeated === 1 ? 'repetido' : 'repetidos'}</Badge> : null}
                         {counts.contacted > 0 ? <Badge variant="neutral">{counts.contacted} ya {counts.contacted === 1 ? 'contactado' : 'contactados'}</Badge> : null}
                         {counts.problems > 0 ? <Badge variant="danger">{counts.problems} por revisar</Badge> : null}
                     </div>
@@ -114,6 +118,11 @@ export function DataReviewGrid({ initialRows, contactedEmails = null, onBack, on
                                             <>
                                                 <Badge variant="danger">Revisar</Badge>
                                                 <p className="mt-1 max-w-56 text-xs leading-5 text-destructive">{problem}</p>
+                                            </>
+                                        ) : repeats[index] !== null ? (
+                                            <>
+                                                <Badge variant="neutral">Repetido</Badge>
+                                                <p className="mt-1 max-w-56 text-xs leading-5 text-foreground/70">Es la misma persona de la fila {repeats[index]}: se importa una vez.</p>
                                             </>
                                         ) : isContacted(row) ? (
                                             <>

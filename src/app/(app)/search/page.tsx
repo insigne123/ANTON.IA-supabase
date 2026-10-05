@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import Image from 'next/image';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { safeAvatarUrl } from '@/lib/avatar';
@@ -18,7 +19,7 @@ import { companySizes } from '@/lib/data';
 import { organizationService } from '@/lib/services/organization-service';
 import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Search, Save, X, ChevronDown, ChevronRight, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal, Users } from 'lucide-react';
+import { Search, Save, X, ChevronDown, ChevronRight, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal, Upload, Users } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
@@ -2447,6 +2448,11 @@ export default function SearchPage() {
       <PageHeader
         title="Buscar prospectos"
         description="Elige a quién buscar, revisa los resultados y guarda los contactos que te sirven."
+        actions={(
+          <Button asChild variant="ghost" className="w-full sm:w-auto">
+            <Link href="/leads/import?from=buscar"><Upload className="h-4 w-4" aria-hidden="true" />¿Ya tienes tu lista? Impórtala</Link>
+          </Button>
+        )}
       />
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)] xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <aside aria-label="Criterios de búsqueda" className="min-w-0 space-y-3 lg:sticky lg:top-16">
