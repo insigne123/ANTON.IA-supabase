@@ -5,6 +5,7 @@ import { coworkReplyRefusal, coworkReplyText, coworkReplyThread, type ThreadRow 
 import { COWORK_REPLY_BODY_MAX, coworkReplyBody, coworkReplySubject, coworkReplyThreadSchema } from '@/lib/cowork/reply-proposal';
 import { createLegacyReadyEmailDraftV1, createMessagingSendMetadataV1 } from '@/lib/messaging-contracts';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
+import { readSendSignature } from '@/lib/server/email-signature';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
 import { tokenService } from '@/lib/services/token-service';
@@ -208,7 +209,9 @@ export async function executeCoworkReplyThread(auth: AuthContext, runId: string,
     throw new Error('No se pudo verificar las reglas de lenguaje. No se envió la respuesta.');
   }
   const unsubscribeUrl = generateUnsubscribeLink(to, userId, organizationId);
-  const prepared = prepareOutboundEmail({ text: body, unsubscribeUrl });
+  // The signature of the mailbox that wrote the original, as in any other send.
+  const signature = await readSendSignature(client, userId, String(row.provider || ''));
+  const prepared = prepareOutboundEmail({ text: body, unsubscribeUrl, signature });
   const check = validateOutboundEmail({ to, subject, ...prepared, requireUnsubscribe: true, unsubscribeUrl });
   if (!check.ok) throw new Error(`La respuesta no pasó la validación: ${check.errors.join(' ')}`.slice(0, 280));
   // The thread belongs to the mailbox that sent the original.

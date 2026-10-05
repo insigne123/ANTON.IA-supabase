@@ -12,6 +12,7 @@ import { findCompanyReply, findCompanySendToday, findExcludedDomain, findNegotia
 import { santiagoDayBounds } from '@/lib/cowork/send-cadence';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
+import { readSendSignature } from '@/lib/server/email-signature';
 import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
 import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import { resolveCampaignReplyTarget, ReplyTargetError } from '@/lib/server/reply-target';
@@ -199,10 +200,12 @@ async function defaultSendStep(client: SupabaseClientLike, step: AutoSendClaimed
   }
 
   const unsubscribeUrl = generateUnsubscribeLink(canonical.to, step.user_id, step.organization_id);
+  const signature = await readSendSignature(client, step.user_id, provider);
   const prepared = prepareOutboundEmail({
     text: canonical.text || undefined,
     html: canonical.html || undefined,
     unsubscribeUrl,
+    signature,
   });
   const check = validateOutboundEmail({
     to: canonical.to,

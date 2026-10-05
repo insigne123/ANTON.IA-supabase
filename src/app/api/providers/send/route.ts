@@ -30,6 +30,7 @@ import {
 import { ensureMessagingDraftV1, getCurrentMessagingDraftVersionV1 } from '@/lib/server/messaging-drafts';
 import { resolveCampaignReplyTarget, resolveContactedReplyTarget, ReplyTargetError } from '@/lib/server/reply-target';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { readSendSignature } from '@/lib/server/email-signature';
 
 export const dynamic = 'force-dynamic';
 
@@ -315,10 +316,13 @@ export async function POST(req: NextRequest) {
 
         const unsubscribeUrl = generateUnsubscribeLink(delivery.to, user.id, orgId);
 
+        // The signature of the mailbox that sends, from «Firmas y estilo» (Plan 11): it was saved but never added.
+        const signature = await readSendSignature(getSupabaseAdminClient(), user.id, dispatchProvider);
         const prepared = prepareOutboundEmail({
             html: delivery.html ?? undefined,
             text: delivery.text ?? undefined,
             unsubscribeUrl,
+            signature,
         });
         const preflight = validateOutboundEmail({
             to: delivery.to,

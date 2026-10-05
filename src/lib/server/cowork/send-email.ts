@@ -11,6 +11,7 @@ import {
   resolveApprovedEmailSendV1,
 } from '@/lib/messaging-contracts';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
+import { readSendSignature } from '@/lib/server/email-signature';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
 import { tokenService } from '@/lib/services/token-service';
@@ -125,7 +126,8 @@ export async function sendCoworkEmail(
     throw new Error('No se pudo verificar las reglas de lenguaje. No se envió el correo.');
   }
   const unsubscribeUrl = generateUnsubscribeLink(canonical.to, userId, organizationId);
-  const prepared = prepareOutboundEmail({ text: canonical.text || undefined, html: canonical.html || undefined, unsubscribeUrl });
+  const signature = await readSendSignature(client, userId, target.provider);
+  const prepared = prepareOutboundEmail({ text: canonical.text || undefined, html: canonical.html || undefined, unsubscribeUrl, signature });
   const check = validateOutboundEmail({ to: canonical.to, subject: canonical.subject, ...prepared, requireUnsubscribe: true, unsubscribeUrl });
   if (!check.ok) throw new Error(`El correo no pasó la validación: ${check.errors.join(' ')}`.slice(0, 280));
   // Provider label is resolved before dispatch so the durable record matches
