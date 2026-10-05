@@ -58,6 +58,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
 import { DuplicateSavedSearchNameError, savedSearchesService } from '@/lib/services/saved-searches-service';
+import { getLeadsFinderAvailability, LeadsFinderClientError, searchWithLeadsFinder } from '@/lib/leads-finder-client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
@@ -89,6 +90,7 @@ import { SearchLeadRow } from '@/components/search/SearchLeadRow';
 const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
 
 type SearchMode = LeadSearchMode;
+type SearchSource = 'apollo' | 'leads_finder';
 
 
 export default function SearchPage() {
@@ -132,6 +134,16 @@ export default function SearchPage() {
   const [hasSearched, setHasSearched] = useState(false);
   // On phones the criteria fold into one bar once there are results, so the results are what you see first.
   const [criteriaOpen, setCriteriaOpen] = useState(true);
+  // Leads Finder (Plan 11, PR 6c): a test next to Apollo, offered only to the accounts the server allows.
+  const [leadsFinderAvailable, setLeadsFinderAvailable] = useState(false);
+  const [searchSource, setSearchSource] = useState<SearchSource>('apollo');
+  const [leadsFinderNotice, setLeadsFinderNotice] = useState<{ notApplied: string[]; alreadySaved: number } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    // Every visit starts with Apollo, whose last search is restored below; Leads Finder is chosen on purpose.
+    void getLeadsFinderAvailability(controller.signal).then((available) => { if (available) setLeadsFinderAvailable(true); });
+    return () => controller.abort();
+  }, []);
 
   // Company-first flow: filtros → empresas → ventanas por empresa (50 por empresa).
   type CompanyWindowState = {
@@ -515,6 +527,11 @@ export default function SearchPage() {
   };
 
   const [filters, setFilters] = useState({ ...DEFAULT_FILTERS, maxResults: 50 });
+  const usingLeadsFinder = leadsFinderAvailable && searchSource === 'leads_finder' && filters.searchMode === 'filters';
+  // Once the person touches the criteria, restoring the last search no longer folds them away on a phone.
+  const criteriaTouched = useRef(false);
+  const searchSourceRef = useRef<SearchSource>('apollo');
+  searchSourceRef.current = searchSource;
   const [checkpointReady, setCheckpointReady] = useState(false);
   const [checkpointLoading, setCheckpointLoading] = useState(true);
   const [checkpointNotice, setCheckpointNotice] = useState('');
@@ -578,11 +595,12 @@ export default function SearchPage() {
         setActiveCompanyId(snapshot.activeCompanyId || null);
         const restored = Object.fromEntries(Object.entries(snapshot.companyWindows).map(([id, value]) => [id, { ...(value as CompanyWindowState), isLoading: false, isExpanding: false }]));
         setCompanyWindows(restored);
-        setLeads(Object.values(restored).flatMap((item) => item.leads || []));
+        // Restored late, after Leads Finder was chosen: the Apollo people wait for Apollo to be chosen again.
+        if (searchSourceRef.current !== 'leads_finder') setLeads(Object.values(restored).flatMap((item) => item.leads || []));
         setFilterStep(['filters', 'companies', 'people'].includes(snapshot.filterStep) ? snapshot.filterStep : 'filters');
         if (snapshot.companies.length > 0 || hasWindows) {
           setCheckpointNotice('Recuperamos tu última búsqueda: sigue donde quedaste.');
-          setCriteriaOpen(false);
+          if (!criteriaTouched.current) setCriteriaOpen(false);
         }
       }
       setCheckpointReady(true);
@@ -622,7 +640,7 @@ export default function SearchPage() {
 
   const checkpointBaseline = useRef<string | null>(null);
   useEffect(() => {
-    if (!checkpointReady || filters.searchMode !== 'filters' || isLoading || Object.values(companyWindows).some((item) => item.isExpanding || item.isLoading)) return;
+    if (!checkpointReady || usingLeadsFinder || filters.searchMode !== 'filters' || isLoading || Object.values(companyWindows).some((item) => item.isExpanding || item.isLoading)) return;
     const snapshot = {
       version: 1, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds: [...selectedCompanyIds],
       activeCompanyId, companyWindows, filterStep, companySignature: companySearchSignature, peopleSignature: peopleSearchSignature,
@@ -651,9 +669,10 @@ export default function SearchPage() {
       }).catch(() => { setCheckpointNotice('No pudimos guardar el avance de la búsqueda.'); });
     }, 400);
     return () => window.clearTimeout(timeout);
-  }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading, companySearchSignature, peopleSearchSignature]);
+  }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading, companySearchSignature, peopleSearchSignature, usingLeadsFinder]);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
+    criteriaTouched.current = true;
     if (field === 'searchMode') {
       companyRun.current += 1;
       companyPeopleAbortRef.current?.abort();
@@ -941,6 +960,22 @@ export default function SearchPage() {
     }
   };
 
+  const chooseSource = (source: SearchSource) => {
+    if (source === searchSource) return;
+    criteriaTouched.current = true;
+    searchRunIdRef.current += 1;
+    abortRef.current?.abort();
+    submittingRef.current = false;
+    setIsLoading(false);
+    setSearchSource(source);
+    setSelectedLeads(new Set());
+    setLeadsFinderNotice(null);
+    setError('');
+    setHasSearched(false);
+    // The Apollo search (companies and their people) stays as it was, and comes back when Apollo is chosen again.
+    setLeads(source === 'leads_finder' ? [] : Object.values(companyWindows).flatMap((item) => item.leads || []));
+  };
+
   const executeSearch = async ({
     countQuota = true,
     selectedOrg = null,
@@ -1036,6 +1071,20 @@ export default function SearchPage() {
           selected_organization_id: organization?.id,
           selected_organization_name: organization?.name,
         }, abortRef.current.signal);
+      } else if (usingLeadsFinder) {
+        // People straight from the filters, no company step; they come back as Apollo's do, with the contact hidden.
+        const found = await searchWithLeadsFinder({
+          titles: splitTitlesInput(filters.title),
+          seniorities: filters.seniorities,
+          person_locations: splitFilterInput(filters.personLocation),
+          company_location: splitFilterInput(filters.location),
+          industry_keywords: [filters.industry.trim()].filter(Boolean),
+          company_keywords: splitFilterInput(filters.companyKeywords),
+          employee_ranges: [filters.sizeRange.trim()].filter(Boolean),
+          max_results: Math.max(1, Math.min(100, Number(filters.maxResults) || 25)),
+        }, abortRef.current.signal);
+        setLeadsFinderNotice({ notApplied: found.not_applied || [], alreadySaved: found.already_saved || 0 });
+        result = found;
       } else {
         const industryKeywords = [filters.industry.trim()].filter(Boolean);
         const companyKeywords = splitFilterInput(filters.companyKeywords);
@@ -1072,7 +1121,8 @@ export default function SearchPage() {
         const problem = error instanceof ProfileSearchProblemError ? error.problem : profileProblemFromMessage(error?.message);
         setProfileProblem(profileSearchMessage(problem, { url: filters.linkedinUrl }));
       } else if (error.name !== 'AbortError') {
-        const friendlyMessage = getFriendlySearchErrorMessage(error.message);
+        // Leads Finder answers in words meant for people; Apollo's codes go through the usual translation.
+        const friendlyMessage = error instanceof LeadsFinderClientError ? error.message : getFriendlySearchErrorMessage(error.message);
         setError(friendlyMessage);
         setProfileOnlyRetry(
           filters.searchMode === 'linkedin_profile'
@@ -1103,6 +1153,11 @@ export default function SearchPage() {
 
   const handleSearch = async () => {
     if (filters.searchMode === 'filters') {
+      if (usingLeadsFinder) {
+        setLeadsFinderNotice(null);
+        await executeSearch();
+        return;
+      }
       resetCompanyFirstFlow();
       await handleSearchCompanies(1);
       return;
@@ -1554,7 +1609,7 @@ export default function SearchPage() {
         : 'intro';
   const companiesStale = companies.length > 0 && Boolean(companySearchSignature) && companySearchSignature !== companyFilterSignature(filters);
   const peopleStale = companyWindowList.length > 0 && Boolean(peopleSearchSignature) && peopleSearchSignature !== peopleFilterSignature(filters);
-  const hasResults = filters.searchMode === 'filters'
+  const hasResults = filters.searchMode === 'filters' && !usingLeadsFinder
     ? resultsView !== 'intro'
     : leads.length > 0 || isLoading || hasSearched || companySelectionPending;
   const activeChips = activeFilterChips(filters);
@@ -1564,7 +1619,7 @@ export default function SearchPage() {
       ? filters.companyName.trim() || filters.companyDomains.trim() || 'Escribe una empresa'
       : filters.linkedinUrl.trim() || 'Pega un perfil de LinkedIn';
   const leadsPerCompany = getCompanyPersonFilters().leadsPerCompany;
-  const showLeadsBar = selectedLeads.size > 0 && (filters.searchMode !== 'filters' || resultsView === 'people');
+  const showLeadsBar = selectedLeads.size > 0 && (filters.searchMode !== 'filters' || usingLeadsFinder || resultsView === 'people');
   const selectWindowLeads = (window: CompanyWindowState) => setSelectedLeads((current) => {
     const next = new Set(current);
     for (const lead of window.leads) if (!isSavedLead(lead) && !isContactedLead(lead)) next.add(lead.id);
@@ -1605,6 +1660,58 @@ export default function SearchPage() {
       </div>
     </fieldset>
   );
+
+  const sourceSwitch = leadsFinderAvailable && filters.searchMode === 'filters' ? (
+    <fieldset disabled={isLoading || checkpointLoading} className="min-w-0 border-0 p-0">
+      <legend className="mb-1.5 text-xs font-medium text-foreground/70">Fuente de los contactos</legend>
+      <div className="grid h-9 w-full grid-cols-2 rounded-xl border border-border/60 bg-muted/60 p-1">
+        {([
+          ['apollo', 'Apollo'],
+          ['leads_finder', 'Leads Finder (prueba)'],
+        ] as const).map(([value, label]) => {
+          const active = searchSource === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => chooseSource(value)}
+              className={cn(
+                'inline-flex items-center justify-center whitespace-nowrap rounded-lg px-2 py-1 text-xs font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+                active ? 'bg-background text-foreground shadow-sm' : 'text-foreground/70 hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  ) : null;
+
+  const alreadySavedCount = leadsFinderNotice?.alreadySaved || 0;
+  const leadsFinderBanner = (
+    <div role="note" className="rounded-2xl border border-border/60 bg-cw-accent-soft px-4 py-3 text-sm">
+      <p className="font-medium text-foreground">Buscando con Leads Finder (prueba)</p>
+      <p className="mt-0.5 text-foreground/70">
+        Encuentra personas directo con tus filtros, sin elegir empresas antes. Como con Apollo, el apellido y el contacto quedan ocultos hasta que buscas su correo en «Por completar».
+      </p>
+      {leadsFinderNotice?.notApplied.length ? (
+        <p className="mt-1 text-foreground/70">No se pudo aplicar: {leadsFinderNotice.notApplied.join(' · ')}.</p>
+      ) : null}
+      {alreadySavedCount > 0 ? (
+        <p className="mt-1 text-foreground/70">
+          {alreadySavedCount} {alreadySavedCount === 1 ? 'persona ya estaba guardada y no se muestra' : 'personas ya estaban guardadas y no se muestran'}.
+        </p>
+      ) : null}
+    </div>
+  );
+  /** A result that has an email it does not show yet (Leads Finder). */
+  const contactOnFile = (lead: UILaed) => (!lead.email && lead.hasEmailOnFile ? (
+    <p className="mt-0.5 flex items-center gap-1 text-xs text-foreground/70">
+      <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Tiene correo: se ve al buscar su correo
+    </p>
+  ) : null);
 
   const savedSearchesMenu = (
     <DropdownMenu>
@@ -2218,7 +2325,7 @@ export default function SearchPage() {
                   contacted={isContactedLead(lead)}
                   onSelect={(checked) => handleSelectLead(lead.id, checked)}
                   lock={teamLockFor(lead)}
-                  details={profileDetails(lead)}
+                  details={profileDetails(lead) ?? contactOnFile(lead)}
                 />
               </li>
             ))}
@@ -2262,7 +2369,7 @@ export default function SearchPage() {
                           )}
                           <div className="min-w-0">
                             <div className="font-medium">{lead.name}</div>
-                            {lead.email ? <div className="text-xs text-foreground/70">{lead.email}</div> : null}
+                            {lead.email ? <div className="text-xs text-foreground/70">{lead.email}</div> : contactOnFile(lead)}
                             {profileDetails(lead)}
                             <TeamLockBadge lock={teamLockFor(lead)} className="mt-0.5" />
                           </div>
@@ -2302,7 +2409,9 @@ export default function SearchPage() {
                 ? 'Prueba ampliando la ubicación, el tamaño de empresa o el cargo.'
                 : filters.searchMode === 'linkedin_profile'
                   ? 'Pega el perfil y presiona «Buscar».'
-                  : 'Escribe la empresa y presiona «Buscar».'}
+                  : filters.searchMode === 'filters'
+                    ? 'Elige cargo, ubicación o industria y presiona «Buscar contactos».'
+                    : 'Escribe la empresa y presiona «Buscar».'}
           </p>
           {hasSearched && !companySelectionPending && filters.searchMode !== 'linkedin_profile' ? (
             <FilterRelaxHint chips={activeChips} onRemove={removeFilterChip} disabled={isLoading} />
@@ -2388,6 +2497,7 @@ export default function SearchPage() {
                 </CardDescription>
               ) : null}
               {modeSwitch}
+              {sourceSwitch}
             </CardHeader>
             <CardContent className="min-h-0 flex-1 overflow-y-auto p-4">
               <fieldset
@@ -2409,7 +2519,7 @@ export default function SearchPage() {
               {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
               <Button data-tour="search-run" className="flex-1 shadow-none sm:flex-none sm:min-w-36" onClick={runSearch} disabled={isLoading || checkpointLoading}>
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-                {isLoading ? 'Buscando…' : filters.searchMode === 'filters' ? 'Buscar empresas' : 'Buscar'}
+                {isLoading ? 'Buscando…' : filters.searchMode === 'filters' ? (usingLeadsFinder ? 'Buscar contactos' : 'Buscar empresas') : 'Buscar'}
               </Button>
             </div>
           </Card>
@@ -2420,7 +2530,7 @@ export default function SearchPage() {
           className={cn('min-w-0 space-y-4', filters.searchMode === 'filters' && resultsView === 'intro' && 'order-first lg:order-none')}
         >
           {checkpointNotice ? <p role="status" className="text-sm text-foreground/70">{checkpointNotice}</p> : null}
-          {filters.searchMode === 'filters' ? (
+          {filters.searchMode === 'filters' && !usingLeadsFinder ? (
             resultsView === 'intro' ? (
               <>
                 {searchError}
@@ -2449,6 +2559,7 @@ export default function SearchPage() {
             )
           ) : (
             <>
+              {usingLeadsFinder ? leadsFinderBanner : null}
               {profileNotice}
               {companyCandidatesSection}
               {leadsResults}
