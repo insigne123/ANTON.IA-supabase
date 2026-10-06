@@ -111,6 +111,9 @@ Hechos en el tercero (Plan 12, 7):
    - «Generar secuencia con IA» ya no exige elegir antes cuántos seguimientos. Sin elegir, escribe el correo inicial y 1 seguimiento a los 3 días, que se cambian después.
    - La acción principal de cada paso queda fija al pie mientras bajas: «Continuar a correos», «Guardar y revisar correos» y «Aprobar campaña».
 2. **Una tarea nueva, «campana-ia»**, mide el camino principal: generar la secuencia con la IA y revisarla. «campana» sigue midiendo escribir los dos correos a mano.
+3. **Campañas, el objetivo.** Una campaña nueva parte con lo que «Perfil» dice que ofreces: la propuesta de valor (o la descripción) y hasta tres servicios. Un aviso lo dice y pide agregar qué quieres que haga la persona.
+   - La IA de campañas solo conoce tu oferta por ese campo, así que los correos parten de la oferta real sin escribirla cada vez.
+   - En «campana-ia», la persona ya no escribe la oferta: agrega qué pedir. El índice sigue en 88, porque la tarea antes escribía solo qué pedir, y ahora comprueba que la IA recibe la oferta.
 
 | Tarea | Antes | Ahora | Pasos | Tiempo (KLM) | Acción principal a la vista |
 |---|---:|---:|---:|---:|---:|
@@ -121,7 +124,6 @@ Pendientes recomendados:
 
 | Arreglo | Impacto | Esfuerzo |
 |---|---|---|
-| Campañas: el objetivo prellenado desde la oferta de «Perfil» | Medio: un campo menos que escribir en «campana-ia» | Bajo |
 | «Escribir sin investigar» con el estilo predeterminado | Alto: el primer correo sin esperar | Medio |
 | Campañas: «Tamaño de empresa» por rangos (necesita migración) | Medio | Bajo |
 

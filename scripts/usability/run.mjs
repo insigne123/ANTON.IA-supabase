@@ -192,7 +192,12 @@ async function runTask(browser, data, supabase, task, viewportName) {
       }).catch(() => false);
       const kind = step.fill !== undefined ? 'fill' : step.upload ? 'upload' : step.select ? 'select' : step.choose !== undefined ? 'choose' : 'click';
       try {
-        if (kind === 'fill') {
+        if (kind === 'fill' && step.append) {
+          // Adds to what the screen already wrote for the person (an objective drafted from «Perfil»).
+          await element.click({ timeout: 5000 });
+          await element.evaluate(node => { node.selectionStart = node.selectionEnd = node.value.length; });
+          await element.pressSequentially(step.fill, { delay: 0 });
+        } else if (kind === 'fill') {
           await element.fill('');
           await element.pressSequentially(step.fill, { delay: 0 });
         } else if (kind === 'upload') {
