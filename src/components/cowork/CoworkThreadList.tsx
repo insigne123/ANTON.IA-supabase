@@ -1,13 +1,14 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
+import { Brain, LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
   coworkDateBucket, coworkShortTime, coworkStatusCopy, isCoworkActive, type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { CwButton, CwStatusDot } from './ui';
+import { CoworkMemories } from './CoworkMemories';
 
 const TITLE_MAX = 120;
 
@@ -36,6 +37,7 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   const [filter, setFilter] = useState('');
   const [editing, setEditing] = useState<{ rootId: string; draft: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [memoriesOpen, setMemoriesOpen] = useState(false);
   const skipBlurSave = useRef(false);
   const term = filter.trim().toLocaleLowerCase('es');
   const groups = useMemo(() => {
@@ -152,5 +154,11 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
         </ul>
       </div>)}
     </div>
+    <div className="shrink-0 border-t border-cw-border px-3 py-2">
+      <CwButton variant="ghost" size="sm" className="w-full justify-start gap-2 px-2.5 text-[13px]" onClick={() => setMemoriesOpen(true)}>
+        <Brain aria-hidden="true" />Lo que Cowork recuerda
+      </CwButton>
+    </div>
+    <CoworkMemories open={memoriesOpen} onOpenChange={setMemoriesOpen} />
   </nav>;
 }

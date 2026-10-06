@@ -23,6 +23,7 @@ const dependencies: Record<string, unknown> = {
     CwButton: ({ variant: _variant, size: _size, ...props }: Record<string, unknown>) => React.createElement('button', { type: 'button', ...props }),
     CwStatusDot: () => null,
   },
+  './CoworkMemories': { CoworkMemories: () => null },
 };
 const exports: any = {};
 new Function('require', 'exports', code)((id: string) => id in dependencies ? dependencies[id] : require(id), exports);
@@ -88,4 +89,9 @@ test('a search with no match says so and clears in one click', async () => {
     await act(async () => root.unmount());
     Object.assign(globalThis, previous);
   }
+});
+
+test('«Lo que Cowork recuerda» is always at the foot of the list, also with no conversations', () => {
+  assert.match(render({}), /Lo que Cowork recuerda/);
+  assert.match(render({ threads: [thread(1)] }), /Lo que Cowork recuerda/);
 });

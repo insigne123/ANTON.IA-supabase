@@ -6,6 +6,8 @@ export default function cowork(ctx) {
     id: ctx.uid(9000 + n), user_id: ctx.OWNER, organization_id: ctx.ORG, request_id: ctx.uid(9100 + n), message, mode: 'approval', status,
     created_at: at, updated_at: at, lease_token: null, lease_expires_at: null, attempts: 1, parent_run_id: parent, depth: parent ? 1 : 0, root_run_id: root,
   });
+  const memory = (n, userId, scope, text, at) => ({ id: ctx.uid(n), organization_id: ctx.ORG, user_id: userId, scope, memory_type: 'cowork_preference',
+    key: text, value: { text }, confidence: 1, status: 'approved', created_at: at, updated_at: at, expires_at: null });
   const first = ctx.uid(9001);
   const second = ctx.uid(9003);
   const runs = [
@@ -51,6 +53,14 @@ export default function cowork(ctx) {
       cowork_runs: runs, cowork_run_events: events,
       // The campaign conversation was renamed (Plan 9, PR-20); the other keeps its first message as the name.
       cowork_thread_settings: [{ root_run_id: second, user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Campaña logística · reclutamiento', hidden_at: null, updated_at: ctx.hoursAgo(2) }],
+      // «Lo que Cowork recuerda» (Plan 13): two of the owner's, one the team shares (saved by a member) and one a member keeps for
+      // themselves, which the owner never sees.
+      suplia_memories: [
+        memory(9201, ctx.OWNER, 'user', 'firma solo con mi nombre, sin cargo', ctx.daysAgo(2)),
+        memory(9202, ctx.OWNER, 'user', 'tutea a todos los contactos', ctx.daysAgo(5)),
+        memory(9203, ctx.MEMBER, 'organization', 'no escribir a Adecco: ya es cliente', ctx.daysAgo(9)),
+        memory(9204, ctx.MEMBER, 'user', 'prefiere correos de menos de 80 palabras', ctx.daysAgo(1)),
+      ],
     },
     rpc: { cowork_has_access: (_args, { user, service }) => service || user?.id === ctx.OWNER },
     storage: { [`cowork-artifacts/${ctx.ORG}/${ctx.OWNER}/${runs[3].id}/${artifact.name}`]: { type: 'text/html; charset=utf-8', body: page } },
