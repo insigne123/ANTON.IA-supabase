@@ -79,6 +79,36 @@ env:
   - variable: COWORK_WRITER_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Plan 12: consultas ofrecidas en el turno y tableros/gráficos en el lienzo.
+  # Sin migración adicional; cowork-artifacts privado verificado el 6 oct 2026.
+  - variable: COWORK_OFFERED_READS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_CODE_ARTIFACTS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  # memory_save aplicado y verificado en producción (20261006182758).
+  - variable: COWORK_PREFERENCES_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  # El dueño autorizó estas funciones; los efectos conservan sus tarjetas de aprobación.
+  - variable: COWORK_REPLY_THREAD_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_CONTACTS_IMPORT_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  # Lotes autorizados, pendientes de prueba real guiada con un contacto.
+  - variable: COWORK_LINKEDIN_BATCH_ENABLED
+    value: "false"
+    availability: [RUNTIME]
+  # Flags experimentales descartados o con medición todavía insuficiente.
+  - variable: COWORK_ANALYST_ENABLED
+    value: "false"
+    availability: [RUNTIME]
+  - variable: COWORK_INTENT_PROMPTS_ENABLED
+    value: "false"
+    availability: [RUNTIME]
   # Jueza apagada: revisa la respuesta después de mostrarla y la reemplaza a la vista.
   # Vuelve cuando revise antes de mostrar (docs/cowork-jueza.md).
   - variable: COWORK_JUDGE_ENABLED
@@ -207,6 +237,21 @@ env:
 
   - variable: ENRICHMENT_PROVIDER_DEFAULT
     value: apollo
+    availability: [RUNTIME]
+  # Leads Finder como alternativa de prueba, solo la cuenta del dueño.
+  # Bóveda de contactos y secretos server-only verificados; tope monetario por corrida.
+  - variable: LEADS_FINDER_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: LEADS_FINDER_ALLOWED_EMAILS
+    value: nicolas.yarur.g@yago.cl
+    availability: [RUNTIME]
+  - variable: LEADS_FINDER_MAX_RUN_USD
+    value: "0.50"
+    availability: [RUNTIME]
+  # Pipeline: cinco columnas, dos triggers y lectura privada de eventos verificados.
+  - variable: CRM_DEAL_VALUES_ENABLED
+    value: "true"
     availability: [RUNTIME]
 
   - variable: LEADS_DISABLE_EXTERNAL_FALLBACK
