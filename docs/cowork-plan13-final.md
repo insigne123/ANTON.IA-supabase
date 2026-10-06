@@ -20,7 +20,7 @@ Hecha con `gpt-6-luna`, con el juez en `gpt-6.1-sol` y sin astra. El detalle est
 
 Casos `ur-*` y `chat-*` (27), main contra la configuración final (estado de cuenta y esfuerzo bajo):
 - Casos OK: 20 → 24–25.
-- Checks: 226/237 → 234/235.
+- Checks: 226/237 → 235/237 y 234/238 (dos corridas; la segunda suma un check sobre dónde va el aviso).
 - Corridas fallidas: 1 → 0.
 - Tiempo total P50: 5,9 → 5,4 s.
 - Tiempo total P90: 13,7 → 9,6 s.
