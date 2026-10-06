@@ -372,8 +372,9 @@ export function axisCorpus(userContext: CoworkUserContext | null): CorpusCase[] 
       { result: 'T1 a 167, T2 a 166, T3 a 165, T4 a 164, T5 a 164, T6 a 164, T7 a unos 160; cuatro respuestas reales. «50 de 50 enviados, 0 errores», con log y Excel actualizados.',
         failed: 'Un «&» de más dejó sin enviar nada y la IA lo detectó porque el log no existía; el historial contaba un borrador como si fuera un envío y bloqueaba todos los envíos válidos (solo debe contar «gmail_sent»).' }),
     world: w({
-      'files.list': { scope: 'own_files', items: [{ name: 'plan-7-toques.xlsx', kind: 'xlsx', size: 184320, uploadedAt: '2026-09-24T15:00:00Z', rows: 1239 }], truncated: false },
-      'files.read': { scope: 'own_file', name: 'plan-7-toques.xlsx', kind: 'xlsx', sheet: 'Plan', columns: ['lead', 'correo', 'empresa', 'toque', 'estado'], totalRows: 1239,
+      // The shapes of production (server/cowork/extended-reads.ts): the loop recognizes an upload by them before code or an import uses it.
+      'files.list': { scope: 'own_uploads', files: [{ name: 'plan-7-toques.xlsx', runId: id(370), size: 184320, updatedAt: '2026-09-24T15:00:00Z' }] },
+      'files.read': { scope: 'own_uploads', found: true, name: 'plan-7-toques.xlsx', runId: id(370), size: 184320, kind: 'xlsx', sheet: 'Plan', columns: ['lead', 'correo', 'empresa', 'toque', 'estado'], totalRows: 1239,
         preview: [['Patricio Soto', 'psoto@pehuen.cl', 'Constructora Pehuén', 'T1', 'Pendiente'], ['Ana Ruiz', 'aruiz@delvalle.cl', 'Alimentos del Valle', 'T1', 'Pendiente'], ['Jorge Lagos', 'jlagos@pehuen.cl', 'Constructora Pehuén', 'T1', 'Pendiente']],
         summary: { leads: 177, touches: 7, t1: 177, companies: 131, duplicateEmails: 3, excludedCompanies: [{ company: 'Grupo Sureño', rows: 7, reason: 'En la lista de exclusión' }], companiesWithSeveralPeople: 34 },
         truncated: true, limitation: 'Vista previa de las primeras filas y resumen del archivo completo.' },

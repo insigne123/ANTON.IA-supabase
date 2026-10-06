@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkCampaignWithExactEmails, coworkDecisionSchema, runCoworkReadLoop } from './agent-loop';
+import { coworkCampaignWithExactEmails, coworkDecisionSchema, runCoworkReadLoop, type CoworkObservation } from './agent-loop';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
-import { COWORK_NOTE_ACTION } from './contracts';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
 
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
 const search = { action: 'leads.search' as const, query: 'Logística', leadId: null, answer: null };
@@ -276,6 +276,31 @@ test('a fixed read sent with periods runs once instead of costing the decision',
   });
   assert.equal(result.reply, 'Un contacto encontrado.');
   assert.deepEqual(executed.sort(), ['leads.search:', 'metrics.rates:']);
+});
+
+test('a read this account does not have is left out of parallel reads, with its step, and the others run', async () => {
+  const executed: string[] = [];
+  const recorded: CoworkObservation[] = [];
+  let decisions = 0;
+  const result = await runCoworkReadLoop({
+    message: 'Muéstrame mi pipeline en un gráfico', signal: new AbortController().signal, authorize: async () => {},
+    record: async observation => { recorded.push(observation); },
+    decide: async observations => {
+      if (decisions++ > 0) {
+        assert.deepEqual(observations.map(item => item.action), ['crm.search']);
+        return answer;
+      }
+      return { action: 'reads.parallel', query: null, leadId: null, answer: null,
+        reads: [{ action: 'opportunities.list', input: '' }, { action: 'crm.search', input: '' }],
+        outline: [{ label: 'Reviso tus oportunidades', read: 'opportunities.list' }, { label: 'Reviso las etapas del CRM', read: 'crm.search' },
+          { label: 'Armo el gráfico', read: null }] };
+    },
+    execute: async (action, value) => { executed.push(`${action}:${value}`); return {}; },
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.deepEqual(executed, ['crm.search:']);
+  const plan = recorded.find(item => item.action === COWORK_PLAN_ACTION)?.result as { steps: Array<{ label: string }> } | undefined;
+  assert.ok(plan && !plan.steps.some(step => /oportunidades/i.test(step.label)));
 });
 
 test('effect proposals require an observed target and resolve its origin run', async () => {
@@ -1232,6 +1257,46 @@ test('artifact.create hands the brief to the Designer, whose answer ends the tur
     decide: async () => create, design: async () => designed }), designed);
 });
 
+test('analysis.write hands the question to the Analyst after the reads, whose answer ends the turn; without it the coordinator answers', async () => {
+  const brief = { question: '¿Cómo me ha ido este mes?', focus: 'correo contra LinkedIn', notes: null };
+  const analyze = coworkDecisionSchema.parse({ action: 'analysis.write', query: null, leadId: null, answer: null, analysis: brief });
+  const rates = coworkDecisionSchema.parse({ action: 'metrics.rates', query: 'last_30_days', leadId: null, answer: null });
+  const analyzed = { reply: 'Respondieron 4 de 46 contactos por correo, el 8,7 %.', document: null, blocks: null, question: null,
+    suggestions: [{ label: 'Ver los que respondieron', message: 'Muéstrame quiénes respondieron' }] };
+  const closed = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Este mes respondieron 4 personas.', document: null } };
+  const base = { message: '¿Cómo me ha ido este mes?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({ scope: 'own', sent: 46, replies: 4 }) };
+  const seen: unknown[] = [];
+  let decisions = 0;
+  assert.deepEqual(await runCoworkReadLoop({ ...base, decide: async () => (decisions++ ? analyze : rates),
+    analyze: async (given, observations) => { seen.push(given, observations.map(item => item.action)); return analyzed; } }), analyzed);
+  assert.deepEqual(seen, [brief, ['metrics.rates']]);
+  // Before reading, without the Analyst, with an Analyst that fails or without the brief: the coordinator hears why and answers itself.
+  for (const [first, analyst, reason] of [
+    [analyze, async () => analyzed, /primero consulta los datos/],
+    [rates, undefined, /no está disponible/],
+    [rates, async () => { throw new Error('timeout'); }, /no pudo esta vez/],
+    [rates, async () => analyzed, /sin encargo/],
+  ] as const) {
+    const reasons: string[] = [];
+    let turn = 0;
+    const missingBrief = reason.source === 'sin encargo';
+    const fallback = await runCoworkReadLoop({ ...base, ...(analyst ? { analyze: analyst } : {}), decide: async (_observations, _mustAnswer, rejections = []) => {
+      reasons.push(...rejections.map(rejection => rejection.reason));
+      if (rejections.length) return closed;
+      return turn++ === 0 ? first : missingBrief ? { ...analyze, analysis: null } : analyze;
+    } });
+    assert.equal(fallback.reply, 'Este mes respondieron 4 personas.');
+    assert.match(reasons.join('|'), reason);
+  }
+  // On the last decision nobody is left to answer: the turn says so and offers the request again, instead of failing.
+  let last = 0;
+  const late = await runCoworkReadLoop({ ...base, ceiling: { decisions: 2, reads: 3, softDeadlineMs: 50_000 }, decide: async () => (last++ ? analyze : rates),
+    analyze: async () => { throw new Error('timeout'); } });
+  assert.match(late.reply, /No alcancé a terminar el análisis/);
+  assert.equal(late.suggestions?.[0]?.message, '¿Cómo me ha ido este mes?');
+});
+
 test('an answer that offers a read it could make gets it made, once, with room for it; the offered answer stands if that fails', async () => {
   const offers = { action: 'answer' as const, query: null, leadId: null,
     answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Reviso a quiénes ya les escribiste?',
@@ -1265,11 +1330,18 @@ test('an answer that offers a read it could make gets it made, once, with room f
   let broken = 0;
   const failed = await runCoworkReadLoop({ ...base, decide: async () => (broken++ === 0 ? offers : { action: 'answer', query: null, leadId: null, answer: null }) as never });
   assert.equal(failed.reply, offers.answer.reply);
-  // Without a decision for the read and one to answer, it stands; offers that need approval or write are not reads.
+  // A turn that spent its decisions reading gets the two the read needs, up to the ledger's five coordinator calls.
   let late = 0;
   const reads = { action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
     reads: [{ action: 'leads.search' as const, input: 'a' }, { action: 'leads.search' as const, input: 'b' }] };
-  const lastOne = await runCoworkReadLoop({ ...base, decide: async () => [readSent, reads, offers][late++] ?? done });
+  const extended = await runCoworkReadLoop({ ...base, decide: async () => [readSent, reads, offers, readSent][late++] ?? done });
+  assert.equal(extended.reply, done.answer.reply);
+  assert.equal(late, 5);
+  // Past those five calls it stands; offers that need approval or write are not reads.
+  let later = 0;
+  const another = { action: 'leads.search' as const, query: 'c', leadId: null, answer: null };
+  const lastOne = await runCoworkReadLoop({ ...base, ceiling: { decisions: 5, reads: 6, softDeadlineMs: 50_000 },
+    decide: async () => [readSent, reads, another, offers][later++] ?? done });
   assert.equal(lastOne.reply, offers.answer.reply);
   for (const question of ['¿Busco su correo con el proveedor?', '¿Te redacto la respuesta?', '¿Preparo la campaña pausada?']) {
     let asked = 0;

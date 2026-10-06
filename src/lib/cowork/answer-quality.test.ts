@@ -76,6 +76,10 @@ test('quick replies keep short plain chips and drop malformed ones one by one', 
     { label: 'Usa últimos 30 días', message: 'Muéstrame últimos 30 días' },
   ]);
   assert.deepEqual(coworkSuggestions(null), []);
+  // A chip that only turns the question down is not shown; a «no» that tells something is.
+  assert.deepEqual(coworkSuggestions([{ label: 'Sí, búscalo', message: 'Sí, busca su correo' }, { label: 'No por ahora', message: 'No por ahora' },
+    { label: 'Lo revisaré por mi cuenta', message: 'Lo revisaré por mi cuenta' }, { label: 'No está confirmado', message: 'No está confirmado' }]).map(chip => chip.label),
+  ['Sí, búscalo', 'No está confirmado']);
   // Asterisks inside the text (masked names) are not formatting.
   assert.deepEqual(coworkSuggestions([{ label: 'Buscar correos', message: 'Busca los correos de Carlos Ah***a y Nehal Pa***a' }]),
     [{ label: 'Buscar correos', message: 'Busca los correos de Carlos Ah***a y Nehal Pa***a' }]);

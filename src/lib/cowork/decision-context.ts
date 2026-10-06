@@ -212,6 +212,7 @@ export function coworkDecisionContext(
     ...(instructions.phoneRevealCapability ? { phoneRevealCapability: instructions.phoneRevealCapability } : {}),
     ...(instructions.prepareBatchCapability ? { prepareBatchCapability: instructions.prepareBatchCapability } : {}),
     ...(instructions.artifactCapability ? { artifactCapability: instructions.artifactCapability } : {}),
+    ...(instructions.analystCapability ? { analystCapability: instructions.analystCapability, analystAvailable: (turnBudget?.decisionsLeft ?? 1) > 0 } : {}),
     ...(instructions.preferenceCapability ? { preferenceCapability: instructions.preferenceCapability } : {}),
     threadBudgetCapability: instructions.threadBudgetCapability,
   };

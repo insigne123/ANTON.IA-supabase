@@ -17,9 +17,10 @@ import { coworkCrmRecordPatchSchema, type CoworkCrmRecordPatch } from './crm-rec
 import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionControlSchema,
   type CoworkCrmAssign, type CoworkExceptionResolve, type CoworkMissionControl } from './team-proposals';
 import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
-import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
+import { COWORK_MAX_COORDINATOR_CALLS, COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
 import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
 import { coworkDesignBriefSchema, type CoworkDesignBrief } from './design-brief';
+import { coworkAnalysisBriefSchema, coworkAnalystFallback, type CoworkAnalysisBrief } from './analyst';
 import { coworkWithCharts } from './charts';
 import { coworkContactsImportSchema, type CoworkContactsImportInput } from './contacts-import';
 import { coworkReplyThreadSchema, type CoworkReplyThreadInput } from './reply-proposal';
@@ -62,7 +63,7 @@ export const coworkDecisionSchema = z.object({
     'contacts.prepare_batch', 'preference.save',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze', 'leads.recommend', 'opportunities.list',
-    'answer', 'draft.write', 'artifact.create', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
+    'answer', 'draft.write', 'artifact.create', 'analysis.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
   /** The steps the person sees while the turn works (rule 12); only the first consulting decision uses it. */
@@ -94,6 +95,8 @@ export const coworkDecisionSchema = z.object({
   write: coworkWriteBriefSchema.nullable().optional(),
   /** artifact.create: the brief the Designer gets to write the code of an artifact (designer.ts, Plan 12). */
   design: coworkDesignBriefSchema.nullable().optional(),
+  /** analysis.write: the question the Analyst answers with what the turn read (analyst.ts, Plan 12, 4b). */
+  analysis: coworkAnalysisBriefSchema.nullable().optional(),
   /** contacts.import: the uploaded file whose contacts to save and, if needed, which column is which (contacts-import.ts). */
   contactsImport: coworkContactsImportSchema.nullable().optional(),
   /** email.reply_thread: the conversation read with replies.thread and the final text of the reply to propose sending in its thread (reply-proposal.ts). */
@@ -474,6 +477,11 @@ function closingQuestion(answer: { reply: string; question?: unknown }): string 
  * approval («¿Busco su correo?») or write something («¿Te redacto…?») are not reads and stay. */
 const OFFERED_READ = /¿\s*(?:(?:quieres|prefieres|deseas|te parece)\s+(?:que\s+)?)?(?:te\s+|les?\s+|lo\s+|la\s+|los\s+|las\s+)?(?:revis[eo]|consult[eo]|mir[eo]|muestr[eo]|revisemos|veamos)\b/i;
 
+/** The closing question when it offers a read Cowork could make itself («¿Reviso tus contactos?»), or null. The evaluation counts them. */
+export function coworkOfferedRead(answer: { reply: string; question?: unknown }): string | null {
+  return offeredRead(answer);
+}
+
 function offeredRead(answer: { reply: string; question?: unknown }): string | null {
   const question = closingQuestion(answer);
   return question && OFFERED_READ.test(question) ? question : null;
@@ -643,6 +651,8 @@ function proposalRejection(error: unknown, signal: AbortSignal): unknown {
 
 const ID_TEXT = /[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/i;
 const NOT_A_STEP_READ = new Set(['answer', 'reads.parallel', 'reads.plan']);
+/** What the loop wrote about itself (its note, its plan, the Writer's emails): never data an agent can analyze. */
+const ASSISTANT_ACTIONS = new Set<string>([COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_WRITTEN_ACTION]);
 const readsOpportunities = (decision: Decision) => decision.action === 'opportunities.list'
   || Boolean(decision.reads?.some(task => task.action === 'opportunities.list'))
   || Boolean(decision.plan?.some(task => task.read.action === 'opportunities.list'));
@@ -720,6 +730,8 @@ async function runCoworkLoop(input: {
   write?: (brief: CoworkWriteBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
   /** The Designer: writes the artifact of an `artifact.create` decision, stores it and returns the turn's answer (COWORK_CODE_ARTIFACTS_ENABLED). */
   design?: (brief: CoworkDesignBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
+  /** The Analyst: answers the question of an `analysis.write` decision with what the turn read (COWORK_ANALYST_ENABLED). */
+  analyze?: (brief: CoworkAnalysisBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
   /** contacts.import may be proposed (COWORK_CONTACTS_IMPORT_ENABLED, once its migration is applied). */
   contactsImport?: boolean;
   /** email.reply_thread may be proposed (COWORK_REPLY_THREAD_ENABLED; its reply_thread migration is applied in production). */
@@ -769,13 +781,15 @@ async function runCoworkLoop(input: {
     input.signal.throwIfAborted(); await input.authorize();
     if (decision.action === 'draft.write' && decision.write && input.write) return withRememberSuggestion(await input.write(decision.write, observations));
     if (decision.action === 'artifact.create' && decision.design && input.design) return input.design(decision.design, observations);
+    if (decision.action === 'analysis.write' && decision.analysis && input.analyze) return input.analyze(decision.analysis, observations);
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
     return withCoworkReports(decision.answer, observations);
   }
   const ceiling = input.ceiling ?? COWORK_TURN_DEFAULTS;
   const now = input.now ?? Date.now;
   const startedAt = now();
-  const last = ceiling.decisions - 1;
+  // The offered read may add one decision past the ceiling (below), never past what the ledger admits.
+  let last = ceiling.decisions - 1;
   // Past the soft deadline the turn wraps up: the next decision answers with what it has.
   const late = () => now() - startedAt >= ceiling.softDeadlineMs;
   let readsUsed = 0;
@@ -824,7 +838,7 @@ async function runCoworkLoop(input: {
   // Emails the Writer wrote when the person asked for the campaign in the same request (Plan 12, 4a-2): the next
   // decision proposes it with them, word for word. Whatever happens after, the Writer's answer is never lost.
   let written: { emails: CoworkEditedEmail[]; answer: CoworkAnswer } | null = null;
-  for (let turn = 0; turn < ceiling.decisions; turn++) {
+  for (let turn = 0; turn <= last; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
     const overdue = late();
@@ -899,6 +913,30 @@ async function runCoworkLoop(input: {
           throw rejected('Designer failed', `La Diseñadora no pudo esta vez (${error instanceof Error ? error.message.slice(0, 200) : 'error'}): entrega tú la respuesta con un bloque metrics o table, o un document.`);
         }
       }
+      if (decision.action === 'analysis.write') {
+        // On the last decision nobody is left to answer without it: a line that offers to try again.
+        const lastResort = () => closingFallback ?? judgedFallback ?? coworkAnalystFallback(input.message);
+        if (!input.analyze) {
+          if (turn === last) return lastResort();
+          throw rejected('Analyst unavailable', 'La Analista no está disponible: entrega tú la respuesta con answer (regla 11).');
+        }
+        if (!decision.analysis) {
+          if (turn === last) return lastResort();
+          throw rejected('Missing analysis brief', 'Elegiste analysis.write sin encargo: incluye analysis {question, focus, notes}.');
+        }
+        // The Analyst writes from what the turn read: without data there is nothing to analyze yet.
+        if (!observations.some(item => !ASSISTANT_ACTIONS.has(item.action))) {
+          if (turn === last) return lastResort();
+          throw rejected('Analysis before reading', 'La Analista escribe con lo que consultaste: primero consulta los datos que responden la pregunta (por ejemplo metrics.rates, metrics.channels o campaigns.batch_report) y después usa analysis.write.');
+        }
+        try {
+          return await input.analyze(decision.analysis, observations);
+        } catch (error) {
+          if (input.signal.aborted) throw error;
+          if (turn === last) return lastResort();
+          throw rejected('Analyst failed', 'La Analista no pudo esta vez: entrega tú la respuesta con answer (regla 11).');
+        }
+      }
       if (decision.action === 'answer') {
         // The campaign was not proposed after all: the Writer's emails are the answer, as without 4a-2.
         if (written) return written.answer;
@@ -924,8 +962,12 @@ async function runCoworkLoop(input: {
         }
         // An answer that offers a read it could make gets it made, as a judge's correction would: one more
         // read (past the ceiling if needed) and the edited answer, with the offered one standing if that fails.
-        const offered = input.offeredReads && !judged && !keepsVersionOnly && turn + 2 <= last && !late() ? offeredRead(decision.answer) : null;
+        // A turn that spent its decisions reading gets the two it needs, up to the ledger's coordinator calls:
+        // that was where most offers stayed unmade (Plan 12, final round).
+        const offered = input.offeredReads && !judged && !keepsVersionOnly && turn + 2 <= Math.max(last, COWORK_MAX_COORDINATOR_CALLS - 1) && !late()
+          ? offeredRead(decision.answer) : null;
         if (offered) {
+          last = Math.max(last, turn + 2);
           judged = true;
           offerCorrected = true;
           judgedFallback = decision.answer;
@@ -1254,6 +1296,13 @@ async function runCoworkLoop(input: {
       // Checked again here: the decision itself may have run past the soft deadline.
       if (late()) throw rejected('Cowork turn time exhausted', 'Se acabó el tiempo de este turno: responde con lo observado y di en una línea qué queda para el siguiente paso.');
       // «Oportunidades» exists only for the accounts that see the section: for anyone else the read is not there.
+      // Next to other reads it is left out, with its step of the plan, and the others run: sent back, the model asked
+      // for it again until the turn ran out of decisions (Plan 12, final round: «muéstrame mi pipeline en un gráfico»).
+      if (!input.opportunities && decision.action === 'reads.parallel'
+        && decision.reads?.some(task => task.action !== 'opportunities.list')) {
+        decision.reads = decision.reads.filter(task => task.action !== 'opportunities.list');
+        decision.outline = decision.outline?.filter(step => step.read !== 'opportunities.list');
+      }
       if (!input.opportunities && readsOpportunities(decision)) {
         throw rejected('Read unavailable', 'Esa consulta no está disponible en esta cuenta: sigue con las demás y no la menciones.');
       }
