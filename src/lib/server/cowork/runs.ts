@@ -19,6 +19,11 @@ function withAutomaticFlag<T extends { parent_run_id?: string | null; request_id
   return { ...rest, automatic: research || derived('cowork:continuation'), ...(research ? { automaticReason: 'research' as const } : {}) };
 }
 
+/** Whether a run is one the worker started (a continuation or a research notice), not a message the person sent. */
+export function coworkRunIsAutomatic(run: { parent_run_id?: string | null; request_id?: string | null }) {
+  return withAutomaticFlag(run).automatic;
+}
+
 const RUN_LIST_LIMIT = 50;
 
 /** The latest runs, without the conversations the person deleted (hid): those leave the list, not the database. */

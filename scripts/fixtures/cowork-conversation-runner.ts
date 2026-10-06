@@ -218,6 +218,8 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       prepareBatch: corpusPrepareBatch,
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
+      // As in production: an offered read is made first only with COWORK_OFFERED_READS_ENABLED=true.
+      offeredReads: process.env.COWORK_OFFERED_READS_ENABLED === 'true',
       onCorrection: verdict => {
         if (!result.judgeInTurn) return;
         result.judgeInTurn.kept = verdict.keep;
