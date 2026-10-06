@@ -3,7 +3,8 @@
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowRight, ChevronDown, X } from 'lucide-react';
 import { coworkOfferMessage, coworkOverviewFigures, type CoworkOverview } from '@/lib/cowork/overview';
-import { coworkShortTime, coworkStatusCopy, type CoworkThreadSummary } from '@/lib/cowork/presentation';
+import { coworkSinceWhen, type CoworkSince, type CoworkSinceKind } from '@/lib/cowork/since-visit';
+import { coworkShortTime, coworkStatusCopy, type CoworkIconKey, type CoworkThreadSummary } from '@/lib/cowork/presentation';
 import { COWORK_STARTERS } from '@/lib/cowork/starters';
 import { cn } from '@/lib/utils';
 import { CwCollapse, CwCount } from './motion';
@@ -36,6 +37,32 @@ function HomeFigures({ overview, loading }: { overview: CoworkOverview | null; l
       <span className="font-semibold text-cw-text"><CwCount value={figure.value} />{figure.total !== undefined && ` de ${figure.total}`}</span> {figure.label}
     </li>)}
   </ul>;
+}
+
+const SINCE_ICON: Record<CoworkSinceKind, CoworkIconKey> = { replies: 'reply', research: 'research', opportunities: 'target', linkedin: 'linkedin' };
+const SINCE_ACTION: Record<CoworkSinceKind, string> = {
+  replies: 'Preparar respuestas', research: 'Ver hallazgos', opportunities: 'Revisar', linkedin: 'Escribirles',
+};
+
+/** «Desde tu última visita» (Plan 12, 5): what arrived after your last turn; each row asks Cowork to work on it. */
+function SinceLastVisit({ since, onAsk }: { since: CoworkSince; onAsk: (prompt: string) => void }) {
+  const id = useId();
+  return <section aria-labelledby={id} className="cw-rise mt-6 [animation-delay:90ms]">
+    <h2 id={id} className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">Desde tu última visita · {coworkSinceWhen(since.at)}</h2>
+    <ul className="divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated shadow-[var(--cw-shadow-sm)]">
+      {since.items.map(item => <li key={item.kind}>
+        <button type="button" onClick={() => onAsk(item.prompt)}
+          className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]">
+          <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cw-accent-soft text-cw-accent">
+            <CoworkIcon name={SINCE_ICON[item.kind]} className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1 text-[14px] leading-5 text-cw-text">{item.text}</span>
+          <span className="hidden shrink-0 text-[12.5px] font-medium text-cw-accent sm:inline">{SINCE_ACTION[item.kind]}</span>
+          <ArrowRight className="h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+        </button>
+      </li>)}
+    </ul>
+  </section>;
 }
 
 /**
@@ -136,6 +163,7 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
       <div className="cw-rise [animation-delay:60ms]">{composer}</div>
       {!ready && !loading && !listFailed && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
       <HomeFigures overview={overview} loading={overviewLoading} />
+      {overview?.since?.items.length ? <SinceLastVisit since={overview.since} onAsk={onSuggestion} /> : null}
       <CwCollapse show={askOffer}>
         {onSaveOffer && <div className="pt-6"><OfferCard draft={offerDraft} onDraftChange={onOfferDraftChange} onSave={onSaveOffer} onHide={hideOffer} /></div>}
       </CwCollapse>
