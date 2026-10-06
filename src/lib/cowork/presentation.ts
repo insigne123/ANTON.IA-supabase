@@ -237,6 +237,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   linkedin_invite_batch: { title: 'Invitar en LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará una invitación sin nota por cada persona que dejes en la lista. La ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
   linkedin_message_batch: { title: 'Mensajes de LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará el mensaje de cada persona que dejes en la lista, con el texto que ves. Los ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
   reply_thread: { title: 'Responder en el hilo', icon: 'mail', help: 'Si la apruebas, esta respuesta sale tal cual dentro de la conversación de esa persona, desde tu correo. Revisa el texto antes.' },
+  memory_save: { title: 'Recordar preferencia', icon: 'bookmark', help: 'Se guardará esta preferencia, tal como está escrita, y la tendré en cuenta en tus próximos trabajos.' },
   lead_prepare_batch: { title: 'Preparar contactos', icon: 'audience', help: 'A cada persona de la lista se le hace solo lo que le falta: guardarla, buscar su correo (1 crédito) e investigarla. Lo ya hecho no se repite ni se cobra; quita a quien no quieras antes de aprobar.' },
 };
 
@@ -322,6 +323,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   linkedin_invite_batch: { happens: 'Se deja en cola una invitación sin nota por cada persona que dejes en la lista.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o no sale hoy, no se le toca.' },
   linkedin_message_batch: { happens: 'Se deja en cola el mensaje de cada persona que dejes en la lista, con el texto que ves.', not: 'No sale nada hasta que lo ejecutes desde la extensión; a quien quites, o no sale hoy, no se le toca.' },
   reply_thread: { happens: 'La respuesta sale en el hilo de esa conversación, con el texto que ves, desde tu correo.', not: 'No se envía nada más ni a nadie más, y no sale hasta que la apruebes.' },
+  memory_save: { happens: 'Se guarda la preferencia y la tengo en cuenta desde tu próximo pedido.', not: 'No cambian tus contactos, tus campañas ni lo que ya se escribió.' },
   lead_prepare_batch: { happens: 'A cada persona que dejes en la lista se le hace lo que le falta, en orden: guardarla, buscar su correo e investigarla.', not: 'No se le escribe a nadie, y lo que ya estaba hecho no se repite ni se cobra de nuevo.' },
 };
 

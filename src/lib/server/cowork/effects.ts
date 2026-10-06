@@ -29,6 +29,7 @@ import { executeCoworkCampaignRetry } from './campaign-retry';
 import { executeCoworkPhoneReveal } from './enrich-phone';
 import { executeCoworkLinkedinBatch } from './linkedin-batch';
 import { executeCoworkPrepareBatch } from './prepare-batch-run';
+import { executeCoworkPreferenceSave } from './preference';
 import { coworkContinuationArgs } from './continuation';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -36,7 +37,7 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
   'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone',
-  'lead_prepare_batch']);
+  'lead_prepare_batch', 'memory_save']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 type Scope = { userId: string; organizationId: string };
@@ -277,6 +278,10 @@ async function executeEffect(
     const prepared = await executeCoworkPrepareBatch(auth, proposal.run_id, proposal.target_id);
     return { reply: prepared.reply, result: prepared.result };
   }
+  if (proposal.kind === 'memory_save') {
+    const saved = await executeCoworkPreferenceSave(auth, proposal.run_id, proposal.target_id);
+    return { reply: saved.reply, result: saved.result };
+  }
   const requested = await requestCoworkDraft(auth, proposal.origin_run_id, { snapshotId: proposal.target_id });
   return { reply: requested.reused ? 'Ese borrador ya estaba solicitado para este informe.'
       : 'El borrador quedó en preparación; podrás revisarlo cuando esté listo.',
@@ -304,7 +309,8 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
     await requireCoworkWorkerAccess(client, scope);
     const finished = await finish(true, outcome.reply, outcome.result);
     if (finished.error) throw finished.error;
-    if (finished.data === true) {
+    // A remembered preference needs no next turn: its reply says what was kept, and the next request already reads it.
+    if (finished.data === true && job.kind !== 'memory_save') {
       await admitCoworkContinuation(client, scope, job.run_id, job.kind === 'lead_prepare_batch'
         // The people of the batch are the people of this work: shown by what the batch returned, never searched again by name.
         ? 'Continúa a partir del lote recién ejecutado, dentro del mismo encargo. Presenta su resultado en un bloque table con esas mismas personas (nombre real, correo y su estado, LinkedIn, investigación), tomado del resultado del lote en history.actions, sin buscarlas de nuevo por nombre; di en una frase qué faltó y por qué, y propón el siguiente paso concreto sin repetir el lote.'

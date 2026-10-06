@@ -25,6 +25,8 @@
 //
 // --contacts-import turns on contacts.import in every case (F4), as COWORK_CONTACTS_IMPORT_ENABLED
 // does; the cases marked contactsImport have it on anyway. The judges read the same flag.
+// --preferences turns on preference.save in every case (Plan 12, 5), as COWORK_PREFERENCES_ENABLED does; the report lists the
+// cases that proposed remembering something (preferenceProposals), which outside pref-* should be none.
 // With --stream the report also says how many answers the person would have seen replaced on screen
 // (the first answer streamed, then corrected: replacedOnScreen) and how long a turn takes until its
 // answer is final, apart for clean and corrected ones (revealSeconds): with COWORK_ANSWER_HOLD_ENABLED
@@ -66,6 +68,7 @@ import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
 import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
 import { CAMPANA_CORPUS } from './fixtures/cowork-campana-corpus';
+import { PREFERENCIAS_CORPUS } from './fixtures/cowork-preferencias-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
 // every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
@@ -97,6 +100,8 @@ CORPUS.push(...BATCH_CORPUS);
 
 // What the owner actually asked between 24 Sep and 5 Oct (Plan 12), on the production world (scripts/fixtures/cowork-uso-real-corpus.ts): ur-*.
 CORPUS.push(...USO_REAL_CORPUS);
+// Remembering preferences with a card (Plan 12, 5; scripts/fixtures/cowork-preferencias-corpus.ts): pref-*, with preference.save on.
+CORPUS.push(...PREFERENCIAS_CORPUS);
 
 CORPUS.push(...ARTIFACT_CORPUS);
 
@@ -132,6 +137,9 @@ async function main() {
   const percentile = (values: number[], fraction: number) => values.length ? [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * fraction))] : null;
   const jevStats = { asked: 0, ok: 0, failed: 0, handedToModel: 0, cleared: 0, durations: [] as number[], costUsd: 0, inputTokens: 0 };
   const importOn = process.argv.includes('--contacts-import');
+  // --preferences turns preference.save on in every case, as COWORK_PREFERENCES_ENABLED does: a turn that does not ask to
+  // remember anything must not propose it (Plan 12, 5). The pref-* cases have it on anyway.
+  const preferencesOn = process.argv.includes('--preferences');
   const judgeModel = process.env.COWORK_JUDGE_MODEL || process.env.COWORK_MODEL;
   let judgeCalls = 0;
   const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
@@ -141,7 +149,7 @@ async function main() {
   for (let attempt = 1; attempt <= repeat; attempt++) {
     for (const id of selected) {
       const found = CORPUS.find(item => item.id === id)!;
-      const entry = importOn ? { ...found, contactsImport: true } : found;
+      const entry = { ...found, ...(importOn ? { contactsImport: true } : {}), ...(preferencesOn ? { preferences: true } : {}) };
       const decisions: unknown[] = [];
       const started = Date.now();
       // The Writer and the Reviewer, with their own models and the same call budget.
@@ -268,6 +276,7 @@ async function main() {
   const summary = {
     model: process.env.COWORK_MODEL, calls, cases: outcomes.length,
     ...(importOn ? { contactsImport: 'all cases' } : {}),
+    ...(preferencesOn ? { preferences: 'all cases', preferenceProposals: outcomes.filter(outcome => outcome.result.proposal?.kind === 'memory_save').map(outcome => outcome.id) } : {}),
     // With --writer: how many answers the Writer wrote, and how many calls it and the Reviewer made.
     ...(writerOn ? { writer: { models: writerModels, calls: writerCalls,
       answers: outcomes.filter(outcome => outcome.result.writer).length,
