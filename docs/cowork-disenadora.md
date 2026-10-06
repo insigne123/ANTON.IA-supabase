@@ -143,7 +143,29 @@ Cada fila es una medición con el modelo real.
 | La pregunta final después de entregar el tablero («¿Apruebas buscar correos?») era la principal fricción para el juez | Sin pregunta final: el paso siguiente va en la primera respuesta sugerida |
 | «Nuevos» se partía en la tabla y aparecía la columna auxiliar del orden de etapas | CSS de las celdas y regla de columnas |
 
-## Lo que falta (3c)
+## Ejemplos 3c: oportunidades, ficha de una cuenta y segmentos (6 oct 2026)
 
-- **Más ejemplos:** cuatro más para la Diseñadora (tablero de una campaña, licitaciones por monto y cierre, ficha de una cuenta y comparación de segmentos).
-- **El juez de artefactos:** se dibuja sin errores, axe limpio, sin desborde a 390 px, las cifras del texto están en los datos y una rúbrica de utilidad y claridad.
+Tres casos nuevos (`art-licitaciones`, `art-ficha-cuenta` y `art-segmentos`) sobre una cuenta más completa: 24 contactos en 8 empresas de 4 rubros, 30 envíos con respuestas y rebotes, y tres campañas (`ARTIFACT_RICH_WORLD`). Cada uno, tres veces. Coordinador y Diseñadora con `gpt-6-luna`, juez `gpt-6-sol`.
+
+| | Resultado |
+|---|---|
+| Casos que pasan sus verificaciones | 9 de 9 (96/96 verificaciones) |
+| Tablero de oportunidades | Hecho en las 3 corridas: se dibuja a la primera, entra a 390 px y axe limpio |
+| Juez del tablero de oportunidades | buena en las 3 |
+| Juez de la ficha de una cuenta | mala en las 3 |
+| Juez de la comparación de segmentos | buena en 1, mala en 2 |
+| Tiempo total (p50) | 12,8 s |
+
+**La ficha y los segmentos se responden en el chat**, con una tabla o tarjetas de cifras. No piden un tablero, y la regla deja en el chat lo que cabe en una tabla corta.
+
+### Lo que se corrigió del banco, no de Cowork
+
+- **Los segmentos venían de otra cuenta:** `audience.analyze` e `icp.analyze` no estaban en la cuenta del caso y caían en la del corpus (256 contactos en 3 rubros). Con datos que no calzaban, el modelo, con razón, no calculaba tasas. Ahora salen de las mismas funciones de la app (`analyzeStoredAudience` y `analyzeIcp`) sobre los 24 contactos y 30 envíos.
+- **Las verificaciones solo leían el texto:** «nombra los cuatro rubros» fallaba cuando los rubros estaban en la tabla del chat. Ahora leen también las tablas y cifras que se muestran.
+- **El juez no veía los datos del artefacto:** los pone el servidor, no una lectura del modelo, y el juez decía «muestra montos y fechas sin datos que los respalden». Ahora los ve como una observación más (`artifact.data`). Con eso, el tablero de oportunidades pasa de 1 a 3 «buena» y la veracidad de 3,78 a 4,78.
+
+### Lo que sigue siendo de Cowork
+
+- **Ficha de una cuenta:** no trae lo que respondió cada persona. Ofrece revisar el hilo «después» en vez de leerlo en el turno (`replies.thread`). Es la misma causa que mide `COWORK_OFFERED_READS_ENABLED` en `docs/cowork-plan12-causas-raiz.md`.
+- **Segmentos:** una vez ofreció como siguiente paso comparar algo que ya tenía.
+- **Un error de la tarjeta de cifras:** recortaba el valor a 40 caracteres en medio de una palabra («1 respondió (3»). Se arregla aparte.
