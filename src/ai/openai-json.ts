@@ -51,6 +51,14 @@ const DEFAULT_GLM_MODEL = process.env.GLM_MODEL || 'glm-5.2';
 const DEFAULT_GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 const DEFAULT_SYSTEM_PROMPT = 'You are a strict JSON generator. Return valid JSON only.';
 
+/**
+ * Models ANTON.IA never calls, whatever an environment variable or a caller asks for: the Astra family spends far more credits
+ * than the rest (decision of the account owner, 6 Oct 2026). Checked here, where every structured call to OpenAI goes out.
+ */
+export function isBlockedOpenAiModel(model: string) {
+  return /astra/i.test(model);
+}
+
 function env(name: string) {
   return String(process.env[name] || '').trim();
 }
@@ -252,6 +260,7 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
   config: StructuredProviderConfig
 ): Promise<StructuredResult<T>> {
   const model = opts.openAiModel || config.defaultModel;
+  if (isBlockedOpenAiModel(model)) throw new Error(`El modelo ${model} no está permitido en ANTON.IA.`);
   const temperature = opts.temperature ?? 0.3;
   const startedAt = Date.now();
   const streaming = Boolean(opts.onPartial) && config.provider === 'openai';
@@ -356,6 +365,13 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
     opts.openAiModel,
     ...(opts.allowDefaultModelFallback === false ? [] : [config.defaultModel]),
   ].map((model) => String(model || '').trim()).filter(Boolean)));
+  const blocked = models.filter(isBlockedOpenAiModel);
+  if (blocked.length) {
+    // A blocked model is skipped before any request: the next allowed one answers, or the call fails without spending.
+    console.warn(`[${config.displayName}] Skipping models not allowed in ANTON.IA: ${blocked.join(', ')}`);
+    models.splice(0, models.length, ...models.filter((model) => !isBlockedOpenAiModel(model)));
+    if (!models.length) throw new Error(`El modelo ${blocked.join(', ')} no está permitido en ANTON.IA.`);
+  }
 
   if (!models.length) {
     throw new Error('Specify openAiModel or openAiModels when default model fallback is disabled.');

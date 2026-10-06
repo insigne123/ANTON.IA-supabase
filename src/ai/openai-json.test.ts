@@ -570,3 +570,27 @@ test('an error inside the stream fails the attempt like an HTTP error', async (t
     allowDefaultModelFallback: false, maxAttempts: 1, onPartial: () => {},
   }), /OPENAI_STREAM_ERROR:overloaded/);
 });
+
+test('never calls an Astra model: it is skipped for the next allowed one, and alone the call fails without a request', async (t) => {
+  const requested: string[] = [];
+  mockOpenAi(t, async (_input, init) => {
+    const body: RequestBody = JSON.parse(String(init?.body || '{}'));
+    requested.push(String(body.model));
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"value":"ok"}' } }] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  const schema = z.object({ value: z.string() });
+  const result = await generateStructuredWithTelemetry({
+    prompt: 'Return a value.', schema, provider: 'openai', openAiModels: ['gpt-6-astra', 'gpt-6-luna'], allowDefaultModelFallback: false,
+  });
+  assert.equal(result.telemetry.modelName, 'gpt-6-luna');
+  await assert.rejects(generateStructuredWithTelemetry({
+    prompt: 'Return a value.', schema, provider: 'openai', openAiModel: 'GPT-6-Astra', allowDefaultModelFallback: false,
+  }), /no está permitido/);
+  // Not even as the configured default.
+  process.env.OPENAI_MODEL = 'gpt-6-astra';
+  await assert.rejects(generateStructuredWithTelemetry({ prompt: 'Return a value.', schema, provider: 'openai' }), /no está permitido/);
+  assert.deepEqual(requested, ['gpt-6-luna']);
+});

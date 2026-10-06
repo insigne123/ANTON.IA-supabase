@@ -26,6 +26,11 @@ La direccion visual de esta app es la que resulte mas intuitiva y util para el o
 - Nunca ejecutes `reset`, seeds ni suites de prueba contra produccion.
 - Si falta autenticacion del MCP, usa `opencode mcp auth supabase-production`; nunca guardes tokens en el repositorio.
 
+## Modelos de IA
+
+- Nunca uses modelos `astra`, ni en la app ni en pruebas: gastan demasiados créditos de OpenAI. `src/ai/openai-json.ts` los bloquea antes de llamar.
+- En pruebas con el modelo real usa `gpt-6-luna`. `gpt-6.1-sol` solo en casos puntuales y justificados. Mide con muestras chicas antes de lanzar rondas grandes.
+
 ## Git y releases
 
 - `main` es la unica rama canonica para integrar, verificar y desplegar cambios.
