@@ -183,6 +183,35 @@ export function TASKS(ctx, { fixtures }) {
       done: page => page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 }),
     },
     {
+      // The same campaign by the main path of the email step (Plan 12, 7): the AI writes the initial email and its follow-up
+      // from the goal, and the person reviews them before approving. «campana» keeps measuring writing both by hand.
+      id: 'campana-ia', module: 'Seguimiento', title: 'Crear y aprobar una campaña con la IA', start: '/dashboard', ideal: 8,
+      steps: [
+        { menu: 'Campañas' },
+        { target: { role: 'button', name: 'Nueva campaña' } },
+        { target: { label: 'Nombre de campaña' }, fill: 'Primer contacto · Retail' },
+        { target: { role: 'button', name: 'Filtros manuales' } },
+        { target: { label: 'Cargos (separados por comas)' }, fill: 'Gerente de Personas' },
+        { target: { role: 'button', name: 'Buscar con filtros' } },
+        { target: { role: 'button', name: 'Seleccionar todos' }, skipIf: async page => /\b[1-9]\d* seleccionados?\b/.test(await page.getByRole('status').filter({ hasText: 'seleccionado' }).first().innerText({ timeout: 2000 })) },
+        { target: { role: 'button', name: 'Continuar a correos' } },
+        { target: { label: '¿Qué quieres conseguir con la campaña?' }, fill: 'Una reunión de 15 minutos para mostrar AXIS' },
+        { target: { role: 'button', name: 'Generar secuencia con IA' } },
+        { target: { role: 'button', name: 'Guardar y revisar correos' } },
+        { target: { role: 'button', name: 'Aprobar campaña' } },
+      ],
+      mocks: [
+        { url: '**/api/campaigns/bulk/audience', method: 'POST', respond: { people: AUDIENCE, total: AUDIENCE.length, page: 0 } },
+        { url: '**/api/campaigns/bulk/assist', method: 'POST', respond: { messages: [
+          { subject: 'Una idea para tu equipo de personas', body: 'Hola {{nombre}}, vi que en {{empresa}} están contratando. ¿Te sirve conversar 15 minutos esta semana?', delayDays: 0 },
+          { subject: 'Retomo mi correo anterior', body: 'Hola {{nombre}}, ¿pudiste verlo? Si te sirve, te muestro AXIS en 15 minutos.', delayDays: 3 },
+        ] } },
+        { url: '**/api/campaigns/bulk', method: 'POST', respond: body => ({ campaign: campaignFrom(body, 'draft') }) },
+        { url: '**/api/campaigns/bulk/usab-camp-1', method: 'POST', respond: body => ({ campaign: { ...lastCampaign, status: body?.action === 'approve' ? 'approved' : lastCampaign.status, approved_at: body?.action === 'approve' ? new Date().toISOString() : null, revision: 2 } }) },
+      ],
+      done: page => page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 }),
+    },
+    {
       id: 'oportunidades', module: 'Prospectar', title: 'Ver las licitaciones', start: '/dashboard', ideal: 2,
       steps: [
         { menu: 'Oportunidades' },
