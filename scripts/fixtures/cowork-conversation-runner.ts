@@ -2,6 +2,7 @@
 // fixture tools. The decider is injected: a scripted one for offline tests, or
 // the configured model for `scripts/evaluate-cowork-conversations.ts --live`.
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
+import { coworkTurnIntents } from '../../src/lib/cowork/intents';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
 import { runCoworkReadLoop, type CoworkAnswer, type CoworkObservation, type CoworkRejection, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps } from '../../src/lib/cowork/contracts';
@@ -48,11 +49,22 @@ export const corpusWriterInstructions = coworkAgentInstructions({
   threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
 });
 
-/** Instructions for a case: with the Writer, and with contacts.import, email.reply_thread or the LinkedIn batches when the case turns them on. */
-function instructionsFor(writer: boolean, contactsImport: boolean, replyThread = false, linkedinBatch = false, campaignRetry = false, phoneReveal = false, opportunities = false) {
-  if (!contactsImport && !replyThread && !linkedinBatch && !campaignRetry && !phoneReveal && !opportunities) return writer ? corpusWriterInstructions : corpusInstructions;
+/** As in production: the prompt carries only the parts of the turn's intents (intents.ts) with COWORK_INTENT_PROMPTS_ENABLED=true. */
+export const corpusIntentPrompts = process.env.COWORK_INTENT_PROMPTS_ENABLED === 'true';
+/** As in production: several people are prepared with one approval (contacts.prepare_batch), unless COWORK_PREPARE_BATCH_ENABLED=false. */
+export const corpusPrepareBatch = process.env.COWORK_PREPARE_BATCH_ENABLED !== 'false';
+
+/**
+ * The instructions of one case, as the worker builds them for that turn: with the Writer, the flags the case turns on
+ * (contacts.import, email.reply_thread, the LinkedIn batches…) and the parts of its intents.
+ */
+export function corpusCaseInstructions(entry: CorpusCase, writer: boolean) {
   return coworkAgentInstructions({
-    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, contactsImport, replyThread, linkedinBatch, campaignRetry, phoneReveal, opportunities,
+    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer,
+    contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch),
+    campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
+    prepareBatch: corpusPrepareBatch,
+    intents: corpusIntentPrompts ? coworkTurnIntents(entry.request, entry.history || []) : null,
     threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
   });
 }
@@ -168,13 +180,14 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const recorded: CoworkObservation[] = [];
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
-  const instructions = instructionsFor(Boolean(write), Boolean(entry.contactsImport), Boolean(entry.replyThread), Boolean(entry.linkedinBatch), Boolean(entry.campaignRetry), Boolean(entry.phoneReveal), Boolean(entry.opportunities));
+  const instructions = corpusCaseInstructions(entry, Boolean(write));
   const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
+      prepareBatch: corpusPrepareBatch,
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
       onCorrection: verdict => {

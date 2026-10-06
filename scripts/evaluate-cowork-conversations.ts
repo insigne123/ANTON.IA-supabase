@@ -50,7 +50,7 @@ import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { selectCases } from './cowork-case-selection';
 import { askJev, type JevResult } from '../src/lib/server/jev';
 import { COWORK_JEV_DEFAULT_SCREEN, COWORK_JEV_DEFAULT_THRESHOLDS, COWORK_JEV_QUESTIONS, coworkJevJudgement, coworkJevProbabilities, coworkJevSeen, coworkJevStateFromPrompt } from '../src/lib/cowork/jev-review';
-import { corpusInstructions, corpusWriterInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusCaseInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
@@ -193,7 +193,7 @@ async function main() {
         try {
           response = await generateStructuredWithTelemetry({
             schema,
-            systemPrompt: `${(writerOn ? corpusWriterInstructions : corpusInstructions).systemPrompt}\nspecialists.review está deshabilitado.`,
+            systemPrompt: `${corpusCaseInstructions(entry, writerOn).systemPrompt}\nspecialists.review está deshabilitado.`,
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
             // First words of an answer as the page would get them: read at most every 50 ms.
