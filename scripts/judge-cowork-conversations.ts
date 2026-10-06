@@ -28,6 +28,7 @@ import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
 import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { AXIS_REFERENCE_INSTRUCTIONS, axisReferencePrompt, axisReferenceSchema, axisReferenceSummary, type AxisReference } from './fixtures/cowork-axis-judge';
 import { JUDGE_CALIBRATION } from './fixtures/cowork-judge-calibration';
+import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
 import { corpusObservations, corpusShownAnswer } from './fixtures/cowork-conversation-runner';
 
 const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS, ...AXIS_REST_CORPUS];
@@ -36,7 +37,7 @@ async function main() {
   // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
   CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS, ...THREAD_SEND_CORPUS, ...THREAD_SEND_AGENDA_CORPUS, ...BATCH_CORPUS);
   // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
-  CORPUS.push(...AGENDA_CORPUS, ...WEB_CORPUS, ...LECTURAS_CORPUS, ...ICP_CORPUS, ...REINTENTO_CORPUS, ...TELEFONO_CORPUS);
+  CORPUS.push(...AGENDA_CORPUS, ...WEB_CORPUS, ...LECTURAS_CORPUS, ...ICP_CORPUS, ...REINTENTO_CORPUS, ...TELEFONO_CORPUS, ...USO_REAL_CORPUS);
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY) throw new Error('Requires --live and an explicit OPENAI_API_KEY.');
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
   const judgeModel = arg('judge-model') || process.env.COWORK_JUDGE_MODEL || '';
