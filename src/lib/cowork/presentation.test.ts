@@ -94,9 +94,13 @@ test('a chart is drawn on the canvas as its own result; figures stay in the chat
 test('progress checklist reflects approval and failure honestly', () => {
   const request = event('approval.requested', { action: 'cowork.effect', kind: 'send_email', label: 'Enviar' });
   const waiting = coworkTurnProgress({ status: 'waiting_approval' }, [event('run.started'), event('tool.completed', { action: 'draft.get' }), request]);
-  assert.deepEqual(waiting.map(step => [step.key, step.state]), [['received', 'done'], ['work', 'done'], ['approval', 'attention'], ['result', 'pending']]);
+  assert.deepEqual(waiting.map(step => [step.key, step.state]), [['approval', 'attention']]);
   const failed = coworkTurnProgress({ status: 'failed' }, [event('run.started'), event('run.failed', { message: 'x' })]);
-  assert.equal(failed.at(-1)?.state, 'error');
+  assert.deepEqual(failed.map(step => [step.label, step.state]), [['No se pudo completar', 'error']]);
+  // A plain answer has nothing to tick off; while it works, it says it is thinking.
+  assert.deepEqual(coworkTurnProgress({ status: 'completed' }, [event('run.started'), event('run.completed', { reply: 'Hola' })]), []);
+  assert.deepEqual(coworkTurnProgress({ status: 'running' }, [event('run.started')]).map(step => step.label), ['Pensando en tu pedido']);
+  assert.deepEqual(coworkTurnProgress({ status: 'queued' }, []).map(step => step.label), ['En cola para empezar']);
 });
 
 test('observation lines carry the query and result size', () => {
@@ -188,9 +192,11 @@ test('the plan of a turn checks off each step as its read completes, and the las
   assert.equal(coworkPlanStepLine(progress[0]), 'Reviso tus contactos');
   assert.equal(describeCoworkObservation({ action: 'metrics.rates', input: '', result: {} }).agent?.name, 'Analista');
   assert.equal(describeCoworkObservation({ action: 'leads.search', input: '', result: {} }).agent, null);
-  // The side panel names the step in progress.
-  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Investigadora · veo qué correos ya enviaste');
-  assert.equal(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).find(step => step.key === 'work')?.detail, '2 consultas');
+  // The side panel is the plan as a to-do list: each step with what it found, the one in progress marked.
+  assert.deepEqual(coworkTurnProgress({ status: 'running' }, [plan, leads]).map(step => [step.label, step.state]),
+    [['Reviso tus contactos', 'done'], ['Investigadora · veo qué correos ya enviaste', 'active'], [progress[2].label, 'pending']]);
+  assert.deepEqual(coworkTurnProgress({ status: 'running' }, [plan, counted]).map(step => step.detail), ['4 contactos', undefined, undefined]);
+  assert.ok(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).every(step => step.state === 'done'));
 });
 
 test('what a read found reads as a count and what it counts, or a short phrase', () => {

@@ -210,7 +210,7 @@ test('asked to remember what is already kept, the answer never says it proposes 
       ? { action: 'preference.save' as const, query: null, leadId: null, answer: null, preference }
       : { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Propongo guardarla; queda pendiente de tu aprobación. ¿Reviso tus contactos para quitar esas empresas?', document: null } }),
   });
-  assert.equal(result.reply, 'Ya lo tengo presente: «No le escribo a empresas de seguridad privada». Lo aplico en tus trabajos.\n\n¿Reviso tus contactos para quitar esas empresas?');
+  assert.equal(result.reply, 'Ya lo tengo presente: «No le escribo a empresas de seguridad privada». Lo aplico en tus conversaciones.\n\n¿Reviso tus contactos para quitar esas empresas?');
 });
 
 test('a preference without its text goes back to the model', async () => {

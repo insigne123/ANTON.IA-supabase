@@ -164,7 +164,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         'focus-within:border-cw-border-strong focus-within:shadow-[0_0_0_4px_var(--cw-accent-soft),var(--cw-shadow)]',
         dragging && 'border-cw-accent shadow-[0_0_0_4px_var(--cw-accent-soft),var(--cw-shadow)]',
       )}>
-      <label htmlFor={id} className="sr-only">{size === 'large' ? 'Describe tu trabajo' : 'Escribe tu mensaje'}</label>
+      <label htmlFor={id} className="sr-only">Escribe tu mensaje</label>
       <textarea
         ref={textarea}
         id={id}
@@ -209,7 +209,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         {canAutonomous && <ExecutionMode id={`${id}-mode`} value={mode} onChange={onModeChange} disabled={sending} />}
         <div className="ml-auto flex items-center gap-2">
           {showStop
-            ? <button type="button" onClick={() => onStop?.()} disabled={stopping} aria-label="Detener trabajo" title="Detener"
+            ? <button type="button" onClick={() => onStop?.()} disabled={stopping} aria-label="Detener" title="Detener"
               className="flex h-9 w-9 items-center justify-center rounded-full bg-cw-text text-cw-bg transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] disabled:opacity-40">
               {stopping ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />}
             </button>

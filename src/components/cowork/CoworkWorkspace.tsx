@@ -24,7 +24,7 @@ import { ResearchProgress } from './ResearchProgress';
 import { CoworkQuickActions } from './CoworkQuickActions';
 import type { CoworkContactOption } from './ComposerShortcuts';
 import { CoworkHome, type CoworkOfferDraft } from './CoworkHome';
-import { CoworkSidePanel } from './CoworkSidePanel';
+import { COWORK_LOW_SEARCH_QUOTA, CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
@@ -83,7 +83,7 @@ function useMedia(query: string) {
 }
 
 /** Radix gives focus back only to its own trigger, and these sheets open from buttons that also do other things: focus
- * goes back to the button that opened the sheet, unless closing it already moved focus somewhere useful («Nuevo trabajo»
+ * goes back to the button that opened the sheet, unless closing it already moved focus somewhere useful («Nueva conversación»
  * focuses the composer; a result focuses its panel). */
 function returnFocusTo(opener: RefObject<HTMLElement | null>) {
   return (event: Event) => {
@@ -368,7 +368,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       } catch (problem) {
         if (disposed || controller.signal.aborted) return null;
         const status = (problem as { status?: number }).status;
-        setError(problem instanceof Error ? problem.message : 'No se pudo actualizar el trabajo.');
+        setError(problem instanceof Error ? problem.message : 'No se pudo actualizar la conversación.');
         if (status !== 401 && status !== 403 && status !== 404 && failures < 3) {
           failures += 1;
           return 4000 * failures;
@@ -458,7 +458,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       });
       return true;
     } catch (problem) {
-      toast({ variant: 'destructive', title: 'No pudimos renombrar el trabajo', description: problem instanceof Error ? problem.message : undefined });
+      toast({ variant: 'destructive', title: 'No pudimos renombrar la conversación', description: problem instanceof Error ? problem.message : undefined });
       return false;
     }
   }, [request, toast]);
@@ -469,7 +469,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       setHiddenRoots(current => { const next = new Set(current); next.delete(thread.rootId); return next; });
       setListVersion(version => version + 1);
     } catch (problem) {
-      toast({ variant: 'destructive', title: 'No pudimos recuperar el trabajo', description: problem instanceof Error ? problem.message : undefined });
+      toast({ variant: 'destructive', title: 'No pudimos recuperar la conversación', description: problem instanceof Error ? problem.message : undefined });
     }
   }, [request, toast]);
 
@@ -480,13 +480,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     try {
       await request(`/api/cowork/threads/${thread.rootId}`, { method: 'DELETE' });
       toast({
-        title: 'Trabajo eliminado',
+        title: 'Conversación eliminada',
         description: `«${thread.title}» ya no está en tu lista.`,
         action: <ToastAction altText="Deshacer la eliminación" onClick={() => void restoreThread(thread)}>Deshacer</ToastAction>,
       });
     } catch (problem) {
       setHiddenRoots(current => { const next = new Set(current); next.delete(thread.rootId); return next; });
-      toast({ variant: 'destructive', title: 'No pudimos eliminar el trabajo', description: problem instanceof Error ? problem.message : undefined });
+      toast({ variant: 'destructive', title: 'No pudimos eliminar la conversación', description: problem instanceof Error ? problem.message : undefined });
     }
   }, [choose, request, restoreThread, selectedRoot, toast]);
   const threadActions = threadNames.available
@@ -827,7 +827,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     : pendingDecision ? 'Pide un cambio o aprueba la propuesta'
       : busy ? 'Escribe; lo envío al terminar este paso'
         : latest.run.status === 'completed' ? 'Responde o pide el siguiente paso…' : 'Reformula o indica cómo seguir…';
-  const quotaNote = searchQuota ? `Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : '';
+  // The searches left today only show when they are about to run out.
+  const quotaNote = searchQuota && searchQuota.remaining <= COWORK_LOW_SEARCH_QUOTA
+    ? (searchQuota.remaining === 0 ? 'Ya usaste las búsquedas de prospectos de hoy.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 búsqueda' : `quedan ${searchQuota.remaining} búsquedas`} de prospectos hoy.`) : '';
   const queuedView = queued ? coworkMessageAttachments(queued) : null;
 
   // The clip, the dropped files and their chips work the same on the home box and in a conversation.
@@ -842,7 +844,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   });
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
     placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
-    ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
+    ready={ready} sending={sending} submitLabel="Enviar mensaje" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
     searchContacts={ready ? searchContacts : null} onMention={addMention} templates
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
@@ -853,7 +855,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
       <SheetContent side="left" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={returnFocusTo(listOpener)}
         className="w-[86%] max-w-[300px] border-cw-border bg-cw-rail p-0 text-cw-text sm:max-w-[300px]">
-        <SheetTitle className="sr-only">Trabajos</SheetTitle>
+        <SheetTitle className="sr-only">Conversaciones</SheetTitle>
         <CoworkThreadList idPrefix="cowork-drawer" closeStyle="dismiss" threads={threads} loading={loading} error={listError} onRetry={retryList}
           selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} {...threadActions} />
       </SheetContent>
@@ -861,16 +863,16 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
 
     <div className={cn('relative flex min-w-0 flex-1 flex-col', artifactOpen && 'hidden lg:flex', artifactOpen && maximized && 'lg:hidden')}>
       <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-cw-border px-2.5 sm:px-3">
-        <CwButton ref={listOpener} variant="ghost" size="icon-sm" className={cn(railVisible && 'lg:hidden')} aria-label="Mostrar trabajos" title="Trabajos"
+        <CwButton ref={listOpener} variant="ghost" size="icon-sm" className={cn(railVisible && 'lg:hidden')} aria-label="Mostrar conversaciones" title="Conversaciones"
           onClick={() => { if (isDesktop && !artifactOpen) setRailCollapsed(false); else setDrawerOpen(true); }}>
           <History aria-hidden="true" />
         </CwButton>
         <h1 className="min-w-0 flex-1 truncate px-1 text-[14px] font-medium text-cw-text">{inConversation ? title : 'Cowork'}</h1>
         {inConversation && status && <CwStatusPill tone={status.tone} pulse={busy} className="hidden sm:inline-flex">{status.label}</CwStatusPill>}
         {inConversation && !artifactOpen && !panelOpen && <CwButton variant="ghost" size="icon-sm" className="hidden xl:inline-flex" onClick={() => setPanelOpen(true)} aria-label="Mostrar resumen" title="Resumen"><PanelRight aria-hidden="true" /></CwButton>}
-        {inConversation && latest && !artifactOpen && <CwButton ref={summaryOpener} variant="ghost" size="icon-sm" className="xl:hidden" onClick={() => setSummaryOpen(true)} aria-label="Ver resumen del trabajo" title="Resumen" aria-haspopup="dialog"><PanelRight aria-hidden="true" /></CwButton>}
-        <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden')} title="Nuevo trabajo">
-          <SquarePen aria-hidden="true" /><span className="hidden sm:inline">Nuevo trabajo</span>
+        {inConversation && latest && !artifactOpen && <CwButton ref={summaryOpener} variant="ghost" size="icon-sm" className="xl:hidden" onClick={() => setSummaryOpen(true)} aria-label="Ver resumen de la conversación" title="Resumen" aria-haspopup="dialog"><PanelRight aria-hidden="true" /></CwButton>}
+        <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden')} title="Nueva conversación">
+          <SquarePen aria-hidden="true" /><span className="hidden sm:inline">Nueva conversación</span>
         </CwButton>
       </header>
 
@@ -973,8 +975,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     <Sheet open={summaryOpen} onOpenChange={setSummaryOpen}>
       <SheetContent side="right" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={returnFocusTo(summaryOpener)}
         className="w-[86%] max-w-[320px] border-cw-border bg-cw-rail p-0 text-cw-text sm:max-w-[320px]">
-        <SheetTitle className="sr-only">Resumen del trabajo</SheetTitle>
-        {latest && <CoworkSidePanel closeStyle="dismiss" steps={coworkTurnProgress(latest.run, latest.events)} turnCount={turns.filter(turn => !turn.run.automatic).length}
+        <SheetTitle className="sr-only">Resumen de la conversación</SheetTitle>
+        {latest && <CoworkSidePanel closeStyle="dismiss" steps={coworkTurnProgress(latest.run, latest.events)}
           artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
           sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
           budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setSummaryOpen(false)} />}
@@ -982,7 +984,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     </Sheet>
     {!openArtifact && inConversation && latest && panelOpen && <m.div key="summary" initial={summaryReturns ? 'hidden' : false} animate="shown" variants={cwPanel}
       className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">
-      <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)} turnCount={turns.filter(turn => !turn.run.automatic).length}
+      <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)}
         artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
         sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
         budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />

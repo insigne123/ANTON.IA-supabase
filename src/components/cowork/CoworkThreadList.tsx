@@ -63,36 +63,36 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
     if (ok) setEditing(null);
   };
 
-  return <nav aria-label="Trabajos recientes" className="flex h-full min-h-0 flex-col">
+  return <nav aria-label="Conversaciones" className="flex h-full min-h-0 flex-col">
     <div className="flex items-center gap-1 px-3 pb-2 pt-3">
       <CwButton variant="quiet" className="flex-1 justify-start gap-2.5 px-2.5 text-[14px]" onClick={onNew}>
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent text-cw-on-accent"><SquarePen className="!size-3.5" aria-hidden="true" /></span>
-        Nuevo trabajo
+        Nueva conversación
       </CwButton>
       {closeStyle === 'dismiss'
-        ? <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Cerrar trabajos" title="Cerrar"><X aria-hidden="true" /></CwButton>
-        : <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar trabajos" title="Ocultar"><PanelLeftClose aria-hidden="true" /></CwButton>}
+        ? <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Cerrar conversaciones" title="Cerrar"><X aria-hidden="true" /></CwButton>
+        : <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar conversaciones" title="Ocultar"><PanelLeftClose aria-hidden="true" /></CwButton>}
     </div>
     {threads.length > 6 && <div className="px-3 pb-2">
-      <label htmlFor={`${idPrefix}-filter`} className="sr-only">Buscar trabajos</label>
+      <label htmlFor={`${idPrefix}-filter`} className="sr-only">Buscar conversaciones</label>
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cw-faint" aria-hidden="true" />
-        <input id={`${idPrefix}-filter`} value={filter} onChange={event => setFilter(event.target.value)} placeholder="Buscar trabajos"
+        <input id={`${idPrefix}-filter`} value={filter} onChange={event => setFilter(event.target.value)} placeholder="Buscar conversaciones"
           className="h-8 w-full rounded-lg border border-transparent bg-cw-hover pl-8 pr-2 text-[13px] text-cw-text placeholder:text-cw-faint focus-visible:border-cw-border focus-visible:bg-cw-elevated focus-visible:outline-none" />
       </div>
     </div>}
     <div className="cw-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-      {loading && threads.length === 0 && <p role="status" className="flex items-center gap-2 px-3 py-2 text-[13px] text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Cargando trabajos…</p>}
+      {loading && threads.length === 0 && <p role="status" className="flex items-center gap-2 px-3 py-2 text-[13px] text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Cargando conversaciones…</p>}
       {!loading && error && threads.length === 0 && <div className="space-y-2 px-3 py-2">
-        <p className="text-[13px] leading-5 text-cw-text">No pudimos cargar tus trabajos.</p>
+        <p className="text-[13px] leading-5 text-cw-text">No pudimos cargar tus conversaciones.</p>
         {onRetry && <CwButton size="xs" variant="secondary" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
       </div>}
       {!loading && !error && threads.length === 0 && <div className="px-3 py-2">
-        <p className="text-[13px] font-medium leading-5 text-cw-text">Aún no tienes trabajos</p>
+        <p className="text-[13px] font-medium leading-5 text-cw-text">Aún no tienes conversaciones</p>
         <p className="mt-0.5 text-[12.5px] leading-5 text-cw-muted">Lo que le pidas a Cowork queda aquí para retomarlo.</p>
       </div>}
       {term && threads.length > 0 && groups.length === 0 && <div className="space-y-1.5 px-3 py-2">
-        <p className="text-[13px] leading-5 text-cw-muted">Ningún trabajo coincide con «{filter.trim()}».</p>
+        <p className="text-[13px] leading-5 text-cw-muted">Ninguna conversación coincide con «{filter.trim()}».</p>
         <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
       </div>}
       {groups.map(group => <div key={group.label} className="mt-3 first:mt-1">
@@ -106,7 +106,7 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
             const manageable = Boolean(onRename || onDelete);
             if (editing?.rootId === thread.rootId) {
               return <li key={thread.rootId} className="px-1 py-0.5">
-                <label htmlFor={`${idPrefix}-rename`} className="sr-only">Nombre del trabajo</label>
+                <label htmlFor={`${idPrefix}-rename`} className="sr-only">Nombre de la conversación</label>
                 <input id={`${idPrefix}-rename`} autoFocus value={editing.draft} maxLength={TITLE_MAX} disabled={saving}
                   onChange={event => setEditing({ rootId: thread.rootId, draft: event.target.value })}
                   onFocus={event => event.currentTarget.select()}

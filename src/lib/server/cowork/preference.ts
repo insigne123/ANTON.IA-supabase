@@ -82,6 +82,6 @@ export async function executeCoworkPreferenceSave(auth: AuthContext, runId: stri
       .select('id').maybeSingle();
     if (updated.error || !updated.data) throw new Error('No se pudo guardar la preferencia. Inténtalo de nuevo.');
   }
-  const who = row.data.scope === 'organization' ? 'en los trabajos de todo tu equipo' : 'en tus próximos trabajos';
+  const who = row.data.scope === 'organization' ? 'en las conversaciones de todo tu equipo' : 'en tus próximas conversaciones';
   return { reply: `Listo: lo tendré en cuenta ${who}: «${text}».`, result: { memoryId, scope: row.data.scope } };
 }

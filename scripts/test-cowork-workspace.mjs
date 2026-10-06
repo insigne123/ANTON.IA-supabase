@@ -56,7 +56,7 @@ const byLabel = label => window.document.querySelector(`[aria-label="${label}"]`
 const thread = title => buttons().find(node => node.getAttribute('title') === title);
 try {
   await waitFor(() => thread('Prepara un resumen'), 'thread list');
-  assert.equal(byLabel('Crear trabajo').disabled, true, 'worker unavailable disables sending');
+  assert.equal(byLabel('Enviar mensaje').disabled, true, 'worker unavailable disables sending');
   assert.match(window.document.body.textContent, /El procesamiento todavía no está disponible/);
   thread('Prepara un resumen').click();
   await waitFor(() => byLabel('Abrir Mi documento'), 'artifact cards');
@@ -98,7 +98,7 @@ try {
   await waitFor(() => window.document.activeElement === byLabel('Abrir Mi documento'), 'focus restoration');
   assert.equal(window.document.activeElement, opener);
 
-  button('Nuevo trabajo').click();
+  button('Nueva conversación').click();
   assert.equal(new URL(window.location.href).searchParams.has('work'), false);
   await waitFor(() => thread('Enviar correo'), 'thread list after new');
   thread('Enviar correo').click();
@@ -110,7 +110,7 @@ try {
   assert.ok(sendApprove);
   assert.equal(sendApprove.disabled, true, 'mismatched version blocks approval');
 
-  button('Nuevo trabajo').click();
+  button('Nueva conversación').click();
   await waitFor(() => thread('Crear campaña'), 'campaign thread');
   thread('Crear campaña').click();
   await waitFor(() => window.document.body.textContent.includes('Te escribo por…'), 'campaign review');
@@ -122,7 +122,7 @@ try {
   assert.equal(campApprove.disabled, false);
   console.log('PASS: reviews render sender, full bodies and recipients; drift blocks send approval.');
 
-  button('Nuevo trabajo').click();
+  button('Nueva conversación').click();
   await waitFor(() => thread('Ejecutar código'), 'code thread');
   thread('Ejecutar código').click();
   await waitFor(() => window.document.querySelector('section[aria-label="Revisar acción propuesta"]')?.textContent.includes('print('), 'code review');
@@ -135,7 +135,7 @@ try {
   assert.equal(codeApprove.disabled, false);
   console.log('PASS: code review renders pinned code, inputs and isolation limits.');
 
-  button('Nuevo trabajo').click();
+  button('Nueva conversación').click();
   await waitFor(() => thread('Prepara un resumen'), 'summary thread');
   denied = true;
   thread('Prepara un resumen').click();

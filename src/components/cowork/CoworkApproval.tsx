@@ -188,10 +188,10 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
       : state === 'running' ? (search ? 'Buscando en el proveedor…' : `Ejecutando: ${proposal.title}`)
         : state === 'done' ? (search ? 'Búsqueda realizada' : `Aprobaste: ${proposal.title}`)
           : state === 'discarded' ? `Descartaste: ${proposal.title}` : `No se pudo completar: ${proposal.title}`;
-  const detail = state === 'approved' ? (search ? 'La búsqueda está aprobada y espera su turno. Puedes cerrar esta pestaña y volver al trabajo.'
-    : 'La acción está aprobada y en cola. Puedes cerrar esta pestaña y volver al trabajo.')
-    : state === 'running' ? (search ? 'La búsqueda está en curso. Puedes cerrar esta pestaña y volver al trabajo.'
-      : 'La acción está en curso. Puedes cerrar esta pestaña y volver al trabajo.')
+  const detail = state === 'approved' ? (search ? 'La búsqueda está aprobada y espera su turno. Puedes cerrar esta pestaña y volver después.'
+    : 'La acción está aprobada y en cola. Puedes cerrar esta pestaña y volver después.')
+    : state === 'running' ? (search ? 'La búsqueda está en curso. Puedes cerrar esta pestaña y volver después.'
+      : 'La acción está en curso. Puedes cerrar esta pestaña y volver después.')
       : state === 'discarded' ? 'No se ejecutó ningún cambio.' : '';
 
   const kind = String(proposal.payload.kind || '');

@@ -237,7 +237,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   linkedin_invite_batch: { title: 'Invitar en LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará una invitación sin nota por cada persona que dejes en la lista. La ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
   linkedin_message_batch: { title: 'Mensajes de LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará el mensaje de cada persona que dejes en la lista, con el texto que ves. Los ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
   reply_thread: { title: 'Responder en el hilo', icon: 'mail', help: 'Si la apruebas, esta respuesta sale tal cual dentro de la conversación de esa persona, desde tu correo. Revisa el texto antes.' },
-  memory_save: { title: 'Recordar preferencia', icon: 'bookmark', help: 'Se guardará esta preferencia, tal como está escrita, y la tendré en cuenta en tus próximos trabajos.' },
+  memory_save: { title: 'Recordar preferencia', icon: 'bookmark', help: 'Se guardará esta preferencia, tal como está escrita, y la tendré en cuenta en tus próximas conversaciones.' },
   lead_prepare_batch: { title: 'Preparar contactos', icon: 'audience', help: 'A cada persona de la lista se le hace solo lo que le falta: guardarla, buscar su correo (1 crédito) e investigarla. Lo ya hecho no se repite ni se cobra; quita a quien no quieras antes de aprobar.' },
 };
 
@@ -620,22 +620,27 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
 export type CoworkProgressState = 'done' | 'active' | 'attention' | 'pending' | 'error' | 'skipped';
 export type CoworkProgressStep = { key: string; label: string; state: CoworkProgressState; detail?: string };
 
-/** Honest lifecycle checklist for one turn, derived from persisted events only. */
+/**
+ * The turn as a to-do list (Plan 13), derived from persisted events only: with a plan, its steps in the person's words, each
+ * with what its read found («Reviso tus contactos · 21 contactos»), as Claude shows its progress; without one, whether it is
+ * still thinking. Then the approval and what it did, and how it ended when it did not end well. The request itself and a
+ * plain «done» are not steps: the chat already says so.
+ */
 export function coworkTurnProgress(run: Pick<CoworkRun, 'status' | 'automatic'>, events: CoworkEvent[]): CoworkProgressStep[] {
   const reads = coworkReadEvents(events).length;
   const proposal = coworkProposalView(run, events);
   const started = events.some(event => event.kind === 'run.started') || run.status !== 'queued';
-  const steps: CoworkProgressStep[] = [{ key: 'received', label: run.automatic ? 'Retomó el trabajo con el resultado' : 'Solicitud recibida', state: 'done' }];
-  const workDone = proposal !== null || ['completed', 'failed', 'cancelled'].includes(run.status) || run.status === 'waiting_workers';
-  // With a plan, the step in progress says which one it is, like the chat does.
   const plan = coworkPlanProgress(run, events);
-  const current = plan ? plan.findIndex(step => step.state === 'current') : -1;
-  steps.push({
-    key: 'work', label: run.status === 'queued' && !started ? 'En cola para empezar' : 'Analizar y consultar datos',
-    state: run.status === 'queued' && !started ? 'active' : workDone ? (run.status === 'failed' && !proposal && reads === 0 ? 'error' : 'done') : 'active',
-    detail: plan && current !== -1 ? `Paso ${current + 1} de ${plan.length}: ${coworkPlanStepLine(plan[current])}`
-      : reads ? `${reads} consulta${reads === 1 ? '' : 's'}` : undefined,
-  });
+  const steps: CoworkProgressStep[] = [];
+  const PLAN_STATE: Record<CoworkPlanState, CoworkProgressState> = { done: 'done', current: 'active', pending: 'pending', skipped: 'skipped' };
+  if (run.status === 'queued' && !started) steps.push({ key: 'queued', label: 'En cola para empezar', state: 'active' });
+  else if (plan) {
+    plan.forEach((step, index) => steps.push({ key: `plan-${index}`, label: coworkPlanStepLine(step), state: PLAN_STATE[step.state],
+      detail: step.found ? coworkFindingText(step.found) : undefined }));
+  } else if (isCoworkActive(run.status) && !proposal) {
+    steps.push({ key: 'work', label: run.automatic ? 'Retomando con el resultado' : 'Pensando en tu pedido', state: 'active',
+      detail: reads ? `${reads} consulta${reads === 1 ? '' : 's'}` : undefined });
+  }
   if (run.status === 'waiting_workers') steps.push({ key: 'specialists', label: 'Revisión de especialistas', state: 'active' });
   if (proposal) {
     const approvalState: CoworkProgressState = proposal.state === 'pending' ? 'attention'
@@ -646,11 +651,8 @@ export function coworkTurnProgress(run: Pick<CoworkRun, 'status' | 'automatic'>,
         state: proposal.state === 'failed' ? 'error' : proposal.state === 'done' ? 'done' : 'active' });
     }
   }
-  steps.push({
-    key: 'result',
-    label: run.status === 'failed' ? 'No se pudo completar' : run.status === 'cancelled' ? 'Trabajo detenido' : 'Resultado listo',
-    state: run.status === 'completed' ? 'done' : run.status === 'failed' ? 'error' : run.status === 'cancelled' ? 'skipped' : 'pending',
-  });
+  if (run.status === 'failed') steps.push({ key: 'result', label: 'No se pudo completar', state: 'error' });
+  if (run.status === 'cancelled') steps.push({ key: 'result', label: 'Lo detuviste', state: 'skipped' });
   return steps;
 }
 

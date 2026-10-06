@@ -40,13 +40,24 @@ export default function cowork(ctx) {
   const artifactEvent = (item, sequence) => ({ sequence, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'artifact.created', created_at: item.updated_at,
     payload: { name: artifact.name, path: `${ctx.ORG}/${ctx.OWNER}/${item.id}/${artifact.name}`, size: page.length, kind: 'code', title: artifact.title,
       key: 'pipeline-por-etapa', version: 1, tables: [{ name: 'pipeline', label: 'Pipeline', rows: 20, truncated: false }] } });
+  // The campaign turn worked with a plan (Plan 13): the side panel shows it as a to-do list, each step with what it found.
+  const at = (item, sequence, kind, payload) => ({ sequence, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind, payload, created_at: item.updated_at });
+  const plan = (item, base) => [
+    at(item, base + 2, 'tool.completed', { action: 'assistant.plan', input: '', result: { steps: [
+      { label: 'Reviso tus campañas', read: 'campaigns.list' },
+      { label: 'Veo si hay incidencias abiertas', read: 'exceptions.list' },
+      { label: 'Armo la campaña con los jefes de reclutamiento', read: null },
+    ] } }),
+    at(item, base + 3, 'tool.completed', { action: 'campaigns.list', input: '', result: { scope: 'own', campaigns: [{ name: 'Logística' }, { name: 'Retail' }] } }),
+    at(item, base + 4, 'tool.completed', { action: 'exceptions.list', input: '', result: { scope: 'team', items: [] } }),
+  ];
   const events = runs.flatMap((item, index) => [
-    { sequence: index * 3 + 1, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.started', payload: {}, created_at: item.created_at },
-    ...(index === 3 ? [artifactEvent(item, index * 3 + 2)] : []),
-    ...(index === 4 ? [{ sequence: index * 3 + 4, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'answer.feedback',
-      payload: { rating: 'up', reason: null, comment: null }, created_at: item.updated_at }] : []),
-    { sequence: index * 3 + 3, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null,
+    { sequence: index * 10 + 1, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.started', payload: {}, created_at: item.created_at },
+    ...(index === 2 ? plan(item, index * 10) : []),
+    ...(index === 3 ? [artifactEvent(item, index * 10 + 5)] : []),
+    { sequence: index * 10 + 8, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null,
       ...(index === 0 ? { blocks: [stagesChart] } : {}) }, created_at: item.updated_at },
+    ...(index === 4 ? [at(item, index * 10 + 9, 'answer.feedback', { rating: 'up', reason: null, comment: null })] : []),
   ]);
   return {
     tables: {

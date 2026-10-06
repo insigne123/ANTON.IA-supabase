@@ -39,11 +39,11 @@ const render = (props: Record<string, unknown>) => renderToStaticMarkup(React.cr
 
 test('a list that could not be read says so, with «Reintentar», instead of looking empty', () => {
   const failed = render({ error: 'No se pudo completar la solicitud.', onRetry: () => {} });
-  assert.match(failed, /No pudimos cargar tus trabajos\./);
+  assert.match(failed, /No pudimos cargar tus conversaciones\./);
   assert.match(failed, />Reintentar<\/button>/);
-  assert.doesNotMatch(failed, /Aún no tienes trabajos/);
+  assert.doesNotMatch(failed, /Aún no tienes conversaciones/);
   // While it retries, it shows the loading line, not the failure.
-  assert.match(render({ error: 'x', loading: true }), /Cargando trabajos…/);
+  assert.match(render({ error: 'x', loading: true }), /Cargando conversaciones…/);
   assert.doesNotMatch(render({ error: 'x', loading: true }), /No pudimos cargar/);
   // The threads it already had stay; the notice above the conversation tells the failure.
   assert.doesNotMatch(render({ error: 'x', threads: [thread(1)] }), /No pudimos cargar/);
@@ -51,15 +51,15 @@ test('a list that could not be read says so, with «Reintentar», instead of loo
 
 test('without work yet the list explains what will appear', () => {
   const empty = render({});
-  assert.match(empty, /Aún no tienes trabajos/);
+  assert.match(empty, /Aún no tienes conversaciones/);
   assert.match(empty, /Lo que le pidas a Cowork queda aquí para retomarlo\./);
   assert.doesNotMatch(empty, /No pudimos cargar|Reintentar/);
 });
 
 test('in a sheet it closes with an X; as the side rail it folds away', () => {
-  assert.match(render({ closeStyle: 'dismiss' }), /aria-label="Cerrar trabajos"/);
-  assert.doesNotMatch(render({ closeStyle: 'dismiss' }), /Ocultar trabajos/);
-  assert.match(render({}), /aria-label="Ocultar trabajos"/);
+  assert.match(render({ closeStyle: 'dismiss' }), /aria-label="Cerrar conversaciones"/);
+  assert.doesNotMatch(render({ closeStyle: 'dismiss' }), /Ocultar conversaciones/);
+  assert.match(render({}), /aria-label="Ocultar conversaciones"/);
 });
 
 test('a search with no match says so and clears in one click', async () => {
@@ -78,13 +78,13 @@ test('a search with no match says so and clears in one click', async () => {
     });
     await type('licitaciones');
     const text = () => dom.window.document.body.textContent || '';
-    assert.match(text(), /Ningún trabajo coincide con «licitaciones»\./);
+    assert.match(text(), /Ninguna conversación coincide con «licitaciones»\./);
     assert.doesNotMatch(text(), /Correos para clientes/);
     const clear = Array.from(dom.window.document.querySelectorAll('button')).find(button => button.textContent === 'Limpiar búsqueda')!;
     await act(async () => clear.click());
     assert.equal(input.value, '');
     assert.match(text(), /Correos para clientes 7/);
-    assert.doesNotMatch(text(), /Ningún trabajo coincide/);
+    assert.doesNotMatch(text(), /Ninguna conversación coincide/);
   } finally {
     await act(async () => root.unmount());
     Object.assign(globalThis, previous);

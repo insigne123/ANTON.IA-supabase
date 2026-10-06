@@ -539,7 +539,7 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   if (action === 'lead.enrich_phone') return `Propongo pedir el teléfono de ${who} al proveedor: cuesta 10 créditos y es una persona por aprobación. La tarjeta muestra tu saldo; revísalo antes de aprobar.`;
   if (action === 'campaign.retry') return 'Propongo reintentar los envíos de esa campaña que fallaron por un motivo que se puede reintentar. En la tarjeta ves cuáles son; si la apruebas, vuelven a la cola y salen con los frenos de siempre, sin enviarse dos veces.';
   if (action === 'email.reply_thread') return `Preparé la respuesta para ${who} y la propongo enviar en su hilo. Revisa el texto en la tarjeta antes de aprobarla: si la apruebas, sale tal cual.`;
-  if (action === 'preference.save') return 'Propongo recordarlo para tus próximos trabajos. Revisa en la tarjeta cómo quedará escrito antes de aprobarlo.';
+  if (action === 'preference.save') return 'Propongo recordarlo para tus próximas conversaciones. Revisa en la tarjeta cómo quedará escrito antes de aprobarlo.';
   return null;
 }
 
@@ -702,7 +702,7 @@ function coworkKeptPreferenceAnswer<T extends { reply: string }>(input: { messag
   if (!asked || !coworkPreferenceAlreadyKept(asked, list) || !answer.reply.match(PROPOSAL_CLAIM)?.some(Boolean)) return answer;
   const rest = answer.reply.replace(PROPOSAL_CLAIM, '').trim();
   const kept = list.find(memory => coworkPreferenceAlreadyKept(asked, [memory])) || asked;
-  return { ...answer, reply: `Ya lo tengo presente: «${kept.replace(/[.\s]+$/u, '')}». Lo aplico en tus trabajos.${rest ? `\n\n${rest}` : ''}` };
+  return { ...answer, reply: `Ya lo tengo presente: «${kept.replace(/[.\s]+$/u, '')}». Lo aplico en tus conversaciones.${rest ? `\n\n${rest}` : ''}` };
 }
 
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */

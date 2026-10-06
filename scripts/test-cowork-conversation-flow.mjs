@@ -84,7 +84,7 @@ try {
   assert.equal(text().includes('Continúa a partir del efecto'), false, 'synthetic prompt never shows as a user message');
   assert.match(text(), /Paula Herrera quedó guardado/);
   assert.match(text(), /Aprobaste: Guardar contacto/);
-  assert.ok(window.document.querySelector('[aria-label="Detener trabajo"]'), 'stop button while working');
+  assert.ok(window.document.querySelector('[aria-label="Detener"]'), 'stop button while working');
 
   // 2. Writing while it works queues the message instead of forking the thread.
   type('Ahora enriquécela');

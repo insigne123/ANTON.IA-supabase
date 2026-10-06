@@ -30,7 +30,7 @@ export function ResearchSources({ events, runId, canCreateDraft = false, onAcces
     .filter(item => item.parsed.success);
   if (!reports.length) return null;
   return <section aria-label="Fuentes de investigación" className="space-y-4">
-    <p className="text-[12.5px] leading-5 text-cw-muted">Fuentes del informe guardado. No se consultaron nuevamente en este trabajo.</p>
+    <p className="text-[12.5px] leading-5 text-cw-muted">Fuentes del informe guardado. No se consultaron nuevamente en esta conversación.</p>
     {reports.map(({ sequence: key, parsed }) => {
       if (!parsed.success) return null;
       const report = parsed.data.result.research;

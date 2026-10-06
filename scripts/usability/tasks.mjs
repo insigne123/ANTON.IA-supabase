@@ -229,8 +229,8 @@ export function TASKS(ctx, { fixtures }) {
       id: 'cowork', module: 'Cowork', title: 'Pedirle algo a Cowork', start: '/dashboard', ideal: 3,
       steps: [
         { menu: 'Cowork' },
-        { target: { label: 'Describe tu trabajo' }, fill: '¿A quién le escribo hoy?' },
-        { target: { role: 'button', name: 'Crear trabajo' } },
+        { target: { label: 'Escribe tu mensaje' }, fill: '¿A quién le escribo hoy?' },
+        { target: { role: 'button', name: 'Enviar mensaje' } },
       ],
       mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
       done: (page, { calls }) => {
@@ -242,8 +242,8 @@ export function TASKS(ctx, { fixtures }) {
       // Measured up to sending, like «Pedirle algo a Cowork»: the bench has no model to write the artifact.
       steps: [
         { menu: 'Cowork' },
-        { target: { label: 'Describe tu trabajo' }, fill: 'Hazme un tablero de mi pipeline por etapa' },
-        { target: { role: 'button', name: 'Crear trabajo' } },
+        { target: { label: 'Escribe tu mensaje' }, fill: 'Hazme un tablero de mi pipeline por etapa' },
+        { target: { role: 'button', name: 'Enviar mensaje' } },
       ],
       mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
       done: (page, { calls }) => {
@@ -255,7 +255,7 @@ export function TASKS(ctx, { fixtures }) {
       // The conversation of the audit fixtures that made «Pipeline por etapa», an artifact written in code.
       steps: [
         { menu: 'Cowork' },
-        { target: { role: 'button', name: 'Mostrar trabajos' }, only: 'phone' },
+        { target: { role: 'button', name: 'Mostrar conversaciones' }, only: 'phone' },
         { target: { role: 'button', name: /Muéstrame mi pipeline/, exact: false } },
         { target: { role: 'button', name: /Pipeline por etapa/, exact: false } },
         { target: { label: 'Pedir cambios a este artefacto' }, fill: 'Agrega el total por etapa' },
