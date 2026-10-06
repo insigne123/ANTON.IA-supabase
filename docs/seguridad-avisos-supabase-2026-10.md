@@ -56,9 +56,15 @@ Son `SECURITY DEFINER`: corren con los permisos de su dueño y se exponen como `
 - 7 son funciones de trigger (`returns trigger`). PostgREST no las expone y no se pueden llamar fuera de un trigger.
 - El resto revisa `auth.uid()` o la membresía de la organización antes de hacer algo.
 
-### Arreglo propuesto (no aplicado)
+### Arreglo: `supabase/migrations/20261006150000_revoke_internal_functions_from_clients.sql`
 
-Es una escritura en producción, así que se aplica solo con tu confirmación, como migración aparte:
+Autorizado el 6 de octubre. La migración hace lo mismo que el SQL de abajo.
+
+- **Funciones creadas fuera del repositorio:** solo toca cada función si existe, porque las dos `trigger_antonia_*` no están en las migraciones.
+- **El worker:** le deja a `service_role` el permiso de ejecutarlas.
+- **La prueba:** `supabase/tests/database/revoke_internal_functions_from_clients.test.sql` comprueba que ni `anon` ni un usuario con sesión pueden ejecutarlas y que el worker sí.
+
+El SQL equivalente:
 
 ```sql
 -- Solo el worker (service_role) ejecuta estas funciones; la app no las llama.
