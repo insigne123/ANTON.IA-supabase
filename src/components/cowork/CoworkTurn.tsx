@@ -323,11 +323,11 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         {proposal && replyBlock}
         {run.status === 'failed' && <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl bg-cw-danger-soft px-4 py-3 text-[13.5px] text-cw-danger">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <p className="min-w-0 flex-1">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>
+          <p className="min-w-0 flex-1">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar.'}</p>
           {latest && onRetry && <CwButton size="sm" variant="secondary" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
         </div>}
         {run.status === 'cancelled' && <div className="flex flex-wrap items-center gap-3 text-[13.5px] text-cw-muted">
-          <span>Detuviste este trabajo. Lo consultado hasta aquí quedó guardado.</span>
+          <span>Lo detuviste. Lo consultado hasta aquí quedó guardado.</span>
           {latest && onRetry && <CwButton size="xs" variant="ghost" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
         </div>}
         {latest && budgetExhausted && <p className="rounded-xl border border-cw-border bg-cw-panel px-3.5 py-2.5 text-[13px] text-cw-muted">Se alcanzó el tope de pasos automáticos de este hilo. Lo logrado quedó guardado; escríbeme abajo para seguir.</p>}

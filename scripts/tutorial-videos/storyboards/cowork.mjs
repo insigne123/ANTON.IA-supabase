@@ -6,7 +6,7 @@ export default {
     {
       title: 'Pídelo con tus palabras', text: 'Correos, mensajes de LinkedIn, prospectos nuevos o cómo vas.',
       say: 'Escribe lo que necesitas, como se lo pedirías a alguien.', postit: 'Antes de enviar o cambiar algo, te pide aprobación.',
-      target: { label: 'Describe tu trabajo' }, action: 'none', zoom: 1.4, arrow: true,
+      target: { label: 'Escribe tu mensaje' }, action: 'none', zoom: 1.4, arrow: true,
     },
     {
       title: 'O parte de un ejemplo', text: 'Los ejemplos llenan el pedido; lo puedes cambiar antes de enviarlo.',
@@ -14,9 +14,9 @@ export default {
       target: { role: 'button', name: '¿A quién le escribo hoy?' }, zoom: 1.6, arrow: true,
     },
     {
-      title: 'Revisa y envía', text: '«Crear trabajo» lo pone a andar. Ves cada paso mientras trabaja.',
+      title: 'Revisa y envía', text: '«Enviar» lo pone a andar. Ves cada paso mientras trabaja.',
       say: 'Revisa el pedido y envíalo.',
-      target: { role: 'button', name: 'Crear trabajo' }, action: 'hover', zoomOn: { label: 'Describe tu trabajo' }, zoom: 1.4, arrow: true,
+      target: { role: 'button', name: 'Enviar mensaje' }, action: 'hover', zoomOn: { label: 'Escribe tu mensaje' }, zoom: 1.4, arrow: true,
     },
     {
       title: 'Tus trabajos quedan guardados', text: 'Retómalos cuando quieras, donde quedaron.',

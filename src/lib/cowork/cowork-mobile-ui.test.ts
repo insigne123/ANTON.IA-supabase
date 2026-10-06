@@ -9,9 +9,9 @@ const workspace = readFileSync('src/components/cowork/CoworkWorkspace.tsx', 'utf
 // «Ir al final» / «Cowork espera tu decisión» sat at a fixed 132 px, over the quick actions when the box grew.
 test('on phones the list of work opens in the shared sheet, with its own icon', () => {
   assert.match(workspace, /<Sheet open=\{drawerOpen\} onOpenChange=\{setDrawerOpen\}>/);
-  assert.match(workspace, /<SheetTitle className="sr-only">Trabajos<\/SheetTitle>/);
+  assert.match(workspace, /<SheetTitle className="sr-only">Conversaciones<\/SheetTitle>/);
   assert.doesNotMatch(workspace, /absolute inset-0 z-40/, 'the home-made drawer is gone');
-  assert.match(workspace, /aria-label="Mostrar trabajos"[\s\S]{0,240}?<History aria-hidden="true" \/>/);
+  assert.match(workspace, /aria-label="Mostrar conversaciones"[\s\S]{0,240}?<History aria-hidden="true" \/>/);
   assert.doesNotMatch(workspace, /\bPanelLeft\b/, 'PanelLeft is the app menu button');
   // Radix only refocuses its own trigger: the workspace gives focus back to the button that opened each sheet.
   assert.match(workspace, /onCloseAutoFocus=\{returnFocusTo\(listOpener\)\}/);
@@ -20,7 +20,7 @@ test('on phones the list of work opens in the shared sheet, with its own icon', 
 
 test('below xl the summary opens in a sheet from the header', () => {
   assert.match(workspace, /<Sheet open=\{summaryOpen\} onOpenChange=\{setSummaryOpen\}>/);
-  assert.match(workspace, /ref=\{summaryOpener\} variant="ghost" size="icon-sm" className="xl:hidden" onClick=\{\(\) => setSummaryOpen\(true\)\} aria-label="Ver resumen del trabajo"/);
+  assert.match(workspace, /ref=\{summaryOpener\} variant="ghost" size="icon-sm" className="xl:hidden" onClick=\{\(\) => setSummaryOpen\(true\)\} aria-label="Ver resumen de la conversación"/);
   assert.match(workspace, /if \(isWide\) setSummaryOpen\(false\)/, 'a sheet left open does not linger once the panel fits beside the chat');
   assert.match(workspace, /<CoworkSidePanel closeStyle="dismiss"/);
 });

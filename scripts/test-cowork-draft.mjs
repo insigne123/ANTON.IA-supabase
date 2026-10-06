@@ -42,8 +42,8 @@ try {
   await waitFor(() => box()?.value === 'que tengo pendiente para hoy?', 'draft restored after remount');
 
   // 2. Mounting never clears a saved draft, and sending does.
-  await waitFor(() => !window.document.querySelector('[aria-label="Crear trabajo"]').disabled, 'send enabled');
-  window.document.querySelector('[aria-label="Crear trabajo"]').click();
+  await waitFor(() => !window.document.querySelector('[aria-label="Enviar mensaje"]').disabled, 'send enabled');
+  window.document.querySelector('[aria-label="Enviar mensaje"]').click();
   await waitFor(() => posts.length === 1, 'message sent');
   assert.equal(posts[0].message, 'que tengo pendiente para hoy?');
   await waitFor(() => saved() === null, 'draft cleared after sending');
@@ -64,8 +64,8 @@ try {
     mentions: [{ id: MARCELA, name: 'Marcela Rojas' }, { id: 'no-es-un-id', name: 'Otra' }, null] }));
   window.mountWorkspace(`${OWNER}:org:2`);
   await waitFor(() => box()?.value === 'escríbele a @Marcela Rojas', 'draft with a mention restored');
-  await waitFor(() => !window.document.querySelector('[aria-label="Crear trabajo"]').disabled, 'send enabled again');
-  window.document.querySelector('[aria-label="Crear trabajo"]').click();
+  await waitFor(() => !window.document.querySelector('[aria-label="Enviar mensaje"]').disabled, 'send enabled again');
+  window.document.querySelector('[aria-label="Enviar mensaje"]').click();
   await waitFor(() => posts.length === 2, 'message with a mention sent');
   assert.equal(posts[1].message, `escríbele a @Marcela Rojas\n\n(ID de Marcela Rojas: ${MARCELA})`);
   console.log('PASS: the unsent message survives a remount with the contacts it names, is cleared when sent and never crosses accounts.');

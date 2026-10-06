@@ -161,7 +161,7 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
         <p className="mt-2 max-w-[34rem] text-[14.5px] leading-6 text-cw-muted">Escribo correos y mensajes de LinkedIn para tus contactos, busco prospectos nuevos y te cuento cómo vas. Antes de enviar o cambiar algo te pido aprobación.</p>
       </div>
       <div className="cw-rise [animation-delay:60ms]">{composer}</div>
-      {!ready && !loading && !listFailed && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
+      {!ready && !loading && !listFailed && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes revisar tus conversaciones guardadas.</p>}
       <HomeFigures overview={overview} loading={overviewLoading} />
       {overview?.since?.items.length ? <SinceLastVisit since={overview.since} onAsk={onSuggestion} /> : null}
       <CwCollapse show={askOffer}>

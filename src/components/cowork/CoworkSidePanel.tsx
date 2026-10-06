@@ -40,12 +40,14 @@ function Section({ title, children, aside }: { title: string; children: ReactNod
   </section>;
 }
 
-/** Right rail of the conversation: what is happening, what came out of it and what it used. Below xl it opens in a
- * sheet, where `closeStyle` «dismiss» closes it with an X. */
-export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, onOpenArtifact, sources, mode, budget, searchQuota, onClose,
+/** The searches left today only matter when they are about to run out. */
+export const COWORK_LOW_SEARCH_QUOTA = 10;
+
+/** Right rail of the conversation: the plan as a to-do list while there is one, what came out of it and what it used. Below
+ * xl it opens in a sheet, where `closeStyle` «dismiss» closes it with an X. */
+export function CoworkSidePanel({ steps, artifacts, openArtifactId, onOpenArtifact, sources, mode, budget, searchQuota, onClose,
   closeStyle = 'collapse' }: {
   steps: CoworkProgressStep[];
-  turnCount: number;
   artifacts: CoworkArtifact[];
   openArtifactId: string | null;
   onOpenArtifact: (artifact: CoworkArtifact, opener: HTMLElement) => void;
@@ -56,7 +58,7 @@ export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, o
   onClose: () => void;
   closeStyle?: 'collapse' | 'dismiss';
 }) {
-  return <aside aria-label="Resumen del trabajo" className="flex h-full min-h-0 flex-col">
+  return <aside aria-label="Resumen de la conversación" className="flex h-full min-h-0 flex-col">
     <div className="flex h-12 shrink-0 items-center justify-between border-b border-cw-border px-4">
       <p className="text-[13px] font-medium text-cw-muted">Resumen</p>
       {closeStyle === 'dismiss'
@@ -64,7 +66,7 @@ export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, o
         : <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label="Ocultar resumen" title="Ocultar"><PanelRightClose aria-hidden="true" /></CwButton>}
     </div>
     <div className="cw-scroll min-h-0 flex-1 overflow-y-auto">
-      <Section title="Progreso" aside={turnCount > 1 ? <span className="text-[11.5px] text-cw-faint">Turno {turnCount}</span> : null}>
+      {steps.length > 0 && <Section title="Progreso">
         <ol className="space-y-2.5">
           {steps.map((step, index) => <li key={step.key} className="relative flex items-start gap-2.5">
             {index < steps.length - 1 && <span className="absolute left-[8.5px] top-[22px] h-[calc(100%-8px)] w-px bg-cw-border" aria-hidden="true" />}
@@ -77,10 +79,10 @@ export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, o
             </div>
           </li>)}
         </ol>
-      </Section>
+      </Section>}
       <Section title="Resultados">
         {artifacts.length === 0
-          ? <p className="text-[12.5px] leading-5 text-cw-muted">Aquí aparecerán documentos, tablas y archivos de este trabajo.</p>
+          ? <p className="text-[12.5px] leading-5 text-cw-muted">Aquí aparecerán documentos, tablas y archivos de esta conversación.</p>
           : <ul className="-mx-2 space-y-0.5">
             {artifacts.map(artifact => <li key={artifact.id}>
               <button type="button" onClick={event => onOpenArtifact(artifact, event.currentTarget)} aria-current={openArtifactId === artifact.id ? 'true' : undefined}
@@ -107,8 +109,10 @@ export function CoworkSidePanel({ steps, turnCount, artifacts, openArtifactId, o
             {mode === 'autonomous' ? <Zap className="h-3.5 w-3.5 text-cw-accent" aria-hidden="true" /> : <ShieldCheck className="h-3.5 w-3.5 text-cw-success" aria-hidden="true" />}
             {mode === 'autonomous' ? 'Modo autónomo con topes' : 'Con aprobaciones: nada cambia sin tu visto bueno'}
           </p>
-          {budget && budget.maxDepth > 0 && <p className="text-cw-muted">Pasos automáticos: {Math.min(budget.depth, budget.maxDepth)} de {budget.maxDepth}{budget.exhausted ? ' · tope alcanzado' : ''}</p>}
-          {searchQuota && <p className="text-cw-muted">Búsquedas externas hoy: {searchQuota.remaining} de {searchQuota.limit}</p>}
+          {budget?.exhausted && <p className="text-cw-muted">Llegó al tope de pasos automáticos de esta conversación: escríbele para seguir.</p>}
+          {searchQuota && searchQuota.remaining <= COWORK_LOW_SEARCH_QUOTA && <p className="text-cw-muted">
+            {searchQuota.remaining === 0 ? 'Ya usaste las búsquedas de prospectos de hoy.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 búsqueda' : `quedan ${searchQuota.remaining} búsquedas`} de prospectos hoy.`}
+          </p>}
         </div>
       </Section>
     </div>

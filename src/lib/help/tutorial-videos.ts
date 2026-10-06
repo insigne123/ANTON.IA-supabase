@@ -32,7 +32,7 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'conversaciones', title: 'Conversaciones', summary: 'Quién te respondió primero, el hilo completo y tu respuesta en el mismo hilo.', seconds: 53, sections: ['conversaciones'] },
   { id: 'pipeline', title: 'Pipeline', summary: 'El panel con tus cifras y etapas, y cómo mover un lead en el tablero.', seconds: 85, sections: ['pipeline'] },
   { id: 'oportunidades', title: 'Oportunidades', summary: 'Empresas que están contratando, licitaciones y cómo ajustar lo que buscamos.', seconds: 75, sections: ['oportunidades'], feature: 'opportunities' },
-  { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus trabajos guardados.', seconds: 50, sections: ['primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
+  { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus conversaciones guardadas.', seconds: 50, sections: ['primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
   { id: 'conexiones', title: 'Conexiones', summary: 'Conecta tu correo, elige la cuenta que envía y consigue tu ticket de Mercado Público.', seconds: 61, sections: ['conexiones'] },
 ];
 
