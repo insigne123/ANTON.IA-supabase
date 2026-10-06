@@ -104,9 +104,44 @@ PR `claude/cowork-ronda-final`:
    - el flag `--analyst`.
 6. **La Analista (4b):** ver la sección siguiente.
 
+**Medición de los arreglos** (6 oct, solo `gpt-6-luna`, con `COWORK_OFFERED_READS_ENABLED`). Son los casos donde la ronda final cerraba ofreciendo una consulta, más los dos turnos que fallaban:
+
+- **Cierres que ofrecen consultar:** en los casos de AXIS de este grupo, la ronda final tenía 8 de 9 (d2, g1, e3, g3 y h5). Ahora queda 1 de 5, en d2.
+  - En g1, e3 y g3 la respuesta ya no ofrece revisar: termina proponiendo la acción con su tarjeta (una búsqueda, la invitación, pausar la campaña).
+- **La decisión extra:** no hizo falta en esta muestra. La consulta ofrecida se hizo dentro de las 4 decisiones de siempre (d2 y `ur-pipeline-grafico`).
+- **Turnos fallidos:** 0 de 25, también en «pipeline en un gráfico» y en la cadencia de 7 toques.
+- **Juez en estos 7 casos:** 1 buena, 3 mejorable y 3 mala.
+  - Las tres «mala»: una cifra sin respaldo (h5), un siguiente paso que no lleva al gráfico pedido (pipeline) y una consulta que todavía ofrece (d2).
+
 ## Especialistas (4b): la Analista
 
-ANALYST_SECTION
+**Qué es:** cuando el usuario pregunta por sus resultados («¿cómo me ha ido?», «¿qué canal funciona?», «¿qué pasó con la tanda?»), la coordinadora consulta los datos y le pasa la pregunta a la Analista con `analysis.write`. La Analista escribe la respuesta del turno con un prompt hecho solo para eso (`src/lib/cowork/analyst.ts`):
+
+- **Primero la conclusión:** con su cifra y sobre qué se calcula («4 de 46 envíos»).
+- **Las malas noticias van primero.**
+- **Muestra chica:** si hay pocos datos, dice que no es concluyente y hacia dónde apunta.
+- **Lo ya consultado se usa:** nunca ofrece revisarlo después.
+- **Las cifras van en tarjetas** y un siguiente paso concreto.
+
+En pantalla aparece como «Analista · analizando tus cifras…».
+
+**Medición** (6 oct, solo `gpt-6-luna`, con juez `gpt-6.1-sol`). Son los 9 casos de análisis (a1, a2, b1, b3, d4, d6, h1 y h4 de AXIS, y `ur-como-me-ha-ido`), × 1, con y sin la Analista:
+
+| | Sin la Analista | Con la Analista |
+|---|---:|---:|
+| Juez: buena / mejorable / mala | 0 / 3 / 6 | 1 / 5 / 3 |
+| Utilidad | 3,11 | 3,33 |
+| Fricción | 3,22 | 3,44 |
+| Veracidad | 3,78 | 3,89 |
+| Verificaciones | 92/131 | 89/131 |
+| Mediana del turno | 18,2 s | 12,5 s |
+
+- **Cuándo la usó:** la coordinadora le pasó la pregunta en 3 de los 9 casos (h1, h4 y `ur-como-me-ha-ido`).
+  - En dos, la respuesta pasó de «mala» a «mejorable». En h4 siguió «mala»: omitió por qué quedaron retenidos dos correos.
+- **Ruido:** la mejora de a1, de «mala» a «buena», no es de la Analista, porque no la usó.
+- **La decisión:** la señal es positiva pero la muestra es chica. Queda conectada al worker detrás de `COWORK_ANALYST_ENABLED`, apagada.
+  - Antes de encenderla conviene una medición con más repeticiones.
+- **La Investigadora y la Prospectora:** siguen siendo solo nombres en pantalla. No se midieron, para no gastar más créditos.
 
 ## Tareas largas (4c): propuesta
 
@@ -162,7 +197,7 @@ Lo hace el mantenedor, en el entorno de producción.
 | `COWORK_OFFERED_READS_ENABLED` + `COWORK_ANSWER_HOLD_ENABLED` | La consulta que la respuesta ofrece se hace en el turno, y la respuesta se muestra una vez, ya corregida | Encender: ataca la queja más repetida |
 | `COWORK_CODE_ARTIFACTS_ENABLED` | La Diseñadora escribe tableros y gráficos a medida en el lienzo | Encender: 20/20 artefactos se dibujan a la primera |
 | `COWORK_PREFERENCES_ENABLED` | Cowork recuerda preferencias con una tarjeta | Encender después de su migración |
-| `COWORK_ANALYST_ENABLED` | La Analista responde las preguntas de resultados | ANALYST_FLAG |
+| `COWORK_ANALYST_ENABLED` | La Analista responde las preguntas de resultados | Apagado hasta medirla con más repeticiones: señal positiva en 9 casos |
 | `COWORK_INTENT_PROMPTS_ENABLED` | Instrucciones por intención | Apagado: empeoró en la ronda 1 |
 
 ## Migraciones pendientes

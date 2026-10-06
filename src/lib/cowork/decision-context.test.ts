@@ -155,6 +155,19 @@ test('remembering a preference is described only when it is on, in any turn, wit
   assert.match(String(on.preferenceCapability), /Nunca digas que algo queda guardado o propuesto si no propusiste preference\.save/);
 });
 
+test('the Analyst is described only when it is on, with a decision in reserve for the coordinator to answer if it fails', () => {
+  const base = { history: { turns: [] }, request: '¿Cómo me ha ido este mes?', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  assert.equal('analystCapability' in off, false);
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, analyst: true });
+  const on = coworkDecisionContext(instructions, { ...base, turnBudget: { reads: 3, readsLeft: 3, decisionsLeft: 2 } });
+  assert.match(String(on.analystCapability), /primero consulta todo lo que lo responde/);
+  assert.match(String(on.analystCapability), /analysis\.write con analysis \{question/);
+  assert.equal(on.analystAvailable, true);
+  // On the last decision the coordinator answers itself: nobody would be left if the Analyst failed.
+  assert.equal(coworkDecisionContext(instructions, { ...base, turnBudget: { reads: 3, readsLeft: 3, decisionsLeft: 0 } }).analystAvailable, false);
+});
+
 test('replying in a conversation is described as a proposal with a card only when it is on; off, it is a draft sent from Contactados', () => {
   const base = { history: { turns: [] }, request: '¿Qué toca hoy?', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
   const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
