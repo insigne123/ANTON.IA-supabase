@@ -150,6 +150,77 @@ test('message context update requires observed context and carries the patch', a
   assert.deepEqual((proposals[0] as { kind: string; messageContext: unknown }).messageContext, patch);
 });
 
+test('a preference is proposed with its text and scope, without reading first, only when it is on', async () => {
+  const preference = { text: 'No le escribo a empresas de la competencia', scope: 'personal' as const };
+  const proposal = { action: 'preference.save' as const, query: null, leadId: null, answer: null, preference };
+  const proposals: unknown[] = [];
+  const base = {
+    message: 'Recuerda que no le escribo a empresas de la competencia', runId: '00000000-0000-4000-8000-000000000099',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({}), record: async () => {},
+    proposeEffect: async (value: unknown) => { proposals.push(value); },
+  };
+  // Off: the decision goes back to the model, which cannot store it.
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => proposal }), /Preferences unavailable/);
+  assert.equal(proposals.length, 0);
+  const result = await runCoworkReadLoop({ ...base, preferences: true, decide: async () => proposal });
+  assert.match(result.reply, /Revisa en la tarjeta cómo quedará escrito/);
+  assert.equal(proposals.length, 1);
+  const sent = proposals[0] as { kind: string; preference: unknown; originRunId: string; targetId: string };
+  assert.equal(sent.kind, 'memory_save');
+  assert.deepEqual(sent.preference, preference);
+  assert.equal(sent.originRunId, base.runId);
+  assert.equal(sent.targetId, 'new-preference');
+});
+
+test('a preference already remembered goes back to the model instead of a second card', async () => {
+  const proposal = { action: 'preference.save' as const, query: null, leadId: null, answer: null,
+    preference: { text: 'No le escribo a empresas de seguridad privada', scope: 'personal' as const } };
+  const proposals: unknown[] = [];
+  await assert.rejects(runCoworkReadLoop({
+    message: 'Recuerda que no le escribo a seguridad privada', runId: '00000000-0000-4000-8000-000000000099', signal: new AbortController().signal,
+    authorize: async () => {}, execute: async () => ({}), record: async () => {}, proposeEffect: async value => { proposals.push(value); },
+    preferences: true, userContext: { memories: ['No le escribo a empresas de seguridad privada'] }, decide: async () => proposal,
+  }), /Preference already remembered/);
+  assert.equal(proposals.length, 0);
+});
+
+test('a writing turn that also asks to remember something offers to remember it, only with preferences on', async () => {
+  const write = { kind: 'email' as const, recipients: null, objective: 'Invitar a una reunión', angle: null, tone: null, steps: null, notes: 'Firma como Nico', findings: null };
+  const written = { reply: 'Preparé el correo.', document: null, suggestions: [{ label: 'Ajustar el correo', message: 'Hazlo más corto' }] };
+  const base = {
+    message: 'escríbeme un correo para los gerentes de retail, y recuerda que siempre firmo como Nico', runId: '00000000-0000-4000-8000-000000000099',
+    signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}), record: async () => {},
+    write: async () => written, decide: async () => ({ action: 'draft.write' as const, query: null, leadId: null, answer: null, write }),
+  };
+  const on = await runCoworkReadLoop({ ...base, preferences: true });
+  assert.deepEqual(on.suggestions?.map(chip => chip.message), ['Hazlo más corto', 'Recuerda que siempre firmo como Nico']);
+  const off = await runCoworkReadLoop(base);
+  assert.deepEqual(off.suggestions?.map(chip => chip.message), ['Hazlo más corto']);
+});
+
+test('asked to remember what is already kept, the answer never says it proposes it', async () => {
+  const preference = { text: 'No le escribo a empresas de seguridad privada', scope: 'personal' as const };
+  let decisions = 0;
+  const result = await runCoworkReadLoop({
+    message: 'recuerda que no le escribo a empresas de seguridad privada', runId: '00000000-0000-4000-8000-000000000099',
+    signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}), record: async () => {}, proposeEffect: async () => {},
+    preferences: true, userContext: { memories: ['No le escribo a empresas de seguridad privada'] },
+    decide: async () => (decisions++ === 0
+      ? { action: 'preference.save' as const, query: null, leadId: null, answer: null, preference }
+      : { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Propongo guardarla; queda pendiente de tu aprobación. ¿Reviso tus contactos para quitar esas empresas?', document: null } }),
+  });
+  assert.equal(result.reply, 'Ya lo tengo presente: «No le escribo a empresas de seguridad privada». Lo aplico en tus trabajos.\n\n¿Reviso tus contactos para quitar esas empresas?');
+});
+
+test('a preference without its text goes back to the model', async () => {
+  const proposal = { action: 'preference.save' as const, query: null, leadId: null, answer: null, preference: null };
+  await assert.rejects(runCoworkReadLoop({
+    message: 'Recuerda esto', runId: '00000000-0000-4000-8000-000000000099', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({}), record: async () => {}, proposeEffect: async () => {}, preferences: true, decide: async () => proposal,
+  }), /Missing preference/);
+});
+
 test('enrich batch requires observed review and carries targets', async () => {
   const ids = ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'];
   const proposal = { action: 'lead.enrich_batch' as const, query: null, leadId: null, leadIds: ids, answer: null };

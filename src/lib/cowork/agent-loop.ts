@@ -29,6 +29,7 @@ import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memo
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 import { withCoworkReports } from './report-document';
 import { COWORK_NEXT_STEP_RULE } from './next-step';
+import { coworkPreferenceAlreadyKept, coworkPreferenceSchema, coworkRememberSuggestion, type CoworkPreference } from './preference-proposal';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -36,7 +37,7 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
   'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone',
-  'lead_prepare_batch']);
+  'lead_prepare_batch', 'memory_save']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 /** The strict output makes the model fill every field, and on a search or an artifact it sometimes fills `campaign`
@@ -58,7 +59,7 @@ export const coworkDecisionSchema = z.object({
     'crm.update_record', 'campaign.prepare_draft_v2',
     'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
     'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message', 'linkedin.invite_batch', 'linkedin.message_batch', 'contacts.import',
-    'contacts.prepare_batch',
+    'contacts.prepare_batch', 'preference.save',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze', 'leads.recommend', 'opportunities.list',
     'answer', 'draft.write', 'artifact.create', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
@@ -101,6 +102,8 @@ export const coworkDecisionSchema = z.object({
   linkedinBatch: coworkLinkedinBatchSchema.nullable().optional(),
   /** contacts.prepare_batch: the goal (save, email or research) and the people seen in this thread, approved with one decision (prepare-batch.ts). */
   prepareBatch: coworkPrepareBatchSchema.nullable().optional(),
+  /** preference.save: the preference to remember in the next turns and for whom (preference-proposal.ts, Plan 12, 5). */
+  preference: coworkPreferenceSchema.nullable().optional(),
   /** The summary of the whole conversation, updated with the final decision of a turn (thread-memory.ts); null on reads. */
   memory: coworkThreadMemorySchema.nullable().optional(),
   answer: coworkDocumentSchema.nullable(),
@@ -116,7 +119,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry' | 'lead.enrich_phone'
-  | 'contacts.prepare_batch';
+  | 'contacts.prepare_batch' | 'preference.save';
 export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION | typeof COWORK_WRITTEN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
@@ -134,6 +137,7 @@ export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; l
   replyThread?: CoworkReplyThreadInput;
   linkedinBatch?: CoworkLinkedinBatchInput;
   prepareBatch?: CoworkPrepareBatchInput;
+  preference?: CoworkPreference;
   campaignId?: string; enrollmentId?: string; stepId?: string };
 
 function observationRunId(
@@ -177,7 +181,7 @@ function effectTargetRun(
   if (action === 'profile.update') {
     return observationRunId(observations, history, currentRunId, payload => payload.action === 'profile.get');
   }
-  if (action === 'saved_search.create') {
+  if (action === 'saved_search.create' || action === 'preference.save') {
     return currentRunId || null;
   }
   if (action === 'saved_search.update' || action === 'saved_search.delete') {
@@ -372,6 +376,7 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'campaign.retry') return 'Reintentar los envíos fallidos de una campaña';
   if (action === 'lead.enrich_phone') return named('Revelar el teléfono de');
   if (action === 'contacts.prepare_batch') return 'Preparar contactos';
+  if (action === 'preference.save') return 'Recordar una preferencia';
   return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
 }
 
@@ -391,7 +396,7 @@ export class CoworkDecisionRejected extends Error {
  * fixes what was pointed out and keeps the rest instead of writing it again from scratch. */
 export type CoworkRejection = { action: string; reason: string; previous?: CoworkAnswer };
 
-const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, linkedinBatch, prepareBatch, campaignId o contactsImport).';
+const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, linkedinBatch, prepareBatch, campaignId, contactsImport o preference).';
 
 function budgetFeedback(readsUsed: number, maximum: number) {
   const left = Math.max(0, maximum - readsUsed);
@@ -526,6 +531,7 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   if (action === 'lead.enrich_phone') return `Propongo pedir el teléfono de ${who} al proveedor: cuesta 10 créditos y es una persona por aprobación. La tarjeta muestra tu saldo; revísalo antes de aprobar.`;
   if (action === 'campaign.retry') return 'Propongo reintentar los envíos de esa campaña que fallaron por un motivo que se puede reintentar. En la tarjeta ves cuáles son; si la apruebas, vuelven a la cola y salen con los frenos de siempre, sin enviarse dos veces.';
   if (action === 'email.reply_thread') return `Preparé la respuesta para ${who} y la propongo enviar en su hilo. Revisa el texto en la tarjeta antes de aprobarla: si la apruebas, sale tal cual.`;
+  if (action === 'preference.save') return 'Propongo recordarlo para tus próximos trabajos. Revisa en la tarjeta cómo quedará escrito antes de aprobarlo.';
   return null;
 }
 
@@ -663,8 +669,30 @@ export function coworkOutline(value: Decision['outline']): CoworkPlanStep[] | nu
 /** The turn's answer with the chart its reads allow (charts.ts); the loop below is what produces it. */
 export async function runCoworkReadLoop(input: Parameters<typeof runCoworkLoop>[0]): Promise<Awaited<ReturnType<typeof runCoworkLoop>>> {
   const observations: CoworkObservation[] = [...(input.resumedObservations || [])];
-  const answer = await runCoworkLoop(input, observations);
-  return coworkWithCharts<typeof answer>(answer, observations);
+  let proposed = false;
+  const proposeEffect = input.proposeEffect;
+  const answer = await runCoworkLoop(proposeEffect ? { ...input, proposeEffect: async proposal => { proposed = true; await proposeEffect(proposal); } } : input, observations);
+  const kept = proposed ? answer : coworkKeptPreferenceAnswer(input, answer);
+  return coworkWithCharts<typeof kept>(kept, observations);
+}
+
+// A sentence that says something was proposed, saved or waits for approval.
+const PROPOSAL_CLAIM = /[^.!?\n]*(?:propong|propuest|queda(?:rá)? (?:guardad|registrad|pendiente)|(?:espera|requiere|necesita|pide) (?:tu )?aprobaci|cuando (?:la |lo )?apruebes|al aprobar)[^.!?\n]*[.!?]?[ \t]*/giu;
+
+/**
+ * Asked to remember what memories already keep, the answer must say so, never that it proposes it (Plan 12, 5). Seen with the
+ * real model: after the loop sent the repeat back, it still wrote «propongo guardarla» in a plain answer, with no card. With no
+ * effect proposed in the turn, such a sentence is false: it goes, and the answer says what is true.
+ */
+function coworkKeptPreferenceAnswer<T extends { reply: string }>(input: { message: string; preferences?: boolean; userContext?: unknown }, answer: T): T {
+  if (!input.preferences) return answer;
+  const asked = coworkRememberSuggestion(input.message)?.message.replace(/^Recuerda que /, '');
+  const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
+  const list = Array.isArray(memories) ? memories.map(String) : [];
+  if (!asked || !coworkPreferenceAlreadyKept(asked, list) || !answer.reply.match(PROPOSAL_CLAIM)?.some(Boolean)) return answer;
+  const rest = answer.reply.replace(PROPOSAL_CLAIM, '').trim();
+  const kept = list.find(memory => coworkPreferenceAlreadyKept(asked, [memory])) || asked;
+  return { ...answer, reply: `Ya lo tengo presente: «${kept.replace(/[.\s]+$/u, '')}». Lo aplico en tus trabajos.${rest ? `\n\n${rest}` : ''}` };
 }
 
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
@@ -704,6 +732,8 @@ async function runCoworkLoop(input: {
   linkedinBatch?: boolean;
   /** contacts.prepare_batch may be proposed (on unless COWORK_PREPARE_BATCH_ENABLED=false; its kind is in the migration 20261001210000). */
   prepareBatch?: boolean;
+  /** preference.save may be proposed (COWORK_PREFERENCES_ENABLED; its memory_save kind is in the migration 20261006160000). */
+  preferences?: boolean;
   /** opportunities.list may be read: the owner of the run is in OPPORTUNITIES_ALLOWED_EMAILS (server/cowork/opportunities-read.ts). */
   opportunities?: boolean;
   /** The judge (plan 2, G2): reads the coordinator's final answer before it is shown and returns
@@ -722,6 +752,14 @@ async function runCoworkLoop(input: {
   const remember = async (decision: Decision) => {
     if (decision.memory && input.remember) await input.remember(decision.memory).catch(() => undefined);
   };
+  // A preference asked for next to a writing task (Plan 12, 5): the Writer applied it, and a quick reply keeps it for next time.
+  // Seen with the real model: the Writer's own suggestions never offered it, so the preference was lost.
+  const withRememberSuggestion = (answer: CoworkAnswer): CoworkAnswer => {
+    const suggestion = input.preferences ? coworkRememberSuggestion(input.message) : null;
+    const current = answer.suggestions || [];
+    if (!suggestion || current.some(chip => /recu[eé]rd|record/i.test(`${chip.label} ${chip.message}`))) return answer;
+    return { ...answer, suggestions: [...current.slice(0, 2), suggestion] };
+  };
   if (observations.length) {
     // The pre-queue phase already spent reads/model decisions. Resume only
     // synthesis, never a second tool or specialist budget in the same run.
@@ -729,7 +767,7 @@ async function runCoworkLoop(input: {
     const decision = coworkDecisionSchema.parse(await input.decide(observations, true));
     await remember(decision);
     input.signal.throwIfAborted(); await input.authorize();
-    if (decision.action === 'draft.write' && decision.write && input.write) return input.write(decision.write, observations);
+    if (decision.action === 'draft.write' && decision.write && input.write) return withRememberSuggestion(await input.write(decision.write, observations));
     if (decision.action === 'artifact.create' && decision.design && input.design) return input.design(decision.design, observations);
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
     return withCoworkReports(decision.answer, observations);
@@ -834,7 +872,7 @@ async function runCoworkLoop(input: {
           throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11).');
         }
         const emails: CoworkEditedEmail[] | null = decision.write.campaign && !written && turn < last && input.proposeEffect ? coworkCampaignEmails(answer.blocks) : null;
-        if (!emails) return answer;
+        if (!emails) return withRememberSuggestion(answer);
         written = { emails, answer };
         observations.push({ action: COWORK_WRITTEN_ACTION, input: '', result: {
           scope: 'writer_output', emails,
@@ -978,7 +1016,7 @@ async function runCoworkLoop(input: {
         || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message'
         || decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch'
         || decision.action === 'contacts.import' || decision.action === 'email.reply_thread' || decision.action === 'campaign.retry' || decision.action === 'lead.enrich_phone'
-        || decision.action === 'contacts.prepare_batch') {
+        || decision.action === 'contacts.prepare_batch' || decision.action === 'preference.save') {
         if (!input.proposeEffect) throw rejected('Effect proposals unavailable', 'En este contexto no puedes proponer acciones: responde con lo observado.');
         const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
           : decision.action === 'research.start' ? 'start_research'
@@ -1009,7 +1047,8 @@ async function runCoworkLoop(input: {
           : decision.action === 'email.reply_thread' ? 'reply_thread'
           : decision.action === 'campaign.retry' ? 'campaign_retry'
           : decision.action === 'lead.enrich_phone' ? 'enrich_phone'
-          : decision.action === 'contacts.prepare_batch' ? 'lead_prepare_batch' : 'request_draft';
+          : decision.action === 'contacts.prepare_batch' ? 'lead_prepare_batch'
+          : decision.action === 'preference.save' ? 'memory_save' : 'request_draft';
         const targetId = decision.action === 'leads.save_contact' ? decision.providerId
           : decision.action === 'draft.request' ? decision.snapshotId
           : decision.action === 'email.send' ? decision.draftId
@@ -1033,6 +1072,7 @@ async function runCoworkLoop(input: {
           : decision.action === 'linkedin.invite_batch' || decision.action === 'linkedin.message_batch' ? 'new-linkedin-batch'
           : decision.action === 'contacts.import' ? 'new-contacts-import'
           : decision.action === 'contacts.prepare_batch' ? 'new-prepare-batch'
+          : decision.action === 'preference.save' ? 'new-preference'
           : decision.action === 'email.reply_thread' ? decision.replyThread?.contactedId ?? null
           : decision.leadId;
         const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) ?? written?.emails ?? null : null;
@@ -1117,6 +1157,16 @@ async function runCoworkLoop(input: {
         }
         const replyThread = decision.action === 'email.reply_thread' ? decision.replyThread ?? undefined : undefined;
         if (decision.action === 'email.reply_thread' && !replyThread) throw rejected('Missing reply', MISSING_PROPOSAL_FIELDS);
+        if (decision.action === 'preference.save' && !input.preferences) {
+          throw rejected('Preferences unavailable', 'Guardar preferencias desde Cowork todavía no está disponible: tenlo en cuenta en este trabajo y di que, para que valga siempre, se agrega en Perfil o en el contexto de redacción.');
+        }
+        const preference = decision.action === 'preference.save' ? decision.preference ?? undefined : undefined;
+        if (decision.action === 'preference.save' && !preference) throw rejected('Missing preference', MISSING_PROPOSAL_FIELDS);
+        // Seen with the real model: asked to remember what memories already had, it proposed it again word for word.
+        const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
+        if (preference && coworkPreferenceAlreadyKept(preference.text, Array.isArray(memories) ? memories.map(String) : [])) {
+          throw rejected('Preference already remembered', 'Eso ya está entre lo que recuerdas (memories) y ya se aplica: no lo propongas de nuevo. Responde con answer: di en una frase que ya lo tienes presente y que ya lo aplicas, sin decir que lo propones, que lo guardas ni que espera aprobación, y sigue con lo que pidió, si pidió algo más.');
+        }
         const effectAction = decision.action;
         const originOf = () => effectAction === 'code.execute'
           ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
@@ -1190,7 +1240,8 @@ async function runCoworkLoop(input: {
           ...(contactsImport === undefined ? {} : { contactsImport }),
           ...(replyThread === undefined ? {} : { replyThread }),
           ...(linkedinBatch === undefined ? {} : { linkedinBatch }),
-          ...(prepareBatch === undefined ? {} : { prepareBatch }) });
+          ...(prepareBatch === undefined ? {} : { prepareBatch }),
+          ...(preference === undefined ? {} : { preference }) });
         } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
       }

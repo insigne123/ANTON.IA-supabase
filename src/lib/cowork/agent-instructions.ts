@@ -29,6 +29,8 @@ export function coworkAgentInstructions(configuration: {
   opportunities?: boolean;
   /** artifact.create can be decided: the Designer writes a code artifact for the canvas (designer.ts, COWORK_CODE_ARTIFACTS_ENABLED). */
   codeArtifacts?: boolean;
+  /** preference.save can be proposed: a preference the person asks to keep, with a card (preference-proposal.ts, COWORK_PREFERENCES_ENABLED). */
+  preferences?: boolean;
   /** What this turn is about (intents.ts): each part of the prompt that belongs to other intents stays out. Null or absent: the whole prompt. */
   intents?: ReadonlySet<CoworkIntent> | null;
 }) {
@@ -164,6 +166,10 @@ export function coworkAgentInstructions(configuration: {
         'title: específico, con el período o para quién («Pipeline de octubre», «Prospectos de minería por calce»). goal: qué debe ver o decidir el usuario y cómo ordenarlo (cifras clave arriba, qué gráficos, qué tabla, qué filtros), en palabras simples y sin cifras: las cifras las calcula el artefacto desde los datos. Si ya leíste algo que importa (por ejemplo, que no hay envíos), dilo en goal para que el artefacto lo muestre bien.',
         'El artefacto es la respuesta final del turno, como la Redactora: la Diseñadora escribe también el mensaje del chat. Para cambiar o arreglar uno ya hecho («Cambia el artefacto «X» (artifact-…-vN.html): …», «Arregla el artefacto…» o un cambio que el usuario pide sobre el último), usa previous con el nombre exacto del archivo (artifact-…-vN.html: está en el mensaje o en history.artifacts) y change con lo pedido o el error; tables, las mismas salvo que pida otros datos. Si lo pedido cabe en una respuesta corta, en hasta 4 cifras o en una tabla de hasta 6 filas, no hagas un artefacto: responde en el chat.',
       ].join(' ')
+      : null,
+    // Short and needed in any turn that asks to remember something, so it goes whatever the intent.
+    preferenceCapability: configuration.preferences
+      ? 'Preferencias: cuando el usuario pide que recuerdes algo para los próximos trabajos («recuerda que…», «de ahora en adelante…», «nunca le escribas a…», «mi tono es…»), propón preference.save con preference {text, scope}: text es la preferencia en una frase, como se va a recordar («No le escribo a empresas de la competencia»), sin datos que no dijo; scope es personal, u organization solo si dice que vale para su equipo o su empresa. Va con tarjeta y revisión humana siempre, incluso en modo autónomo. Una por turno; si en el mismo mensaje pide además otra tarea, haz la tarea aplicando ya esa preferencia (si escribe la Redactora, ponla en notes del encargo: «firma como Nico», «tono cercano») y deja recordarla como siguiente paso, con una respuesta sugerida («Recordar que firmo como Nico»). No la propongas por iniciativa propia ni para cosas de un solo trabajo, y no la uses para datos de contactos (eso es guardar el contacto o su nota). Lo que ya recuerdas viene en memories y ya se aplica: si lo que pide ya está, responde que ya lo tienes presente, sin proponerlo de nuevo ni decir que espera aprobación. Nunca digas que algo queda guardado o propuesto si no propusiste preference.save en esta decisión.'
       : null,
     threadBudgetCapability: configuration.threadBudget
       || 'Hilo nuevo: dispones del presupuesto completo de pasos automáticos; aun así, cierra cada trabajo con lo esencial y no encadenes trabajo innecesario.',
