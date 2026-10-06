@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, LayoutDashboard, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { ChevronRight, CornerDownRight, Download, FileText, LayoutDashboard, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkAgentRows, coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkHeldAnswerCopy, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
@@ -22,6 +22,8 @@ import { coworkArtifactUrls } from './ArtifactPreview';
 import { AnimatePresence, cwFadeRise, cwSwap, cwVariants, m } from './motion';
 import type { CoworkLiveDraft } from '@/lib/cowork/partial-json';
 import { CoworkMark, CwButton } from './ui';
+import { coworkEditableText, coworkTurnFeedback, type CoworkFeedback, type CoworkTurnVersions } from '@/lib/cowork/turn-actions';
+import { CoworkAnswerActions, CoworkEditButton, CoworkEditMessage, CoworkVersionSwitcher } from './CoworkTurnActions';
 
 export type CoworkTurnData = { run: CoworkRun; events: CoworkEvent[] };
 /** The answer while it is being written: its text so far, how far each card got, and
@@ -202,19 +204,9 @@ function NextStep({ question, live }: { question: string; live: boolean }) {
   </p>;
 }
 
-function CopyReply({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return <CwButton size="icon-sm" variant="ghost" className="h-7 w-7" aria-label={copied ? 'Respuesta copiada' : 'Copiar respuesta'} title="Copiar"
-    onClick={async () => {
-      try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
-    }}>
-    {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-  </CwButton>;
-}
-
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
-  liveAnswer = null, streamed = false, cardStatuses = null }: {
+  liveAnswer = null, streamed = false, cardStatuses = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** The turn finished while you were watching: reveal the answer gently. */
@@ -233,7 +225,18 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   budgetExhausted: boolean;
   /** What later turns did with this turn's email and sequence cards, by artifact id. */
   cardStatuses?: ReadonlyMap<string, CoworkCardStatus> | null;
+  /** The other versions of this message (another version, an edit), and how to open one; null when there is one. */
+  versions?: CoworkTurnVersions | null;
+  onVersion?: ((id: string) => void) | null;
+  /** Sends your message again with new words; null when it cannot be edited now. */
+  onEdit?: ((text: string) => Promise<boolean>) | null;
+  /** Asks for another version of this answer; null when it cannot. */
+  onRegenerate?: (() => void) | null;
+  /** 👍 / 👎 on this answer; null when it cannot be rated. */
+  onFeedback?: ((feedback: CoworkFeedback) => Promise<boolean>) | null;
 }) {
+  const [editing, setEditing] = useState(false);
+  const editOpener = useRef<HTMLDivElement>(null);
   const { run, events } = turn;
   const version = coworkEditedEmails(run.message);
   const active = isCoworkActive(run.status);
@@ -273,15 +276,27 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
     {adjusted && <p className="cw-fade mt-2 flex items-center gap-1.5 text-[12.5px] text-cw-muted">
       <PencilLine className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Ajusté la respuesta al revisarla.
     </p>}
-    {!active && <div className="-ml-1.5 mt-1 flex opacity-100 transition-opacity sm:opacity-0 sm:group-hover/reply:opacity-100 sm:focus-within:opacity-100"><CopyReply text={reply} /></div>}
+    {!active && <div className="mt-1"><CoworkAnswerActions text={reply} latest={latest} rating={coworkTurnFeedback(events)?.rating ?? null}
+      onFeedback={run.status === 'completed' ? onFeedback : null} onRegenerate={onRegenerate} /></div>}
   </div> : null;
 
   return <article className="space-y-4" aria-label={run.automatic ? 'Continuación automática' : 'Turno'}>
     {run.automatic
       ? <p className="flex items-center gap-2 text-[12.5px] text-cw-muted"><CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />
         {run.automaticReason === 'research' ? 'Terminaron las investigaciones que pediste' : 'Continuó automáticamente con el resultado'}</p>
-      : <div className="flex justify-end">
-        {version ? <VersionMessage message={run.message} emails={version} /> : <CoworkUserMessage message={run.message} />}
+      : <div className="group/message flex flex-col items-end gap-1">
+        {editing && onEdit
+          ? <CoworkEditMessage initial={coworkEditableText(run.message)} onCancel={() => {
+            setEditing(false);
+            requestAnimationFrame(() => editOpener.current?.querySelector('button')?.focus());
+          }} onSend={async text => { const sent = await onEdit(text); if (sent) setEditing(false); return sent; }} />
+          : <div className="flex w-full items-start justify-end gap-1">
+            {onEdit && !version && <div ref={editOpener} className="mt-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-within:opacity-100">
+              <CoworkEditButton onClick={() => setEditing(true)} />
+            </div>}
+            {version ? <VersionMessage message={run.message} emails={version} /> : <CoworkUserMessage message={run.message} />}
+          </div>}
+        {versions && onVersion && !editing && <CoworkVersionSwitcher versions={versions} onSelect={onVersion} disabled={active} />}
       </div>}
 
     <div className="flex gap-3">

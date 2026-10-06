@@ -7,6 +7,7 @@ import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import { coworkWithMentions, type CoworkMention } from '@/lib/cowork/mentions';
+import { coworkEditedMessage, coworkTurnVersions, coworkVersionLeaf, type CoworkFeedback } from '@/lib/cowork/turn-actions';
 import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
@@ -141,6 +142,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const [listVersion, setListVersion] = useState(0);
   const [threadVersion, setThreadVersion] = useState(0);
   const [optimistic, setOptimistic] = useState<{ text: string; runId: string | null } | null>(null);
+  /** The turn a new version or an edited message replaces: out of sight while the new one is on its way. */
+  const [replacing, setReplacing] = useState<string | null>(null);
   const [queued, setQueued] = useState<string | null>(null);
   const [awaitingContinuation, setAwaitingContinuation] = useState(false);
   // The worker should resume after an approved action; if it never does, offer the next step instead of a dead end.
@@ -417,6 +420,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const turns: CoworkTurnData[] = useMemo(() => state && selected
     ? [...(state.ancestors || []), { run: state.run, events: state.events }] : [], [state, selected]);
   const latest = turns[turns.length - 1] || null;
+  const shownTurns = useMemo(() => optimistic && replacing ? turns.filter(turn => turn.run.id !== replacing) : turns, [turns, optimistic, replacing]);
   const latestIsCurrent = Boolean(latest && latest.run.id === selected);
   const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events)), [turns]);
   // What later turns did with each email or sequence card («Campaña creada · guardada sin enviar»…).
@@ -704,6 +708,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   useEffect(() => {
     if (optimistic?.runId && turns.some(turn => turn.run.id === optimistic.runId)) setOptimistic(null);
   }, [optimistic, turns]);
+  useEffect(() => { if (!optimistic) setReplacing(null); }, [optimistic]);
 
   async function sendQueuedNow() {
     if (!queued || !latest || !pendingDecision) return;
@@ -713,10 +718,48 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     if (!await post(text, latest.run.id)) setMessage(current => current.trim() ? current : text);
   }
 
+  /**
+   * Asks again in place of the latest turn (another version, an edited message, «Reintentar»): a new turn with the same parent,
+   * so what follows reads the new one and the others stay as versions. The first message asked again starts the conversation
+   * anew, and the previous one leaves the list.
+   */
+  async function replaceLatest(text: string) {
+    if (!latest) return false;
+    const old = latest.run;
+    setReplacing(old.id);
+    const sent = await post(text, old.parent_run_id ?? null);
+    if (!sent) { setReplacing(null); return false; }
+    if (!old.parent_run_id && threadNames.available) {
+      setHiddenRoots(current => new Set(current).add(old.id));
+      request(`/api/cowork/threads/${old.id}`, { method: 'DELETE' })
+        .catch(() => setHiddenRoots(current => { const next = new Set(current); next.delete(old.id); return next; }));
+    }
+    return true;
+  }
+
   function retry() {
     if (!latest) return;
-    void post(latest.run.message, latest.run.parent_run_id ?? null);
+    void replaceLatest(latest.run.message);
   }
+
+  // Your last message can be edited, and a plain answer asked again, once the turn is settled and nothing waits on you.
+  const settled = Boolean(latest && latestIsCurrent && ready && !sending && !optimistic && !queued && !busy && !pendingDecision && !latest.run.automatic);
+  const canEdit = settled && Boolean(latest && ['completed', 'failed', 'cancelled'].includes(latest.run.status))
+    && (!proposal || proposal.state === 'discarded');
+  const canRegenerate = settled && latest?.run.status === 'completed' && !proposal;
+  const editLatest = async (text: string) => Boolean(latest) && replaceLatest(coworkEditedMessage(latest!.run.message, text));
+  const regenerate = () => { if (latest) void replaceLatest(latest.run.message); };
+  /** A version opens where its conversation went on. */
+  const openVersion = (id: string) => choose(coworkVersionLeaf(runs, id));
+  const sendFeedback = useCallback(async (runId: string, feedback: CoworkFeedback) => {
+    try {
+      await request(`/api/cowork/runs/${runId}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(feedback) });
+      return true;
+    } catch (problem) {
+      toast({ variant: 'destructive', title: 'No pudimos guardar tu opinión', description: problem instanceof Error ? problem.message : undefined });
+      return false;
+    }
+  }, [request, toast]);
 
   // A quick reply is a message you did not have to type: same thread, same rules.
   const canFollowUp = Boolean(ready && !sending && latest && latestIsCurrent && latest.run.status === 'completed' && !optimistic && !queued);
@@ -852,12 +895,15 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           <div ref={scroller} onScroll={onScroll} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
             <div ref={conversation} className="mx-auto w-full max-w-[46rem] space-y-9 px-4 pb-8 pt-7 sm:px-6">
               {state?.olderTurnsOmitted && <p className="text-center text-[12px] text-cw-faint">Se muestran los últimos ocho turnos anteriores.</p>}
-              {turns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === turns.length - 1}
+              {shownTurns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === shownTurns.length - 1}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
                 onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
                 liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)}
-                cardStatuses={cardStatuses} />)}
+                cardStatuses={cardStatuses} versions={coworkTurnVersions(runs, turn.run)} onVersion={busy || sending ? null : openVersion}
+                onEdit={index === shownTurns.length - 1 && canEdit ? editLatest : null}
+                onRegenerate={index === shownTurns.length - 1 && canRegenerate ? regenerate : null}
+                onFeedback={feedback => sendFeedback(turn.run.id, feedback)} />)}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
                   onClick={() => { setContinuationMissing(false); void post(CONTINUE_PROMPT, latest.run.id); }}>

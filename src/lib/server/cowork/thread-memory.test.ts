@@ -59,3 +59,15 @@ test('a turn keeps its memory unless a later turn of the conversation already wr
   assert.equal(await saveCoworkThreadMemory(fake.client, scope, { id: 'turn-3', message: 'm' }, memory), false, 'no root, nothing to store');
   assert.equal(fake.writes.length, 1);
 });
+
+test('another version of a turn does not read the memory the version it replaces wrote', async () => {
+  const fake = fakeClient({
+    runs: { root: { message: 'Quiero vender', user_id: 'u1', organization_id: 'o1' } },
+    memory: { root_run_id: 'root', user_id: 'u1', organization_id: 'o1', memory, source_run_id: 'turn-2a', source_created_at: '2026-10-01T10:00:00Z' },
+  });
+  const turn = { id: 'turn-2b', message: 'Otra versión', root_run_id: 'root' };
+  assert.equal((await loadCoworkThreadMemory(fake.client, scope, turn, { runIds: ['root'], complete: true })).memory, null);
+  assert.deepEqual((await loadCoworkThreadMemory(fake.client, scope, { ...turn, id: 'turn-3' }, { runIds: ['root', 'turn-2a'], complete: true })).memory, memory);
+  // A history cut short cannot tell: the memory stays, as before versions.
+  assert.deepEqual((await loadCoworkThreadMemory(fake.client, scope, turn, { runIds: ['turn-9'], complete: false })).memory, memory);
+});

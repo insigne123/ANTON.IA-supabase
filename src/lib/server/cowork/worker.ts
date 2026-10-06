@@ -145,7 +145,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     await authorize();
     const history = await loadCoworkHistory(client, scope, run.parent_run_id || null);
     // The whole conversation beyond the last turns: its first request and the memory the previous turns kept.
-    const threadMemory = coworkThreadMemoryContext(await loadCoworkThreadMemory(client, scope, run)
+    const threadMemory = coworkThreadMemoryContext(await loadCoworkThreadMemory(client, scope, run,
+      { runIds: history.turns.map(turn => turn.runId), complete: !history.olderTurnsOmitted })
       .catch(() => ({ firstRequest: null, memory: null })));
     // Name, company and offer once per run: drafts get signed and pitched without spending reads.
     const userContext = await loadCoworkUserContext(client, scope);

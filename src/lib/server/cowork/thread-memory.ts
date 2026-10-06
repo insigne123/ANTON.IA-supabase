@@ -9,19 +9,26 @@ import { coworkThreadMemorySchema, readCoworkThreadMemory, type CoworkThreadMemo
 type Scope = { userId: string; organizationId: string };
 type Run = { id: string; message: string; root_run_id?: string | null; created_at?: string | null };
 
-/** The first request of the conversation (when this is not that turn) and the latest memory, for the next decision. */
-export async function loadCoworkThreadMemory(client: SupabaseClient, scope: Scope, run: Run) {
+/**
+ * The first request of the conversation (when this is not that turn) and the latest memory, for the next decision. With
+ * versions of a turn (another version, an edited message: Plan 13) the latest memory may come from a version that is not on
+ * this branch: `branch` (the runs of the history this turn reads, and whether it reaches the start) leaves that one out.
+ */
+export async function loadCoworkThreadMemory(client: SupabaseClient, scope: Scope, run: Run, branch?: { runIds: string[]; complete: boolean }) {
   const rootId = run.root_run_id || null;
   if (!rootId) return { firstRequest: null, memory: null };
   const own = (table: string, fields: string) => client.from(table).select(fields).eq('user_id', scope.userId).eq('organization_id', scope.organizationId);
   const [root, stored] = await Promise.all([
     rootId === run.id ? null : own('cowork_runs', 'message').eq('id', rootId).maybeSingle(),
-    own('cowork_thread_memory', 'memory').eq('root_run_id', rootId).maybeSingle(),
+    own('cowork_thread_memory', 'memory,source_run_id').eq('root_run_id', rootId).maybeSingle(),
   ]);
   const message = (root?.data as { message?: unknown } | null)?.message;
+  const row = stored.data as { memory?: unknown; source_run_id?: unknown } | null;
+  const source = typeof row?.source_run_id === 'string' ? row.source_run_id : null;
+  const offBranch = Boolean(branch?.complete && source && source !== run.id && !branch.runIds.includes(source));
   return {
     firstRequest: !root || root.error || typeof message !== 'string' ? null : message,
-    memory: stored.error ? null : readCoworkThreadMemory((stored.data as { memory?: unknown } | null)?.memory),
+    memory: stored.error || offBranch ? null : readCoworkThreadMemory(row?.memory),
   };
 }
 
