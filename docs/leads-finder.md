@@ -55,6 +55,7 @@ Plan 11, sección 6. **Objetivo:** probar si la búsqueda por filtros de Apify �
 # Sin red: la entrada que recibiría el actor
 node --loader ./scripts/ts-test-loader.mjs scripts/compare-lead-providers.ts
 # Real (necesita APOLLO_API_KEY y APIFY_TOKEN en el entorno; nunca en .env del repo)
+# Solo Leads Finder, sin Apollo: agrega --only=leads-finder (basta APIFY_TOKEN)
 node --loader ./scripts/ts-test-loader.mjs scripts/compare-lead-providers.ts --live --max=50 --output=comparacion.json
 ```
 
@@ -100,3 +101,23 @@ Detrás de `LEADS_FINDER_ENABLED=true` y solo para los correos de `LEADS_FINDER_
 - **6a, el proveedor y la comparación:** en `main`.
 - **6b, la bóveda `lead_search_vault`:** en `main`; se aplica en producción aparte.
 - **6c, la búsqueda en la app:** apagada hasta que el mantenedor aplique 6b y encienda el flag. Para la prueba, se enciende solo para quien la hace.
+
+## Prueba real (Plan 12, 6 oct 2026)
+
+Fue una sola búsqueda de 50 personas: «Gerente de Personas» o «Gerente de Recursos Humanos» en Chile, con `--only=leads-finder`. La comparación con Apollo sigue esperando `APOLLO_API_KEY`.
+
+| | Resultado |
+|---|---|
+| Personas encontradas | 50 de 50, en 50 empresas distintas |
+| Cargo que calza con el pedido | 100 % |
+| Con correo | 47 de 50 (94 %) |
+| Con perfil de LinkedIn | 100 % |
+| Con teléfono móvil | 0 % |
+| Tiempo | 40 s |
+| Costo | US$0,174 (US$0,0035 por persona) |
+
+**Un error que salió de la prueba:** el actor no devuelve `email_status` (ninguno de los 50 lo traía). La app marcaba todos esos correos como «sin verificar», aunque la búsqueda pide solo correos validados.
+
+**El arreglo** (`splitLeadsFinderItems`): si la búsqueda pidió solo `validated` y un correo vuelve sin estado, cuenta como validado. Si el actor algún día manda el estado, se usa ese.
+
+**Lo que ya cubren las pruebas de la ruta:** la búsqueda nunca entrega al navegador el correo, el teléfono ni el LinkedIn personal. Solo dice si los hay.

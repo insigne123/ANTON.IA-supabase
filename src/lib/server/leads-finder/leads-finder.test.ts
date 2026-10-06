@@ -141,3 +141,13 @@ test('Apify errors say whether the run may have charged, without Apify\'s own te
   await assert.rejects(run(201, { not: 'a list' }), /no entregó una lista/);
   await assert.rejects(searchLeadsFinder(search({ titles: ['x'] }), { token: undefined, fetch: globalThis.fetch }), /APIFY_TOKEN/);
 });
+
+test('the actor does not echo the email status: an email from a validated-only search counts as validated, nothing else does', () => {
+  const { email_status: _status, ...withoutStatus } = ITEM as Record<string, unknown>;
+  const [validated] = splitLeadsFinderItems([withoutStatus], ['validated']);
+  assert.equal(validated.contact.emailStatus, 'validated');
+  // Without that filter, or without an email, the status stays unknown; a status the actor does send is kept.
+  assert.equal(splitLeadsFinderItems([withoutStatus])[0].contact.emailStatus, null);
+  assert.equal(splitLeadsFinderItems([{ ...withoutStatus, email: null }], ['validated'])[0].contact.emailStatus, null);
+  assert.equal(splitLeadsFinderItems([{ ...withoutStatus, email_status: 'not_validated' }], ['validated'])[0].contact.emailStatus, 'not_validated');
+});
