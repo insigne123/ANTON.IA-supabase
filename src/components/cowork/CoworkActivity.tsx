@@ -25,7 +25,11 @@ function stepsFrom(events: CoworkEvent[]): Step[] {
     }
     if (event.kind === 'artifact.created') {
       const name = typeof event.payload?.name === 'string' ? event.payload.name : 'archivo';
-      steps.push({ key: String(event.sequence), label: `Generó ${name}`, detail: null, icon: 'file', agent: null });
+      // A code artifact is the Designer's page, named by its title; any other is a file of the run.
+      const title = event.payload?.kind === 'code' && typeof event.payload.title === 'string' ? event.payload.title : null;
+      steps.push(title
+        ? { key: String(event.sequence), label: `Diseñó «${title}»`, detail: null, icon: 'chart', agent: 'Diseñadora' }
+        : { key: String(event.sequence), label: `Generó ${name}`, detail: null, icon: 'file', agent: null });
     }
   }
   return steps;
@@ -215,7 +219,8 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
   const expandable = steps.length > 0 || Boolean(plan) || (agents.length > 0 && !active);
   const icons = [...new Set(steps.map(step => step.icon))].slice(0, 3);
   const reads = coworkReadEvents(events).length;
-  const files = steps.length - reads;
+  const designs = steps.filter(step => step.agent === 'Diseñadora' && step.label.startsWith('Diseñó')).length;
+  const files = steps.length - reads - designs;
   // «Escribió 3 correos»: the Writer's last step says what it wrote (nothing when it gave up).
   const wrote = agents.find(row => row.agent === 'writer' && row.state === 'done' && row.outcome !== 'skipped')?.label || '';
   // «Revisó la respuesta»: the judge read it before it was shown (nothing when it could not). Whether
@@ -224,6 +229,7 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
   const parts = [
     plan ? `Siguió un plan de ${plan.length} pasos` : '',
     reads ? `hizo ${reads} ${reads === 1 ? 'consulta' : 'consultas'}` : '',
+    designs ? `diseñó ${designs === 1 ? 'un artefacto' : `${designs} artefactos`}` : '',
     files ? `generó ${files} ${files === 1 ? 'archivo' : 'archivos'}` : '',
     wrote ? wrote.charAt(0).toLocaleLowerCase('es') + wrote.slice(1) : '',
     reviewed ? 'revisó la respuesta' : '',

@@ -251,7 +251,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         const made = await design(brief, { caseId: entry.id, request: entry.request, userContext, data, previous });
         result.artifact = { brief, title: made.output.title, html: made.html, bytes: made.bytes, attempts: made.attempts, seconds: Math.round((Date.now() - started) / 100) / 10,
           tables: Object.entries(data.tables).map(([name, table]) => ({ name, rows: table.total })) };
-        return { reply: made.output.reply, document: null, blocks: null, question: made.output.question, suggestions: made.output.suggestions };
+        return { reply: made.output.reply, document: null, blocks: null, question: null, suggestions: made.output.suggestions };
       } } : {}),
       ...(judge ? { judge: async (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => {
         const judgement = await judge(answer, observations, { caseId: entry.id, request: entry.request, userContext,

@@ -99,6 +99,7 @@ export function coworkDesignerTurn(deps: {
       tables: Object.entries(data.tables).map(([table, value]) => ({ name: table as CoworkArtifactTableName, label: value.label, rows: value.total, truncated: value.truncated })),
     });
     await step({ agent: 'designer', state: 'done', label: `${version > 1 ? `Versión ${version} de` : 'Listo:'} «${result.output.title}»` });
-    return { reply: result.output.reply, document: null, blocks: null, question: result.output.question, suggestions: result.output.suggestions };
+    // The artifact is the whole answer: no closing question, its chips carry what follows.
+    return { reply: result.output.reply, document: null, blocks: null, question: null, suggestions: result.output.suggestions };
   };
 }

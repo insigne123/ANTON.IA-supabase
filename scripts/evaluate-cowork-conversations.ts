@@ -198,7 +198,8 @@ async function main() {
           const response = await generateStructuredWithTelemetry({ schema: coworkDesignerOutputSchema, systemPrompt, prompt, provider: 'openai', openAiModel: designerModel,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 60000 });
           usage.push(coworkModelUsage(response.telemetry));
-          decisions.push({ agent: 'designer', attempt, title: response.data.title, reply: response.data.reply, bytes: response.data.js.length + response.data.html.length + response.data.css.length });
+          decisions.push({ agent: 'designer', attempt, title: response.data.title, reply: response.data.reply, suggestions: response.data.suggestions,
+            bytes: response.data.js.length + response.data.html.length + response.data.css.length });
           return response.data;
         },
       }) : undefined;

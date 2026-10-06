@@ -21,7 +21,12 @@ Sin el flag, `artifact.create` no existe: el coordinador no lo ve en sus instruc
    - un resumen calculado en el servidor: cuántas filas tiene cada etapa o estado, sumas y rango de fechas;
    - cinco filas cortas de muestra.
 
-   Escribe el `html`, el `css` y el `js`, la respuesta para el chat, la pregunta final y las respuestas sugeridas. Usa el rol `writer` del presupuesto, con hasta 6.000 tokens de salida.
+   Escribe el `html`, el `css` y el `js`, la respuesta para el chat y las respuestas sugeridas. Usa el rol `writer` del presupuesto, con hasta 6.000 tokens de salida.
+
+   - **La respuesta del chat:** abre con la conclusión que muestran los datos, con cifras del resumen que el tablero también muestra. En una versión nueva abre con qué cambió y, si era un error, con qué lo causaba y cómo quedó.
+   - **Sin pregunta final:** el artefacto es la respuesta. El paso siguiente va como la primera respuesta sugerida, escrita como pedido y posible con esos datos («Busca los correos de los 3 contactos sin correo»).
+
+     En las mediciones, el juez castigaba la pregunta de cierre después de un tablero («¿Apruebas buscar correos?») como un paso no pedido.
 3. **Revisión del código:** `buildCoworkArtifactDocument` lo revisa (3a). Si lo rechaza, la Diseñadora recibe los problemas y su código y lo corrige **una vez**, siempre que quede tiempo en el turno. Si vuelve a fallar:
    - antes de la última decisión, el coordinador se entera y responde en el chat con una tabla o con cifras;
    - en la última decisión, el turno dice que no pudo y ofrece intentarlo de nuevo con un clic.
@@ -32,7 +37,10 @@ Sin el flag, `artifact.create` no existe: el coordinador no lo ve en sus instruc
    - las tablas, con cuántas filas trae cada una.
 
    El código va aparte, en `….code.json`. Ese archivo nunca se registra ni se sirve: solo lo lee la Diseñadora para hacer la versión siguiente.
-5. **En pantalla:** el chat muestra la respuesta y una tarjeta compacta del artefacto («Artefacto · versión N · Pipeline (36 filas)»). Al terminar el turno, el lienzo lo abre solo.
+5. **En pantalla:**
+   - el chat muestra la respuesta y una tarjeta compacta del artefacto («Artefacto · versión N · Pipeline (36 filas)»);
+   - la línea de actividad dice «Diseñó un artefacto»;
+   - al terminar el turno, el lienzo lo abre solo.
 
 ## Los datos (`artifact-data.ts`)
 
@@ -104,9 +112,36 @@ node --loader ./scripts/ts-test-loader.mjs scripts/judge-cowork-conversations.ts
   - cambio pedido en el chat;
   - «Arreglarlo».
 
-## Resultados con el modelo real
+## Resultados con el modelo real (6 oct 2026)
 
-Ver «Medición» en la descripción del PR. Los números de cada ronda quedan en `docs/cowork-plan12-ronda-2.md`.
+**Configuración:** coordinador y Diseñadora con `gpt-6-luna`, juez `gpt-6-sol`. Siete casos: `ur-tablero-mes`, `ur-pipeline-grafico` y los cinco `art-*`. La medición final repite cada uno tres veces (21 turnos).
+
+| | Primera prueba (3 pedidos visuales × 2) | Segunda (7 casos × 2) | Final (7 casos × 3) |
+|---|---|---|---|
+| Artefactos que se dibujan sin errores | 4/4 | 14/14 | 20/20 |
+| … a la primera, sin corrección | 4/4 | 13/14 | 20/20 |
+| Sin desborde a 390 px y axe limpio en claro y oscuro | 4/4 | 14/14 | 20/20 |
+| Verificaciones | — | 120/120 | 181/183 |
+| Juez: buena / mejorable / mala | 0 / 0 / 6 | 10 / 2 / 2 | 20 / 1 / 0 |
+| Fricción media (1 a 5) | 2,0 | 3,9 | 4,95 |
+| Duración del turno (mediana) | 24 s | 20 s | 24,6 s (la Diseñadora, 19,7 s) |
+
+- **Turno sin artefacto:** en la medición final, 1 de los 21 turnos lo respondió en el chat con una tabla, y el juez lo calificó «buena».
+- **Las 2 verificaciones que fallaron** eran respuestas sugeridas con etiquetas de más de 40 caracteres, que el chat descarta. Ahora se acortan en una palabra (`coworkDesignerSuggestions`, con su prueba).
+- **Gasto de la medición final:** 44 llamadas, unos 667.000 tokens de entrada (93 % en caché) y 48.000 de salida.
+
+### Lo que se corrigió en el camino
+
+Cada fila es una medición con el modelo real.
+
+| Problema | Arreglo |
+|---|---|
+| El tablero del mes mostraba «1 al 6 de octubre»: contaba desde la fecha del navegador y no desde la de los datos | `antonia.meta.today`, `agg.inMonth` y `agg.since` |
+| Estados en inglés («draft») | Los datos llegan en español |
+| La respuesta del chat no decía la conclusión, o inventaba que «ninguno avanzó» | Resumen de cada tabla calculado en el servidor, y solo cifras que el tablero también muestra |
+| «Arreglarlo» no decía qué falló | El encargo de una edición pide abrir con qué cambió o qué causaba el error |
+| La pregunta final después de entregar el tablero («¿Apruebas buscar correos?») era la principal fricción para el juez | Sin pregunta final: el paso siguiente va en la primera respuesta sugerida |
+| «Nuevos» se partía en la tabla y aparecía la columna auxiliar del orden de etapas | CSS de las celdas y regla de columnas |
 
 ## Lo que falta (3c)
 

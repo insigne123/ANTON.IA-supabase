@@ -239,7 +239,8 @@ const answerOk = (result: CorpusTurnResult) => !result.failed;
 const shownText = (result: CorpusTurnResult) => (result.proposal || result.search) && result.note ? result.note : result.reply;
 const noJargon = (result: CorpusTurnResult) => coworkAnswerIssues(shownText(result), { expectNextStep: false })
   .every(issue => !['jargon', 'uuid', 'format', 'timezone'].includes(issue.code));
-const nextStep = (result: CorpusTurnResult) => Boolean(result.proposal || result.search)
+// A code artifact is the whole answer (Plan 12, 3b): it closes without a question, its chips offer what follows.
+const nextStep = (result: CorpusTurnResult) => Boolean(result.proposal || result.search || result.artifact)
   || !coworkAnswerIssues(result.reply).some(issue => issue.code === 'next_step');
 const explained = (result: CorpusTurnResult) => !(result.proposal || result.search) || Boolean(result.note && result.note.length > 20);
 // A plain answer offers at least one quick reply, or the options that answer its question (V5); a proposal already has its card.

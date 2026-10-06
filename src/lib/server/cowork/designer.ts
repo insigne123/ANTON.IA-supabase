@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { coworkSuggestionSchema } from '@/lib/cowork/contracts';
+import { COWORK_SUGGESTION_LIMITS, coworkSuggestionSchema } from '@/lib/cowork/contracts';
 import type { CoworkDesignBrief } from '@/lib/cowork/design-brief';
 import { buildCoworkArtifactDocument, type CoworkArtifactCodeIssue, type CoworkArtifactData, type CoworkCodeArtifact } from './code-artifact';
 import { coworkArtifactDataPreview } from './artifact-data';
@@ -18,7 +18,6 @@ export const coworkDesignerOutputSchema = z.object({
   html: z.string().max(60_000),
   css: z.string().max(40_000),
   js: z.string().max(120_000),
-  question: z.string().trim().min(1).max(400).nullable(),
   suggestions: z.array(coworkSuggestionSchema).min(1).max(3),
 }).strict();
 export type CoworkDesignerOutput = z.infer<typeof coworkDesignerOutputSchema>;
@@ -47,8 +46,8 @@ export const COWORK_DESIGNER_RULES = [
   API,
   'Si te dan previous (el código de una versión anterior) y change, edítalo: aplica solo el cambio pedido (no agregues gráficos ni secciones que nadie pidió), conserva lo que funciona y devuelve el código completo de la versión nueva. Si change trae un error, búscalo en previous, corrígelo en su causa y revisa que el mismo error no pueda repetirse con otros datos (tablas vacías, columnas null).',
   'Salida: title (el título del artefacto, específico: qué y de qué período o para quién); html, css (solo lo que las clases no resuelven; puede ir vacío) y js.',
-  'reply: 2 a 4 frases para el chat, en palabras del usuario (di «el tablero», «el gráfico» o «la ficha»; nunca «artefacto», ni nombres de tablas o columnas, ni estados en inglés). En un tablero nuevo, primero la conclusión principal que muestran los datos, con cifras que estén en data (rows, total y summary) y ninguna otra: «Tus 4 contactos están en Nuevos: ninguno avanzó de etapa» o «Aún no hay envíos registrados este mes»; luego qué trae y cómo usarlo (filtros, ordenar, «Ver datos»). En una versión nueva (previous), primero qué cambiaste; si change traía un error, qué lo causaba y cómo quedó resuelto («El error venía de leer los montos cuando la tabla no los trae; ahora el gráfico cuenta contactos y no falla»).',
-  'question: en un tablero nuevo, la acción con aprobación que más acerca su objetivo según lo que muestran los datos (buscar prospectos nuevos, buscar el correo de contactos, crear una campaña, investigar a alguien, invitar por LinkedIn) o una decisión que solo el usuario puede tomar; nunca un cambio opcional al tablero. En una versión nueva (previous), null: el cambio es la respuesta. suggestions: 1 a 3 respuestas que el usuario tocaría; con question, la primera dice que sí a question; las otras (o todas, sin question) pueden pedir un cambio al tablero.',
+  'reply: 2 a 4 frases para el chat, en palabras del usuario (di «el tablero», «el gráfico» o «la ficha»; nunca «artefacto», ni nombres de tablas, columnas o variables, ni estados en inglés). Describe solo lo que el tablero muestra y permite hacer, y afirma solo lo que los datos dicen («Tus 4 contactos están en Nuevos», no «ninguno avanzó nunca»). En un tablero nuevo, primero la conclusión principal, con cifras que estén en data (rows, total y summary), que el tablero también muestre, y ninguna otra; luego qué trae y cómo usarlo, nombrando solo los controles que pusiste (filtros, «Ver datos»). Si es para mostrárselo a alguien, di que «Descargar», arriba del lienzo, lo baja como una página que se abre sin conexión. En una versión nueva (previous), primero qué cambiaste; si change traía un error, qué lo causaba y cómo quedó resuelto, en palabras simples («El tablero buscaba los contactos en un lugar donde no estaban; ahora los lee de tu pipeline y, si no hay, lo dice»).',
+  'Sin pregunta final: el tablero es la respuesta. suggestions: 1 a 3 respuestas que el usuario tocaría: label corto (hasta 40 caracteres, «Buscar sus correos») y message, el pedido completo. La primera, el paso siguiente que más acerca su objetivo y que los datos permiten (buscar prospectos nuevos, buscar el correo de los contactos que no lo tienen, crear una campaña con los que sí, investigar a alguien, invitar por LinkedIn a quienes tienen perfil), con su cifra cuando la hay: «Busca los correos de los 3 contactos sin correo». Las otras pueden pedir un cambio al tablero.',
 ].join('\n\n');
 
 /** Two artifacts made with the runtime, as the Designer's reference (code-artifact-examples.ts). */
@@ -69,6 +68,10 @@ export function coworkDesignerPrompt(input: { brief: CoworkDesignBrief; request:
     data: coworkArtifactDataPreview(input.data),
     userContext: input.userContext ?? null,
     previous: input.previous ?? null,
+    // An edit says first what changed (and, for an error, its cause and fix): it is the whole answer of the turn.
+    ...(input.previous ? { edit: input.brief.change && /error|fall|undefined|cannot|null/i.test(input.brief.change)
+      ? 'Arreglo: la primera frase de reply dice qué causaba el error y cómo quedó resuelto, en palabras simples; luego qué muestra el tablero.'
+      : 'Cambio: la primera frase de reply dice qué cambiaste; luego qué muestra el tablero. No agregues nada que no se pidió.' } : {}),
     ...(input.issues?.length ? {
       fix: {
         instruction: 'Tu código anterior no pasó la revisión. Corrige cada problema y devuelve el código completo otra vez.',
@@ -80,6 +83,19 @@ export function coworkDesignerPrompt(input: { brief: CoworkDesignBrief; request:
 }
 
 export type CoworkDesignResult = { output: CoworkDesignerOutput; html: string; bytes: number; attempts: number };
+
+/** A chip's label longer than the chat shows is cut at a word (its message keeps the whole request), instead of losing the chip. */
+export function coworkDesignerSuggestions(suggestions: CoworkDesignerOutput['suggestions']) {
+  const max = COWORK_SUGGESTION_LIMITS.label;
+  return suggestions.map(chip => {
+    const label = chip.label.trim();
+    if (label.length <= max) return chip;
+    let cut = label.slice(0, max + 1).replace(/\s+\S*$/, '').replace(/[\s,;:.]+$/, '');
+    // Never ending on a word that needs the next one («…contactos sin»).
+    while (/\s(?:a|al|con|de|del|el|en|la|las|lo|los|para|por|sin|su|sus|un|una|y|o)$/i.test(cut)) cut = cut.replace(/\s+\S+$/, '');
+    return { label: cut.length >= 8 ? cut : label.slice(0, max), message: chip.message.trim() || label };
+  });
+}
 
 /**
  * Writes the artifact: one call, and one more to fix it if the check refused the code. Throws when the
@@ -99,7 +115,7 @@ export async function runCoworkDesigner(input: {
       prompt: coworkDesignerPrompt({ brief: input.brief, request: input.request, data: input.data, previous: input.previous, userContext: input.userContext, issues, rejected }) }));
     const code = { html: output.html, css: output.css, js: output.js };
     const built = buildCoworkArtifactDocument({ title: output.title, code, data: input.data, generatedAt: input.generatedAt });
-    if (built.ok) return { output, html: built.html, bytes: built.bytes, attempts: attempt };
+    if (built.ok) return { output: { ...output, suggestions: coworkDesignerSuggestions(output.suggestions) }, html: built.html, bytes: built.bytes, attempts: attempt };
     issues = built.issues;
     rejected = code;
   }

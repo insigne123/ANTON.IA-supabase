@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { CoworkDesignBrief } from '@/lib/cowork/design-brief';
 import { COWORK_ARTIFACT_EXAMPLES, coworkExamplePipeline } from './code-artifact-examples';
-import { COWORK_DESIGNER_RULES, coworkDesignerPrompt, runCoworkDesigner, type CoworkDesignerOutput } from './designer';
+import { COWORK_DESIGNER_RULES, coworkDesignerPrompt, coworkDesignerSuggestions, runCoworkDesigner, type CoworkDesignerOutput } from './designer';
 import { coworkDesignerTurn, type CoworkArtifactStore } from './designer-run';
 import type { CoworkCodeArtifact } from './code-artifact';
 
@@ -10,7 +10,7 @@ const brief: CoworkDesignBrief = { title: 'Pipeline por etapa', goal: 'Ver cuán
 const data = coworkExamplePipeline();
 const good: CoworkDesignerOutput = {
   title: 'Pipeline por etapa', reply: 'Armé el tablero del pipeline con tus contactos guardados.', ...COWORK_ARTIFACT_EXAMPLES[0].code,
-  question: '¿Lo comparo con el mes pasado?', suggestions: [{ label: 'Sí, compáralo', message: 'Sí, compáralo con el mes pasado' }],
+  suggestions: [{ label: 'Busca sus correos', message: 'Busca los correos de los 3 contactos sin correo' }],
 };
 const bad: CoworkDesignerOutput = { ...good, js: `${good.js}\nfetch('https://example.com');` };
 
@@ -41,6 +41,10 @@ test('the Designer’s rules forbid figures in the code and the prompt carries t
   const prompt = JSON.parse(coworkDesignerPrompt({ brief: { ...brief, previous: 'artifact-pipeline-por-etapa-v1.html', change: 'solo minería' }, request: 'solo minería', data, previous }));
   assert.deepEqual(prompt.previous, previous);
   assert.equal(prompt.brief.change, 'solo minería');
+  assert.match(prompt.edit, /^Cambio: la primera frase/);
+  const fix = JSON.parse(coworkDesignerPrompt({ brief: { ...brief, previous: 'artifact-pipeline-por-etapa-v1.html', change: 'falló con «x is undefined»' }, request: 'x', data, previous }));
+  assert.match(fix.edit, /^Arreglo: la primera frase de reply dice qué causaba el error/);
+  assert.equal(JSON.parse(coworkDesignerPrompt({ brief, request: 'x', data })).edit, undefined);
 });
 
 function memoryStore(previous: Record<string, CoworkCodeArtifact> = {}, versions: Record<string, number> = {}) {
@@ -76,7 +80,8 @@ test('a new artifact is version 1 of its key: kept as a file of the run, recorde
   const { deps, steps, reserved } = turnDeps(store);
   const answer = await coworkDesignerTurn(deps)(brief, []);
   assert.equal(answer.reply, good.reply);
-  assert.equal(answer.question, good.question);
+  assert.equal(answer.question, null);
+  assert.deepEqual(answer.suggestions, good.suggestions);
   assert.equal(answer.document, null);
   assert.deepEqual(saved.map(file => file.name), ['artifact-pipeline-por-etapa-v1.html']);
   assert.deepEqual(saved[0].code, COWORK_ARTIFACT_EXAMPLES[0].code);
@@ -96,6 +101,10 @@ test('a change keeps the key of the previous artifact and makes its next version
   const { deps, steps } = turnDeps(store, { ...good, title: 'Pipeline de minería' });
   await coworkDesignerTurn(deps)({ ...brief, previous: 'artifact-pipeline-por-etapa-v2.html', change: 'solo minería' }, []);
   assert.deepEqual(saved.map(file => file.name), ['artifact-pipeline-por-etapa-v3.html']);
+  // A new version is the whole answer too: no closing question, its chips carry what follows.
+  const edited = await coworkDesignerTurn(turnDeps(memoryStore(previous, { 'pipeline-por-etapa': 3 }).store).deps)({ ...brief, previous: 'artifact-pipeline-por-etapa-v2.html', change: 'solo minería' }, []);
+  assert.equal(edited.question, null);
+  assert.deepEqual(edited.suggestions, good.suggestions);
   assert.deepEqual(steps, ['Cambiando «Pipeline por etapa»', 'Versión 3 de «Pipeline de minería»']);
   await assert.rejects(coworkDesignerTurn(deps)({ ...brief, previous: 'artifact-otro-v1.html', change: 'x' }, []), /No encontré el artefacto/);
 });
@@ -105,4 +114,14 @@ test('without time for the call the Designer does not start it', async () => {
   const { deps } = turnDeps(store);
   await assert.rejects(coworkDesignerTurn({ ...deps, timeLeft: () => 5_000 })(brief, []), /time exhausted/);
   assert.equal(saved.length, 0);
+});
+
+test('a chip label too long for the chat is cut at a word, keeping the whole request in its message', () => {
+  const [long, short] = coworkDesignerSuggestions([
+    { label: 'Busca los correos de los 3 contactos sin correo', message: 'Busca los correos de los 3 contactos sin correo' },
+    { label: 'Solo minería', message: 'Deja solo minería' },
+  ]);
+  assert.equal(long.label, 'Busca los correos de los 3 contactos');
+  assert.equal(long.message, 'Busca los correos de los 3 contactos sin correo');
+  assert.deepEqual(short, { label: 'Solo minería', message: 'Deja solo minería' });
 });

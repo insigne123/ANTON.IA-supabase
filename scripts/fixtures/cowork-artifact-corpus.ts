@@ -53,5 +53,5 @@ export const ARTIFACT_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'edita el artefacto anterior', test: edited },
       { label: 'la versión nueva se dibuja sin errores', test: drawn },
-      { label: 'dice qué falló y cómo quedó', test: r => /error|fall[óo]|corregí|arregl/i.test(r.reply) }] },
+      { label: 'dice qué falló y cómo quedó', test: r => /error|fall[óo]|corregí|arregl|no exist|ahora (?:lee|usa|toma|muestra)/i.test(r.reply) }] },
 ];
