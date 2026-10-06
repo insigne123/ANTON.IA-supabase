@@ -30,6 +30,17 @@ const nextConfig = {
     'mammoth', // lectura de Word
   ],
 
+  // Code artifacts (Plan 12): the Cowork page frames them sandboxed and allows frames only from
+  // itself, so an artifact cannot navigate its own frame out of the app. Kept equal to
+  // COWORK_ARTIFACT_FRAME_SRC in src/lib/cowork/code-artifact-frame.ts (a test checks it).
+  async headers() {
+    const coworkFrames = [{ key: 'Content-Security-Policy', value: "frame-src 'self' https://login.microsoftonline.com https://accounts.google.com" }];
+    return [
+      { source: '/cowork', headers: coworkFrames },
+      { source: '/cowork/:path*', headers: coworkFrames },
+    ];
+  },
+
   async redirects() {
     return [
       {
