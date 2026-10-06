@@ -1,7 +1,7 @@
 'use client';
 
 import { PageHeader } from '@/components/page-header';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CampaignSequenceEditor } from './CampaignSequenceEditor';
 import { CampaignAudienceTable } from './CampaignAudienceTable';
 import { CampaignSteps } from './CampaignSteps';
@@ -15,6 +15,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
 import { describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
 import { firstSelection } from '@/lib/campaign-audience-selection';
+import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
+import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { profileService } from '@/lib/services/profile-service';
 import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 
 async function request(path: string, body?: unknown, method = 'POST') {
@@ -79,6 +82,24 @@ export function BulkCampaignWorkspace() {
       .catch(() => undefined);
     return () => { disposed = true; };
   }, []);
+  // What «Perfil» says the company offers starts the objective of every new campaign (the AI only knows the offer from it).
+  const [profileObjective, setProfileObjective] = useState('');
+  const objectivePending = useRef(false);
+  useEffect(() => {
+    let disposed = false;
+    profileService.getCurrentProfile().then(profile => { if (!disposed) setProfileObjective(campaignObjectiveFromProfile(mapProfileToForm(profile))); })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, []);
+  // A campaign started before «Perfil» loaded gets the objective when it arrives, unless the person already wrote one.
+  useEffect(() => {
+    if (!objectivePending.current || !profileObjective) return;
+    objectivePending.current = false;
+    if (!editing || campaign) return;
+    setDefinition(value => value.objective.trim() ? value : { ...value, objective: profileObjective });
+    // Only the arrival of «Perfil» matters here; editing and campaign are read as they are then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileObjective]);
 
   async function run(work: () => Promise<void>) {
     setBusy(true); setError(''); setFeedback('');
@@ -198,7 +219,7 @@ export function BulkCampaignWorkspace() {
       <TabsContent value="followups"><CampaignReviewInbox /></TabsContent>
       <TabsContent value="campaigns" className="space-y-5">
         {!editing ? <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { setDefinition({ ...initial(), provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { objectivePending.current = !profileObjective; setDefinition({ ...initial(), objective: profileObjective, provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
           {busy && <p role="status">Cargando campañas…</p>}
           {!busy && !items.length && !error && <div className="rounded-2xl border bg-card p-8"><h3 className="font-medium">Tu próxima conversación empieza aquí</h3><p className="mt-2 text-sm text-muted-foreground">Crea una campaña para tus leads nuevos o vuelve a contactar a quienes ya conoces.</p></div>}
           <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.definition.emails.length} destinatarios · {item.definition.messages.length} correos por persona</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>
@@ -252,7 +273,7 @@ export function BulkCampaignWorkspace() {
             </>}
             {step === 1 && <CampaignSequenceEditor definition={definition} messageIndex={messageIndex} busy={busy} reviseMode={reviseMode}
               isLocked={reviseLocked} onSelect={setMessageIndex} onChange={change} onBusyChange={setBusy}
-              onAssist={input => request('/assist', input)} onSave={() => void run(() => save())}
+              onAssist={input => request('/assist', input)} onSave={() => void run(() => save())} objectiveFromProfile={profileObjective}
               onBack={() => { if (reviseMode) { setReviseMode(false); setStep(2); } else setStep(0); }} />}
             {step === 2 && campaign && <>
               <h2 className="text-xl font-semibold">{campaign.definition.name}</h2><p className="text-sm text-muted-foreground">{plural(campaign.recipients.length, 'destinatario', 'destinatarios')} · {plural(campaign.definition.messages.length, 'correo', 'correos')} por persona · {plural(campaign.recipients.length * campaign.definition.messages.length, 'correo', 'correos')} en total. Revisa cómo le llega a cada persona antes de aprobar.</p>

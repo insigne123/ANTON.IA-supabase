@@ -21,12 +21,14 @@ type Props = {
   onAssist: (input: unknown) => Promise<any>;
   onBack: () => void;
   onSave: () => void;
+  /** The objective drafted from «Perfil» for a new campaign; while the field still holds it, the editor says where it came from. */
+  objectiveFromProfile?: string;
 };
 const label = (index: number) => index === 0 ? 'Primer correo' : `Seguimiento ${index}`;
 /** Follow-ups the AI writes when the person did not choose how many. */
 const DEFAULT_FOLLOW_UPS = 1;
 
-export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseMode, isLocked, onSelect, onChange, onBusyChange, onAssist, onBack, onSave }: Props) {
+export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseMode, isLocked, onSelect, onChange, onBusyChange, onAssist, onBack, onSave, objectiveFromProfile = '' }: Props) {
   const confirm = useConfirm();
   const [followUpCount, setFollowUpCount] = useState<number | null>(() =>
     reviseMode || definition.messages.length > 1 || definition.messages.some(value => value.subject.trim() || value.body.trim())
@@ -46,6 +48,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
   const scheduleValid = definition.messages.slice(1).every(value => Number.isInteger(value.delayDays) && value.delayDays >= 1 && value.delayDays <= 90);
   // Writing the emails by hand is choosing how many there are: the count is asked only to generate them with AI.
   const effectiveCount = followUpCount ?? (hasContent ? definition.messages.length - 1 : null);
+  const fromProfile = !reviseMode && Boolean(objectiveFromProfile) && definition.objective === objectiveFromProfile;
   const canSave = effectiveCount !== null && scheduleValid && definition.messages.every(value => CampaignMessageSchema.safeParse(value).success);
 
   useEffect(() => { setInstruction(''); setProposal(null); setMessageError(''); setMessageFeedback(''); }, [messageIndex]);
@@ -110,12 +113,14 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
     </header>
     <div className="space-y-3">
       <Label htmlFor="objective">¿Qué quieres conseguir con la campaña?</Label>
-      <Textarea id="objective" maxLength={2000} disabled={busy} value={definition.objective} onChange={event => { onChange({ objective: event.target.value }); invalidateSequence(); setProposal(null); }} placeholder="Describe tu servicio, qué ofreces y qué quieres que haga la persona al leer el correo." />
+      <Textarea id="objective" maxLength={2000} disabled={busy} value={definition.objective} onChange={event => { onChange({ objective: event.target.value }); invalidateSequence(); setProposal(null); }} placeholder="Describe tu servicio, qué ofreces y qué quieres que haga la persona al leer el correo."
+        aria-describedby={fromProfile ? 'objective-help' : undefined} />
+      {fromProfile && <p id="objective-help" className="text-sm text-muted-foreground">Lo tomamos de tu Perfil. Agrega qué quieres que haga la persona al leerlo, por ejemplo, agendar una reunión.</p>}
       {!reviseMode && <>
         <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-2"><Label htmlFor="follow-up-count">¿Cuántos seguimientos quieres?</Label>
             <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={effectiveCount ?? ''} onChange={event => void chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
-              <option value="" disabled>Elige antes de generar</option>
+              <option value="" disabled>Sin elegir: correo inicial + 1 seguimiento</option>
               {[0, 1, 2, 3, 4].map(count => <option key={count} value={count}>{count === 0 ? 'Solo el correo inicial' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'} + correo inicial`}</option>)}
             </select>
           </div>

@@ -195,7 +195,8 @@ export function TASKS(ctx, { fixtures }) {
         { target: { role: 'button', name: 'Buscar con filtros' } },
         { target: { role: 'button', name: 'Seleccionar todos' }, skipIf: async page => /\b[1-9]\d* seleccionados?\b/.test(await page.getByRole('status').filter({ hasText: 'seleccionado' }).first().innerText({ timeout: 2000 })) },
         { target: { role: 'button', name: 'Continuar a correos' } },
-        { target: { label: '¿Qué quieres conseguir con la campaña?' }, fill: 'Una reunión de 15 minutos para mostrar AXIS' },
+        // The offer comes from «Perfil»; the person adds what to ask for.
+        { target: { label: '¿Qué quieres conseguir con la campaña?' }, fill: '\nUna reunión de 15 minutos para mostrar AXIS', append: true },
         { target: { role: 'button', name: 'Generar secuencia con IA' } },
         { target: { role: 'button', name: 'Guardar y revisar correos' } },
         { target: { role: 'button', name: 'Aprobar campaña' } },
@@ -209,7 +210,12 @@ export function TASKS(ctx, { fixtures }) {
         { url: '**/api/campaigns/bulk', method: 'POST', respond: body => ({ campaign: campaignFrom(body, 'draft') }) },
         { url: '**/api/campaigns/bulk/usab-camp-1', method: 'POST', respond: body => ({ campaign: { ...lastCampaign, status: body?.action === 'approve' ? 'approved' : lastCampaign.status, approved_at: body?.action === 'approve' ? new Date().toISOString() : null, revision: 2 } }) },
       ],
-      done: page => page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 }),
+      done: async (page, { calls }) => {
+        await page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 });
+        // The AI got the offer from «Perfil» and what the person added.
+        const objective = calls.find(call => call.url.endsWith('/api/campaigns/bulk/assist'))?.body?.objective || '';
+        if (!/^Ofrecemos: /.test(objective) || !/reunión de 15 minutos/.test(objective)) throw new Error('el objetivo no partió de la oferta de Perfil');
+      },
     },
     {
       id: 'oportunidades', module: 'Prospectar', title: 'Ver las licitaciones', start: '/dashboard', ideal: 2,
