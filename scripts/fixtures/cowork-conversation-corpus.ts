@@ -119,7 +119,7 @@ export function corpusRead(action: string, input: string): unknown {
       policy: { stopOnUnsubscribe: true, doNotContact: 'do_not_contact bloquea el contacto' } };
     case 'research.get_existing':
       return input === LEAD.carlos
-        ? { scope: 'own_research', availability: 'available', research: { snapshotId: id(51), status: 'insufficient_evidence', capturedAt: '2026-09-25T13:17:16Z', sources: [], findings: [] } }
+        ? { scope: 'own_research', availability: 'available', research: { snapshotId: id(51), status: 'insufficient_evidence', capturedAt: '2026-09-25T13:07:16Z', sources: [], findings: [] } }
         : { scope: 'own_research', availability: 'none' };
     case 'compliance.check':
       return { lead: { id: input }, verdict: input === LEAD.jose ? 'allow' : 'block', reasons: input === LEAD.jose ? [] : ['missing_email'] };
