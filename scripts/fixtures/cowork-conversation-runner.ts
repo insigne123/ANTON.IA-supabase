@@ -25,7 +25,7 @@ import {
 import { normalizeLinkedinProfileUrl } from '../../src/lib/linkedin-url';
 import type { CoworkArtifactTableName, CoworkDesignBrief } from '../../src/lib/cowork/design-brief';
 import type { CoworkArtifactData, CoworkArtifactTable, CoworkCodeArtifact } from '../../src/lib/server/cowork/code-artifact';
-import { coworkArtifactActivity, coworkArtifactCampaigns, coworkArtifactContacts, coworkArtifactPipeline } from '../../src/lib/server/cowork/artifact-data';
+import { coworkArtifactActivity, coworkArtifactCampaigns, coworkArtifactContacts, coworkArtifactOpportunities, coworkArtifactPipeline } from '../../src/lib/server/cowork/artifact-data';
 import type { CoworkDesignResult } from '../../src/lib/server/cowork/designer';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
@@ -58,7 +58,12 @@ export function corpusArtifactData(read: (action: string, input: string) => unkn
     else if (name === 'campaigns') out.campaigns = coworkArtifactCampaigns(items(read('campaigns.list', ''), 'campaigns').map(campaign => ({
       definition: { name: campaign.name }, status: campaign.status, recipients: Array.from({ length: Number(campaign.recipients) || 0 }), created_at: campaign.createdAt,
     })));
-    else throw new Error('Esta cuenta no tiene «Oportunidades»: el artefacto no puede usar esa tabla.');
+    else {
+      // A world with «Oportunidades» hands its items as the store lists them (artifact.opportunities).
+      const found = read('artifact.opportunities', '') as Parameters<typeof coworkArtifactOpportunities>[0] | null;
+      if (!Array.isArray(found?.tenders)) throw new Error('Esta cuenta no tiene «Oportunidades»: el artefacto no puede usar esa tabla.');
+      out.opportunities = coworkArtifactOpportunities(found);
+    }
   }
   return { tables: out, currency: 'CLP', timeZone: 'America/Santiago' };
 }

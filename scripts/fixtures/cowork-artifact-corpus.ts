@@ -3,7 +3,8 @@
 // production fixture world of the corpus; without it they measure how Cowork answers the same requests in the chat.
 import { coworkArtifactChangeMessage, coworkArtifactFixMessage } from '../../src/lib/cowork/code-artifact-frame';
 import { COWORK_ARTIFACT_EXAMPLES } from '../../src/lib/server/cowork/code-artifact-examples';
-import { CORPUS_COMMON_CHECKS, type CorpusCase, type CorpusHistoryTurn, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { CORPUS_COMMON_CHECKS, corpusRead, type CorpusCase, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
+import { OPPORTUNITIES_READ, OPPORTUNITY_HIRING, OPPORTUNITY_PROJECTS, OPPORTUNITY_TENDERS } from './cowork-opportunities-corpus';
 
 const at = '2026-09-25T13:00:00Z';
 const PIPELINE = { name: 'artifact-pipeline-por-etapa-v1.html', title: 'Pipeline por etapa' };
@@ -19,6 +20,71 @@ const drawn = (result: CorpusTurnResult) => Boolean(result.artifact) && result.a
 /** Without --artifacts the same request is answered in the chat: a table, figures or a document count. */
 const visual = (result: CorpusTurnResult) => Boolean(result.artifact) || Boolean(result.document)
   || (result.blocks || []).some(block => ['metrics', 'chart', 'table'].includes(block.type));
+
+// A fuller account for the dashboards of 3c: 24 saved contacts in 8 companies of 4 industries, what was sent to 16 of them
+// (with replies and bounces) and three campaigns. Made up: the app is for any company.
+const COMPANIES: Array<[string, string, string]> = [
+  ['Constructora Andes', 'Construcción', 'constructoraandes.cl'], ['Inmobiliaria Pacífico', 'Construcción', 'inmopacifico.cl'],
+  ['Retail Andes', 'Retail', 'retailandes.cl'], ['Tiendas Sur', 'Retail', 'tiendassur.cl'],
+  ['Minera Centinela', 'Minería', 'centinela.cl'], ['Minera Sur', 'Minería', 'minerasur.cl'],
+  ['Grupo Expro', 'Servicios', 'grupoexpro.com'], ['Servicios Norte', 'Servicios', 'serviciosnorte.cl'],
+];
+const TITLES = ['Gerente de Personas', 'Jefe de Reclutamiento', 'Analista de Selección'];
+const NAMES = ['Carolina Vega', 'Rodrigo Fuentes', 'Paula Soto', 'Andrés Molina', 'Javiera Rojas', 'Tomás Pizarro', 'Daniela Muñoz', 'Felipe Araya',
+  'Camila Torres', 'Ignacio Reyes', 'Valentina Díaz', 'Matías Herrera', 'Francisca Lagos', 'Sebastián Castro', 'Constanza Paredes', 'Joaquín Bravo',
+  'Antonia Silva', 'Martín Ortega', 'Catalina Núñez', 'Diego Sepúlveda', 'Fernanda Ríos', 'Nicolás Cárdenas', 'Isidora Vidal', 'Benjamín Tapia'];
+const slug = (name: string) => name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '.');
+const RICH_LEADS = COMPANIES.flatMap(([company, industry, domain], c) => TITLES.map((title, p) => ({
+  id: `00000000-0000-4000-8000-${String(900 + c * 3 + p).padStart(12, '0')}`, name: NAMES[c * 3 + p], title, company, industry,
+  // Most have an email; the analysts of the last four companies do not. Half have a LinkedIn profile.
+  email: p === 2 && c >= 4 ? null : `${slug(NAMES[c * 3 + p])}@${domain}`,
+  linkedin_url: (c + p) % 2 === 0 ? `https://www.linkedin.com/in/${slug(NAMES[c * 3 + p]).replace('.', '-')}` : null,
+  status: 'saved', location: c % 2 === 0 ? 'Santiago, Chile' : 'Antofagasta, Chile', created_at: `2026-0${7 + (c % 2)}-${String(10 + p * 5).padStart(2, '0')}T12:00:00Z`,
+})));
+// Two emails to each of the first two people of each company (16 people, 32 sends), with replies and two bounces.
+const REPLIES: Record<string, [string, string]> = {
+  'Constructora Andes|0': ['2026-09-12T14:00:00Z', 'meeting_request'], 'Constructora Andes|1': ['2026-09-15T10:00:00Z', 'question'],
+  'Inmobiliaria Pacífico|0': ['2026-09-08T16:00:00Z', 'not_interested'], 'Minera Centinela|0': ['2026-09-18T11:00:00Z', 'interested'],
+  'Grupo Expro|0': ['2026-09-20T09:30:00Z', 'meeting_request'], 'Servicios Norte|1': ['2026-09-10T15:00:00Z', 'referral'],
+};
+const RICH_SENDS = COMPANIES.flatMap(([company], c) => [0, 1].flatMap(p => {
+  const lead = RICH_LEADS[c * 3 + p];
+  const reply = REPLIES[`${company}|${p}`];
+  const bounced = (c === 3 && p === 1) || (c === 5 && p === 0);
+  return [1, 2].map(step => ({
+    name: lead.name, company, provider: 'gmail', subject: step === 1 ? `Verificación de antecedentes en ${company}` : `Re: Verificación de antecedentes en ${company}`,
+    sent_at: `2026-0${step === 1 ? 8 : 9}-${String(4 + c * 3).padStart(2, '0')}T13:00:00Z`, status: bounced ? 'bounced' : 'sent',
+    replied_at: step === 2 && reply ? reply[0] : null, reply_intent: step === 2 && reply ? reply[1] : null, bounced_at: bounced && step === 1 ? '2026-08-05T13:05:00Z' : null,
+  })).filter(send => !(send.bounced_at === null && send.status === 'bounced'));
+}));
+const RICH_CAMPAIGNS = [
+  { id: '00000000-0000-4000-8000-000000000951', name: 'Construcción · RR. HH.', status: 'active', revision: 2, recipients: 6, createdAt: '2026-08-01T15:00:00Z' },
+  { id: '00000000-0000-4000-8000-000000000952', name: 'Minería y servicios', status: 'paused', revision: 1, recipients: 8, createdAt: '2026-08-20T15:00:00Z' },
+  { id: '00000000-0000-4000-8000-000000000953', name: 'Retail · segunda ola', status: 'draft', revision: 1, recipients: 4, createdAt: '2026-09-22T15:00:00Z' },
+];
+const words = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+/** The fuller account: its contacts, sends and campaigns; the rest of the world is the corpus's. */
+export const ARTIFACT_RICH_WORLD: CorpusWorld = {
+  savedEmails: RICH_LEADS.map(lead => lead.email).filter((email): email is string => Boolean(email)),
+  read: (action, input) => {
+    const term = words(input || '').trim();
+    const match = (values: unknown[]) => !term || values.some(value => words(String(value || '')).split(/\s+/).some(word => term.split(/\s+/).some(part => part.length > 2 && word.includes(part))));
+    if (action === 'leads.search') {
+      const items = RICH_LEADS.filter(lead => match([lead.name, lead.title, lead.company, lead.industry]));
+      return { items, returned: items.length, limit: 20, scope: 'own_saved_contacts', truncated: false, partial: false };
+    }
+    if (action === 'contacted.search') {
+      const items = RICH_SENDS.filter(send => match([send.name, send.company]));
+      return { items, returned: items.length, limit: 40, scope: 'organization_contacted', truncated: false };
+    }
+    if (action === 'campaigns.list') return { scope: 'own', campaigns: RICH_CAMPAIGNS };
+    if (action === 'opportunities.list') return OPPORTUNITIES_READ(input);
+    if (action === 'artifact.opportunities') return { hiring: OPPORTUNITY_HIRING, tenders: OPPORTUNITY_TENDERS, projects: OPPORTUNITY_PROJECTS };
+    return corpusRead(action, input);
+  },
+};
+const text = (result: CorpusTurnResult) => words(`${result.reply}\n${result.artifact?.render?.text || ''}`);
+const usesTables = (...names: string[]) => (result: CorpusTurnResult) => !result.artifact || names.every(name => result.artifact!.tables.some(table => table.name === name));
 
 export const ARTIFACT_CORPUS: CorpusCase[] = [
   { id: 'art-prospectos-filtro', title: 'Prospectos en una tabla que se filtra',
@@ -54,4 +120,32 @@ export const ARTIFACT_CORPUS: CorpusCase[] = [
       { label: 'edita el artefacto anterior', test: edited },
       { label: 'la versión nueva se dibuja sin errores', test: drawn },
       { label: 'dice qué falló y cómo quedó', test: r => /error|fall[óo]|corregí|arregl|no exist|ahora (?:lee|usa|toma|muestra)/i.test(r.reply) }] },
+  // 3c: the kinds of artifact the Designer had no example of.
+  { id: 'art-licitaciones', title: 'Tablero de oportunidades por monto y cierre', opportunities: true, world: ARTIFACT_RICH_WORLD,
+    request: 'hazme un tablero de mis oportunidades: las licitaciones y compras ágiles por monto y fecha de cierre, y las empresas que están contratando',
+    origin: 'Plan 12, 3c: oportunidades en un tablero (montos, plazos y señales), no en una lista de texto.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'entrega algo visual', test: visual },
+      { label: 'el artefacto usa las oportunidades', test: usesTables('opportunities') },
+      { label: 'el artefacto se dibuja sin errores', test: r => !r.artifact || drawn(r) },
+      { label: 'muestra el cierre de las licitaciones', test: r => /cierr|plazo|vence/.test(text(r)) },
+      { label: 'no muestra la empresa descartada', test: r => !/seguridad austral/.test(text(r)) }] },
+  { id: 'art-ficha-cuenta', title: 'Ficha de una cuenta antes de una reunión', world: ARTIFACT_RICH_WORLD,
+    request: 'mañana me reúno con Constructora Andes: arma una ficha con mis contactos ahí y todo lo que les he enviado y lo que respondieron',
+    origin: 'Plan 12, 3c: una ficha de cuenta junta contactos y envíos de una sola empresa.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'entrega algo visual', test: visual },
+      { label: 'el artefacto usa los contactos y los envíos', test: r => !r.artifact || (r.artifact.tables.some(table => table.name === 'activity')
+        && r.artifact.tables.some(table => table.name === 'contacts' || table.name === 'pipeline')) },
+      { label: 'el artefacto se dibuja sin errores', test: r => !r.artifact || drawn(r) },
+      { label: 'es de Constructora Andes', test: r => /constructora andes/.test(text(r)) },
+      { label: 'nombra la respuesta que pide reunión', test: r => /reuni/.test(text(r)) }] },
+  { id: 'art-segmentos', title: 'Comparación de segmentos por rubro', world: ARTIFACT_RICH_WORLD,
+    request: 'compara mis segmentos por rubro: cuántos contactos tengo en cada uno, a cuántos les escribí y qué porcentaje respondió',
+    origin: 'Plan 12, 3c: comparar segmentos cruza contactos (el rubro) con envíos (respuestas).',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'entrega algo visual', test: visual },
+      { label: 'el artefacto usa los contactos y los envíos', test: usesTables('contacts', 'activity') },
+      { label: 'el artefacto se dibuja sin errores', test: r => !r.artifact || drawn(r) },
+      { label: 'nombra los cuatro rubros', test: r => ['construccion', 'retail', 'mineria', 'servicios'].every(name => text(r).includes(name)) }] },
 ];
