@@ -188,6 +188,15 @@ export function coworkChartSummary(block: Chart) {
   return `${block.title}${block.period ? `, ${block.period}` : ''}. ${block.labels.length} puntos y ${block.series.length} ${block.series.length === 1 ? 'serie' : 'series'}. ${top}.`;
 }
 
+/** The line a chart's card shows in the chat: its largest value, as the figure to read first. */
+export function coworkChartHeadline(block: Chart) {
+  const series = block.series[0];
+  if (!series?.values.length) return `${block.labels.length} ${block.labels.length === 1 ? 'punto' : 'puntos'}`;
+  const at = series.values.indexOf(Math.max(...series.values));
+  const name = block.series.length > 1 ? ` (${series.name})` : '';
+  return `Mayor: ${block.labels[at]}, ${coworkChartValue(block, series.values[at])}${name} · ${block.labels.length} ${block.kind === 'bar' ? 'categorías' : 'puntos'}`;
+}
+
 function people(to: string[] | null) {
   if (!to?.length) return '';
   return to.length === 1 ? ` · para ${to[0]}` : ` · para ${to[0]} y ${to.length - 1} más`;

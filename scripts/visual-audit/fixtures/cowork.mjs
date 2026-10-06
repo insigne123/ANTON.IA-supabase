@@ -19,6 +19,9 @@ export default function cowork(ctx) {
     3: 'Armé la campaña **«Logística · centros de distribución»** con 6 jefes de reclutamiento. Quedó en Campañas para que la revises antes de aprobarla.',
     4: 'De tus 20 contactos, 8 siguen en Nuevos y 3 ya tienen reunión. El tablero muestra el pipeline por etapa con la tabla de detalle; puedes ordenarla y usar «Ver datos» en el gráfico.',
   };
+  // The first answer carries a chart: in the chat a compact card, drawn on the canvas when opened (Plan 12, 2).
+  const stagesChart = { type: 'chart', title: 'Contactos por etapa', kind: 'bar', period: 'Hoy', unit: null,
+    labels: ['Nuevos', 'Contactado', 'Interesado', 'Reunión'], series: [{ name: 'Contactos', values: [8, 6, 3, 3] }] };
   const artifact = { name: 'artifact-pipeline-por-etapa-v1.html', title: 'Pipeline por etapa' };
   const page = '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Pipeline por etapa</title><style>'
     + 'body{margin:0;font:14px system-ui,sans-serif;background:#fff;color:#0f172a}html.dark body{background:#020817;color:#e2e8f0}'
@@ -34,7 +37,8 @@ export default function cowork(ctx) {
   const events = runs.flatMap((item, index) => [
     { sequence: index * 3 + 1, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.started', payload: {}, created_at: item.created_at },
     ...(index === 3 ? [artifactEvent(item, index * 3 + 2)] : []),
-    { sequence: index * 3 + 3, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null }, created_at: item.updated_at },
+    { sequence: index * 3 + 3, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null,
+      ...(index === 0 ? { blocks: [stagesChart] } : {}) }, created_at: item.updated_at },
   ]);
   return {
     tables: {

@@ -6,7 +6,7 @@ import type { CoworkBlock } from '@/lib/cowork/contracts';
 import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
   coworkBlockMeta, coworkBlockWithSteps, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableTsv, coworkVersionMessage,
-  coworkFigureNumber, coworkWordDiff, coworkChartRows, coworkChartSummary, coworkChartValue, type CoworkEditedEmail,
+  coworkFigureNumber, coworkWordDiff, coworkChartHeadline, coworkChartRows, coworkChartSummary, coworkChartValue, type CoworkEditedEmail,
 } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
 import { ExportMenu } from './ExportMenu';
@@ -77,13 +77,14 @@ function chartTsv(chart: Chart) {
  * the first time the card appears while you watch; at rest, and with reduced motion, it is already drawn.
  * The drawing is hidden from screen readers, which get a sentence and the table of values instead.
  */
-export function ChartBlock({ block, live = false }: { block: Chart; live?: boolean }) {
+export function ChartBlock({ block, live = false, tall = false }: { block: Chart; live?: boolean; /** On the canvas, twice as high. */ tall?: boolean }) {
   const reduce = useReducedMotion();
   const animate = live && !reduce;
   const max = Math.max(1, ...block.series.flatMap(series => series.values));
+  const plotHeight = tall ? PLOT_HEIGHT * 2 : PLOT_HEIGHT;
   // With few points every bar says its value; with many, the table and the export do.
-  const showValues = block.labels.length <= 6;
-  const slot = (value: number) => Math.max(value > 0 ? 3 : 0, Math.round(value / max * PLOT_HEIGHT));
+  const showValues = block.labels.length <= (tall ? 12 : 6);
+  const slot = (value: number) => Math.max(value > 0 ? 3 : 0, Math.round(value / max * plotHeight));
   return <section aria-label={block.title} className={cn('rounded-2xl border border-cw-border bg-cw-elevated p-4 shadow-[var(--cw-shadow-sm)]', live && 'cw-rise')}>
     <header className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
       <h3 className="text-[14px] font-semibold tracking-tight text-cw-text">{block.title}</h3>
@@ -96,7 +97,7 @@ export function ChartBlock({ block, live = false }: { block: Chart; live?: boole
     </ul>}
     <div role="img" aria-label={coworkChartSummary(block)}>
       {block.kind === 'bar'
-        ? <div aria-hidden="true" className="flex items-end gap-3 border-b border-cw-border" style={{ height: PLOT_HEIGHT + (showValues ? 22 : 0) }}>
+        ? <div aria-hidden="true" className="flex items-end gap-3 border-b border-cw-border" style={{ height: plotHeight + (showValues ? 22 : 0) }}>
           {block.labels.map((label, index) => <div key={`${label}-${index}`} className="flex min-w-0 flex-1 items-end justify-center gap-1">
             {block.series.map((series, at) => {
               const value = series.values[index];
@@ -112,7 +113,7 @@ export function ChartBlock({ block, live = false }: { block: Chart; live?: boole
             })}
           </div>)}
         </div>
-        : <svg aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full border-b border-cw-border" style={{ height: PLOT_HEIGHT }}>
+        : <svg aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full border-b border-cw-border" style={{ height: plotHeight }}>
           {block.series.map((series, at) => <m.path key={series.name} fill="none" stroke={SERIES_FILL[at]} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
             vectorEffect="non-scaling-stroke" pathLength={1}
             d={series.values.map((value, index) => `${index ? 'L' : 'M'}${(index / (block.labels.length - 1) * 100).toFixed(2)} ${(100 - value / max * 96 - 2).toFixed(2)}`).join(' ')}
@@ -243,6 +244,11 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
           <span className="min-w-0 truncate text-cw-text">{step.subject}</span>
         </li>)}
       </ol>
+    </CardShell>}
+    {block.type === 'chart' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
+      actions={<><CopyButton text={chartTsv(block)} label="Copiar datos" />
+        <ExportMenu kind="chart" block={() => block} size="xs" variant="ghost" />{openButton}</>}>
+      <p className="text-[13.5px] leading-[1.55] text-cw-muted">{coworkChartHeadline(block)}</p>
     </CardShell>}
     {block.type === 'table' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
       actions={<>
@@ -461,6 +467,7 @@ export function CoworkBlockView({ block, draftKey, onSend = null, sendHint = 'Di
   block: CoworkPanelBlock; draftKey: string; onSend?: ((message: string) => void) | null; sendHint?: string;
 }) {
   if (block.type === 'email_draft' || block.type === 'sequence') return <DraftView block={block} draftKey={draftKey} onSend={onSend} sendHint={sendHint} />;
+  if (block.type === 'chart') return <ChartBlock block={block} tall />;
   return <div className="space-y-4">
     <div className="flex flex-wrap gap-2">
       <ExportMenu kind="table" block={() => block} />

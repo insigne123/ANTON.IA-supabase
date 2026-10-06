@@ -83,6 +83,13 @@ test('a code artifact is its own kind, grouped by key and version, with the tabl
   assert.equal(file.kind, 'file');
 });
 
+test('a chart is drawn on the canvas as its own result; figures stay in the chat', () => {
+  const chart = { type: 'chart', title: 'Envíos por semana', kind: 'bar', period: 'Últimas 4 semanas', unit: null, labels: ['S1', 'S2'], series: [{ name: 'Envíos', values: [3, 5] }] };
+  const metrics = { type: 'metrics', title: 'Cifras', period: null, items: [{ label: 'Envíos', value: '8', note: null }] };
+  const artifacts = coworkTurnArtifacts(run('r', 1), [event('run.completed', { reply: 'Listo', document: null, blocks: [metrics, chart] })]);
+  assert.deepEqual(artifacts.map(item => [item.kind, item.title]), [['block', 'Envíos por semana']]);
+});
+
 test('progress checklist reflects approval and failure honestly', () => {
   const request = event('approval.requested', { action: 'cowork.effect', kind: 'send_email', label: 'Enviar' });
   const waiting = coworkTurnProgress({ status: 'waiting_approval' }, [event('run.started'), event('tool.completed', { action: 'draft.get' }), request]);
