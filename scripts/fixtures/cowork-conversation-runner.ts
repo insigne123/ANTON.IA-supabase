@@ -28,6 +28,8 @@ import type { CoworkArtifactTableName, CoworkDesignBrief } from '../../src/lib/c
 import type { CoworkArtifactData, CoworkArtifactTable, CoworkCodeArtifact } from '../../src/lib/server/cowork/code-artifact';
 import { coworkArtifactActivity, coworkArtifactCampaigns, coworkArtifactContacts, coworkArtifactOpportunities, coworkArtifactPipeline } from '../../src/lib/server/cowork/artifact-data';
 import type { CoworkDesignResult } from '../../src/lib/server/cowork/designer';
+import { coworkWorkspaceDigest, type CoworkWorkspace } from '../../src/lib/cowork/workspace';
+import type { CoworkAgenda } from '../../src/lib/cowork/agenda';
 import { coworkAnalystAnswer, type CoworkAnalysisBrief, type CoworkAnalystOutput } from '../../src/lib/cowork/analyst';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
@@ -208,6 +210,26 @@ export function scoreCorpusCase(entry: CorpusCase, result: CorpusTurnResult): Co
   return { id: entry.id, result, checks, passed: checks.every(check => check.passed) };
 }
 
+/**
+ * The account's state as the worker sends it with COWORK_WORKSPACE_ENABLED (Plan 13): built from the case's own world, so it says
+ * what the reads of that world would say (the counts of app.context, the LinkedIn week, today's agenda).
+ */
+export function corpusWorkspace(read: (action: string, input: string) => unknown): CoworkWorkspace | null {
+  const safe = (action: string) => { try { return read(action, ''); } catch { return null; } };
+  const app = safe('app.context') as { counts?: { leads?: number; campaigns?: number } } | null;
+  const audience = safe('audience.analyze') as { contactsWithEmail?: number } | null;
+  const quota = safe('linkedin.quota') as { pending?: number; sent?: number; sent7d?: number; limit?: number } | null;
+  const agenda = safe('agenda.today') as CoworkAgenda | null;
+  return coworkWorkspaceDigest({
+    contacts: typeof app?.counts?.leads === 'number' ? app.counts.leads : null,
+    withEmail: typeof audience?.contactsWithEmail === 'number' ? audience.contactsWithEmail : null,
+    campaigns: typeof app?.counts?.campaigns === 'number' ? app.counts.campaigns : null,
+    linkedin: quota && typeof quota.pending === 'number' && typeof quota.limit === 'number'
+      ? { pending: quota.pending, sent7d: quota.sent7d ?? quota.sent ?? 0, limit: quota.limit } : null,
+    agenda: agenda && agenda.counts && Array.isArray(agenda.items) ? agenda : null,
+  });
+}
+
 export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter, judge?: CorpusJudge, design?: CorpusDesigner, analyze?: CorpusAnalyst): Promise<CorpusOutcome> {
   const turns = (entry.history || []).map((turn, index) => ({
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
@@ -220,7 +242,12 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
   const instructions = corpusCaseInstructions(entry, Boolean(write), { codeArtifacts: Boolean(design), analyst: Boolean(analyze) });
-  const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
+  const baseUserContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
+  // As in production: the account's state travels with the turn only with COWORK_WORKSPACE_ENABLED=true (a case may bring its own).
+  const workspace = process.env.COWORK_WORKSPACE_ENABLED === 'true' && baseUserContext && !('workspace' in baseUserContext)
+    ? corpusWorkspace(entry.world?.read ?? corpusRead) : null;
+  const userContext = baseUserContext && workspace ? { ...baseUserContext, workspace } : baseUserContext;
+  if (workspace) result.workspace = workspace;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
     const answer = await runCoworkReadLoop({

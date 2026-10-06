@@ -179,6 +179,8 @@ export type CorpusTurnResult = {
   question?: string | null;
   /** The options that answer it (V5), when it asks for something only the person knows. */
   choices?: CoworkChoices | null;
+  /** The account's state the turn carried (COWORK_WORKSPACE_ENABLED, Plan 13), so the judge reads the same figures. */
+  workspace?: unknown;
   /** The plan shown while it worked, when the turn consulted something. */
   plan?: Array<{ label: string; read: string | null }> | null;
   /** Each read with its input, so the judge can see the same data the model saw. */

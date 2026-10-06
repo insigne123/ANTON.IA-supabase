@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_MAX_COORDINATOR_CALLS, COWORK_TURN_DEFAULTS, coworkTurnCeiling } from './turn-budget';
+import { COWORK_MAX_COORDINATOR_CALLS, COWORK_TURN_DEFAULTS, coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling } from './turn-budget';
 
 test('the turn ceiling comes from the environment, bounded to what the worker and the database allow', () => {
   assert.deepEqual(coworkTurnCeiling({}), COWORK_TURN_DEFAULTS);
@@ -13,4 +13,12 @@ test('the turn ceiling comes from the environment, bounded to what the worker an
     { decisions: 2, reads: 1, softDeadlineMs: 20_000 });
   // A value that is not a number keeps the default.
   assert.deepEqual(coworkTurnCeiling({ COWORK_MAX_DECISIONS_PER_TURN: 'muchas', COWORK_MAX_READS_PER_TURN: ' ' }), COWORK_TURN_DEFAULTS);
+});
+
+test('the coordinator thinks at low effort unless COWORK_REASONING_EFFORT asks for more, with more time to do it', () => {
+  assert.equal(coworkReasoningEffort({}), 'low');
+  assert.equal(coworkReasoningEffort({ COWORK_REASONING_EFFORT: 'medium' }), 'medium');
+  assert.equal(coworkReasoningEffort({ COWORK_REASONING_EFFORT: 'high' }), 'high');
+  assert.equal(coworkReasoningEffort({ COWORK_REASONING_EFFORT: 'max' }), 'low');
+  assert.ok(coworkDecisionTimeoutMs('medium') > coworkDecisionTimeoutMs('low'));
 });

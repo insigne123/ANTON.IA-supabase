@@ -44,3 +44,15 @@ export function coworkTurnCeiling(env: Record<string, string | undefined> = type
     softDeadlineMs: bounded(env.COWORK_TURN_SOFT_DEADLINE_SECONDS, 20, 75, COWORK_TURN_DEFAULTS.softDeadlineMs / 1000) * 1000,
   };
 }
+
+/** How hard the coordinator thinks before each decision (COWORK_REASONING_EFFORT: low, medium or high; low by default, as before
+ * Plan 13). More effort reasons better and takes longer, so each decision gets a little more time. */
+export function coworkReasoningEffort(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env): 'low' | 'medium' | 'high' {
+  const value = env.COWORK_REASONING_EFFORT;
+  return value === 'medium' || value === 'high' ? value : 'low';
+}
+
+/** The time one coordinator decision may take at that effort. */
+export function coworkDecisionTimeoutMs(effort: 'low' | 'medium' | 'high') {
+  return effort === 'low' ? 30_000 : 40_000;
+}
