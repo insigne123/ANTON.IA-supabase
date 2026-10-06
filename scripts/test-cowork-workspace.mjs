@@ -77,7 +77,9 @@ try {
   await waitFor(() => window.document.querySelector('section[aria-label="Contactos consultados"]'), 'contacts panel');
   const contacts = window.document.querySelector('section[aria-label="Contactos consultados"]');
   assert.match(contacts.textContent, /Ana Ejemplo/);
-  assert.match(contacts.textContent, /no representa toda tu base/);
+  // A search of your contacts cut at its limit offers the whole list («Ver todos», Plan 13) instead of a dead end.
+  assert.match(contacts.textContent, /Hay más contactos tuyos que calzan con esta búsqueda/);
+  assert.ok([...contacts.querySelectorAll('button')].some(button => /Ver todos/.test(button.textContent)), 'offers the whole list');
   assert.ok(contacts.querySelector('[aria-label="Descargar contactos"]'));
   const filter = contacts.querySelector('input');
   Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(filter, 'No coincide');
