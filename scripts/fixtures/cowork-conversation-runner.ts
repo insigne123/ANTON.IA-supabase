@@ -309,9 +309,16 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
 export function corpusObservations(entry: CorpusCase, result: CorpusTurnResult) {
   const read = entry.world?.read ?? corpusRead;
   const reads = result.reads?.length ? result.reads : result.actions.map(action => ({ action, input: '' }));
-  return reads.map(({ action, input }) => {
-    try { return { action, input, result: read(action, input) }; } catch { return { action, input, result: null }; }
+  const observed = reads.map(({ action, input }) => {
+    try { return { action, input, result: read(action, input) as unknown }; } catch { return { action, input, result: null as unknown }; }
   });
+  // The data of an artifact are put by the server from the account (artifact-data.ts), not read by the model: the judge sees them
+  // as one more observation, so it can check the artifact's figures against them.
+  const tables = (result.artifact?.tables || []).map(table => table.name as CoworkArtifactTableName);
+  if (tables.length) {
+    try { observed.push({ action: 'artifact.data', input: tables.join(','), result: corpusArtifactData(read, tables) }); } catch { /* the artifact stands without them */ }
+  }
+  return observed;
 }
 
 /** The emails of a campaign card as the person reads them in the review (CampaignReview.tsx): numbered, with the day it goes, subject and text. */

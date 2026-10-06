@@ -1,6 +1,8 @@
 // Cases for code artifacts (Plan 12, 3b): what a person asks to see, and changes to an artifact already made, in the
 // words of the chat and as the canvas sends them («Pedir cambios» and «Arreglarlo»). They run with --artifacts, on the
 // production fixture world of the corpus; without it they measure how Cowork answers the same requests in the chat.
+import { analyzeStoredAudience } from '../../src/lib/cowork/audience-analysis';
+import { analyzeIcp, type IcpTouch } from '../../src/lib/cowork/icp';
 import { coworkArtifactChangeMessage, coworkArtifactFixMessage } from '../../src/lib/cowork/code-artifact-frame';
 import { COWORK_ARTIFACT_EXAMPLES } from '../../src/lib/server/cowork/code-artifact-examples';
 import { CORPUS_COMMON_CHECKS, corpusRead, type CorpusCase, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
@@ -63,6 +65,20 @@ const RICH_CAMPAIGNS = [
   { id: '00000000-0000-4000-8000-000000000953', name: 'Retail · segunda ola', status: 'draft', revision: 1, recipients: 4, createdAt: '2026-09-22T15:00:00Z' },
 ];
 const words = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const leadOf = (name: string) => RICH_LEADS.find(lead => lead.name === name)!;
+// The segment reads come from the same functions the app runs (audience-read.ts, icp-read.ts) over this account, so a dashboard
+// by industry sees the same 24 contacts and 30 sends as the searches, not the corpus's other account.
+const RICH_AUDIENCE = { queriedAt: '2026-09-25T13:10:00Z', ...analyzeStoredAudience(RICH_LEADS,
+  RICH_SENDS.map(send => ({ company: send.company, lead_id: leadOf(send.name).id, sent_at: send.sent_at })), { leadsComplete: true, historyComplete: true }) };
+const RICH_ICP = { scope: 'organization_icp', offer: null, ...analyzeIcp({
+  declared: null, now: '2026-09-25T13:10:00Z', stages: new Map(),
+  touches: RICH_SENDS.map((send, index): IcpTouch => {
+    const lead = leadOf(send.name);
+    return { id: `rich-send-${index}`, leadId: lead.id, email: lead.email, role: lead.title, industry: lead.industry, country: 'Chile',
+      city: lead.location.split(',')[0], sentAt: send.sent_at, repliedAt: send.replied_at, replyIntent: send.reply_intent, bouncedAt: send.bounced_at };
+  }),
+  leads: RICH_LEADS.map(lead => ({ id: lead.id, title: lead.title, industry: lead.industry, country: 'Chile', city: lead.location.split(',')[0] })),
+}) };
 /** The fuller account: its contacts, sends and campaigns; the rest of the world is the corpus's. */
 export const ARTIFACT_RICH_WORLD: CorpusWorld = {
   savedEmails: RICH_LEADS.map(lead => lead.email).filter((email): email is string => Boolean(email)),
@@ -78,12 +94,15 @@ export const ARTIFACT_RICH_WORLD: CorpusWorld = {
       return { items, returned: items.length, limit: 40, scope: 'organization_contacted', truncated: false };
     }
     if (action === 'campaigns.list') return { scope: 'own', campaigns: RICH_CAMPAIGNS };
+    if (action === 'audience.analyze') return RICH_AUDIENCE;
+    if (action === 'icp.analyze') return RICH_ICP;
     if (action === 'opportunities.list') return OPPORTUNITIES_READ(input);
     if (action === 'artifact.opportunities') return { hiring: OPPORTUNITY_HIRING, tenders: OPPORTUNITY_TENDERS, projects: OPPORTUNITY_PROJECTS };
     return corpusRead(action, input);
   },
 };
-const text = (result: CorpusTurnResult) => words(`${result.reply}\n${result.artifact?.render?.text || ''}`);
+// What the person reads: the answer, the tables and figures shown in the chat, and the artifact.
+const text = (result: CorpusTurnResult) => words(`${result.reply}\n${JSON.stringify(result.blocks || [])}\n${result.artifact?.render?.text || ''}`);
 const usesTables = (...names: string[]) => (result: CorpusTurnResult) => !result.artifact || names.every(name => result.artifact!.tables.some(table => table.name === name));
 
 export const ARTIFACT_CORPUS: CorpusCase[] = [
