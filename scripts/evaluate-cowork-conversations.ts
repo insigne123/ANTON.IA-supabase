@@ -60,6 +60,7 @@ import { ICP_CORPUS } from './fixtures/cowork-icp-corpus';
 import { OPPORTUNITIES_CORPUS } from './fixtures/cowork-opportunities-corpus';
 import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
+import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
 // every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
@@ -88,6 +89,9 @@ CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS, ...THREAD_SEND_CORPUS, ..
 
 // Several people on LinkedIn with one approval (scripts/fixtures/cowork-batch-corpus.ts): the lote-* cases have the batch on.
 CORPUS.push(...BATCH_CORPUS);
+
+// What the owner actually asked between 24 Sep and 5 Oct (Plan 12), on the production world (scripts/fixtures/cowork-uso-real-corpus.ts): ur-*.
+CORPUS.push(...USO_REAL_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
