@@ -1,12 +1,12 @@
 import { z } from 'zod';
-import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
 import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
-import { coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
+import { coworkCampaignEmails, coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
@@ -117,7 +117,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry' | 'lead.enrich_phone'
   | 'contacts.prepare_batch';
-export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
+export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION | typeof COWORK_WRITTEN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
 export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string;
@@ -783,6 +783,9 @@ async function runCoworkLoop(input: {
   // The correction that makes the read an answer offered is the loop's, not the judge's: it is not reported as one.
   let offerCorrected = false;
   const keepsVersionOnly = coworkOnlyUsesVersion(input.message);
+  // Emails the Writer wrote when the person asked for the campaign in the same request (Plan 12, 4a-2): the next
+  // decision proposes it with them, word for word. Whatever happens after, the Writer's answer is never lost.
+  let written: { emails: CoworkEditedEmail[]; answer: CoworkAnswer } | null = null;
   for (let turn = 0; turn < ceiling.decisions; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
@@ -821,14 +824,23 @@ async function runCoworkLoop(input: {
           if (turn === last) return lastResort();
           throw rejected('Missing write brief', 'Elegiste draft.write sin encargo: incluye write {kind, recipients, objective, angle, tone, steps, notes, findings}.');
         }
+        let answer: CoworkAnswer;
         try {
-          return await input.write(decision.write, observations);
+          answer = await input.write(decision.write, observations);
         } catch (error) {
           if (input.signal.aborted) throw error;
           if (turn === last) return lastResort();
           // A failed Writer does not end the turn: the coordinator writes it, as before.
           throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11).');
         }
+        const emails: CoworkEditedEmail[] | null = decision.write.campaign && !written && turn < last && input.proposeEffect ? coworkCampaignEmails(answer.blocks) : null;
+        if (!emails) return answer;
+        written = { emails, answer };
+        observations.push({ action: COWORK_WRITTEN_ACTION, input: '', result: {
+          scope: 'writer_output', emails,
+          next: 'La Redactora ya escribió estos correos y el usuario pidió la campaña: propón ahora campaign.create con ellos (la app copia su texto) a los contactos guardados con correo que leíste. En answer.reply di a quiénes va, cuántos correos lleva y que queda pausada hasta otra aprobación; no hables de versiones anteriores ni nombres el remitente si no lo leíste en app.context. Si nadie puede recibirla, responde con answer y di por qué; los correos se muestran igual.',
+        } });
+        continue;
       }
       if (decision.action === 'artifact.create') {
         // On the last decision nobody is left to answer without it: a line that offers to try again.
@@ -850,6 +862,8 @@ async function runCoworkLoop(input: {
         }
       }
       if (decision.action === 'answer') {
+        // The campaign was not proposed after all: the Writer's emails are the answer, as without 4a-2.
+        if (written) return written.answer;
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
         // The reports it names go complete in document, written by the app from what this turn read (report-document.ts).
         decision.answer = withCoworkReports(decision.answer, observations);
@@ -1021,7 +1035,7 @@ async function runCoworkLoop(input: {
           : decision.action === 'contacts.prepare_batch' ? 'new-prepare-batch'
           : decision.action === 'email.reply_thread' ? decision.replyThread?.contactedId ?? null
           : decision.leadId;
-        const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) : null;
+        const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) ?? written?.emails ?? null : null;
         const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
         if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));
         const campaign = decision.action === 'campaign.create' && decision.campaign
@@ -1272,6 +1286,8 @@ async function runCoworkLoop(input: {
       await input.record(observation);
       observations.push(observation);
     } catch (error) {
+      // After the Writer wrote, a campaign that could not be proposed leaves its emails as the answer.
+      if (written && !input.signal.aborted && (!(error instanceof CoworkDecisionRejected) || turn === last)) return written.answer;
       // Correctable refusals go back to the model; the last decision must stand on its own.
       const standing = closingFallback ?? judgedFallback;
       if (standing && error instanceof CoworkDecisionRejected && !input.signal.aborted) return standing;
@@ -1279,5 +1295,6 @@ async function runCoworkLoop(input: {
       rejections.push({ action: decision.action, reason: error.feedback });
     }
   }
+  if (written) return written.answer;
   throw new Error('Cowork did not produce a final answer');
 }

@@ -38,6 +38,8 @@ export type CoworkEvent = {
  * It is recorded right before the approval card, is never a data read, and is
  * shown as the assistant's message for that turn. */
 export const COWORK_NOTE_ACTION = 'assistant.note';
+/** The emails the Writer wrote in a turn that also proposes their campaign (Plan 12, 4a-2): the coordinator reads them, nothing is stored. */
+export const COWORK_WRITTEN_ACTION = 'assistant.written';
 
 export function coworkNoteText(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;

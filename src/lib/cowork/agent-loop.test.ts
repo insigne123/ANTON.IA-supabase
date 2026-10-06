@@ -1208,6 +1208,54 @@ test('an answer that offers a read it could make gets it made, once, with room f
   }
 });
 
+test('a sequence asked with its campaign: the Writer writes it and the same turn proposes the campaign with that exact text', async () => {
+  const brief = { kind: 'sequence' as const, recipients: ['Jose'], objective: 'Una reunión sobre AXIS', angle: null, tone: null, steps: 2, notes: null, findings: null, campaign: true };
+  const write = coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
+  const written = { reply: 'Te dejo la secuencia de 2 correos.', document: null, question: '¿Creo la campaña pausada?', suggestions: [{ label: 'Sí', message: 'Sí, créala' }],
+    blocks: [{ type: 'sequence' as const, title: 'Secuencia AXIS', to: ['Jose'], steps: [
+      { day: 1, subject: 'AXIS para GrupoExpro', body: 'Hola Jose,\nTexto de la Redactora.\nNicolás' },
+      { day: 4, subject: 'Re: AXIS', body: 'Hola Jose,\nSeguimiento.\nNicolás' }] }] };
+  const campaign = { name: 'AXIS', objective: 'Primera conversación',
+    criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false },
+    emails: ['jcastro@grupoexpro.com'], provider: 'google', messages: [{ subject: 'Otro asunto', body: 'Otro texto que el modelo resumió', delayDays: 0 }] };
+  const create = coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign, answer: { reply: 'Te dejo la campaña pausada.', document: null } });
+  const base = { message: 'Escríbele una secuencia de 2 correos a Jose y créala como campaña', runId: '00000000-0000-4000-8000-0000000000aa',
+    signal: new AbortController().signal, authorize: async () => {}, record: async () => {}, execute: async () => ({ scope: 'own', campaigns: [] }) };
+  const seen: unknown[][] = [];
+  const proposed: Array<{ kind: string; campaign?: { messages: Array<{ subject: string; body: string; delayDays: number }> } }> = [];
+  const result = await runCoworkReadLoop({ ...base, write: async () => written, proposeEffect: async proposal => { proposed.push(proposal); },
+    decide: async observations => { seen.push(observations.map(item => item.action)); return seen.length === 1 ? write : create; } });
+  // The coordinator reads the emails (the loop checks the campaigns before proposing, as always).
+  assert.deepEqual(seen[1], ['assistant.written']);
+  assert.equal(proposed[0].kind, 'campaign_create');
+  // The Writer's text goes word for word, spaced by its days.
+  assert.deepEqual(proposed[0].campaign?.messages, [
+    { subject: 'AXIS para GrupoExpro', body: 'Hola Jose,\nTexto de la Redactora.\nNicolás', delayDays: 0 },
+    { subject: 'Re: AXIS', body: 'Hola Jose,\nSeguimiento.\nNicolás', delayDays: 3 }]);
+  assert.notEqual(result.reply, written.reply);
+  // The coordinator answers instead, or the proposal fails: the Writer's emails are the answer, as before.
+  const answered = await runCoworkReadLoop({ ...base, write: async () => written, proposeEffect: async () => {},
+    decide: async observations => observations.length ? { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'No hay a quién.', document: null } } : write });
+  assert.deepEqual(answered, written);
+  const failed = await runCoworkReadLoop({ ...base, write: async () => written, proposeEffect: async () => { throw new Error('El destinatario ya no está disponible.'); },
+    decide: async observations => observations.length ? create : write });
+  assert.deepEqual(failed, written);
+  // Without the campaign asked, on the last decision, or with one email per person, nothing changes.
+  for (const options of [
+    { decision: coworkDecisionSchema.parse({ ...write, write: { ...brief, campaign: null } }), ceiling: undefined, blocks: written.blocks },
+    { decision: write, ceiling: { decisions: 1, reads: 3, softDeadlineMs: 50_000 }, blocks: written.blocks },
+    { decision: write, ceiling: undefined, blocks: [
+      { type: 'email_draft' as const, title: 'Jose', to: ['Jose'], subject: 'A', body: 'Hola Jose' },
+      { type: 'email_draft' as const, title: 'Ana', to: ['Ana'], subject: 'B', body: 'Hola Ana' }] },
+  ]) {
+    let decisions = 0;
+    const plain = await runCoworkReadLoop({ ...base, ...(options.ceiling ? { ceiling: options.ceiling } : {}), write: async () => ({ ...written, blocks: options.blocks }),
+      proposeEffect: async () => { throw new Error('no debía proponer'); }, decide: async () => { decisions++; return options.decision; } });
+    assert.equal(plain.reply, written.reply);
+    assert.equal(decisions, 1);
+  }
+});
+
 test('the judge reads the final answer once; its correction may read once, and the judged answer stands if it fails', async () => {
   const ask = { action: 'answer' as const, query: null, leadId: null,
     answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres saber a quiénes ya les escribiste?',

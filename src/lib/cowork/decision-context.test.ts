@@ -279,14 +279,15 @@ test('a correction edits the answer it fixes: it travels once, trimmed, apart fr
   assert.equal('answerToCorrect' in coworkDecisionContext(instructions, { ...base, rejectedDecisions: [{ action: 'decision', reason: 'formato' }] }), false);
 });
 
-test('a person is proposed for LinkedIn only with a saved profile: without one Cowork says so and offers the email', () => {
+test('a person is proposed for LinkedIn only with a saved profile: without one Cowork proposes to look up their details or asks for the link', () => {
   const { systemPrompt } = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
-  assert.match(systemPrompt, /propón linkedin\.message con el texto listo y firmado solo si trae linkedin_url; si es null no tiene perfil de LinkedIn guardado: dilo en una frase, nómbrala y ofrece escribirle por correo, sin proponer nada por LinkedIn/);
+  assert.match(systemPrompt, /propón linkedin\.message con el texto listo y firmado solo si trae linkedin_url\. Si es null \(o no viene\), ANTON\.IA no tiene guardado su perfil, que no es lo mismo que no tener LinkedIn: no lo afirmes/);
+  assert.match(systemPrompt, /Propón lead\.enrich y explícalo en answer\.reply: busca sus datos con el proveedor \(1 crédito\), trae su correo y, si el proveedor lo tiene, su perfil de LinkedIn/);
   const base = { history: { turns: [] }, request: 'Invita a Paz por LinkedIn', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
   const context = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
   const linkedin = JSON.stringify(context);
   assert.match(linkedin, /linkedin\.invite con leadId de un contacto observado con linkedin_url propone invitación sin nota/);
-  assert.match(linkedin, /Un contacto con linkedin_url null no tiene perfil guardado: no propongas invitarlo ni escribirle por LinkedIn, dilo y ofrece el correo/);
+  assert.match(linkedin, /Un contacto con linkedin_url null no tiene perfil guardado \(no es que no tenga LinkedIn\): no propongas invitarlo ni escribirle por LinkedIn; propón lead\.enrich/);
   // The quota adds the pending to the sent of 7 days: when it is cited, the two are told apart, never «se usaron 20».
   assert.match(linkedin, /linkedin\.quota cuenta las invitaciones pendientes y las enviadas de los últimos 7 días contra el límite operativo semanal: si citas el cupo, separa pending y sent7d/);
 });

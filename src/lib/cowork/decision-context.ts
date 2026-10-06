@@ -1,5 +1,5 @@
 import { coworkAgentInstructions } from './agent-instructions';
-import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
+import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_WRITTEN_ACTION } from './contracts';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 
 /** The organization's working time zone. ANTON.IA schedules and reports in
@@ -157,7 +157,7 @@ export function coworkDecisionContext(
   const maximumReads = turnBudget?.reads ?? COWORK_TURN_DEFAULTS.reads;
   const readsUsed = input.observations.reduce<number>((used, item) => {
     const action = (item as { action?: string } | null)?.action;
-    return used + (action === 'specialists.review' || action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION || action === COWORK_AGENT_ACTION ? 0
+    return used + (action === 'specialists.review' || action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION || action === COWORK_AGENT_ACTION || action === COWORK_WRITTEN_ACTION ? 0
       : action === 'privacy.contactability_batch' || action === 'lists.review_batch' ? maximumReads : 1);
   }, 0);
   const observedLeadIds = new Set<string>();
