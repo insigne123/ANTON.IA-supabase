@@ -6,6 +6,9 @@ import { normalizeLockEmail, teamLockNotice } from '@/lib/team-lock';
 import { readTeamLocks } from '@/lib/server/team-locks';
 import { ENRICHED_CONTACT_COLUMNS, mergeOwnContacts, type EnrichedContactRecord } from './own-contacts';
 
+/** The most rows «Ver todos» brings to the panel and to the export (Plan 13): beyond it, the list is cut and says so. */
+export const COWORK_FULL_LIST_MAX = 500;
+
 // Email is searchable too: people often look a contact up by the address they know.
 const SEARCH_FIELDS = ['name', 'title', 'company', 'email', 'location', 'city', 'country'] as const;
 // The same fields in «Por escribir» (enriched_leads), which Cowork reads too (Plan 6, PR-A).
@@ -62,7 +65,11 @@ export async function queryCoworkLeads(
   scope: { userId: string; organizationId: string },
   action: 'leads.search' | 'leads.get',
   value: string,
+  /** How many rows a search returns: 20 for Cowork's turn, up to COWORK_FULL_LIST_MAX for «Ver todos» (Plan 13). */
+  options: { max?: number } = {},
 ) {
+  const max = Math.min(COWORK_FULL_LIST_MAX, Math.max(1, Math.floor(options.max ?? 20)));
+  const fetchLimit = Math.max(60, max);
   let query = client.from('leads')
     .select('id,name,title,company,email,status,industry,linkedin_url,location,city,country,created_at')
     .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
@@ -98,8 +105,8 @@ export async function queryCoworkLeads(
       query = query.or(terms.flatMap(term => SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
       enriched = enriched.or(terms.flatMap(term => ENRICHED_SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
     }
-    query = query.limit(60);
-    enriched = enriched.limit(60);
+    query = query.limit(fetchLimit);
+    enriched = enriched.limit(fetchLimit);
   }
   const [{ data, error }, porEscribir] = await Promise.all([query, enriched]);
   if (error) throw new Error('No se pudieron consultar los contactos guardados.');
@@ -113,9 +120,9 @@ export async function queryCoworkLeads(
   }
   if (profile) {
     const matches = merged.rows.filter(row => linkedinProfilesMatch(typeof row.linkedin_url === 'string' ? row.linkedin_url : null, profile));
-    const items = await withTeamLocks(client, scope, matches.slice(0, 20).map(withProfile));
-    return { items, returned: items.length, limit: 20, scope: 'own_saved_contacts', sources,
-      truncated: matches.length > 20, partial: false, terms: 0, match: 'linkedin_url', profileUrl: profile,
+    const items = await withTeamLocks(client, scope, matches.slice(0, max).map(withProfile));
+    return { items, returned: items.length, limit: max, scope: 'own_saved_contacts', sources,
+      truncated: matches.length > max, partial: false, terms: 0, match: 'linkedin_url', profileUrl: profile,
       sourcesComplete: !porEscribir.error,
       ...(porEscribir.error ? { notice: 'No se pudo consultar «Por escribir»; no puedo confirmar que este perfil no esté guardado.' }
         : !items.length ? { profileLookup: { action: 'prospecting.propose_search', searchCriteria: {
@@ -130,10 +137,12 @@ export async function queryCoworkLeads(
     return { row, matched };
   }).sort((left, right) => right.matched - left.matched || created(right.row).localeCompare(created(left.row)));
   const best = ranked[0]?.matched || 0;
-  const items = await withTeamLocks(client, scope, ranked.slice(0, 20).map(entry => withProfile(entry.row)));
+  const items = await withTeamLocks(client, scope, ranked.slice(0, max).map(entry => withProfile(entry.row)));
+  // Either list cut at the fetch limit may hold more matches than the ones ranked here.
+  const cut = (data || []).length >= fetchLimit || (!porEscribir.error && (porEscribir.data || []).length >= fetchLimit);
   return {
-    items, returned: items.length, limit: 20, scope: 'own_saved_contacts', sources,
-    truncated: ranked.length > 20,
+    items, returned: items.length, limit: max, scope: 'own_saved_contacts', sources,
+    truncated: ranked.length > max || cut,
     partial: terms.length > 0 && items.length > 0 && best < terms.length,
     terms: terms.length,
   };

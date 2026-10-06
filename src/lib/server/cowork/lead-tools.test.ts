@@ -373,3 +373,21 @@ test('a segment counts «Por escribir» too, without the ones already tied to a 
   const down = await countCoworkLeads(countingClient({ total: 10, email: 4, profile: 1 }, false, 'error').db, { userId: 'owner', organizationId: 'org' }, '');
   assert.deepEqual([down.total, down.exact, down.bySource.porEscribir], [10, false, null]);
 });
+
+test('«Ver todos» brings the whole list up to 500, and says when even that is cut', async () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const many = Array.from({ length: 130 }, (_, n) => ({ id: id(n + 1), name: `Persona ${n}`, title: 'Gerente de Personas', company: `Empresa ${n}`, email: null,
+    city: null, country: null, created_at: `2026-01-${String((n % 28) + 1).padStart(2, '0')}` }));
+  const turn = tablesClient({ leads: many, enriched_leads: [] });
+  const cut = await queryCoworkLeads(turn.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'personas');
+  assert.equal(cut.items.length, 20);
+  assert.equal(cut.truncated, true);
+  assert.ok(turn.calls.some(call => call[0] === 'limit' && call[1] === 'leads' && call[2] === 60));
+  const all = tablesClient({ leads: many, enriched_leads: [] });
+  const full = await queryCoworkLeads(all.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'personas', { max: 500 });
+  assert.equal(full.items.length, 130);
+  assert.equal(full.truncated, false);
+  assert.equal(full.limit, 500);
+  assert.ok(all.calls.some(call => call[0] === 'limit' && call[1] === 'leads' && call[2] === 500));
+  assert.equal((await queryCoworkLeads(tablesClient({ leads: many, enriched_leads: [] }).db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'personas', { max: 9999 })).limit, 500);
+});

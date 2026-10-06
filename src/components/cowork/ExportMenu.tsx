@@ -41,7 +41,8 @@ export function ExportMenu({ onError, onAccessDenied, compact = false, size = 's
   size?: 'xs' | 'sm';
   variant?: 'ghost' | 'secondary';
 } & (
-  | { kind: 'contacts' | 'document'; runId: string; block?: undefined }
+  /** read: the sequence of the search whose whole list is on screen («Ver todos»); the export carries the whole list too. */
+  | { kind: 'contacts' | 'document'; runId: string; read?: number | null; block?: undefined }
   | { kind: CoworkBlockType; block: () => CoworkBlock; runId?: undefined }
 )) {
   const handlers = useContext(ExportHandlers);
@@ -50,7 +51,7 @@ export function ExportMenu({ onError, onAccessDenied, compact = false, size = 's
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState<{ name: string; size: number } | null>(null);
   const active = useRef<AbortController | null>(null);
-  const sourceKey = source.block ? `${source.kind}` : `${source.kind}:${source.runId}`;
+  const sourceKey = source.block ? `${source.kind}` : `${source.kind}:${source.runId}:${source.read ?? ''}`;
   useEffect(() => () => active.current?.abort(), [sourceKey]);
   useEffect(() => {
     if (!ready) return;
@@ -68,7 +69,7 @@ export function ExportMenu({ onError, onAccessDenied, compact = false, size = 's
       const response = source.block
         ? await fetch('/api/cowork/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', signal: controller.signal,
           body: JSON.stringify({ format, block: source.block() }) })
-        : await fetch(`/api/cowork/runs/${source.runId}/export?format=${format}`, { cache: 'no-store', signal: controller.signal });
+        : await fetch(`/api/cowork/runs/${source.runId}/export?format=${format}${source.read ? `&read=${source.read}` : ''}`, { cache: 'no-store', signal: controller.signal });
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) denied?.();
         const body = await response.json().catch(() => ({}));
