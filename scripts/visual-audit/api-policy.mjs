@@ -12,6 +12,8 @@ const PASS_WRITES = [
   /^\/api\/cowork\/threads\/[0-9a-f-]{36}$/,
   // 👍 / 👎 on a Cowork answer only adds a cowork_run_events row.
   /^\/api\/cowork\/runs\/[0-9a-f-]{36}\/feedback$/,
+  // «Olvidar» in «Lo que Cowork recuerda» only archives a suplia_memories row.
+  /^\/api\/cowork\/memories\/[0-9a-f-]{36}$/,
 ];
 /** Reads sent as POST (a body with many ids): they run and are not reported. */
 const PASS_READS = [
