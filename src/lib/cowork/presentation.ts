@@ -553,6 +553,20 @@ export function coworkContactsTitle(rows: Array<{ id: string }>) {
   return { title, noun, companies, mixed, external };
 }
 
+/** The results of a conversation for the canvas switcher (Plan 12, 2): newest first, and a code artifact once, at its
+ * latest version (its versions have their own selector). `artifacts` comes in the conversation's order, oldest first. */
+export function coworkThreadResults(artifacts: CoworkArtifact[]): CoworkArtifact[] {
+  const seen = new Set<string>();
+  const latest = new Map<string, number>();
+  for (const item of artifacts) if (item.kind === 'code') latest.set(item.key, Math.max(latest.get(item.key) ?? 0, item.version));
+  return artifacts.slice().reverse().filter(item => {
+    if (item.kind !== 'code') return true;
+    if (seen.has(item.key) || item.version !== latest.get(item.key)) return false;
+    seen.add(item.key);
+    return true;
+  });
+}
+
 export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, events: CoworkEvent[]): CoworkArtifact[] {
   const artifacts: CoworkArtifact[] = [];
   const completedAt = events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || run.created_at;

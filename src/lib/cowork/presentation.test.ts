@@ -7,6 +7,7 @@ import {
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
+  coworkThreadResults,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -395,4 +396,13 @@ test('a held answer says which phase it is in, about the emails when it carries 
   assert.equal(coworkHeldAnswerCopy('reviewing', [{ type: 'email_draft' }, { type: 'table' }]), 'Revisando el correo antes de mostrártelo');
   assert.equal(coworkHeldAnswerCopy('reviewing', [{ type: 'sequence' }]), 'Revisando los correos antes de mostrártelos');
   assert.equal(coworkHeldAnswerCopy('adjusting', [{ type: 'email_draft' }, { type: 'email_draft' }]), 'Ajustando los correos tras revisarlos');
+});
+
+test('the canvas lists the conversation\'s results newest first, a code artifact once at its latest version', () => {
+  const code = (version: number, key = 'pipeline') => ({ kind: 'code' as const, id: `r${version}:code:${key}-v${version}`, runId: `r${version}`, title: `Pipeline v${version}`,
+    name: `artifact-${key}-v${version}.html`, key, version, tables: [], createdAt: '2026-10-06T10:00:00Z' });
+  const doc = { kind: 'document' as const, id: 'r0:document', runId: 'r0', title: 'Informe', content: '# Informe', createdAt: '2026-10-06T09:00:00Z' };
+  const results = coworkThreadResults([doc, code(1), code(2), code(1, 'campanas')] as never);
+  assert.deepEqual(results.map(item => item.id), ['r1:code:campanas-v1', 'r2:code:pipeline-v2', 'r0:document']);
+  assert.deepEqual(coworkThreadResults([]), []);
 });
