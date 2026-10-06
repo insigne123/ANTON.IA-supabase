@@ -60,6 +60,7 @@ import { corpusCaseInstructions, runCorpusCase, type CorpusAnalyst, type CorpusD
 import { coworkDesignerOutputSchema, runCoworkDesigner } from '../src/lib/server/cowork/designer';
 import { COWORK_ANALYST_RULES, coworkAnalystOutputSchema, coworkAnalystPrompt } from '../src/lib/cowork/analyst';
 import { coworkTimeZone } from '../src/lib/cowork/decision-context';
+import { coworkReasoningEffort } from '../src/lib/cowork/turn-budget';
 import { renderCoworkArtifacts } from './fixtures/cowork-artifact-render';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
@@ -71,6 +72,7 @@ import { OPPORTUNITIES_CORPUS } from './fixtures/cowork-opportunities-corpus';
 import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
+import { CHAT_CORPUS } from './fixtures/cowork-chat-corpus';
 import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
 import { CAMPANA_CORPUS } from './fixtures/cowork-campana-corpus';
 import { PREFERENCIAS_CORPUS } from './fixtures/cowork-preferencias-corpus';
@@ -111,6 +113,10 @@ CORPUS.push(...PREFERENCIAS_CORPUS);
 CORPUS.push(...ARTIFACT_CORPUS);
 
 CORPUS.push(...CAMPANA_CORPUS);
+
+// Chatting with a colleague (Plan 13; scripts/fixtures/cowork-chat-corpus.ts): general questions, honest disagreement, owning a
+// mistake and the one-line heads-up about today: chat-*.
+CORPUS.push(...CHAT_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
@@ -260,6 +266,8 @@ async function main() {
             systemPrompt: `${corpusCaseInstructions(entry, writerOn, { codeArtifacts: artifactsOn, analyst: analystOn }).systemPrompt}\nspecialists.review está deshabilitado.`,
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
+            // The same effort as the worker (COWORK_REASONING_EFFORT, low by default).
+            reasoningEffort: coworkReasoningEffort(),
             // First words of an answer as the page would get them: read at most every 50 ms.
             ...(stream ? { onPartial: (text: string) => {
               if (firstTextMs !== null || Date.now() - lastPeek < 50) return;

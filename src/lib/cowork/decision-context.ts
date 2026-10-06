@@ -1,6 +1,7 @@
 import { coworkAgentInstructions } from './agent-instructions';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_WRITTEN_ACTION } from './contracts';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
+import { COWORK_WORKSPACE_INSTRUCTION, type CoworkWorkspace } from './workspace';
 
 /** The organization's working time zone. ANTON.IA schedules and reports in
  * Chile; override with COWORK_TIME_ZONE for another market. */
@@ -104,6 +105,8 @@ export type CoworkUserContext = {
   /** The mailbox that sends (Gmail or Outlook): the one chosen in Conexiones or the only connected one; absent when two
    * are connected and none was chosen, or none is (Plan 5, PR-6b). */
   sender?: string;
+  /** The account when the turn starts: contacts, campaigns, LinkedIn week and what waits today (workspace.ts, Plan 13). */
+  workspace?: CoworkWorkspace | null;
 };
 
 const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer y services, sin consultar profile.get ni app.context para eso. proofPoints son resultados que el usuario cargó en su perfil: se pueden citar tal cual. differentiators son razones para elegirlo que el usuario declaró: se pueden usar tal cual. idealCustomer (cargos e industrias) dice a quién le vende: úsalo para proponer búsquedas y elegir contactos. sender es la cuenta que envía sus correos (Gmail u Outlook): úsala como provider sin preguntar. Un valor null o ausente no se inventa.';
@@ -170,7 +173,8 @@ export function coworkDecisionContext(
   return {
     ...input,
     userContext: input.userContext ? { ...input.userContext,
-      instruction: USER_CONTEXT_INSTRUCTION + (input.userContext.memories?.length ? MEMORIES_INSTRUCTION : '') } : null,
+      instruction: USER_CONTEXT_INSTRUCTION + (input.userContext.memories?.length ? MEMORIES_INSTRUCTION : '')
+        + (input.userContext.workspace ? ` ${COWORK_WORKSPACE_INSTRUCTION}` : '') } : null,
     history: coworkWithLocalTimes(input.history, timeZone) as typeof input.history,
     observations: coworkWithLocalTimes(input.observations, timeZone) as unknown[],
     // A correction edits the answer it was asked to fix: it travels apart from the reasons.
