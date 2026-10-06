@@ -28,6 +28,7 @@ import type { CoworkArtifactTableName, CoworkDesignBrief } from '../../src/lib/c
 import type { CoworkArtifactData, CoworkArtifactTable, CoworkCodeArtifact } from '../../src/lib/server/cowork/code-artifact';
 import { coworkArtifactActivity, coworkArtifactCampaigns, coworkArtifactContacts, coworkArtifactOpportunities, coworkArtifactPipeline } from '../../src/lib/server/cowork/artifact-data';
 import type { CoworkDesignResult } from '../../src/lib/server/cowork/designer';
+import { coworkAnalystAnswer, type CoworkAnalysisBrief, type CoworkAnalystOutput } from '../../src/lib/cowork/analyst';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
 
@@ -44,6 +45,9 @@ export type CorpusJudge = (answer: CoworkAnswer, observations: CoworkObservation
 /** The Designer for a corpus case (Plan 12, 3b): the real one (designer.ts) with the configured model, or a scripted one. */
 export type CorpusDesigner = (brief: CoworkDesignBrief, meta: { caseId: string; request: string; userContext: unknown; data: CoworkArtifactData;
   previous: CoworkCodeArtifact | null }) => Promise<CoworkDesignResult>;
+/** The Analyst for a corpus case (Plan 12, 4b): the real one (analyst.ts) with the configured model, or a scripted one. */
+export type CorpusAnalyst = (brief: CoworkAnalysisBrief, observations: CoworkObservation[], meta: { caseId: string; request: string; userContext: unknown;
+  history: Array<{ at: string; request: string; reply: string }> }) => Promise<CoworkAnalystOutput>;
 
 /**
  * The tables of an artifact from the case's world, shaped as loadCoworkArtifactData shapes the database: the saved
@@ -91,9 +95,9 @@ export const corpusPrepareBatch = process.env.COWORK_PREPARE_BATCH_ENABLED !== '
  * The instructions of one case, as the worker builds them for that turn: with the Writer, the flags the case turns on
  * (contacts.import, email.reply_thread, the LinkedIn batches…) and the parts of its intents.
  */
-export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, options: { codeArtifacts?: boolean } = {}) {
+export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, options: { codeArtifacts?: boolean; analyst?: boolean } = {}) {
   return coworkAgentInstructions({
-    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, codeArtifacts: Boolean(options.codeArtifacts),
+    turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, codeArtifacts: Boolean(options.codeArtifacts), analyst: Boolean(options.analyst),
     contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch),
     campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
     preferences: Boolean(entry.preferences),
@@ -204,7 +208,7 @@ export function scoreCorpusCase(entry: CorpusCase, result: CorpusTurnResult): Co
   return { id: entry.id, result, checks, passed: checks.every(check => check.passed) };
 }
 
-export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter, judge?: CorpusJudge, design?: CorpusDesigner): Promise<CorpusOutcome> {
+export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter, judge?: CorpusJudge, design?: CorpusDesigner, analyze?: CorpusAnalyst): Promise<CorpusOutcome> {
   const turns = (entry.history || []).map((turn, index) => ({
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
     reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
@@ -215,7 +219,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   const recorded: CoworkObservation[] = [];
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
-  const instructions = corpusCaseInstructions(entry, Boolean(write), { codeArtifacts: Boolean(design) });
+  const instructions = corpusCaseInstructions(entry, Boolean(write), { codeArtifacts: Boolean(design), analyst: Boolean(analyze) });
   const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
@@ -262,6 +266,12 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         result.artifact = { brief, title: made.output.title, html: made.html, bytes: made.bytes, attempts: made.attempts, seconds: Math.round((Date.now() - started) / 100) / 10,
           tables: Object.entries(data.tables).map(([name, table]) => ({ name, rows: table.total })) };
         return { reply: made.output.reply, document: null, blocks: null, question: null, suggestions: made.output.suggestions };
+      } } : {}),
+      ...(analyze ? { analyze: async (brief: CoworkAnalysisBrief, observations: CoworkObservation[]) => {
+        result.analyst = { brief };
+        const output = await analyze(brief, observations, { caseId: entry.id, request: entry.request, userContext,
+          history: turns.map(turn => ({ at: turn.at, request: turn.request, reply: turn.reply })) });
+        return coworkAnalystAnswer(output);
       } } : {}),
       ...(judge ? { judge: async (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => {
         const judgement = await judge(answer, observations, { caseId: entry.id, request: entry.request, userContext,

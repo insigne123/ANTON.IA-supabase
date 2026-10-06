@@ -23,6 +23,9 @@
 // hands the answer to the judge's model only when Jev sees something or does not answer; llm (the default) is the model alone. The report
 // says how many answers Jev read, how many it handed to the model, its latency and what it cost.
 //
+// --analyst turns on the Analyst (Plan 12, 4b), as COWORK_ANALYST_ENABLED does: after reading, the coordinator may hand a question
+// about results to the Analyst (COWORK_ANALYST_MODEL, then COWORK_MODEL), who writes the turn's answer. The report says how many used it.
+//
 // --contacts-import turns on contacts.import in every case (F4), as COWORK_CONTACTS_IMPORT_ENABLED
 // does; the cases marked contactsImport have it on anyway. The judges read the same flag.
 // --preferences turns on preference.save in every case (Plan 12, 5), as COWORK_PREFERENCES_ENABLED does; the report lists the
@@ -39,7 +42,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
-import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
+import { coworkDecisionSchema, coworkOfferedRead } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { coworkAnswerChanged } from '../src/lib/cowork/presentation';
@@ -53,8 +56,10 @@ import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { selectCases } from './cowork-case-selection';
 import { askJev, type JevResult } from '../src/lib/server/jev';
 import { COWORK_JEV_DEFAULT_SCREEN, COWORK_JEV_DEFAULT_THRESHOLDS, COWORK_JEV_QUESTIONS, coworkJevJudgement, coworkJevProbabilities, coworkJevSeen, coworkJevStateFromPrompt } from '../src/lib/cowork/jev-review';
-import { corpusCaseInstructions, runCorpusCase, type CorpusDesigner, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusCaseInstructions, runCorpusCase, type CorpusAnalyst, type CorpusDesigner, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { coworkDesignerOutputSchema, runCoworkDesigner } from '../src/lib/server/cowork/designer';
+import { COWORK_ANALYST_RULES, coworkAnalystOutputSchema, coworkAnalystPrompt } from '../src/lib/cowork/analyst';
+import { coworkTimeZone } from '../src/lib/cowork/decision-context';
 import { renderCoworkArtifacts } from './fixtures/cowork-artifact-render';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
@@ -128,6 +133,9 @@ async function main() {
   const artifactsOn = process.argv.includes('--artifacts');
   const designerModel = process.env.COWORK_DESIGNER_MODEL || process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL;
   let designerCalls = 0;
+  const analystOn = process.argv.includes('--analyst');
+  const analystModel = process.env.COWORK_ANALYST_MODEL || process.env.COWORK_MODEL;
+  let analystCalls = 0;
   const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
   const writerCalls = { writer: 0, reviewer: 0 };
   const reviewEngine = arg('review-engine') ?? 'llm';
@@ -214,9 +222,28 @@ async function main() {
           return response.data;
         },
       }) : undefined;
+      // The Analyst writes the answer with its own prompt and the same data, as the worker does.
+      const analyze: CorpusAnalyst | undefined = analystOn ? async (brief, observations, meta) => {
+        if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
+        calls++;
+        analystCalls++;
+        const response = await generateStructuredWithTelemetry({ schema: coworkAnalystOutputSchema, systemPrompt: COWORK_ANALYST_RULES.join('\n'),
+          prompt: coworkAnalystPrompt({ request: meta.request, brief, userContext: meta.userContext, observations, history: meta.history, now: CORPUS_NOW, timeZone: coworkTimeZone() }),
+          provider: 'openai', openAiModel: analystModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 4000, timeoutMs: 45000 });
+        usage.push(coworkModelUsage(response.telemetry));
+        decisions.push({ agent: 'analyst', brief, output: response.data });
+        return response.data;
+      } : undefined;
+      let refusedSeen = 0;
       const outcome = await runCorpusCase(entry, async context => {
         if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
         calls++;
+        // What the loop refused since the previous decision and why, so a failed turn can be read in the report.
+        const refused = (context as { rejectedDecisions?: Array<{ action?: unknown; reason?: unknown }> }).rejectedDecisions ?? [];
+        if (refused.length > refusedSeen) {
+          decisions.push({ loopRejected: refused.slice(refusedSeen).map(item => `${String(item.action)}: ${String(item.reason).slice(0, 300)}`) });
+          refusedSeen = refused.length;
+        }
         // Same schema as production; the wrapper only keeps the raw decision so a
         // rejected one (the loop retries it) can still be read in the report.
         let raw: unknown = null;
@@ -230,7 +257,7 @@ async function main() {
         try {
           response = await generateStructuredWithTelemetry({
             schema,
-            systemPrompt: `${corpusCaseInstructions(entry, writerOn, { codeArtifacts: artifactsOn }).systemPrompt}\nspecialists.review está deshabilitado.`,
+            systemPrompt: `${corpusCaseInstructions(entry, writerOn, { codeArtifacts: artifactsOn, analyst: analystOn }).systemPrompt}\nspecialists.review está deshabilitado.`,
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
             // First words of an answer as the page would get them: read at most every 50 ms.
@@ -251,7 +278,7 @@ async function main() {
           leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
           outline: response.data.outline ?? null });
         return response.data;
-      }, write, judgeInTurn, design);
+      }, write, judgeInTurn, design, analyze);
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
       outcomes.push({ ...outcome, attempt, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
         issues: coworkAnswerIssues(shown, { expectNextStep: !(outcome.result.proposal || outcome.result.search) }).map(issue => issue.detail) });
@@ -299,6 +326,11 @@ async function main() {
       fit390: made.filter(outcome => (outcome.result.artifact!.render?.overflow390 ?? 1) <= 0).length,
       axeClean: made.filter(outcome => outcome.result.artifact!.render && !outcome.result.artifact!.render.axe.light.length && !outcome.result.artifact!.render.axe.dark.length).length,
       seconds: made.map(outcome => outcome.result.artifact!.seconds) } } : {}),
+    // With --analyst: how many turns the coordinator handed to the Analyst.
+    ...(analystOn ? { analyst: { model: analystModel, calls: analystCalls, used: outcomes.filter(outcome => outcome.result.analyst).length } } : {}),
+    // Answers that close offering a read Cowork could have made itself, the judge's most frequent complaint (Plan 12, final round).
+    answersOfferingReads: outcomes.filter(outcome => !outcome.result.proposal && !outcome.result.search
+      && coworkOfferedRead({ reply: outcome.result.reply, question: outcome.result.question })).map(outcome => outcome.id),
     casesPassed: outcomes.filter(outcome => outcome.passed).length,
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,

@@ -29,6 +29,9 @@ export function polishCoworkText(text: string): string {
  * «…y te indicaré otro horario», «Voy a sincronizar») cannot be done on click.
  * Shared with the evaluation corpus. */
 export const COWORK_DEFERRAL = /(?<!\p{L})(?:voy a|te indicar[ée]|te aviso|lo pienso|d[ée]jame pensar|m[áa]s tarde|despu[ée]s lo|luego lo)(?!\p{L})|^s[íi],? cuando(?!\p{L})/iu;
+/** A chip that only turns the question down («No por ahora», «Lo revisaré por mi cuenta»): the person can just not click. The judge
+ * reads it as a yes-or-no choice it did not need (Plan 12, final round). A «no» that tells something («No está confirmado») stays. */
+const DECLINE = /^(?:no,?\s+(?:por ahora|por el momento|todav[íi]a|gracias|de momento)|ahora no|todav[íi]a no|por ahora no|lo (?:reviso|revisar[ée]|veo|ver[ée]) (?:yo|por mi cuenta|despu[ée]s))(?!\p{L})/iu;
 
 /** Quick replies that are safe to show as buttons: plain text, no IDs or
  * internal codes, a short label and a self-contained message. Malformed chips
@@ -49,7 +52,7 @@ export function coworkSuggestions(value: unknown): CoworkSuggestion[] {
     // A message ending in «:» or holding a [placeholder] waits for text the person has to add, and
     // a deferral leaves something for later: none can be sent as is.
     if (UUID.test(label) || UUID.test(message) || /:$/.test(message) || /\[[^\]]{2,}\]/.test(`${label} ${message}`)
-      || COWORK_DEFERRAL.test(message)) continue;
+      || COWORK_DEFERRAL.test(message) || DECLINE.test(label)) continue;
     const key = label.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);

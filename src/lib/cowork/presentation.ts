@@ -766,7 +766,7 @@ export function coworkConsultedSources(events: CoworkEvent[]): string[] {
 /** The Writer, the Reviewer or the judge in a turn (writer.ts, judge-run.ts): its latest step, with the name the page shows. */
 export type CoworkAgentRow = CoworkAgentEvent & { name: string };
 /** The judge reads answers as the Reviewer reads emails: to the person, both are the Reviewer. */
-const AGENT_NAMES: Record<CoworkAgentEvent['agent'], string> = { writer: 'Redactora', reviewer: 'Revisora', judge: 'Revisora', designer: 'Diseñadora' };
+const AGENT_NAMES: Record<CoworkAgentEvent['agent'], string> = { writer: 'Redactora', reviewer: 'Revisora', judge: 'Revisora', designer: 'Diseñadora', analyst: 'Analista' };
 
 /** Each agent of the turn at its latest step, in the order they started: who wrote, who reviewed. */
 export function coworkAgentRows(events: CoworkEvent[]): CoworkAgentRow[] {

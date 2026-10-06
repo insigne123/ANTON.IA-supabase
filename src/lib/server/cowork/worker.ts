@@ -29,7 +29,7 @@ import { hashCoworkCodeProposal } from '@/lib/cowork/code-proposal';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
-import { coworkDecisionContext } from '@/lib/cowork/decision-context';
+import { coworkDecisionContext, coworkTimeZone } from '@/lib/cowork/decision-context';
 import { loadCoworkUserContext } from './user-context';
 import { reserveCoworkModelCall } from './model-budget';
 import { coworkAnswerHoldEnabled, coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
@@ -58,6 +58,7 @@ import { coworkLinkedinBatchEnabled, stageCoworkLinkedinBatch } from './linkedin
 import { coworkEffectAlreadyDone, coworkPrepareBatchEnabled, stageCoworkPrepareBatch } from './prepare-batch';
 import { coworkIntentPromptsEnabled, coworkTurnIntents } from '@/lib/cowork/intents';
 import { coworkCodeArtifactsEnabled, coworkDesignerModel, coworkDesignerTurn } from './designer-run';
+import { coworkAnalystEnabled, coworkAnalystModel, coworkAnalystTurn } from './analyst-run';
 import { coworkArtifactStore } from './artifact-store';
 import { coworkPreferencesEnabled, stageCoworkPreference } from './preference';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
@@ -195,6 +196,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // Remembering preferences with a card (Plan 12, 5) needs the memory_save kind (migration 20261006160000). Off unless
     // COWORK_PREFERENCES_ENABLED=true.
     const preferencesEnabled = coworkPreferencesEnabled();
+    // The Analyst (Plan 12, 4b) answers questions about results with what the turn read. Off unless COWORK_ANALYST_ENABLED=true.
+    const analystEnabled = coworkAnalystEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
@@ -207,6 +210,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       opportunities: opportunitiesEnabled,
       codeArtifacts: codeArtifactsEnabled,
       preferences: preferencesEnabled,
+      analyst: analystEnabled,
       // Only the parts of the prompt this request needs (intents.ts), with COWORK_INTENT_PROMPTS_ENABLED=true; off, the whole prompt.
       intents: coworkIntentPromptsEnabled() ? coworkTurnIntents(run.message, history.turns) : null,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
@@ -307,6 +311,18 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         timeLeft: () => 100000 - (Date.now() - claimedAt),
         model: coworkDesignerModel(),
         store: coworkArtifactStore(client, scope, run.id, { opportunities: opportunitiesEnabled }),
+        onCall: call => telemetry.push(call),
+      }) : undefined,
+      // The Analyst writes the answer when the coordinator hands it a question about results (analysis.write).
+      analyze: analystEnabled ? coworkAnalystTurn({
+        request: run.message, userContext, history: history.turns, signal: controller.signal, authorize,
+        reserve: role => reserveCoworkModelCall(client, run.id, run.lease_token, role),
+        generate: generateStructuredWithTelemetry,
+        recordUsage: (reservationId, callTelemetry) => recordCoworkModelUsage(client, reservationId, run.lease_token, callTelemetry),
+        record: recordEvent, liveDraft,
+        timeLeft: () => 100000 - (Date.now() - claimedAt),
+        timeZone: coworkTimeZone(),
+        model: coworkAnalystModel(),
         onCall: call => telemetry.push(call),
       }) : undefined,
       judge: judgeTurn?.review,
