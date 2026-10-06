@@ -146,3 +146,26 @@ test('a parent turn with a long list keeps its first rows and says how many it l
   assert.deepEqual(result.next, { page: 1, offset: 25 });
   assert.ok(JSON.stringify(history.turns[0]).length <= 60000);
 });
+
+test('each turn of the history carries what the person said about its answer', async () => {
+  const runs: Record<string, string | null> = { a: null, b: 'a' };
+  const client = { from(table: string) {
+    const where: Record<string, unknown> = {};
+    const chain = {
+      select: () => chain, order: () => chain, limit: () => chain,
+      in: (key: string, values: unknown[]) => { where[key] = values; return chain; },
+      eq: (key: string, value: unknown) => { where[key] = value; return chain; },
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(where.kind === 'answer.feedback'
+        ? { data: [{ run_id: 'a', kind: 'answer.feedback', payload: { rating: 'down', reason: 'too_long', comment: null }, sequence: 9 }], error: null }
+        : { data: [], error: null })),
+      maybeSingle: async () => {
+        const id = String(where.id || where.run_id);
+        return { data: table === 'cowork_runs' ? { id, message: `request-${id}`, status: 'completed', parent_run_id: runs[id] }
+          : { payload: { reply: `reply-${id}`, document: null } }, error: null };
+      },
+    };
+    return chain;
+  } } as unknown as SupabaseClient;
+  const history = await loadCoworkHistory(client, { userId: 'owner', organizationId: 'org' }, 'b');
+  assert.deepEqual(history.turns.map(turn => turn.feedback ?? null), [{ rating: 'down', reason: 'Demasiado largo', comment: null }, null]);
+});

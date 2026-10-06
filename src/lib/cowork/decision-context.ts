@@ -1,3 +1,4 @@
+import { COWORK_HISTORY_FEEDBACK_INSTRUCTION, COWORK_PREVIOUS_VERSIONS_INSTRUCTION, type CoworkPreviousVersion } from './previous-versions';
 import { coworkAgentInstructions } from './agent-instructions';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_WRITTEN_ACTION } from './contracts';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
@@ -142,6 +143,9 @@ function coworkAnswerToCorrect(rejections: unknown[] | undefined) {
   } };
 }
 
+const historyHasFeedback = (history: unknown) => Array.isArray((history as { turns?: unknown } | null)?.turns)
+  && ((history as { turns: Array<{ feedback?: unknown }> }).turns).some(turn => Boolean(turn?.feedback));
+
 /** Shared by the worker and AXIS replay. Time comes from the server, not the model. */
 export function coworkDecisionContext(
   instructions: ReturnType<typeof coworkAgentInstructions>,
@@ -153,7 +157,9 @@ export function coworkDecisionContext(
      * Decisions stay the loop's business: it asks for the answer with mustAnswer. */
     turnBudget?: CoworkTurnBudget;
     /** The whole conversation beyond the last turns of history: its first request and its memory (thread-memory.ts). */
-    threadMemory?: unknown },
+    threadMemory?: unknown;
+    /** «Otra versión» (Plan 13): the answers already given to this same message, with what the person said about them. */
+    previousVersions?: CoworkPreviousVersion[] },
   now = new Date(),
   timeZone = coworkTimeZone(),
 ) {
@@ -176,6 +182,9 @@ export function coworkDecisionContext(
       instruction: USER_CONTEXT_INSTRUCTION + (input.userContext.memories?.length ? MEMORIES_INSTRUCTION : '')
         + (input.userContext.workspace ? ` ${COWORK_WORKSPACE_INSTRUCTION}` : '') } : null,
     history: coworkWithLocalTimes(input.history, timeZone) as typeof input.history,
+    // What the person said about the answers of the conversation (👍/👎, Plan 13) shapes this one.
+    ...(historyHasFeedback(input.history) ? { historyFeedbackInstruction: COWORK_HISTORY_FEEDBACK_INSTRUCTION } : {}),
+    ...(input.previousVersions?.length ? { previousVersions: input.previousVersions, previousVersionsInstruction: COWORK_PREVIOUS_VERSIONS_INSTRUCTION } : {}),
     observations: coworkWithLocalTimes(input.observations, timeZone) as unknown[],
     // A correction edits the answer it was asked to fix: it travels apart from the reasons.
     ...(input.rejectedDecisions ? { rejectedDecisions: input.rejectedDecisions.map(withoutPrevious) } : {}),

@@ -1,9 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { CoworkAnswerFeedback } from '@/lib/cowork/previous-versions';
+import { loadCoworkHistoryFeedback } from './previous-versions';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkDocumentSchema, coworkStoredBlocks, type CoworkBlock } from '@/lib/cowork/contracts';
 
 type HistoryTurn = { runId: string; at: string | null; request: string; reply: string; document: { title: string; content: string } | null; blocks?: CoworkBlock[]; observations: unknown[]; actions?: Array<{ kind: string; label: string; outcome: string; result?: unknown }>;
   /** The code artifacts of that turn (Plan 12): «cámbiale el gráfico» refers to them by file name. */
-  artifacts?: Array<{ name: string; title: string }> };
+  artifacts?: Array<{ name: string; title: string }>;
+  /** What the person said about that answer (👍/👎 with its reason, Plan 13). */
+  feedback?: CoworkAnswerFeedback };
 
 /**
  * The parent turn with its long lists cut to their first rows, each saying how many it left out (itemsOmitted), or null
@@ -109,6 +113,12 @@ export async function loadCoworkHistory(
     history.unshift(turn);
     remaining -= size;
     cursor = run.parent_run_id;
+  }
+  // What the person said about each answer, in one read: a «Demasiado largo» shapes the next one.
+  const feedback = await loadCoworkHistoryFeedback(client, scope, history.map(turn => turn.runId));
+  for (const turn of history) {
+    const said = feedback.get(turn.runId);
+    if (said) turn.feedback = said;
   }
   return { turns: history, olderTurnsOmitted: Boolean(cursor) };
 }

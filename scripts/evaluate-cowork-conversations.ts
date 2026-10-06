@@ -73,6 +73,7 @@ import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
 import { CHAT_CORPUS } from './fixtures/cowork-chat-corpus';
+import { VERSION_CORPUS } from './fixtures/cowork-version-corpus';
 import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
 import { CAMPANA_CORPUS } from './fixtures/cowork-campana-corpus';
 import { PREFERENCIAS_CORPUS } from './fixtures/cowork-preferencias-corpus';
@@ -117,6 +118,9 @@ CORPUS.push(...CAMPANA_CORPUS);
 // Chatting with a colleague (Plan 13; scripts/fixtures/cowork-chat-corpus.ts): general questions, honest disagreement, owning a
 // mistake and the one-line heads-up about today: chat-*.
 CORPUS.push(...CHAT_CORPUS);
+
+// «Otra versión» and the 👎 (Plan 13; scripts/fixtures/cowork-version-corpus.ts): ver-*. COWORK_EVAL_VERSIONS=off runs them without.
+CORPUS.push(...VERSION_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
