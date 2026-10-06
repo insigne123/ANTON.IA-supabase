@@ -1,6 +1,7 @@
 // Runs one corpus case through the real Cowork loop and decision context with
 // fixture tools. The decider is injected: a scripted one for offline tests, or
 // the configured model for `scripts/evaluate-cowork-conversations.ts --live`.
+import { coworkPreferenceLabel } from '../../src/lib/cowork/preference-proposal';
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
 import { coworkTurnIntents } from '../../src/lib/cowork/intents';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
@@ -95,6 +96,7 @@ export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, optio
     turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, codeArtifacts: Boolean(options.codeArtifacts),
     contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch),
     campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
+    preferences: Boolean(entry.preferences),
     prepareBatch: corpusPrepareBatch,
     intents: corpusIntentPrompts ? coworkTurnIntents(entry.request, entry.history || []) : null,
     threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
@@ -220,6 +222,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
+      preferences: Boolean(entry.preferences),
       prepareBatch: corpusPrepareBatch,
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
@@ -277,7 +280,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         const reply = proposal.replyThread ? corpusStageReply(proposal.replyThread, entry.world?.read ?? corpusRead) : null;
         const batch = proposal.linkedinBatch
           ? corpusStageLinkedinBatch(proposal.kind === 'linkedin_invite_batch' ? 'invite' : 'message', proposal.linkedinBatch, entry.world?.read ?? corpusRead) : null;
-        result.proposal = { kind: proposal.kind, label: staged?.label ?? reply?.label ?? batch?.label ?? proposal.label,
+        result.proposal = { kind: proposal.kind, label: staged?.label ?? reply?.label ?? batch?.label
+            ?? (proposal.preference ? coworkPreferenceLabel(proposal.preference) : proposal.label),
+          ...(proposal.preference ? { preference: proposal.preference } : {}),
           ...(batch ? { linkedinBatch: { kind: batch.kind, items: batch.items, deferred: batch.deferred } } : {}), targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
           ...(proposal.replyThread && reply ? { replyThread: { contactedId: proposal.replyThread.contactedId, to: reply.to, subject: reply.subject, body: reply.body } } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),
@@ -347,6 +352,8 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
         : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage }
         // The code card shows the files it runs on and the code itself.
         : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }
+        // The preference card shows the sentence it will keep and for whom.
+        : result.proposal.preference ? { detail: { recordar: result.proposal.preference.text, para: result.proposal.preference.scope === 'organization' ? 'todo el equipo' : 'solo la persona' } }
         // The import card shows who comes in, who stays out and the columns (older reports: only the file).
         : result.proposal.contactsImport ? { detail: result.proposal.contactsImport.card ?? { archivo: result.proposal.contactsImport.file } }
         // The batch card lists who goes (with the text of each message), who waits and why.

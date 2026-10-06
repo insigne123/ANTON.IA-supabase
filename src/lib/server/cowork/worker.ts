@@ -59,6 +59,7 @@ import { coworkEffectAlreadyDone, coworkPrepareBatchEnabled, stageCoworkPrepareB
 import { coworkIntentPromptsEnabled, coworkTurnIntents } from '@/lib/cowork/intents';
 import { coworkCodeArtifactsEnabled, coworkDesignerModel, coworkDesignerTurn } from './designer-run';
 import { coworkArtifactStore } from './artifact-store';
+import { coworkPreferencesEnabled, stageCoworkPreference } from './preference';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -191,6 +192,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const opportunitiesEnabled = await coworkOpportunitiesAllowed(client, scope.userId);
     // Code artifacts (Plan 12, 3b): the Designer writes them for the canvas. Off unless COWORK_CODE_ARTIFACTS_ENABLED=true.
     const codeArtifactsEnabled = coworkCodeArtifactsEnabled();
+    // Remembering preferences with a card (Plan 12, 5) needs the memory_save kind (migration 20261006160000). Off unless
+    // COWORK_PREFERENCES_ENABLED=true.
+    const preferencesEnabled = coworkPreferencesEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
@@ -202,6 +206,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       prepareBatch: prepareBatchEnabled,
       opportunities: opportunitiesEnabled,
       codeArtifacts: codeArtifactsEnabled,
+      preferences: preferencesEnabled,
       // Only the parts of the prompt this request needs (intents.ts), with COWORK_INTENT_PROMPTS_ENABLED=true; off, the whole prompt.
       intents: coworkIntentPromptsEnabled() ? coworkTurnIntents(run.message, history.turns) : null,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
@@ -311,6 +316,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       phoneReveal: phoneRevealEnabled,
       linkedinBatch: linkedinBatchEnabled,
       prepareBatch: prepareBatchEnabled,
+      preferences: preferencesEnabled,
       opportunities: opportunitiesEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       offeredReads: process.env.COWORK_OFFERED_READS_ENABLED === 'true',
@@ -513,6 +519,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.prepareBatch) throw new Error('Missing batch people');
           const staged = await stageCoworkPrepareBatch(scope, run.id, proposal.prepareBatch);
           targetId = `preparebatch:${staged.hash}`;
+          label = staged.label;
+        }
+        if (proposal.kind === 'memory_save') {
+          if (!preferencesEnabled) throw new Error('Recordar preferencias no está disponible.');
+          if (!proposal.preference) throw new Error('Missing preference');
+          const staged = await stageCoworkPreference(scope, run.id, proposal.preference);
+          targetId = staged.targetId;
           label = staged.label;
         }
         const proposed = await client.rpc('cowork_propose_effect', {

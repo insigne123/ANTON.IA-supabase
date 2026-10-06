@@ -142,6 +142,19 @@ test('importing contacts is described only when it is on, and says what it leave
   assert.match(String(on.contactsImportCapability), /o una campaña o un correo para personas de un archivo que aún no están guardadas, propón contacts\.import/);
 });
 
+test('remembering a preference is described only when it is on, in any turn, with its card', () => {
+  const base = { history: { turns: [] }, request: 'Recuerda que no le escribo a la competencia', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
+  const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);
+  assert.equal('preferenceCapability' in off, false);
+  // Whatever the intent of the turn: a request to remember can come with any.
+  const on = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, preferences: true,
+    intents: new Set(['email'] as const) }), base);
+  assert.match(String(on.preferenceCapability), /preference\.save con preference \{text, scope\}/);
+  assert.match(String(on.preferenceCapability), /revisión humana siempre, incluso en modo autónomo/);
+  assert.match(String(on.preferenceCapability), /responde que ya lo tienes presente, sin proponerlo de nuevo ni decir que espera aprobación/);
+  assert.match(String(on.preferenceCapability), /Nunca digas que algo queda guardado o propuesto si no propusiste preference\.save/);
+});
+
 test('replying in a conversation is described as a proposal with a card only when it is on; off, it is a draft sent from Contactados', () => {
   const base = { history: { turns: [] }, request: '¿Qué toca hoy?', observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' } };
   const off = coworkDecisionContext(coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false }), base);

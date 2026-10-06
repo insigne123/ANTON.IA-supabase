@@ -165,7 +165,9 @@ export type CorpusTurnResult = {
     linkedinBatch?: { kind: 'invite' | 'message'; items: Array<{ id: string; name: string | null; company: string | null; message?: string }>;
       deferred: Array<{ id: string; name: string | null; reason: string }> };
     /** A profile update's fields, as the approval card shows them. */
-    profile?: Record<string, unknown> } | null;
+    profile?: Record<string, unknown>;
+    /** A preference to remember (Plan 12, 5): the sentence the card shows and for whom. */
+    preference?: { text: string; scope: 'personal' | 'organization' } } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;
@@ -230,6 +232,8 @@ export type CorpusCase = {
   phoneReveal?: boolean;
   /** Runs for an account that sees «Oportunidades» (OPPORTUNITIES_ALLOWED_EMAILS): opportunities.list is available. */
   opportunities?: boolean;
+  /** preference.save can be proposed (COWORK_PREFERENCES_ENABLED, Plan 12, 5). */
+  preferences?: boolean;
   /** The code of the artifacts made before in this conversation, by file name: what the Designer gets to edit. */
   artifacts?: Record<string, { html: string; css: string; js: string }>;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
