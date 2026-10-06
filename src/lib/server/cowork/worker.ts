@@ -1,6 +1,6 @@
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { coworkDecisionSchema, runCoworkReadLoop } from '@/lib/cowork/agent-loop';
-import { coworkTurnCeiling } from '@/lib/cowork/turn-budget';
+import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -31,6 +31,7 @@ import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
 import { coworkDecisionContext, coworkTimeZone } from '@/lib/cowork/decision-context';
 import { loadCoworkUserContext } from './user-context';
+import { coworkWorkspaceEnabled, loadCoworkWorkspace } from './workspace';
 import { reserveCoworkModelCall } from './model-budget';
 import { coworkAnswerHoldEnabled, coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
 import { coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
@@ -149,7 +150,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       { runIds: history.turns.map(turn => turn.runId), complete: !history.olderTurnsOmitted })
       .catch(() => ({ firstRequest: null, memory: null })));
     // Name, company and offer once per run: drafts get signed and pitched without spending reads.
-    const userContext = await loadCoworkUserContext(client, scope);
+    // With the account's state (Plan 13, COWORK_WORKSPACE_ENABLED): counts and today's agenda, read in parallel and never waited on long.
+    const [baseContext, workspace] = await Promise.all([
+      loadCoworkUserContext(client, scope),
+      coworkWorkspaceEnabled() ? loadCoworkWorkspace(client, scope).catch(() => null) : Promise.resolve(null),
+    ]);
+    const userContext = baseContext && workspace ? { ...baseContext, workspace } : baseContext;
+    const reasoningEffort = coworkReasoningEffort();
     let waitingApproval = false;
     const autonomyEnabled = process.env.COWORK_AUTONOMY_ENABLED === 'true';
     const executionPolicy = coworkExecutionPolicy(run.mode, autonomyEnabled);
@@ -274,7 +281,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           })),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',
-          maxAttempts: 1, timeoutMs: 30000, maxOutputTokens: 6000,
+          maxAttempts: 1, timeoutMs: coworkDecisionTimeoutMs(reasoningEffort), maxOutputTokens: 6000, reasoningEffort,
           signal: controller.signal,
           onPartial: liveDraft && (liveDraft.held || !correcting) ? text => liveDraft.push(text) : undefined,
         });

@@ -22,17 +22,18 @@ import {
   COWORK_JUDGE_DIMENSIONS, COWORK_JUDGE_INSTRUCTIONS, COWORK_JUDGE_NOW_RULE, coworkJudgeAgreement, coworkJudgeExplainSchema, coworkJudgeInstructions, coworkJudgePrompt, coworkJudgeSchema, coworkJudgeSummary,
   type CoworkExplainedJudgement, type CoworkJudgement,
 } from '../src/lib/cowork/judge';
-import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW, CORPUS_USER_CONTEXT, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
+import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
 import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { AXIS_REFERENCE_INSTRUCTIONS, axisReferencePrompt, axisReferenceSchema, axisReferenceSummary, type AxisReference } from './fixtures/cowork-axis-judge';
 import { JUDGE_CALIBRATION } from './fixtures/cowork-judge-calibration';
 import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
+import { CHAT_CORPUS } from './fixtures/cowork-chat-corpus';
 import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
 import { CAMPANA_CORPUS } from './fixtures/cowork-campana-corpus';
 import { PREFERENCIAS_CORPUS } from './fixtures/cowork-preferencias-corpus';
-import { corpusObservations, corpusShownAnswer } from './fixtures/cowork-conversation-runner';
+import { corpusObservations, corpusShownAnswer, corpusWorkspace } from './fixtures/cowork-conversation-runner';
 
 const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS, ...AXIS_REST_CORPUS];
 
@@ -40,7 +41,7 @@ async function main() {
   // Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts).
   CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS, ...THREAD_SEND_CORPUS, ...THREAD_SEND_AGENDA_CORPUS, ...BATCH_CORPUS);
   // «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
-  CORPUS.push(...AGENDA_CORPUS, ...WEB_CORPUS, ...LECTURAS_CORPUS, ...ICP_CORPUS, ...REINTENTO_CORPUS, ...TELEFONO_CORPUS, ...USO_REAL_CORPUS, ...ARTIFACT_CORPUS, ...CAMPANA_CORPUS, ...PREFERENCIAS_CORPUS);
+  CORPUS.push(...AGENDA_CORPUS, ...WEB_CORPUS, ...LECTURAS_CORPUS, ...ICP_CORPUS, ...REINTENTO_CORPUS, ...TELEFONO_CORPUS, ...USO_REAL_CORPUS, ...ARTIFACT_CORPUS, ...CAMPANA_CORPUS, ...PREFERENCIAS_CORPUS, ...CHAT_CORPUS);
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY) throw new Error('Requires --live and an explicit OPENAI_API_KEY.');
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
   const judgeModel = arg('judge-model') || process.env.COWORK_JUDGE_MODEL || '';
@@ -104,7 +105,11 @@ async function main() {
       // The rules of the turn as it ran: contacts.import, email.reply_thread and the LinkedIn batches on or off (in older reports, as the case says).
       // The worlds of the bank run on their own clock (the 25th), not on the day the judge runs: it reads the same date the coordinator did.
       const rules = [coworkJudgeInstructions({ contactsImport: outcome.contactsImport ?? Boolean(entry.contactsImport), replyThread: outcome.replyThread ?? Boolean(entry.replyThread), linkedinBatch: outcome.linkedinBatch ?? Boolean(entry.linkedinBatch), explain: true }), COWORK_JUDGE_NOW_RULE].join('\n');
-      const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
+      const baseUserContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
+      // The account's state the turn carried (Plan 13): recorded with the result, or rebuilt from the case's world for runs saved before.
+      const workspace = outcome.result.workspace
+        ?? (process.env.COWORK_WORKSPACE_ENABLED === 'true' && baseUserContext ? corpusWorkspace(entry.world?.read ?? corpusRead) : null);
+      const userContext = baseUserContext && workspace ? { ...baseUserContext, workspace } : baseUserContext;
       const observations = corpusObservations(entry, outcome.result);
       const shown = corpusShownAnswer(outcome.result);
       const judgement = await judge(coworkJudgePrompt({

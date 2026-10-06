@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { coworkDecisionContext } from './decision-context';
 import { coworkAgentInstructions } from './agent-instructions';
 import { COWORK_TURN_DEFAULTS } from './turn-budget';
+import { COWORK_WORKSPACE_INSTRUCTION } from './workspace';
 
 test('decision context uses server clock independently of historical dates', () => {
   const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
@@ -316,4 +317,20 @@ test('a person is proposed for LinkedIn only with a saved profile: without one C
   assert.match(linkedin, /Un contacto con linkedin_url null no tiene perfil guardado \(no es que no tenga LinkedIn\): no propongas invitarlo ni escribirle por LinkedIn; propón lead\.enrich/);
   // The quota adds the pending to the sent of 7 days: when it is cited, the two are told apart, never «se usaron 20».
   assert.match(linkedin, /linkedin\.quota cuenta las invitaciones pendientes y las enviadas de los últimos 7 días contra el límite operativo semanal: si citas el cupo, separa pending y sent7d/);
+});
+
+test('the account state travels with the user context, and with it how to use it and the one-line heads-up', () => {
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  const base = { history: { turns: [] }, request: 'Escríbele a Jose', observations: [], mustAnswer: false, executionPolicy: {} };
+  const profile = { fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl',
+    offer: 'AXIS', offerSource: 'profile' as const };
+  const workspace = { contacts: 256, withEmail: 21, campaigns: 19, linkedin: null, today: { interestedAccounts: 1, meetingRequests: 1,
+    followupsReady: 0, approvals: 0, bounces: 0, first: [{ who: 'Marcela Rojas · Servicios Norte', what: 'pidió una reunión hace 4 días' }], complete: true } };
+  const withState = coworkDecisionContext(instructions, { ...base, userContext: { ...profile, workspace } });
+  assert.deepEqual(withState.userContext?.workspace, workspace);
+  assert.ok(withState.userContext?.instruction.endsWith(COWORK_WORKSPACE_INSTRUCTION));
+  assert.match(COWORK_WORKSPACE_INSTRUCTION, /Por cierto/);
+  assert.match(COWORK_WORKSPACE_INSTRUCTION, /no lo dijiste antes en este hilo/);
+  const without = coworkDecisionContext(instructions, { ...base, userContext: profile });
+  assert.ok(!without.userContext?.instruction.includes('workspace'));
 });
