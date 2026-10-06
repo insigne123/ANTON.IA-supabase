@@ -54,6 +54,10 @@ export default function cowork(ctx) {
   const events = runs.flatMap((item, index) => [
     { sequence: index * 10 + 1, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.started', payload: {}, created_at: item.created_at },
     ...(index === 2 ? plan(item, index * 10) : []),
+    // The first turn read your contacts and the read came back cut (Plan 13): the table offers «Ver todos».
+    ...(index === 0 ? [at(item, 3, 'tool.completed', { action: 'leads.search', input: 'personas', result: { scope: 'own_saved_contacts', truncated: true, limit: 3, returned: 3,
+      items: [['Andrea Soto', 'Gerente de Personas', 'Retail Andino'], ['Catalina Morales', 'Subgerente de Personas', 'Grupo Pacífico'], ['Martina Valenzuela', 'Jefa de Personas', 'Logística Sur']]
+        .map(([name, title, company], n) => ({ id: ctx.uid(9301 + n), name, title, company, email: null, status: 'saved' })) } })] : []),
     ...(index === 3 ? [artifactEvent(item, index * 10 + 5)] : []),
     { sequence: index * 10 + 8, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null,
       ...(index === 0 ? { blocks: [stagesChart] } : {}) }, created_at: item.updated_at },

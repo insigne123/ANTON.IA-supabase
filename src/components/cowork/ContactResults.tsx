@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { Building2, ExternalLink, Search, SearchCheck } from 'lucide-react';
+import { Building2, ExternalLink, ListChecks, Loader2, Search, SearchCheck } from 'lucide-react';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { displayLeadName } from '@/lib/lead-name';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
@@ -55,7 +55,29 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
 }) {
   const [search, setSearch] = useState('');
   const [enriched, setEnriched] = useState<Record<string, string | null>>({});
-  const observations = useMemo(() => events.filter(event => event.kind === 'tool.completed').map(event => event.payload), [events]);
+  // «Ver todos» (Plan 13): the last search of your contacts the turn read cut at 20, and its whole list once asked for.
+  const cutSearch = useMemo(() => events.filter(event => event.kind === 'tool.completed' && event.payload?.action === 'leads.search'
+    && (event.payload.result as { truncated?: boolean } | null)?.truncated === true).at(-1) ?? null, [events]);
+  const [full, setFull] = useState<{ sequence: number; payload: Record<string, unknown> } | null>(null);
+  const [loadingFull, setLoadingFull] = useState(false);
+  const observations = useMemo(() => events.filter(event => event.kind === 'tool.completed')
+    .map(event => full && event.sequence === full.sequence ? full.payload : event.payload), [events, full]);
+  const fullCut = Boolean(full && (full.payload.result as { truncated?: boolean } | null)?.truncated);
+  const loadFull = async () => {
+    if (!cutSearch || loadingFull) return;
+    setLoadingFull(true);
+    try {
+      const response = await fetch(`/api/cowork/runs/${runId}/contacts?read=${cutSearch.sequence}`, { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401 || response.status === 403) { onAccessDenied(); return; }
+      if (!response.ok || !data?.result) throw new Error(data?.error || 'No pudimos traer la lista completa.');
+      setFull({ sequence: cutSearch.sequence, payload: data as Record<string, unknown> });
+    } catch (problem) {
+      onError(problem instanceof Error ? problem.message : 'No pudimos traer la lista completa.');
+    } finally {
+      setLoadingFull(false);
+    }
+  };
   const rows = useMemo(() => collectCoworkLeadRows(observations), [observations]);
   const { title: heading, noun, companies: companiesOnly, external } = coworkContactsTitle(rows);
   const term = search.trim().toLocaleLowerCase('es');
@@ -64,7 +86,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
   // Own data cut at the query limit is a partial view; an external search with more results offers «Traer más».
   const partial = observations.some(observation => {
     const result = observation.result as { truncated?: boolean } | null;
-    return observation.action !== 'prospecting.search' && result?.truncated === true;
+    return observation.action !== 'prospecting.search' && observation.action !== 'leads.search' && result?.truncated === true;
   });
   const more = observations.some(observation => {
     const result = observation.result as { next?: unknown } | null;
@@ -93,7 +115,7 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
         <h3 className="text-[15px] font-semibold tracking-tight">{heading}</h3>
         <p className="mt-0.5 text-[12.5px] text-cw-muted">{rows.length} {noun(rows.length)} · {external ? 'Incluye resultados externos no guardados' : 'Contactos propios'}</p>
       </div>
-      <ExportMenu runId={runId} kind="contacts" onError={onError} onAccessDenied={onAccessDenied} />
+      <ExportMenu runId={runId} kind="contacts" read={full?.sequence ?? null} onError={onError} onAccessDenied={onAccessDenied} />
     </div>}
     <div className="space-y-2">
       <div className="flex items-center gap-2">
@@ -103,9 +125,18 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
           <input id={`contacts-filter-${runId}`} value={search} onChange={event => setSearch(event.target.value)} placeholder="Filtrar por nombre, empresa, cargo o correo"
             className="h-9 w-full rounded-[10px] border border-cw-border bg-cw-elevated pl-9 pr-3 text-[13.5px] text-cw-text placeholder:text-cw-faint focus-visible:border-cw-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]" />
         </div>
-        {!showHeader && <ExportMenu runId={runId} kind="contacts" onError={onError} onAccessDenied={onAccessDenied} />}
+        {!showHeader && <ExportMenu runId={runId} kind="contacts" read={full?.sequence ?? null} onError={onError} onAccessDenied={onAccessDenied} />}
       </div>
       <p className="text-[12px] text-cw-muted">La descarga incluye {rows.length} {noun(rows.length)}, sin aplicar este filtro.</p>
+      {cutSearch && !full && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
+        <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Cowork revisó los primeros {rows.length}. Hay más contactos tuyos que calzan con esta búsqueda.</p>
+        <CwButton size="sm" variant="secondary" disabled={loadingFull} onClick={() => void loadFull()}>
+          {loadingFull ? <Loader2 className="motion-safe:animate-spin" aria-hidden="true" /> : <ListChecks aria-hidden="true" />}{loadingFull ? 'Trayendo…' : 'Ver todos'}
+        </CwButton>
+      </div>}
+      {full && <p role="status" className="text-[12px] text-cw-muted">{fullCut
+        ? `Lista completa hasta ${rows.length} ${noun(rows.length)}: hay más; acota la búsqueda para ver el resto.`
+        : `Lista completa: ${rows.length} ${noun(rows.length)}.`}</p>}
       {partial && <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-[12px] text-cw-warning">Una consulta alcanzó el límite de resultados. Esta lista no representa toda tu base.</p>}
       {more && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-cw-hover px-2.5 py-2">
         <p className="min-w-0 flex-1 text-[12.5px] text-cw-muted">Hay más resultados con estos criterios. Cowork propone la búsqueda y tú la apruebas (usa 1 búsqueda de tu cupo diario).</p>
