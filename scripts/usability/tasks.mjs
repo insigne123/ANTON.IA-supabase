@@ -1,4 +1,4 @@
-// The twelve tasks of the simplicity measurement, done as a new person would: each step names the control by what the
+// The tasks of the simplicity measurement, done as a new person would: each step names the control by what the
 // person reads on it, starting from «Hoy» or the menu. `ideal` is the fewest steps the task could take in a good design
 // (expert judgment, written down so changes to it show in review). `dataset` and `persona` pick the situation: a new
 // organization (`empty`) or one in use (`full`), the owner or a member. `mocks` answer, in the browser, the few calls a
@@ -183,6 +183,41 @@ export function TASKS(ctx, { fixtures }) {
       done: page => page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 }),
     },
     {
+      // The same campaign by the main path of the email step (Plan 12, 7): the AI writes the initial email and its follow-up
+      // from the goal, and the person reviews them before approving. «campana» keeps measuring writing both by hand.
+      id: 'campana-ia', module: 'Seguimiento', title: 'Crear y aprobar una campaña con la IA', start: '/dashboard', ideal: 8,
+      steps: [
+        { menu: 'Campañas' },
+        { target: { role: 'button', name: 'Nueva campaña' } },
+        { target: { label: 'Nombre de campaña' }, fill: 'Primer contacto · Retail' },
+        { target: { role: 'button', name: 'Filtros manuales' } },
+        { target: { label: 'Cargos (separados por comas)' }, fill: 'Gerente de Personas' },
+        { target: { role: 'button', name: 'Buscar con filtros' } },
+        { target: { role: 'button', name: 'Seleccionar todos' }, skipIf: async page => /\b[1-9]\d* seleccionados?\b/.test(await page.getByRole('status').filter({ hasText: 'seleccionado' }).first().innerText({ timeout: 2000 })) },
+        { target: { role: 'button', name: 'Continuar a correos' } },
+        // The offer comes from «Perfil»; the person adds what to ask for.
+        { target: { label: '¿Qué quieres conseguir con la campaña?' }, fill: '\nUna reunión de 15 minutos para mostrar AXIS', append: true },
+        { target: { role: 'button', name: 'Generar secuencia con IA' } },
+        { target: { role: 'button', name: 'Guardar y revisar correos' } },
+        { target: { role: 'button', name: 'Aprobar campaña' } },
+      ],
+      mocks: [
+        { url: '**/api/campaigns/bulk/audience', method: 'POST', respond: { people: AUDIENCE, total: AUDIENCE.length, page: 0 } },
+        { url: '**/api/campaigns/bulk/assist', method: 'POST', respond: { messages: [
+          { subject: 'Una idea para tu equipo de personas', body: 'Hola {{nombre}}, vi que en {{empresa}} están contratando. ¿Te sirve conversar 15 minutos esta semana?', delayDays: 0 },
+          { subject: 'Retomo mi correo anterior', body: 'Hola {{nombre}}, ¿pudiste verlo? Si te sirve, te muestro AXIS en 15 minutos.', delayDays: 3 },
+        ] } },
+        { url: '**/api/campaigns/bulk', method: 'POST', respond: body => ({ campaign: campaignFrom(body, 'draft') }) },
+        { url: '**/api/campaigns/bulk/usab-camp-1', method: 'POST', respond: body => ({ campaign: { ...lastCampaign, status: body?.action === 'approve' ? 'approved' : lastCampaign.status, approved_at: body?.action === 'approve' ? new Date().toISOString() : null, revision: 2 } }) },
+      ],
+      done: async (page, { calls }) => {
+        await page.getByText('Contenido y audiencia aprobados').first().waitFor({ timeout: 10000 });
+        // The AI got the offer from «Perfil» and what the person added.
+        const objective = calls.find(call => call.url.endsWith('/api/campaigns/bulk/assist'))?.body?.objective || '';
+        if (!/^Ofrecemos: /.test(objective) || !/reunión de 15 minutos/.test(objective)) throw new Error('el objetivo no partió de la oferta de Perfil');
+      },
+    },
+    {
       id: 'oportunidades', module: 'Prospectar', title: 'Ver las licitaciones', start: '/dashboard', ideal: 2,
       steps: [
         { menu: 'Oportunidades' },
@@ -200,6 +235,39 @@ export function TASKS(ctx, { fixtures }) {
       mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
       done: (page, { calls }) => {
         if (!calls.some(call => call.method === 'POST' && /cowork/.test(call.url))) throw new Error('no se envió el pedido');
+      },
+    },
+    {
+      id: 'cowork-informe', module: 'Cowork', title: 'Pedir un informe visual', start: '/dashboard', ideal: 3,
+      // Measured up to sending, like «Pedirle algo a Cowork»: the bench has no model to write the artifact.
+      steps: [
+        { menu: 'Cowork' },
+        { target: { label: 'Describe tu trabajo' }, fill: 'Hazme un tablero de mi pipeline por etapa' },
+        { target: { role: 'button', name: 'Crear trabajo' } },
+      ],
+      mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
+      done: (page, { calls }) => {
+        if (!calls.some(call => call.method === 'POST' && /cowork/.test(call.url) && /tablero/.test(JSON.stringify(call.body)))) throw new Error('no se envió el pedido');
+      },
+    },
+    {
+      id: 'cowork-cambio', module: 'Cowork', title: 'Pedir un cambio a un artefacto', start: '/dashboard', ideal: 4,
+      // The conversation of the audit fixtures that made «Pipeline por etapa», an artifact written in code.
+      steps: [
+        { menu: 'Cowork' },
+        { target: { role: 'button', name: 'Mostrar trabajos' }, only: 'phone' },
+        { target: { role: 'button', name: /Muéstrame mi pipeline/, exact: false } },
+        { target: { role: 'button', name: /Pipeline por etapa/, exact: false } },
+        { target: { label: 'Pedir cambios a este artefacto' }, fill: 'Agrega el total por etapa' },
+        { target: { role: 'button', name: 'Pedir cambios' } },
+      ],
+      mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
+      done: (page, { calls }) => {
+        // The change goes in the same conversation, tied to the turn that made the artifact.
+        const sent = calls.find(call => call.method === 'POST' && /cowork\/runs$/.test(call.url) && /total por etapa/.test(call.body?.message || ''));
+        if (!sent) throw new Error('no se envió el cambio');
+        if (!sent.body.parentRunId) throw new Error('el cambio abrió una conversación nueva');
+        if (!/Pipeline por etapa/.test(sent.body.message)) throw new Error('el cambio no nombra el artefacto');
       },
     },
     {

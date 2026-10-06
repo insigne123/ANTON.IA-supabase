@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, type RefObject } from 'react';
-import { ArrowLeft, Check, Copy, Download, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Download, Layers, Maximize2, Minimize2, X } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import type { CoworkArtifact } from '@/lib/cowork/presentation';
 import { ArtifactPreview, coworkArtifactUrls } from './ArtifactPreview';
@@ -28,7 +29,7 @@ function when(value: string) {
 
 /** The open result, beside the conversation (or full screen on phones). */
 export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDraft, maximized, onToggleMaximize, onClose, headingRef,
-  onError, onAccessDenied, onUseReport, onSelectVersion, onSend = null, sendHint, versions = [], onOpenArtifact }: {
+  onError, onAccessDenied, onUseReport, onSelectVersion, onSend = null, sendHint, versions = [], onOpenArtifact, others = [] }: {
   artifact: CoworkArtifact;
   events: CoworkEvent[];
   canResearch: boolean;
@@ -48,6 +49,8 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
   versions?: CoworkArtifact[];
   /** Opens another artifact (a version) in the panel. */
   onOpenArtifact?: (artifact: CoworkArtifact) => void;
+  /** Every result of the conversation, newest first (a code artifact once, at its latest version): switch without closing. */
+  others?: CoworkArtifact[];
 }) {
   const [copied, setCopied] = useState(false);
   const label = artifact.kind === 'block' ? BLOCK_LABEL[artifact.block.type] : KIND_LABEL[artifact.kind];
@@ -94,6 +97,28 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
             <Download aria-hidden="true" />
           </a>
         </>}
+        {others.length > 1 && onOpenArtifact && <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <CwButton variant="ghost" size="icon-sm" aria-label={`Resultados de esta conversación (${others.length})`} title="Resultados de esta conversación">
+              <Layers aria-hidden="true" />
+            </CwButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-[min(24rem,70vh)] w-72 overflow-y-auto rounded-xl border-cw-border bg-cw-elevated p-1 text-cw-text shadow-[var(--cw-shadow)]">
+            <DropdownMenuLabel className="px-2.5 py-1.5 text-[12px] font-medium text-cw-muted">Resultados de esta conversación</DropdownMenuLabel>
+            {others.map(item => {
+              const current = item.id === artifact.id || (item.kind === 'code' && artifact.kind === 'code' && item.key === artifact.key);
+              return <DropdownMenuItem key={item.id} onSelect={() => { if (!current) onOpenArtifact(item); }} aria-current={current ? 'true' : undefined}
+                className="gap-2.5 rounded-lg px-2.5 py-2 focus:bg-cw-hover focus:text-cw-text">
+                <CoworkArtifactIcon artifact={item} className="h-4 w-4 shrink-0 text-cw-accent" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">{item.title}</span>
+                  <span className="block truncate text-[11.5px] text-cw-muted">{coworkArtifactMeta(item)}</span>
+                </span>
+                {current && <Check className="h-4 w-4 shrink-0 text-cw-accent" aria-hidden="true" />}
+              </DropdownMenuItem>;
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>}
         <CwButton variant="ghost" size="icon-sm" className="hidden lg:inline-flex" onClick={onToggleMaximize}
           aria-label={maximized ? 'Reducir panel' : 'Ampliar panel'} title={maximized ? 'Reducir' : 'Ampliar'}>
           {maximized ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}

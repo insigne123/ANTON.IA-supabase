@@ -10,7 +10,7 @@ import { coworkWithMentions, type CoworkMention } from '@/lib/cowork/mentions';
 import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
-  coworkCardStatuses, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+  coworkCardStatuses, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
   type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -920,6 +920,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact} onSend={sendFromPanel} sendHint={panelSendHint}
           versions={openArtifact.kind === 'code' ? artifacts.filter(item => item.kind === 'code' && item.key === openArtifact.key).sort((a, b) => (a.kind === 'code' && b.kind === 'code' ? a.version - b.version : 0)) : []}
           onOpenArtifact={item => openArtifactPanel(item, null, false)}
+          others={coworkThreadResults(artifacts)}
           onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
       </m.div>}
     </AnimatePresence>

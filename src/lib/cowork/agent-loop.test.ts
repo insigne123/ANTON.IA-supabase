@@ -876,6 +876,28 @@ test('a search proposed without an explanation still gets a sentence built from 
   assert.match((chained[0] as { result: { reply: string } }).result.reply, /Cuando veas los resultados y guardes a quienes te sirvan, sigo con la campaña\.$/);
 });
 
+test('filler in the campaign field of another action no longer rejects it; on campaign.create its problem goes back', async () => {
+  const filler = { name: 'Prospección', objective: '', criteria: {}, emails: ['N/A-no-destinatarios@invalid'], provider: 'google',
+    messages: [{ subject: '', body: 'No usar.', delayDays: 0 }], firstEmails: [] };
+  // Seen with the real model on a search: the decision used to fail its schema and cost the turn a decision.
+  const search = coworkDecisionSchema.parse({ action: 'prospecting.propose_search', query: null, leadId: null, campaign: filler,
+    answer: { reply: 'Propongo buscar 25 jefaturas de selección en retail.', document: null },
+    searchCriteria: { titles: ['Jefe de Selección'], industries: ['retail'], locations: ['Chile'], limit: 25 } });
+  const proposed: unknown[] = [];
+  await runCoworkReadLoop({ message: 'https://www.linkedin.com/in/ana', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({}), proposeSearch: async given => { proposed.push(given); },
+    decide: async () => ({ ...search, searchCriteria: { titles: [], industries: [], locations: [], limit: 1, linkedinUrl: 'https://www.linkedin.com/in/ana' } }) });
+  assert.equal(proposed.length, 1);
+  // The same filler on campaign.create is still a decision to fix, with what is wrong (also after a second parse).
+  const reasons: string[] = [];
+  const create = coworkDecisionSchema.parse(coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign: filler, answer: null }));
+  const fixed = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Necesito a quién va la campaña.', document: null, question: '¿A quiénes va?' } };
+  await runCoworkReadLoop({ message: 'Crea la campaña', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({ scope: 'own', campaigns: [] }), proposeEffect: async () => { throw new Error('no debe proponer'); },
+    decide: async (_observations, _mustAnswer, rejections = []) => { reasons.push(...rejections.map(rejection => rejection.reason)); return reasons.length ? fixed : create; } });
+  assert.match(reasons.join('|'), /no cumple el formato \(campaign\.criteria\.relationship: Required;.*campaign\.emails\.0: Invalid email/);
+});
+
 test('a campaign proposed before listing campaigns gets the list read by the loop, not a failed turn', async () => {
   const executed: string[] = [];
   const proposals: Array<{ kind: string; originRunId: string }> = [];
@@ -1139,6 +1161,53 @@ test('artifact.create hands the brief to the Designer, whose answer ends the tur
     decide: async () => create, design: async () => designed }), designed);
 });
 
+test('an answer that offers a read it could make gets it made, once, with room for it; the offered answer stands if that fails', async () => {
+  const offers = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Reviso a quiénes ya les escribiste?',
+      suggestions: [{ label: 'Sí, revísalo', message: 'Sí, revisa a quiénes ya les escribí' }] } };
+  const done = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados; a Marcela ya le escribiste, así que partiría por Felipe y Camila.', document: null,
+      question: '¿Les preparo el correo?', suggestions: [{ label: 'Sí, prepáralo', message: 'Sí, prepara el correo para Felipe y Camila' }] } };
+  const readSent = { action: 'contacted.search' as const, query: '', leadId: null, answer: null };
+  const base = { message: '¿A quién le escribo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({ items: [{ name: 'Marcela Rojas' }] }), offeredReads: true };
+  // Off by default (COWORK_OFFERED_READS_ENABLED): the answer is shown as it came.
+  let off = 0;
+  const shown = await runCoworkReadLoop({ ...base, offeredReads: false, decide: async () => { off++; return offers; } });
+  assert.equal(shown.reply, offers.answer.reply);
+  assert.equal(off, 1);
+  const seen: Array<{ mustAnswer: boolean; reasons: string[] }> = [];
+  const verdicts: unknown[] = [];
+  const made = await runCoworkReadLoop({ ...base, onCorrection: verdict => verdicts.push(verdict),
+    decide: async (_observations, mustAnswer, rejections = []) => {
+      seen.push({ mustAnswer, reasons: rejections.map(rejection => rejection.reason) });
+      return [offers, readSent][seen.length - 1] ?? done;
+    } });
+  assert.equal(made.reply, done.answer.reply);
+  assert.match(seen[1].reasons.join('|'), /termina ofreciendo una consulta \(«¿Reviso a quiénes ya les escribiste\?»\) que puedes hacer ahora/);
+  assert.deepEqual(seen.map(item => item.mustAnswer), [false, false, true], 'after the offered read it answers');
+  assert.deepEqual(verdicts, [], 'not reported as a judge correction');
+  // Asked once: offering it again, or failing to read, leaves the first answer.
+  let again = 0;
+  const insists = await runCoworkReadLoop({ ...base, decide: async () => (again++ === 1 ? readSent : offers) });
+  assert.equal(insists.reply, offers.answer.reply);
+  let broken = 0;
+  const failed = await runCoworkReadLoop({ ...base, decide: async () => (broken++ === 0 ? offers : { action: 'answer', query: null, leadId: null, answer: null }) as never });
+  assert.equal(failed.reply, offers.answer.reply);
+  // Without a decision for the read and one to answer, it stands; offers that need approval or write are not reads.
+  let late = 0;
+  const reads = { action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
+    reads: [{ action: 'leads.search' as const, input: 'a' }, { action: 'leads.search' as const, input: 'b' }] };
+  const lastOne = await runCoworkReadLoop({ ...base, decide: async () => [readSent, reads, offers][late++] ?? done });
+  assert.equal(lastOne.reply, offers.answer.reply);
+  for (const question of ['¿Busco su correo con el proveedor?', '¿Te redacto la respuesta?', '¿Preparo la campaña pausada?']) {
+    let asked = 0;
+    const kept = await runCoworkReadLoop({ ...base, decide: async () => { asked++; return { ...offers, answer: { ...offers.answer, question } }; } });
+    assert.equal(kept.question, question);
+    assert.equal(asked, 1, question);
+  }
+});
+
 test('a sequence asked with its campaign: the Writer writes it and the same turn proposes the campaign with that exact text', async () => {
   const brief = { kind: 'sequence' as const, recipients: ['Jose'], objective: 'Una reunión sobre AXIS', angle: null, tone: null, steps: 2, notes: null, findings: null, campaign: true };
   const write = coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
@@ -1189,7 +1258,7 @@ test('a sequence asked with its campaign: the Writer writes it and the same turn
 
 test('the judge reads the final answer once; its correction may read once, and the judged answer stands if it fails', async () => {
   const ask = { action: 'answer' as const, query: null, leadId: null,
-    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres que revise a quiénes ya les escribiste?',
+    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres saber a quiénes ya les escribiste?',
       suggestions: [{ label: 'Sí, revísalo', message: 'Sí, revisa a quiénes ya les escribí' }] } };
   const fixed = { action: 'answer' as const, query: null, leadId: null,
     answer: { reply: 'Tienes 5 contactos guardados; a Marcela ya le escribiste, así que partiría por Felipe y Camila.', document: null,
@@ -1281,7 +1350,7 @@ test('the judge reads the final answer once; its correction may read once, and t
 
 test('a correction edits the answer it fixes, and is kept only when it is one: no figures without support, not the same answer', async () => {
   const ask = { action: 'answer' as const, query: null, leadId: null,
-    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres que revise a quiénes ya les escribiste?',
+    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres saber a quiénes ya les escribiste?',
       suggestions: [{ label: 'Sí, revísalo', message: 'Sí, revisa a quiénes ya les escribí' }] } };
   const fixed = { action: 'answer' as const, query: null, leadId: null,
     answer: { reply: 'Tienes 5 contactos guardados; a 2 ya les escribiste (12 correos en total).', document: null, question: '¿Les preparo el correo?',

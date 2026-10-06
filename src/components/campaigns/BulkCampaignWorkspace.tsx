@@ -1,7 +1,7 @@
 'use client';
 
 import { PageHeader } from '@/components/page-header';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CampaignSequenceEditor } from './CampaignSequenceEditor';
 import { CampaignAudienceTable } from './CampaignAudienceTable';
 import { CampaignSteps } from './CampaignSteps';
@@ -15,6 +15,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
 import { describeCampaignFailure, withSentAttemptsAsDeliveries, type CampaignAttempt } from '@/lib/bulk-campaign-attempts';
 import { firstSelection } from '@/lib/campaign-audience-selection';
+import { campaignObjectiveFromProfile } from '@/lib/campaign-objective';
+import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { profileService } from '@/lib/services/profile-service';
 import { AudienceCriteriaSchema, CampaignInputSchema, SENIORITY_LEVELS, defaultAudience, isCampaignMessageLocked, nextCampaignMessage, type AudiencePerson, type AudienceProfile, type BulkCampaign, type CampaignDelivery, type CampaignHistoryEvent, type CampaignInput, type CampaignMessage } from '@/lib/bulk-campaigns';
 
 async function request(path: string, body?: unknown, method = 'POST') {
@@ -79,6 +82,24 @@ export function BulkCampaignWorkspace() {
       .catch(() => undefined);
     return () => { disposed = true; };
   }, []);
+  // What «Perfil» says the company offers starts the objective of every new campaign (the AI only knows the offer from it).
+  const [profileObjective, setProfileObjective] = useState('');
+  const objectivePending = useRef(false);
+  useEffect(() => {
+    let disposed = false;
+    profileService.getCurrentProfile().then(profile => { if (!disposed) setProfileObjective(campaignObjectiveFromProfile(mapProfileToForm(profile))); })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, []);
+  // A campaign started before «Perfil» loaded gets the objective when it arrives, unless the person already wrote one.
+  useEffect(() => {
+    if (!objectivePending.current || !profileObjective) return;
+    objectivePending.current = false;
+    if (!editing || campaign) return;
+    setDefinition(value => value.objective.trim() ? value : { ...value, objective: profileObjective });
+    // Only the arrival of «Perfil» matters here; editing and campaign are read as they are then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileObjective]);
 
   async function run(work: () => Promise<void>) {
     setBusy(true); setError(''); setFeedback('');
@@ -198,7 +219,7 @@ export function BulkCampaignWorkspace() {
       <TabsContent value="followups"><CampaignReviewInbox /></TabsContent>
       <TabsContent value="campaigns" className="space-y-5">
         {!editing ? <>
-          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { setDefinition({ ...initial(), provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-medium">Tus campañas</h2><Button disabled={busy} onClick={() => { objectivePending.current = !profileObjective; setDefinition({ ...initial(), objective: profileObjective, provider: defaultProvider ?? 'google' }); setCampaign(null); setPeople([]); setSearched(false); setEditing(true); setStep(0); setDirty(false); setAudienceMode('ai'); setRankMeta(null); setMessageIndex(0); setError(''); setReviseMode(false); setHistory({}); setAudiencePage(0); setAudienceTotal(0); setAudienceQuery(''); setProfileName(''); void loadProfiles(); }}>Nueva campaña</Button></div>
           {busy && <p role="status">Cargando campañas…</p>}
           {!busy && !items.length && !error && <div className="rounded-2xl border bg-card p-8"><h3 className="font-medium">Tu próxima conversación empieza aquí</h3><p className="mt-2 text-sm text-muted-foreground">Crea una campaña para tus leads nuevos o vuelve a contactar a quienes ya conoces.</p></div>}
           <div className="divide-y rounded-2xl border bg-card">{items.map(item => <button key={item.id} disabled={busy} onClick={() => void run(() => open(item.id))} className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span><span className="block font-medium">{item.definition.name}</span><span className="text-sm text-muted-foreground">{item.definition.emails.length} destinatarios · {item.definition.messages.length} correos por persona</span></span><span className="text-sm">{stateLabels[item.status]}</span></button>)}</div>
@@ -248,11 +269,11 @@ export function BulkCampaignWorkspace() {
               <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" disabled={busy} checked={definition.criteria.excludeReplied} onChange={event => { change({ criteria: { ...definition.criteria, excludeReplied: event.target.checked } }); setSearched(false); }} />Excluir personas que ya respondieron</label>
               {searched && <><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm" role="status">{plural(audienceTotal, 'resultado', 'resultados')} · {plural(definition.emails.length, 'seleccionado', 'seleccionados')} (máximo {MAX_RECIPIENTS}){people.some(person => person.blockedReason) ? ` · ${plural(people.filter(person => person.blockedReason).length, 'no disponible', 'no disponibles')} en esta página` : ''}</p><span className="flex gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={() => selectAllResults(true)}>Seleccionar todos</Button><Button variant="ghost" size="sm" disabled={busy} onClick={() => selectAllResults(false)}>Quitar todos</Button></span></div>{!people.length ? <p className="text-sm text-muted-foreground">No encontramos leads para esta búsqueda. Prueba describirlo de otra forma, con menos filtros, o revisa tus leads enriquecidos.</p> : <CampaignAudienceTable people={people} selected={definition.emails} max={MAX_RECIPIENTS} busy={busy} onToggle={(email, checked) => change({ emails: checked ? [...definition.emails, email] : definition.emails.filter(value => value !== email) })} />}{audienceMode === 'manual' && audienceTotal > 25 && <div className="flex items-center justify-between gap-2 text-sm"><Button variant="outline" size="sm" disabled={busy || audiencePage === 0} onClick={() => void run(() => searchAudience(audiencePage - 1))}>Anterior</Button><span>Página {audiencePage + 1} de {Math.max(1, Math.ceil(audienceTotal / 25))}</span><Button variant="outline" size="sm" disabled={busy || (audiencePage + 1) * 25 >= audienceTotal} onClick={() => void run(() => searchAudience(audiencePage + 1))}>Siguiente</Button></div>}</>}
               {definition.emails.length > 0 && <details><summary className="cursor-pointer text-sm">Revisar selección guardada ({definition.emails.length})</summary><p className="my-2 text-sm text-muted-foreground">Al guardar verificaremos que todos sigan cumpliendo los criterios.</p>{definition.emails.map(email => <div key={email} className="flex items-center justify-between gap-2 text-sm"><span className="break-all">{email}</span><Button variant="ghost" size="sm" disabled={busy} onClick={() => change({ emails: definition.emails.filter(value => value !== email) })}>Quitar</Button></div>)}</details>}
-              <div className="flex justify-end"><Button disabled={busy || !definition.name.trim() || !definition.emails.length} onClick={() => setStep(1)}>Continuar a correos</Button></div>
+              <div className="sticky bottom-0 z-10 -mx-1 flex justify-end border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button disabled={busy || !definition.name.trim() || !definition.emails.length} onClick={() => setStep(1)}>Continuar a correos</Button></div>
             </>}
             {step === 1 && <CampaignSequenceEditor definition={definition} messageIndex={messageIndex} busy={busy} reviseMode={reviseMode}
               isLocked={reviseLocked} onSelect={setMessageIndex} onChange={change} onBusyChange={setBusy}
-              onAssist={input => request('/assist', input)} onSave={() => void run(() => save())}
+              onAssist={input => request('/assist', input)} onSave={() => void run(() => save())} objectiveFromProfile={profileObjective}
               onBack={() => { if (reviseMode) { setReviseMode(false); setStep(2); } else setStep(0); }} />}
             {step === 2 && campaign && <>
               <h2 className="text-xl font-semibold">{campaign.definition.name}</h2><p className="text-sm text-muted-foreground">{plural(campaign.recipients.length, 'destinatario', 'destinatarios')} · {plural(campaign.definition.messages.length, 'correo', 'correos')} por persona · {plural(campaign.recipients.length * campaign.definition.messages.length, 'correo', 'correos')} en total. Revisa cómo le llega a cada persona antes de aprobar.</p>
@@ -311,7 +332,7 @@ export function BulkCampaignWorkspace() {
                   <li>Cada seguimiento sale en su fecha y se detiene si la persona responde.</li>
                   <li>Puedes pausar la campaña cuando quieras.</li>
                 </ol>
-              </section><div className="flex flex-wrap justify-end gap-3"><Button variant="ghost" disabled={busy || Boolean(individual)} onClick={() => setStep(0)}>Editar audiencia</Button><Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('reject'))}>Rechazar y editar</Button><Button disabled={busy || dirty || Boolean(individual)} onClick={() => void run(() => decide('approve'))}>Aprobar campaña</Button></div></> : <>
+              </section><div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap justify-end gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="ghost" disabled={busy || Boolean(individual)} onClick={() => setStep(0)}>Editar audiencia</Button><Button variant="outline" disabled={busy || Boolean(individual)} onClick={() => void run(() => decide('reject'))}>Rechazar y editar</Button><Button disabled={busy || dirty || Boolean(individual)} onClick={() => void run(() => decide('approve'))}>Aprobar campaña</Button></div></> : <>
                 <p className="text-sm text-muted-foreground">{deliveries.filter(value => value.status === 'sent').length} envíos confirmados. {automationEnabled ? 'Los correos aprobados se procesan automáticamente, incluso con esta página cerrada. Los seguimientos esperan su fecha y se detienen ante una respuesta.' : '«Enviar correos disponibles» los envía desde el servidor, por tandas. Los seguimientos futuros se envían al volver a pulsarlo, cuando corresponda su fecha.'}</p>
                 <div className="flex flex-wrap gap-3"><Button variant="outline" disabled={busy} onClick={() => void run(() => decide(campaign.status === 'paused' ? 'resume' : 'pause'))}>{campaign.status === 'paused' ? 'Reanudar campaña' : 'Pausar campaña'}</Button><Button variant="ghost" disabled={busy} onClick={() => void run(() => open(campaign.id))}>Actualizar estado</Button><Button disabled={busy || campaign.status !== 'approved'} onClick={() => void run(sendAvailable)}>{busy ? 'Procesando…' : 'Enviar correos disponibles'}</Button>{campaign.recipients.some(person => person.messages.some(message => !isCampaignMessageLocked(message.draftId, deliveries))) && <Button variant="outline" disabled={busy} onClick={() => { setDefinition({ ...campaign.definition }); setReviseMode(true); setStep(1); setMessageIndex(0); setDirty(false); setFeedback('Edita solo los mensajes pendientes. Los enviados o en curso están bloqueados.'); }}>Editar mensajes pendientes</Button>}</div>
                 <section aria-label="Estado por destinatario" className="divide-y rounded-xl border">

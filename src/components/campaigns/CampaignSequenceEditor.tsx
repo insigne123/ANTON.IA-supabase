@@ -21,10 +21,14 @@ type Props = {
   onAssist: (input: unknown) => Promise<any>;
   onBack: () => void;
   onSave: () => void;
+  /** The objective drafted from «Perfil» for a new campaign; while the field still holds it, the editor says where it came from. */
+  objectiveFromProfile?: string;
 };
 const label = (index: number) => index === 0 ? 'Primer correo' : `Seguimiento ${index}`;
+/** Follow-ups the AI writes when the person did not choose how many. */
+const DEFAULT_FOLLOW_UPS = 1;
 
-export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseMode, isLocked, onSelect, onChange, onBusyChange, onAssist, onBack, onSave }: Props) {
+export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseMode, isLocked, onSelect, onChange, onBusyChange, onAssist, onBack, onSave, objectiveFromProfile = '' }: Props) {
   const confirm = useConfirm();
   const [followUpCount, setFollowUpCount] = useState<number | null>(() =>
     reviseMode || definition.messages.length > 1 || definition.messages.some(value => value.subject.trim() || value.body.trim())
@@ -44,6 +48,7 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
   const scheduleValid = definition.messages.slice(1).every(value => Number.isInteger(value.delayDays) && value.delayDays >= 1 && value.delayDays <= 90);
   // Writing the emails by hand is choosing how many there are: the count is asked only to generate them with AI.
   const effectiveCount = followUpCount ?? (hasContent ? definition.messages.length - 1 : null);
+  const fromProfile = !reviseMode && Boolean(objectiveFromProfile) && definition.objective === objectiveFromProfile;
   const canSave = effectiveCount !== null && scheduleValid && definition.messages.every(value => CampaignMessageSchema.safeParse(value).success);
 
   useEffect(() => { setInstruction(''); setProposal(null); setMessageError(''); setMessageFeedback(''); }, [messageIndex]);
@@ -69,13 +74,15 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
     setProposal(null); invalidateSequence();
   }
   async function generate(kind: 'sequence' | 'message') {
-    if (busy || (kind === 'sequence' && (reviseMode || followUpCount === null || !scheduleValid)) || (kind === 'message' && isLocked(messageIndex))) return;
+    if (busy || (kind === 'sequence' && (reviseMode || !scheduleValid)) || (kind === 'message' && isLocked(messageIndex))) return;
     setJob(kind); onBusyChange(true);
     if (kind === 'sequence') { invalidateSequence(); setProposal(null); }
     else { setMessageError(''); setMessageFeedback(''); setProposal(null); }
     try {
       if (kind === 'sequence') {
-        const followUpDelays = definition.messages.slice(1).map(value => value.delayDays);
+        // Without a chosen count the AI writes the initial email and one follow-up 3 days later (the usual sequence).
+        if (followUpCount === null) setFollowUpCount(DEFAULT_FOLLOW_UPS);
+        const followUpDelays = followUpCount === null ? Array.from({ length: DEFAULT_FOLLOW_UPS }, () => 3) : definition.messages.slice(1).map(value => value.delayDays);
         const result = await onAssist({ mode: 'sequence', objective: definition.objective, audience: definition.description,
           relationship: definition.criteria.relationship, followUpDelays });
         const messages = validateSequenceProposal(result, followUpDelays);
@@ -106,18 +113,20 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
     </header>
     <div className="space-y-3">
       <Label htmlFor="objective">¿Qué quieres conseguir con la campaña?</Label>
-      <Textarea id="objective" maxLength={2000} disabled={busy} value={definition.objective} onChange={event => { onChange({ objective: event.target.value }); invalidateSequence(); setProposal(null); }} placeholder="Describe tu servicio, qué ofreces y qué quieres que haga la persona al leer el correo." />
+      <Textarea id="objective" maxLength={2000} disabled={busy} value={definition.objective} onChange={event => { onChange({ objective: event.target.value }); invalidateSequence(); setProposal(null); }} placeholder="Describe tu servicio, qué ofreces y qué quieres que haga la persona al leer el correo."
+        aria-describedby={fromProfile ? 'objective-help' : undefined} />
+      {fromProfile && <p id="objective-help" className="text-sm text-muted-foreground">Lo tomamos de tu Perfil. Agrega qué quieres que haga la persona al leerlo, por ejemplo, agendar una reunión.</p>}
       {!reviseMode && <>
         <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
           <div className="space-y-2"><Label htmlFor="follow-up-count">¿Cuántos seguimientos quieres?</Label>
             <select id="follow-up-count" className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring" disabled={busy} value={effectiveCount ?? ''} onChange={event => void chooseCount(Number(event.target.value))} aria-describedby="sequence-help">
-              <option value="" disabled>Elige antes de generar</option>
+              <option value="" disabled>Sin elegir: correo inicial + 1 seguimiento</option>
               {[0, 1, 2, 3, 4].map(count => <option key={count} value={count}>{count === 0 ? 'Solo el correo inicial' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'} + correo inicial`}</option>)}
             </select>
           </div>
-          <Button disabled={busy || followUpCount === null || definition.objective.trim().length < 5 || !scheduleValid} onClick={() => void generate('sequence')}>{job === 'sequence' ? 'Generando secuencia…' : hasContent ? 'Proponer nueva secuencia' : 'Generar secuencia con IA'}</Button>
+          <Button disabled={busy || definition.objective.trim().length < 5 || !scheduleValid} onClick={() => void generate('sequence')}>{job === 'sequence' ? 'Generando secuencia…' : hasContent ? 'Proponer nueva secuencia' : 'Generar secuencia con IA'}</Button>
         </div>
-        <p id="sequence-help" className="text-sm text-muted-foreground">{followUpCount === null ? 'Tú eliges la cantidad. La IA redactará el inicial y todos los seguimientos seleccionados.' : `La secuencia tendrá ${followUpCount + 1} ${followUpCount === 0 ? 'correo' : 'correos'}. Puedes ajustar los días de espera al seleccionar cada seguimiento.`}</p>
+        <p id="sequence-help" className="text-sm text-muted-foreground">{followUpCount === null ? 'Si no eliges, la IA escribe el correo inicial y 1 seguimiento a los 3 días; puedes cambiarlo después.' : `La secuencia tendrá ${followUpCount + 1} ${followUpCount === 0 ? 'correo' : 'correos'}. Puedes ajustar los días de espera al seleccionar cada seguimiento.`}</p>
         <div ref={sequenceResultRef} tabIndex={-1} className="space-y-3 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
           {job === 'sequence' && <p role="status" className="text-sm text-muted-foreground">Preparando el correo inicial y los seguimientos de tu secuencia…</p>}
           {sequenceError && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm">{sequenceError}</p>}
@@ -153,6 +162,6 @@ export function CampaignSequenceEditor({ definition, messageIndex, busy, reviseM
     {!reviseMode && <div className="space-y-2"><Label htmlFor="provider">Enviar desde</Label><select id="provider" disabled={busy} className="min-h-11 w-full rounded-md border bg-background px-3 focus-visible:outline-ring sm:max-w-sm" value={definition.provider} onChange={event => onChange({ provider: event.target.value as 'google' | 'outlook' })}><option value="google">Mi cuenta de Gmail conectada</option><option value="outlook">Mi cuenta de Outlook conectada</option></select></div>}
     {(definition.overrides || []).length > 0 && <p className="text-sm text-muted-foreground">Cambiar la plantilla reemplazará las ediciones individuales. Podrás ajustarlas nuevamente en la revisión.</p>}
     {!canSave && <p className="text-sm text-muted-foreground">Elige la cantidad de seguimientos y completa el asunto, el texto y los días de espera de cada correo para continuar.</p>}
-    <div className="flex justify-between gap-3"><Button variant="ghost" disabled={busy} onClick={onBack}>{reviseMode ? 'Cancelar edición' : 'Atrás'}</Button><Button disabled={busy || !canSave} onClick={onSave}>{busy && !job ? 'Preparando…' : reviseMode ? 'Guardar pendientes y volver a revisión' : 'Guardar y revisar correos'}</Button></div>
+    <div className="sticky bottom-0 z-10 -mx-1 flex justify-between gap-3 border-t bg-background/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="ghost" disabled={busy} onClick={onBack}>{reviseMode ? 'Cancelar edición' : 'Atrás'}</Button><Button disabled={busy || !canSave} onClick={onSave}>{busy && !job ? 'Preparando…' : reviseMode ? 'Guardar pendientes y volver a revisión' : 'Guardar y revisar correos'}</Button></div>
   </>;
 }

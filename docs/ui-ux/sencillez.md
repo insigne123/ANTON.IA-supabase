@@ -105,11 +105,25 @@ Hechos en el segundo:
 2. **Campañas.** «Nivel del cargo» es una lista que busca los códigos que guardan los contactos. «Tamaño de empresa» ya no se ofrece, porque no podía funcionar (abajo).
 3. **Por completar.** Comentarios y eliminar van en el menú «Más» de cada fila.
 
+Hechos en el tercero (Plan 12, 7):
+
+1. **Campañas, el paso de correos.**
+   - «Generar secuencia con IA» ya no exige elegir antes cuántos seguimientos. Sin elegir, escribe el correo inicial y 1 seguimiento a los 3 días, que se cambian después.
+   - La acción principal de cada paso queda fija al pie mientras bajas: «Continuar a correos», «Guardar y revisar correos» y «Aprobar campaña».
+2. **Una tarea nueva, «campana-ia»**, mide el camino principal: generar la secuencia con la IA y revisarla. «campana» sigue midiendo escribir los dos correos a mano.
+3. **Campañas, el objetivo.** Una campaña nueva parte con lo que «Perfil» dice que ofreces: la propuesta de valor (o la descripción) y hasta tres servicios. Un aviso lo dice y pide agregar qué quieres que haga la persona.
+   - La IA de campañas solo conoce tu oferta por ese campo, así que los correos parten de la oferta real sin escribirla cada vez.
+   - En «campana-ia», la persona ya no escribe la oferta: agrega qué pedir. El índice sigue en 88, porque la tarea antes escribía solo qué pedir, y ahora comprueba que la IA recibe la oferta.
+
+| Tarea | Antes | Ahora | Pasos | Tiempo (KLM) | Acción principal a la vista |
+|---|---:|---:|---:|---:|---:|
+| Crear y aprobar una campaña (a mano) | 74 | **76** | 15 | 123 s | 80 % (antes 67 %) |
+| Crear y aprobar una campaña con la IA | — | **88** | 11 | 58 s | 91 % |
+
 Pendientes recomendados:
 
 | Arreglo | Impacto | Esfuerzo |
 |---|---|---|
-| Campañas: partir de un estilo guardado (asunto y cuerpo ya escritos) | Alto: quita 4 de los 15 pasos | Medio |
 | «Escribir sin investigar» con el estilo predeterminado | Alto: el primer correo sin esperar | Medio |
 | Campañas: «Tamaño de empresa» por rangos (necesita migración) | Medio | Bajo |
 
@@ -121,6 +135,26 @@ Pendientes recomendados:
 - **La propuesta:** una migración pequeña y forward-only. Una función `bulk_audience_size_match_v1(size text, ranges text[])` que lea el número y lo compare con rangos («1-10», «11-50», «51-200», «201-500», «501-1000», «1001-5000», «5001+»), usada en lugar de la comparación de texto para `p_sizes`.
 - **Después:** «Tamaño de empresa» vuelve a la pantalla como lista de rangos.
 - **Pendiente de solicitud explícita:** las migraciones necesitan un pedido explícito, así que queda propuesta.
+
+### «Escribir sin investigar»: por qué no entra sin migración
+
+El borrador del primer correo se crea desde una investigación guardada: `native_drafts.research_snapshot_id` es obligatorio (`not null`, migración `20260822111000`). Escribir sin investigar necesita que esa columna acepte un borrador sin investigación, o un tipo de investigación «solo perfil». Las dos son migraciones, así que queda propuesta.
+
+## Cowork: pedir un informe y pedir un cambio a un artefacto (Plan 12, 6)
+
+Son dos tareas nuevas del banco, con la meta de 85 o más que fija el Plan 12:
+
+- **Pedir un informe visual:** se mide hasta enviar el pedido, como «Pedirle algo a Cowork». El banco no tiene el modelo que escribe el artefacto.
+- **Pedir un cambio a un artefacto:** parte de la conversación de ejemplo que hizo «Pipeline por etapa», un artefacto con código. Abre la conversación y el artefacto en el lienzo, y pide el cambio desde «Pedir cambios».
+  - La tarea comprueba que el cambio vaya en la misma conversación, atado al turno que hizo el artefacto, y que lo nombre.
+
+| Tarea | Índice | Pasos (ideal) | Tiempo (KLM) | En teléfono |
+|---|---:|---:|---:|---|
+| Pedirle algo a Cowork | **96** | 3 (3) | 15 s | se completa, 4 pasos |
+| Pedir un informe visual | **96** | 3 (3) | 20 s | se completa, 4 pasos |
+| Pedir un cambio a un artefacto | **91** | 5 (4) | 21 s | se completa, 7 pasos |
+
+En el teléfono hay más pasos: abrir el menú y, en «Pedir un cambio», también la lista de trabajos.
 
 ## Prueba con personas (recomendada)
 

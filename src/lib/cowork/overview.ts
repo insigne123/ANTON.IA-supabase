@@ -1,3 +1,5 @@
+import type { CoworkSince } from './since-visit';
+
 /**
  * The account at a glance on the Cowork home (plan 2, V7): real figures of your own work, the
  * first name to greet you, and whether ANTON.IA knows what you sell. Each figure is null when it
@@ -12,6 +14,8 @@ export type CoworkOverview = {
   campaigns: number | null;
   /** LinkedIn invitations this week (pending and confirmed) against the weekly limit. */
   linkedin: { used: number; limit: number } | null;
+  /** What changed since the person's last own turn (since-visit.ts); null without a previous visit or when it could not be read. */
+  since?: CoworkSince | null;
 };
 
 /** The first word of a full name, as a greeting uses it. */
