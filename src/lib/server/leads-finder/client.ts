@@ -90,19 +90,24 @@ function publicLead(item: Record<string, unknown>, id: string) {
   };
 }
 
-function contactOf(item: Record<string, unknown>): LeadsFinderContact {
+function contactOf(item: Record<string, unknown>, onlyValidated: boolean): LeadsFinderContact {
   const status = text(item.email_status).toLowerCase();
+  const email = nullable(item.email)?.toLowerCase() ?? null;
   return {
     fullName: text(item.full_name) || [text(item.first_name), text(item.last_name)].filter(Boolean).join(' '),
     firstName: text(item.first_name), lastName: text(item.last_name),
-    email: nullable(item.email)?.toLowerCase() ?? null, personalEmail: nullable(item.personal_email)?.toLowerCase() ?? null,
+    email, personalEmail: nullable(item.personal_email)?.toLowerCase() ?? null,
     mobileNumber: nullable(item.mobile_number), linkedinUrl: linkedinUrl(item.linkedin),
-    emailStatus: status === 'validated' || status === 'not_validated' || status === 'unknown' ? status : null,
+    // The actor does not echo the status (a real run, 6 Oct 2026: no email_status in 50 of 50 items). When the search
+    // asked for validated emails only, an email that came back passed that check.
+    emailStatus: status === 'validated' || status === 'not_validated' || status === 'unknown' ? status : email && onlyValidated ? 'validated' : null,
   };
 }
 
-/** Each actor item, as a search result plus its hidden contact; items without a name or a way to tell them apart are dropped. */
-export function splitLeadsFinderItems(items: unknown[]) {
+/** Each actor item, as a search result plus its hidden contact; items without a name or a way to tell them apart are dropped.
+ * `requested` is the input's email_status filter: with only «validated», a returned email counts as validated. */
+export function splitLeadsFinderItems(items: unknown[], requested: string[] = []) {
+  const onlyValidated = requested.length === 1 && requested[0] === 'validated';
   const seen = new Set<string>();
   const results: Array<{ lead: LeadsFinderLead; contact: LeadsFinderContact }> = [];
   for (const raw of items) {
@@ -111,7 +116,7 @@ export function splitLeadsFinderItems(items: unknown[]) {
     const id = stableId(item);
     if (!id || seen.has(id) || !(text(item.first_name) || text(item.full_name))) continue;
     seen.add(id);
-    results.push({ lead: publicLead(item, id), contact: contactOf(item) });
+    results.push({ lead: publicLead(item, id), contact: contactOf(item, onlyValidated) });
   }
   return results;
 }
@@ -155,7 +160,7 @@ export async function searchLeadsFinder(input: LeadSearchInput, dependencies: De
   if (!response.ok) throw await failure(response);
   const items = await response.json().catch(() => null) as unknown;
   if (!Array.isArray(items)) throw new LeadsFinderError('Leads Finder no entregó una lista de contactos.', 502, true);
-  const results = splitLeadsFinderItems(items.slice(0, mapped.input.fetch_count));
+  const results = splitLeadsFinderItems(items.slice(0, mapped.input.fetch_count), mapped.input.email_status ?? []);
   return {
     results,
     fetched: items.length,
