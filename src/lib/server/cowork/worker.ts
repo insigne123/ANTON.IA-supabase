@@ -56,6 +56,7 @@ import { coworkPhoneRevealEnabled, stageCoworkPhoneReveal } from './enrich-phone
 import { coworkReplyThreadEnabled } from './thread-read';
 import { coworkLinkedinBatchEnabled, stageCoworkLinkedinBatch } from './linkedin-batch';
 import { coworkEffectAlreadyDone, coworkPrepareBatchEnabled, stageCoworkPrepareBatch } from './prepare-batch';
+import { coworkIntentPromptsEnabled, coworkTurnIntents } from '@/lib/cowork/intents';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -196,6 +197,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       linkedinBatch: linkedinBatchEnabled,
       prepareBatch: prepareBatchEnabled,
       opportunities: opportunitiesEnabled,
+      // Only the parts of the prompt this request needs (intents.ts), with COWORK_INTENT_PROMPTS_ENABLED=true; off, the whole prompt.
+      intents: coworkIntentPromptsEnabled() ? coworkTurnIntents(run.message, history.turns) : null,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,

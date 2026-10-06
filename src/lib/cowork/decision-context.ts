@@ -4,6 +4,10 @@ import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 
 /** The organization's working time zone. ANTON.IA schedules and reports in
  * Chile; override with COWORK_TIME_ZONE for another market. */
+
+const withoutNulls = <T extends Record<string, unknown>>(values: T) =>
+  Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null && value !== undefined)) as { [K in keyof T]?: NonNullable<T[K]> };
+
 export const COWORK_DEFAULT_TIME_ZONE = 'America/Santiago';
 
 /** Plain-language equivalents for codes that appear in tool results, so the
@@ -187,16 +191,19 @@ export function coworkDecisionContext(
     },
     clock: { serverNow: now.toISOString(), timezone: 'UTC', source: 'server', timeZone, localNow: localNow(now, timeZone) },
     glossary: COWORK_GLOSSARY,
-    parallelReadCapability: instructions.parallelReadCapability,
-    researchCapability: instructions.researchCapability,
-    externalSearchCapability: instructions.externalSearchCapability,
-    extendedReadCapability: instructions.extendedReadCapability,
-    replyDetectionCapability: instructions.replyDetectionCapability,
-    metricsCapability: instructions.metricsCapability,
-    deliverabilityCapability: instructions.deliverabilityCapability,
-    complianceCapability: instructions.complianceCapability,
-    additionalCapability: instructions.additionalCapability,
-    effectCapability: instructions.effectCapability,
+    // A capability the turn's intents leave out (intents.ts) is null and does not travel.
+    ...withoutNulls({
+      parallelReadCapability: instructions.parallelReadCapability,
+      researchCapability: instructions.researchCapability,
+      externalSearchCapability: instructions.externalSearchCapability,
+      extendedReadCapability: instructions.extendedReadCapability,
+      replyDetectionCapability: instructions.replyDetectionCapability,
+      metricsCapability: instructions.metricsCapability,
+      deliverabilityCapability: instructions.deliverabilityCapability,
+      complianceCapability: instructions.complianceCapability,
+      additionalCapability: instructions.additionalCapability,
+      effectCapability: instructions.effectCapability,
+    }),
     // The Writer needs a decision in reserve in case it fails: on the last one the coordinator writes.
     ...(instructions.writerCapability ? { writerCapability: instructions.writerCapability, writerAvailable: (turnBudget?.decisionsLeft ?? 1) > 0 } : {}),
     ...(instructions.contactsImportCapability ? { contactsImportCapability: instructions.contactsImportCapability } : {}),
