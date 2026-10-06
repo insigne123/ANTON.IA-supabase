@@ -105,11 +105,23 @@ Hechos en el segundo:
 2. **Campañas.** «Nivel del cargo» es una lista que busca los códigos que guardan los contactos. «Tamaño de empresa» ya no se ofrece, porque no podía funcionar (abajo).
 3. **Por completar.** Comentarios y eliminar van en el menú «Más» de cada fila.
 
+Hechos en el tercero (Plan 12, 7):
+
+1. **Campañas, el paso de correos.**
+   - «Generar secuencia con IA» ya no exige elegir antes cuántos seguimientos. Sin elegir, escribe el correo inicial y 1 seguimiento a los 3 días, que se cambian después.
+   - La acción principal de cada paso queda fija al pie mientras bajas: «Continuar a correos», «Guardar y revisar correos» y «Aprobar campaña».
+2. **Una tarea nueva, «campana-ia»**, mide el camino principal: generar la secuencia con la IA y revisarla. «campana» sigue midiendo escribir los dos correos a mano.
+
+| Tarea | Antes | Ahora | Pasos | Tiempo (KLM) | Acción principal a la vista |
+|---|---:|---:|---:|---:|---:|
+| Crear y aprobar una campaña (a mano) | 74 | **76** | 15 | 123 s | 80 % (antes 67 %) |
+| Crear y aprobar una campaña con la IA | — | **88** | 11 | 58 s | 91 % |
+
 Pendientes recomendados:
 
 | Arreglo | Impacto | Esfuerzo |
 |---|---|---|
-| Campañas: partir de un estilo guardado (asunto y cuerpo ya escritos) | Alto: quita 4 de los 15 pasos | Medio |
+| Campañas: el objetivo prellenado desde la oferta de «Perfil» | Medio: un campo menos que escribir en «campana-ia» | Bajo |
 | «Escribir sin investigar» con el estilo predeterminado | Alto: el primer correo sin esperar | Medio |
 | Campañas: «Tamaño de empresa» por rangos (necesita migración) | Medio | Bajo |
 
