@@ -334,3 +334,17 @@ test('the account state travels with the user context, and with it how to use it
   const without = coworkDecisionContext(instructions, { ...base, userContext: profile });
   assert.ok(!without.userContext?.instruction.includes('workspace'));
 });
+
+test('another version carries the earlier answers and what to change; feedback in the history shapes the answer', () => {
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  const base = { request: 'Escríbele a Jose', observations: [], mustAnswer: false, executionPolicy: {} };
+  const previousVersions = [{ reply: 'Hola Jose, …', feedback: { rating: 'down' as const, reason: 'Demasiado largo', comment: null } }];
+  const again = coworkDecisionContext(instructions, { ...base, history: { turns: [] }, previousVersions });
+  assert.deepEqual(again.previousVersions, previousVersions);
+  assert.match(String(again.previousVersionsInstruction), /Da una respuesta distinta y mejor/);
+  const plain = coworkDecisionContext(instructions, { ...base, history: { turns: [{ request: 'hola', reply: 'Hola' }] } });
+  assert.equal('previousVersions' in plain, false);
+  assert.equal('historyFeedbackInstruction' in plain, false);
+  const rated = coworkDecisionContext(instructions, { ...base, history: { turns: [{ request: 'hola', reply: 'Hola', feedback: { rating: 'down', reason: 'Demasiado largo', comment: null } }] } });
+  assert.match(String(rated.historyFeedbackInstruction), /sé más breve/);
+});

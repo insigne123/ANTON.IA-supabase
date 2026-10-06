@@ -235,6 +235,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
     reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
     ...(turn.artifacts ? { artifacts: turn.artifacts } : {}),
+    ...(turn.feedback && process.env.COWORK_EVAL_VERSIONS !== 'off' ? { feedback: turn.feedback } : {}),
   }));
   const actions: string[] = [];
   const reads: Array<{ action: string; input: string }> = [];
@@ -269,6 +270,8 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer, turnBudget,
         executionPolicy: { mode: 'approval' }, userContext,
         ...(rejections.length ? { rejectedDecisions: rejections } : {}),
+        // As the worker sends them since Plan 13; COWORK_EVAL_VERSIONS=off measures Cowork without them.
+        ...(entry.previousVersions?.length && process.env.COWORK_EVAL_VERSIONS !== 'off' ? { previousVersions: entry.previousVersions } : {}),
       }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }).then(chosen => {
         if (chosen.action === 'answer' && chosen.answer) (result.answers ||= []).push(chosen.answer.reply);
         return chosen;

@@ -207,6 +207,8 @@ export const corpusShown = (result: CorpusTurnResult) => [result.reply, result.c
 export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[]; userContext?: CoworkUserContext | null };
 
 export type CorpusHistoryTurn = { request: string; reply: string; at: string; observations?: unknown[]; actions?: unknown[];
+  /** What the person said about that answer (👍/👎, Plan 13), as the history carries it. */
+  feedback?: { rating: 'up' | 'down'; reason: string | null; comment: string | null };
   /** The code artifacts that turn made (Plan 12, 3b), as the conversation history carries them. */
   artifacts?: Array<{ name: string; title: string }> };
 
@@ -238,6 +240,8 @@ export type CorpusCase = {
   opportunities?: boolean;
   /** preference.save can be proposed (COWORK_PREFERENCES_ENABLED, Plan 12, 5). */
   preferences?: boolean;
+  /** «Otra versión» (Plan 13): the answers already given to this same message, with what the person said about them. */
+  previousVersions?: Array<{ reply: string; feedback: { rating: 'up' | 'down'; reason: string | null; comment: string | null } | null }>;
   /** The code of the artifacts made before in this conversation, by file name: what the Designer gets to edit. */
   artifacts?: Record<string, { html: string; css: string; js: string }>;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
