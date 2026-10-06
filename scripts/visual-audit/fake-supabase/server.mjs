@@ -84,7 +84,14 @@ export function startFakeSupabase({ port = 54321, datasets, personas, serviceKey
         return send(200, { users: Object.values(personas), aud: 'authenticated' });
       }
       if (url.pathname.startsWith('/auth/v1/')) return send(200, {});
-      if (url.pathname.startsWith('/storage/v1/')) return send(404, { statusCode: '404', error: 'not_found', message: 'Object not found' });
+      // Storage: only the objects the fixtures keep (`storage`, by «bucket/path»), read only; anything else is not there.
+      if (url.pathname.startsWith('/storage/v1/')) {
+        const key = decodeURIComponent(url.pathname.replace(/^\/storage\/v1\/object\/(?:authenticated\/|public\/)?/, ''));
+        const object = req.method === 'GET' || req.method === 'HEAD' ? dataset.storage?.[key] : null;
+        if (!object) return send(404, { statusCode: '404', error: 'not_found', message: 'Object not found' });
+        res.writeHead(200, { 'content-type': object.type, 'access-control-allow-origin': req.headers.origin || '*', 'access-control-allow-credentials': 'true' });
+        return res.end(req.method === 'HEAD' ? undefined : object.body);
+      }
 
       // RPC
       if (url.pathname.startsWith('/rest/v1/rpc/')) {

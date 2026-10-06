@@ -57,6 +57,8 @@ import { coworkReplyThreadEnabled } from './thread-read';
 import { coworkLinkedinBatchEnabled, stageCoworkLinkedinBatch } from './linkedin-batch';
 import { coworkEffectAlreadyDone, coworkPrepareBatchEnabled, stageCoworkPrepareBatch } from './prepare-batch';
 import { coworkIntentPromptsEnabled, coworkTurnIntents } from '@/lib/cowork/intents';
+import { coworkCodeArtifactsEnabled, coworkDesignerModel, coworkDesignerTurn } from './designer-run';
+import { coworkArtifactStore } from './artifact-store';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -187,6 +189,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const prepareBatchEnabled = coworkPrepareBatchEnabled();
     // «Oportunidades» is read only by the accounts that see the section (OPPORTUNITIES_ALLOWED_EMAILS); for the rest it does not exist.
     const opportunitiesEnabled = await coworkOpportunitiesAllowed(client, scope.userId);
+    // Code artifacts (Plan 12, 3b): the Designer writes them for the canvas. Off unless COWORK_CODE_ARTIFACTS_ENABLED=true.
+    const codeArtifactsEnabled = coworkCodeArtifactsEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
       writer: writerEnabled,
@@ -197,6 +201,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       linkedinBatch: linkedinBatchEnabled,
       prepareBatch: prepareBatchEnabled,
       opportunities: opportunitiesEnabled,
+      codeArtifacts: codeArtifactsEnabled,
       // Only the parts of the prompt this request needs (intents.ts), with COWORK_INTENT_PROMPTS_ENABLED=true; off, the whole prompt.
       intents: coworkIntentPromptsEnabled() ? coworkTurnIntents(run.message, history.turns) : null,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
@@ -285,6 +290,18 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // Five seconds before the worker's deadline, for the terminal write.
         timeLeft: () => 100000 - (Date.now() - claimedAt),
         models: coworkWriterModels(),
+        onCall: call => telemetry.push(call),
+      }) : undefined,
+      // The Designer writes a code artifact when the coordinator hands it a brief (artifact.create).
+      design: codeArtifactsEnabled ? coworkDesignerTurn({
+        request: run.message, userContext, signal: controller.signal, authorize,
+        reserve: role => reserveCoworkModelCall(client, run.id, run.lease_token, role),
+        generate: generateStructuredWithTelemetry,
+        recordUsage: (reservationId, callTelemetry) => recordCoworkModelUsage(client, reservationId, run.lease_token, callTelemetry),
+        record: recordEvent,
+        timeLeft: () => 100000 - (Date.now() - claimedAt),
+        model: coworkDesignerModel(),
+        store: coworkArtifactStore(client, scope, run.id, { opportunities: opportunitiesEnabled }),
         onCall: call => telemetry.push(call),
       }) : undefined,
       judge: judgeTurn?.review,

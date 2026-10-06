@@ -38,3 +38,13 @@ export function coworkArtifactFrameMessage(event: { source: unknown; data: unkno
 export function coworkArtifactThemeMessage(theme: 'light' | 'dark') {
   return { source: 'antonia-host', type: 'theme', mode: theme } as const;
 }
+
+/** What the composer of the canvas sends: the change, tied to this artifact by its file name (the coordinator edits it). */
+export function coworkArtifactChangeMessage(artifact: { title: string; name: string }, change: string) {
+  return `Cambia el artefacto «${artifact.title}» (${artifact.name}): ${change.trim()}`;
+}
+
+/** What «Arreglarlo» sends: the error, tied to this artifact, for the Designer to fix in its cause. */
+export function coworkArtifactFixMessage(artifact: { title: string; name: string }, error: { message: string; line: number | null }) {
+  return `Arregla el artefacto «${artifact.title}» (${artifact.name}): falló con «${error.message.slice(0, 240)}»${error.line ? ` en la línea ${error.line} de su código` : ''}.`;
+}

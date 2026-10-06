@@ -70,6 +70,19 @@ test('artifacts come only from persisted results', () => {
   assert.equal(artifacts[1].kind === 'contacts' && artifacts[1].count, 1);
 });
 
+test('a code artifact is its own kind, grouped by key and version, with the tables it read', () => {
+  const events = [
+    event('artifact.created', { name: 'artifact-pipeline-por-etapa-v2.html', size: 4096, kind: 'code', title: 'Pipeline por etapa', key: 'pipeline-por-etapa', version: 2,
+      tables: [{ name: 'pipeline', label: 'Pipeline', rows: 36, truncated: false }, { label: 7 }] }),
+    // A payload that says code without its key or version stays a file.
+    event('artifact.created', { name: 'artifact-x-v1.html', kind: 'code', title: 'X' }),
+  ];
+  const [code, file] = coworkTurnArtifacts(run('r', 1), events);
+  assert.deepEqual(code.kind === 'code' && { title: code.title, name: code.name, key: code.key, version: code.version, tables: code.tables },
+    { title: 'Pipeline por etapa', name: 'artifact-pipeline-por-etapa-v2.html', key: 'pipeline-por-etapa', version: 2, tables: [{ label: 'Pipeline', rows: 36 }] });
+  assert.equal(file.kind, 'file');
+});
+
 test('progress checklist reflects approval and failure honestly', () => {
   const request = event('approval.requested', { action: 'cowork.effect', kind: 'send_email', label: 'Enviar' });
   const waiting = coworkTurnProgress({ status: 'waiting_approval' }, [event('run.started'), event('tool.completed', { action: 'draft.get' }), request]);

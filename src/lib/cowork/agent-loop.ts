@@ -19,6 +19,7 @@ import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionContr
 import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
 import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
+import { coworkDesignBriefSchema, type CoworkDesignBrief } from './design-brief';
 import { coworkWithCharts } from './charts';
 import { coworkContactsImportSchema, type CoworkContactsImportInput } from './contacts-import';
 import { coworkReplyThreadSchema, type CoworkReplyThreadInput } from './reply-proposal';
@@ -51,7 +52,7 @@ export const coworkDecisionSchema = z.object({
     'contacts.prepare_batch',
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze', 'leads.recommend', 'opportunities.list',
-    'answer', 'draft.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
+    'answer', 'draft.write', 'artifact.create', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
   /** The steps the person sees while the turn works (rule 12); only the first consulting decision uses it. */
@@ -81,6 +82,8 @@ export const coworkDecisionSchema = z.object({
   searchCriteria: coworkSearchCriteriaSchema.nullable().optional(),
   /** draft.write: the brief the Writer gets instead of the coordinator writing the emails itself (writer.ts). */
   write: coworkWriteBriefSchema.nullable().optional(),
+  /** artifact.create: the brief the Designer gets to write the code of an artifact (designer.ts, Plan 12). */
+  design: coworkDesignBriefSchema.nullable().optional(),
   /** contacts.import: the uploaded file whose contacts to save and, if needed, which column is which (contacts-import.ts). */
   contactsImport: coworkContactsImportSchema.nullable().optional(),
   /** email.reply_thread: the conversation read with replies.thread and the final text of the reply to propose sending in its thread (reply-proposal.ts). */
@@ -414,6 +417,12 @@ const VERSION_KEPT_ANSWER = {
   reply: 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.', document: null, question: '¿Creo la campaña pausada con ella?',
   suggestions: [{ label: 'Crear la campaña', message: 'Sí, crea la campaña pausada con esta versión' }],
 };
+/** When the Designer fails on the last decision: what happened and how to go on, instead of a failed turn. */
+const designerFallback: CoworkAnswer = {
+  reply: 'Esta vez no pude armar el artefacto. Tu pedido quedó guardado: pídemelo de nuevo y lo intento otra vez, o te lo respondo en el chat con cifras y una tabla.',
+  document: null, blocks: null, question: '¿Lo intento de nuevo?',
+  suggestions: [{ label: 'Inténtalo de nuevo', message: 'Inténtalo de nuevo' }, { label: 'Respóndeme en el chat', message: 'Respóndeme en el chat con cifras y una tabla' }],
+};
 /** The Writer failed on the turn's last decision: nothing is left to write it, so the turn says so
  * and offers to try again in one click, instead of failing. */
 const writerFallback = (message: string) => ({
@@ -660,6 +669,8 @@ async function runCoworkLoop(input: {
   proposeEffect?: (proposal: CoworkEffectProposal) => Promise<void>;
   /** The Writer: writes the emails of a `draft.write` decision and returns the turn's answer. */
   write?: (brief: CoworkWriteBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
+  /** The Designer: writes the artifact of an `artifact.create` decision, stores it and returns the turn's answer (COWORK_CODE_ARTIFACTS_ENABLED). */
+  design?: (brief: CoworkDesignBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
   /** contacts.import may be proposed (COWORK_CONTACTS_IMPORT_ENABLED, once its migration is applied). */
   contactsImport?: boolean;
   /** email.reply_thread may be proposed (COWORK_REPLY_THREAD_ENABLED; its reply_thread migration is applied in production). */
@@ -696,6 +707,7 @@ async function runCoworkLoop(input: {
     await remember(decision);
     input.signal.throwIfAborted(); await input.authorize();
     if (decision.action === 'draft.write' && decision.write && input.write) return input.write(decision.write, observations);
+    if (decision.action === 'artifact.create' && decision.design && input.design) return input.design(decision.design, observations);
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
     return withCoworkReports(decision.answer, observations);
   }
@@ -791,6 +803,25 @@ async function runCoworkLoop(input: {
           if (turn === last) return lastResort();
           // A failed Writer does not end the turn: the coordinator writes it, as before.
           throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11).');
+        }
+      }
+      if (decision.action === 'artifact.create') {
+        // On the last decision nobody is left to answer without it: a line that offers to try again.
+        const lastResort = () => closingFallback ?? judgedFallback ?? designerFallback;
+        if (!input.design) {
+          if (turn === last) return lastResort();
+          throw rejected('Artifacts unavailable', 'Los artefactos todavía no están disponibles: entrega la respuesta con un bloque metrics o table (regla 11) o un document.');
+        }
+        if (!decision.design) {
+          if (turn === last) return lastResort();
+          throw rejected('Missing design brief', 'Elegiste artifact.create sin encargo: incluye design {title, goal, tables, previous, change}.');
+        }
+        try {
+          return await input.design(decision.design, observations);
+        } catch (error) {
+          if (input.signal.aborted) throw error;
+          if (turn === last) return lastResort();
+          throw rejected('Designer failed', `La Diseñadora no pudo esta vez (${error instanceof Error ? error.message.slice(0, 200) : 'error'}): entrega tú la respuesta con un bloque metrics o table, o un document.`);
         }
       }
       if (decision.action === 'answer') {

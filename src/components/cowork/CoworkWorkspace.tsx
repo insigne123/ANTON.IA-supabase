@@ -530,7 +530,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     if (autoOpened.current.has(latest.run.id)) return;
     autoOpened.current.add(latest.run.id);
     const produced = coworkTurnArtifacts(latest.run, latest.events);
-    const best = produced.find(item => item.kind === 'document')
+    const best = produced.find(item => item.kind === 'code')
+      || produced.find(item => item.kind === 'document')
       || produced.find(item => item.kind === 'block' && item.block.type === 'sequence')
       || produced.find(item => item.kind === 'block' && item.block.type === 'table' && item.block.rows.length >= 6)
       || produced.find(item => item.kind === 'contacts' && item.count >= 3)
@@ -916,6 +917,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           canResearch={Boolean(state?.canResearch) && latest?.run.status === 'completed'} canCreateDraft={Boolean(state?.canCreateDraft) && latest?.run.status === 'completed'}
           maximized={maximized} onToggleMaximize={() => setMaximized(value => !value)} onClose={closeArtifact} headingRef={artifactHeading}
           onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact} onSend={sendFromPanel} sendHint={panelSendHint}
+          versions={openArtifact.kind === 'code' ? artifacts.filter(item => item.kind === 'code' && item.key === openArtifact.key).sort((a, b) => (a.kind === 'code' && b.kind === 'code' ? a.version - b.version : 0)) : []}
+          onOpenArtifact={item => openArtifactPanel(item, null, false)}
           onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
       </m.div>}
     </AnimatePresence>

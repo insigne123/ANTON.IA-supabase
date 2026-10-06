@@ -8,7 +8,8 @@ import type { CoworkArtifactData, CoworkCodeArtifact } from './code-artifact';
 
 export type CoworkArtifactExample = { id: string; title: string; brief: string; code: CoworkCodeArtifact; data: CoworkArtifactData };
 
-const STAGES = ['Nuevo', 'Contactado', 'Reunión', 'Propuesta', 'Negociación', 'Ganado', 'Perdido'];
+// The stages of the app's pipeline (crm-types.ts), in order.
+const STAGES = ['Nuevos', 'Calificado', 'Contactado', 'Interesado', 'Reunión', 'Negociación', 'Ganado', 'Perdido'];
 const COMPANIES = ['Minera Centinela', 'Retail Andes', 'Transportes Sur', 'Clínica Norte', 'Agrícola Valle', 'Securitas Chile', 'Banco Austral',
   'Logística Pacífico', 'Constructora Cumbre', 'Grupo Expro', 'Viña Alta', 'Frutícola del Maule', 'Puerto Central', 'Seguros Cordillera',
   'Pesquera Austral', 'Inmobiliaria Bahía', 'Farmacias Salud', 'Energía Solar Norte'];
@@ -22,6 +23,7 @@ export function coworkExamplePipeline(): CoworkArtifactData {
     return {
       company: COMPANIES[at % COMPANIES.length],
       stage,
+      stage_order: STAGES.indexOf(stage) + 1,
       value: (3 + ((at * 37) % 41)) * 1_000_000,
       owner: OWNERS[at % OWNERS.length],
       created_at: `2026-${String(month).padStart(2, '0')}-${String(1 + ((at * 11) % 27)).padStart(2, '0')}`,
@@ -30,7 +32,7 @@ export function coworkExamplePipeline(): CoworkArtifactData {
   });
   return { currency: 'CLP', tables: { pipeline: { label: 'Pipeline', source: 'CRM de ANTON.IA', total: rows.length, truncated: false,
     columns: [
-      { key: 'company', label: 'Empresa', type: 'text' }, { key: 'stage', label: 'Etapa', type: 'text' },
+      { key: 'company', label: 'Empresa', type: 'text' }, { key: 'stage', label: 'Etapa', type: 'text' }, { key: 'stage_order', label: 'Orden de la etapa', type: 'number' },
       { key: 'value', label: 'Monto', type: 'money' }, { key: 'owner', label: 'Responsable', type: 'text' },
       { key: 'created_at', label: 'Creado', type: 'date' }, { key: 'close_date', label: 'Cierre', type: 'date' },
     ], rows } } };
@@ -94,8 +96,9 @@ antonia.kpi('#kpis', [
   { label: 'Tasa de cierre', value: closed.length ? won.length / closed.length : null, unit: 'percent', hint: closed.length + ' cerrados' },
 ]);
 
-const order = ['Nuevo', 'Contactado', 'Reunión', 'Propuesta', 'Negociación', 'Ganado'];
-const byStage = agg.series(deals.filter(d => d.stage !== 'Perdido'), 'stage', { value: 'value', order });
+// Etapas en el orden del proceso (stage_order), nunca por monto.
+const byStage = agg.series(deals.filter(d => d.stage !== 'Perdido'), 'stage', { value: 'value',
+  sort: (a, b) => a.rows[0].stage_order - b.rows[0].stage_order });
 antonia.chart('#stages', { type: 'funnel', title: 'Monto por etapa', note: 'Sin los perdidos', labels: byStage.labels, series: [{ name: 'Monto', values: byStage.values }], unit: 'money' });
 
 const months = agg.byMonth(deals, 'created_at');
@@ -106,7 +109,7 @@ antonia.chart('#months', { type: 'line', title: 'Negocios creados por mes', labe
 const owners = agg.groupBy(open, 'owner', { value: 'value' });
 antonia.chart('#owners', { type: 'bar', title: 'Monto abierto por responsable', labels: owners.map(o => o.key), series: [{ name: 'Monto', values: owners.map(o => o.value) }], unit: 'money' });
 
-const stagesByOwner = ['Nuevo', 'Contactado', 'Reunión', 'Propuesta', 'Negociación'];
+const stagesByOwner = agg.groupBy(open, 'stage', { sort: (a, b) => a.rows[0].stage_order - b.rows[0].stage_order }).map(g => g.key);
 antonia.chart('#mix', { type: 'stacked', title: 'Negocios abiertos por responsable y etapa', labels: owners.map(o => o.key),
   series: stagesByOwner.map(stage => ({ name: stage, values: owners.map(o => o.rows.filter(d => d.stage === stage).length) })) });
 

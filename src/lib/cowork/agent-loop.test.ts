@@ -1105,6 +1105,40 @@ test('draft.write hands the emails to the Writer, whose answer ends the turn; wi
   assert.equal(rewritten, 0);
 });
 
+test('artifact.create hands the brief to the Designer, whose answer ends the turn; without it the coordinator answers in the chat', async () => {
+  const brief = { title: 'Pipeline por etapa', goal: 'Ver cuántos contactos hay en cada etapa.', tables: ['pipeline' as const], previous: null, change: null };
+  const create = coworkDecisionSchema.parse({ action: 'artifact.create', query: null, leadId: null, answer: null, design: brief });
+  const designed = { reply: 'Armé el tablero del pipeline.', document: null, blocks: null, question: '¿Lo comparo con el mes pasado?',
+    suggestions: [{ label: 'Sí', message: 'Sí, compáralo' }] };
+  const closed = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Tus contactos por etapa, en la tabla.', document: null } };
+  const base = { message: 'Muéstrame mi pipeline en un gráfico', signal: new AbortController().signal, authorize: async () => {}, record: async () => {}, execute: async () => ({}) };
+  const briefs: unknown[] = [];
+  assert.deepEqual(await runCoworkReadLoop({ ...base, decide: async () => create, design: async given => { briefs.push(given); return designed; } }), designed);
+  assert.deepEqual(briefs, [brief]);
+  // Artifacts off, a Designer that fails, or a decision without its brief: the coordinator hears why and answers itself.
+  for (const [decision, designer, reason] of [
+    [create, undefined, /no están disponibles/],
+    [create, async () => { throw new Error('timeout'); }, /no pudo esta vez \(timeout\)/],
+    [{ ...create, design: null }, async () => designed, /sin encargo/],
+  ] as const) {
+    const reasons: string[] = [];
+    const fallback = await runCoworkReadLoop({ ...base, ...(designer ? { design: designer } : {}), decide: async (_observations, _mustAnswer, rejections = []) => {
+      reasons.push(...rejections.map(rejection => rejection.reason));
+      return rejections.length ? closed : decision;
+    } });
+    assert.equal(fallback.reply, 'Tus contactos por etapa, en la tabla.');
+    assert.match(reasons.join('|'), reason);
+  }
+  // On the last decision nobody is left to answer: the turn says so and offers to try again, instead of failing.
+  const late = await runCoworkReadLoop({ ...base, ceiling: { decisions: 1, reads: 3, softDeadlineMs: 50_000 }, decide: async () => create,
+    design: async () => { throw new Error('timeout'); } });
+  assert.match(late.reply, /no pude armar el artefacto/);
+  assert.equal(late.suggestions?.[0]?.message, 'Inténtalo de nuevo');
+  // A turn resumed after the specialists may hand it to the Designer too.
+  assert.deepEqual(await runCoworkReadLoop({ ...base, resumedObservations: [{ action: 'crm.search', input: '', result: { items: [] } }],
+    decide: async () => create, design: async () => designed }), designed);
+});
+
 test('the judge reads the final answer once; its correction may read once, and the judged answer stands if it fails', async () => {
   const ask = { action: 'answer' as const, query: null, leadId: null,
     answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Quieres que revise a quiénes ya les escribiste?',

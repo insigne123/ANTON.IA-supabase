@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkDocumentSchema, coworkStoredBlocks, type CoworkBlock } from '@/lib/cowork/contracts';
 
-type HistoryTurn = { runId: string; at: string | null; request: string; reply: string; document: { title: string; content: string } | null; blocks?: CoworkBlock[]; observations: unknown[]; actions?: Array<{ kind: string; label: string; outcome: string; result?: unknown }> };
+type HistoryTurn = { runId: string; at: string | null; request: string; reply: string; document: { title: string; content: string } | null; blocks?: CoworkBlock[]; observations: unknown[]; actions?: Array<{ kind: string; label: string; outcome: string; result?: unknown }>;
+  /** The code artifacts of that turn (Plan 12): «cámbiale el gráfico» refers to them by file name. */
+  artifacts?: Array<{ name: string; title: string }> };
 
 /**
  * The parent turn with its long lists cut to their first rows, each saying how many it left out (itemsOmitted), or null
@@ -86,8 +88,15 @@ export async function loadCoworkHistory(
         result: { leadId: row.payload?.leadId ?? null, providerId: row.payload?.providerId ?? null, reused: row.payload?.reused === true } };
     });
     const actions = [...effects, ...saved];
+    const made = await client.from('cowork_run_events').select('payload')
+      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
+      .eq('kind', 'artifact.created').order('sequence', { ascending: true }).limit(5);
+    const artifacts = made.error ? [] : ((made.data || []) as Array<{ payload: Record<string, unknown> | null }>)
+      .filter(row => row.payload?.kind === 'code' && typeof row.payload.name === 'string')
+      .map(row => ({ name: String(row.payload!.name), title: String(row.payload!.title || row.payload!.name).slice(0, 120) }));
     let turn: HistoryTurn = { runId: cursor, at: typeof run.created_at === 'string' ? run.created_at : null, request: run.message, reply: result.reply, document: result.document,
-      ...(blocks.length ? { blocks } : {}), observations: observedPayloads, ...(actions.length ? { actions } : {}) };
+      ...(blocks.length ? { blocks } : {}), observations: observedPayloads, ...(actions.length ? { actions } : {}),
+      ...(artifacts.length ? { artifacts } : {}) };
     let size = JSON.stringify(turn).length;
     if (size > remaining) {
       if (history.length > 0) break;

@@ -1,5 +1,5 @@
 // Builds the audit datasets from the domain files in this folder. Each file default-exports `(ctx) => ({ tables, rpc?,
-// embeds? })` and may export `keepInEmpty`, the tables an empty organization still has (itself, its members, profiles).
+// embeds?, storage? })` and may export `keepInEmpty`, the tables an empty organization still has (itself, its members, profiles).
 // `full` merges every domain; `empty` keeps only those tables, so each page shows its empty state.
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -19,7 +19,7 @@ function pageGuideIds() {
 
 export async function buildDatasets({ ownerEmail, now = Date.now() }) {
   const ctx = makeContext({ ownerEmail, now, pageGuideIds: pageGuideIds() });
-  const full = { tables: {}, rpc: {}, embeds: {} };
+  const full = { tables: {}, rpc: {}, embeds: {}, storage: {} };
   const keep = new Set();
   const files = readdirSync(HERE).filter(file => file.endsWith('.mjs') && !SKIP.has(file)).sort();
   for (const file of files) {
@@ -30,9 +30,10 @@ export async function buildDatasets({ ownerEmail, now = Date.now() }) {
       full.tables[table] = rows;
     }
     Object.assign(full.rpc, part.rpc || {});
+    Object.assign(full.storage, part.storage || {});
     for (const [table, rules] of Object.entries(part.embeds || {})) full.embeds[table] = { ...(full.embeds[table] || {}), ...rules };
     for (const table of mod.keepInEmpty || []) keep.add(table);
   }
-  const empty = { tables: Object.fromEntries([...keep].map(table => [table, full.tables[table] || []])), rpc: full.rpc, embeds: full.embeds };
+  const empty = { tables: Object.fromEntries([...keep].map(table => [table, full.tables[table] || []])), rpc: full.rpc, embeds: full.embeds, storage: {} };
   return { ctx, datasets: { full, empty }, personas: buildPersonas(ctx) };
 }
