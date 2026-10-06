@@ -313,6 +313,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       prepareBatch: prepareBatchEnabled,
       opportunities: opportunitiesEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
+      offeredReads: process.env.COWORK_OFFERED_READS_ENABLED === 'true',
       userContext,
       remember: async memory => { await saveCoworkThreadMemory(client, scope, run, memory); },
       proposeNote: async (leadId, note) => {
