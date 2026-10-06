@@ -529,7 +529,7 @@ export function coworkTurnChoices(events: CoworkEvent[]): CoworkChoices | null {
 }
 
 /** Cards that also open in the side panel; figures and charts stay inline in the chat. */
-export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' | 'chart' }>;
+export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' }>;
 
 export type CoworkArtifact =
   | { kind: 'block'; id: string; runId: string; title: string; block: CoworkPanelBlock; createdAt: string }
@@ -558,7 +558,8 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
   const completedAt = events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || run.created_at;
   const output = coworkTurnOutput(events);
   coworkTurnBlocks(events).forEach((block, index) => {
-    if (block.type === 'metrics' || block.type === 'chart') return;
+    // Figures read inline; a chart is drawn on the canvas, with a compact card in the chat (Plan 12, 2).
+    if (block.type === 'metrics') return;
     artifacts.push({ kind: 'block', id: `${run.id}:block:${index}`, runId: run.id, title: block.title, block, createdAt: completedAt });
   });
   if (output?.document) {

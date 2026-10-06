@@ -532,6 +532,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const produced = coworkTurnArtifacts(latest.run, latest.events);
     const best = produced.find(item => item.kind === 'code')
       || produced.find(item => item.kind === 'document')
+      || produced.find(item => item.kind === 'block' && item.block.type === 'chart')
       || produced.find(item => item.kind === 'block' && item.block.type === 'sequence')
       || produced.find(item => item.kind === 'block' && item.block.type === 'table' && item.block.rows.length >= 6)
       || produced.find(item => item.kind === 'contacts' && item.count >= 3)

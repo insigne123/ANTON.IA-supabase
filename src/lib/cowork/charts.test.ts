@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { CoworkBlock } from './contracts';
 import { coworkBlocks } from './answer-quality';
-import { coworkBlocksText, coworkBlockMeta, coworkChartCsv, coworkChartSummary, coworkChartValue } from './blocks';
+import { coworkBlocksText, coworkBlockMeta, coworkChartCsv, coworkChartHeadline, coworkChartSummary, coworkChartValue } from './blocks';
 import { coworkChartCandidates, coworkWithCharts } from './charts';
 import { runCoworkReadLoop } from './agent-loop';
 
@@ -99,4 +99,11 @@ test('the answer of a turn that read the metrics comes with its chart', async ()
   const empty = await runCoworkReadLoop({ ...base, execute: async () => ({ last_7_days: period(0, 0, 0, 0), last_30_days: period(0, 0, 0, 0) }),
     decide: async () => (step++ === 0 ? read : answer) });
   assert.deepEqual((empty as { blocks: CoworkBlock[] }).blocks.map(block => block.type), ['metrics']);
+});
+
+test('the chart card in the chat reads its largest value first', () => {
+  const bar = { type: 'chart' as const, title: 'Contactos por etapa', kind: 'bar' as const, period: null, unit: null, labels: ['Nuevos', 'Reunión'], series: [{ name: 'Contactos', values: [8, 3] }] };
+  assert.equal(coworkChartHeadline(bar), 'Mayor: Nuevos, 8 · 2 categorías');
+  const line = { ...bar, kind: 'line' as const, unit: 'percent' as const, labels: ['Sem 1', 'Sem 2', 'Sem 3'], series: [{ name: 'Respuesta', values: [0.1, 0.25, 0.2] }, { name: 'Rebote', values: [0, 0, 0] }] };
+  assert.match(coworkChartHeadline(line), /^Mayor: Sem 2, .+ \(Respuesta\) · 3 puntos$/);
 });

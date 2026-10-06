@@ -14,7 +14,7 @@ import { coworkBlockMeta, coworkEditedEmails, type CoworkEditedEmail } from '@/l
 import { cn } from '@/lib/utils';
 import { CoworkActivity } from './CoworkActivity';
 import { CoworkUserMessage } from './CoworkAttachments';
-import { BlockCard, ChartBlock, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
+import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
 import { CoworkChoicesCard } from './CoworkChoices';
 import { CoworkMarkdown } from './CoworkMarkdown';
@@ -240,11 +240,10 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const output = coworkTurnOutput(events);
   const proposal = coworkProposalView(run, events);
   const artifacts = coworkTurnArtifacts(run, events);
-  // Emails, sequences and tables read as rich cards; figures stay inline.
+  // Emails, sequences, tables and charts read as compact cards that open on the canvas; figures stay inline.
   const blockCards = artifacts.flatMap(artifact => artifact.kind === 'block' ? [artifact] : []);
   const otherArtifacts = artifacts.filter(artifact => artifact.kind !== 'block');
   const metrics = coworkTurnBlocks(events).flatMap(block => block.type === 'metrics' ? [block] : []);
-  const charts = coworkTurnBlocks(events).flatMap(block => block.type === 'chart' ? [block] : []);
   // The Writer's emails carry what the Reviewer did with them.
   const review = coworkDraftReview(events);
   const failure = events.slice().reverse().find(event => event.kind === 'run.failed')?.payload;
@@ -293,7 +292,6 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         {!proposal && replyBlock}
         {working && !reply && !proposal && liveAnswer && (liveAnswer.phase ? <HeldAnswerView answer={liveAnswer} /> : <LiveAnswerView answer={liveAnswer} />)}
         {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}
-        {!proposal && charts.map((block, index) => <ChartBlock key={`chart-${index}`} block={block} live={live} />)}
         {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live}
           status={cardStatuses?.get(artifact.id) ?? null} review={review} />)}
         {otherArtifacts.length > 0 && <div className="grid gap-2">

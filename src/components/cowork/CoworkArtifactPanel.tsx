@@ -19,7 +19,7 @@ import { CwButton } from './ui';
 const KIND_LABEL: Record<CoworkArtifact['kind'], string> = {
   block: 'Resultado', document: 'Documento', contacts: 'Tabla', file: 'Archivo', sources: 'Fuentes', code: 'Artefacto',
 };
-const BLOCK_LABEL = { email_draft: 'Correo', sequence: 'Secuencia', table: 'Tabla' } as const;
+const BLOCK_LABEL = { email_draft: 'Correo', sequence: 'Secuencia', table: 'Tabla', chart: 'Gráfico' } as const;
 
 function when(value: string) {
   const date = new Date(value);
