@@ -307,6 +307,17 @@ export function corpusObservations(entry: CorpusCase, result: CorpusTurnResult) 
   });
 }
 
+/** The emails of a campaign card as the person reads them in the review (CampaignReview.tsx): numbered, with the day it goes, subject and text. */
+function corpusCampaignEmailsText(messages: unknown) {
+  if (!Array.isArray(messages)) return messages;
+  let day = 1;
+  return messages.map((raw, index) => {
+    const message = raw as { subject?: unknown; body?: unknown; delayDays?: unknown };
+    if (index > 0) day += Number(message.delayDays) || 0;
+    return `Correo ${index + 1} · día ${day}\nAsunto: ${String(message.subject ?? '')}\n\n${String(message.body ?? '')}`;
+  }).join('\n\n---\n\n');
+}
+
 /** What the person saw in a corpus turn. */
 export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
   const campaign = result.proposal?.campaign as { name?: unknown; objective?: unknown; messages?: unknown; emails?: unknown } | undefined;
@@ -318,7 +329,7 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
     ...(result.choices ? { choices: result.choices } : {}),
     proposal: result.proposal ? { kind: result.proposal.kind, label: result.proposal.label, note: result.note,
       // The review card shows the campaign's name and objective above its recipients and emails.
-      ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: campaign.messages } }
+      ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: corpusCampaignEmailsText(campaign.messages) } }
         : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage }
         // The code card shows the files it runs on and the code itself.
         : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }

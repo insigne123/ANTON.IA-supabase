@@ -23,6 +23,12 @@ export function coworkDraftSteps(block: Draftable): CoworkEditedEmail[] {
     : block.steps.map(step => ({ subject: step.subject, body: step.body, day: step.day }));
 }
 
+/** The emails a turn wrote for one campaign: its only email or sequence card (one email per person is not one campaign). */
+export function coworkCampaignEmails(blocks: ReadonlyArray<{ type: string }> | null | undefined): CoworkEditedEmail[] | null {
+  const drafts = (blocks || []).filter((block): block is Draftable => block.type === 'email_draft' || block.type === 'sequence');
+  return drafts.length === 1 ? coworkDraftSteps(drafts[0]) : null;
+}
+
 /** The card with the emails the person has now (their edit of the subject and body of each step); everything else as it was. */
 export function coworkBlockWithSteps(block: Draftable, steps: CoworkEditedEmail[]): Draftable {
   if (block.type === 'email_draft') return { ...block, subject: steps[0]?.subject ?? block.subject, body: steps[0]?.body ?? block.body };
