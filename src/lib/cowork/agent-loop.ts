@@ -28,6 +28,7 @@ import { coworkPrepareBatchPeople, coworkPrepareBatchSchema, type CoworkPrepareB
 import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memory';
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 import { withCoworkReports } from './report-document';
+import { COWORK_NEXT_STEP_RULE } from './next-step';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -37,6 +38,14 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone',
   'lead_prepare_batch']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
+
+/** The strict output makes the model fill every field, and on a search or an artifact it sometimes fills `campaign`
+ * with filler (an invalid address, an empty subject). That no longer rejects the decision: the field keeps its
+ * problem, and only campaign.create, the one action that uses it, sends the problem back (Plan 12, 4a-4). */
+const INVALID_CAMPAIGN = Symbol('invalid campaign');
+function campaignProblem(value: unknown): string | null {
+  return value && typeof value === 'object' && INVALID_CAMPAIGN in value ? String((value as { [INVALID_CAMPAIGN]: unknown })[INVALID_CAMPAIGN]) : null;
+}
 
 export const coworkDecisionSchema = z.object({
   action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'reads.parallel', 'reads.plan', 'specialists.review',
@@ -74,7 +83,7 @@ export const coworkDecisionSchema = z.object({
   campaignId: z.string().uuid().nullable().optional(),
   spacingMinutes: z.number().int().min(5).max(480).nullable().optional(),
   linkedinMessage: z.string().trim().min(1).max(1200).nullable().optional(),
-  campaign: coworkCampaignDraftSchema.nullable().optional(),
+  campaign: coworkCampaignDraftSchema.nullable().optional().catch(({ input, error }) => (campaignProblem(input) !== null ? input : { [INVALID_CAMPAIGN]: issueSummary(error) || 'formato inválido' }) as never),
   code: coworkCodeProposalSchema.nullable().optional(),
   providerId: z.string().regex(/^apollo:[A-Za-z0-9_-]{1,200}$/).nullable().optional(),
   snapshotId: z.string().uuid().nullable().optional(),
@@ -455,6 +464,18 @@ function closingQuestion(answer: { reply: string; question?: unknown }): string 
   return /\?\s*$/.test(last) ? last.trim() : null;
 }
 
+/** A closing question that offers a free read («¿Reviso tus contactos?», «¿Quieres que te muestre…?»): the
+ * judge marked «mala» 55 of the 62 measured turns that closed like this (Plan 12, 4a-4). Offers that need
+ * approval («¿Busco su correo?») or write something («¿Te redacto…?») are not reads and stay. */
+const OFFERED_READ = /¿\s*(?:(?:quieres|prefieres|deseas|te parece)\s+(?:que\s+)?)?(?:te\s+|les?\s+|lo\s+|la\s+|los\s+|las\s+)?(?:revis[eo]|consult[eo]|mir[eo]|muestr[eo]|revisemos|veamos)\b/i;
+
+function offeredRead(answer: { reply: string; question?: unknown }): string | null {
+  const question = closingQuestion(answer);
+  return question && OFFERED_READ.test(question) ? question : null;
+}
+
+const offeredReadFeedback = (question: string) => `Tu respuesta termina ofreciendo una consulta («${question.slice(0, 160)}») que puedes hacer ahora, sin aprobación. Hazla en esta decisión con la lectura que corresponda y edita tu respuesta anterior (answerToCorrect) con lo que encuentres, sin volver a ofrecerla. Si ninguna lectura disponible la responde, quita esa oferta. Cómo cerrar: ${COWORK_NEXT_STEP_RULE}`;
+
 function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown }): string | null {
   const chips = coworkSuggestions(answer.suggestions).length;
   const blocks = coworkBlocks(answer.blocks);
@@ -691,6 +712,8 @@ async function runCoworkLoop(input: {
   judge?: (answer: CoworkAnswer, observations: CoworkObservation[], turn: { canRead: boolean }) => Promise<string | null>;
   /** Whether the judge's correction was kept (coworkCorrectionVerdict), once it arrives. */
   onCorrection?: (verdict: CoworkCorrectionVerdict) => void;
+  /** An answer that closes offering a read it could make gets it made first (COWORK_OFFERED_READS_ENABLED). */
+  offeredReads?: boolean;
   /** Who the person is and what they sell: figures from it are not new when a correction uses them. */
   userContext?: unknown;
   /** Keeps the summary of the conversation a decision carries (thread-memory.ts). Best effort: it never fails the turn. */
@@ -757,6 +780,8 @@ async function runCoworkLoop(input: {
   const readLimit = () => judgedFallback && judgeCanRead && !judgeReadDone() ? Math.max(ceiling.reads, judgeReadsAt + 1) : ceiling.reads;
   let campaignsListed = false;
   let filesListed = false;
+  // The correction that makes the read an answer offered is the loop's, not the judge's: it is not reported as one.
+  let offerCorrected = false;
   const keepsVersionOnly = coworkOnlyUsesVersion(input.message);
   for (let turn = 0; turn < ceiling.decisions; turn++) {
     input.signal.throwIfAborted();
@@ -834,7 +859,7 @@ async function runCoworkLoop(input: {
         if (judgedFallback) {
           const corrected = completeFrom(judgedFallback, decision.answer);
           const verdict = coworkCorrectionVerdict(judgedFallback, corrected, [observations, input.history ?? [], input.userContext ?? null]);
-          input.onCorrection?.(verdict);
+          if (!offerCorrected) input.onCorrection?.(verdict);
           return verdict.keep === 'first' ? judgedFallback : corrected;
         }
         // A correction needs one more decision, and time for it.
@@ -843,6 +868,18 @@ async function runCoworkLoop(input: {
           // Asked directly, not thrown: the catch below returns closingFallback once it is set.
           closingFallback = decision.answer;
           rejections.push({ action: 'answer', reason: closing, previous: decision.answer });
+          continue;
+        }
+        // An answer that offers a read it could make gets it made, as a judge's correction would: one more
+        // read (past the ceiling if needed) and the edited answer, with the offered one standing if that fails.
+        const offered = input.offeredReads && !judged && !keepsVersionOnly && turn + 2 <= last && !late() ? offeredRead(decision.answer) : null;
+        if (offered) {
+          judged = true;
+          offerCorrected = true;
+          judgedFallback = decision.answer;
+          judgeReadsAt = readsUsed;
+          judgeCanRead = true;
+          rejections.push({ action: 'answer', reason: offeredReadFeedback(offered), previous: decision.answer });
           continue;
         }
         // The judge reads the answer once, with a decision to spare and time for it; its
@@ -985,6 +1022,8 @@ async function runCoworkLoop(input: {
           : decision.action === 'email.reply_thread' ? decision.replyThread?.contactedId ?? null
           : decision.leadId;
         const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) : null;
+        const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
+        if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));
         const campaign = decision.action === 'campaign.create' && decision.campaign
           ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
