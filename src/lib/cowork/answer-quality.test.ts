@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -147,6 +147,27 @@ test('the closing question is one plain sentence that ends the reply exactly onc
   assert.equal(coworkStoredQuestion('¿Creo la campaña?'), '¿Creo la campaña?');
   assert.equal(coworkStoredQuestion('Listo.'), null);
   assert.equal(coworkStoredQuestion({ text: '¿Sí?' }), null);
+});
+
+test('a figure that does not fit its card moves the rest to its detail, cut between clauses, never inside a word', () => {
+  // Seen with the real model (Plan 12, 3c): «1 respondió (33 %)» was cut at 40 characters into «1 respondió (3».
+  assert.deepEqual(coworkMetricFit('6 contactos; 4 con envío; 1 respondió (33 %)', '1 de 3 contactos con envío no rebotado'),
+    { value: '6 contactos; 4 con envío', detail: '1 respondió (33 %) · 1 de 3 contactos con envío no rebotado' });
+  assert.deepEqual(coworkMetricFit('12 reuniones (4 más que en septiembre de 2026)', null),
+    { value: '12 reuniones', detail: '(4 más que en septiembre de 2026)' });
+  // No clause to split at: the value ends at a word, with an ellipsis, and goes on in the detail.
+  const long = coworkMetricFit('Muy por encima del promedio de la industria regional', null);
+  assert.equal(long.value, 'Muy por encima del promedio de la…');
+  assert.equal(long.detail, 'industria regional');
+  // What fits stays as it is, and a long detail ends at a word too.
+  assert.deepEqual(coworkMetricFit('57 de 60', null), { value: '57 de 60', detail: null });
+  const detail = coworkMetricFit('3', 'palabra '.repeat(30).trim()).detail!;
+  assert.ok(detail.length <= 140 && detail.endsWith('…') && !/palabr…$/.test(detail));
+  // Through coworkBlocks, the card shows the split figure.
+  const [card] = coworkBlocks([{ type: 'metrics', title: 'Por rubro', period: null,
+    items: [{ label: 'Minería', value: '6 contactos; 4 con envío; 1 respondió (33 %)', detail: null }] }]);
+  assert.deepEqual(card, { type: 'metrics', title: 'Por rubro', period: null,
+    items: [{ label: 'Minería', value: '6 contactos; 4 con envío', detail: '1 respondió (33 %)' }] });
 });
 
 test('blocks become cards one by one: plain text, no IDs, trimmed to what a card shows', () => {

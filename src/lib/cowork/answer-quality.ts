@@ -90,6 +90,48 @@ export function coworkChoices(value: unknown): CoworkChoices | null {
 /** What a card shows at most; longer results belong in a document or an export. */
 export const COWORK_BLOCK_DISPLAY = { steps: 7, columns: 8, rows: 50, metrics: 6, recipients: 25 } as const;
 
+const METRIC_VALUE_MAX = 40;
+const METRIC_DETAIL_MAX = 140;
+// Where a figure can be split, strongest first: between clauses («6 contactos; 4 con envío»), at a middle dot, a comma or a dash,
+// and only then before a parenthesis, which usually belongs to the figure before it («1 respondió (33 %)»).
+const METRIC_SEPARATORS = [/;\s+/g, /\s+·\s+/g, /,\s+/g, /\s+[–-]\s+/g, /\s+(?=\()/g];
+const clipWords = (value: string, max: number) => {
+  if (value.length <= max) return value;
+  const space = value.lastIndexOf(' ', max - 1);
+  return `${(space > max * 0.6 ? value.slice(0, space) : value.slice(0, max - 1)).trimEnd()}…`;
+};
+
+/**
+ * A figure fits its card: the value shows at most 40 characters, so what does not fit goes to the start of its detail line,
+ * cut between clauses and never inside a word or a number («6 contactos; 4 con envío; 1 respondió (33 %)» → «6 contactos;
+ * 4 con envío» and «1 respondió (33 %)»). Cutting at 40 used to leave «1 respondió (3».
+ */
+export function coworkMetricFit(value: string, detail: string | null): { value: string; detail: string | null } {
+  const clean = value.trim();
+  const tail = (detail || '').trim();
+  if (clean.length <= METRIC_VALUE_MAX) return { value: clean, detail: tail ? clipWords(tail, METRIC_DETAIL_MAX) : null };
+  let head = '';
+  let rest = '';
+  // The last split of the strongest kind that leaves a value that fits.
+  for (const separator of METRIC_SEPARATORS) {
+    for (const match of clean.matchAll(separator)) {
+      if (match.index === undefined || match.index === 0 || match.index > METRIC_VALUE_MAX) continue;
+      head = clean.slice(0, match.index).trim();
+      rest = clean.slice(match.index + match[0].length).trim();
+    }
+    if (head) break;
+  }
+  if (!head) {
+    // No clause to split at: the value ends at a word and the rest goes on in the detail.
+    const space = clean.lastIndexOf(' ', METRIC_VALUE_MAX - 1);
+    const at = space > 0 ? space : METRIC_VALUE_MAX - 1;
+    head = `${clean.slice(0, at).trimEnd()}…`;
+    rest = clean.slice(at).trim();
+  }
+  const moved = [rest, tail].filter(Boolean).join(' · ');
+  return { value: head, detail: moved ? clipWords(moved, METRIC_DETAIL_MAX) : null };
+}
+
 /** Blocks safe to render as cards: plain text without IDs or internal codes,
  * trimmed to what a card shows. A malformed block is dropped on its own; a
  * one-email sequence reads as an email. */
@@ -132,7 +174,7 @@ export function coworkBlocks(value: unknown): CoworkBlock[] {
       blocks.push({ type: 'chart', title: visible(block.title, 120) || 'Gráfico', kind: block.kind, period: block.period ? visible(block.period, 80) || null : null,
         unit: block.unit ? visible(block.unit, 20) || null : null, labels, series });
     } else {
-      const items = block.items.map(item => ({ label: visible(item.label, 60), value: visible(item.value, 40), detail: item.detail ? visible(item.detail, 140) || null : null }))
+      const items = block.items.map(item => ({ label: visible(item.label, 60), ...coworkMetricFit(visible(item.value, 300), item.detail ? visible(item.detail, 300) : null) }))
         .filter(item => item.label && item.value).slice(0, COWORK_BLOCK_DISPLAY.metrics);
       if (!items.length) continue;
       blocks.push({ type: 'metrics', title: visible(block.title, 120) || 'Cifras', period: block.period ? visible(block.period, 80) || null : null, items });
