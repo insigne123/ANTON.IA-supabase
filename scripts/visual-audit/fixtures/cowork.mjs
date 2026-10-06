@@ -1,4 +1,5 @@
-// Cowork: three finished threads for the owner (one with a follow-up turn, one renamed, one with a code artifact on the canvas)
+// Cowork: three finished threads for the owner (one with a follow-up turn in two versions, the latest rated 👍; one renamed; one
+// with a code artifact on the canvas)
 // and the access RPC, which only the owner passes. The artifact is a small static page in storage: the panel around it is what is audited.
 export default function cowork(ctx) {
   const run = (n, message, { parent = null, root, status = 'completed', at }) => ({
@@ -12,11 +13,14 @@ export default function cowork(ctx) {
     run(2, 'Prepárame el correo para Andrea Soto', { parent: first, root: first, at: ctx.hoursAgo(25) }),
     run(3, 'Arma una campaña para jefes de reclutamiento en logística', { root: second, at: ctx.hoursAgo(3) }),
     run(4, 'Muéstrame mi pipeline en un gráfico por etapa', { root: ctx.uid(9004), at: ctx.hoursAgo(1) }),
+    // «Otra versión» of the second turn (Plan 13): same parent, asked again later.
+    run(5, 'Prepárame el correo para Andrea Soto', { parent: first, root: first, at: ctx.hoursAgo(24) }),
   ];
   const replies = {
     1: 'Te recomiendo empezar por **3 personas** que calzan con tu cliente ideal y aún no contactas:\n\n1. **Andrea Soto**, Gerente de Personas en Retail Andino: están abriendo tiendas.\n2. **Matías Rojas**, Jefe de Reclutamiento en Logística Sur: contrataciones masivas en temporada.\n3. **Francisca Muñoz**, Gerente de Operaciones en Seguridad Austral.\n\n¿Quieres que prepare el primer correo para Andrea?',
     2: 'Listo. Este es el borrador para **Andrea Soto**:\n\n**Asunto:** Retail Andino: contrataciones sin revisar antecedentes a mano\n\nHola Andrea, vi que Retail Andino está abriendo tiendas. Revisamos antecedentes en minutos, con trazabilidad. ¿Conversamos 15 minutos?',
     3: 'Armé la campaña **«Logística · centros de distribución»** con 6 jefes de reclutamiento. Quedó en Campañas para que la revises antes de aprobarla.',
+    5: 'Aquí va una versión más directa para **Andrea Soto**:\n\n**Asunto:** ¿15 minutos sobre las contrataciones de Retail Andino?\n\nHola Andrea, con las tiendas nuevas su equipo revisa muchos antecedentes. Nosotros lo hacemos en minutos y con trazabilidad. ¿Te muestro cómo el jueves?',
     4: 'De tus 20 contactos, 8 siguen en Nuevos y 3 ya tienen reunión. El tablero muestra el pipeline por etapa con la tabla de detalle; puedes ordenarla y usar «Ver datos» en el gráfico.',
   };
   // The first answer carries a chart: in the chat a compact card, drawn on the canvas when opened (Plan 12, 2).
@@ -37,6 +41,8 @@ export default function cowork(ctx) {
   const events = runs.flatMap((item, index) => [
     { sequence: index * 3 + 1, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.started', payload: {}, created_at: item.created_at },
     ...(index === 3 ? [artifactEvent(item, index * 3 + 2)] : []),
+    ...(index === 4 ? [{ sequence: index * 3 + 4, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'answer.feedback',
+      payload: { rating: 'up', reason: null, comment: null }, created_at: item.updated_at }] : []),
     { sequence: index * 3 + 3, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null,
       ...(index === 0 ? { blocks: [stagesChart] } : {}) }, created_at: item.updated_at },
   ]);
