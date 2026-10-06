@@ -134,6 +134,26 @@ Pendientes recomendados:
 - **Después:** «Tamaño de empresa» vuelve a la pantalla como lista de rangos.
 - **Pendiente de solicitud explícita:** las migraciones necesitan un pedido explícito, así que queda propuesta.
 
+### «Escribir sin investigar»: por qué no entra sin migración
+
+El borrador del primer correo se crea desde una investigación guardada: `native_drafts.research_snapshot_id` es obligatorio (`not null`, migración `20260822111000`). Escribir sin investigar necesita que esa columna acepte un borrador sin investigación, o un tipo de investigación «solo perfil». Las dos son migraciones, así que queda propuesta.
+
+## Cowork: pedir un informe y pedir un cambio a un artefacto (Plan 12, 6)
+
+Son dos tareas nuevas del banco, con la meta de 85 o más que fija el Plan 12:
+
+- **Pedir un informe visual:** se mide hasta enviar el pedido, como «Pedirle algo a Cowork». El banco no tiene el modelo que escribe el artefacto.
+- **Pedir un cambio a un artefacto:** parte de la conversación de ejemplo que hizo «Pipeline por etapa», un artefacto con código. Abre la conversación y el artefacto en el lienzo, y pide el cambio desde «Pedir cambios».
+  - La tarea comprueba que el cambio vaya en la misma conversación, atado al turno que hizo el artefacto, y que lo nombre.
+
+| Tarea | Índice | Pasos (ideal) | Tiempo (KLM) | En teléfono |
+|---|---:|---:|---:|---|
+| Pedirle algo a Cowork | **96** | 3 (3) | 15 s | se completa, 4 pasos |
+| Pedir un informe visual | **96** | 3 (3) | 20 s | se completa, 4 pasos |
+| Pedir un cambio a un artefacto | **91** | 5 (4) | 21 s | se completa, 7 pasos |
+
+En el teléfono hay más pasos: abrir el menú y, en «Pedir un cambio», también la lista de trabajos.
+
 ## Prueba con personas (recomendada)
 
 La medición automática dice dónde sobran pasos y controles. No dice qué entiende una persona.

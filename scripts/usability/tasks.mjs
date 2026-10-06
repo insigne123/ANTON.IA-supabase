@@ -1,4 +1,4 @@
-// The twelve tasks of the simplicity measurement, done as a new person would: each step names the control by what the
+// The tasks of the simplicity measurement, done as a new person would: each step names the control by what the
 // person reads on it, starting from «Hoy» or the menu. `ideal` is the fewest steps the task could take in a good design
 // (expert judgment, written down so changes to it show in review). `dataset` and `persona` pick the situation: a new
 // organization (`empty`) or one in use (`full`), the owner or a member. `mocks` answer, in the browser, the few calls a
@@ -229,6 +229,39 @@ export function TASKS(ctx, { fixtures }) {
       mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
       done: (page, { calls }) => {
         if (!calls.some(call => call.method === 'POST' && /cowork/.test(call.url))) throw new Error('no se envió el pedido');
+      },
+    },
+    {
+      id: 'cowork-informe', module: 'Cowork', title: 'Pedir un informe visual', start: '/dashboard', ideal: 3,
+      // Measured up to sending, like «Pedirle algo a Cowork»: the bench has no model to write the artifact.
+      steps: [
+        { menu: 'Cowork' },
+        { target: { label: 'Describe tu trabajo' }, fill: 'Hazme un tablero de mi pipeline por etapa' },
+        { target: { role: 'button', name: 'Crear trabajo' } },
+      ],
+      mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
+      done: (page, { calls }) => {
+        if (!calls.some(call => call.method === 'POST' && /cowork/.test(call.url) && /tablero/.test(JSON.stringify(call.body)))) throw new Error('no se envió el pedido');
+      },
+    },
+    {
+      id: 'cowork-cambio', module: 'Cowork', title: 'Pedir un cambio a un artefacto', start: '/dashboard', ideal: 4,
+      // The conversation of the audit fixtures that made «Pipeline por etapa», an artifact written in code.
+      steps: [
+        { menu: 'Cowork' },
+        { target: { role: 'button', name: 'Mostrar trabajos' }, only: 'phone' },
+        { target: { role: 'button', name: /Muéstrame mi pipeline/, exact: false } },
+        { target: { role: 'button', name: /Pipeline por etapa/, exact: false } },
+        { target: { label: 'Pedir cambios a este artefacto' }, fill: 'Agrega el total por etapa' },
+        { target: { role: 'button', name: 'Pedir cambios' } },
+      ],
+      mocks: [{ url: '**/api/cowork/**', method: 'POST', respond: { ok: true } }],
+      done: (page, { calls }) => {
+        // The change goes in the same conversation, tied to the turn that made the artifact.
+        const sent = calls.find(call => call.method === 'POST' && /cowork\/runs$/.test(call.url) && /total por etapa/.test(call.body?.message || ''));
+        if (!sent) throw new Error('no se envió el cambio');
+        if (!sent.body.parentRunId) throw new Error('el cambio abrió una conversación nueva');
+        if (!/Pipeline por etapa/.test(sent.body.message)) throw new Error('el cambio no nombra el artefacto');
       },
     },
     {
