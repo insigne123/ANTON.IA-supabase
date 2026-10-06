@@ -5,6 +5,8 @@ import { readCoworkLinkedinQuota } from '@/lib/server/cowork/linkedin-reads';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkFirstName, type CoworkOverview } from '@/lib/cowork/overview';
+import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
+import { loadCoworkSinceLastVisit } from '@/lib/server/cowork/since-visit';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,8 +19,8 @@ const counted = (result: PromiseSettledResult<Count>) =>
 /**
  * The Cowork home's figures (plan 2, V7), on the same scope Cowork reads and through your session:
  * your saved contacts (and how many have an email), your campaigns, your LinkedIn invitations of
- * the week, your first name and whether there is an offer to write with. Counts only: no rows,
- * no addresses. A figure that fails is null; the others still arrive.
+ * the week, your first name and whether there is an offer to write with, and what changed since your last
+ * turn (names of who replied or was researched, counts of the rest). No addresses. A figure that fails is null; the others still arrive.
  */
 export async function GET() {
   try {
@@ -26,7 +28,7 @@ export async function GET() {
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const own = (table: string) => auth.supabase.from(table).select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
-    const [contacts, withEmail, campaigns, linkedin, context] = await Promise.allSettled([
+    const [contacts, withEmail, campaigns, linkedin, context, since] = await Promise.allSettled([
       own('leads'),
       own('leads').not('email', 'is', null).neq('email', ''),
       own('bulk_campaigns'),
@@ -34,6 +36,9 @@ export async function GET() {
       // counts Cowork's linkedin.quota reads, scoped to you. Only the numbers leave the server.
       Promise.resolve().then(() => readCoworkLinkedinQuota(getSupabaseAdminClient(), scope)),
       loadCoworkUserContext(auth.supabase, scope, { memories: false }),
+      // «Desde tu última visita»: replies, research and opportunities through your session; LinkedIn as the quota above.
+      loadCoworkSinceLastVisit({ client: auth.supabase, admin: getSupabaseAdminClient,
+        opportunities: isOpportunitiesUserAllowed(auth.user, process.env.OPPORTUNITIES_ALLOWED_EMAILS) }, scope),
     ]);
     const quota = linkedin.status === 'fulfilled' ? linkedin.value : null;
     const person = context.status === 'fulfilled' ? context.value : null;
@@ -44,6 +49,7 @@ export async function GET() {
       withEmail: counted(withEmail as PromiseSettledResult<Count>),
       campaigns: counted(campaigns as PromiseSettledResult<Count>),
       linkedin: quota ? { used: quota.pending + quota.sent7d, limit: quota.limit } : null,
+      since: since.status === 'fulfilled' ? since.value : null,
     };
     return NextResponse.json(overview, { headers: privateHeaders });
   } catch (error) {
