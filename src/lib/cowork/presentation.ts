@@ -536,7 +536,9 @@ export type CoworkArtifact =
   | { kind: 'document'; id: string; runId: string; title: string; content: string; createdAt: string }
   | { kind: 'contacts'; id: string; runId: string; title: string; count: number; companies: boolean; external: boolean; createdAt: string }
   | { kind: 'file'; id: string; runId: string; title: string; name: string; extension: string; size: number | null; createdAt: string }
-  | { kind: 'sources'; id: string; runId: string; title: string; count: number; sequence: number; createdAt: string };
+  | { kind: 'sources'; id: string; runId: string; title: string; count: number; sequence: number; createdAt: string }
+  /** A code artifact (Plan 12): a page the Designer wrote, shown in a sandboxed frame. key and version group its versions. */
+  | { kind: 'code'; id: string; runId: string; title: string; name: string; key: string; version: number; tables: Array<{ label: string; rows: number }>; createdAt: string };
 
 /** Title and noun for a set of observed rows (people, companies or both). */
 export function coworkContactsTitle(rows: Array<{ id: string }>) {
@@ -572,9 +574,16 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
   }
   for (const event of events) {
     if (event.kind === 'artifact.created') {
-      const payload = event.payload as { name?: unknown; size?: unknown } | null;
+      const payload = event.payload as { name?: unknown; size?: unknown; kind?: unknown; title?: unknown; key?: unknown; version?: unknown; tables?: unknown } | null;
       const name = typeof payload?.name === 'string' ? payload.name : '';
       if (!name) continue;
+      if (payload?.kind === 'code' && typeof payload.key === 'string' && Number.isInteger(payload.version)) {
+        const tables = Array.isArray(payload.tables) ? (payload.tables as Array<{ label?: unknown; rows?: unknown }>)
+          .filter(table => typeof table?.label === 'string' && typeof table.rows === 'number').map(table => ({ label: String(table.label), rows: Number(table.rows) })) : [];
+        artifacts.push({ kind: 'code', id: `${run.id}:code:${name}`, runId: run.id, title: typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : name,
+          name, key: payload.key, version: Number(payload.version), tables, createdAt: event.created_at });
+        continue;
+      }
       const dot = name.lastIndexOf('.');
       artifacts.push({ kind: 'file', id: `${run.id}:file:${name}`, runId: run.id, title: name, name,
         extension: dot > 0 ? name.slice(dot + 1).toLowerCase() : '', size: typeof payload?.size === 'number' ? payload.size : null,
@@ -740,7 +749,7 @@ export function coworkConsultedSources(events: CoworkEvent[]): string[] {
 /** The Writer, the Reviewer or the judge in a turn (writer.ts, judge-run.ts): its latest step, with the name the page shows. */
 export type CoworkAgentRow = CoworkAgentEvent & { name: string };
 /** The judge reads answers as the Reviewer reads emails: to the person, both are the Reviewer. */
-const AGENT_NAMES: Record<CoworkAgentEvent['agent'], string> = { writer: 'Redactora', reviewer: 'Revisora', judge: 'Revisora' };
+const AGENT_NAMES: Record<CoworkAgentEvent['agent'], string> = { writer: 'Redactora', reviewer: 'Revisora', judge: 'Revisora', designer: 'Diseñadora' };
 
 /** Each agent of the turn at its latest step, in the order they started: who wrote, who reviewed. */
 export function coworkAgentRows(events: CoworkEvent[]): CoworkAgentRow[] {

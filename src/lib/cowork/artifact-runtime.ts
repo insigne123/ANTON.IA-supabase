@@ -41,6 +41,9 @@ input,select,textarea{background:var(--surface);border:1px solid var(--border);b
 .btn:hover{background:var(--panel)}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .btn-primary:hover{background:var(--accent);filter:brightness(1.08)}
+.chip{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:13px;font-weight:600}
+.chip:hover{background:var(--panel)}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:20px}
 .header p{color:var(--muted);margin:0}
 .stack{display:flex;flex-direction:column;gap:16px}
@@ -100,7 +103,7 @@ input,select,textarea{background:var(--surface);border:1px solid var(--border);b
 .antonia-table-count{color:var(--muted);font-size:13px}
 .antonia-table-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)}
 table{border-collapse:collapse;width:100%;font-size:13.5px}
-th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:break-word}
 thead th{background:var(--panel);color:var(--muted);font-size:12.5px;font-weight:600;white-space:nowrap;position:sticky;top:0}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:var(--accent-soft)}
@@ -337,7 +340,14 @@ export const COWORK_ARTIFACT_RUNTIME_JS = String.raw`(function () {
     table.columns = Array.isArray(table.columns) ? table.columns : inferColumns(table.rows);
   });
   var meta = { title: payload.title || D.title || '', generatedAt: payload.generatedAt || null,
-    currency: payload.currency || 'CLP', timeZone: payload.timeZone || 'America/Santiago' };
+    currency: payload.currency || 'CLP', timeZone: payload.timeZone || 'America/Santiago', today: '' };
+  // The day it was made, in the person's time zone: «hoy» and «este mes» of the data, not of whoever opens it later.
+  meta.today = (function () {
+    var made = meta.generatedAt ? new Date(meta.generatedAt) : new Date();
+    if (isNaN(made.getTime())) made = new Date();
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: meta.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(made); }
+    catch (error) { return made.toISOString().slice(0, 10); }
+  })();
 
   var themeListeners = [];
   var theme = { mode: 'light', colors: {} };
@@ -533,6 +543,14 @@ export const COWORK_ARTIFACT_RUNTIME_JS = String.raw`(function () {
       if (options.last) keys = keys.slice(-options.last);
       return { keys: keys, labels: keys.map(function (key) { return format.date(key + '-01', 'month'); }),
         values: keys.map(function (key) { return options.value ? (options.op === 'avg' ? agg.avg(buckets[key], options.value) : agg.sum(buckets[key], options.value)) : buckets[key].length; }) };
+    },
+    since: function (input, dateKey, days) {
+      var from = new Date(meta.today + 'T12:00:00Z').getTime() - Math.max(0, Number(days) || 0) * 86400000 - 43200000;
+      return rowsOf(input).filter(function (row) { var date = toDate(pick(row, dateKey)); return Boolean(date) && date.getTime() >= from; });
+    },
+    inMonth: function (input, dateKey, month) {
+      var wanted = typeof month === 'string' && /^\d{4}-\d{2}$/.test(month) ? month : meta.today.slice(0, 7);
+      return rowsOf(input).filter(function (row) { var date = toDate(pick(row, dateKey)); return Boolean(date) && date.toISOString().slice(0, 7) === wanted; });
     },
     top: function (input, key, n, direction) {
       return rowsOf(input).slice().sort(function (a, b) {

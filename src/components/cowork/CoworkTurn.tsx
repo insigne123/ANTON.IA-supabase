@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
+import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, LayoutDashboard, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkAgentRows, coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkHeldAnswerCopy, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
@@ -106,7 +106,7 @@ function LiveAnswerView({ answer }: { answer: CoworkLiveAnswer }) {
 
 export function CoworkArtifactIcon({ artifact, className }: { artifact: CoworkArtifact; className?: string }) {
   if (artifact.kind === 'block') return <CoworkBlockIcon block={artifact.block} className={className} />;
-  const Icon = artifact.kind === 'document' ? FileText : artifact.kind === 'contacts' ? Table2 : artifact.kind === 'sources' ? Library : FileText;
+  const Icon = artifact.kind === 'document' ? FileText : artifact.kind === 'contacts' ? Table2 : artifact.kind === 'sources' ? Library : artifact.kind === 'code' ? LayoutDashboard : FileText;
   return <Icon className={className} aria-hidden="true" />;
 }
 
@@ -115,6 +115,8 @@ export function coworkArtifactMeta(artifact: CoworkArtifact) {
   if (artifact.kind === 'document') return 'Documento';
   if (artifact.kind === 'contacts') return `Tabla · ${artifact.count} ${artifact.companies ? (artifact.count === 1 ? 'empresa' : 'empresas') : (artifact.count === 1 ? 'contacto' : 'contactos')}`;
   if (artifact.kind === 'sources') return `${artifact.count} fuente${artifact.count === 1 ? '' : 's'}`;
+  if (artifact.kind === 'code') return [`Artefacto${artifact.version > 1 ? ` · versión ${artifact.version}` : ''}`,
+    ...artifact.tables.map(table => `${table.label} (${table.rows} ${table.rows === 1 ? 'fila' : 'filas'})`)].join(' · ');
   return [artifact.extension.toUpperCase(), coworkFileSize(artifact.size)].filter(Boolean).join(' · ') || 'Archivo';
 }
 

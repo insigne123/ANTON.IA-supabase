@@ -10,6 +10,7 @@ import { coworkUserContextFromProfile } from '../../src/lib/server/cowork/user-c
 import type { CoworkBlock, CoworkChoices } from '../../src/lib/cowork/contracts';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 import { buildCoworkAgenda } from '../../src/lib/cowork/agenda';
+import type { CoworkArtifactRender } from './cowork-artifact-render';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
 
@@ -188,6 +189,10 @@ export type CorpusTurnResult = {
     kept?: 'correction' | 'first'; keptReason?: string | null };
   /** The reply of every answer decision, in order: more than one means the first was corrected (closing or judge). */
   answers?: string[];
+  /** The code artifact the Designer made (Plan 12, 3b): the coordinator's brief, the page and what it took. */
+  artifact?: { brief: unknown; title: string; html: string; bytes: number; attempts: number; seconds: number; tables: Array<{ name: string; rows: number }>;
+    /** How it rendered in Chromium (cowork-artifact-render.ts), when the evaluation rendered it. */
+    render?: CoworkArtifactRender };
 };
 
 /** What the person reads in the chat: the reply plus every card. */
@@ -195,7 +200,9 @@ export const corpusShown = (result: CorpusTurnResult) => [result.reply, result.c
 
 export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[]; userContext?: CoworkUserContext | null };
 
-export type CorpusHistoryTurn = { request: string; reply: string; at: string; observations?: unknown[]; actions?: unknown[] };
+export type CorpusHistoryTurn = { request: string; reply: string; at: string; observations?: unknown[]; actions?: unknown[];
+  /** The code artifacts that turn made (Plan 12, 3b), as the conversation history carries them. */
+  artifacts?: Array<{ name: string; title: string }> };
 
 export type CorpusCase = {
   id: string;
@@ -223,6 +230,8 @@ export type CorpusCase = {
   phoneReveal?: boolean;
   /** Runs for an account that sees «Oportunidades» (OPPORTUNITIES_ALLOWED_EMAILS): opportunities.list is available. */
   opportunities?: boolean;
+  /** The code of the artifacts made before in this conversation, by file name: what the Designer gets to edit. */
+  artifacts?: Record<string, { html: string; css: string; js: string }>;
   checks: Array<{ label: string; test: (result: CorpusTurnResult) => boolean }>;
 };
 

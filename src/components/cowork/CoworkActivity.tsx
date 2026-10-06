@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronRight, LoaderCircle, Minus, PenLine, SearchCheck, TriangleAlert } from 'lucide-react';
+import { ChevronRight, LayoutDashboard, LoaderCircle, Minus, PenLine, SearchCheck, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import {
   coworkAgentLine, coworkAgentRows, coworkAnswerReview, coworkElapsed, coworkFindingText, coworkPlanStepLine, coworkReadEvents, coworkTurnFindings, describeCoworkObservation, type CoworkAgentRow,
@@ -67,7 +67,7 @@ function Finding({ finding, live }: { finding: CoworkReadFinding; live: boolean 
   </m.span>;
 }
 
-const AGENT_ICONS = { writer: PenLine, reviewer: SearchCheck, judge: SearchCheck } as const;
+const AGENT_ICONS = { writer: PenLine, reviewer: SearchCheck, judge: SearchCheck, designer: LayoutDashboard } as const;
 
 /** Where an agent stands: working, done, done with something left to look at, or given up (the
  * coordinator took over). It swaps in place; it never loops (the plan's marker and the headline

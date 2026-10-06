@@ -110,15 +110,8 @@ De afuera hacia adentro:
 
 Las pruebas unitarias son `src/lib/server/cowork/code-artifact.test.ts` y `artifact-runtime.test.ts`, con la biblioteca corriendo en JSDOM.
 
-## Lo que falta (3b y 3c)
+## Lo que sigue
 
-- **La Diseñadora** (`artifact.create`, detrás de `COWORK_CODE_ARTIFACTS_ENABLED`):
-  - escribe el código en su propio paso, con su cupo y estos ejemplos;
-  - el HTML armado se guarda como archivo del turno y se sirve por la ruta que ya existe.
-- **Lecturas para datos:** `data.pipeline`, `data.contacts`, `data.campaigns`, `data.opportunities` y `data.activity`.
-- **El lienzo:**
-  - el marco con su tema;
-  - «Arreglarlo», con un reintento automático;
-  - versiones y «Pedir cambios»;
-  - descargar el HTML, imprimirlo y bajar el CSV de los datos.
-- **Cuatro ejemplos más y el juez de artefactos:** que se dibuje, axe, que no desborde a 390 px, que las cifras salgan de los datos y su utilidad.
+- **La Diseñadora (3b) ya está:** `artifact.create`, los datos, el lienzo con versiones, «Pedir cambios», «Arreglarlo» y la descarga. Ver `docs/cowork-disenadora.md`.
+- **Imprimir y el CSV de los datos:** quedan para el lienzo (2).
+- **Cuatro ejemplos más y el juez de artefactos (3c):** que se dibuje, axe, que no desborde a 390 px, que las cifras salgan de los datos y su utilidad.

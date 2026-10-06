@@ -102,6 +102,8 @@ export type CoworkShownAnswer = {
   proposal?: { kind: string; label: string; note: string | null; detail?: unknown } | null;
   search?: unknown;
   document?: { title: string; content: string } | null;
+  /** A code artifact on the canvas (Plan 12, 3b): its title, the tables it draws from and the text a person reads on it. */
+  artifact?: { title: string; tables: Array<{ name: string; rows: number }>; text: string | null; errors?: string[] } | null;
   failed?: string | null;
 };
 
@@ -172,6 +174,12 @@ export function coworkJudgePrompt(input: {
       respuesta: input.shown.failed ? `Error: ${input.shown.failed}` : clip(input.shown.reply, 6000),
       documento: input.shown.document ? { titulo: input.shown.document.title, contenido: clip(input.shown.document.content, 5000) } : null,
       tarjetas: input.shown.cards ? clip(input.shown.cards, 5000) : null,
+      ...(input.shown.artifact ? { artefacto: {
+        nota: 'Página que se abre en el lienzo, al lado del chat. Sus cifras las calcula la página desde estas tablas de ANTON.IA; textoVisible es lo que el usuario lee en ella.',
+        titulo: input.shown.artifact.title, tablas: input.shown.artifact.tables,
+        textoVisible: input.shown.artifact.text === null ? 'No se pudo dibujar para leerla.' : clip(input.shown.artifact.text, 5000),
+        ...(input.shown.artifact.errors?.length ? { errores: input.shown.artifact.errors.slice(0, 3) } : {}),
+      } } : {}),
       preguntaFinal: input.shown.question ?? null,
       botones: input.shown.quickReplies || [],
       ...(input.shown.choices ? { opciones: { variasALaVez: input.shown.choices.multiple, opciones: input.shown.choices.options, puedeEscribirOtra: true } } : {}),

@@ -12,7 +12,7 @@ const at = '2026-09-25T13:00:00Z';
 const reads = (result: CorpusTurnResult) => result.actions.filter(action => !action.startsWith('assistant.'));
 const visual = (result: CorpusTurnResult) => Boolean(result.document)
   || (result.blocks || []).some(block => ['metrics', 'chart', 'table'].includes(block.type))
-  || Boolean((result as CorpusTurnResult & { artifact?: unknown }).artifact);
+  || Boolean(result.artifact);
 const asksWhatTheySell = (result: CorpusTurnResult) => /qué (?:producto|servicio|vendes|ofreces?|ofrece)|a qué te dedicas|cuéntame (?:qué|sobre tu)/i
   .test(`${result.reply}\n${result.question || ''}`);
 const titlesOf = (result: CorpusTurnResult) => (Array.isArray(result.search?.titles) ? result.search?.titles as string[] : []).join(' | ').toLowerCase();
@@ -135,19 +135,21 @@ export const USO_REAL_CORPUS: CorpusCase[] = [
     request: 'hazme un tablero visual de cómo voy con la prospección este mes, con gráficos, para mostrárselo a mi jefe',
     origin: 'Plan 12: pedido visual que hoy solo se responde con cifras o un documento.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'consulta cifras y actividad', test: r => r.actions.some(action => action.startsWith('metrics.')) },
+      // A coded artifact reads the activity and the pipeline itself, on the server, when it opens.
+      { label: 'consulta cifras y actividad', test: r => r.actions.some(action => action.startsWith('metrics.'))
+        || Boolean(r.artifact?.tables.some(table => ['activity', 'pipeline', 'campaigns'].includes(table.name))) },
       { label: 'entrega algo visual (cifras, tabla, documento o artefacto)', test: visual },
       { label: 'no inventa cifras sin datos (0 envíos)', test: r => !/\b(?:[1-9]\d*)\s*%\s*de\s*(?:apertura|respuesta)/i.test(corpusShown(r) + (r.document?.content || '')) }] },
   { id: 'ur-pipeline-grafico', title: 'El Pipeline en un gráfico', request: 'muéstrame mi pipeline en un gráfico por etapa',
     origin: 'Plan 12.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'consulta datos antes de dibujar', test: r => reads(r).length > 0 },
+      { label: 'consulta datos antes de dibujar', test: r => reads(r).length > 0 || Boolean(r.artifact?.tables.some(table => table.name === 'pipeline')) },
       { label: 'entrega algo visual o explica cómo verlo', test: r => visual(r) || /pipeline/i.test(r.reply) }] },
   { id: 'ur-ficha-cuenta', title: 'Ficha de una cuenta para una reunión', request: 'arma una ficha de Minera Centinela para mi reunión del martes con Carlos',
     origin: 'Plan 12.',
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'consulta lo que sabe de Carlos', test: r => r.actions.some(action => ['leads.search', 'leads.get', 'research.get_existing', 'crm.search', 'contacted.timeline'].includes(action)) },
-      { label: 'entrega la ficha (documento o artefacto)', test: r => Boolean(r.document) || Boolean((r as CorpusTurnResult & { artifact?: unknown }).artifact) },
+      { label: 'entrega la ficha (documento o artefacto)', test: r => Boolean(r.document) || Boolean(r.artifact) },
       { label: 'no inventa datos de la empresa', test: r => !/(factura|ingresos de|empleados:?\s*\d)/i.test(r.document?.content || '') }] },
   { id: 'ur-tarea-larga', title: 'Pedido de varios pasos',
     request: 'busca 25 gerentes de RRHH de retail en Santiago, guarda los 10 mejores, búscales el correo y escríbeles una secuencia de 3 correos',

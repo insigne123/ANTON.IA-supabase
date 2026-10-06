@@ -211,6 +211,7 @@ export function coworkDecisionContext(
     ...(instructions.campaignRetryCapability ? { campaignRetryCapability: instructions.campaignRetryCapability } : {}),
     ...(instructions.phoneRevealCapability ? { phoneRevealCapability: instructions.phoneRevealCapability } : {}),
     ...(instructions.prepareBatchCapability ? { prepareBatchCapability: instructions.prepareBatchCapability } : {}),
+    ...(instructions.artifactCapability ? { artifactCapability: instructions.artifactCapability } : {}),
     threadBudgetCapability: instructions.threadBudgetCapability,
   };
 }

@@ -34,7 +34,8 @@
 // judge-cowork-conversations.ts, which also compares each answer with what the previous AI achieved.
 //
 // To compare prompts, run it on the previous commit and on this one with the same flags.
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
@@ -50,7 +51,9 @@ import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
 import { selectCases } from './cowork-case-selection';
 import { askJev, type JevResult } from '../src/lib/server/jev';
 import { COWORK_JEV_DEFAULT_SCREEN, COWORK_JEV_DEFAULT_THRESHOLDS, COWORK_JEV_QUESTIONS, coworkJevJudgement, coworkJevProbabilities, coworkJevSeen, coworkJevStateFromPrompt } from '../src/lib/cowork/jev-review';
-import { corpusCaseInstructions, runCorpusCase, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusCaseInstructions, runCorpusCase, type CorpusDesigner, type CorpusJudge, type CorpusOutcome, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { coworkDesignerOutputSchema, runCoworkDesigner } from '../src/lib/server/cowork/designer';
+import { renderCoworkArtifacts } from './fixtures/cowork-artifact-render';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
 import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
@@ -61,6 +64,7 @@ import { OPPORTUNITIES_CORPUS } from './fixtures/cowork-opportunities-corpus';
 import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
+import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
 // every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
@@ -93,6 +97,8 @@ CORPUS.push(...BATCH_CORPUS);
 // What the owner actually asked between 24 Sep and 5 Oct (Plan 12), on the production world (scripts/fixtures/cowork-uso-real-corpus.ts): ur-*.
 CORPUS.push(...USO_REAL_CORPUS);
 
+CORPUS.push(...ARTIFACT_CORPUS);
+
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
     throw new Error('Requires --live and explicit OPENAI_API_KEY/COWORK_MODEL. The offline check is scripts/cowork-conversation-corpus.test.ts.');
@@ -109,6 +115,11 @@ async function main() {
 
   const stream = process.argv.includes('--stream');
   const writerOn = process.argv.includes('--writer');
+  // --artifacts turns on code artifacts (Plan 12, 3b), as COWORK_CODE_ARTIFACTS_ENABLED does: the coordinator may hand a brief
+  // to the Designer (COWORK_DESIGNER_MODEL, then the Writer's model). Each page is rendered in Chromium at the end.
+  const artifactsOn = process.argv.includes('--artifacts');
+  const designerModel = process.env.COWORK_DESIGNER_MODEL || process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL;
+  let designerCalls = 0;
   const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
   const writerCalls = { writer: 0, reviewer: 0 };
   const reviewEngine = arg('review-engine') ?? 'llm';
@@ -177,6 +188,20 @@ async function main() {
           return null;
         }
       } : undefined;
+      // The Designer, with its model and the same call budget: one call, and one more if the check refuses the code.
+      const design: CorpusDesigner | undefined = artifactsOn ? (brief, meta) => runCoworkDesigner({
+        brief, request: meta.request, data: meta.data, previous: meta.previous, userContext: meta.userContext, generatedAt: CORPUS_NOW.toISOString(),
+        generate: async ({ systemPrompt, prompt, attempt }) => {
+          if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
+          calls++;
+          designerCalls++;
+          const response = await generateStructuredWithTelemetry({ schema: coworkDesignerOutputSchema, systemPrompt, prompt, provider: 'openai', openAiModel: designerModel,
+            allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 60000 });
+          usage.push(coworkModelUsage(response.telemetry));
+          decisions.push({ agent: 'designer', attempt, title: response.data.title, reply: response.data.reply, bytes: response.data.js.length + response.data.html.length + response.data.css.length });
+          return response.data;
+        },
+      }) : undefined;
       const outcome = await runCorpusCase(entry, async context => {
         if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
         calls++;
@@ -193,7 +218,7 @@ async function main() {
         try {
           response = await generateStructuredWithTelemetry({
             schema,
-            systemPrompt: `${corpusCaseInstructions(entry, writerOn).systemPrompt}\nspecialists.review está deshabilitado.`,
+            systemPrompt: `${corpusCaseInstructions(entry, writerOn, { codeArtifacts: artifactsOn }).systemPrompt}\nspecialists.review está deshabilitado.`,
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
             // First words of an answer as the page would get them: read at most every 50 ms.
@@ -214,7 +239,7 @@ async function main() {
           leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
           outline: response.data.outline ?? null });
         return response.data;
-      }, write, judgeInTurn);
+      }, write, judgeInTurn, design);
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
       outcomes.push({ ...outcome, attempt, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
         issues: coworkAnswerIssues(shown, { expectNextStep: !(outcome.result.proposal || outcome.result.search) }).map(issue => issue.detail) });
@@ -222,6 +247,19 @@ async function main() {
     }
   }
 
+  // Each artifact as the app shows it: sandboxed in Chromium, its visible text for the judge, 390 px and axe in both themes.
+  const output = arg('output');
+  const made = outcomes.filter(outcome => outcome.result.artifact);
+  const artifactDir = output ? output.replace(/\.json$/, '') + '-artifacts' : null;
+  if (made.length) {
+    const pages = made.map(outcome => ({ id: `${outcome.id}-${outcome.attempt}`, html: outcome.result.artifact!.html }));
+    if (artifactDir) {
+      mkdirSync(artifactDir, { recursive: true });
+      for (const page of pages) writeFileSync(path.join(artifactDir, `${page.id}.html`), page.html, 'utf8');
+    }
+    const renders = await renderCoworkArtifacts(pages, { shots: artifactDir && process.argv.includes('--shots') ? artifactDir : undefined });
+    for (const outcome of made) outcome.result.artifact!.render = renders.get(`${outcome.id}-${outcome.attempt}`);
+  }
   const checks = outcomes.flatMap(outcome => outcome.checks);
   const summary = {
     model: process.env.COWORK_MODEL, calls, cases: outcomes.length,
@@ -241,6 +279,13 @@ async function main() {
       // A correction that was not one (empty, the same words, a figure without support): the first answer stood.
       keptFirst: outcomes.filter(outcome => outcome.result.judgeInTurn?.kept === 'first').length,
       keptFirstReasons: outcomes.flatMap(outcome => outcome.result.judgeInTurn?.kept === 'first' ? [String(outcome.result.judgeInTurn.keptReason)] : []) } } : {}),
+    // With --artifacts: how many turns made one, at the first try, and how many drew without errors, fit 390 px and passed axe.
+    ...(artifactsOn ? { artifacts: { model: designerModel, calls: designerCalls, made: made.length,
+      firstTry: made.filter(outcome => outcome.result.artifact!.attempts === 1).length,
+      rendered: made.filter(outcome => outcome.result.artifact!.render?.ok).length,
+      fit390: made.filter(outcome => (outcome.result.artifact!.render?.overflow390 ?? 1) <= 0).length,
+      axeClean: made.filter(outcome => outcome.result.artifact!.render && !outcome.result.artifact!.render.axe.light.length && !outcome.result.artifact!.render.axe.dark.length).length,
+      seconds: made.map(outcome => outcome.result.artifact!.seconds) } } : {}),
     casesPassed: outcomes.filter(outcome => outcome.passed).length,
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,
@@ -288,7 +333,6 @@ async function main() {
   };
   const report = { mode: 'real_model_real_loop_corpus_tools', summary, usage, outcomes,
     limitation: 'Fixture tools copied from one production workspace; lexical checks screen behavior and need a human read of the replies.' };
-  const output = arg('output');
   if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   console.log(JSON.stringify(summary, null, 2));
   for (const outcome of outcomes) {

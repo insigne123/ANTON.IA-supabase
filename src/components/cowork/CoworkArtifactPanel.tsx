@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, type RefObject } from 'react';
-import { ArrowLeft, Check, Copy, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Download, Maximize2, Minimize2, X } from 'lucide-react';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import type { CoworkArtifact } from '@/lib/cowork/presentation';
-import { ArtifactPreview } from './ArtifactPreview';
+import { ArtifactPreview, coworkArtifactUrls } from './ArtifactPreview';
+import { CoworkCodeArtifact } from './CoworkCodeArtifact';
 import { CoworkBlockView } from './CoworkBlocks';
 import { ContactResults } from './ContactResults';
 import { CoworkMarkdown } from './CoworkMarkdown';
@@ -16,7 +17,7 @@ import { cwSwap, m } from './motion';
 import { CwButton } from './ui';
 
 const KIND_LABEL: Record<CoworkArtifact['kind'], string> = {
-  block: 'Resultado', document: 'Documento', contacts: 'Tabla', file: 'Archivo', sources: 'Fuentes',
+  block: 'Resultado', document: 'Documento', contacts: 'Tabla', file: 'Archivo', sources: 'Fuentes', code: 'Artefacto',
 };
 const BLOCK_LABEL = { email_draft: 'Correo', sequence: 'Secuencia', table: 'Tabla' } as const;
 
@@ -27,7 +28,7 @@ function when(value: string) {
 
 /** The open result, beside the conversation (or full screen on phones). */
 export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDraft, maximized, onToggleMaximize, onClose, headingRef,
-  onError, onAccessDenied, onUseReport, onSelectVersion, onSend = null, sendHint }: {
+  onError, onAccessDenied, onUseReport, onSelectVersion, onSend = null, sendHint, versions = [], onOpenArtifact }: {
   artifact: CoworkArtifact;
   events: CoworkEvent[];
   canResearch: boolean;
@@ -43,6 +44,10 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
   /** Sends a version of an email or sequence as the next message; null while it cannot be sent. */
   onSend?: ((message: string) => void) | null;
   sendHint?: string;
+  /** The versions of a code artifact in this conversation (the same key), oldest first. */
+  versions?: CoworkArtifact[];
+  /** Opens another artifact (a version) in the panel. */
+  onOpenArtifact?: (artifact: CoworkArtifact) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const label = artifact.kind === 'block' ? BLOCK_LABEL[artifact.block.type] : KIND_LABEL[artifact.kind];
@@ -76,6 +81,19 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
           <div className="hidden sm:block"><ExportMenu key={artifact.runId} runId={artifact.runId} kind="document" onError={onError} onAccessDenied={onAccessDenied} /></div>
           <div className="sm:hidden"><ExportMenu key={`${artifact.runId}-compact`} runId={artifact.runId} kind="document" onError={onError} onAccessDenied={onAccessDenied} compact /></div>
         </>}
+        {artifact.kind === 'code' && <>
+          {versions.length > 1 && onOpenArtifact && <>
+            <label htmlFor={`version-${artifact.id}`} className="sr-only">Versión del artefacto</label>
+            <select id={`version-${artifact.id}`} value={artifact.id} onChange={event => { const next = versions.find(item => item.id === event.target.value); if (next) onOpenArtifact(next); }}
+              className="h-8 rounded-lg border border-cw-border bg-cw-elevated px-2 text-[13px] text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+              {versions.map(item => <option key={item.id} value={item.id}>{item.kind === 'code' ? `Versión ${item.version}` : item.title}</option>)}
+            </select>
+          </>}
+          <a href={coworkArtifactUrls(artifact.runId, artifact.name).downloadUrl} title="Descargar el artefacto (HTML que funciona sin conexión)"
+            aria-label="Descargar el artefacto" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-cw-muted hover:bg-cw-hover hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] [&_svg]:size-4">
+            <Download aria-hidden="true" />
+          </a>
+        </>}
         <CwButton variant="ghost" size="icon-sm" className="hidden lg:inline-flex" onClick={onToggleMaximize}
           aria-label={maximized ? 'Reducir panel' : 'Ampliar panel'} title={maximized ? 'Reducir' : 'Ampliar'}>
           {maximized ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
@@ -85,7 +103,10 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
     </header>
     {/* Opening another result fades the new content in, so the change reads as a change of
         page. The old content leaves at once: the title and the content always match. */}
-    <m.div key={artifact.id} initial="hidden" animate="shown" variants={cwSwap} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
+    {artifact.kind === 'code' && <m.div key={artifact.id} initial="hidden" animate="shown" variants={cwSwap} className="flex min-h-0 flex-1 flex-col">
+      <CoworkCodeArtifact artifact={artifact} onSend={onSend} sendHint={sendHint} />
+    </m.div>}
+    {artifact.kind !== 'code' && <m.div key={artifact.id} initial="hidden" animate="shown" variants={cwSwap} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
       {artifact.kind === 'block' && <div className="mx-auto w-full max-w-[46rem] px-4 py-6 sm:px-8">
         <CoworkBlockView key={artifact.id} block={artifact.block} draftKey={`cowork:draft:${artifact.id}`} onSend={onSend} sendHint={sendHint} />
       </div>}
@@ -102,6 +123,6 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
       {artifact.kind === 'sources' && <div className="px-4 py-5 sm:px-6">
         <ResearchSources events={events} runId={artifact.runId} sequence={artifact.sequence} canCreateDraft={canCreateDraft} onAccessDenied={onAccessDenied} />
       </div>}
-    </m.div>
+    </m.div>}
   </aside>;
 }

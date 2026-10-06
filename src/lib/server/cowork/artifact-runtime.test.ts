@@ -10,7 +10,7 @@ import { coworkExampleContacts, coworkExamplePipeline } from './code-artifact-ex
 
 type Antonia = {
   data: Record<string, { rows: Array<Record<string, unknown>>; columns: Array<{ key: string }> }>;
-  meta: { currency: string };
+  meta: { currency: string; today: string };
   format: Record<string, (...args: unknown[]) => string>;
   agg: Record<string, (...args: unknown[]) => unknown>;
   h: (...args: unknown[]) => HTMLElement;
@@ -21,8 +21,8 @@ type Antonia = {
   kpi: (target: unknown, items: unknown) => HTMLElement;
 };
 
-function load(js = '', data: CoworkArtifactData = coworkExamplePipeline(), html = '<div id="app"></div>') {
-  const built = buildCoworkArtifactDocument({ title: 'Prueba', code: { html, css: '', js }, data });
+function load(js = '', data: CoworkArtifactData = coworkExamplePipeline(), html = '<div id="app"></div>', generatedAt?: string) {
+  const built = buildCoworkArtifactDocument({ title: 'Prueba', code: { html, css: '', js }, data, generatedAt });
   if (!built.ok) throw new Error(built.issues.map(issue => issue.message).join(' | '));
   const errors: string[] = [];
   const dom = new JSDOM(built.html, {
@@ -72,8 +72,8 @@ test('aggregates read the rows: sum, average, groups in a given order, months, t
   const total = rows.reduce((sum, row) => sum + Number(row.value), 0);
   assert.equal(antonia.agg.sum(rows, 'value'), total);
   assert.equal(antonia.agg.count(rows, (row: Record<string, unknown>) => row.stage === 'Ganado'), rows.filter(row => row.stage === 'Ganado').length);
-  const series = antonia.agg.series(rows, 'stage', { order: ['Nuevo', 'Contactado'] }) as { labels: string[]; values: number[] };
-  assert.deepEqual(Array.from(series.labels.slice(0, 2)), ['Nuevo', 'Contactado']);
+  const series = antonia.agg.series(rows, 'stage', { order: ['Nuevos', 'Contactado'] }) as { labels: string[]; values: number[] };
+  assert.deepEqual(Array.from(series.labels.slice(0, 2)), ['Nuevos', 'Contactado']);
   assert.equal(series.values.reduce((a, b) => a + b, 0), rows.length);
   const months = antonia.agg.byMonth(rows, 'created_at') as { keys: string[]; values: number[] };
   assert.deepEqual(Array.from(months.keys), [...months.keys].sort());
@@ -196,5 +196,20 @@ test('the loop guard stops a loop that never gives the page a turn', () => {
   const started = Date.now();
   assert.throws(() => { for (;;) guard(); }, /Un bucle no terminó en 2 segundos/);
   assert.ok(Date.now() - started >= 2000 && Date.now() - started < 4000);
+  dom.window.close();
+});
+
+test('today is the day the artifact was made, in Chile, and since and inMonth count from it', () => {
+  const rows = [{ at: '2026-09-01' }, { at: '2026-09-24T20:00:00Z' }, { at: '2026-08-31' }, { at: '2026-09-25' }, { at: 'no' }, { at: null }];
+  const data = { tables: { t: { label: 'T', source: 'S', columns: [{ key: 'at', label: 'Fecha', type: 'date' as const }], rows, total: rows.length, truncated: false } } };
+  // 02:00 UTC on the 26th is still the 25th in Santiago.
+  const { antonia, dom } = load('', data, '<div id="app"></div>', '2026-09-26T02:00:00Z');
+  const meta = antonia.meta;
+  const agg = antonia.agg as unknown as { since: (rows: unknown, key: string, days: number) => unknown[]; inMonth: (rows: unknown, key: string, month?: string) => unknown[] };
+  assert.equal(meta.today, '2026-09-25');
+  assert.equal(agg.inMonth(antonia.data.t, 'at').length, 3);
+  assert.equal(agg.inMonth(antonia.data.t, 'at', '2026-08').length, 1);
+  assert.deepEqual(Array.from(agg.since(antonia.data.t, 'at', 1), row => (row as { at: string }).at), ['2026-09-24T20:00:00Z', '2026-09-25']);
+  assert.equal(agg.since(antonia.data.t, 'at', 30).length, 4);
   dom.window.close();
 });
