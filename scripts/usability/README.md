@@ -1,9 +1,9 @@
 # Índice de sencillez
 
-Mide qué tan fácil es usar la app: hace 12 tareas clave como lo haría una persona nueva, en escritorio (1440 px) y en teléfono (390 px), sobre el banco de la auditoría visual (Supabase simulado, sin red, sin envíos reales).
+Mide qué tan fácil es usar la app: hace las tareas clave como lo haría una persona nueva, en escritorio (1440 px) y en teléfono (390 px), sobre el banco de la auditoría visual (Supabase simulado, sin red, sin envíos reales).
 
 ```bash
-npm run audit:simplicity                                   # las 12 tareas
+npm run audit:simplicity                                   # todas las tareas
 npm run audit:simplicity -- --tasks=perfil,importar --viewports=desktop
 npm run audit:simplicity -- --skip-build --out=.visual-audit/sencillez-antes
 ```
