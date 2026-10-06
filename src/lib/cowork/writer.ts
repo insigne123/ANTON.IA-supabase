@@ -20,6 +20,8 @@ export const coworkWriteBriefSchema = z.object({
   notes: z.string().trim().max(1200).nullable(),
   /** What the coordinator's reads found that the person must read with the emails (figures, who is left out and why), or null. */
   findings: z.string().trim().max(600).nullable(),
+  /** The person asked, in this same request, for the campaign with these emails (Plan 12, 4a-2): the coordinator proposes it next. */
+  campaign: z.boolean().nullable().optional(),
 }).strict();
 export type CoworkWriteBrief = z.infer<typeof coworkWriteBriefSchema>;
 

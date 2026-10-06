@@ -65,6 +65,7 @@ import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
 import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
 import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
 import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
+import { CAMPANA_CORPUS } from './fixtures/cowork-campana-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
 // every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
@@ -98,6 +99,8 @@ CORPUS.push(...BATCH_CORPUS);
 CORPUS.push(...USO_REAL_CORPUS);
 
 CORPUS.push(...ARTIFACT_CORPUS);
+
+CORPUS.push(...CAMPANA_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
