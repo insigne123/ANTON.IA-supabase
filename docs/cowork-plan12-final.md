@@ -188,6 +188,68 @@ No se construyó en este plan. Necesita un tipo de efecto nuevo en la base, una 
 
 **Necesita una decisión de producto** (cuánto puede personalizar un correo sin investigación) y tu OK a la migración.
 
+## Lo que falta para que Cowork funcione bien
+
+**Dónde está:** en los pedidos reales del usuario, 1 de cada 3 respuestas todavía es «mala»; en AXIS, 6 de cada 10. Las metas del plan para AXIS («mala» ≤ 25 % y verificaciones ≥ 80 %) no se cumplen.
+
+Lo que falta va de lo más rápido a lo más grande.
+
+### 1. Que lo hecho llegue a producción (sin código)
+
+- **Deploy de `main` y las tres migraciones:** el paso a paso está en `docs/mantenedor-2026-10-06.md`.
+- **Encender la Diseñadora y la consulta ofrecida.** Atacan las dos quejas que más pesan:
+  - **«Pidió un gráfico o un tablero y no lo recibió»:** 4 de las 13 respuestas «mala» de uso real. La Diseñadora estaba apagada en la ronda final, y uno de esos turnos además fallaba (#217 lo arregla).
+  - **«Ofrece revisar algo que podía consultar»:** es la primera queja en 15 de las 53 «mala». Con el flag y #217, en los casos donde pasaba bajó de 8 de 9 respuestas a 1 de 5.
+- **Encender lo ya medido que espera el OK del usuario:** responder en el hilo, lotes de LinkedIn, importar contactos y Leads Finder.
+
+### 2. Probarlo con la cuenta del usuario (sin código)
+
+- **La aceptación con sesión real:** la medición usa datos de ejemplo. Falta probar con la cuenta real lo que necesita LinkedIn, envíos y bandeja (`docs/cowork-authenticated-acceptance-checklist.md`).
+- **Una prueba con personas:** 5 personas de ventas (`docs/ui-ux/sencillez.md`).
+- **Calibrar al juez:** que alguien del equipo puntúe unas 20 respuestas con su rúbrica. Todas las cifras de este informe dependen de él.
+
+### 3. Mejorar las respuestas (código, medido solo con `gpt-6-luna`)
+
+En orden de peso en la ronda final:
+
+1. **Listas grandes.**
+   - **El límite:** cada lectura de contactos trae hasta 20 personas y un turno tiene 3 lecturas.
+   - **Lo que piden los casos de AXIS:** trabajar listas de 36 a 177 personas.
+   - **Lo que pasó:** «revisó 6 de 96», «la búsqueda vino recortada y no la amplió», «no definió los 35 contactos de la semana».
+   - **La propuesta:**
+     - una lectura de segmento que cuente y filtre en el servidor (cuántos hay, cuántos con correo, quiénes ya recibieron algo);
+     - la lista completa como tabla del lienzo o como archivo, sin pasar cada fila por el modelo;
+     - las tareas largas (4c) para trabajarla en tandas.
+2. **Le deja trabajo al usuario.**
+   - **Ejemplos:** «busca su correo en LinkedIn», «importa o guarda a Marcela y Héctor».
+   - **Parte se resuelve** encendiendo «importar contactos».
+   - **El resto:** un control del ciclo como el de la consulta ofrecida. Si la respuesta manda al usuario a hacer algo que Cowork puede proponer, el ciclo le pide proponerlo.
+3. **Decisiones que podía tomar** («¿a cuál le escribo primero?»): son 5 de las 53 «mala». La regla 4 ya lo prohíbe; falta el mismo tipo de control del ciclo.
+4. **Datos sin respaldo:** según las quejas del juez, 13 de 104 respuestas tienen al menos uno.
+   - El chequeo de cifras atrapa números nuevos, no un dato bien escrito pero mal usado.
+   - El juez del turno no sirvió para esto: al corregir, bajaba la veracidad.
+5. **La Analista:** medirla con más repeticiones y, si se confirma, encenderla.
+6. **Instrucciones más cortas:** son 24 mil tokens por decisión.
+   - Acortarlas abarata y acelera cada turno.
+   - La prueba siguiente es un núcleo corto, con las recetas a demanda.
+7. **Modelo:** `gpt-6.1-sol` respondió mejor los pedidos reales (15 % contra 35 % de «mala»), pero tarda el doble. Probarlo en un solo rol (la Redactora o la Analista) es una medición chica y puntual.
+
+### 4. Funciones que faltan (necesitan una decisión o una migración)
+
+- **Tareas largas (4c)** y **«Escribir sin investigar»:** las propuestas están arriba.
+- **Las operaciones de AXIS que Cowork todavía no cubre bien.** En AXIS, las cubiertas a medias o sin cubrir dan 68 % y 71 % de «mala», contra 44 % las cubiertas:
+  - **Barrer la bandeja completa** y encontrar quién respondió alguna vez (g1). Hoy solo ve lo sincronizado.
+  - **Verificar el perfil real** de una persona antes de invitarla (a8).
+  - **Elegir entre responder en el hilo o escribir un correo nuevo**, verificando los hechos antes (d5).
+  - **Detectar las fallas de su propia automatización** (g3). Por ejemplo, seguir escribiéndole a una empresa que respondió desde otra dirección.
+- **Tareas programadas** («todos los lunes prepárame los seguimientos»): necesita una migración.
+- **Campañas: tamaño de empresa por rangos.** La migración está propuesta en `docs/ui-ux/sencillez.md`.
+
+### 5. Decisiones del usuario
+
+- **Los modelos de producción:** `OPENAI_ORCHESTRATOR_MODEL`, `OPENAI_REASONING_MODEL` y `OPENAI_CRITICAL_MODEL` usan `gpt-6-sol` (ninguno es astra). Para bajar el gasto, se pueden pasar a `gpt-6-luna` o a `gpt-6.1-sol` después de medir.
+- **Las claves opcionales:** `APOLLO_API_KEY` (para comparar con Leads Finder), `JSEARCH_API_KEY` y `MERCADO_PUBLICO_TEST_TICKET`.
+
 ## Para encender en producción
 
 Lo hace el mantenedor, en el entorno de producción.

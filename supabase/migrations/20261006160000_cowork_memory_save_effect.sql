@@ -4,7 +4,7 @@
 -- change here is the new kind, «memory_save», in the two places that know the vocabulary of effects: the check of the
 -- proposals table and the list inside cowork_propose_effect.
 -- Forward-only and inert on its own: nothing proposes this effect until the app ships its half, behind
--- COWORK_MEMORY_SAVE_ENABLED (off by default).
+-- COWORK_PREFERENCES_ENABLED (off by default).
 alter table public.cowork_effect_proposals drop constraint cowork_effect_proposals_kind_check;
 alter table public.cowork_effect_proposals add constraint cowork_effect_proposals_kind_check
   check (kind in ('save_contact', 'start_research', 'request_draft', 'enrich_contact',
