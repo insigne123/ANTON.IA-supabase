@@ -25,7 +25,23 @@ Después de la ronda 1 (`docs/cowork-plan12-ronda-1.md`) se corrigió una causa 
 - Si la corrección falla, se muestra la respuesta original.
 - No se aplica a lo que lleva aprobación («¿Busco su correo?») ni a lo que es redactar («¿Te redacto…?»).
 
-**Por qué está apagado:** la medición con el juez quedó a medias porque la cuenta de OpenAI se quedó sin crédito. En los turnos que alcanzaron a correr, el ciclo hizo la consulta y respondió con ella, por ejemplo en `axis-h5`. Falta la nota del juez para encenderlo.
+**Medición (6 oct, con el modelo real):** los mismos 12 casos × 2, con el flag encendido y apagado, y el juez `gpt-6-sol`. Son casos elegidos porque cerraban ofreciendo una consulta, así que su «mala» es más alta que el promedio.
+
+| | Apagado | Encendido |
+|---|---:|---:|
+| Juez: buena / mejorable / mala | 3 / 1 / 20 | 4 / 3 / 17 |
+| Utilidad | 2,88 | 3,08 |
+| Fricción | 2,63 | 2,71 |
+| Veracidad | 4,08 | 4,17 |
+| Verificaciones | 215/290 | 218/290 |
+| Llamadas al modelo por caso | 2,75 | 3,0 |
+| Tiempo total (p50) | 9,1 s | 8,7 s |
+
+- **Mejora, pero poco:** 3 «mala» menos de 24, sin bajar en ninguna verificación ni en el tiempo.
+- **Lo que queda:** en `axis-d2`, `axis-g1` y `axis-h5` la respuesta sigue ofreciendo la consulta, porque el turno lee en dos decisiones y ya no le queda lugar. El arreglo de fondo es leer en paralelo en una sola decisión (ver «Pendiente»).
+- **Un costo en pantalla:** 7 respuestas se corrigieron. Con el texto en vivo, 5 de ellas se ven primero y después cambian. Con `COWORK_ANSWER_HOLD_ENABLED` la respuesta se muestra una sola vez, ya corregida.
+
+**Recomendación:** encenderlo junto con `COWORK_ANSWER_HOLD_ENABLED`. Lo enciende el mantenedor en el entorno de producción.
 
 Para medirlo:
 
@@ -53,6 +69,5 @@ COWORK_OFFERED_READS_ENABLED=true node --loader ./scripts/ts-test-loader.mjs scr
 ## Pendiente
 
 - **Con crédito en la cuenta de OpenAI:**
-  - medir `COWORK_OFFERED_READS_ENABLED`;
   - medir los tres casos nuevos de artefactos de 3c (`art-licitaciones`, `art-ficha-cuenta` y `art-segmentos`).
 - **AXIS d2 y g1:** leen en dos decisiones y responden en la tercera. Ya no queda lugar para la consulta ofrecida, así que el arreglo tiene que ir en las instrucciones: leer en paralelo en una sola decisión.
