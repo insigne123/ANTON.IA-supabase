@@ -208,16 +208,19 @@ Se aplican de a una en el editor SQL de Supabase. Después de cada una verifico 
 2. **`20261006150000_revoke_internal_functions_from_clients.sql`:** seguridad (#212). Siete funciones del worker dejan de poder ejecutarse sin sesión.
 3. **`20261006160000_cowork_memory_save_effect.sql`:** preferencias (#215). Agrega el efecto `memory_save`.
 
-## Uso del modelo en esta ronda
+## Uso del modelo en las mediciones
 
-Llamadas a OpenAI de la evaluación en esta sesión, sin contar las del juez:
+Llamadas a OpenAI de las mediciones del 6 de octubre, desde las 14:30 UTC, cuando volvió el crédito:
 
-| Modelo | Llamadas | Tokens de entrada | Tokens de salida |
-|---|---:|---:|---:|
-| `gpt-6-luna` | 685 | 14,5 M | 393 mil |
-| `gpt-6.1-sol` | 107 | 2,3 M | 63 mil |
-| `gpt-6-astra` | 99 | 2,25 M | 47 mil |
+| Modelo | Para qué | Llamadas | Tokens de entrada |
+|---|---|---:|---:|
+| `gpt-6-luna` | Cowork: coordinador, Redactora y Analista | 754 | 16,1 M |
+| `gpt-6.1-sol` | Comparación de modelos (107) y juez de la medición chica (47) | 154 | 2,3 M sin el juez |
+| `gpt-6-sol` | Juez de las rondas | 391 | sin dato |
+| `gpt-6-astra` | Comparación de modelos, antes de la decisión de no usarlo | 99 | 2,25 M |
 
 Cada decisión del coordinador lleva unos 24 mil tokens de entrada, casi todo instrucciones. Por eso un caso cuesta lo mismo aunque el pedido sea corto.
 
-Bajar ese tamaño abarataría cada turno y cada medición. Las instrucciones por intención lo bajaban 22 %, pero empeoraban la calidad; un núcleo más corto es la siguiente apuesta.
+- **Cómo abaratarlo:** bajar ese tamaño abarataría cada turno y cada medición.
+- **Lo que se probó:** las instrucciones por intención lo bajaban 22 %, pero empeoraban la calidad. Un núcleo más corto es la siguiente apuesta.
+- **Desde la decisión del usuario:** las mediciones usan solo `gpt-6-luna`, y `gpt-6.1-sol` en casos puntuales.
