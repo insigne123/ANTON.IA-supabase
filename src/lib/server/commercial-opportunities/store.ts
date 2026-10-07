@@ -6,7 +6,7 @@ import {
   HIRING_WINDOW_DAYS, OPPORTUNITY_STATUSES, jobAdFromSignal, tenderFromStoredRow, type HiringOpportunityData, type OpportunityStatus,
   type ProjectOpportunityData, type StoredTenderRow, type TenderOpportunityData,
 } from '@/lib/commercial-opportunities/records';
-import type { Tender } from '@/lib/commercial-opportunities/tenders';
+import type { Tender, TenderAiVerdict } from '@/lib/commercial-opportunities/tenders';
 import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { commaItems } from '@/lib/profile/profile-lists';
@@ -398,11 +398,27 @@ async function storedTendersOf(client: SupabaseClient, scope: Scope, codes: stri
   return found;
 }
 
+/** What the model said of the organization's open tenders already saved (Plan 15), by code: reused while the offer is the same. */
+async function storedVerdictsOf(client: SupabaseClient, scope: Scope) {
+  const { data, error } = await client.from('commercial_opportunities').select('dedupe_key,data')
+    .eq('organization_id', scope.organizationId).in('kind', ['tender', 'compra_agil']).gte('deadline_at', new Date().toISOString()).limit(2000);
+  if (error) fail('revisar las licitaciones guardadas', error);
+  const found = new Map<string, TenderAiVerdict>();
+  for (const row of (data || []) as Array<{ dedupe_key: string; data: { ai?: Partial<TenderAiVerdict> } | null }>) {
+    const ai = row.data?.ai;
+    if (ai && (ai.fit === 'alta' || ai.fit === 'media') && typeof ai.reason === 'string' && typeof ai.profileKey === 'string') {
+      found.set(row.dedupe_key, { fit: ai.fit, reason: ai.reason, profileKey: ai.profileKey });
+    }
+  }
+  return found;
+}
+
 export function supabaseTenderStore(client: SupabaseClient, scope: Scope & { profileId: string }, trigger: 'manual' | 'schedule'): TenderStore {
   return {
     ...runLog(client, scope, trigger),
     existingKeys: (keys, kinds) => existingKeysOf(client, scope, kinds, keys),
     storedTenders: codes => storedTendersOf(client, scope, codes),
+    storedVerdicts: () => storedVerdictsOf(client, scope),
     saveOpportunities: rows => upsertOpportunities(client, rows),
     saveSignals: rows => upsertSignals(client, rows),
   };

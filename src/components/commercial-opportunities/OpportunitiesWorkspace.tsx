@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Factory, Gavel, KeyRound, Landmark, Loader2, Pencil, RotateCcw, Search, Star, Upload, Users, X } from 'lucide-react';
+import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Factory, Gavel, KeyRound, Landmark, Loader2, Pencil, RotateCcw, Search, Sparkles, Star, Upload, Users, X } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { MercadoPublicoTicketCard, TicketGuide } from '@/components/commercial-opportunities/MercadoPublicoTicket';
 import { HiringSearchDialog, type HiringSearchChoice } from '@/components/commercial-opportunities/HiringSearchDialog';
@@ -75,7 +75,7 @@ type ProjectResult = { status: 'done'; read: number; skipped: number; matched: n
 type HiringResult =
   | { status: 'done' | 'partial' | 'failed'; fetched: number; qualifying: number; newQualifying: number; costUsd: number; sources: Array<{ source: string; error: string | null }> }
   | { status: 'capped'; message: string };
-type TenderResult = { status: 'done' | 'partial' | 'failed'; found: number; matched: number; created: number; sources: Array<{ source: string; error: string | null }> };
+type TenderResult = { status: 'done' | 'partial' | 'failed'; found: number; matched: number; created: number; screened?: number; sources: Array<{ source: string; error: string | null }> };
 const TAB_SOURCES: Record<Tab, string[]> = { hiring: ['jsearch', 'linkedin'], tenders: ['mercado_publico', 'compra_agil'], projects: ['seia'] };
 const SEIA_MAP_URL = 'https://sig.sea.gob.cl/mapadeproyectos/';
 
@@ -129,7 +129,8 @@ export function OpportunitiesWorkspace() {
         const failed = result.sources.filter(source => source.error).map(source => sourceLabel(source.source));
         toast({
           title: result.status === 'failed' ? 'No se pudo consultar las fuentes' : `${result.status === 'partial' ? 'Búsqueda parcial: ' : ''}${result.matched} ${result.matched === 1 ? 'licitación abierta calza' : 'licitaciones abiertas calzan'}${result.created ? ` (${result.created} nuevas)` : ''}`,
-          description: result.status === 'failed' ? 'La búsqueda falló; no significa que no existan licitaciones. Revisa los errores de cada fuente.' : `${result.found} revisadas en Mercado Público y Compra Ágil · sin costo${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
+          description: result.status === 'failed' ? 'La búsqueda falló; no significa que no existan licitaciones. Revisa los errores de cada fuente.'
+            : `${result.found} abiertas en Mercado Público y Compra Ágil${result.screened ? `; la IA leyó ${result.screened} y dejó las que sirven a lo que vendes` : ''}${failed.length ? ` · con problemas en ${failed.join(' y ')}` : ''}.`,
           variant: result.status === 'failed' ? 'destructive' : 'default',
         });
       } else {
@@ -357,7 +358,7 @@ function Welcome({ overview, onStart, onGuide }: { overview: Overview; onStart: 
   const needsTicket = ticketNeedsAction(overview.tenderSearch.ticketStatus);
   const sources = [
     { icon: Building2, title: 'Empresas contratando', body: 'Las que publican avisos para los cargos que cubres, con la evidencia de cada aviso.' },
-    { icon: Gavel, title: 'Licitaciones y Compra Ágil', body: 'Compras públicas abiertas que nombran lo que ofreces. Sin costo, con tu ticket de Mercado Público.' },
+    { icon: Gavel, title: 'Licitaciones y Compra Ágil', body: 'Todas las compras públicas abiertas, y la IA deja las que sirven a lo que vendes. Con tu ticket gratuito de Mercado Público.' },
     { icon: Factory, title: 'Proyectos de inversión', body: 'Proyectos del SEIA por partir, con la empresa titular. Subes el archivo una vez al mes.' },
   ];
   const origin = overview.suggestion?.pilot ? 'Parte con valores sugeridos para tu organización, que revisas antes de guardar.'
@@ -609,7 +610,10 @@ function TenderSummary({ overview, running, onTicketChange, onOpenGuide }: {
     <section aria-label="Qué buscamos en licitaciones" className="grid gap-4 rounded-xl border border-border/70 bg-card p-4 shadow-sm md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-2">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Qué buscamos en Mercado Público y Compra Ágil</p>
-        <p className="text-xs text-muted-foreground">Palabras generadas de lo que vendes en tu Perfil; se actualizan cuando cambias tu oferta.</p>
+        <p className="text-sm text-foreground">
+          Revisamos todas las licitaciones abiertas de Mercado Público y la IA deja solo las que sirven a lo que vendes. En Compra Ágil
+          buscamos con estas palabras, generadas de tu Perfil, y la IA filtra igual.
+        </p>
         {tenderSearch.keywords.length ? (
           <ul className="flex flex-wrap gap-1.5" aria-label="Palabras">
             {tenderSearch.keywords.slice(0, 10).map(keyword => <li key={keyword} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{keyword}</li>)}
@@ -619,7 +623,7 @@ function TenderSummary({ overview, running, onTicketChange, onOpenGuide }: {
           : <OfferFromPerfil offer={null} />}
         <p className="text-xs text-muted-foreground">
           {tenderSearch.unspscCodes.length ? `Códigos UNSPSC: ${tenderSearch.unspscCodes.join(', ')} · ` : ''}
-          Abiertas y publicadas en las últimas dos semanas · {profile.regions.length ? `suman calce ${profile.regions.join(', ')}` : 'todo Chile'}
+          Abiertas · Compra Ágil de las últimas dos semanas · {profile.regions.length ? `suman calce ${profile.regions.join(', ')}` : 'todo Chile'}
         </p>
       </div>
       <div className="space-y-3 border-t border-border/60 pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
@@ -673,6 +677,12 @@ function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: b
         </div>
         <ScorePill score={item.score} />
       </div>
+      {item.data?.ai?.reason ? (
+        <p className="mt-3 flex gap-2 rounded-lg bg-primary/5 px-2.5 py-2 text-sm text-foreground">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          <span><span className="font-medium">{item.data.ai.fit === 'alta' ? 'Muy afín' : 'Afín'}:</span> {item.data.ai.reason}</span>
+        </p>
+      ) : null}
       <p className="mt-3 text-sm text-foreground">
         <strong className="font-semibold">{formatClp(item.amount, item.currency)}</strong> · {closesIn(item.deadlineAt)}
       </p>
@@ -728,20 +738,20 @@ function TenderEmpty({ overview, filter, query, searchDisabled, onSearch, onEdit
   if (!last && !overview.tenderSearch.ticket) {
     return (
       <EmptyState icon={KeyRound} headingLevel="h3" title="Conecta tu ticket para buscar licitaciones"
-        description="Con tu ticket gratuito de Mercado Público buscamos cada mañana las compras abiertas que nombran lo que ofreces."
+        description="Con tu ticket gratuito de Mercado Público revisamos cada mañana todas las compras abiertas y la IA deja las que sirven a lo que vendes."
         action={<Button onClick={onGuide}><KeyRound className="h-4 w-4" aria-hidden="true" />Cómo conseguirlo</Button>} />
     );
   }
   if (!last) {
     return (
       <EmptyState icon={Gavel} headingLevel="h3" title="Aún no hay licitaciones"
-        description="Busca en Mercado Público y Compra Ágil las compras abiertas que nombran lo que ofreces. No tiene costo."
+        description="Revisamos todas las compras abiertas de Mercado Público y Compra Ágil, y la IA deja las que sirven a lo que vendes."
         action={<Button onClick={onSearch} disabled={searchDisabled}><Search className="h-4 w-4" aria-hidden="true" />Buscar licitaciones</Button>} />
     );
   }
   return (
     <EmptyState icon={Gavel} headingLevel="h3" title={last.status === 'partial' ? 'Búsqueda incompleta, sin licitaciones para mostrar' : 'Ninguna licitación abierta calza'}
-      description={last.status === 'partial' ? 'La búsqueda quedó incompleta. Revisa los errores de las fuentes antes de cambiar tus palabras.' : 'Con tus palabras no hay compras abiertas ahora. Prueba con otras palabras o agrega códigos UNSPSC.'}
+      description={last.status === 'partial' ? 'La búsqueda quedó incompleta. Revisa los errores de las fuentes antes de cambiar tus palabras.' : 'Revisamos todas las compras abiertas y ninguna sirve hoy a lo que vendes. Si tu oferta cambió, actualízala en Perfil.'}
       action={<Button variant="outline" onClick={onEdit}><Pencil className="h-4 w-4" aria-hidden="true" />Editar búsqueda</Button>} />
   );
 }

@@ -1,5 +1,5 @@
 import type { HiringOpportunity, JobAd, JobAdSource } from './hiring';
-import { tenderUrl, type Tender, type TenderSource } from './tenders';
+import { tenderUrl, type Tender, type TenderAiVerdict, type TenderSource } from './tenders';
 import type { SeiaProject } from './projects';
 
 /**
@@ -114,15 +114,18 @@ export function jobAdFromSignal(row: {
 export type TenderOpportunityData = {
   source: TenderSource; code: string; buyerUnit: string | null; status: string | null; keywords: string[];
   description: string | null; items: Array<{ code: string | null; name: string }>;
+  /** Plan 15: what the model said when it read the tender against the offer; absent when only the words found it. */
+  ai?: TenderAiVerdict;
 };
 const kindOf = (source: TenderSource) => (source === 'mercado_publico' ? 'tender' as const : 'compra_agil' as const);
 
 /** The row of a tender or a Compra Ágil quote that fits the offer. As with companies, status and owner are never sent. */
-export function tenderOpportunityRow(tender: Tender, match: { score: number; reasons: string[]; keywords: string[] },
+export function tenderOpportunityRow(tender: Tender, match: { score: number; reasons: string[]; keywords: string[]; ai?: TenderAiVerdict | null },
   scope: { organizationId: string; profileId: string | null }, now: string) {
   const data: TenderOpportunityData = {
     source: tender.source, code: tender.code, buyerUnit: clip(tender.buyerUnit, 300), status: tender.status, keywords: match.keywords.slice(0, 10),
     description: clip(tender.description, 1500), items: tender.items.slice(0, 10).map(item => ({ code: item.code, name: item.name.slice(0, 200) })),
+    ...(match.ai ? { ai: { fit: match.ai.fit, reason: match.ai.reason.slice(0, 200), profileKey: match.ai.profileKey.slice(0, 16) } } : {}),
   };
   return {
     organization_id: scope.organizationId, profile_id: scope.profileId, kind: kindOf(tender.source), dedupe_key: tender.code.slice(0, 300),

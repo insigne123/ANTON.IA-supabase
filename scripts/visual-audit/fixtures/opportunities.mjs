@@ -4,7 +4,9 @@
 const DATA = {
   tender: { source: 'mercado_publico', code: '1057-88-LE26', buyerUnit: 'Unidad de Abastecimiento', status: 'publicada', keywords: ['antecedentes'],
     description: 'Servicio de verificación de antecedentes laborales y judiciales para el personal externo de la municipalidad.',
-    items: [{ code: '80111600', name: 'Servicios de personal temporal' }] },
+    items: [{ code: '80111600', name: 'Servicios de personal temporal' }],
+    // Plan 15: what the model said when it read the tender against the offer.
+    ai: { fit: 'alta', reason: 'Piden verificar antecedentes laborales y judiciales del personal externo', profileKey: 'demo' } },
   compra_agil: { source: 'compra_agil', code: '1057539-228-COT26', buyerUnit: 'Abastecimiento', status: 'publicada', keywords: ['antecedentes'],
     description: null, items: [] },
   project: { owner: 'Inmobiliaria Pacífico', presentation: 'DIA', typology: 'Centro de distribución', sector: 'inmobiliario', state: 'En Calificación',
