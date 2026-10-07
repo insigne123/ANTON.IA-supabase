@@ -520,12 +520,13 @@ const SAYS_YES = /^\s*s[íi](?!\p{L})/iu;
  * or a chip that says yes to a question the answer does not ask, still gets the correction. */
 function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown },
   context: { read: boolean } = { read: true }): string | null {
-  const chips = coworkSuggestions(answer.suggestions).length;
+  const replies = coworkSuggestions(answer.suggestions);
+  const chips = replies.length;
   const blocks = coworkBlocks(answer.blocks);
   const drafts = blocks.some(block => block.type === 'email_draft' || block.type === 'sequence');
   const filler = blocks.some(hasFiller);
   const closesOnChips = !context.read && chips > 0 && !LEAVES_FOR_LATER.test(answer.reply)
-    && !coworkSuggestions(answer.suggestions).some(chip => SAYS_YES.test(chip.label) || SAYS_YES.test(chip.message));
+    && !replies.some(chip => SAYS_YES.test(chip.label) || SAYS_YES.test(chip.message));
   const missing = [
     closingQuestion(answer) || closesOnChips ? null : `completa answer.question con la pregunta del siguiente paso (regla 4): ${CLOSING_QUESTION_RULE}`,
     // A question apart already gets a one-tap yes (COWORK_YES_CHIP): not worth another call.
