@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { loadCoworkThreadMemory, saveCoworkThreadMemory } from './thread-memory';
+import { loadCoworkThreadMemory, loadCoworkThreadTitles, saveCoworkThreadMemory } from './thread-memory';
 
 const scope = { userId: 'u1', organizationId: 'o1' };
 const memory = { offer: 'Revisión de antecedentes', audience: null, people: [], decisions: [], pending: [] };
@@ -70,4 +70,32 @@ test('another version of a turn does not read the memory the version it replaces
   assert.deepEqual((await loadCoworkThreadMemory(fake.client, scope, { ...turn, id: 'turn-3' }, { runIds: ['root', 'turn-2a'], complete: true })).memory, memory);
   // A history cut short cannot tell: the memory stays, as before versions.
   assert.deepEqual((await loadCoworkThreadMemory(fake.client, scope, turn, { runIds: ['turn-9'], complete: false })).memory, memory);
+});
+
+test('the list reads the names Cowork gave the person\'s conversations, scoped to them, and goes on without them', async () => {
+  const filters: Array<Record<string, unknown>> = [];
+  const rows = [
+    { root_run_id: 'root-1', user_id: 'u1', organization_id: 'o1', memory: { ...memory, title: 'Antecedentes para RR. HH.' } },
+    { root_run_id: 'root-2', user_id: 'u1', organization_id: 'o1', memory },
+    { root_run_id: 'root-3', user_id: 'u2', organization_id: 'o1', memory: { ...memory, title: 'De otra persona' } },
+  ];
+  const admin = { from: () => {
+    const where: Record<string, unknown> = {};
+    filters.push(where);
+    const chain = {
+      select: (fields: string) => { where.select = fields; return chain; },
+      eq: (key: string, value: unknown) => { where[key] = value; return chain; },
+      in: (key: string, values: unknown[]) => { where[key] = values; return chain; },
+      then: (resolve: (value: unknown) => void) => resolve({ data: rows.filter(row => row.user_id === where.user_id && row.organization_id === where.organization_id
+        && (where.root_run_id as string[]).includes(row.root_run_id)).map(row => ({ root_run_id: row.root_run_id, title: (row.memory as { title?: string }).title ?? null })), error: null }),
+    };
+    return chain;
+  } } as unknown as SupabaseClient;
+  assert.deepEqual(await loadCoworkThreadTitles(admin, scope, ['root-1', 'root-2', 'root-3', 'root-1']), { 'root-1': 'Antecedentes para RR. HH.' });
+  assert.deepEqual(filters[0].root_run_id, ['root-1', 'root-2', 'root-3']);
+  // Only the name leaves the database, never the rest of the memory.
+  assert.equal(filters[0].select, 'root_run_id,title:memory->>title');
+  assert.deepEqual(await loadCoworkThreadTitles(admin, scope, []), {});
+  const broken = { from: () => { throw new Error('down'); } } as unknown as SupabaseClient;
+  assert.deepEqual(await loadCoworkThreadTitles(broken, scope, ['root-1']), {});
 });
