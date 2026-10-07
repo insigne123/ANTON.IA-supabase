@@ -12,9 +12,9 @@ const CreateOrganizationSchema = z.object({
   name: z.string().trim().min(1).max(120),
 }).strict();
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireAuth(request);
     const organizationIds = auth.organizationIds;
     const [organizationsResult, membersResult] = await Promise.all([
       auth.supabase.from('organizations').select('id,name').in('id', organizationIds),

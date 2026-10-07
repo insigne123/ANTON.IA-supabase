@@ -61,7 +61,7 @@ test('a message from the person ends the task, and a thread that never started o
 
 test('the worker approves by itself only what fits the plan, and never past the plan\'s limits or outside the task', async () => {
   const { readFileSync } = await import('node:fs');
-  const worker = readFileSync('src/lib/server/cowork/worker.ts', 'utf8');
+  const worker = readFileSync('src/lib/server/cowork/worker.ts', 'utf8').replace(/\r\n/g, '\n');
   // The plan is proposed only outside a task, with tasks on.
   assert.match(worker, /const activeTask = tasksEnabled \? await loadCoworkActiveTask\(client, scope, run\.id\)\.catch\(\(\) => null\) : null;/);
   assert.match(worker, /if \(activeTask\) throw new Error\('Ya hay una tarea en curso en este hilo/);
@@ -76,7 +76,7 @@ test('the worker approves by itself only what fits the plan, and never past the 
   // The turn reads the task and has room for its steps; continuations too.
   assert.match(worker, /\.\.\.\(activeTask \? \{ task: coworkTaskContext\(activeTask\) \} : \{\}\)/);
   assert.match(worker, /coworkTaskThreadBudget\(coworkThreadBudgets\(run\.mode, autonomyEnabled\), activeTask\)/);
-  const effects = readFileSync('src/lib/server/cowork/effects.ts', 'utf8');
+  const effects = readFileSync('src/lib/server/cowork/effects.ts', 'utf8').replace(/\r\n/g, '\n');
   assert.match(effects, /coworkTaskThreadBudget\(coworkThreadBudgets\(mode, process\.env\.COWORK_AUTONOMY_ENABLED === 'true'\), task\)/);
   assert.match(effects, /job\.kind === 'task_plan'\n[^\n]*\n\s*\? 'El usuario aprobó el plan de la tarea \(task\)\. Empieza ahora por su primer paso pendiente, sin volver a preguntar\.'/);
 });

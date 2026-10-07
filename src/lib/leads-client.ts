@@ -14,6 +14,7 @@ import type {
 import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { linkedinProfilesMatch, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import {
   ProfileSearchProblemError, profileProblemFromHttp, profileProblemFromProviderCode, profileUrlProblem,
 } from '@/lib/search/profile-search-outcome';
@@ -32,6 +33,8 @@ export class ApolloOrganizationEnrichmentClientError extends Error {
 type SearchPayload = LeadsSearchParams | LinkedInProfileSearchRequest | CompanyNameSearchRequest;
 
 function extractSearchErrorMessage(json: any, status: number): string {
+  if (status === 401) return 'Tu sesión necesita renovarse. Vuelve a iniciar sesión y repite la búsqueda.';
+  if (status === 403) return 'No pudimos confirmar tu acceso a este equipo. Vuelve a entrar; si se repite, consulta a quien administra tu cuenta.';
   if (status === 429 && json?.error === 'ENRICHMENT_SEARCH_CREDITS_UNAVAILABLE') {
     return String(json?.message || 'Esta cuenta no tiene créditos disponibles para búsquedas ni enriquecimiento.');
   }
@@ -68,7 +71,7 @@ function extractSearchErrorMessage(json: any, status: number): string {
 }
 
 async function postSearch(body: SearchPayload, signal?: AbortSignal): Promise<LeadSearchResponse> {
-  const res = await fetch(PATH, {
+  const res = await authenticatedApiFetch(PATH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -102,7 +105,7 @@ export async function searchCompanies(
   body: CompanyFilterSearchRequest,
   signal?: AbortSignal,
 ): Promise<CompanySearchResponse> {
-  const res = await fetch(PATH, {
+  const res = await authenticatedApiFetch(PATH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, search_mode: 'companies' }),
@@ -111,7 +114,7 @@ export async function searchCompanies(
   });
   const json: any = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(String(json?.message || json?.error || `HTTP_${res.status}`));
+    throw new Error(extractSearchErrorMessage(json, res.status));
   }
   return {
     count: Number(json?.count ?? (Array.isArray(json?.organizations) ? json.organizations.length : 0)) || 0,
@@ -277,7 +280,7 @@ export async function enrichLinkedInProfileLead(input: {
   enriched?: Array<{ id: string }>;
   phone_enrichment?: LeadSearchResponse['phone_enrichment'];
 }> {
-  const res = await fetch(PROFILE_ENRICHMENT_PATH, {
+  const res = await authenticatedApiFetch(PROFILE_ENRICHMENT_PATH, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -314,7 +317,7 @@ export async function enrichLinkedInProfileLead(input: {
     && Array.isArray(json?.enriched)
     && Boolean(json.enriched[0]?.id);
   if (!res.ok && !recoverablePending) {
-    const problem = profileProblemFromHttp(res.status, json?.error);
+    const problem = profileProblemFromHttp(res.status, json?.code || json?.error);
     if (res.status === 429) {
       throw new ProfileSearchProblemError(problem, 'Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
     }
@@ -342,7 +345,7 @@ export async function enrichApolloOrganization(input: {
   domain: string;
   operationId: string;
 }, signal?: AbortSignal): Promise<CompanySearchOrganization | null> {
-  const response = await fetch(ORGANIZATION_ENRICHMENT_PATH, {
+  const response = await authenticatedApiFetch(ORGANIZATION_ENRICHMENT_PATH, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -391,7 +394,7 @@ export async function getLinkedInProfileStatuses(
   const normalizedIds = ids.map((value) => String(value || '').trim()).filter(Boolean);
   if (normalizedIds.length === 0) return [];
 
-  const res = await fetch(PROFILE_STATUS_PATH, {
+  const res = await authenticatedApiFetch(PROFILE_STATUS_PATH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids: normalizedIds }),

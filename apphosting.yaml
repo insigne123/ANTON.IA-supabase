@@ -141,9 +141,9 @@ env:
     value: "true"
     availability: [RUNTIME]
   # OpenAI Standard, short-context (<272K input), USD per million tokens.
-  # Checked against https://platform.openai.com/docs/pricing on 2026-09-23.
+  # gpt-6.1-sol checked against https://developers.openai.com/api/docs/pricing on 2026-10-07.
   - variable: COWORK_MODEL_PRICING_JSON
-    value: '{"gpt-6-luna":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":0.1,"outputUsdPerMillion":0.5,"cachedInputUsdPerMillion":0.01},"gpt-6-sol":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.2}}'
+    value: '{"gpt-6-luna":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":0.1,"outputUsdPerMillion":0.5,"cachedInputUsdPerMillion":0.01},"gpt-6-sol":{"version":"openai-standard-2026-09-23-short","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.2},"gpt-6.1-sol":{"version":"openai-standard-2026-10-07-short","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.1}}'
     availability: [RUNTIME]
   # Fase 3: ejecutor remoto de código. Secreto COWORK_EXECUTOR_SECRET en
   # Secret Manager (versión 3 = bearer exacto de la VM). No guardar valores

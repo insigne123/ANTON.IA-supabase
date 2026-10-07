@@ -1,6 +1,7 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 import { resolveActiveOrganization } from '@/lib/server/organization-context';
@@ -23,6 +24,21 @@ export class RequestAuthError extends Error {
   }
 }
 
+function requestSessionClient(req: Request) {
+  const authorization = req.headers.get('authorization');
+  if (!authorization) return { supabase: createRouteHandlerClient({ cookies }), token: undefined };
+  const match = /^Bearer ([^\s]+)$/i.exec(authorization);
+  if (!match || match[1].length > 16000) throw new RequestAuthError('Unauthorized', 401);
+  const token = match[1];
+  // One verified token also backs the RLS membership query. Cookie rotation in
+  // another request must not silently turn that query into an anonymous one.
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  return { supabase, token };
+}
+
 async function findMembership(supabase: any, userId: string, organizationId?: string | null) {
   let query = supabase
     .from('organization_members')
@@ -43,9 +59,9 @@ async function findMembership(supabase: any, userId: string, organizationId?: st
   return data || null;
 }
 
-export async function requireSessionRequestAuth(): Promise<RequestAuthContext> {
-  const supabase = createRouteHandlerClient({ cookies });
-  const { data: { user }, error } = await supabase.auth.getUser();
+export async function requireSessionRequestAuth(req?: Request): Promise<RequestAuthContext> {
+  const { supabase, token } = req ? requestSessionClient(req) : { supabase: createRouteHandlerClient({ cookies }), token: undefined };
+  const { data: { user }, error } = token ? await supabase.auth.getUser(token) : await supabase.auth.getUser();
   if (error || !user) {
     throw new RequestAuthError('Unauthorized', 401);
   }
@@ -59,10 +75,10 @@ export async function requireSessionRequestAuth(): Promise<RequestAuthContext> {
 }
 
 export async function requireSessionOrTrustedInternalRequest(req: Request): Promise<RequestAuthContext> {
-  const supabase = createRouteHandlerClient({ cookies });
-  const { data: { user } } = await supabase.auth.getUser();
+  const { supabase, token } = requestSessionClient(req);
+  const { data: { user }, error: userError } = token ? await supabase.auth.getUser(token) : await supabase.auth.getUser();
 
-  if (user) {
+  if (!userError && user) {
     const requestedOrganizationId = String(req.headers.get('x-organization-id') || '').trim() || null;
     let active;
     try {
@@ -109,7 +125,9 @@ export async function requireSessionOrTrustedInternalRequest(req: Request): Prom
 
 export function requestAuthErrorResponse(error: unknown) {
   if (error instanceof RequestAuthError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: error.message,
+      code: error.status === 401 ? 'AUTH_SESSION_EXPIRED' : error.status === 403 ? 'ORGANIZATION_ACCESS_REQUIRED' : 'AUTH_CHECK_UNAVAILABLE',
+    }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
   }
   return null;
 }

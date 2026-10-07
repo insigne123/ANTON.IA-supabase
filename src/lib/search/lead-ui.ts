@@ -12,6 +12,10 @@ export function getFriendlySearchErrorMessage(message?: string) {
   const generic = 'No pudimos completar la búsqueda. Prueba de nuevo en unos minutos; si se repite, cambia algún filtro.';
 
   if (!raw) return generic;
+  if (/organization_access_required|acceso a este equipo|requested organization/i.test(raw)) {
+    return 'No pudimos confirmar tu acceso a este equipo. Vuelve a entrar; si se repite, consulta a quien administra tu cuenta.';
+  }
+  if (/auth_session_expired/i.test(raw)) return 'Tu sesión necesita renovarse. Vuelve a iniciar sesión y repite la búsqueda.';
 
   if (raw.includes('APOLLO_PROFILE_NO_USABLE_DATA')) {
     return 'No hay nombre, cargo ni empresa para esa dirección. Prueba solo con datos profesionales o busca a la persona por su empresa.';

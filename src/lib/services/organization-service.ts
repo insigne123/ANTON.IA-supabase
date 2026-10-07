@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 
 export type OrganizationRole = 'owner' | 'admin' | 'member';
 
@@ -39,7 +40,8 @@ function notifyCurrentOrganizationChanged() {
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const isWrite = Boolean(init?.method && init.method.toUpperCase() !== 'GET');
     try {
-        const response = await fetch(path, {
+        const read = path === '/api/organizations' && !isWrite ? authenticatedApiFetch : fetch;
+        const response = await read(path, {
             ...init,
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', ...init?.headers },
