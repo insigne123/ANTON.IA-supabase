@@ -33,6 +33,8 @@ export function coworkAgentInstructions(configuration: {
   analyst?: boolean;
   /** preference.save can be proposed: a preference the person asks to keep, with a card (preference-proposal.ts, COWORK_PREFERENCES_ENABLED). */
   preferences?: boolean;
+  /** task.plan can be proposed: a request of several steps becomes one plan approved once (task-plan.ts, COWORK_TASKS_ENABLED, Plan 13, 4c). */
+  tasks?: boolean;
   /** What this turn is about (intents.ts): each part of the prompt that belongs to other intents stays out. Null or absent: the whole prompt. */
   intents?: ReadonlySet<CoworkIntent> | null;
 }) {
@@ -175,6 +177,10 @@ export function coworkAgentInstructions(configuration: {
     // Short and needed in any turn that asks to remember something, so it goes whatever the intent.
     preferenceCapability: configuration.preferences
       ? 'Preferencias: cuando el usuario pide que recuerdes algo para los próximos trabajos («recuerda que…», «de ahora en adelante…», «nunca le escribas a…», «mi tono es…»), propón preference.save con preference {text, scope}: text es la preferencia en una frase, como se va a recordar («No le escribo a empresas de la competencia»), sin datos que no dijo; scope es personal, u organization solo si dice que vale para su equipo o su empresa. Va con tarjeta y revisión humana siempre, incluso en modo autónomo. Una por turno; si en el mismo mensaje pide además otra tarea, haz la tarea aplicando ya esa preferencia (si escribe la Redactora, ponla en notes del encargo: «firma como Nico», «tono cercano») y deja recordarla como siguiente paso, con una respuesta sugerida («Recordar que firmo como Nico»). No la propongas por iniciativa propia ni para cosas de un solo trabajo, y no la uses para datos de contactos (eso es guardar el contacto o su nota). Lo que ya recuerdas viene en memories y ya se aplica: si lo que pide ya está, responde que ya lo tienes presente, sin proponerlo de nuevo ni decir que espera aprobación. Nunca digas que algo queda guardado o propuesto si no propusiste preference.save en esta decisión.'
+      : null,
+    // Short and needed in any turn with a request of several steps, so it goes whatever the intent.
+    taskCapability: configuration.tasks
+      ? 'Tareas: si el pedido encadena 3 o más pasos y al menos dos llevan aprobación (buscar prospectos, guardar o buscar correos, crear la campaña), propón task.plan en vez del primer paso: task {goal: lo que quedará hecho, en una frase; steps: 2 a 6 pasos en orden [{label: el paso en palabras simples con su cifra («Buscar 25 gerentes de RR. HH. de retail en Santiago»), kind: search (buscar prospectos con el proveedor), prepare (guardar, buscar su correo o investigar), write (redactar correos o la secuencia) o campaign (dejar la campaña pausada)}]; limits: {searches: 1 si hay un paso search o 0, credits: los correos que buscará, 0 a 50}}. answer.reply explica en 1 a 3 frases qué hará y que nunca enviará ni activará nada sin preguntar. Enviar, activar campañas y LinkedIn nunca son pasos: quedan para el usuario al final. Un pedido de uno o dos pasos no es una tarea: hazlo como siempre.'
       : null,
     threadBudgetCapability: configuration.threadBudget
       || 'Hilo nuevo: dispones del presupuesto completo de pasos automáticos; aun así, cierra cada trabajo con lo esencial y no encadenes trabajo innecesario.',

@@ -103,6 +103,10 @@ env:
   - variable: COWORK_CONTACTS_IMPORT_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Tareas largas (Plan 13, 4c): requiere la migración 20261007120000 (task_plan). Encender solo después de aplicarla y verificarla.
+  - variable: COWORK_TASKS_ENABLED
+    value: "false"
+    availability: [RUNTIME]
   # Lotes autorizados, pendientes de prueba real guiada con un contacto.
   - variable: COWORK_LINKEDIN_BATCH_ENABLED
     value: "false"

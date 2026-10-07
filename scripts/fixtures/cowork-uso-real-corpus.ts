@@ -160,7 +160,11 @@ export const USO_REAL_CORPUS: CorpusCase[] = [
     request: 'busca 25 gerentes de RRHH de retail en Santiago, guarda los 10 mejores, búscales el correo y escríbeles una secuencia de 3 correos',
     origin: 'Plan 12: una tarea larga se explica entera y arranca por el primer paso.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'arranca proponiendo la búsqueda', test: r => Boolean(r.search) },
-      { label: 'busca 25 personas', test: r => Number(r.search?.limit) === 25 },
-      { label: 'explica los pasos que siguen', test: r => /guard/i.test(`${r.note || ''} ${r.reply}`) && /secuencia|correos/i.test(`${r.note || ''} ${r.reply}`) }] },
+      // With long tasks (Plan 13, 4c) the same request is one plan approved once: it starts by its search and never sends.
+      { label: 'arranca proponiendo la búsqueda', test: r => Boolean(r.search) || r.proposal?.task?.steps[0]?.kind === 'search' },
+      { label: 'busca 25 personas', test: r => Number(r.search?.limit) === 25 || /\b25\b/.test(r.proposal?.task?.steps[0]?.label || '') },
+      { label: 'explica los pasos que siguen', test: r => (/guard/i.test(`${r.note || ''} ${r.reply}`) && /secuencia|correos/i.test(`${r.note || ''} ${r.reply}`))
+        || (r.proposal?.task?.steps || []).some(step => step.kind === 'prepare') && (r.proposal?.task?.steps || []).some(step => step.kind === 'write') },
+      { label: 'si es una tarea, nunca envía ni gasta de más', test: r => !r.proposal?.task || (r.proposal.task.limits.searches <= 1 && r.proposal.task.limits.credits <= 10
+        && !(r.proposal.task.steps || []).some(step => /envi|activ/i.test(step.label))) }] },
 ];

@@ -159,7 +159,9 @@ export function coworkDecisionContext(
     /** The whole conversation beyond the last turns of history: its first request and its memory (thread-memory.ts). */
     threadMemory?: unknown;
     /** «Otra versión» (Plan 13): the answers already given to this same message, with what the person said about them. */
-    previousVersions?: CoworkPreviousVersion[] },
+    previousVersions?: CoworkPreviousVersion[];
+    /** The approved long task this turn continues (task-plan.ts, Plan 13, 4c): its plan, what it spent and how to go on. */
+    task?: unknown },
   now = new Date(),
   timeZone = coworkTimeZone(),
 ) {
@@ -227,6 +229,7 @@ export function coworkDecisionContext(
     ...(instructions.artifactCapability ? { artifactCapability: instructions.artifactCapability } : {}),
     ...(instructions.analystCapability ? { analystCapability: instructions.analystCapability, analystAvailable: (turnBudget?.decisionsLeft ?? 1) > 0 } : {}),
     ...(instructions.preferenceCapability ? { preferenceCapability: instructions.preferenceCapability } : {}),
+    ...(instructions.taskCapability ? { taskCapability: instructions.taskCapability } : {}),
     threadBudgetCapability: instructions.threadBudgetCapability,
   };
 }

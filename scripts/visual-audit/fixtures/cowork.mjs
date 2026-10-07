@@ -17,6 +17,8 @@ export default function cowork(ctx) {
     run(4, 'Muéstrame mi pipeline en un gráfico por etapa', { root: ctx.uid(9004), at: ctx.hoursAgo(1) }),
     // «Otra versión» of the second turn (Plan 13): same parent, asked again later.
     run(5, 'Prepárame el correo para Andrea Soto', { parent: first, root: first, at: ctx.hoursAgo(24) }),
+    // A long task waiting for its plan to be approved (Plan 13, 4c).
+    run(6, 'Busca 25 gerentes de RR. HH. de retail en Santiago, guarda los 10 mejores, búscales el correo y escríbeles una secuencia', { root: ctx.uid(9006), status: 'waiting_approval', at: ctx.hoursAgo(0.2) }),
   ];
   const replies = {
     1: 'Te recomiendo empezar por **3 personas** que calzan con tu cliente ideal y aún no contactas:\n\n1. **Andrea Soto**, Gerente de Personas en Retail Andino: están abriendo tiendas.\n2. **Matías Rojas**, Jefe de Reclutamiento en Logística Sur: contrataciones masivas en temporada.\n3. **Francisca Muñoz**, Gerente de Operaciones en Seguridad Austral.\n\n¿Quieres que prepare el primer correo para Andrea?',
@@ -62,7 +64,20 @@ export default function cowork(ctx) {
     { sequence: index * 10 + 8, run_id: item.id, user_id: ctx.OWNER, organization_id: ctx.ORG, kind: 'run.completed', payload: { reply: replies[index + 1], document: null,
       ...(index === 0 ? { blocks: [stagesChart] } : {}) }, created_at: item.updated_at },
     ...(index === 4 ? [at(item, index * 10 + 9, 'answer.feedback', { rating: 'up', reason: null, comment: null })] : []),
-  ]);
+  ]).filter(event => !(event.run_id === ctx.uid(9006) && event.kind === 'run.completed'));
+  // The plan the task proposed, staged as an event of its run, and the card that asks to approve it.
+  const taskRun = runs[5];
+  const taskHash = '0123456789abcdef0123456789abcdef';
+  const taskPlan = { goal: 'Dejar una secuencia de 3 correos lista para los 10 gerentes de RR. HH. de retail que mejor calcen', limits: { searches: 1, credits: 10 }, steps: [
+    { label: 'Buscar 25 gerentes de RR. HH. de retail en Santiago', kind: 'search' },
+    { label: 'Guardar a los 10 mejores y buscar su correo', kind: 'prepare' },
+    { label: 'Escribir una secuencia de 3 correos', kind: 'write' },
+    { label: 'Dejar la campaña pausada con ellos', kind: 'campaign' }] };
+  events.push(
+    at(taskRun, 53, 'tool.completed', { action: 'assistant.note', input: '', result: { reply: 'Propongo hacerlo como una tarea: busco, preparo a los 10 mejores, escribo la secuencia y dejo la campaña pausada. Nunca envío ni activo nada sin preguntarte.' } }),
+    at(taskRun, 54, 'task.plan', { hash: taskHash, plan: taskPlan }),
+    at(taskRun, 55, 'approval.requested', { action: 'cowork.effect', kind: 'task_plan', targetId: `task:${taskHash}`, label: 'Tarea de 4 pasos · hasta 1 búsqueda y 10 créditos' }),
+  );
   return {
     tables: {
       cowork_runs: runs, cowork_run_events: events,

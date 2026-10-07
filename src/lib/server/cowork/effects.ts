@@ -30,6 +30,8 @@ import { executeCoworkPhoneReveal } from './enrich-phone';
 import { executeCoworkLinkedinBatch } from './linkedin-batch';
 import { executeCoworkPrepareBatch } from './prepare-batch-run';
 import { executeCoworkPreferenceSave } from './preference';
+import { coworkTasksEnabled, executeCoworkTaskStart, loadCoworkActiveTask } from './task';
+import { coworkTaskThreadBudget } from '@/lib/cowork/task-plan';
 import { coworkContinuationArgs } from './continuation';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -37,7 +39,7 @@ export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 
   'crm_update_record', 'campaign_prepare_draft_v2',
   'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
   'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message', 'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch', 'campaign_retry', 'enrich_phone',
-  'lead_prepare_batch', 'memory_save']);
+  'lead_prepare_batch', 'memory_save', 'task_plan']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 type Scope = { userId: string; organizationId: string };
@@ -73,7 +75,9 @@ export async function admitCoworkContinuation(
     const mode = parent.data.mode === 'autonomous' ? 'autonomous' : 'approval';
     // Fase 1 (CW-06): automatic chains end gracefully at the thread budget.
     // The thread simply stops; the last completed reply stands as the result.
-    const budgets = coworkThreadBudgets(mode, process.env.COWORK_AUTONOMY_ENABLED === 'true');
+    // A long task (Plan 13, 4c) has room for the steps of its approved plan.
+    const task = coworkTasksEnabled() ? await loadCoworkActiveTask(client, scope, runId).catch(() => null) : null;
+    const budgets = coworkTaskThreadBudget(coworkThreadBudgets(mode, process.env.COWORK_AUTONOMY_ENABLED === 'true'), task);
     let depth = 0;
     let effects = 0;
     try {
@@ -282,6 +286,10 @@ async function executeEffect(
     const saved = await executeCoworkPreferenceSave(auth, proposal.run_id, proposal.target_id);
     return { reply: saved.reply, result: saved.result };
   }
+  if (proposal.kind === 'task_plan') {
+    const started = await executeCoworkTaskStart(auth, proposal.run_id, proposal.target_id);
+    return { reply: started.reply, result: started.result };
+  }
   const requested = await requestCoworkDraft(auth, proposal.origin_run_id, { snapshotId: proposal.target_id });
   return { reply: requested.reused ? 'Ese borrador ya estaba solicitado para este informe.'
       : 'El borrador quedó en preparación; podrás revisarlo cuando esté listo.',
@@ -311,7 +319,10 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
     if (finished.error) throw finished.error;
     // A remembered preference needs no next turn: its reply says what was kept, and the next request already reads it.
     if (finished.data === true && job.kind !== 'memory_save') {
-      await admitCoworkContinuation(client, scope, job.run_id, job.kind === 'lead_prepare_batch'
+      await admitCoworkContinuation(client, scope, job.run_id, job.kind === 'task_plan'
+        // The plan was approved: the task starts by its first step, without asking again.
+        ? 'El usuario aprobó el plan de la tarea (task). Empieza ahora por su primer paso pendiente, sin volver a preguntar.'
+        : job.kind === 'lead_prepare_batch'
         // The people of the batch are the people of this work: shown by what the batch returned, never searched again by name.
         ? 'Continúa a partir del lote recién ejecutado, dentro del mismo encargo. Presenta su resultado en un bloque table con esas mismas personas (nombre real, correo y su estado, LinkedIn, investigación), tomado del resultado del lote en history.actions, sin buscarlas de nuevo por nombre; di en una frase qué faltó y por qué, y propón el siguiente paso concreto sin repetir el lote.'
         : 'Continúa a partir del efecto recién ejecutado, dentro del mismo encargo. Resume qué quedó hecho y propón el siguiente paso concreto sin repetir el efecto.');

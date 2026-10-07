@@ -173,6 +173,38 @@ test('a preference is proposed with its text and scope, without reading first, o
   assert.equal(sent.targetId, 'new-preference');
 });
 
+test('a request of several steps is proposed as one task plan, only when tasks are on, and a plan that does not add up goes back', async () => {
+  const task = { goal: 'Escribirles una secuencia a los 10 mejores gerentes de RR. HH. de retail', limits: { searches: 1, credits: 10 }, steps: [
+    { label: 'Buscar 25 gerentes de RR. HH. de retail en Santiago', kind: 'search' as const },
+    { label: 'Guardar a los 10 mejores y buscar su correo', kind: 'prepare' as const },
+    { label: 'Escribir una secuencia de 3 correos', kind: 'write' as const },
+    { label: 'Dejar la campaña pausada con ellos', kind: 'campaign' as const }] };
+  const proposal = { action: 'task.plan' as const, query: null, leadId: null, answer: null, task };
+  const proposals: unknown[] = [];
+  const base = {
+    message: 'busca 25 gerentes de RRHH de retail en Santiago, guarda los 10 mejores, búscales el correo y escríbeles una secuencia de 3 correos',
+    runId: '00000000-0000-4000-8000-000000000099', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({}), record: async () => {}, proposeEffect: async (value: unknown) => { proposals.push(value); },
+  };
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => proposal }), /Tasks unavailable/);
+  assert.equal(proposals.length, 0);
+  const result = await runCoworkReadLoop({ ...base, tasks: true, decide: async () => proposal });
+  assert.match(result.reply, /los pasos, lo máximo que puede gastar y lo que nunca hará sin preguntarte/);
+  const sent = proposals[0] as { kind: string; task: unknown; originRunId: string; targetId: string };
+  assert.equal(sent.kind, 'task_plan');
+  assert.deepEqual(sent.task, task);
+  assert.equal(sent.originRunId, base.runId);
+  assert.equal(sent.targetId, 'new-task');
+  // A search step without a search to spend is corrected before any card.
+  const reasons: string[] = [];
+  await runCoworkReadLoop({ ...base, tasks: true, decide: async (_observations, _mustAnswer, rejections = []) => {
+    reasons.push(...rejections.map(rejection => rejection.reason));
+    return rejections.length ? { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Listo.', document: null } }
+      : { ...proposal, task: { ...task, limits: { searches: 0, credits: 10 } } };
+  } });
+  assert.match(reasons.join('|'), /El plan no cuadra \(el plan busca prospectos pero limits\.searches es 0\)/);
+});
+
 test('a preference already remembered goes back to the model instead of a second card', async () => {
   const proposal = { action: 'preference.save' as const, query: null, leadId: null, answer: null,
     preference: { text: 'No le escribo a empresas de seguridad privada', scope: 'personal' as const } };
