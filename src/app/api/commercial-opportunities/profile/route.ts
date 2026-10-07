@@ -1,23 +1,36 @@
 import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunities/access';
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
-import { createHiringProfile, findHiringProfile, hiringProfilePatchSchema, updateHiringProfile } from '@/lib/server/commercial-opportunities/store';
+import {
+  createHiringProfile, findHiringProfile, hiringProfilePatchSchema, readPerfilForOpportunities, refreshHiringProfileFromPerfil, updateHiringProfile,
+} from '@/lib/server/commercial-opportunities/store';
 import { hiringSyncEnvironment, hiringSyncPlan } from '@/lib/server/commercial-opportunities/sync';
+import { MANUAL_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 /**
- * What to look for: the offer, the roles, the regions and the minimum of ads. The next search uses it. The first save creates
- * the organization's profile (Plan 10): nothing is created just by opening the page.
+ * What to look for: the roles, the regions and the minimum of ads, plus the words of the tender search, the SEIA sectors and
+ * the minimum investment. The first save creates the organization's profile (Plan 10): nothing is created just by opening
+ * the page. Since Plan 15 the offer comes from «Perfil», and the words and sectors are generated from it when the profile
+ * is created without them, when the offer changed or when the person asks again (`regenerate`).
  */
 export async function PUT(request: Request) {
   try {
     const auth = await requireOpportunitiesAccess();
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
-    const patch = hiringProfilePatchSchema.parse(await request.json().catch(() => ({})));
-    const current = await findHiringProfile(auth.admin, scope);
-    const profile = current ? await updateHiringProfile(auth.admin, scope, current.id, patch) : await createHiringProfile(auth.admin, scope, patch);
-    if (!profile) return opportunitiesJson({ error: 'No encontramos el perfil de búsqueda.' }, 404);
-    return opportunitiesJson({ profile, plan: hiringSyncPlan(profile, hiringSyncEnvironment()) });
+    const body = await request.json().catch(() => ({}));
+    const regenerate = Boolean(body && typeof body === 'object' && (body as { regenerate?: unknown }).regenerate === true);
+    const { regenerate: _ignored, ...fields } = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const patch = hiringProfilePatchSchema.parse(fields);
+    const [current, perfil] = await Promise.all([findHiringProfile(auth.admin, scope), readPerfilForOpportunities(auth.admin, scope)]);
+    const withOffer = { ...patch, offer: perfil.offer || current?.offer || patch.offer };
+    const saved = current ? await updateHiringProfile(auth.admin, scope, current.id, withOffer) : await createHiringProfile(auth.admin, scope, withOffer);
+    if (!saved) return opportunitiesJson({ error: 'No encontramos el perfil de búsqueda.' }, 404);
+    const profile = await refreshHiringProfileFromPerfil(auth.admin, scope, saved, {
+      perfil, force: regenerate || (!current && !patch.keywords?.length),
+    });
+    return opportunitiesJson({ profile, plan: hiringSyncPlan(profile, hiringSyncEnvironment(), { cap: MANUAL_JSEARCH_QUERIES }) });
   } catch (error) {
     return opportunitiesError(error);
   }

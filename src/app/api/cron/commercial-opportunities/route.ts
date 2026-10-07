@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { findHiringProfile, lastRunOf, supabaseHiringStore, supabaseTenderStore } from '@/lib/server/commercial-opportunities/store';
+import {
+  findHiringProfile, lastRunOf, refreshHiringProfileFromPerfil, supabaseHiringStore, supabaseTenderStore,
+} from '@/lib/server/commercial-opportunities/store';
+import { DAILY_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
+import { generateRoleVariants } from '@/lib/server/commercial-opportunities/search-ai';
 import { hiringSyncEnvironment, monthStart, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
 import { runTenderSync } from '@/lib/server/commercial-opportunities/tender-sync';
 import {
@@ -39,8 +43,10 @@ export async function POST(request: Request) {
     const scope = { userId: item.userId, organizationId: item.organizationId };
     const outcome: Record<string, unknown> = { organizationId: item.organizationId };
     try {
-      const profile = await findHiringProfile(client, scope);
-      if (!profile) { results.push({ ...outcome, skipped: 'sin perfil de búsqueda' }); continue; }
+      const found = await findHiringProfile(client, scope);
+      if (!found) { results.push({ ...outcome, skipped: 'sin perfil de búsqueda' }); continue; }
+      // Plan 15: the offer and the tender words follow the «Perfil» of whoever created the search.
+      const profile = await refreshHiringProfileFromPerfil(client, scope, found).catch(() => found);
       const storeScope = { ...scope, profileId: profile.id };
       if (item.tenders) {
         // The ticket of a member of the organization (Plan 10); without any, the run is recorded as skipped.
@@ -56,9 +62,11 @@ export async function POST(request: Request) {
       if (jsearchSpent) {
         await supabaseHiringStore(client, storeScope, 'schedule').startRun({ source: 'jsearch', status: 'skipped', error: JSEARCH_MONTH_SPENT });
         outcome.hiring = { skipped: JSEARCH_MONTH_SPENT };
+      } else if (item.hiring && !profile.roles.length) {
+        outcome.hiring = { skipped: 'sin cargos guardados' };
       } else if (item.hiring) {
         outcome.hiring = await runHiringSync({ store: supabaseHiringStore(client, storeScope, 'schedule'), profile, env, capUsd: monthlyCapUsd(),
-          organizationId: item.organizationId, only: ['jsearch'] })
+          organizationId: item.organizationId, only: ['jsearch'], variants: await generateRoleVariants(profile.roles), queryCap: DAILY_JSEARCH_QUERIES })
           .then(result => (result.status === 'capped' ? { capped: true } : { status: result.status, qualifying: result.qualifying, costUsd: result.costUsd,
             errors: result.sources.filter(source => source.error).map(source => source.error) }),
             failure => ({ error: failure instanceof Error ? failure.message : 'error' }));

@@ -1,8 +1,10 @@
 import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunities/access';
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import {
-  findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities, monthSpentUsd, readHiringProfileSuggestion, recentRuns,
+  findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities, monthSpentUsd, readHiringProfileSuggestion,
+  readPerfilForOpportunities, recentRuns,
 } from '@/lib/server/commercial-opportunities/store';
+import { MANUAL_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
 import { hiringSyncEnvironment, hiringSyncPlan, monthStart, monthlyCapUsd } from '@/lib/server/commercial-opportunities/sync';
 import { resolveTicketForUser } from '@/lib/server/commercial-opportunities/tickets';
 
@@ -17,15 +19,17 @@ export async function GET() {
   try {
     const auth = await requireOpportunitiesAccess();
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
-    const profile = await findHiringProfile(auth.admin, scope);
+    const [profile, perfil] = await Promise.all([findHiringProfile(auth.admin, scope), readPerfilForOpportunities(auth.admin, scope)]);
     const now = new Date().toISOString();
+    // What «Perfil» says today (Plan 15): the page shows the offer from there and suggests its regions.
+    const fromPerfil = { offer: perfil.offer, regions: perfil.regions };
     if (!profile) {
       const [runs, spentUsd, ticket, suggestion] = await Promise.all([
         recentRuns(auth.admin, scope), monthSpentUsd(auth.admin, scope, monthStart(now)), resolveTicketForUser(auth.admin, auth.user),
         readHiringProfileSuggestion(auth.admin, scope),
       ]);
       return opportunitiesJson({
-        profile: null, suggestion, plan: { sources: [], estimateUsd: 0 }, month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
+        profile: null, suggestion, perfil: fromPerfil, plan: { sources: [], estimateUsd: 0, queries: [], left: 0 }, month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
         tenderSearch: { ticket: Boolean(ticket.ticket), ticketStatus: ticket.status, keywords: [], unspscCodes: [] },
         opportunities: [], tenders: [], projects: [], runs,
       });
@@ -39,7 +43,7 @@ export async function GET() {
       resolveTicketForUser(auth.admin, auth.user),
     ]);
     return opportunitiesJson({
-      profile, plan: hiringSyncPlan(profile, hiringSyncEnvironment()), month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
+      profile, perfil: fromPerfil, plan: hiringSyncPlan(profile, hiringSyncEnvironment(), { cap: MANUAL_JSEARCH_QUERIES }), month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
       // Whether this person can search tenders (their own ticket, or the shared one when they are on its list), never the ticket.
       tenderSearch: { ticket: Boolean(ticket.ticket), ticketStatus: ticket.status, keywords: profile.keywords, unspscCodes: profile.unspscCodes },
       opportunities, tenders, projects, runs,
