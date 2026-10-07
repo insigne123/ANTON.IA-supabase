@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { searchLinkedInProfileLead } from '@/lib/leads-client';
+import { searchCompanyNameLeads, searchLinkedInProfileLead } from '@/lib/leads-client';
 import { ProfileSearchProblemError } from '@/lib/search/profile-search-outcome';
 
 function mockEnrichmentResponse(
@@ -385,5 +385,15 @@ test('an ambiguous provider outcome without phone reveal remains trackable witho
     assert.equal(result.count, 0);
     assert.deepEqual(result.leads, []);
     assert.deepEqual(result.profile_tracking_ids, ['profile-pending']);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('profile/company 403 is access to the team, not an expired session or bad search filters', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ error: 'User does not belong to the requested organization', code: 'ORGANIZATION_ACCESS_REQUIRED' }, { status: 403 });
+  try {
+    await assert.rejects(searchLinkedInProfileLead({ search_mode: 'linkedin_profile', linkedin_url: 'https://www.linkedin.com/in/flaviobaronti' }),
+      (error: unknown) => error instanceof ProfileSearchProblemError && error.problem === 'organization_access');
+    await assert.rejects(searchCompanyNameLeads({ search_mode: 'company_name', company_name: 'acciona', seniorities: [] }), /acceso a este equipo/);
   } finally { globalThis.fetch = originalFetch; }
 });

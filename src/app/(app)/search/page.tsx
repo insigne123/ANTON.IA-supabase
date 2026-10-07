@@ -17,6 +17,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { companySizes } from '@/lib/data';
 import { organizationService } from '@/lib/services/organization-service';
+import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
+import { readCachedAuthScope } from '@/lib/auth-scope-cache';
+import { consumeSearchReauthCriteria, saveSearchReauthCriteria } from '@/lib/search/reauth-criteria';
 import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Save, X, ChevronDown, ChevronRight, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal, Upload, Users } from 'lucide-react';
@@ -92,6 +95,7 @@ type SearchSource = 'apollo' | 'leads_finder';
 
 export default function SearchPage() {
   const router = useRouter();
+  const reauthScope = useRef(readCachedAuthScope());
   const [isLoading, setIsLoading] = useState(false);
   const [leads, setLeads] = useState<UILaed[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
@@ -299,6 +303,10 @@ export default function SearchPage() {
     } catch (searchError: any) {
       if (searchError?.name === 'AbortError') return;
       const friendlyMessage = getFriendlySearchErrorMessage(searchError?.message);
+      const accessProblem = profileProblemFromMessage(searchError?.message);
+      if (accessProblem === 'session_expired' || accessProblem === 'organization_access') {
+        setProfileProblem(profileSearchMessage(accessProblem));
+      }
       setError(friendlyMessage);
       toast({ title: 'No se pudo completar la búsqueda', description: friendlyMessage });
     } finally {
@@ -580,7 +588,7 @@ export default function SearchPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/leads/search/checkpoint', { cache: 'no-store' }).then(async (response) => {
+    void authenticatedApiFetch('/api/leads/search/checkpoint', { cache: 'no-store' }).then(async (response) => {
       if (!response.ok) throw new Error('unavailable');
       const data = await response.json();
       if (cancelled) return;
@@ -612,7 +620,23 @@ export default function SearchPage() {
       setCheckpointReady(true);
     }).catch(() => {
       if (!cancelled) setCheckpointNotice('La recuperación de búsquedas no está disponible. El avance se conserva mientras mantengas esta pantalla abierta.');
-    }).finally(() => { if (!cancelled) setCheckpointLoading(false); });
+    }).finally(() => {
+      if (cancelled) return;
+      try {
+        const recovered = consumeSearchReauthCriteria(window.sessionStorage, readCachedAuthScope() || reauthScope.current);
+        if (recovered) {
+          setFilters(recovered);
+          setCompanies([]);
+          setCompanyWindows({});
+          setSelectedCompanyIds(new Set());
+          setActiveCompanyId(null);
+          setLeads([]);
+          setFilterStep('filters');
+          setCheckpointNotice('Conservamos tus criterios. Revisa y pulsa «Buscar» para continuar.');
+        }
+      } catch { /* Browser storage may be blocked. */ }
+      setCheckpointLoading(false);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -661,7 +685,7 @@ export default function SearchPage() {
     const timeout = window.setTimeout(() => {
       checkpointQueue.current = checkpointQueue.current.then(async () => {
         if (checkpointStopped.current) return;
-        const response = await fetch('/api/leads/search/checkpoint', {
+        const response = await authenticatedApiFetch('/api/leads/search/checkpoint', {
           method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-organization-id': checkpointOrganization.current },
           body: JSON.stringify({ revision: checkpointRevision.current, snapshot }),
         });
@@ -1123,8 +1147,8 @@ export default function SearchPage() {
       applySearchResult(result, filters.searchMode, { revealEmail: activeRevealEmail, revealPhone: activeRevealPhone });
     } catch (error: any) {
       if (searchRunIdRef.current !== searchRunId) return;
-      if (error.name !== 'AbortError' && filters.searchMode === 'linkedin_profile') {
-        const problem = error instanceof ProfileSearchProblemError ? error.problem : profileProblemFromMessage(error?.message);
+      const problem = error instanceof ProfileSearchProblemError ? error.problem : profileProblemFromMessage(error?.message);
+      if (error.name !== 'AbortError' && (filters.searchMode === 'linkedin_profile' || problem === 'session_expired' || problem === 'organization_access')) {
         setProfileProblem(profileSearchMessage(problem, { url: filters.linkedinUrl }));
       } else if (error.name !== 'AbortError') {
         // Leads Finder answers in words meant for people; Apollo's codes go through the usual translation.
@@ -1205,7 +1229,12 @@ export default function SearchPage() {
     } else if (action === 'professional_only') {
       void handleProfileOnlyRetry();
     } else if (action === 'sign_in') {
-      window.location.assign('/login');
+      try { saveSearchReauthCriteria(window.sessionStorage, reauthScope.current, filters); } catch { /* Still allow sign-in. */ }
+      // Do not return to a login that redirects straight back with the stale
+      // cookie. This is explicit user consent to renew only this browser session.
+      void import('@/lib/supabase').then(async ({ supabase }) => {
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+      }).finally(() => window.location.assign('/login?next=%2Fsearch'));
     } else if (action === 'fix_url') {
       setProfileProblem(null);
       window.requestAnimationFrame(() => {
@@ -2409,7 +2438,7 @@ export default function SearchPage() {
             </Table>
           </div>
         </>
-      ) : !error && !(filters.searchMode === 'linkedin_profile' && profileProblem) ? (
+      ) : !error && !profileProblem ? (
         <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
           <Search className="mb-3 h-5 w-5 text-foreground/70" aria-hidden="true" />
           <p className="font-medium">
@@ -2566,6 +2595,9 @@ export default function SearchPage() {
           className={cn('min-w-0 space-y-4', filters.searchMode === 'filters' && resultsView === 'intro' && 'order-first lg:order-none')}
         >
           {checkpointNotice ? <p role="status" className="text-sm text-foreground/70">{checkpointNotice}</p> : null}
+          {filters.searchMode !== 'linkedin_profile' && profileProblem ? (
+            <ProfileSearchProblemAlert message={profileProblem} busy={isLoading} onAction={handleProfileProblemAction} onDismiss={() => setProfileProblem(null)} />
+          ) : null}
           {filters.searchMode === 'filters' && !usingLeadsFinder ? (
             resultsView === 'intro' ? (
               <>

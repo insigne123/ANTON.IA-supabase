@@ -17,6 +17,7 @@ export type ProfileSearchProblem =
   | 'credits_exhausted'
   | 'daily_limit'
   | 'session_expired'
+  | 'organization_access'
   | 'unknown';
 
 /** retry: same search again · professional_only: name, title and company without revealing contact data · search_company: switch
@@ -63,7 +64,8 @@ export function profileProblemFromProviderCode(code?: string | null): ProfileSea
 export function profileProblemFromHttp(status: number, errorCode?: string | null): ProfileSearchProblem {
   const fromCode = profileProblemFromProviderCode(errorCode);
   if (fromCode) return fromCode;
-  if (status === 401 || status === 403) return 'session_expired';
+  if (status === 401) return 'session_expired';
+  if (status === 403) return 'organization_access';
   if (status === 402) return 'credits_exhausted';
   if (status === 429) return 'daily_limit';
   if (status >= 500) return 'provider_unavailable';
@@ -74,6 +76,7 @@ export function profileProblemFromHttp(status: number, errorCode?: string | null
 export function profileProblemFromMessage(message?: string | null): ProfileSearchProblem {
   const raw = String(message || '');
   const lower = raw.toLowerCase();
+  if (lower.includes('organization_access_required') || lower.includes('acceso a este equipo') || lower.includes('requested organization')) return 'organization_access';
   const fromCode = profileProblemFromProviderCode(raw);
   if (fromCode) return fromCode;
   if (raw.includes('APOLLO_PROFILE_NO_USABLE_DATA')) return 'no_usable_data';
@@ -128,6 +131,9 @@ export function profileSearchMessage(problem: ProfileSearchProblem, context: { u
         description: 'Se renueva mañana. Si lo necesitas antes, pide a quien administra tu cuenta que lo amplíe.', actions: [] };
     case 'session_expired':
       return { problem, title: 'Tu sesión expiró', description: 'Vuelve a entrar y repite la búsqueda.', actions: ['sign_in'] };
+    case 'organization_access':
+      return { problem, title: 'No pudimos confirmar tu acceso al equipo',
+        description: 'Vuelve a entrar para comprobar tu cuenta. Si se repite, consulta a quien administra tu acceso al equipo.', actions: ['sign_in'] };
     default:
       return { problem: 'unknown', title: 'No pudimos completar la búsqueda del perfil',
         description: `Prueba de nuevo. Si se repite, ${lookFor.charAt(0).toLowerCase()}${lookFor.slice(1)}`, actions: ['retry', 'search_company'] };

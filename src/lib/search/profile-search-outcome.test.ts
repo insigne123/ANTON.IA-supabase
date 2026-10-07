@@ -6,7 +6,7 @@ import {
 } from '@/lib/search/profile-search-outcome';
 
 const ALL: ProfileSearchProblem[] = ['invalid_url', 'sales_navigator_url', 'company_page_url', 'not_found', 'no_usable_data',
-  'identity_mismatch', 'provider_unavailable', 'credits_exhausted', 'daily_limit', 'session_expired', 'unknown'];
+  'identity_mismatch', 'provider_unavailable', 'credits_exhausted', 'daily_limit', 'session_expired', 'organization_access', 'unknown'];
 
 test('every problem says what happened in Spanish, never blames the filters, and offers known actions', () => {
   for (const problem of ALL) {
@@ -47,6 +47,8 @@ test('URL, provider, HTTP and legacy message failures map to the right problem',
   assert.equal(profileProblemFromHttp(503), 'provider_unavailable');
   assert.equal(profileProblemFromHttp(429), 'daily_limit');
   assert.equal(profileProblemFromHttp(401), 'session_expired');
+  assert.equal(profileProblemFromHttp(403, 'ORGANIZATION_ACCESS_REQUIRED'), 'organization_access');
+  assert.equal(profileProblemFromMessage('No pudimos confirmar tu acceso a este equipo.'), 'organization_access');
   assert.equal(profileProblemFromHttp(402), 'credits_exhausted');
   assert.equal(profileProblemFromHttp(400, 'APOLLO_PROVIDER_NOT_CONFIGURED'), 'provider_unavailable');
   assert.equal(profileProblemFromHttp(409), 'unknown');
