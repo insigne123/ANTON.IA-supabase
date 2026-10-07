@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { Brain, LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
+import { Brain, Keyboard, LoaderCircle, MoreHorizontal, PanelLeftClose, Pencil, RotateCcw, Search, SquarePen, Trash2, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
   coworkDateBucket, coworkShortTime, coworkStatusCopy, isCoworkActive, type CoworkThreadSummary,
@@ -19,7 +19,7 @@ const TITLE_MAX = 120;
  * When the list could not be read it says so, with «Reintentar», instead of looking empty.
  * `closeStyle` «dismiss» closes with an X, as in a sheet; «collapse» folds the side rail.
  */
-export function CoworkThreadList({ threads, loading, error = '', onRetry, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete,
+export function CoworkThreadList({ threads, loading, error = '', onRetry, selectedThreadId, onSelect, onNew, onClose, onRename, onDelete, onShortcuts,
   idPrefix = 'cowork-rail', closeStyle = 'collapse' }: {
   idPrefix?: string;
   threads: CoworkThreadSummary[];
@@ -33,6 +33,8 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   onClose: () => void;
   onRename?: (rootId: string, title: string) => Promise<boolean>;
   onDelete?: (thread: CoworkThreadSummary) => void;
+  /** «Atajos de teclado» (Plan 13), from the footer; on a desktop, where there is a keyboard. */
+  onShortcuts?: () => void;
 }) {
   const [filter, setFilter] = useState('');
   const [editing, setEditing] = useState<{ rootId: string; draft: string } | null>(null);
@@ -154,10 +156,12 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
         </ul>
       </div>)}
     </div>
-    <div className="shrink-0 border-t border-cw-border px-3 py-2">
-      <CwButton variant="ghost" size="sm" className="w-full justify-start gap-2 px-2.5 text-[13px]" onClick={() => setMemoriesOpen(true)}>
+    <div className="flex shrink-0 items-center gap-1 border-t border-cw-border px-3 py-2">
+      <CwButton variant="ghost" size="sm" className="min-w-0 flex-1 justify-start gap-2 px-2.5 text-[13px]" onClick={() => setMemoriesOpen(true)}>
         <Brain aria-hidden="true" />Lo que Cowork recuerda
       </CwButton>
+      {onShortcuts && <CwButton variant="ghost" size="icon-sm" className="hidden shrink-0 lg:inline-flex" onClick={onShortcuts}
+        aria-label="Atajos de teclado" title="Atajos de teclado"><Keyboard aria-hidden="true" /></CwButton>}
     </div>
     <CoworkMemories open={memoriesOpen} onOpenChange={setMemoriesOpen} />
   </nav>;

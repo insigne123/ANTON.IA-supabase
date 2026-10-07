@@ -91,6 +91,14 @@ test('a search with no match says so and clears in one click', async () => {
   }
 });
 
+test('«Atajos de teclado» sits at the foot of the list on a desktop, when the workspace offers it (Plan 13)', () => {
+  const opened: string[] = [];
+  const html = render({ onShortcuts: () => opened.push('atajos') });
+  assert.match(html, /aria-label="Atajos de teclado"/);
+  assert.match(html, /hidden shrink-0 lg:inline-flex/, 'only where there is a keyboard');
+  assert.doesNotMatch(render({}), /Atajos de teclado/);
+});
+
 test('«Lo que Cowork recuerda» is always at the foot of the list, also with no conversations', () => {
   assert.match(render({}), /Lo que Cowork recuerda/);
   assert.match(render({ threads: [thread(1)] }), /Lo que Cowork recuerda/);

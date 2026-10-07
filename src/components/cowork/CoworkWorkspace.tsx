@@ -8,6 +8,7 @@ import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import { coworkWithMentions, type CoworkMention } from '@/lib/cowork/mentions';
 import { coworkEditedMessage, coworkTurnVersions, coworkVersionLeaf, type CoworkFeedback } from '@/lib/cowork/turn-actions';
+import { COWORK_KEY_HANDLERS, coworkIsMac, coworkShortcut, coworkTypesIntoComposer } from '@/lib/cowork/shortcuts';
 import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
@@ -26,6 +27,7 @@ import type { CoworkContactOption } from './ComposerShortcuts';
 import { CoworkHome, type CoworkOfferDraft } from './CoworkHome';
 import { COWORK_LOW_SEARCH_QUOTA, CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
+import { CoworkShortcuts } from './CoworkShortcuts';
 import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
@@ -133,6 +135,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const [mode, setMode] = useState<CoworkExecutionMode>('approval');
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** «Atajos de teclado» (Plan 13), and whether the keys are a Mac's (read on the client: the server cannot tell). */
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [mac, setMac] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   // Below xl the summary has no room beside the chat: it opens in a sheet.
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -828,6 +833,35 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     return () => window.removeEventListener('keydown', onKey);
   }, [openArtifact, closeArtifact]);
 
+  useEffect(() => { setMac(coworkIsMac(typeof navigator === 'undefined' ? '' : navigator.platform)); }, []);
+
+  // Keyboard shortcuts (Plan 13): a new conversation, searching the conversations and their list; typing where it does nothing
+  // starts the message. An open dialog (a review, «Lo que Cowork recuerda») keeps its keys; the shortcuts' own closes with its key.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const dialogOpen = Boolean(document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]'));
+      const action = coworkShortcut(event, mac);
+      if (action) {
+        if (dialogOpen && !(action === 'help' && shortcutsOpen)) return;
+        event.preventDefault();
+        if (action === 'new') choose(null);
+        else if (action === 'help') setShortcutsOpen(open => !open);
+        else {
+          const rail = isDesktop && !openArtifact;
+          if (rail) setRailCollapsed(false); else setDrawerOpen(true);
+          // Once the list is on screen. With few conversations there is no search field: the list itself is the answer.
+          window.setTimeout(() => document.getElementById(rail ? 'cowork-rail-filter' : 'cowork-drawer-filter')?.focus(), 60);
+        }
+        return;
+      }
+      const focused = document.activeElement;
+      if (!dialogOpen && coworkTypesIntoComposer(event, Boolean(focused && focused !== document.body && focused.closest(COWORK_KEY_HANDLERS)))) composer.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mac, shortcutsOpen, choose, isDesktop, openArtifact]);
+
   const executing = Boolean(latest && latest.run.status === 'waiting_approval' && proposal && (proposal.state === 'approved' || proposal.state === 'running'));
   const status = latest ? coworkStatusCopy(latest.run.status, { executing }) : null;
   const inConversation = Boolean(selected || optimistic);
@@ -860,7 +894,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
 
   return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
-      <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} {...threadActions} />
+      <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} onShortcuts={() => setShortcutsOpen(true)} {...threadActions} />
     </div>
     <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
       <SheetContent side="left" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={returnFocusTo(listOpener)}
@@ -999,5 +1033,6 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
         sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
         budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
     </m.div>}
+    <CoworkShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} mac={mac} />
   </section></CoworkExportProvider></CoworkMotion>;
 }
