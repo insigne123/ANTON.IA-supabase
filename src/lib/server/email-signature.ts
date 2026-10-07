@@ -1,6 +1,10 @@
 import createDOMPurify from 'dompurify';
 import { JSDOM } from 'jsdom';
 import type { OutboundSignature } from '@/lib/email-outbound';
+import { SIGNATURE_MAX_HTML } from '@/lib/email-studio/signature-builder';
+import {
+  SIGNATURE_ALLOWED_ATTR, SIGNATURE_ALLOWED_TAGS, SIGNATURE_URI, SIGNATURE_URI_SAFE_ATTR,
+} from '@/lib/email-studio/signature-import';
 
 /**
  * The signature the person set in «Firmas y estilo», added to every email the server sends for them (Plan 11, PR 3a):
@@ -13,14 +17,12 @@ export type SignatureChannel = 'gmail' | 'outlook';
 export const signatureChannelFor = (provider: string | null | undefined): SignatureChannel =>
   (/^(google|gmail)$/i.test(String(provider || '').trim()) ? 'gmail' : 'outlook');
 
-const MAX_SIGNATURE_HTML = 20_000;
-
 /**
  * An email-safe copy of the stored HTML: text, links, tables and images over https (the uploaded signature image lives in
  * public storage). No scripts, forms, event handlers, embedded data or CSS that loads anything.
  */
 export function sanitizeSendSignature(html: string | null | undefined, text?: string | null): OutboundSignature | null {
-  const raw = String(html || '').slice(0, MAX_SIGNATURE_HTML).trim();
+  const raw = String(html || '').slice(0, SIGNATURE_MAX_HTML).trim();
   const plain = String(text || '').trim();
   if (!raw && !plain) return null;
   const dom = new JSDOM('');
@@ -30,12 +32,9 @@ export function sanitizeSendSignature(html: string | null | undefined, text?: st
       if (data.attrName === 'style' && /url\s*\(|expression\s*\(|@import|javascript:/i.test(data.attrValue)) data.keepAttr = false;
     });
     const clean = raw ? purify.sanitize(raw, {
-      ALLOWED_TAGS: ['p', 'br', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'small', 'a', 'img', 'hr', 'table', 'thead', 'tbody', 'tr', 'td', 'th'],
-      ALLOWED_ATTR: ['href', 'src', 'alt', 'width', 'height', 'style', 'align', 'valign', 'cellpadding', 'cellspacing', 'border', 'target', 'rel', 'title'],
-      ALLOW_DATA_ATTR: false, ALLOW_ARIA_ATTR: false,
-      ALLOWED_URI_REGEXP: /^(?:https:\/\/|mailto:|tel:)/i,
-      // Layout attributes are not addresses: without this, the URL rule above would drop «320» or «0».
-      ADD_URI_SAFE_ATTR: ['width', 'height', 'align', 'valign', 'cellpadding', 'cellspacing', 'border', 'target', 'rel'],
+      // The same rules as «Tu firma actual» when it is pasted (signature-import.ts), so the preview is what goes out.
+      ALLOWED_TAGS: SIGNATURE_ALLOWED_TAGS, ALLOWED_ATTR: SIGNATURE_ALLOWED_ATTR, ALLOW_DATA_ATTR: false, ALLOW_ARIA_ATTR: false,
+      ALLOWED_URI_REGEXP: SIGNATURE_URI, ADD_URI_SAFE_ATTR: SIGNATURE_URI_SAFE_ATTR,
     }) : '';
     dom.window.document.body.innerHTML = clean;
     const visible = dom.window.document.body.textContent?.replace(/\s+/g, ' ').trim() || '';
