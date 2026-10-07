@@ -9,7 +9,10 @@ import {
 import type { Tender } from '@/lib/commercial-opportunities/tenders';
 import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
-import { profileOffer, readOrganizationOffer } from '@/lib/server/suplia-context';
+import { commaItems } from '@/lib/profile/profile-lists';
+import { regionsFromPlaces } from '@/lib/commercial-opportunities/search-terms';
+import { profileOffer, profileOfferDetails, readOrganizationOffer } from '@/lib/server/suplia-context';
+import { generateTenderTerms, type PerfilOffer, type TenderTerms } from './search-ai';
 import type { HiringSearchProfile, HiringStore, HiringSyncSource } from './sync';
 import type { TenderStore } from './tender-sync';
 import type { ProjectStore } from './project-import';
@@ -29,9 +32,10 @@ type ProfileRow = {
 };
 /** Every source on: the profile has no per-source switch yet, and a source without its key is skipped anyway. */
 const ALL_SOURCES = ['hiring', 'tender', 'compra_agil', 'project'];
-const toProfile = (row: ProfileRow): HiringSearchProfile & {
+export type StoredHiringProfile = HiringSearchProfile & {
   keywords: string[]; unspscCodes: string[]; sectors: string[]; minInvestmentUsd: number | null; updatedAt: string;
-} => ({
+};
+const toProfile = (row: ProfileRow): StoredHiringProfile => ({
   id: row.id, name: row.name, offer: row.offer, roles: row.roles || [], regions: row.regions || [], minAds: row.min_ads,
   keywords: row.keywords || [], unspscCodes: row.unspsc_codes || [], sectors: row.seia_sectors || [],
   minInvestmentUsd: row.min_investment_usd === null || row.min_investment_usd === undefined ? null : Number(row.min_investment_usd), updatedAt: row.updated_at,
@@ -53,17 +57,64 @@ export async function findHiringProfile(client: SupabaseClient, scope: Scope) {
   return found.data ? toProfile(found.data as ProfileRow) : null;
 }
 
+export type PerfilForOpportunities = PerfilOffer & { regions: string[] };
+
+/**
+ * What the person's «Perfil» says for «Oportunidades» (Plan 15): what they sell (with the organization's offer when their
+ * own is empty), their services and sector, and the regions of «Tu cliente ideal». Any failure reads as an empty Perfil.
+ */
+export async function readPerfilForOpportunities(client: SupabaseClient, scope: Scope): Promise<PerfilForOpportunities> {
+  try {
+    const { data } = await client.from('profiles').select('*').eq('id', scope.userId).maybeSingle();
+    const person = (data as Record<string, unknown> | null) || null;
+    const details = profileOfferDetails(person);
+    const signatures = person?.signatures;
+    const extended = signatures && typeof signatures === 'object' && !Array.isArray(signatures) ? (signatures as Record<string, unknown>).profile_extended : null;
+    const places = commaItems(extended && typeof extended === 'object' && !Array.isArray(extended) ? (extended as Record<string, unknown>).targetLocations : null);
+    const offer = profileOffer(person) || await readOrganizationOffer(client, scope.organizationId);
+    return { offer: offer || null, services: details.services, sector: details.sector, regions: regionsFromPlaces(places) };
+  } catch {
+    return { offer: null, services: [], sector: null, regions: [] };
+  }
+}
+
 /**
  * What «Define qué buscas» starts with while the organization has no profile (Plan 10): GrupoExpro's pilot values for
- * GrupoExpro, and for anyone else their own offer from «Perfil». Reads only: the profile is created when the person saves.
+ * GrupoExpro, and for anyone else their own offer and the regions of their ideal customer from «Perfil». Reads only: the
+ * profile is created when the person saves.
  */
 export async function readHiringProfileSuggestion(client: SupabaseClient, scope: Scope) {
-  const [organization, person] = await Promise.all([
+  const [organization, perfil] = await Promise.all([
     client.from('organizations').select('name').eq('id', scope.organizationId).maybeSingle(),
-    client.from('profiles').select('*').eq('id', scope.userId).maybeSingle(),
+    readPerfilForOpportunities(client, scope),
   ]);
-  const offer = profileOffer((person.data as Record<string, unknown> | null) || null) || await readOrganizationOffer(client, scope.organizationId);
-  return suggestedHiringProfile({ organizationName: (organization.data as { name?: string } | null)?.name ?? null, offer });
+  const suggestion = suggestedHiringProfile({ organizationName: (organization.data as { name?: string } | null)?.name ?? null, offer: perfil.offer });
+  return suggestion.pilot ? suggestion : { ...suggestion, regions: perfil.regions };
+}
+
+type Terms = (perfil: PerfilOffer) => Promise<TenderTerms>;
+
+/**
+ * The search follows «Perfil» (Plan 15): the offer always comes from there, and the words of the tender search and the SEIA
+ * sectors are generated from it when the profile has none yet, when the offer changed, or when the person asks again.
+ * Words the person adjusted stay until the offer changes. Without an offer in «Perfil», nothing changes.
+ */
+export async function refreshHiringProfileFromPerfil(client: SupabaseClient, scope: Scope, profile: StoredHiringProfile,
+  options: { force?: boolean; terms?: Terms; perfil?: PerfilForOpportunities } = {}): Promise<StoredHiringProfile> {
+  const perfil = options.perfil ?? await readPerfilForOpportunities(client, scope);
+  const offer = perfil.offer?.trim() || '';
+  const offerChanged = Boolean(offer) && offer !== profile.offer;
+  if (!options.force && !offerChanged && profile.keywords.length) return profile;
+  if (!offer && !perfil.services.length) return profile;
+  const terms = await (options.terms ?? generateTenderTerms)(perfil);
+  const { data, error } = await client.from('commercial_opportunity_profiles').update({
+    ...(offer ? { offer: offer.slice(0, 2000) } : {}),
+    ...(terms.keywords.length ? { keywords: terms.keywords } : {}),
+    ...(terms.sectors.length ? { seia_sectors: terms.sectors } : {}),
+    updated_at: new Date().toISOString(),
+  }).eq('id', profile.id).eq('organization_id', scope.organizationId).select(PROFILE_COLUMNS).maybeSingle();
+  if (error) fail('actualizar la búsqueda con tu Perfil', error);
+  return data ? toProfile(data as ProfileRow) : profile;
 }
 
 /** The organization's first profile, from what the person saved in «Define qué buscas». */
@@ -83,9 +134,11 @@ export async function createHiringProfile(client: SupabaseClient, scope: Scope, 
 const list = (max: number, length: number) => z.array(z.string().transform(value => value.replace(/\s+/g, ' ').trim()).pipe(z.string().min(2).max(length)))
   .max(max).transform(values => [...new Map(values.map(value => [value.toLowerCase(), value])).values()]);
 export const hiringProfilePatchSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  offer: z.string().trim().max(2000),
-  roles: list(40, 80).refine(values => values.length > 0, 'Agrega al menos un cargo.'),
+  name: z.string().trim().min(1).max(120).default('Qué buscamos'),
+  /** Plan 15: the server takes the offer from «Perfil»; this one is kept only while «Perfil» has none. */
+  offer: z.string().trim().max(2000).default(''),
+  // The roles may be chosen when searching (Plan 15): a profile can start without them.
+  roles: list(40, 80),
   regions: list(20, 60),
   minAds: z.number().int().min(1).max(100),
   keywords: list(40, 80).optional(),
@@ -102,6 +155,15 @@ export async function updateHiringProfile(client: SupabaseClient, scope: Scope, 
     sources: ALL_SOURCES, updated_at: new Date().toISOString(),
   }).eq('id', id).eq('organization_id', scope.organizationId).select(PROFILE_COLUMNS).maybeSingle();
   if (error) fail('guardar el perfil de búsqueda', error);
+  return data ? toProfile(data as ProfileRow) : null;
+}
+
+/** The roles and regions of the last search by hand, kept for the daily search (Plan 15: «Usar en la búsqueda diaria»). */
+export async function saveSearchChoice(client: SupabaseClient, scope: Scope, id: string, choice: { roles: string[]; regions: string[] }) {
+  const { data, error } = await client.from('commercial_opportunity_profiles').update({
+    roles: choice.roles.slice(0, 40), regions: choice.regions.slice(0, 20), updated_at: new Date().toISOString(),
+  }).eq('id', id).eq('organization_id', scope.organizationId).select(PROFILE_COLUMNS).maybeSingle();
+  if (error) fail('guardar los cargos y regiones', error);
   return data ? toProfile(data as ProfileRow) : null;
 }
 

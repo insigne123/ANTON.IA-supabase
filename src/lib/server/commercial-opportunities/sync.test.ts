@@ -54,12 +54,12 @@ test('a search regroups the window: three ads from yesterday and two today reach
   const result = await runHiringSync({
     store: memory.store, profile: PROFILE, env: ENV, capUsd: 10, organizationId: ORG, now: NOW,
     sources: {
-      jsearch: async input => { asked.push(input.query); return { ads: input.query === 'operario' ? [ad('jsearch', 'n1', 'Operaria de planta', 'Minera Norte S.A.')] : [], requests: 1, costUsd: 0.0025 }; },
+      jsearch: async input => { asked.push(input.query); return { ads: input.query === 'operario Antofagasta' ? [ad('jsearch', 'n1', 'Operaria de planta', 'Minera Norte S.A.')] : [], requests: 1, costUsd: 0.0025 }; },
       fantastic: async () => ({ ads: [ad('linkedin', 'l1', 'Operario', 'Agrosuper'), ad('linkedin', 'l2', 'Conductor', 'Adecco Chile'),
         ad('linkedin', 'l3', 'Guardia', 'Minera Norte S.A.')], fetched: 3, costUsd: 0.015 }),
     },
   });
-  assert.deepEqual(asked, ['operario', 'bodeguero', 'guardia']);
+  assert.deepEqual(asked, ['operario Antofagasta', 'bodeguero Antofagasta', 'guardia Antofagasta'], 'each role in the region chosen');
   assert.equal(result.status, 'done');
   if (result.status !== 'done') return;
   assert.equal(result.fetched, 4);
@@ -165,13 +165,41 @@ test('JSearch queries are spaced, uncertainty is counted and useful partial resu
     only: ['jsearch'], wait: async ms => { waits.push(ms); }, sources: {
       jsearch: async input => {
         asked.push(input.query);
-        if (input.query === 'bodeguero') throw new JSearchRequestError('JSearch respondió 500.', 0.0025);
+        if (input.query === 'bodeguero Antofagasta') throw new JSearchRequestError('JSearch respondió 500.', 0.0025);
         return { ads: [ad('jsearch', input.query, input.query, 'Acme')], requests: 1, costUsd: 0.0025 };
       }, fantastic: async () => assert.fail('not selected'),
     } });
   assert.deepEqual(waits, [1100, 1100]);
-  assert.deepEqual(asked, PROFILE.roles);
+  assert.deepEqual(asked, PROFILE.roles.map(role => `${role} Antofagasta`));
   assert.equal(result.status, 'partial');
   assert.equal(memory.runs[0].costUsd, 0.0075);
   assert.equal(memory.signals.length, 2);
+});
+
+test('each role brings its variants: they are asked too, an ad for one counts for its role, and other regions do not count', async () => {
+  const memory = memoryStore();
+  const asked: string[] = [];
+  const titles: string[][] = [];
+  const places: string[][] = [];
+  const variants = { operario: ['operator', 'ayudante de producción'] };
+  const plan = hiringSyncPlan(PROFILE, ENV, { variants, cap: 4 });
+  assert.deepEqual(plan.queries, ['operario Antofagasta', 'bodeguero Antofagasta', 'guardia Antofagasta', 'operator Antofagasta']);
+  assert.equal(plan.left, 1, 'what does not fit is reported');
+  const result = await runHiringSync({ store: memory.store, profile: PROFILE, env: ENV, capUsd: 10, organizationId: ORG, now: NOW, variants, queryCap: 4,
+    wait: async () => {}, sources: {
+      jsearch: async input => { asked.push(input.query); return { ads: [], requests: 1, costUsd: 0.0025 }; },
+      fantastic: async input => {
+        titles.push(input.titles); places.push(input.locations || []);
+        const santiago = { ...ad('linkedin', 'l4', 'Machine Operator', 'Minera Norte S.A.'), location: 'Santiago', region: 'Metropolitana' };
+        return { ads: [ad('linkedin', 'l1', 'Machine Operator', 'Minera Norte S.A.'), ad('linkedin', 'l2', 'Operario', 'Minera Norte S.A.'),
+          ad('linkedin', 'l3', 'Bodeguero', 'Minera Norte S.A.'), santiago], fetched: 4, costUsd: 0.02 };
+      },
+    } });
+  assert.deepEqual(asked, plan.queries);
+  assert.deepEqual(titles, [['operario', 'bodeguero', 'guardia', 'operator', 'ayudante de producción']]);
+  assert.deepEqual(places, [['Antofagasta, Chile']]);
+  assert.equal(result.status, 'done');
+  const minera = memory.opportunities.get('name:minera norte');
+  assert.equal(minera?.signal_count, 3, 'the ad from Santiago is left out of the count');
+  assert.deepEqual(minera?.data.roles, [{ role: 'operario', ads: 2 }, { role: 'bodeguero', ads: 1 }], '«Machine Operator» counts for «operario»');
 });

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertCircle, Briefcase, Building2, ChevronDown, Copy, ExternalLink, Factory, Gavel, KeyRound, Landmark, Loader2, Pencil, RotateCcw, Search, Star, Upload, Users, X } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { MercadoPublicoTicketCard, TicketGuide } from '@/components/commercial-opportunities/MercadoPublicoTicket';
+import { HiringSearchDialog, type HiringSearchChoice } from '@/components/commercial-opportunities/HiringSearchDialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -55,10 +56,13 @@ type ProjectOpportunity = {
 };
 /** What «Qué buscamos» holds before it is saved: a saved profile, or the suggestion «Define qué buscas» starts from. */
 type ProfileDraft = Pick<Profile, 'name' | 'offer' | 'roles' | 'regions' | 'minAds' | 'keywords' | 'unspscCodes' | 'sectors' | 'minInvestmentUsd'>;
+type Plan = { sources: PlanSource[]; estimateUsd: number; queries: string[]; left: number };
+/** What «Perfil» says today (Plan 15): the offer the search uses and the regions of the ideal customer. */
+type Perfil = { offer: string | null; regions: string[] };
 type Overview = {
   /** Null until the organization saves «Define qué buscas» (Plan 10): opening the page creates nothing. */
-  profile: Profile | null; suggestion?: HiringProfileSuggestion;
-  plan: { sources: PlanSource[]; estimateUsd: number }; month: { spentUsd: number; capUsd: number };
+  profile: Profile | null; suggestion?: HiringProfileSuggestion; perfil: Perfil;
+  plan: Plan; month: { spentUsd: number; capUsd: number };
   tenderSearch: { ticket: boolean; ticketStatus?: TicketStatus; keywords: string[]; unspscCodes: string[] };
   opportunities: Opportunity[]; tenders: TenderOpportunity[]; projects: ProjectOpportunity[]; runs: Run[];
 };
@@ -113,12 +117,12 @@ export function OpportunitiesWorkspace() {
     ...current, tenderSearch: { ...current.tenderSearch, ticketStatus: status, ticket: status.connected || status.shared },
   });
 
-  const runSearch = async (kind: Tab) => {
+  const runSearch = async (kind: Tab, choice?: HiringSearchChoice) => {
     setConfirmOpen(false);
     setRunning(true);
     try {
       const response = await fetch('/api/commercial-opportunities/runs', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, ...(choice || {}) }),
       });
       if (kind === 'tenders') {
         const result = await readJson<TenderResult>(response);
@@ -198,11 +202,11 @@ export function OpportunitiesWorkspace() {
   const visibleTenders = useMemo(() => filterOpportunities(tenderItems, filter, query), [tenderItems, filter, query]);
   const visibleProjects = useMemo(() => filterOpportunities(projectItems, filter, query), [projectItems, filter, query]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const enabledSources = overview?.plan.sources.filter(source => source.enabled) || [];
-  const overCap = overview ? overview.month.spentUsd + overview.plan.estimateUsd > overview.month.capUsd : false;
-  const hiringDisabled = running || !overview || !enabledSources.length;
+  // The roles are chosen in the dialog (Plan 15): it opens whenever a source of job ads is connected.
+  const hiringDisabled = running || !overview || overview.plan.sources.every(source => Boolean(source.missing));
+  // Without words yet, the search generates them from the offer in «Perfil».
   const tendersDisabled = running || !overview || !overview.tenderSearch.ticket
-    || (!overview.tenderSearch.keywords.length && !overview.tenderSearch.unspscCodes.length);
+    || (!overview.tenderSearch.keywords.length && !overview.tenderSearch.unspscCodes.length && !overview.perfil?.offer);
   const searchDisabled = tab === 'hiring' ? hiringDisabled : tab === 'tenders' ? tendersDisabled : running || !overview;
   const startSearch = () => (tab === 'hiring' ? setConfirmOpen(true) : tab === 'tenders' ? void runSearch('tenders') : fileInput.current?.click());
 
@@ -244,12 +248,12 @@ export function OpportunitiesWorkspace() {
         <>
           <Welcome overview={overview} onStart={() => setEditOpen(true)} onGuide={() => setGuideOpen(true)} />
           <TicketGuide open={guideOpen} onOpenChange={setGuideOpen} onSaved={updateTicket} />
-          <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.suggestion || EMPTY_DRAFT} firstTime pilot={Boolean(overview.suggestion?.pilot)}
+          <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.suggestion || EMPTY_DRAFT} perfil={overview.perfil} firstTime pilot={Boolean(overview.suggestion?.pilot)}
             onSaved={next => {
               setOverview(current => current && { ...current, profile: next.profile, plan: next.plan });
               void load();
-              // «Guardar y buscar»: the search of companies costs money, so it goes through the same confirmation as «Buscar ahora».
-              if (next.plan.sources.some(source => source.enabled)) setConfirmOpen(true);
+              // «Guardar y buscar»: the search of companies costs money, so it goes through the same dialog as «Buscar ahora».
+              if (next.plan.sources.some(source => !source.missing)) setConfirmOpen(true);
             }} />
         </>
       ) : hasProfile(overview) ? (
@@ -332,9 +336,10 @@ export function OpportunitiesWorkspace() {
             ))}
           </Tabs>
 
-          <RunDialog open={confirmOpen} onOpenChange={setConfirmOpen} overview={overview} overCap={overCap} onConfirm={() => void runSearch('hiring')} />
+          <HiringSearchDialog open={confirmOpen} onOpenChange={setConfirmOpen} initialRoles={overview.profile.roles} initialRegions={overview.profile.regions}
+            month={overview.month} onConfirm={choice => void runSearch('hiring', choice)} />
           <TicketGuide open={guideOpen} onOpenChange={setGuideOpen} onSaved={updateTicket} />
-          <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.profile}
+          <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.profile} perfil={overview.perfil}
             onSaved={next => { setOverview(current => current && { ...current, profile: next.profile, plan: next.plan }); void load(); }} />
         </>
       ) : null}
@@ -356,12 +361,12 @@ function Welcome({ overview, onStart, onGuide }: { overview: Overview; onStart: 
     { icon: Factory, title: 'Proyectos de inversión', body: 'Proyectos del SEIA por partir, con la empresa titular. Subes el archivo una vez al mes.' },
   ];
   const origin = overview.suggestion?.pilot ? 'Parte con valores sugeridos para tu organización, que revisas antes de guardar.'
-    : overview.suggestion?.offer ? 'Parte con la oferta de tu Perfil.' : 'Toma un par de minutos.';
+    : overview.perfil?.offer ? 'Lo que vendes sale de tu Perfil.' : 'Antes, completa en Perfil qué vendes: de ahí salen las palabras para licitaciones.';
   return (
     <section aria-labelledby="opportunities-welcome-title" className="rounded-xl border border-border/70 bg-card p-5 shadow-sm sm:p-6">
       <h2 id="opportunities-welcome-title" className="text-lg font-semibold text-foreground">Define qué buscas</h2>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        Cuéntanos qué ofreces, los cargos que cubres y cómo nombran tu servicio los organismos públicos. Con eso buscamos cada mañana a quién ofrecérselo.
+        Tomamos lo que vendes de tu Perfil y con eso armamos la búsqueda: las palabras para licitaciones y los sectores de proyectos se generan solos. Tú eliges los cargos y las regiones cuando buscas.
       </p>
       <ul className="mt-5 grid gap-3 md:grid-cols-3">
         {sources.map(source => (
@@ -403,14 +408,16 @@ function SearchSummary({ overview, running }: { overview: ReadyOverview; running
   return (
     <section aria-label="Qué buscamos" className="grid gap-4 rounded-xl border border-border/70 bg-card p-4 shadow-sm md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Qué buscamos · {profile.name}</p>
-        {profile.offer ? <p className="line-clamp-2 text-sm text-foreground">{profile.offer}</p> : null}
-        <ul className="flex flex-wrap gap-1.5" aria-label="Cargos">
-          {profile.roles.slice(0, 8).map(role => <li key={role} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{role}</li>)}
-          {profile.roles.length > 8 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground/70">+{profile.roles.length - 8} más</li> : null}
-        </ul>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Búsqueda diaria</p>
+        <OfferFromPerfil offer={overview.perfil?.offer || profile.offer} />
+        {profile.roles.length ? (
+          <ul className="flex flex-wrap gap-1.5" aria-label="Cargos de la búsqueda diaria">
+            {profile.roles.slice(0, 8).map(role => <li key={role} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{role}</li>)}
+            {profile.roles.length > 8 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground/70">+{profile.roles.length - 8} más</li> : null}
+          </ul>
+        ) : <p className="text-sm text-muted-foreground">Sin cargos guardados: elígelos al pulsar «Buscar ahora».</p>}
         <p className="text-xs text-muted-foreground">
-          {profile.minAds} o más avisos en 30 días · {profile.regions.length ? profile.regions.join(', ') : 'todo Chile'}
+          {profile.minAds} o más avisos en 30 días · {profile.regions.length ? profile.regions.join(', ') : 'todo Chile'} · con otras formas de escribir cada cargo
         </p>
       </div>
       <div className="space-y-3 border-t border-border/60 pt-3 md:border-l md:border-t-0 md:pl-4 md:pt-0">
@@ -440,6 +447,25 @@ function SearchSummary({ overview, running }: { overview: ReadyOverview; running
         ) : null}
       </div>
     </section>
+  );
+}
+
+/** What the person sells, read from «Perfil» (Plan 15): shown, never edited here. */
+function OfferFromPerfil({ offer }: { offer: string | null | undefined }) {
+  if (!offer) {
+    return (
+      <p className="rounded-lg bg-cw-warning-soft px-2.5 py-1.5 text-xs text-cw-warning">
+        Tu Perfil no dice qué vendes. <Link href="/profile" className="font-medium underline underline-offset-4">Complétalo</Link> para generar las palabras de licitaciones.
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm text-foreground">
+      <span className="line-clamp-2">{offer}</span>
+      <Link href="/profile" className="mt-0.5 inline-block rounded text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        De tu Perfil · editar
+      </Link>
+    </p>
   );
 }
 
@@ -583,12 +609,14 @@ function TenderSummary({ overview, running, onTicketChange, onOpenGuide }: {
     <section aria-label="Qué buscamos en licitaciones" className="grid gap-4 rounded-xl border border-border/70 bg-card p-4 shadow-sm md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-2">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Qué buscamos en Mercado Público y Compra Ágil</p>
+        <p className="text-xs text-muted-foreground">Palabras generadas de lo que vendes en tu Perfil; se actualizan cuando cambias tu oferta.</p>
         {tenderSearch.keywords.length ? (
           <ul className="flex flex-wrap gap-1.5" aria-label="Palabras">
             {tenderSearch.keywords.slice(0, 10).map(keyword => <li key={keyword} className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{keyword}</li>)}
             {tenderSearch.keywords.length > 10 ? <li className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-foreground/70">+{tenderSearch.keywords.length - 10} más</li> : null}
           </ul>
-        ) : <p className="text-sm text-muted-foreground">Aún no hay palabras para buscar. Agrégalas en «Editar búsqueda».</p>}
+        ) : overview.perfil?.offer ? <p className="text-sm text-muted-foreground">Se generan en tu primera búsqueda.</p>
+          : <OfferFromPerfil offer={null} />}
         <p className="text-xs text-muted-foreground">
           {tenderSearch.unspscCodes.length ? `Códigos UNSPSC: ${tenderSearch.unspscCodes.join(', ')} · ` : ''}
           Abiertas y publicadas en las últimas dos semanas · {profile.regions.length ? `suman calce ${profile.regions.join(', ')}` : 'todo Chile'}
@@ -838,54 +866,17 @@ function ProjectEmpty({ overview, filter, query, disabled, onUpload }: {
   );
 }
 
-function RunDialog({ open, onOpenChange, overview, overCap, onConfirm }: {
-  open: boolean; onOpenChange: (open: boolean) => void; overview: ReadyOverview; overCap: boolean; onConfirm: () => void;
-}) {
-  const { plan, month } = overview;
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Buscar empresas que están contratando</AlertDialogTitle>
-          <AlertDialogDescription>Se buscan los avisos de tus {overview.profile.roles.length} cargos y se agrupan por empresa. Puede tardar hasta 2 minutos.</AlertDialogDescription>
-        </AlertDialogHeader>
-        <ul className="space-y-2 text-sm">
-          {plan.sources.map(source => (
-            <li key={source.source} className="flex items-start justify-between gap-3 rounded-lg border border-border/60 px-3 py-2">
-              <div>
-                <p className="font-medium text-foreground">{source.label}</p>
-                <p className="text-xs text-muted-foreground">
-                  {source.enabled ? (source.source === 'jsearch' ? `${source.requests} consultas, avisos del último mes` : `hasta ${source.requests} avisos de los últimos 7 días`) : 'No está conectada'}
-                </p>
-              </div>
-              <span className={cn('shrink-0 tabular-nums', source.enabled ? 'text-foreground' : 'text-muted-foreground')}>{source.enabled ? `hasta ${formatUsd(source.estimateUsd)}` : 'no se usa'}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="text-sm text-foreground">
-          Costo máximo: <strong>{formatUsd(plan.estimateUsd)}</strong>. Este mes llevas {formatUsd(month.spentUsd)} de {formatUsd(month.capUsd)}.
-        </p>
-        {overCap ? <p className="rounded-lg bg-cw-warning-soft px-3 py-2 text-sm text-cw-warning">Esta búsqueda pasaría el tope de gasto del mes. Espera al próximo mes o pide a quien administra ANTON.IA que suba el tope.</p> : null}
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} disabled={overCap}>Buscar ahora</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function ProfileSheet({ open, onOpenChange, profile, firstTime = false, pilot = false, onSaved }: {
+function ProfileSheet({ open, onOpenChange, profile, perfil, firstTime = false, pilot = false, onSaved }: {
   open: boolean; onOpenChange: (open: boolean) => void; profile: ProfileDraft;
+  /** What «Perfil» says today (Plan 15): the offer comes from there and is never edited here. */
+  perfil: Perfil;
   /** «Define qué buscas»: the first save creates the profile and goes on to search. */
   firstTime?: boolean;
   /** The values come from the pilot's suggestion, to be reviewed before saving. */
   pilot?: boolean;
-  onSaved: (next: { profile: Profile; plan: Overview['plan'] }) => void;
+  onSaved: (next: { profile: Profile; plan: Plan }) => void;
 }) {
   const { toast } = useToast();
-  const [name, setName] = useState(profile.name);
-  const [offer, setOffer] = useState(profile.offer);
   const [roles, setRoles] = useState(profile.roles.join('\n'));
   const [regions, setRegions] = useState<string[]>(profile.regions);
   const [minAds, setMinAds] = useState(String(profile.minAds));
@@ -893,41 +884,44 @@ function ProfileSheet({ open, onOpenChange, profile, firstTime = false, pilot = 
   const [codes, setCodes] = useState(profile.unspscCodes.join(', '));
   const [sectors, setSectors] = useState<string[]>(profile.sectors);
   const [minInvestment, setMinInvestment] = useState(profile.minInvestmentUsd ? String(profile.minInvestmentUsd / 1_000_000) : '');
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<'save' | 'regenerate' | null>(null);
   const [problem, setProblem] = useState('');
   useEffect(() => {
     if (!open) return;
-    setName(profile.name); setOffer(profile.offer); setRoles(profile.roles.join('\n')); setRegions(profile.regions); setMinAds(String(profile.minAds));
+    setRoles(profile.roles.join('\n')); setRegions(profile.regions); setMinAds(String(profile.minAds));
     setKeywords(profile.keywords.join('\n')); setCodes(profile.unspscCodes.join(', ')); setSectors(profile.sectors);
     setMinInvestment(profile.minInvestmentUsd ? String(profile.minInvestmentUsd / 1_000_000) : ''); setProblem('');
   }, [open, profile]);
 
-  const save = async () => {
+  const save = async (regenerate = false) => {
     const roleList = parseList(roles);
     const keywordList = parseList(keywords);
     const codeList = parseList(codes).map(code => code.replace(/\s/g, ''));
     const minimum = Number(minAds);
-    if (!name.trim()) return setProblem('Ponle un nombre a la búsqueda.');
-    if (!roleList.length) return setProblem('Agrega al menos un cargo.');
     if (!Number.isInteger(minimum) || minimum < 1 || minimum > 100) return setProblem('El mínimo de avisos va de 1 a 100.');
     if (codeList.some(code => !/^\d{2,8}$/.test(code))) return setProblem('Los códigos UNSPSC son números de 2 a 8 dígitos, separados por coma.');
     const investment = minInvestment.trim() ? Number(minInvestment.replace(',', '.')) : null;
     if (investment !== null && (!Number.isFinite(investment) || investment < 0)) return setProblem('La inversión mínima es un número de millones de dólares.');
-    setSaving(true);
+    setSaving(regenerate ? 'regenerate' : 'save');
     setProblem('');
     try {
-      const next = await readJson<{ profile: Profile; plan: Overview['plan'] }>(await fetch('/api/commercial-opportunities/profile', {
+      const next = await readJson<{ profile: Profile; plan: Plan }>(await fetch('/api/commercial-opportunities/profile', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), offer: offer.trim(), roles: roleList, regions, minAds: minimum, keywords: keywordList, unspscCodes: codeList,
-          sectors, minInvestmentUsd: investment === null ? null : Math.round(investment * 1_000_000) }),
+        body: JSON.stringify({ name: profile.name, roles: roleList, regions, minAds: minimum, keywords: keywordList, unspscCodes: codeList,
+          sectors, minInvestmentUsd: investment === null ? null : Math.round(investment * 1_000_000), ...(regenerate ? { regenerate: true } : {}) }),
       }));
       onSaved(next);
+      if (regenerate) {
+        setKeywords(next.profile.keywords.join('\n')); setSectors(next.profile.sectors);
+        toast({ title: 'Palabras generadas de tu Perfil', description: `${next.profile.keywords.length} palabras para licitaciones y Compra Ágil.` });
+        return;
+      }
       onOpenChange(false);
-      toast({ title: 'Búsqueda guardada', description: firstTime ? 'Desde mañana se busca sola cada mañana con estos criterios.' : 'La próxima búsqueda usa estos cargos y regiones.' });
+      toast({ title: 'Búsqueda guardada', description: firstTime ? 'Desde mañana se busca sola cada mañana con estos criterios.' : 'La búsqueda diaria usa estos cargos y regiones.' });
     } catch (failure) {
       setProblem(failure instanceof Error ? failure.message : 'No se pudo guardar.');
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
@@ -935,75 +929,98 @@ function ProfileSheet({ open, onOpenChange, profile, firstTime = false, pilot = 
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle>{firstTime ? 'Define qué buscas' : 'Qué buscamos'}</SheetTitle>
+          <SheetTitle>{firstTime ? 'Define qué buscas' : 'Ajustes de la búsqueda'}</SheetTitle>
           <SheetDescription>
-            {!firstTime ? 'Los cargos definen qué avisos se buscan; las regiones y el tamaño suben el calce.'
-              : pilot ? 'Partimos de valores sugeridos para tu organización. Revísalos y ajústalos: nada se guarda hasta que pulses «Guardar y buscar».'
-                : profile.offer ? 'Partimos de la oferta de tu Perfil. Agrega los cargos que cubres y cómo nombran tu servicio los organismos públicos.'
-                  : 'Cuenta qué ofreces, los cargos que cubres y cómo nombran tu servicio los organismos públicos. Nada se guarda hasta que lo confirmes.'}
+            {pilot ? 'Partimos de valores sugeridos para tu organización. Revísalos: nada se guarda hasta que pulses «Guardar y buscar».'
+              : 'Lo que vendes sale de tu Perfil y con eso generamos las palabras para licitaciones. Aquí eliges los cargos y regiones de la búsqueda diaria; al buscar puedes elegir otros.'}
           </SheetDescription>
         </SheetHeader>
         <form className="mt-4 flex flex-1 flex-col gap-4" onSubmit={event => { event.preventDefault(); void save(); }}>
+          <section aria-labelledby="opportunity-offer" className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 p-3">
+            <h3 id="opportunity-offer" className="text-sm font-medium text-foreground">Lo que vendes</h3>
+            <OfferFromPerfil offer={perfil.offer || profile.offer} />
+          </section>
           <div className="space-y-1.5">
-            <Label htmlFor="opportunity-name">Nombre</Label>
-            <Input id="opportunity-name" value={name} maxLength={120} onChange={event => setName(event.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="opportunity-offer">Qué ofreces</Label>
-            <Textarea id="opportunity-offer" value={offer} maxLength={2000} rows={3} onChange={event => setOffer(event.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="opportunity-roles">Cargos que buscan las empresas</Label>
-            <Textarea id="opportunity-roles" value={roles} rows={6} onChange={event => setRoles(event.target.value)} aria-describedby="opportunity-roles-hint" />
-            <p id="opportunity-roles-hint" className="text-xs text-muted-foreground">Uno por línea o separados por coma. Se consultan los 10 primeros en Google for Jobs.</p>
+            <Label htmlFor="opportunity-roles">Cargos de la búsqueda diaria</Label>
+            <Textarea id="opportunity-roles" value={roles} rows={5} onChange={event => setRoles(event.target.value)} aria-describedby="opportunity-roles-hint" />
+            <p id="opportunity-roles-hint" className="text-xs text-muted-foreground">Los que publican las empresas que te sirven, uno por línea o separados por coma. Buscamos también sus variantes, en español e inglés.</p>
           </div>
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-foreground">Regiones que suman calce</legend>
-            <p className="text-xs text-muted-foreground">Sin ninguna, se busca en todo Chile sin preferencia.</p>
+            <legend className="text-sm font-medium text-foreground">Regiones de la búsqueda diaria</legend>
+            <p className="text-xs text-muted-foreground">
+              Sin ninguna, se busca en todo Chile.{perfil.regions.length && !regions.length ? ' ' : ''}
+              {perfil.regions.length && !regions.length ? (
+                <button type="button" onClick={() => setRegions(perfil.regions)} className="rounded font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  Usar las de tu Perfil ({perfil.regions.join(', ')})
+                </button>
+              ) : null}
+            </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {CHILE_REGIONS.map(region => (
                 <label key={region} className="flex items-center gap-2 text-sm text-foreground">
                   <Checkbox checked={regions.includes(region)}
-                    onCheckedChange={checked => setRegions(current => checked ? [...current, region] : current.filter(item => item !== region))} />
+                    onCheckedChange={checked => setRegions(current => checked ? CHILE_REGIONS.filter(item => item === region || current.includes(item)) : current.filter(item => item !== region))} />
                   {region}
                 </label>
               ))}
             </div>
           </fieldset>
           <div className="space-y-1.5">
-            <Label htmlFor="opportunity-keywords">Palabras para licitaciones y Compra Ágil</Label>
-            <Textarea id="opportunity-keywords" value={keywords} rows={5} onChange={event => setKeywords(event.target.value)} aria-describedby="opportunity-keywords-hint" />
-            <p id="opportunity-keywords-hint" className="text-xs text-muted-foreground">Como las escriben los organismos: «suministro de personal», «outsourcing». Una por línea; se usan las 12 primeras.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="opportunity-codes">Códigos UNSPSC (opcional)</Label>
-            <Input id="opportunity-codes" value={codes} inputMode="numeric" onChange={event => setCodes(event.target.value)} placeholder="Ej. 80111600, 801116" aria-describedby="opportunity-codes-hint" />
-            <p id="opportunity-codes-hint" className="text-xs text-muted-foreground">Del catálogo de Mercado Público. Un código corto incluye a toda su familia.</p>
-          </div>
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-foreground">Sectores de proyectos del SEIA</legend>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {SEIA_SECTORS.map(sector => (
-                <label key={sector.id} className="flex items-center gap-2 text-sm text-foreground">
-                  <Checkbox checked={sectors.includes(sector.id)}
-                    onCheckedChange={checked => setSectors(current => checked ? [...current, sector.id] : current.filter(item => item !== sector.id))} />
-                  {sector.label}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <div className="space-y-1.5">
-            <Label htmlFor="opportunity-investment">Inversión mínima de un proyecto (millones de US$)</Label>
-            <Input id="opportunity-investment" value={minInvestment} inputMode="decimal" onChange={event => setMinInvestment(event.target.value)} placeholder="Ej. 10" className="w-32" />
-          </div>
-          <div className="space-y-1.5">
             <Label htmlFor="opportunity-min">Mínimo de avisos en 30 días</Label>
             <Input id="opportunity-min" type="number" inputMode="numeric" min={1} max={100} value={minAds} onChange={event => setMinAds(event.target.value)} className="w-28" />
           </div>
+          <Collapsible defaultOpen={pilot} className="rounded-lg border border-border/60">
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" className="group flex h-auto w-full items-center justify-between px-3 py-2.5 text-left">
+                <span>
+                  <span className="block text-sm font-medium text-foreground">Licitaciones y proyectos</span>
+                  <span className="block text-xs font-normal text-muted-foreground">Automático desde tu Perfil · {profile.keywords.length ? `${profile.keywords.length} palabras` : 'se generan al guardar'}</span>
+                </span>
+                <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-4 border-t border-border/60 p-3">
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor="opportunity-keywords">Palabras para licitaciones y Compra Ágil</Label>
+                  {/* The first save generates them; afterwards they can be asked for again. */}
+                  {!firstTime ? (
+                    <Button type="button" size="sm" variant="ghost" className="h-8" disabled={Boolean(saving) || !(perfil.offer || profile.offer)} onClick={() => void save(true)}>
+                      {saving === 'regenerate' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RotateCcw className="h-4 w-4" aria-hidden="true" />}
+                      Volver a generar
+                    </Button>
+                  ) : null}
+                </div>
+                <Textarea id="opportunity-keywords" value={keywords} rows={5} onChange={event => setKeywords(event.target.value)} aria-describedby="opportunity-keywords-hint" />
+                <p id="opportunity-keywords-hint" className="text-xs text-muted-foreground">Como las escriben los organismos públicos. Las generamos de tu Perfil y se actualizan cuando cambias tu oferta; puedes ajustarlas.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="opportunity-codes">Códigos UNSPSC (opcional)</Label>
+                <Input id="opportunity-codes" value={codes} inputMode="numeric" onChange={event => setCodes(event.target.value)} placeholder="Ej. 80111600, 801116" aria-describedby="opportunity-codes-hint" />
+                <p id="opportunity-codes-hint" className="text-xs text-muted-foreground">Del catálogo de Mercado Público. Un código corto incluye a toda su familia.</p>
+              </div>
+              <fieldset className="space-y-2">
+                <legend className="text-sm font-medium text-foreground">Sectores de proyectos del SEIA</legend>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {SEIA_SECTORS.map(sector => (
+                    <label key={sector.id} className="flex items-center gap-2 text-sm text-foreground">
+                      <Checkbox checked={sectors.includes(sector.id)}
+                        onCheckedChange={checked => setSectors(current => checked ? [...current, sector.id] : current.filter(item => item !== sector.id))} />
+                      {sector.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="space-y-1.5">
+                <Label htmlFor="opportunity-investment">Inversión mínima de un proyecto (millones de US$)</Label>
+                <Input id="opportunity-investment" value={minInvestment} inputMode="decimal" onChange={event => setMinInvestment(event.target.value)} placeholder="Ej. 10" className="w-32" />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
           {problem ? <p role="alert" className="text-sm text-destructive">{problem}</p> : null}
           <SheetFooter className="mt-auto gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-            <Button type="submit" disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{firstTime ? 'Guardar y buscar' : 'Guardar'}</Button>
+            <Button type="submit" disabled={Boolean(saving)}>{saving === 'save' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}{firstTime ? 'Guardar y buscar' : 'Guardar'}</Button>
           </SheetFooter>
         </form>
       </SheetContent>

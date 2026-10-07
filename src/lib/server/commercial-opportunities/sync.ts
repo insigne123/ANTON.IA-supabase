@@ -1,4 +1,7 @@
-import { groupHiring, type JobAd } from '@/lib/commercial-opportunities/hiring';
+import { adInRegions, groupHiring, type JobAd } from '@/lib/commercial-opportunities/hiring';
+import {
+  DAILY_JSEARCH_QUERIES, hiringQueries, linkedinLocations, linkedinTitles, type RoleVariants,
+} from '@/lib/commercial-opportunities/search-terms';
 import {
   HIRING_WINDOW_DAYS, hiringOpportunityRow, hiringSignalRow, type HiringOpportunityRow, type HiringSignalRow,
 } from '@/lib/commercial-opportunities/records';
@@ -9,13 +12,14 @@ import { FantasticJobsError, fantasticMaxRunUsd, fantasticRunPlan, fantasticStar
 /**
  * One search of «empresas contratando» (plan 8, phase 3): asks each source with a key for the ads of the profile's roles,
  * regroups every ad of the last 30 days by company and saves the companies with their evidence. Each source run is recorded
- * with what it brought and what it cost; the month's total is capped before anything is spent.
+ * with what it brought and what it cost; the month's total is capped before anything is spent. Since Plan 15 each role also
+ * brings its variants (search-terms.ts), the questions name the regions the person chose, and ads from other regions are
+ * left out of the count.
  */
 export type HiringSyncSource = 'jsearch' | 'linkedin';
 export type HiringSearchProfile = { id: string; name: string; offer: string; roles: string[]; regions: string[]; minAds: number };
 export type HiringSyncEnvironment = { jsearchKey?: string; apifyToken?: string; usdPerJob: number; maxRunUsd?: number; startUsd?: number };
 
-export const JSEARCH_QUERIES = 10;
 export const LINKEDIN_LIMIT = 200;
 export const DEFAULT_MONTHLY_CAP_USD = 10;
 /** A run still «running» after this long was cut (a deploy, a timeout) and no longer blocks a new search. */
@@ -34,9 +38,14 @@ export function monthlyCapUsd(configured = process.env.OPPORTUNITIES_MONTHLY_USD
   return configured !== undefined && configured !== '' && Number.isFinite(value) && value >= 0 ? value : DEFAULT_MONTHLY_CAP_USD;
 }
 
-/** What a search will ask and what it may cost, shown before the person runs it. A source without its key is listed as missing. */
-export function hiringSyncPlan(profile: Pick<HiringSearchProfile, 'roles'>, env: HiringSyncEnvironment) {
-  const queries = profile.roles.slice(0, JSEARCH_QUERIES);
+export type HiringPlanOptions = { variants?: RoleVariants; cap?: number };
+
+/**
+ * What a search will ask and what it may cost, shown before the person runs it. A source without its key is listed as missing.
+ * `queries` are the Google for Jobs questions and `left` how many did not fit in `cap`.
+ */
+export function hiringSyncPlan(profile: Pick<HiringSearchProfile, 'roles'> & { regions?: string[] }, env: HiringSyncEnvironment, options: HiringPlanOptions = {}) {
+  const { queries, left } = hiringQueries(profile.roles, options.variants || {}, profile.regions || [], options.cap ?? DAILY_JSEARCH_QUERIES);
   const apify = fantasticRunPlan(LINKEDIN_LIMIT, env.usdPerJob, env.maxRunUsd, env.startUsd);
   const sources = [
     { source: 'jsearch' as const, label: 'Google for Jobs (JSearch)', enabled: Boolean(env.jsearchKey) && queries.length > 0,
@@ -44,7 +53,7 @@ export function hiringSyncPlan(profile: Pick<HiringSearchProfile, 'roles'>, env:
     { source: 'linkedin' as const, label: 'LinkedIn (Fantastic Jobs)', enabled: Boolean(env.apifyToken) && profile.roles.length > 0 && apify.enabled,
       requests: apify.limit, estimateUsd: apify.estimateUsd, missing: env.apifyToken ? null : 'APIFY_TOKEN' },
   ];
-  return { sources, estimateUsd: round(sources.filter(item => item.enabled).reduce((sum, item) => sum + item.estimateUsd, 0)) };
+  return { sources, estimateUsd: round(sources.filter(item => item.enabled).reduce((sum, item) => sum + item.estimateUsd, 0)), queries, left };
 }
 export type HiringSyncPlan = ReturnType<typeof hiringSyncPlan>;
 
@@ -77,17 +86,17 @@ type SourceResult = { source: HiringSyncSource; runId: string; ads: JobAd[]; cos
 /** A source's message is kept short and never carries a key (the clients already keep keys out of their errors). */
 const message = (error: unknown) => (error instanceof Error ? error.message : 'Error desconocido.').slice(0, 300);
 
-async function runJSearch(roles: string[], search: Sources['jsearch'], key: string, wait: (ms: number) => Promise<void>) {
+async function runJSearch(queries: string[], search: Sources['jsearch'], key: string, wait: (ms: number) => Promise<void>) {
   const ads: JobAd[] = [];
   const failures: string[] = [];
   let costUsd = 0, asked = 0, answered = 0;
   // Do not burst three requests at once: low-tier plans rate-limit those even
   // when the monthly quota still has room. No automatic paid retries.
-  for (const role of roles) {
+  for (const query of queries) {
     if (asked) await wait(1100);
     asked++;
     try {
-      const result = await search({ query: role, numPages: 1, datePosted: 'month' }, { fetch: globalThis.fetch, key });
+      const result = await search({ query, numPages: 1, datePosted: 'month' }, { fetch: globalThis.fetch, key });
       answered++; ads.push(...result.ads); costUsd += result.costUsd;
     } catch (error) {
       failures.push(message(error));
@@ -111,12 +120,16 @@ export async function runHiringSync(input: {
   now?: string; sources?: Sources;
   /** Only these sources (the daily sync asks the cheap one); every source with its key when absent. */
   only?: HiringSyncSource[];
+  /** The variants of each role (Plan 15) and how many Google for Jobs questions fit. */
+  variants?: RoleVariants;
+  queryCap?: number;
   wait?: (ms: number) => Promise<void>;
 }) {
   const now = input.now ?? new Date().toISOString();
   const sources = input.sources ?? { jsearch: searchJSearch, fantastic: searchFantasticJobs };
   const { store, profile, env } = input;
-  const full = hiringSyncPlan(profile, env);
+  const variants = input.variants || {};
+  const full = hiringSyncPlan(profile, env, { variants, cap: input.queryCap });
   const chosen = full.sources.filter(item => !input.only || input.only.includes(item.source));
   const plan = { sources: chosen, estimateUsd: round(chosen.filter(item => item.enabled).reduce((sum, item) => sum + item.estimateUsd, 0)) };
   const enabled = plan.sources.filter(item => item.enabled);
@@ -138,11 +151,11 @@ export async function runHiringSync(input: {
   const results: SourceResult[] = await Promise.all(runs.map(async ({ source, runId }): Promise<SourceResult> => {
     try {
       if (source === 'jsearch') {
-        const result = await runJSearch(profile.roles.slice(0, JSEARCH_QUERIES), sources.jsearch, env.jsearchKey!,
+        const result = await runJSearch(full.queries, sources.jsearch, env.jsearchKey!,
           input.wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms))));
         return { source, runId, ...result };
       }
-      const result = await sources.fantastic({ titles: profile.roles, limit: LINKEDIN_LIMIT, timeRange: '7d' },
+      const result = await sources.fantastic({ titles: linkedinTitles(profile.roles, variants), locations: linkedinLocations(profile.regions), limit: LINKEDIN_LIMIT, timeRange: '7d' },
         { fetch: globalThis.fetch, token: env.apifyToken, usdPerJob: env.usdPerJob, maxRunUsd: env.maxRunUsd, startUsd: env.startUsd });
       return { source, runId, ads: result.ads, costUsd: result.costUsd, error: null, failed: false };
     } catch (error) {
@@ -167,7 +180,9 @@ export async function runHiringSync(input: {
     for (const ad of fresh) byId.set(`${ad.source}|${ad.externalId}`, ad);
     const known = await store.knownCompanies();
     // Every company with an ad is saved (minimum 1) so its ads are kept; the page lists those that reach the profile's minimum.
-    const grouped = groupHiring([...byId.values()], { roles: profile.roles, regions: profile.regions, minAds: 1, ...known },
+    // Ads from regions the person did not choose do not count (an ad without a known place does).
+    const grouped = groupHiring([...byId.values()].filter(ad => adInRegions(ad, profile.regions)),
+      { roles: profile.roles, regions: profile.regions, minAds: 1, variants, ...known },
       { now, windowDays: HIRING_WINDOW_DAYS });
     const rows = grouped.opportunities.map(item => hiringOpportunityRow(item, { organizationId: input.organizationId, profileId: profile.id }, now));
     const existing = await store.existingKeys(rows.map(row => row.dedupe_key));

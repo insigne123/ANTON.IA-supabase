@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHiringProfile, readHiringProfileSuggestion, recentRuns } from './store';
+import { createHiringProfile, readHiringProfileSuggestion, recentRuns, refreshHiringProfileFromPerfil } from './store';
 
 type Row = Record<string, any>;
 const ORG = '00000000-0000-4000-8000-000000000002';
@@ -94,4 +94,38 @@ test('without a profile the page suggests GrupoExpro\'s pilot only to GrupoExpro
   assert.equal(other.pilot, false);
   assert.equal(other.offer, 'Arriendo de maquinaria pesada para minería');
   assert.deepEqual(other.roles, []);
+
+  const placed = await readHiringProfileSuggestion(fakeClient({
+    organizations: [{ id: ORG, name: 'Constructora Andes' }],
+    profiles: [{ id: USER, company_profile: 'Arriendo de grúas', signatures: { profile_extended: { targetLocations: 'Calama, Santiago' } } }],
+  }).client, scope);
+  assert.deepEqual(placed.regions, ['Antofagasta', 'Metropolitana'], 'the regions of «Tu cliente ideal» (Plan 15)');
+});
+
+test('the search follows «Perfil»: words are generated when missing or when the offer changes, and adjusted words stay otherwise', async () => {
+  const stored = {
+    id: 'p1', organization_id: ORG, name: 'Qué buscamos', offer: 'Arriendo de grúas', roles: [], regions: [], min_ads: 5, keywords: ['grúa horquilla'],
+    unspsc_codes: [], seia_sectors: [], min_investment_usd: null, sources: ['hiring'], active: true, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z',
+  };
+  const profile = { id: 'p1', name: 'Qué buscamos', offer: 'Arriendo de grúas', roles: [], regions: [], minAds: 5, keywords: ['grúa horquilla'],
+    unspscCodes: [], sectors: [], minInvestmentUsd: null, updatedAt: stored.updated_at };
+  const calls: string[] = [];
+  const terms = async (perfil: { offer: string | null }) => { calls.push(String(perfil.offer)); return { keywords: ['arriendo de grúas', 'servicio de izaje'], sectors: ['industria'], source: 'ai' as const }; };
+  const perfil = (offer: string | null) => ({ offer, services: [], sector: null, regions: [] });
+
+  const same = fakeClient({ commercial_opportunity_profiles: [{ ...stored }] });
+  assert.equal(await refreshHiringProfileFromPerfil(same.client, scope, profile, { terms, perfil: perfil('Arriendo de grúas') }), profile, 'nothing changed: no call');
+  assert.equal(await refreshHiringProfileFromPerfil(same.client, scope, profile, { terms, perfil: perfil(null) }), profile, 'an empty «Perfil» changes nothing');
+  assert.deepEqual(calls, []);
+
+  const changed = fakeClient({ commercial_opportunity_profiles: [{ ...stored }] });
+  const next = await refreshHiringProfileFromPerfil(changed.client, scope, profile, { terms, perfil: perfil('Arriendo de grúas e izaje') });
+  assert.equal(next.offer, 'Arriendo de grúas e izaje');
+  assert.deepEqual(next.keywords, ['arriendo de grúas', 'servicio de izaje']);
+  assert.deepEqual(next.sectors, ['industria']);
+
+  const asked = fakeClient({ commercial_opportunity_profiles: [{ ...stored }] });
+  assert.deepEqual((await refreshHiringProfileFromPerfil(asked.client, scope, profile, { terms, perfil: perfil('Arriendo de grúas'), force: true })).keywords,
+    ['arriendo de grúas', 'servicio de izaje'], '«Volver a generar»');
+  assert.deepEqual(calls, ['Arriendo de grúas e izaje', 'Arriendo de grúas']);
 });
