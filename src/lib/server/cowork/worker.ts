@@ -208,8 +208,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // «Preparar contactos» (save, look up the email, research several people with one approval) needs its kind in the database
     // (migration 20261001210000); on unless COWORK_PREPARE_BATCH_ENABLED=false.
     const prepareBatchEnabled = coworkPrepareBatchEnabled();
-    // «Oportunidades» is read only by the accounts that see the section (OPPORTUNITIES_ALLOWED_EMAILS); for the rest it does not exist.
-    const opportunitiesEnabled = await coworkOpportunitiesAllowed(client, scope.userId);
+    // «Oportunidades» is read only by the accounts that see the section in this organization; for the rest it does not exist.
+    const opportunitiesEnabled = await coworkOpportunitiesAllowed(client, scope);
     // Code artifacts (Plan 12, 3b): the Designer writes them for the canvas. Off unless COWORK_CODE_ARTIFACTS_ENABLED=true.
     const codeArtifactsEnabled = coworkCodeArtifactsEnabled();
     // Remembering preferences with a card (Plan 12, 5) needs the memory_save kind (migration 20261006160000). Off unless

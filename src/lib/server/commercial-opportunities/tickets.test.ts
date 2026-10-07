@@ -44,6 +44,7 @@ function fakeClient(tables: Record<string, Row[]>) {
         select() { return builder; },
         eq(column: string, value: unknown) { filters.push(row => row[column] === value); return builder; },
         in(column: string, values: unknown[]) { filters.push(row => values.includes(row[column])); return builder; },
+        limit() { return builder; },
         maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
         upsert: async (row: Row) => {
           const list = (tables[table] ||= []);
@@ -141,6 +142,16 @@ test('the daily search uses the creator\'s ticket, else the newest of an allowed
     { ticket: SHARED, userId: 'nico', source: 'shared' }, 'the shared ticket only when the creator is on its list');
   assert.equal(await resolveTicketForOrganization(org([]), { organizationId: 'org', creatorId: 'ana', env: ENV }), null);
   assert.match(NO_ORGANIZATION_TICKET, /Nadie de la organización/);
+
+  // Plan 15: a member an admin let in counts as one of the list, in that organization only.
+  const granted = (organizationId: string) => fakeClient({
+    organization_members: members(['ana', 'ex']), commercial_opportunity_tickets: [ticketRow('ex', OTHER)],
+    commercial_opportunity_members: [{ organization_id: organizationId, user_id: 'ex' }],
+  });
+  assert.deepEqual(await resolveTicketForOrganization(granted('org'), { organizationId: 'org', creatorId: 'ana', env: ENV }),
+    { ticket: OTHER, userId: 'ex', source: 'own' }, 'the ticket of a member an admin let in');
+  assert.equal(await resolveTicketForOrganization(granted('otra'), { organizationId: 'org', creatorId: 'ana', env: ENV }), null,
+    'access given in another organization does not count here');
 });
 
 test('checking a ticket costs one light request and tells a real ticket from an unknown one', async () => {

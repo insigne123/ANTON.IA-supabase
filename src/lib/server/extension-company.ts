@@ -4,7 +4,7 @@ import type { ProfilePresence } from '@/lib/extension-presence';
 import { canonicalExtensionProfileUrl } from '@/lib/extension-profile-url';
 import { companyDomain, companySearchName, emailDomain, sameCompany } from '@/lib/extension-company';
 import { companySearchHref } from '@/lib/search/company-prefill';
-import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
+import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { hiringSignal, OPPORTUNITIES_PAGE } from '@/lib/commercial-opportunities/cowork';
 import { findHiringProfile, listHiringOpportunities } from '@/lib/server/commercial-opportunities/store';
 import { icpDeclaredFromProfile } from '@/lib/server/cowork/icp-read';
@@ -38,7 +38,8 @@ type LeadRow = { id: string; name: string | null; title: string | null; company:
  * company (plan 8, phase 4, PR-4d): what the organization has of the LinkedIn company on screen. Its saved contacts, found by
  * the company's LinkedIn page, web domain or name (never a name inside another: «Falabella» is not «Banco Falabella»), each with
  * what the organization knows of them (PR-4b). The link to look for its decision makers in Búsqueda, with the roles of «Perfil».
- * For the accounts of OPPORTUNITIES_ALLOWED_EMAILS, its «hiring» opportunity with the signal. Read only.
+ * For the accounts that may see «Oportunidades» (the list, or a member an admin let in), its «hiring» opportunity with the
+ * signal. Read only.
  */
 export async function readExtensionCompany(auth: Pick<AuthContext, 'supabase' | 'organizationId' | 'user'>, company: ExtensionCompany,
   overrides: Partial<Deps> = {}): Promise<ExtensionCompanyView> {
@@ -92,16 +93,17 @@ export async function readExtensionCompany(auth: Pick<AuthContext, 'supabase' | 
   return {
     contacts, total: merged.size, truncated: [enriched, leads].some(read => (read.data || []).length >= READ_LIMIT),
     searchHref: companySearchHref({ company: company.name, domain: domain || null, titles: icpDeclaredFromProfile(profile.data)?.roles ?? [] }),
-    opportunity: await hiringOpportunity(auth, scope, keys, deps),
+    // Nothing to look for (no name, domain or page): not even who may see opportunities is read.
+    opportunity: enrichedFilter || leadFilter ? await hiringOpportunity(auth, scope, keys, deps) : null,
   };
 }
 
 /** The pilot's «hiring» opportunity of this company, with the profile's own minimum of ads; null for everyone else. */
 async function hiringOpportunity(auth: Pick<AuthContext, 'user'>, scope: { userId: string; organizationId: string },
   keys: { linkedinUrl: string; domain: string; name: string }, deps: Deps): Promise<CompanyOpportunity | null> {
-  if (!isOpportunitiesUserAllowed(auth.user, deps.allowedEmails)) return null;
   try {
     const admin = deps.admin();
+    if (!(await canUseOpportunities(admin, auth.user, scope.organizationId, deps.allowedEmails))) return null;
     const profile = await findHiringProfile(admin, scope);
     if (!profile) return null;
     const items = await listHiringOpportunities(admin, scope, { minAds: profile.minAds, now: new Date(deps.now()).toISOString() });
