@@ -64,6 +64,6 @@ El esfuerzo de razonamiento medio duplicó la latencia sin mejorar los checks, a
 ## Lo que queda
 
 - **Medir en producción** la latencia del estado de la cuenta (`loadCoworkWorkspace`) y, con dos semanas de 👍/👎, qué respuestas fallan más y por qué.
-- **Fricción de «¿quieres que revise…?»**: la queja más frecuente del juez, todavía presente en 2 o 3 respuestas de 27. Cowork ofrece una consulta gratuita en vez de hacerla.
+- ~~**Fricción de «¿quieres que revise…?»**~~: resuelta en la segunda ronda (#229, `docs/cowork-plan13-segunda-ronda.md`). Las respuestas que terminan ofreciendo una consulta bajaron de 5 a 0 y la fricción del juez de 4,26 a 4,52.
 - **Tareas largas (4c)**: requiere una migración que el dueño debe autorizar.
 - **«Otra versión» del primer mensaje**: abre una conversación nueva y oculta la anterior, así que no tiene ‹ 1/2 ›. Las versiones de los turnos siguientes sí lo tienen.
