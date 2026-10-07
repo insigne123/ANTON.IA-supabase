@@ -47,6 +47,14 @@ test('the judge sees the request, the data and exactly what was shown, trimmed t
   // Product facts the judge cannot guess: sending goes through a campaign, and the «use» button fixes a text.
   assert.match(COWORK_JUDGE_INSTRUCTIONS, /no hay envío directo/);
   assert.match(COWORK_JUDGE_INSTRUCTIONS, /«Usar esta versión».*no crear nada/);
+  // What the coordinator is told about the product is not «sin respaldo» (Plan 13): the daily search quota, the guide on the home
+  // and the LinkedIn extension, which the judge marked as invented in every round.
+  assert.match(COWORK_JUDGE_INSTRUCTIONS, /Hechos del producto que Cowork puede afirmar sin consultarlos \(no son afirmaciones sin respaldo\)/);
+  assert.match(COWORK_JUDGE_INSTRUCTIONS, /consume una búsqueda del cupo diario al aprobarla/);
+  assert.match(COWORK_JUDGE_INSTRUCTIONS, /la portada de Cowork tiene «¿Qué puedes hacer\?»/);
+  assert.match(COWORK_JUDGE_INSTRUCTIONS, /los envía la extensión de ANTON\.IA en el navegador del usuario/);
+  // The judge in the turn reads the same facts.
+  assert.match(COWORK_JUDGE_TURN_INSTRUCTIONS, /Hechos del producto/);
   // A failed turn reads as the error the person saw.
   assert.equal(JSON.parse(coworkJudgePrompt({ request: 'x', shown: { reply: '', failed: 'No pude completar esta respuesta.' } })).loQueVioElUsuario.respuesta,
     'Error: No pude completar esta respuesta.');
