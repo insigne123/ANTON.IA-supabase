@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { deterministicCoworkUuid } from './operations';
-import { COWORK_TASK_EVENTS, coworkTasksEnabled, loadCoworkActiveTask, parseCoworkTaskTarget } from './task-state';
+import { COWORK_TASK_EVENTS, coworkTaskTtlHours, coworkTasksEnabled, loadCoworkActiveTask, parseCoworkTaskTarget } from './task-state';
 
 const scope = { userId: 'u1', organizationId: 'o1' };
 const plan = { goal: 'Escribirles a los 10 mejores', limits: { searches: 1, credits: 10 },
@@ -12,7 +12,8 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const automatic = (runId: string, parent: string) => ({ id: runId, parent_run_id: parent, depth: 0, request_id: deterministicCoworkUuid(`cowork:continuation:${parent}`) });
 const human = (runId: string, parent: string | null) => ({ id: runId, parent_run_id: parent, depth: 0, request_id: id(900) });
 
-function fakeClient(runs: Array<Record<string, unknown>>, events: Array<{ run_id: string; kind: string; payload: unknown }>) {
+// Events carry the time they were written; by default, a moment ago.
+function fakeClient(runs: Array<Record<string, unknown>>, events: Array<{ run_id: string; kind: string; payload: unknown; created_at?: string | null }>) {
   return { from: (table: string) => {
     const where: Record<string, unknown> = {};
     const chain: Record<string, unknown> = {
@@ -21,7 +22,8 @@ function fakeClient(runs: Array<Record<string, unknown>>, events: Array<{ run_id
       order: () => chain,
       maybeSingle: async () => ({ data: runs.find(run => run.id === where.id) ?? null, error: null }),
       then: (resolve: (value: unknown) => void) => resolve({ data: table === 'cowork_run_events'
-        ? events.filter(event => event.run_id === where.run_id && event.kind === where.kind).map(event => ({ payload: event.payload })) : [], error: null }),
+        ? events.filter(event => event.run_id === where.run_id && event.kind === where.kind)
+          .map(event => ({ payload: event.payload, created_at: event.created_at === undefined ? new Date(Date.now() - 60_000).toISOString() : event.created_at })) : [], error: null }),
     };
     return chain;
   } } as unknown as SupabaseClient;
@@ -77,4 +79,20 @@ test('the worker approves by itself only what fits the plan, and never past the 
   const effects = readFileSync('src/lib/server/cowork/effects.ts', 'utf8');
   assert.match(effects, /coworkTaskThreadBudget\(coworkThreadBudgets\(mode, process\.env\.COWORK_AUTONOMY_ENABLED === 'true'\), task\)/);
   assert.match(effects, /job\.kind === 'task_plan'\n[^\n]*\n\s*\? 'El usuario aprobó el plan de la tarea \(task\)\. Empieza ahora por su primer paso pendiente, sin volver a preguntar\.'/);
+});
+
+test('an approved plan approves its steps by itself only within its time, 24 hours unless set (Plan 14, 3)', async () => {
+  assert.equal(coworkTaskTtlHours({}), 24);
+  assert.equal(coworkTaskTtlHours({ COWORK_TASK_TTL_HOURS: '48' }), 48);
+  for (const value of ['0', '169', '1.5', 'x']) assert.equal(coworkTaskTtlHours({ COWORK_TASK_TTL_HOURS: value }), 24, value);
+  const runs = [human(id(1), null), automatic(id(2), id(1))];
+  const approvedAt = '2026-10-07T10:00:00Z';
+  const events = [{ run_id: id(1), kind: COWORK_TASK_EVENTS.started, payload: { hash: 'h', plan }, created_at: approvedAt }];
+  const at = (hours: number) => Date.parse(approvedAt) + hours * 3_600_000;
+  assert.equal((await loadCoworkActiveTask(fakeClient(runs, events), scope, id(2), { now: at(23), ttlHours: 24 }))?.startRunId, id(1));
+  assert.equal(await loadCoworkActiveTask(fakeClient(runs, events), scope, id(2), { now: at(25), ttlHours: 24 }), null, 'past its time, each step asks again');
+  assert.equal((await loadCoworkActiveTask(fakeClient(runs, events), scope, id(2), { now: at(25), ttlHours: 48 }))?.startRunId, id(1));
+  // When was it approved, unknown: it asks again rather than go on without a limit.
+  const unknown = [{ ...events[0], created_at: null }];
+  assert.equal(await loadCoworkActiveTask(fakeClient(runs, unknown), scope, id(2), { now: at(1), ttlHours: 24 }), null);
 });

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { getCoworkRun } from '@/lib/server/cowork/runs';
-import { COWORK_TASK_EVENTS, parseCoworkTaskTarget } from '@/lib/server/cowork/task-state';
+import { COWORK_TASK_EVENTS, coworkTaskTtlHours, parseCoworkTaskTarget } from '@/lib/server/cowork/task-state';
 import { coworkTaskPlanSchema } from '@/lib/cowork/task-plan';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 
@@ -26,7 +26,8 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
     const staged = events.find(event => event.kind === COWORK_TASK_EVENTS.plan && (event.payload as { hash?: unknown } | null)?.hash === hash);
     const plan = coworkTaskPlanSchema.safeParse((staged?.payload as { plan?: unknown } | undefined)?.plan);
     if (!plan.success) return NextResponse.json({ error: 'El plan ya no está disponible.' }, { status: 409, headers: privateHeaders });
-    return NextResponse.json({ plan: plan.data }, { headers: privateHeaders });
+    // How long the plan approves its steps by itself once approved (Plan 14, 3): the card says it.
+    return NextResponse.json({ plan: plan.data, ttlHours: coworkTaskTtlHours() }, { headers: privateHeaders });
   } catch (error) {
     if (error instanceof AuthError) {
       const response = handleAuthError(error);

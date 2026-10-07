@@ -239,7 +239,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   reply_thread: { title: 'Responder en el hilo', icon: 'mail', help: 'Si la apruebas, esta respuesta sale tal cual dentro de la conversación de esa persona, desde tu correo. Revisa el texto antes.' },
   memory_save: { title: 'Recordar preferencia', icon: 'bookmark', help: 'Se guardará esta preferencia, tal como está escrita, y la tendré en cuenta en tus próximas conversaciones.' },
   lead_prepare_batch: { title: 'Preparar contactos', icon: 'audience', help: 'A cada persona de la lista se le hace solo lo que le falta: guardarla, buscar su correo (1 crédito) e investigarla. Lo ya hecho no se repite ni se cobra; quita a quien no quieras antes de aprobar.' },
-  task_plan: { title: 'Plan de la tarea', icon: 'list', help: 'Se aprueba una vez: cada paso que cabe en el plan y en su gasto máximo se hace solo, y lo que salga de él vuelve a pedir tu aprobación.' },
+  task_plan: { title: 'Plan de la tarea', icon: 'list', help: 'Se aprueba una vez: cada paso que cabe en el plan y en su gasto máximo se hace solo, y lo que salga de él, o pase de su plazo, vuelve a pedir tu aprobación.' },
 };
 
 export function coworkEffectCopy(kind: unknown): CoworkEffectCopy {
