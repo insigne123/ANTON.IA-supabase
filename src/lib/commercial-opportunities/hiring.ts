@@ -23,7 +23,11 @@ export type JobAd = {
   url: string | null;
   postedAt: string | null;
 };
-export type HiringProfile = { roles: string[]; regions: string[]; minAds: number; clients: string[]; contactsCompanies: string[] };
+export type HiringProfile = {
+  roles: string[]; regions: string[]; minAds: number; clients: string[]; contactsCompanies: string[];
+  /** Other ways companies write each role (Plan 15, search-terms.ts): an ad for one of them counts for its role. */
+  variants?: Record<string, string[]>;
+};
 
 const text = (value: unknown, max = 300) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
 const fold = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
@@ -139,10 +143,19 @@ const rolePattern = (role: string) => {
   const stem = needle.endsWith('o') ? `${needle.slice(0, -1)}[oa]s?` : `${needle}(?:a|as|es|s)?`;
   return new RegExp(`(^|[^\\p{L}\\p{N}])${stem}($|[^\\p{L}\\p{N}])`, 'u');
 };
-const roleOf = (title: string, roles: string[]) => {
+const roleOf = (title: string, roles: string[], variants: Record<string, string[]> = {}) => {
   const folded = fold(title);
-  return roles.find(role => rolePattern(role).test(folded)) ?? null;
+  return roles.find(role => rolePattern(role).test(folded))
+    ?? roles.find(role => (variants[role] || []).some(variant => rolePattern(variant).test(folded))) ?? null;
 };
+
+/**
+ * Whether an ad is in the regions a search asked for (Plan 15). An ad whose place is not known is kept: it may well be there,
+ * and leaving it out would hide companies that only say «Chile».
+ */
+export function adInRegions(ad: Pick<JobAd, 'region'>, regions: string[]) {
+  return !regions.length || !ad.region || regions.some(region => fold(region) === fold(ad.region!));
+}
 const DAY = 86_400_000;
 const headcountOf = (size: string | null) => {
   if (!size) return null;
@@ -188,7 +201,7 @@ export function groupHiring(ads: JobAd[], profile: HiringProfile, options: { now
     const lastWeek = list.filter(ad => (ad.postedAt ? Date.parse(ad.postedAt) : now) >= now - 7 * DAY).length;
     const roles = new Map<string, number>(), regions = new Map<string, number>();
     for (const ad of list) {
-      const role = profile.roles.length ? roleOf(ad.title, profile.roles) : null;
+      const role = profile.roles.length ? roleOf(ad.title, profile.roles, profile.variants) : null;
       if (role) roles.set(role, (roles.get(role) || 0) + 1);
       if (ad.region) regions.set(ad.region, (regions.get(ad.region) || 0) + 1);
     }
