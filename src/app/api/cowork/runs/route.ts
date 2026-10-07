@@ -34,7 +34,9 @@ export async function GET() {
     const rootIds = runs.flatMap((run: { id: string; root_run_id?: string | null; parent_run_id?: string | null }) =>
       run.root_run_id ? [run.root_run_id] : run.parent_run_id ? [] : [run.id]);
     const [autoTitles, searchQuota] = await Promise.all([
-      loadCoworkThreadTitles(getSupabaseAdminClient(), { userId: auth.user.id, organizationId: auth.organizationId }, rootIds),
+      // Best effort, also without the service client: the list then names conversations by their first message.
+      Promise.resolve().then(() => loadCoworkThreadTitles(getSupabaseAdminClient(), { userId: auth.user.id, organizationId: auth.organizationId }, rootIds))
+        .catch(() => ({} as Record<string, string>)),
       coworkSearchQuota(auth),
     ]);
     return NextResponse.json({

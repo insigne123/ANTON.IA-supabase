@@ -137,6 +137,8 @@ test('the route, the list and the workspace wire rename and delete, and hide the
   assert.match(list, /threads: \{ available: threads\.available, titles: threads\.titles, autoTitles \}/);
   // The names Cowork gave each conversation (Plan 13) come from the worker's table, scoped to the person.
   assert.match(list, /loadCoworkThreadTitles\(getSupabaseAdminClient\(\), \{ userId: auth\.user\.id, organizationId: auth\.organizationId \}, rootIds\)/);
+  // Best effort, also when the service client cannot be made: a missing key never takes the list down.
+  assert.match(list, /Promise\.resolve\(\)\.then\(\(\) => loadCoworkThreadTitles\(getSupabaseAdminClient\(\)[^\n]*\n\s*\.catch\(\(\) => \(\{\} as Record<string, string>\)\)/);
   const menu = readFileSync('src/components/cowork/CoworkThreadList.tsx', 'utf8');
   assert.match(menu, /Renombrar/);
   assert.match(menu, /disabled=\{working\}/);
