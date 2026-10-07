@@ -2,12 +2,13 @@
 // fixture tools. The decider is injected: a scripted one for offline tests, or
 // the configured model for `scripts/evaluate-cowork-conversations.ts --live`.
 import { coworkSearchDefaults } from '../../src/lib/cowork/search-scope';
+import { coworkRescueModel } from '../../src/lib/cowork/rescue-model';
 import { coworkPreferenceLabel } from '../../src/lib/cowork/preference-proposal';
 import { coworkTaskPlanLabel } from '../../src/lib/cowork/task-plan';
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
 import { coworkTurnIntents } from '../../src/lib/cowork/intents';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
-import { runCoworkReadLoop, type CoworkAnswer, type CoworkObservation, type CoworkRejection, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
+import { coworkRescueNote, runCoworkReadLoop, type CoworkAnswer, type CoworkObservation, type CoworkRejection, type CoworkTurnFailure, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps } from '../../src/lib/cowork/contracts';
 import { coworkFailureMessage } from '../../src/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
@@ -38,7 +39,7 @@ import type { z } from 'zod';
 
 type Decision = z.infer<typeof coworkDecisionSchema>;
 export type CorpusContext = ReturnType<typeof coworkDecisionContext>;
-export type CorpusDecider = (context: CorpusContext, meta: { caseId: string; turn: number }) => Promise<Decision>;
+export type CorpusDecider = (context: CorpusContext, meta: { caseId: string; turn: number; model?: string }) => Promise<Decision>;
 /** The Writer for a corpus case: the real pipeline (writer.ts) with the configured models, or a scripted one. */
 export type CorpusWriter = (brief: CoworkWriteBrief, observations: CoworkObservation[], meta: { caseId: string; request: string; userContext: unknown;
   step: (step: CoworkAgentStep) => Promise<void> }) => Promise<CoworkWriterOutput>;
@@ -284,6 +285,15 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         if (chosen.action === 'answer' && chosen.answer) (result.answers ||= []).push(chosen.answer.reply);
         return chosen;
       }),
+      // As in production (Plan 14, 2): with COWORK_RESCUE_MODEL, a turn about to fail gets one answer from that model.
+      ...(coworkRescueModel() ? {
+        rescue: (observations: CoworkObservation[], rejections: CoworkRejection[], failure: CoworkTurnFailure) => decide(coworkDecisionContext(instructions, {
+          history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer: true,
+          executionPolicy: { mode: 'approval' }, userContext,
+          rejectedDecisions: [...rejections, { action: 'turn', reason: coworkRescueNote(failure) }],
+        }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++, model: coworkRescueModel() ?? undefined }),
+        onRescue: (failure: CoworkTurnFailure) => { result.rescued = failure; },
+      } : {}),
       execute: async (action, value) => { actions.push(action); reads.push({ action, input: value }); return (entry.world?.read ?? corpusRead)(action, value); },
       record: async observation => { recorded.push(observation); },
       proposeSearch: async criteria => { result.search = criteria as unknown as Record<string, unknown>; },
