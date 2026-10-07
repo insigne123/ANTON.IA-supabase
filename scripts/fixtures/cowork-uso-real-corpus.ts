@@ -16,6 +16,9 @@ const visual = (result: CorpusTurnResult) => Boolean(result.document)
 const asksWhatTheySell = (result: CorpusTurnResult) => /qué (?:producto|servicio|vendes|ofreces?|ofrece)|a qué te dedicas|cuéntame (?:qué|sobre tu)/i
   .test(`${result.reply}\n${result.question || ''}`);
 const titlesOf = (result: CorpusTurnResult) => (Array.isArray(result.search?.titles) ? result.search?.titles as string[] : []).join(' | ').toLowerCase();
+// Where a proposed search looks: the people's places and the companies' (Plan 14, 1).
+const placesOf = (result: CorpusTurnResult) => ['locations', 'companyLocations']
+  .flatMap(field => Array.isArray(result.search?.[field]) ? result.search?.[field] as string[] : []);
 
 const ORIGINAL_EMAIL = 'Estimados Marcela, Romualdo y Verónica: Retomo nuestra conversación de la semana pasada respecto a la automatización '
   + 'de la revisión de antecedentes. Quedamos en que les enviaría la propuesta, la cual adjunto, y quería saber si tienen comentarios o si '
@@ -69,7 +72,9 @@ export const USO_REAL_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'propone una búsqueda', test: r => Boolean(r.search) },
       { label: 'apunta al retail', test: r => /retail|comercio|tienda|supermerc/i.test(JSON.stringify(r.search?.industries ?? r.search ?? '')) },
-      { label: 'cargos altos de selección o personas', test: r => /(gerent|director|jef|head|vp|chief|lider|líder)/i.test(titlesOf(r)) && /rr|recurs|human|selecc|reclut|talent|persona|people/i.test(titlesOf(r)) }] },
+      { label: 'cargos altos de selección o personas', test: r => /(gerent|director|jef|head|vp|chief|lider|líder)/i.test(titlesOf(r)) && /rr|recurs|human|selecc|reclut|talent|persona|people/i.test(titlesOf(r)) },
+      // No place was said: the search still has one (the Perfil's, or Chile), never people from any country (Plan 14, 1).
+      { label: 'la búsqueda tiene lugar aunque no lo dijo', test: r => !r.search || placesOf(r).length > 0 }] },
   { id: 'ur-enriquecer-investigar', title: 'Guardados: enriquecer e investigar a los dos', request: 'enriquece a los dos que guardé recién y después investígalos',
     history: [{ request: 'guarda a Carlos de Minera Centinela y a Nehal de Adecco', at,
       reply: 'Listo: guardé a Carlos Ah***a (Minera Centinela) y a Nehal Pa***a (Adecco). Ninguno tiene correo todavía.',
@@ -166,5 +171,7 @@ export const USO_REAL_CORPUS: CorpusCase[] = [
       { label: 'explica los pasos que siguen', test: r => (/guard/i.test(`${r.note || ''} ${r.reply}`) && /secuencia|correos/i.test(`${r.note || ''} ${r.reply}`))
         || (r.proposal?.task?.steps || []).some(step => step.kind === 'prepare') && (r.proposal?.task?.steps || []).some(step => step.kind === 'write') },
       { label: 'si es una tarea, nunca envía ni gasta de más', test: r => !r.proposal?.task || (r.proposal.task.limits.searches <= 1 && r.proposal.task.limits.credits <= 10
-        && !(r.proposal.task.steps || []).some(step => /envi|activ/i.test(step.label))) }] },
+        && !(r.proposal.task.steps || []).some(step => /envi|activ/i.test(step.label))) },
+      // It asked for Santiago: the search keeps it, neither all of Chile nor anywhere (Plan 14, 1).
+      { label: 'si busca, conserva Santiago', test: r => !r.search || placesOf(r).some(place => /santiago|metropolitana/i.test(place)) }] },
 ];

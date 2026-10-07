@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutOfferedRead, runCoworkReadLoop, type CoworkObservation } from './agent-loop';
+import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutOfferedRead, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
@@ -1788,4 +1788,73 @@ test('an offered read the turn could not make leaves the answer: it closes on it
   assert.equal(insisted.question, null);
   assert.equal(insisted.reply, 'Tienes 5 contactos guardados.');
   assert.equal((await runCoworkReadLoop({ ...base, offeredReads: false, decide: async () => offers })).question, offers.answer.question);
+});
+
+test('a search keeps the place asked for, and one with no place gets the person\'s market (Plan 14, 1)', async () => {
+  const base = { signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}), record: async () => {},
+    searchDefaults: { places: ['Chile'], source: 'default' as const } };
+  const search = (locations: string[], reply: string | null = null) => ({ action: 'prospecting.propose_search' as const, query: null, leadId: null,
+    answer: reply ? { reply, document: null } : null,
+    searchCriteria: { strategy: 'people' as const, titles: ['Jefe de Reclutamiento'], industries: [], locations, limit: 25 } });
+
+  // Asked for Chile and proposed with no place: one correction, and the corrected search is the one proposed.
+  const proposed: Array<{ locations: string[] }> = [];
+  const seen: CoworkRejection[][] = [];
+  await runCoworkReadLoop({ ...base, message: 'Busca empresas de Chile y personas de reclutamiento',
+    proposeSearch: async criteria => { proposed.push(criteria as unknown as { locations: string[] }); },
+    decide: async (_observations, _mustAnswer, rejections = []) => { seen.push(rejections); return rejections.length ? search(['Chile']) : search([]); } });
+  assert.match(seen[1]?.[0]?.reason || '', /nombra Chile y la búsqueda no tiene ubicación/);
+  assert.deepEqual(proposed.map(item => item.locations), [['Chile']]);
+
+  // Widened on purpose and said so: it stands.
+  const widened: Array<{ locations: string[] }> = [];
+  await runCoworkReadLoop({ ...base, message: 'jefes de reclutamiento en Calama',
+    proposeSearch: async criteria => { widened.push(criteria as unknown as { locations: string[] }); },
+    decide: async () => search(['Antofagasta, Chile'], 'En Calama hay pocos: amplié a la región de Antofagasta.') });
+  assert.deepEqual(widened.map(item => item.locations), [['Antofagasta, Chile']]);
+
+  // Changed again after the correction: the card shows the criteria, the turn does not spend another decision on it.
+  let calls = 0;
+  const again: Array<{ locations: string[] }> = [];
+  await runCoworkReadLoop({ ...base, message: 'jefes de reclutamiento en Calama',
+    proposeSearch: async criteria => { again.push(criteria as unknown as { locations: string[] }); },
+    decide: async () => { calls++; return search(['Chile']); } });
+  assert.equal(calls, 2);
+  assert.deepEqual(again.map(item => item.locations), [['Chile']]);
+
+  // Nobody said where: the market fills it without another call, and the explanation says it once.
+  const notes: unknown[] = [];
+  const filled: Array<{ locations: string[] }> = [];
+  let asked = 0;
+  await runCoworkReadLoop({ ...base, message: 'ayúdame a buscar jefes de reclutamiento',
+    record: async observation => { notes.push(observation); },
+    proposeSearch: async criteria => { filled.push(criteria as unknown as { locations: string[] }); },
+    decide: async () => { asked++; return search([], 'Propongo buscar jefes de reclutamiento.'); } });
+  assert.equal(asked, 1);
+  assert.deepEqual(filled.map(item => item.locations), [['Chile']]);
+  assert.deepEqual(notes, [{ action: 'assistant.note', input: '', result: { reply:
+    'Propongo buscar jefes de reclutamiento. Busco en Chile porque no dijiste dónde; si es en otro lugar, dímelo.' } }]);
+
+  // On the turn's last decision there is nobody left to correct it: the search goes as proposed.
+  const last: Array<{ locations: string[] }> = [];
+  await runCoworkReadLoop({ ...base, message: 'gerentes de RRHH en Santiago', ceiling: { ...COWORK_TURN_DEFAULTS, decisions: 1 },
+    proposeSearch: async criteria => { last.push(criteria as unknown as { locations: string[] }); },
+    decide: async () => search(['Chile']) });
+  assert.deepEqual(last.map(item => item.locations), [['Chile']]);
+});
+
+test('inside a long task a search keeps the place of the approved plan, not of the automatic message (Plan 14, 1)', async () => {
+  const proposed: Array<{ locations: string[] }> = [];
+  const seen: CoworkRejection[][] = [];
+  await runCoworkReadLoop({ signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}), record: async () => {},
+    message: 'Sigue con el siguiente paso de la tarea.', scopeRequest: 'Escribirles a los gerentes de RR. HH. de retail en Santiago. Buscar 25 gerentes de RR. HH. de retail en Santiago',
+    searchDefaults: { places: ['Chile'], source: 'default' },
+    proposeSearch: async criteria => { proposed.push(criteria as unknown as { locations: string[] }); },
+    decide: async (_observations, _mustAnswer, rejections = []) => {
+      seen.push(rejections);
+      return { action: 'prospecting.propose_search' as const, query: null, leadId: null, answer: null,
+        searchCriteria: { strategy: 'people' as const, titles: ['Gerente de RR. HH.'], industries: [], locations: rejections.length ? ['Santiago, Chile'] : ['Chile'], limit: 25 } };
+    } });
+  assert.match(seen[1]?.[0]?.reason || '', /nombra Santiago/);
+  assert.deepEqual(proposed.map(item => item.locations), [['Santiago, Chile']]);
 });

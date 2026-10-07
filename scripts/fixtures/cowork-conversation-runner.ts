@@ -1,6 +1,7 @@
 // Runs one corpus case through the real Cowork loop and decision context with
 // fixture tools. The decider is injected: a scripted one for offline tests, or
 // the configured model for `scripts/evaluate-cowork-conversations.ts --live`.
+import { coworkSearchDefaults } from '../../src/lib/cowork/search-scope';
 import { coworkPreferenceLabel } from '../../src/lib/cowork/preference-proposal';
 import { coworkTaskPlanLabel } from '../../src/lib/cowork/task-plan';
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
@@ -262,6 +263,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       prepareBatch: corpusPrepareBatch,
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
+      searchDefaults: coworkSearchDefaults(userContext),
       // What the turn keeps of the conversation, as the worker stores it (with the conversation's name, Plan 13).
       remember: async memory => { result.memory = memory; },
       // As in production: an offered read is made first only with COWORK_OFFERED_READS_ENABLED=true.

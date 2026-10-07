@@ -102,7 +102,7 @@ export type CoworkUserContext = {
   sector?: string;
   /** Why choose them and who they sell to, from «Perfil», only when filled in. */
   differentiators?: string[];
-  idealCustomer?: { roles?: string[]; industries?: string[] };
+  idealCustomer?: { roles?: string[]; industries?: string[]; locations?: string[] };
   /** The mailbox that sends (Gmail or Outlook): the one chosen in Conexiones or the only connected one; absent when two
    * are connected and none was chosen, or none is (Plan 5, PR-6b). */
   sender?: string;
@@ -110,7 +110,7 @@ export type CoworkUserContext = {
   workspace?: CoworkWorkspace | null;
 };
 
-const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer y services, sin consultar profile.get ni app.context para eso. proofPoints son resultados que el usuario cargó en su perfil: se pueden citar tal cual. differentiators son razones para elegirlo que el usuario declaró: se pueden usar tal cual. idealCustomer (cargos e industrias) dice a quién le vende: úsalo para proponer búsquedas y elegir contactos. sender es la cuenta que envía sus correos (Gmail u Outlook): úsala como provider sin preguntar. Un valor null o ausente no se inventa.';
+const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer y services, sin consultar profile.get ni app.context para eso. proofPoints son resultados que el usuario cargó en su perfil: se pueden citar tal cual. differentiators son razones para elegirlo que el usuario declaró: se pueden usar tal cual. idealCustomer (cargos, industrias y lugares) dice a quién le vende: úsalo para proponer búsquedas y elegir contactos. sender es la cuenta que envía sus correos (Gmail u Outlook): úsala como provider sin preguntar. Un valor null o ausente no se inventa.';
 const MEMORIES_INSTRUCTION = ' memories son cosas que el usuario aprobó que ANTON.IA recuerde (preferencias, su negocio, cómo quiere que le escriban): síguelas al redactar y decidir, salvo que el pedido de ahora diga otra cosa, y no las presentes como datos consultados en este trabajo.';
 
 const ANSWER_TO_CORRECT_INSTRUCTION = 'Esta es tu respuesta anterior. Edítala: cambia solo lo que señala rejectedDecisions y conserva el resto (lo que hiciste bien, sus cifras, nombres, tarjetas y tono). Si un bloque o el documento no cambian, puedes dejarlos en null: se conservan. No menciones la corrección ni que hubo una versión anterior.';

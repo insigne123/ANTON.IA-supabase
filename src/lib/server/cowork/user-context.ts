@@ -4,6 +4,7 @@ import type { CoworkUserContext } from '@/lib/cowork/decision-context';
 import { memoryValueText, profileOffer, profileOfferDetails, readOrganizationOffer } from '@/lib/server/suplia-context';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { MAIL_PROVIDER_LABEL } from '@/lib/mail-sender';
+import { commaItems } from '@/lib/profile/profile-lists';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -59,6 +60,12 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
   const differentiators = items(details.differentiators || [], 4, 200);
   const roles = items(details.targetRoles || [], 6, 80);
   const industries = items(details.targetIndustries || [], 6, 80);
+  // Where the ideal customer is («Tu cliente ideal» in «Perfil»): a search with no place looks there (Plan 14, 1).
+  const signatures = profile?.signatures;
+  const extended = signatures && typeof signatures === 'object' && !Array.isArray(signatures)
+    ? (signatures as Record<string, unknown>).profile_extended : null;
+  const locations = items(commaItems(extended && typeof extended === 'object' && !Array.isArray(extended)
+    ? (extended as Record<string, unknown>).targetLocations : null), 5, 80);
   return {
     fullName: text(profile?.full_name), jobTitle: text(profile?.job_title) || text(details.role),
     companyName: text(profile?.company_name), companyDomain: text(profile?.company_domain),
@@ -67,8 +74,8 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
     ...(proofPoints.length ? { proofPoints } : {}),
     ...(sector ? { sector } : {}),
     ...(differentiators.length ? { differentiators } : {}),
-    ...(roles.length || industries.length
-      ? { idealCustomer: { ...(roles.length ? { roles } : {}), ...(industries.length ? { industries } : {}) } }
+    ...(roles.length || industries.length || locations.length
+      ? { idealCustomer: { ...(roles.length ? { roles } : {}), ...(industries.length ? { industries } : {}), ...(locations.length ? { locations } : {}) } }
       : {}),
   };
 }
