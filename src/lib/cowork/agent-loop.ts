@@ -510,13 +510,25 @@ export function coworkWithoutOfferedRead<T extends { reply: string; question?: u
 
 const offeredReadFeedback = (question: string) => `Tu respuesta termina ofreciendo una consulta («${question.slice(0, 160)}») que puedes hacer ahora, sin aprobación. Hazla en esta decisión con la lectura que corresponda y edita tu respuesta anterior (answerToCorrect): agrega lo que encuentres y conserva lo demás que ya decía (lo que reconociste, las cifras, los avisos), sin volver a ofrecerla. Si ninguna lectura disponible la responde, quita esa oferta. Cómo cerrar: ${COWORK_NEXT_STEP_RULE}`;
 
-function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown }): string | null {
-  const chips = coworkSuggestions(answer.suggestions).length;
+// «Después los reviso», «más tarde lo veo», «voy a…»: the answer leaves for later something it could do now.
+const LEAVES_FOR_LATER = /(?<!\p{L})(?:despu[ée]s|luego|m[áa]s tarde|en otro momento|voy a|te aviso|te indicar[ée])(?!\p{L})/iu;
+// «Sí, créala»: a quick reply that answers a question, which then has to be there.
+const SAYS_YES = /^\s*s[íi](?!\p{L})/iu;
+
+/** read: the turn consulted something. A chat answer (nothing read) that already offers its quick replies closes on them, as in
+ * any AI chat (Plan 13): asking for a question too cost another call and mostly repeated a chip. Leaving something for later,
+ * or a chip that says yes to a question the answer does not ask, still gets the correction. */
+function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown },
+  context: { read: boolean } = { read: true }): string | null {
+  const replies = coworkSuggestions(answer.suggestions);
+  const chips = replies.length;
   const blocks = coworkBlocks(answer.blocks);
   const drafts = blocks.some(block => block.type === 'email_draft' || block.type === 'sequence');
   const filler = blocks.some(hasFiller);
+  const closesOnChips = !context.read && chips > 0 && !LEAVES_FOR_LATER.test(answer.reply)
+    && !replies.some(chip => SAYS_YES.test(chip.label) || SAYS_YES.test(chip.message));
   const missing = [
-    closingQuestion(answer) ? null : `completa answer.question con la pregunta del siguiente paso (regla 4): ${CLOSING_QUESTION_RULE}`,
+    closingQuestion(answer) || closesOnChips ? null : `completa answer.question con la pregunta del siguiente paso (regla 4): ${CLOSING_QUESTION_RULE}`,
     // A question apart already gets a one-tap yes (COWORK_YES_CHIP): not worth another call.
     chips || coworkQuestion(answer.question) ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
     // Two or more emails are meant to be copied and kept: they go in a card, not in the chat.
@@ -976,7 +988,8 @@ async function runCoworkLoop(input: {
           return verdict.keep === 'first' ? judgedFallback : corrected;
         }
         // A correction needs one more decision, and time for it.
-        const closing = turn < last && !late() ? closingFeedback(decision.answer) : null;
+        const closing = turn < last && !late()
+          ? closingFeedback(decision.answer, { read: observations.some(item => !ASSISTANT_ACTIONS.has(item.action)) }) : null;
         if (closing) {
           // Asked directly, not thrown: the catch below returns closingFallback once it is set.
           closingFallback = decision.answer;
