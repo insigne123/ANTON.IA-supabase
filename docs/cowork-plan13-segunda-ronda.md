@@ -40,6 +40,24 @@ Cada comparación usa el mismo corpus en ambos brazos.
 - Respuestas con quejas falsas sobre esos hechos: 3 → 0.
 - Las demás dimensiones quedan dentro del ruido.
 
+**Todo junto** (`main` con los seis PR contra el `main` de antes de esta ronda, `ur-*` y `chat-*`, 27 casos × 2, el mismo corpus):
+
+| | antes | después |
+|---|---|---|
+| Respuestas que terminan ofreciendo una consulta | 5 | **0** |
+| Checks fallidos | 10 de 476 | **8 de 480** |
+| Llamadas al modelo | 127 | **113** (−11 %) |
+| Tiempo total de respuesta P50 / P90 | 6,5 / 10,1 s | **5,9 / 9,5 s** |
+| Tiempo por caso P50 | 12,4 s | **10,7 s** |
+| Rechazos por «falta el argumento» | 4 | **0** |
+| Corridas fallidas | 0 | 0 |
+
+- Los checks son 480 porque #230 agrega dos.
+- Los tres fallos que aparecen solo después son de modelo, no de la combinación:
+  - `ur-que-haces` propuso una acción en un turno de presentación;
+  - `chat-aviso-dado` repitió el aviso de Marcela por su cuenta;
+  - `ur-hola` no agregó sugerencias aunque se le pidieron.
+
 **Descartado: sugerencias que no repiten lo ya pedido.** Medido sobre 199 respuestas con sugerencias, el filtro habría
 quitado una sola, que además era la única sugerencia de su respuesta. No se publicó.
 
