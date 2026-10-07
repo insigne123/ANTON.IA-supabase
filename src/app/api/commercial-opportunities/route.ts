@@ -2,7 +2,7 @@ import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunitie
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import {
   findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities, monthSpentUsd, readHiringProfileSuggestion,
-  listMyOpportunities, readPerfilForOpportunities, recentRuns,
+  listMyOpportunities, readPerfilForOpportunities, readSchedule, recentRuns,
 } from '@/lib/server/commercial-opportunities/store';
 import { MANUAL_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
 import { hiringSyncEnvironment, hiringSyncPlan, monthStart, monthlyCapUsd } from '@/lib/server/commercial-opportunities/sync';
@@ -34,7 +34,7 @@ export async function GET() {
         opportunities: [], tenders: [], projects: [], runs,
       });
     }
-    const [opportunities, tenders, projects, runs, spentUsd, ticket, mine] = await Promise.all([
+    const [opportunities, tenders, projects, runs, spentUsd, ticket, mine, schedule] = await Promise.all([
       listHiringOpportunities(auth.admin, scope, { minAds: profile.minAds, now }),
       listTenderOpportunities(auth.admin, scope, { now }),
       listProjectOpportunities(auth.admin, scope),
@@ -42,9 +42,10 @@ export async function GET() {
       monthSpentUsd(auth.admin, scope, monthStart(now)),
       resolveTicketForUser(auth.admin, auth.user),
       listMyOpportunities(auth.admin, scope),
+      readSchedule(auth.admin, scope, profile.id),
     ]);
     return opportunitiesJson({
-      mine,
+      mine, schedule,
       profile, perfil: fromPerfil, plan: hiringSyncPlan(profile, hiringSyncEnvironment(), { cap: MANUAL_JSEARCH_QUERIES }), month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
       // Whether this person can search tenders (their own ticket, or the shared one when they are on its list), never the ticket.
       tenderSearch: { ticket: Boolean(ticket.ticket), ticketStatus: ticket.status, keywords: profile.keywords, unspscCodes: profile.unspscCodes },

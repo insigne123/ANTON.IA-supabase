@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import {
-  findHiringProfile, lastRunOf, refreshHiringProfileFromPerfil, supabaseHiringStore, supabaseTenderStore,
+  findHiringProfile, lastRunOf, lastScheduledRunAt, refreshHiringProfileFromPerfil, supabaseHiringStore, supabaseTenderStore,
 } from '@/lib/server/commercial-opportunities/store';
+import { scheduleDue } from '@/lib/commercial-opportunities/schedule';
 import { DAILY_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
 import { generateRoleVariants } from '@/lib/server/commercial-opportunities/search-ai';
 import { hiringSyncEnvironment, monthStart, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
@@ -26,18 +27,25 @@ export async function POST(request: Request) {
   const headers = firebaseSchedulerResponseHeaders();
   if (!isFirebaseSchedulerRequest(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers });
   const client = getSupabaseAdminClient();
-  const { data, error } = await client.from('commercial_opportunity_profiles').select('organization_id,created_by')
+  // Plan 15: with each organization's schedule; before its columns exist, the profiles as they were (every day at 8).
+  const profiles = (columns: string) => client.from('commercial_opportunity_profiles').select(columns)
     .eq('active', true).not('created_by', 'is', null).order('created_at', { ascending: true }).limit(50);
+  let { data, error } = await profiles('organization_id,created_by,schedule_enabled,schedule_days,schedule_hour');
+  if (error) ({ data, error } = await profiles('organization_id,created_by'));
   if (error) {
     console.error('[cron/commercial-opportunities] profiles:', error);
     return NextResponse.json({ error: 'No se pudieron leer los perfiles de búsqueda.' }, { status: 500, headers });
   }
   const env = hiringSyncEnvironment();
-  const plan = dailyOpportunityPlan((data || []) as Array<{ organization_id: string; created_by: string }>, { jsearch: Boolean(env.jsearchKey) });
+  const plan = dailyOpportunityPlan((data || []) as unknown as Array<{ organization_id: string; created_by: string }>, { jsearch: Boolean(env.jsearchKey) });
   const results = [];
   const pending: string[] = [];
+  let notDue = 0;
   const started = Date.now();
   for (const item of plan) {
+    // The tick runs every hour: each organization searches on its days, from its hour, once a day.
+    const lastScheduled = await lastScheduledRunAt(client, { userId: item.userId, organizationId: item.organizationId }).catch(() => null);
+    if (!scheduleDue(item.schedule, new Date().toISOString(), lastScheduled)) { notDue++; continue; }
     // Inside the route's 300 s: organizations left for later are named in the answer and searched the next morning.
     if (Date.now() - started > DAILY_BUDGET_MS) { pending.push(item.organizationId); continue; }
     const scope = { userId: item.userId, organizationId: item.organizationId };
@@ -77,5 +85,5 @@ export async function POST(request: Request) {
     results.push(outcome);
   }
   if (pending.length) console.warn(`[cron/commercial-opportunities] ${pending.length} organizations left for tomorrow (time budget).`);
-  return NextResponse.json({ ok: true, organizations: results.length, results, pending }, { headers });
+  return NextResponse.json({ ok: true, organizations: results.length, notDue, results, pending }, { headers });
 }

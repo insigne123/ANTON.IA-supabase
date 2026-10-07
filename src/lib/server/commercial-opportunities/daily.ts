@@ -1,3 +1,4 @@
+import { normalizeSchedule } from '@/lib/commercial-opportunities/schedule';
 import type { TicketSource } from './tickets';
 import { NO_ORGANIZATION_TICKET, ticketWasRejected } from './tickets';
 
@@ -6,12 +7,15 @@ import { NO_ORGANIZATION_TICKET, ticketWasRejected } from './tickets';
  * profile's creator acts as the scope), tenders always (the ticket is resolved per organization, from its members) and
  * hiring when JSearch has its key.
  */
-export function dailyOpportunityPlan(profiles: Array<{ organization_id: string; created_by: string }>, keys: { jsearch: boolean }) {
+export function dailyOpportunityPlan(profiles: Array<{ organization_id: string; created_by: string; schedule_enabled?: unknown; schedule_days?: unknown; schedule_hour?: unknown }>,
+  keys: { jsearch: boolean }) {
   const seen = new Set<string>();
   return profiles.flatMap(profile => {
     if (!profile.organization_id || !profile.created_by || seen.has(profile.organization_id)) return [];
     seen.add(profile.organization_id);
-    return [{ organizationId: profile.organization_id, userId: profile.created_by, tenders: true, hiring: keys.jsearch }];
+    // Plan 15: each organization's own days and hour; before the columns exist, every day at 8.
+    const schedule = normalizeSchedule({ enabled: profile.schedule_enabled, days: profile.schedule_days, hour: profile.schedule_hour });
+    return [{ organizationId: profile.organization_id, userId: profile.created_by, tenders: true, hiring: keys.jsearch, schedule }];
   });
 }
 

@@ -8,8 +8,12 @@ const done = (errors: Array<string | null> = [null, null]) => ({ status: 'done',
 
 test('every organization with a profile gets its tender search; hiring only with the JSearch key', () => {
   const profiles = [{ organization_id: 'o1', created_by: 'u1' }, { organization_id: 'o1', created_by: 'u2' }, { organization_id: 'o2', created_by: 'u3' }];
+  const everyDay = { enabled: true, days: [0, 1, 2, 3, 4, 5, 6], hour: 8 };
   assert.deepEqual(dailyOpportunityPlan(profiles, { jsearch: false }), [
-    { organizationId: 'o1', userId: 'u1', tenders: true, hiring: false }, { organizationId: 'o2', userId: 'u3', tenders: true, hiring: false }]);
+    { organizationId: 'o1', userId: 'u1', tenders: true, hiring: false, schedule: everyDay }, { organizationId: 'o2', userId: 'u3', tenders: true, hiring: false, schedule: everyDay }],
+    'without schedule columns, every day at 8 as before');
+  assert.deepEqual(dailyOpportunityPlan([{ organization_id: 'o1', created_by: 'u1', schedule_enabled: false, schedule_days: [1, 3], schedule_hour: 7 }], { jsearch: true })[0].schedule,
+    { enabled: false, days: [1, 3], hour: 7 }, 'its own schedule (Plan 15)');
   assert.deepEqual(dailyOpportunityPlan(profiles, { jsearch: true }).map(item => item.hiring), [true, true]);
 });
 
