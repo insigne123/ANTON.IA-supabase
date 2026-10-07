@@ -10,6 +10,7 @@ import { coworkUserContextFromProfile } from '../../src/lib/server/cowork/user-c
 import type { CoworkBlock, CoworkChoices } from '../../src/lib/cowork/contracts';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 import { buildCoworkAgenda } from '../../src/lib/cowork/agenda';
+import { coworkLeadsSummary } from '../../src/lib/cowork/leads-summary';
 import type { CoworkArtifactRender } from './cowork-artifact-render';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
@@ -24,6 +25,12 @@ const ownLeads = [
   { id: LEAD.jose, name: 'Jose Ca***o', title: 'Reclutador Junior', company: 'GrupoExpro', email: 'jcastro@grupoexpro.com', status: 'saved', created_at: '2026-09-22T19:10:00Z' },
   { id: LEAD.paula, name: 'Katherine Sa***o', title: 'Consultor de Selección', company: 'Adecco', email: null, status: 'saved', created_at: '2026-09-22T19:05:00Z' },
 ];
+
+/** The 256 saved contacts as the summary and the counts read them, ids and emails only: the 4 that searches return and 252
+ * more, 21 with an email in all (app.context and audience.analyze say the same). */
+const savedRows = [...ownLeads.map(lead => ({ id: lead.id, email: lead.email })),
+  ...Array.from({ length: 252 }, (_, index) => ({ id: id(1000 + index), email: index < 20 ? `contacto${index + 1}@empresa${index + 1}.cl` : null }))];
+const savedWithEmail = savedRows.filter(row => row.email).length;
 
 const unknownCoverage = { gmail: null, outlook: null };
 
@@ -64,6 +71,15 @@ export function corpusRead(action: string, input: string): unknown {
       return { items: ownLeads.filter(lead => lead.id === input), returned: 1, limit: 1, scope: 'own_saved_contacts', truncated: false };
     case 'leads.recommend':
       return corpusRecommend(ownLeads, new Set(), input);
+    case 'leads.summary':
+      return coworkLeadsSummary({ leads: savedRows, contacted: [], researched: [] }, { sources: { saved: savedRows.length, porEscribir: 0 } });
+    case 'leads.count': {
+      // Counting by words in a title or a sector needs data the corpus does not keep: only the unfiltered count is answered.
+      if (term.trim()) return { scope: 'not_in_corpus', items: [], note: 'Sin datos en este corpus.' };
+      const saved = { total: savedRows.length, withEmail: savedWithEmail, withLinkedinProfile: 0 };
+      return { scope: 'own_saved_contacts', phrases: [], exact: true, total: saved.total, withEmail: saved.withEmail,
+        withoutEmail: saved.total - saved.withEmail, withLinkedinProfile: 0, bySource: { saved, porEscribir: { total: 0, withEmail: 0, withLinkedinProfile: 0 } } };
+    }
     case 'contacted.search':
       return { items: [], limit: 20, scope: 'organization_contacted', returned: 0, truncated: false,
         evidence: { source: 'application_contact_records', limitation: 'Lista de registros, no cola de respuestas pendientes confirmadas.', pendingStatus: 'needs_verification', mailboxCoverage: unknownCoverage } };
@@ -251,9 +267,12 @@ const answerOk = (result: CorpusTurnResult) => !result.failed;
 const shownText = (result: CorpusTurnResult) => (result.proposal || result.search) && result.note ? result.note : result.reply;
 const noJargon = (result: CorpusTurnResult) => coworkAnswerIssues(shownText(result), { expectNextStep: false })
   .every(issue => !['jargon', 'uuid', 'format', 'timezone'].includes(issue.code));
-// A code artifact is the whole answer (Plan 12, 3b): it closes without a question, its chips offer what follows.
+// A code artifact is the whole answer (Plan 12, 3b): it closes without a question, its chips offer what follows. So does a
+// plain answer whose closing offered a read Cowork could make (Plan 13): rule 4 keeps answer.question for a step that needs
+// approval or a decision that is the person's, and the quick replies under the answer are the next step.
 const nextStep = (result: CorpusTurnResult) => Boolean(result.proposal || result.search || result.artifact)
-  || !coworkAnswerIssues(result.reply).some(issue => issue.code === 'next_step');
+  || !coworkAnswerIssues(result.reply).some(issue => issue.code === 'next_step')
+  || (result.suggestions?.length ?? 0) > 0;
 const explained = (result: CorpusTurnResult) => !(result.proposal || result.search) || Boolean(result.note && result.note.length > 20);
 // A plain answer offers at least one quick reply, or the options that answer its question (V5); a proposal already has its card.
 const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search || result.choices) || (result.suggestions?.length ?? 0) > 0;

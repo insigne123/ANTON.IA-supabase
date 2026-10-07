@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkCampaignWithExactEmails, coworkDecisionSchema, runCoworkReadLoop, type CoworkObservation } from './agent-loop';
+import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutOfferedRead, runCoworkReadLoop, type CoworkObservation } from './agent-loop';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
@@ -1321,6 +1321,8 @@ test('an answer that offers a read it could make gets it made, once, with room f
     } });
   assert.equal(made.reply, done.answer.reply);
   assert.match(seen[1].reasons.join('|'), /termina ofreciendo una consulta \(«¿Reviso a quiénes ya les escribiste\?»\) que puedes hacer ahora/);
+  // The edit adds what the read found and keeps the rest: a «me equivoqué» or a heads-up does not get lost (Plan 13, chat-error).
+  assert.match(seen[1].reasons.join('|'), /agrega lo que encuentres y conserva lo demás que ya decía \(lo que reconociste, las cifras, los avisos\)/);
   assert.deepEqual(seen.map(item => item.mustAnswer), [false, false, true], 'after the offered read it answers');
   assert.deepEqual(verdicts, [], 'not reported as a judge correction');
   // Asked once: offering it again, or failing to read, leaves the first answer.
@@ -1663,4 +1665,63 @@ test('options the first answer had come back when the closing correction drops t
       : first });
   assert.equal(fixed.question, '¿A qué segmentos va la campaña?');
   assert.deepEqual('choices' in fixed ? fixed.choices : undefined, choices);
+});
+
+test('the summary of your contacts needs no argument: asked without one, it runs instead of costing a decision', async () => {
+  const executed: Array<[string, string]> = [];
+  const decisions = [
+    { action: 'leads.summary' as const, query: null, leadId: null, answer: null },
+    { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Tienes 21 contactos con correo de 256.', document: null,
+      question: '¿Armo una campaña pausada para esos 21?', suggestions: [{ label: 'Sí, ármala', message: 'Arma una campaña pausada para mis 21 contactos con correo' }] } },
+  ];
+  let turn = 0;
+  const reasons: string[] = [];
+  const answer = await runCoworkReadLoop({ message: '¿Cuántos tienen correo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async (action, value) => { executed.push([action, value]); return { withEmail: 21, total: 256 }; },
+    decide: async (_observations, _mustAnswer, rejections = []) => { reasons.push(...rejections.map(rejection => rejection.reason)); return decisions[turn++]; } });
+  assert.deepEqual(executed, [['leads.summary', '']]);
+  assert.equal(answer.reply, 'Tienes 21 contactos con correo de 256.');
+  assert.deepEqual(reasons, []);
+});
+
+test('a closing correction says how to close: a step that needs approval or a decision, never a read Cowork can make', async () => {
+  const flat = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Tienes 256 contactos y 21 tienen correo.', document: null,
+    question: null, suggestions: [{ label: 'Ver los contactos', message: 'Muéstrame cuáles de mis contactos tienen correo.' }] } };
+  const closed = { action: 'answer' as const, query: null, leadId: null, answer: { ...flat.answer, question: '¿Armo una campaña pausada para esos 21?' } };
+  const reasons: string[] = [];
+  let turn = 0;
+  await runCoworkReadLoop({ message: '¿Cuántos tienen correo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({}), decide: async (_observations, _mustAnswer, rejections = []) => { reasons.push(...rejections.map(rejection => rejection.reason)); return [flat, closed][turn++] ?? closed; } });
+  assert.match(reasons.join('|'), /Cierre incompleto: completa answer\.question con la pregunta del siguiente paso \(regla 4\): ofrece el paso que sigue y lleva aprobación/);
+  assert.match(reasons.join('|'), /nunca ofrezcas una consulta que puedes hacer tú ahora/);
+});
+
+test('more ways of offering a read are seen; offers that write or need approval are not', () => {
+  const offered = (question: string) => coworkOfferedRead({ reply: 'Listo.', question });
+  for (const question of ['¿Quieres que te resuma toda la información de tu perfil?', '¿Comparo tus resultados de lunes y martes?',
+    '¿Te listo los 21 contactos?', '¿Verifico el dominio?', '¿Te muestro cuáles tienen correo?']) assert.ok(offered(question), question);
+  for (const question of ['¿Te redacto el correo?', '¿Busco el correo de los 235 que no lo tienen?', '¿Armo una campaña pausada para esos 21?',
+    '¿Cuento con tu aprobación para crearla?', '¿Listo para enviarlo?']) assert.equal(offered(question), null, question);
+});
+
+test('an offered read the turn could not make leaves the answer: it closes on its quick replies, never asking permission for it', async () => {
+  const chips = [{ label: 'Ver los contactos', message: 'Muéstrame cuáles de mis contactos tienen correo.' }];
+  assert.deepEqual(coworkWithoutOfferedRead({ reply: 'Tienes 256 contactos y 21 tienen correo.', question: '¿Te muestro cuáles tienen correo?', suggestions: chips }),
+    { reply: 'Tienes 256 contactos y 21 tienen correo.', question: null, suggestions: chips });
+  // Also when the model wrote it into the reply: only the asking sentence goes.
+  assert.equal(coworkWithoutOfferedRead({ reply: 'En tu perfil figura AXIS. ¿Quieres que revise qué otros datos tienes guardados?',
+    question: '¿Quieres que revise qué otros datos tienes guardados?', suggestions: chips }).reply, 'En tu perfil figura AXIS.');
+  // A step that needs approval stays, and so does an offer with no quick replies to take its place.
+  const approval = { reply: 'Tienes 3 contactos sin correo.', question: '¿Busco sus correos?', suggestions: chips };
+  assert.equal(coworkWithoutOfferedRead(approval), approval);
+  const alone = { reply: 'Tienes 5 contactos.', question: '¿Reviso a quiénes ya les escribiste?', suggestions: null };
+  assert.equal(coworkWithoutOfferedRead(alone), alone);
+  // In the loop: offered again after the correction, it leaves; with offered reads off, the answer is shown as it came.
+  const offers = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Tienes 5 contactos guardados.', document: null,
+    question: '¿Reviso a quiénes ya les escribiste?', suggestions: [{ label: 'Ver envíos', message: 'Muéstrame a quiénes ya les escribí' }] } };
+  const base = { message: '¿A quién le escribo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {}, execute: async () => ({}) };
+  const insisted = await runCoworkReadLoop({ ...base, offeredReads: true, decide: async () => offers });
+  assert.equal(insisted.question, null);
+  assert.equal(insisted.reply, 'Tienes 5 contactos guardados.');
+  assert.equal((await runCoworkReadLoop({ ...base, offeredReads: false, decide: async () => offers })).question, offers.answer.question);
 });
