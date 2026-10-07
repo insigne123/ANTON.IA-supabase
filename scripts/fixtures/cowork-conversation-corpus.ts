@@ -170,6 +170,8 @@ export function corpusStageEffect(proposal: { kind: string; campaign?: { emails:
 }
 
 export type CorpusTurnResult = {
+  /** Why the turn was rescued by COWORK_RESCUE_MODEL (Plan 14, 2), when it was. */
+  rescued?: string;
   actions: string[];
   reply: string;
   document: { title: string; content: string } | null;

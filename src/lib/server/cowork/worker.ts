@@ -1,6 +1,7 @@
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
-import { coworkDecisionSchema, runCoworkReadLoop } from '@/lib/cowork/agent-loop';
-import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling } from '@/lib/cowork/turn-budget';
+import { coworkDecisionSchema, coworkRescueNote, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from '@/lib/cowork/agent-loop';
+import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
+import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling, type CoworkTurnBudget } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -262,6 +263,22 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       onCall: call => telemetry.push(call),
       engine: reviewEngine, jev: askJev, jevShadow,
     }) : null;
+    // What every decision of the turn reads, the rescue's included (Plan 14, 2): the same instructions and the same context.
+    const decisionSystemPrompt = `${instructions.systemPrompt}\n${coworkSpecialistQueueEnabled()
+      ? 'specialists.review: una vez por turno, specialists [{role: analyst|researcher|verifier, objective, evidence: índices de observaciones actuales}]. Máximo dos roles distintos. Si necesitas esta revisión, reserva una decisión antes del último turno; mustAnswer exige responder.' + (process.env.COWORK_SPECIALIST_TOOLS_ENABLED === 'true'
+        ? ' Cada tarea puede incluir read {action,input}: analyst permite metrics.overview/crm.record; researcher research.get_existing/leads.get; verifier privacy.contactability/crm.collaboration. Solo IDs observados en su evidencia. La revisión ve como máximo tres consultas del turno, contando cada read junto con las ya ejecutadas. No permite escrituras ni proveedores externos.'
+        : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
+      : 'specialists.review está deshabilitado.'}`;
+    const decisionPrompt = (observations: CoworkObservation[], mustAnswer: boolean, rejections: CoworkRejection[], turnBudget?: CoworkTurnBudget) =>
+      JSON.stringify(coworkDecisionContext(instructions, {
+        history, request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
+        ...(threadMemory ? { threadMemory } : {}),
+        ...(previousVersions.length ? { previousVersions } : {}),
+        ...(activeTask ? { task: coworkTaskContext(activeTask) } : {}),
+        ...(rejections.length ? { rejectedDecisions: rejections } : {}),
+      }));
+    // The rescue (Plan 14, 2): one last decision by COWORK_RESCUE_MODEL when the turn would fail, only with time and budget left.
+    const rescueModel = coworkRescueModel();
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
       // Where a search looks when nobody said where (Plan 14, 1): «Perfil», or COWORK_DEFAULT_SEARCH_LOCATION (Chile).
@@ -285,18 +302,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         }
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
-          systemPrompt: `${instructions.systemPrompt}\n${coworkSpecialistQueueEnabled()
-            ? 'specialists.review: una vez por turno, specialists [{role: analyst|researcher|verifier, objective, evidence: índices de observaciones actuales}]. Máximo dos roles distintos. Si necesitas esta revisión, reserva una decisión antes del último turno; mustAnswer exige responder.' + (process.env.COWORK_SPECIALIST_TOOLS_ENABLED === 'true'
-              ? ' Cada tarea puede incluir read {action,input}: analyst permite metrics.overview/crm.record; researcher research.get_existing/leads.get; verifier privacy.contactability/crm.collaboration. Solo IDs observados en su evidencia. La revisión ve como máximo tres consultas del turno, contando cada read junto con las ya ejecutadas. No permite escrituras ni proveedores externos.'
-              : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
-            : 'specialists.review está deshabilitado.'}`,
-          prompt: JSON.stringify(coworkDecisionContext(instructions, {
-            history, request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
-            ...(threadMemory ? { threadMemory } : {}),
-            ...(previousVersions.length ? { previousVersions } : {}),
-            ...(activeTask ? { task: coworkTaskContext(activeTask) } : {}),
-            ...(rejections.length ? { rejectedDecisions: rejections } : {}),
-          })),
+          systemPrompt: decisionSystemPrompt,
+          prompt: decisionPrompt(observations, mustAnswer, rejections, turnBudget),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',
           maxAttempts: 1, timeoutMs: coworkDecisionTimeoutMs(reasoningEffort), maxOutputTokens: 6000, reasoningEffort,
@@ -307,6 +314,31 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         await recordCoworkModelUsage(client, reservationId, run.lease_token, turn.telemetry);
         telemetry.push({ model: turn.telemetry.modelName, durationMs: turn.telemetry.durationMs });
         return turn.data;
+      },
+      rescue: rescueModel ? async (observations, rejections, failure) => {
+        // Five seconds for the terminal write, and the call itself: without them the turn fails as before.
+        const left = 100000 - (Date.now() - claimedAt) - 5_000;
+        if (left < COWORK_RESCUE_MIN_MS) return null;
+        const reservationId = await reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator').catch(() => null);
+        if (reservationId === null) return null;
+        if (liveDraft?.held) liveDraft.adjust();
+        const turn = await generateStructuredWithTelemetry({
+          schema: coworkDecisionSchema,
+          systemPrompt: decisionSystemPrompt,
+          prompt: decisionPrompt(observations, true, [...rejections, { action: 'turn', reason: coworkRescueNote(failure) }]),
+          openAiModel: rescueModel, allowDefaultModelFallback: false, provider: 'openai',
+          maxAttempts: 1, timeoutMs: Math.min(COWORK_RESCUE_TIMEOUT_MS, left), maxOutputTokens: 6000, reasoningEffort,
+          signal: controller.signal,
+        });
+        await recordCoworkModelUsage(client, reservationId, run.lease_token, turn.telemetry);
+        telemetry.push({ model: turn.telemetry.modelName, durationMs: turn.telemetry.durationMs });
+        return turn.data;
+      } : undefined,
+      // Each rescue leaves its reason in the run, to learn which turns fail and why (best effort).
+      onRescue: failure => {
+        console.info('[cowork] turn rescued:', failure);
+        void client.from('cowork_run_events').insert({ run_id: run.id, user_id: scope.userId, organization_id: scope.organizationId,
+          kind: 'turn.rescued', payload: { failure, model: rescueModel } }).then(() => undefined, () => undefined);
       },
       execute: (action, value) => readGateway.invoke(operationScope, {
         capability: action, input: value,

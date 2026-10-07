@@ -1858,3 +1858,66 @@ test('inside a long task a search keeps the place of the approved plan, not of t
   assert.match(seen[1]?.[0]?.reason || '', /nombra Santiago/);
   assert.deepEqual(proposed.map(item => item.locations), [['Santiago, Chile']]);
 });
+
+test('a turn about to fail gets one answer from the rescue model instead of an error (Plan 14, 2)', async () => {
+  const base = { message: 'revisa mis contactos', signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({ items: [] }), record: async () => {} };
+  const read = { action: 'leads.search' as const, query: 'gerente', leadId: null, answer: null };
+  const rescueAnswer = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Revisé tus contactos, pero no alcancé a ordenarlos. ¿Los ordeno por cargo?', document: null } };
+  const failures: string[] = [];
+  const asked: CoworkRejection[][] = [];
+
+  // Reading until the last decision: the rescue answers with what was read.
+  const saved = await runCoworkReadLoop({ ...base, decide: async () => read,
+    rescue: async (_observations, rejections, failure) => { asked.push(rejections); failures.push(failure); return rescueAnswer; },
+    onRescue: failure => failures.push(`rescued:${failure}`) });
+  assert.equal(saved.reply, rescueAnswer.answer.reply);
+  assert.deepEqual(failures, ['reads_at_last_decision', 'rescued:reads_at_last_decision']);
+  // Without a rescue, or when it cannot answer, the turn fails as before.
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => read }), /Cowork tool budget exhausted/);
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => read, rescue: async () => null }), /Cowork tool budget exhausted/);
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => read, rescue: async () => read }), /Cowork tool budget exhausted/, 'it may only answer');
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => read, rescue: async () => { throw new Error('OPENAI_HTTP_500'); } }), /Cowork tool budget exhausted/);
+
+  // A model that times out: the rescue answers on the first decision already.
+  const timeout = Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' });
+  let calls = 0;
+  const late = await runCoworkReadLoop({ ...base, decide: async () => { calls++; throw timeout; },
+    rescue: async (_observations, _rejections, failure) => { assert.equal(failure, 'model_unavailable'); return rescueAnswer; } });
+  assert.equal(calls, 1);
+  assert.equal(late.reply, rescueAnswer.answer.reply);
+
+  // Never for lost access, budgets or a refused proposal, which have their own message; and only once.
+  let rescues = 0;
+  const count = async () => { rescues++; return rescueAnswer; };
+  for (const error of [Object.assign(new Error('Cowork no está disponible para esta cuenta.'), { name: 'AuthError' }),
+    new Error('COWORK_DAILY_MODEL_BUDGET: No se pudo reservar presupuesto para continuar este trabajo.'),
+    new Error('Thread effect budget exhausted')]) {
+    await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => { throw error; }, rescue: count }), error);
+  }
+  // The server refused the proposal with its reason on the last decision: «No pude preparar la acción: …» says it best.
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  await assert.rejects(runCoworkReadLoop({ ...base, runId: '00000000-0000-4000-8000-000000000010', ceiling: { ...COWORK_TURN_DEFAULTS, decisions: 2 }, rescue: count,
+    execute: async () => ({ items: [{ id: leadId, name: 'José C.', company: 'GrupoExpro' }], scope: 'own_saved_contacts' }),
+    proposeEffect: async () => { throw new Error('El destinatario no es un contacto guardado'); },
+    decide: async observations => observations.length
+      ? { action: 'lead.enrich' as const, query: null, leadId, answer: null }
+      : { action: 'leads.search' as const, query: 'José', leadId: null, answer: null } }),
+  (error: Error & { userFacing?: boolean }) => error.userFacing === true);
+  assert.equal(rescues, 0);
+});
+
+test('a turn that already has an answer keeps it instead of rescuing (Plan 14, 2)', async () => {
+  // The closing correction failed on the last decision: the first answer stands, as before, and no rescue call is made.
+  let rescues = 0;
+  const first = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Revisé tus 12 contactos.', document: null } };
+  const kept = await runCoworkReadLoop({ message: 'revisa mis contactos', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [] }), record: async () => {}, ceiling: { ...COWORK_TURN_DEFAULTS, decisions: 2 },
+    rescue: async () => { rescues++; return null; },
+    decide: async (_observations, _mustAnswer, rejections = []) => {
+      if (!rejections.length) return first;
+      throw Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' });
+    } });
+  assert.equal(kept.reply, 'Revisé tus 12 contactos.');
+  assert.equal(rescues, 0);
+});
