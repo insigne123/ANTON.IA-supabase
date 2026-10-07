@@ -48,6 +48,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -65,6 +66,9 @@ const ROLE_LABELS: Record<OrganizationRole, string> = {
   member: 'Miembro',
 };
 const EMPTY_PEOPLE: AdminReportingUser[] = [];
+
+/** Who may open «Oportunidades» (Plan 15): the members an admin let in and the ones from ANTON.IA's own list. */
+type OpportunityAccess = { granted: Set<string>; listed: Set<string> };
 
 function dateInput(value: Date) {
   return value.toISOString().slice(0, 10);
@@ -146,7 +150,66 @@ function PeoplePageContent() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [removeCandidate, setRemoveCandidate] = useState<AdminReportingUser | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [opportunityAccess, setOpportunityAccess] = useState<OpportunityAccess | null>(null);
+  const [savingAccess, setSavingAccess] = useState<Set<string>>(new Set());
   const requestRef = useRef(0);
+
+  // The «Oportunidades» column shows only once its table exists; any failure leaves the page as it was.
+  async function loadOpportunityAccess() {
+    try {
+      const response = await fetch('/api/dashboard/admin/opportunities', { cache: 'no-store' });
+      const data = await response.json().catch(() => null) as { available?: boolean; granted?: string[]; listed?: string[] } | null;
+      setOpportunityAccess(response.ok && data?.available ? { granted: new Set(data.granted || []), listed: new Set(data.listed || []) } : null);
+    } catch {
+      setOpportunityAccess(null);
+    }
+  }
+  useEffect(() => { void loadOpportunityAccess(); }, []);
+
+  async function changeOpportunityAccess(person: AdminReportingUser, enabled: boolean) {
+    if (!opportunityAccess) return;
+    const apply = (value: boolean) => setOpportunityAccess(current => {
+      if (!current) return current;
+      const granted = new Set(current.granted);
+      if (value) granted.add(person.id); else granted.delete(person.id);
+      return { ...current, granted };
+    });
+    apply(enabled);
+    setSavingAccess(current => new Set(current).add(person.id));
+    try {
+      const response = await fetch('/api/dashboard/admin/opportunities', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: person.id, enabled }),
+      });
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'No pudimos cambiar el acceso.');
+      toast({ title: enabled ? `${person.name} ya puede usar Oportunidades` : `${person.name} ya no ve Oportunidades`,
+        description: enabled ? 'Aparece en su menú la próxima vez que abra ANTON.IA.' : 'Deja de verla en su menú y en Cowork.' });
+    } catch (failure) {
+      apply(!enabled);
+      toast({ title: 'No se guardó el cambio', description: failure instanceof Error ? failure.message : undefined, variant: 'destructive' });
+    } finally {
+      setSavingAccess(current => { const next = new Set(current); next.delete(person.id); return next; });
+    }
+  }
+
+  // Called as a function, not mounted as a component: the switch keeps its focus when its state changes.
+  function opportunityAccessControl(person: AdminReportingUser, compact = false) {
+    if (!opportunityAccess) return null;
+    const listed = opportunityAccess.listed.has(person.id);
+    const checked = listed || opportunityAccess.granted.has(person.id);
+    const id = `opportunities-${person.id}${compact ? '-compact' : ''}`;
+    const note = listed ? 'Incluida por ANTON.IA' : !person.emailConfirmed ? 'Confirma su correo primero' : null;
+    return (
+      <div className={cn('flex items-center gap-2', compact && 'justify-between')}>
+        {compact ? <label htmlFor={id} className="text-xs font-medium text-foreground">Oportunidades</label> : null}
+        <div className="flex items-center gap-2">
+          {note ? <span className="text-[11px] text-muted-foreground">{note}</span> : null}
+          <Switch id={id} checked={checked} disabled={listed || !person.emailConfirmed || savingAccess.has(person.id)}
+            onCheckedChange={value => void changeOpportunityAccess(person, value)}
+            aria-label={compact ? undefined : `Oportunidades para ${person.name}`} />
+        </div>
+      </div>
+    );
+  }
   const range = useMemo(() => rangeFor(Number(period)), [period]);
 
   useEffect(() => {
@@ -309,7 +372,7 @@ function PeoplePageContent() {
     <div className="mx-auto w-full max-w-[1320px] pb-10">
       <PageHeader title="Personas" description={`Administra acceso y revisa el rendimiento de ${overview?.organization.name || 'la organización'}.`}>
         {overview && !loading && !refreshing && (currentRole === 'owner' || currentRole === 'admin') ? <InviteMemberDialog organizationId={overview.organization.id} onInviteSent={() => void loadPeople({ silent: true })} /> : null}
-        <Button type="button" variant="ghost" size="icon" onClick={() => void loadPeople({ silent: true })} disabled={loading || refreshing} className="rounded-xl" aria-label="Actualizar personas">
+        <Button type="button" variant="ghost" size="icon" onClick={() => { void loadPeople({ silent: true }); void loadOpportunityAccess(); }} disabled={loading || refreshing} className="rounded-xl" aria-label="Actualizar personas">
           <RefreshCw className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
         </Button>
       </PageHeader>
@@ -377,6 +440,7 @@ function PeoplePageContent() {
                         <p className="truncate text-xs text-muted-foreground">{person.email}</p>
                         <div className="mt-2 flex flex-wrap items-center gap-2"><Badge variant={roleBadgeVariant(person.role)} className="font-normal">{ROLE_LABELS[person.role]}</Badge><span className="text-xs text-muted-foreground">{primaryTeam(person)?.name || 'Sin equipo principal'}</span></div>
                         <div className="mt-3 grid grid-cols-3 gap-2 text-xs"><span><strong className="block text-sm tabular-nums">{formatNumber(person.metrics.contacted)}</strong><span className="text-muted-foreground">Contactos</span></span><span><strong className="block text-sm tabular-nums">{formatNumber(person.metrics.replies)}</strong><span className="text-muted-foreground">Respuestas</span></span><span><strong className="block text-sm tabular-nums">{formatPercent(person.metrics.responseRate)}</strong><span className="text-muted-foreground">Tasa</span></span></div>
+                        {opportunityAccess ? <div className="mt-3 border-t border-border/60 pt-3">{opportunityAccessControl(person, true)}</div> : null}
                       </div>
                       <PersonMenu person={person} />
                     </div>
@@ -384,8 +448,8 @@ function PeoplePageContent() {
                 </div>
                 <div className="hidden xl:block">
                   <Table aria-label="Personas de la organización">
-                    <TableHeader><TableRow><TableHead className="pl-6">Persona</TableHead><TableHead>Rol</TableHead><TableHead>Equipo principal</TableHead><TableHead>Actividad</TableHead><TableHead className="text-right">Contactos</TableHead><TableHead className="text-right">Respuestas</TableHead><TableHead className="text-right">Tasa</TableHead><TableHead className="w-16"><span className="sr-only">Acciones</span></TableHead></TableRow></TableHeader>
-                    <TableBody>{filteredPeople.map((person) => <TableRow key={person.id}><TableCell className="pl-6"><div className="flex min-w-[210px] items-center gap-3"><Avatar className="h-9 w-9 border border-border/60"><AvatarImage src={person.avatarUrl || undefined} alt="" /><AvatarFallback className="text-[11px]">{initials(person.name)}</AvatarFallback></Avatar><div className="min-w-0"><Link href={`/dashboard/admin/users/${person.id}`} className="block max-w-[210px] truncate font-medium hover:underline">{person.name}</Link><span className="block max-w-[210px] truncate text-xs text-muted-foreground">{person.email}</span>{!person.emailConfirmed ? <span className="mt-0.5 block text-[11px] text-cw-warning">Correo pendiente</span> : null}</div></div></TableCell><TableCell><Badge variant={roleBadgeVariant(person.role)} className="font-normal">{ROLE_LABELS[person.role]}</Badge></TableCell><TableCell className="text-muted-foreground">{primaryTeam(person)?.name || 'Sin equipo'}</TableCell><TableCell><span className={cn('inline-flex items-center gap-1.5 text-sm', !person.lastActivityAt && 'text-muted-foreground')}><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{formatActivity(person.lastActivityAt)}</span></TableCell><TableCell className="text-right font-medium tabular-nums">{formatNumber(person.metrics.contacted)}</TableCell><TableCell className="text-right font-medium tabular-nums">{formatNumber(person.metrics.replies)}</TableCell><TableCell className="text-right font-medium tabular-nums">{formatPercent(person.metrics.responseRate)}</TableCell><TableCell><PersonMenu person={person} /></TableCell></TableRow>)}</TableBody>
+                    <TableHeader><TableRow><TableHead className="pl-6">Persona</TableHead><TableHead>Rol</TableHead><TableHead>Equipo principal</TableHead><TableHead>Actividad</TableHead><TableHead className="text-right">Contactos</TableHead><TableHead className="text-right">Respuestas</TableHead><TableHead className="text-right">Tasa</TableHead>{opportunityAccess ? <TableHead>Oportunidades</TableHead> : null}<TableHead className="w-16"><span className="sr-only">Acciones</span></TableHead></TableRow></TableHeader>
+                    <TableBody>{filteredPeople.map((person) => <TableRow key={person.id}><TableCell className="pl-6"><div className="flex min-w-[210px] items-center gap-3"><Avatar className="h-9 w-9 border border-border/60"><AvatarImage src={person.avatarUrl || undefined} alt="" /><AvatarFallback className="text-[11px]">{initials(person.name)}</AvatarFallback></Avatar><div className="min-w-0"><Link href={`/dashboard/admin/users/${person.id}`} className="block max-w-[210px] truncate font-medium hover:underline">{person.name}</Link><span className="block max-w-[210px] truncate text-xs text-muted-foreground">{person.email}</span>{!person.emailConfirmed ? <span className="mt-0.5 block text-[11px] text-cw-warning">Correo pendiente</span> : null}</div></div></TableCell><TableCell><Badge variant={roleBadgeVariant(person.role)} className="font-normal">{ROLE_LABELS[person.role]}</Badge></TableCell><TableCell className="text-muted-foreground">{primaryTeam(person)?.name || 'Sin equipo'}</TableCell><TableCell><span className={cn('inline-flex items-center gap-1.5 text-sm', !person.lastActivityAt && 'text-muted-foreground')}><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{formatActivity(person.lastActivityAt)}</span></TableCell><TableCell className="text-right font-medium tabular-nums">{formatNumber(person.metrics.contacted)}</TableCell><TableCell className="text-right font-medium tabular-nums">{formatNumber(person.metrics.replies)}</TableCell><TableCell className="text-right font-medium tabular-nums">{formatPercent(person.metrics.responseRate)}</TableCell>{opportunityAccess ? <TableCell>{opportunityAccessControl(person)}</TableCell> : null}<TableCell><PersonMenu person={person} /></TableCell></TableRow>)}</TableBody>
                   </Table>
                 </div>
               </>

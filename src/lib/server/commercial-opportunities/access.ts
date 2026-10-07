@@ -1,16 +1,16 @@
 import { AuthError, requireAuth, type AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
+import { canUseOpportunities } from './grants';
 
 export type OpportunitiesContext = AuthContext & { admin: ReturnType<typeof getSupabaseAdminClient> };
 
 /**
- * «Oportunidades» exists only for the accounts in OPPORTUNITIES_ALLOWED_EMAILS: any other signed-in account gets a 404, as if
- * the section did not exist.
+ * «Oportunidades» exists only for the accounts that may use it in their active organization: any other signed-in account
+ * gets a 404, as if the section did not exist.
  */
 export async function requireOpportunitiesUser(): Promise<AuthContext> {
   const auth = await requireAuth();
-  if (!isOpportunitiesUserAllowed(auth.user, process.env.OPPORTUNITIES_ALLOWED_EMAILS)) throw new AuthError('Not Found', 404);
+  if (!(await canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId))) throw new AuthError('Not Found', 404);
   return auth;
 }
 

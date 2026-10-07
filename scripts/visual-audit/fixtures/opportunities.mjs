@@ -65,6 +65,8 @@ export default function opportunities(ctx) {
         id: ctx.uid(9530 + index), organization_id: ctx.ORG, profile_id: profile, source, trigger: 'schedule', status: 'completed', requested_by: null,
         started_at: ctx.hoursAgo(10 + index), finished_at: ctx.hoursAgo(10 + index), fetched: 40 - index * 8, created: 3 - (index % 2), updated: 2, cost_estimate_usd: 0.4, error: null,
       })),
+      // Who an admin let in (Plan 15): nobody yet, so the member still gets the 404 the audit expects.
+      commercial_opportunity_members: [],
     },
   };
 }
