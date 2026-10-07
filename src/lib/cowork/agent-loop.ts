@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
-import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, coworkSameLine, type CoworkBlock, type CoworkPlanStep } from './contracts';
+import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText, withoutTrailingQuestions } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from './search-proposal';
@@ -451,6 +451,9 @@ const writerFallback = (message: string) => ({
  * answer it (rules 4 and 9). The model gets one correction per run, never on
  * its last decision: after that the answer stands as it is. */
 const CLOSING_FEEDBACK = 'Cierre incompleto:';
+/** What the question a closing correction adds may offer: asked for a question, the model used to fill it with a read it could
+ * make («¿Te muestro cuáles tienen correo?»), the judge's most frequent complaint (Plan 13). */
+const CLOSING_QUESTION_RULE = 'ofrece el paso que sigue y lleva aprobación, nombrado con su dato («¿Armo una campaña pausada para esos 21?», «¿Busco el correo de los 235 que no lo tienen?»), o pide una decisión que solo el usuario puede tomar; nunca ofrezcas una consulta que puedes hacer tú ahora («¿Te muestro…?», «¿Reviso…?», «¿Quieres que te resuma…?»)';
 
 /** A [placeholder] in any text of a card («[tu nombre]»), which would reach the recipient as is. */
 function hasFiller(block: CoworkBlock): boolean {
@@ -475,7 +478,8 @@ function closingQuestion(answer: { reply: string; question?: unknown }): string 
 /** A closing question that offers a free read («¿Reviso tus contactos?», «¿Quieres que te muestre…?»): the
  * judge marked «mala» 55 of the 62 measured turns that closed like this (Plan 12, 4a-4). Offers that need
  * approval («¿Busco su correo?») or write something («¿Te redacto…?») are not reads and stay. */
-const OFFERED_READ = /¿\s*(?:(?:quieres|prefieres|deseas|te parece)\s+(?:que\s+)?)?(?:te\s+|les?\s+|lo\s+|la\s+|los\s+|las\s+)?(?:revis[eo]|consult[eo]|mir[eo]|muestr[eo]|revisemos|veamos)\b/i;
+// «Listo» alone is «ready» («¿Listo para enviarlo?»): it lists only after whom («¿Te listo…?»).
+const OFFERED_READ = /¿\s*(?:(?:quieres|prefieres|deseas|te parece)\s+(?:que\s+)?)?(?:(?:te\s+|les?\s+|lo\s+|la\s+|los\s+|las\s+)?(?:revis[eo]|consult[eo]|mir[eo]|muestr[eo]|revisemos|veamos|resum[ao]|compar[eo]|verifi(?:co|que)|chequ[eo])|(?:te|les?|los|las)\s+list[eo])\b/i;
 
 /** The closing question when it offers a read Cowork could make itself («¿Reviso tus contactos?»), or null. The evaluation counts them. */
 export function coworkOfferedRead(answer: { reply: string; question?: unknown }): string | null {
@@ -487,7 +491,24 @@ function offeredRead(answer: { reply: string; question?: unknown }): string | nu
   return question && OFFERED_READ.test(question) ? question : null;
 }
 
-const offeredReadFeedback = (question: string) => `Tu respuesta termina ofreciendo una consulta («${question.slice(0, 160)}») que puedes hacer ahora, sin aprobación. Hazla en esta decisión con la lectura que corresponda y edita tu respuesta anterior (answerToCorrect) con lo que encuentres, sin volver a ofrecerla. Si ninguna lectura disponible la responde, quita esa oferta. Cómo cerrar: ${COWORK_NEXT_STEP_RULE}`;
+/**
+ * The last word on an offered read (Plan 13): when the turn could not make it (its decisions were spent, or the model offered
+ * it again), the answer closes without that question instead of asking permission for work Cowork does without approval. Its
+ * quick replies stay as the next step, so it never becomes a dead end; without them the question stays.
+ */
+export function coworkWithoutOfferedRead<T extends { reply: string; question?: unknown; suggestions?: unknown }>(answer: T): T {
+  const offered = offeredRead(answer);
+  if (!offered || !coworkSuggestions(answer.suggestions).length) return answer;
+  const lines = answer.reply.trimEnd().split('\n');
+  let last = lines.length - 1;
+  while (last >= 0 && !lines[last].trim()) last--;
+  if (last >= 0 && (coworkSameLine(lines[last], offered) || (/\?\W*$/.test(lines[last]) && OFFERED_READ.test(lines[last])))) {
+    lines[last] = withoutTrailingQuestions(lines[last]);
+  }
+  return { ...answer, reply: lines.join('\n').trimEnd(), question: null };
+}
+
+const offeredReadFeedback = (question: string) => `Tu respuesta termina ofreciendo una consulta («${question.slice(0, 160)}») que puedes hacer ahora, sin aprobación. Hazla en esta decisión con la lectura que corresponda y edita tu respuesta anterior (answerToCorrect): agrega lo que encuentres y conserva lo demás que ya decía (lo que reconociste, las cifras, los avisos), sin volver a ofrecerla. Si ninguna lectura disponible la responde, quita esa oferta. Cómo cerrar: ${COWORK_NEXT_STEP_RULE}`;
 
 function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown }): string | null {
   const chips = coworkSuggestions(answer.suggestions).length;
@@ -495,7 +516,7 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
   const drafts = blocks.some(block => block.type === 'email_draft' || block.type === 'sequence');
   const filler = blocks.some(hasFiller);
   const missing = [
-    closingQuestion(answer) ? null : 'completa answer.question con la pregunta del siguiente paso (regla 4)',
+    closingQuestion(answer) ? null : `completa answer.question con la pregunta del siguiente paso (regla 4): ${CLOSING_QUESTION_RULE}`,
     // A question apart already gets a one-tap yes (COWORK_YES_CHIP): not worth another call.
     chips || coworkQuestion(answer.question) ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
     // Two or more emails are meant to be copied and kept: they go in a card, not in the chat.
@@ -683,7 +704,9 @@ export async function runCoworkReadLoop(input: Parameters<typeof runCoworkLoop>[
   const proposeEffect = input.proposeEffect;
   const answer = await runCoworkLoop(proposeEffect ? { ...input, proposeEffect: async proposal => { proposed = true; await proposeEffect(proposal); } } : input, observations);
   const kept = proposed ? answer : coworkKeptPreferenceAnswer(input, answer);
-  return coworkWithCharts<typeof kept>(kept, observations);
+  // With offered reads on, an offer the turn could not make leaves rather than asking permission for it.
+  const closed = proposed || !input.offeredReads ? kept : coworkWithoutOfferedRead(kept);
+  return coworkWithCharts<typeof closed>(closed, observations);
 }
 
 // A sentence that says something was proposed, saved or waits for approval.
@@ -1361,7 +1384,7 @@ async function runCoworkLoop(input: {
           : decision.action === 'metrics.overview' || decision.action === 'metrics.rates' || decision.action === 'metrics.diagnose' || decision.action === 'metrics.channels' || decision.action === 'metrics.incidents' || decision.action === 'deliverability.bounces' || decision.action === 'deliverability.sender' || decision.action === 'compliance.law' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
           || decision.action === 'linkedin.network' || decision.action === 'linkedin.inbox' || decision.action === 'linkedin.quota'
           || decision.action === 'linkedin.followups' || decision.action === 'linkedin.jobs'
-          || decision.action === 'replies.attention' || decision.action === 'replies.stalled'
+          || decision.action === 'replies.attention' || decision.action === 'replies.stalled' || decision.action === 'leads.summary'
             ? ''
           : decision.action === 'draft.get' || decision.action === 'message.check_terms' || decision.action === 'message.check_evidence'
             ? decision.draftId

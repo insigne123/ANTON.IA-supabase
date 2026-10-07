@@ -196,7 +196,7 @@ export function coworkQuestion(value: unknown): string | null {
 }
 
 /** A line without the questions it ends with: «Te dejo la lista. ¿La reviso?» keeps «Te dejo la lista.». */
-function withoutTrailingQuestions(line: string): string {
+export function withoutTrailingQuestions(line: string): string {
   let kept = line.trimEnd();
   // A Spanish question opens with «¿»: it goes from there, so the periods of an abbreviation inside it
   // («¿… tus contactos de RR. HH. con correo?») do not leave half of it behind.
