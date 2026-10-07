@@ -245,7 +245,7 @@ async function main() {
         return response.data;
       } : undefined;
       let refusedSeen = 0;
-      const outcome = await runCorpusCase(entry, async context => {
+      const outcome = await runCorpusCase(entry, async (context, meta) => {
         if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
         calls++;
         // What the loop refused since the previous decision and why, so a failed turn can be read in the report.
@@ -268,7 +268,8 @@ async function main() {
           response = await generateStructuredWithTelemetry({
             schema,
             systemPrompt: `${corpusCaseInstructions(entry, writerOn, { codeArtifacts: artifactsOn, analyst: analystOn }).systemPrompt}\nspecialists.review está deshabilitado.`,
-            prompt: JSON.stringify(context), provider: 'openai', openAiModel: process.env.COWORK_MODEL,
+            // The rescue (Plan 14, 2) asks the same with COWORK_RESCUE_MODEL; every other decision uses COWORK_MODEL.
+            prompt: JSON.stringify(context), provider: 'openai', openAiModel: meta?.model ?? process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
             // The same effort as the worker (COWORK_REASONING_EFFORT, low by default).
             reasoningEffort: coworkReasoningEffort(),

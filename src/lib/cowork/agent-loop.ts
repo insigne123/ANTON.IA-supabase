@@ -405,6 +405,48 @@ export class CoworkDecisionRejected extends Error {
  * fixes what was pointed out and keeps the rest instead of writing it again from scratch. */
 export type CoworkRejection = { action: string; reason: string; previous?: CoworkAnswer };
 
+/**
+ * Why a turn could not finish, when a stronger model can still answer it (Plan 14, 2). Odysseus hands a failed turn of its
+ * small model to a stronger «teacher»; Cowork does the same once per turn with COWORK_RESCUE_MODEL: instead of «No pude
+ * completar esta respuesta», an answer with what the turn read, what was missing and the next step.
+ */
+export type CoworkTurnFailure = 'reads_at_last_decision' | 'rejected_at_last_decision' | 'invalid_at_last_decision'
+  | 'model_unavailable' | 'no_answer' | 'unexpected';
+
+const RESCUE_REASONS: Record<CoworkTurnFailure, string> = {
+  reads_at_last_decision: 'se acabaron las decisiones del turno mientras seguía consultando',
+  rejected_at_last_decision: 'la última decisión del turno fue rechazada',
+  invalid_at_last_decision: 'la última decisión no cumplió el formato',
+  model_unavailable: 'el modelo tardó demasiado o no respondió',
+  no_answer: 'el turno terminó sin respuesta final',
+  unexpected: 'falló una consulta del turno',
+};
+
+/** What the rescue reads, as one more refused decision: answer now with what was observed, nothing else. */
+export function coworkRescueNote(failure: CoworkTurnFailure): string {
+  return `Este turno no alcanzó a terminar (${RESCUE_REASONS[failure]}). Responde ahora con action answer usando solo lo observado: `
+    + 'en la primera frase, qué revisaste o hiciste y qué faltó; después lo útil que encontraste, y cierra con el siguiente paso concreto. '
+    + 'No propongas acciones ni pidas más lecturas, y no menciones el problema interno ni que hubo un rescate.';
+}
+
+/**
+ * Whether a failure can be rescued, and which one it is. Never cancellation, lost access or a lost lease (the run is not ours
+ * to answer), budgets and quotas (their own message says what to do, and the rescue could not reserve a call anyway), nor a
+ * proposal the server refused with its own reason (proposal_rejected already says it plainly).
+ */
+export function coworkTurnFailure(error: unknown): CoworkTurnFailure | null {
+  if (!(error instanceof Error)) return null;
+  const status = (error as { status?: number }).status;
+  if (error.name === 'AbortError' || error.name === 'AuthError' || status === 401 || status === 403) return null;
+  if (/COWORK_(?:DAILY|CONVERSATION)_MODEL_BUDGET|reservar presupuesto|Thread (?:effect|search) budget|quota|External search disabled|no longer writable|lease|Acceso Cowork|no está disponible para esta cuenta/i.test(error.message)) return null;
+  if (error instanceof CoworkDecisionRejected) return error.userFacing ? null : 'rejected_at_last_decision';
+  if (error.name === 'TimeoutError' || /timed out/i.test(error.message) || /(?:OPENAI|GLM)_HTTP_(?:429|5\d\d)/.test(error.message)) return 'model_unavailable';
+  if (issueSummary(error)) return 'invalid_at_last_decision';
+  if (error.message === 'Cowork tool budget exhausted') return 'reads_at_last_decision';
+  if (error.message === 'Cowork did not produce a final answer') return 'no_answer';
+  return 'unexpected';
+}
+
 const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, linkedinBatch, prepareBatch, campaignId, contactsImport o preference).';
 
 function budgetFeedback(readsUsed: number, maximum: number) {
@@ -809,6 +851,11 @@ async function runCoworkLoop(input: {
   /** What a search has to keep, when it is not this turn's message: inside a long task, the plan the person approved (its
    * goal and steps), since its turns run by themselves with an automatic message. */
   scopeRequest?: string;
+  /** One last decision by a stronger model when the turn would fail (Plan 14, 2): it may only answer. Null when it cannot
+   * (no time or budget left); its answer stands as the turn's. */
+  rescue?: (observations: CoworkObservation[], rejections: CoworkRejection[], failure: CoworkTurnFailure) => Promise<Decision | null>;
+  /** The turn was rescued, and why. */
+  onRescue?: (failure: CoworkTurnFailure) => void;
 }, observations: CoworkObservation[]) {
   const remember = async (decision: Decision) => {
     if (decision.memory && input.remember) await input.remember(decision.memory).catch(() => undefined);
@@ -885,6 +932,29 @@ async function runCoworkLoop(input: {
   let offerCorrected = false;
   // A search that dropped or changed the place asked for goes back once (Plan 14, 1); after that, the card shows its criteria.
   let scopeCorrected = false;
+  // The turn's last word when it would fail (Plan 14, 2): an answer already given stands first; then, once, the rescue.
+  let rescued = false;
+  const rescueOr = async (error: unknown): Promise<CoworkAnswer> => {
+    if (input.signal.aborted) throw error;
+    const standing = closingFallback ?? judgedFallback ?? written?.answer ?? null;
+    if (standing && (error instanceof CoworkDecisionRejected || coworkTurnFailure(error))) return standing;
+    const failure = input.rescue && !rescued ? coworkTurnFailure(error) : null;
+    if (!failure) throw error;
+    rescued = true;
+    let decision: Decision | null = null;
+    try {
+      await input.authorize();
+      const given = await input.rescue!(observations, rejections.slice(), failure);
+      decision = given ? coworkDecisionSchema.parse(given) : null;
+    } catch (rescueError) {
+      if (input.signal.aborted) throw rescueError;
+      decision = null;
+    }
+    if (!decision || decision.action !== 'answer' || !decision.answer?.reply?.trim()) throw error;
+    await remember(decision);
+    input.onRescue?.(failure);
+    return withCoworkReports(decision.answer, observations);
+  };
   const keepsVersionOnly = coworkOnlyUsesVersion(input.message);
   // Emails the Writer wrote when the person asked for the campaign in the same request (Plan 12, 4a-2): the next
   // decision proposes it with them, word for word. Whatever happens after, the Writer's answer is never lost.
@@ -902,7 +972,9 @@ async function runCoworkLoop(input: {
       const reason = invalidDecisionReason(error);
       const standing = closingFallback ?? judgedFallback;
       if (standing && !input.signal.aborted) return standing;
-      if (reason === null || turn === last || input.signal.aborted) throw error;
+      if (input.signal.aborted) throw error;
+      // A model that timed out or answered out of format on the last decision: the rescue answers instead of failing.
+      if (reason === null || turn === last) return rescueOr(error);
       rejections.push({ action: 'decision', reason });
       continue;
     }
@@ -1365,7 +1437,7 @@ async function runCoworkLoop(input: {
       // After the judge's correction one read decision is allowed; after it, on the last decision
       // or without time, the judged answer stands.
       if (judgedFallback && (judgeReadDone() || turn === last || late())) return judgedFallback;
-      if (turn === last) throw new Error('Cowork tool budget exhausted');
+      if (turn === last) return rescueOr(new Error('Cowork tool budget exhausted'));
       // Checked again here: the decision itself may have run past the soft deadline.
       if (late()) throw rejected('Cowork turn time exhausted', 'Se acabó el tiempo de este turno: responde con lo observado y di en una línea qué queda para el siguiente paso.');
       // «Oportunidades» exists only for the accounts that see the section: for anyone else the read is not there.
@@ -1464,10 +1536,11 @@ async function runCoworkLoop(input: {
       // Correctable refusals go back to the model; the last decision must stand on its own.
       const standing = closingFallback ?? judgedFallback;
       if (standing && error instanceof CoworkDecisionRejected && !input.signal.aborted) return standing;
-      if (!(error instanceof CoworkDecisionRejected) || turn === last || input.signal.aborted) throw error;
+      if (input.signal.aborted) throw error;
+      if (!(error instanceof CoworkDecisionRejected) || turn === last) return rescueOr(error);
       rejections.push({ action: decision.action, reason: error.feedback });
     }
   }
   if (written) return written.answer;
-  throw new Error('Cowork did not produce a final answer');
+  return rescueOr(new Error('Cowork did not produce a final answer'));
 }
