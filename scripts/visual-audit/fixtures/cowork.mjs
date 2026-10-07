@@ -66,8 +66,15 @@ export default function cowork(ctx) {
   return {
     tables: {
       cowork_runs: runs, cowork_run_events: events,
-      // The campaign conversation was renamed (Plan 9, PR-20); the other keeps its first message as the name.
+      // The campaign conversation was renamed (Plan 9, PR-20).
       cowork_thread_settings: [{ root_run_id: second, user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Campaña logística · reclutamiento', hidden_at: null, updated_at: ctx.hoursAgo(2) }],
+      // The names Cowork gave its conversations (Plan 13): the first one shows it; the renamed one keeps the person's name.
+      cowork_thread_memory: [
+        { root_run_id: first, user_id: ctx.OWNER, organization_id: ctx.ORG, source_run_id: ctx.uid(9005), source_created_at: ctx.hoursAgo(24), updated_at: ctx.hoursAgo(24),
+          memory: { title: 'Prioridades de esta semana', offer: null, audience: null, people: [], decisions: [], pending: [] } },
+        { root_run_id: second, user_id: ctx.OWNER, organization_id: ctx.ORG, source_run_id: second, source_created_at: ctx.hoursAgo(3), updated_at: ctx.hoursAgo(3),
+          memory: { title: 'Campaña de logística', offer: null, audience: null, people: [], decisions: [], pending: [] } },
+      ],
       // «Lo que Cowork recuerda» (Plan 13): two of the owner's, one the team shares (saved by a member) and one a member keeps for
       // themselves, which the owner never sees.
       suplia_memories: [

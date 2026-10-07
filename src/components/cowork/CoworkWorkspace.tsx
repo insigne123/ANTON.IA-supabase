@@ -115,6 +115,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const [runs, setRuns] = useState<CoworkRun[]>([]);
   // Names the person gave and conversations they deleted (hidden), when the server can keep them (cowork_thread_settings).
   const [threadNames, setThreadNames] = useState<{ available: boolean; titles: Record<string, string> }>({ available: false, titles: {} });
+  /** The names Cowork gave the conversations (Plan 13): shown unless the person renamed it. */
+  const [autoTitles, setAutoTitles] = useState<Record<string, string>>({});
   const [hiddenRoots, setHiddenRoots] = useState<Set<string>>(() => new Set());
   const { toast } = useToast();
   const [selected, setSelected] = useState<string | null>(null);
@@ -174,6 +176,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const focusArtifact = useRef(false);
   const wakeState = useRef({ inflight: false, last: 0 });
   const liveRuns = useRef(new Set<string>());
+  /** Finished turns whose conversation name the list already went to read. */
+  const namedRuns = useRef(new Set<string>());
   const autoOpened = useRef(new Set<string>());
   /** A historical turn opened on purpose (an older document version) is not auto-forwarded. */
   const pinnedRun = useRef<string | null>(null);
@@ -239,6 +243,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       setRuns(Array.isArray(data.runs) ? data.runs : []); setReady(data.canSubmit === true); setError(''); setListError('');
       const names = data.threads && typeof data.threads === 'object' ? data.threads : null;
       setThreadNames({ available: names?.available === true, titles: names?.titles && typeof names.titles === 'object' ? names.titles : {} });
+      setAutoTitles(names?.autoTitles && typeof names.autoTitles === 'object' ? names.autoTitles : {});
       setSearchQuota(data.searchQuota && typeof data.searchQuota.remaining === 'number' ? data.searchQuota : null);
       setCanAutonomous(data.canAutonomous === true);
       if (!data.canAutonomous) setMode('approval');
@@ -330,6 +335,11 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           : [data.run, ...previous]);
         const status = data.run.status;
         if (isCoworkActive(status)) liveRuns.current.add(data.run.id);
+        // A turn that finished while you watched may have named its conversation (Plan 13): the list reads the name once.
+        else if (liveRuns.current.has(data.run.id) && !namedRuns.current.has(data.run.id)) {
+          namedRuns.current.add(data.run.id);
+          setListVersion(value => value + 1);
+        }
         if (data.continuation?.id && !isCoworkActive(status) && data.continuation.id !== selected && pinnedRun.current !== selected) {
           // The worker resumed the thread in a new turn: keep reading there.
           liveRuns.current.add(data.continuation.id);
@@ -430,8 +440,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const pendingDecision = Boolean(latest && latest.run.status === 'waiting_approval' && proposal?.state === 'pending');
   const active = Boolean(latest && isCoworkActive(latest.run.status));
   const busy = (active && !pendingDecision) || awaitingContinuation;
-  const threads = useMemo(() => groupCoworkThreads(runs, threadNames.titles).filter(thread => !hiddenRoots.has(thread.rootId)),
-    [runs, threadNames.titles, hiddenRoots]);
+  const threads = useMemo(() => groupCoworkThreads(runs, { ...autoTitles, ...threadNames.titles }).filter(thread => !hiddenRoots.has(thread.rootId)),
+    [runs, autoTitles, threadNames.titles, hiddenRoots]);
 
   const selectedRoot = useMemo(() => {
     if (!selected) return null;
