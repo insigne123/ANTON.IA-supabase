@@ -4,6 +4,8 @@ import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { admitCoworkRun, coworkWorkerConfigured, listCoworkRuns } from '@/lib/server/cowork/runs';
 import { readCoworkThreadSettings } from '@/lib/server/cowork/thread-settings';
+import { loadCoworkThreadTitles } from '@/lib/server/cowork/thread-memory';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 
 export const dynamic = 'force-dynamic';
@@ -28,9 +30,16 @@ export async function GET() {
     const threads = await readCoworkThreadSettings(auth.supabase, { userId: auth.user.id, organizationId: auth.organizationId })
       .catch(() => ({ available: false, hiddenRootIds: [] as string[], titles: {} as Record<string, string> }));
     const runs = await listCoworkRuns(auth, { hiddenRootIds: threads.hiddenRootIds });
+    // The names Cowork gave each conversation (Plan 13); a name the person chose (titles) always wins.
+    const rootIds = runs.flatMap((run: { id: string; root_run_id?: string | null; parent_run_id?: string | null }) =>
+      run.root_run_id ? [run.root_run_id] : run.parent_run_id ? [] : [run.id]);
+    const [autoTitles, searchQuota] = await Promise.all([
+      loadCoworkThreadTitles(getSupabaseAdminClient(), { userId: auth.user.id, organizationId: auth.organizationId }, rootIds),
+      coworkSearchQuota(auth),
+    ]);
     return NextResponse.json({
-      runs, threads: { available: threads.available, titles: threads.titles },
-      canSubmit: coworkWorkerConfigured(), canAutonomous: process.env.COWORK_AUTONOMY_ENABLED === 'true', searchQuota: await coworkSearchQuota(auth),
+      runs, threads: { available: threads.available, titles: threads.titles, autoTitles },
+      canSubmit: coworkWorkerConfigured(), canAutonomous: process.env.COWORK_AUTONOMY_ENABLED === 'true', searchQuota,
     }, { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);

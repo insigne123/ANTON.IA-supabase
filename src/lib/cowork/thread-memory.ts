@@ -10,6 +10,10 @@ import { z } from 'zod';
 const line = (max: number) => z.string().trim().min(1).max(max);
 
 export const coworkThreadMemorySchema = z.object({
+  /** The conversation's name in 2 to 6 words, like a chat title («Asuntos para gerentes de RR. HH.»): the list shows it unless
+   * the person renamed it (Plan 13). Optional, so the memories stored before it still read; an empty or overlong one is
+   * dropped (null) instead of failing the decision that carries it. */
+  title: line(60).nullable().optional().catch(null),
   /** The product or service in play in this conversation, as the person said it. */
   offer: line(400).nullable(),
   /** Who is being looked for: roles, sector, country, size. */
@@ -46,4 +50,10 @@ export function coworkThreadMemoryContext(input: { firstRequest: string | null; 
     memory: input.memory,
     instruction: MEMORY_INSTRUCTION,
   };
+}
+
+/** The conversation's name the coordinator gave it, or null. Never throws. */
+export function coworkThreadMemoryTitle(value: unknown): string | null {
+  const title = (value as { title?: unknown } | null)?.title;
+  return typeof title === 'string' && title.trim() ? title.replace(/\s+/g, ' ').trim().slice(0, 60) : null;
 }
