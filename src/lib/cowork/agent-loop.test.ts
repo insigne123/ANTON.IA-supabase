@@ -1690,10 +1690,42 @@ test('a closing correction says how to close: a step that needs approval or a de
   const closed = { action: 'answer' as const, query: null, leadId: null, answer: { ...flat.answer, question: '¿Armo una campaña pausada para esos 21?' } };
   const reasons: string[] = [];
   let turn = 0;
+  // After a read: a chat answer that read nothing closes on its quick replies (next test).
   await runCoworkReadLoop({ message: '¿Cuántos tienen correo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
-    execute: async () => ({}), decide: async (_observations, _mustAnswer, rejections = []) => { reasons.push(...rejections.map(rejection => rejection.reason)); return [flat, closed][turn++] ?? closed; } });
+    execute: async () => ({}), decide: async (_observations, _mustAnswer, rejections = []) => { reasons.push(...rejections.map(rejection => rejection.reason)); return [search, flat, closed][turn++] ?? closed; } });
   assert.match(reasons.join('|'), /Cierre incompleto: completa answer\.question con la pregunta del siguiente paso \(regla 4\): ofrece el paso que sigue y lleva aprobación/);
   assert.match(reasons.join('|'), /nunca ofrezcas una consulta que puedes hacer tú ahora/);
+});
+
+test('a chat answer that read nothing closes on its quick replies, without another call for a question (Plan 13)', async () => {
+  const chat = (reply: string, suggestions: Array<{ label: string; message: string }>) => ({ action: 'answer' as const, query: null, leadId: null,
+    answer: { reply, document: null, question: null, suggestions } });
+  const run = async (first: ReturnType<typeof chat>, withRead = false) => {
+    const reasons: string[] = [];
+    let calls = 0;
+    const result = await runCoworkReadLoop({ message: '¿Cómo escribo un buen asunto?', signal: new AbortController().signal, authorize: async () => {},
+      record: async () => {}, execute: async () => ({}), decide: async (_observations, _mustAnswer, rejections = []) => {
+        reasons.push(...rejections.map(rejection => rejection.reason));
+        calls++;
+        if (withRead && calls === 1) return search;
+        return rejections.length ? { ...first, answer: { ...first.answer, question: '¿Redacto un correo con estos asuntos?' } } : first;
+      } });
+    return { reasons, calls, result };
+  };
+  const advice = chat('Un buen asunto es breve y concreto: «¿Revisión de antecedentes en minutos?».', [
+    { label: 'Redactar un correo', message: 'Redacta un correo en frío para gerentes de RR. HH.' }, { label: 'Más asuntos', message: 'Dame cinco asuntos más.' }]);
+  // Seen with the real model: the correction cost a call and its question repeated a chip («¿Te preparo más asuntos?»).
+  const plain = await run(advice);
+  assert.equal(plain.calls, 1);
+  assert.deepEqual(plain.reasons, []);
+  assert.equal(plain.result.question ?? null, null);
+  // After a read the next step is the account's: the question is still asked for.
+  assert.match((await run(advice, true)).reasons.join('|'), /completa answer\.question/);
+  // Leaving something for later, or a chip that says yes to a question that is not there, still gets the correction.
+  assert.match((await run(chat('Tienes 3 contactos sin correo. Después los reviso.', advice.answer.suggestions))).reasons.join('|'), /completa answer\.question/);
+  assert.match((await run(chat('Te dejé la secuencia.', [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }]))).reasons.join('|'), /completa answer\.question/);
+  // Without quick replies it is not a close: they are asked for, as before.
+  assert.match((await run(chat('Un buen asunto es breve.', []))).reasons.join('|'), /respuestas sugeridas/);
 });
 
 test('more ways of offering a read are seen; offers that write or need approval are not', () => {
