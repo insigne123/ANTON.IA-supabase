@@ -31,7 +31,7 @@ import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memo
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 import { withCoworkReports } from './report-document';
 import { COWORK_NEXT_STEP_RULE } from './next-step';
-import { coworkPreferenceAlreadyKept, coworkPreferenceSchema, coworkRememberSuggestion, type CoworkPreference } from './preference-proposal';
+import { coworkPreferenceAlreadyKept, coworkPreferenceSchema, coworkPreferenceSuggestion, coworkRememberSuggestion, type CoworkPreference } from './preference-proposal';
 import { coworkTaskPlanProblem, coworkTaskPlanSchema, type CoworkTaskPlan } from './task-plan';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
@@ -758,13 +758,27 @@ export function coworkOutline(value: Decision['outline']): CoworkPlanStep[] | nu
   return steps.length > 1 ? steps : null;
 }
 
+/**
+ * The quick reply that keeps a preference (Plan 12, 5 and Plan 14, 4): one asked to remember, or a standing instruction said in
+ * passing («siempre firma como Nico»), as Odysseus and ChatGPT learn durable facts from the conversation. Here it is only a
+ * suggestion: touching it asks Cowork to remember, which proposes the card. Never when Cowork already remembers it, and never twice.
+ */
+function coworkWithPreferenceSuggestion<T extends { suggestions?: CoworkAnswer['suggestions'] }>(input: { message: string; preferences?: boolean; userContext?: unknown }, answer: T): T {
+  if (!input.preferences) return answer;
+  const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
+  const suggestion = coworkPreferenceSuggestion(input.message, Array.isArray(memories) ? memories.map(String) : []);
+  const current = answer.suggestions || [];
+  if (!suggestion || current.some(chip => /recu[eé]rd|record/i.test(`${chip.label} ${chip.message}`))) return answer;
+  return { ...answer, suggestions: [...current.slice(0, 2), suggestion] };
+}
+
 /** The turn's answer with the chart its reads allow (charts.ts); the loop below is what produces it. */
 export async function runCoworkReadLoop(input: Parameters<typeof runCoworkLoop>[0]): Promise<Awaited<ReturnType<typeof runCoworkLoop>>> {
   const observations: CoworkObservation[] = [...(input.resumedObservations || [])];
   let proposed = false;
   const proposeEffect = input.proposeEffect;
   const answer = await runCoworkLoop(proposeEffect ? { ...input, proposeEffect: async proposal => { proposed = true; await proposeEffect(proposal); } } : input, observations);
-  const kept = proposed ? answer : coworkKeptPreferenceAnswer(input, answer);
+  const kept = proposed ? answer : coworkWithPreferenceSuggestion(input, coworkKeptPreferenceAnswer(input, answer));
   // With offered reads on, an offer the turn could not make leaves rather than asking permission for it.
   const closed = proposed || !input.offeredReads ? kept : coworkWithoutOfferedRead(kept);
   return coworkWithCharts<typeof closed>(closed, observations);
@@ -862,12 +876,7 @@ async function runCoworkLoop(input: {
   };
   // A preference asked for next to a writing task (Plan 12, 5): the Writer applied it, and a quick reply keeps it for next time.
   // Seen with the real model: the Writer's own suggestions never offered it, so the preference was lost.
-  const withRememberSuggestion = (answer: CoworkAnswer): CoworkAnswer => {
-    const suggestion = input.preferences ? coworkRememberSuggestion(input.message) : null;
-    const current = answer.suggestions || [];
-    if (!suggestion || current.some(chip => /recu[eé]rd|record/i.test(`${chip.label} ${chip.message}`))) return answer;
-    return { ...answer, suggestions: [...current.slice(0, 2), suggestion] };
-  };
+  const withRememberSuggestion = (answer: CoworkAnswer): CoworkAnswer => coworkWithPreferenceSuggestion(input, answer);
   if (observations.length) {
     // The pre-queue phase already spent reads/model decisions. Resume only
     // synthesis, never a second tool or specialist budget in the same run.
