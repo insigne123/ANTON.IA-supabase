@@ -129,3 +129,36 @@ export function matchTender(tender: Tender, profile: TenderProfile, now: string)
   if (tender.region && profile.regions.some(region => fold(region) === fold(tender.region!))) { score += 10; reasons.push(`en ${tender.region}`); }
   return { score: Math.min(100, score), reasons, keywords: [...inName, ...inText] };
 }
+
+/** What the model said of a tender (server/commercial-opportunities/tender-ai.ts), kept with it. */
+export type TenderAiVerdict = { fit: 'alta' | 'media'; reason: string; profileKey: string };
+
+/**
+ * A tender the model read (Plan 15). Kept when the model said it fits (its reason first, «alta» above «media»), or when an
+ * item carries one of the profile's UNSPSC codes, which the person chose on purpose; any other one read by the model is left
+ * out. The amount, the days left and the region add as they do for the words. Closed or past-deadline tenders never fit.
+ */
+export function matchScreenedTender(tender: Tender, profile: TenderProfile, verdict: TenderAiVerdict | undefined, now: string) {
+  const byWords = matchTender(tender, profile, now);
+  if (!verdict) {
+    const codes = profile.unspscCodes.map(code => code.replace(/\D/g, '')).filter(Boolean);
+    const codeHit = tender.items.some(item => item.code && codes.some(code => item.code!.replace(/\D/g, '').startsWith(code)));
+    return codeHit && byWords ? { ...byWords, ai: null } : null;
+  }
+  const closes = tender.closesAt ? Date.parse(tender.closesAt) : NaN;
+  if (Number.isFinite(closes) && closes < Date.parse(now)) return null;
+  if (tender.status && !['publicada', 'publicado', 'activa'].includes(tender.status)) return null;
+  const reasons = [verdict.reason];
+  let score = verdict.fit === 'alta' ? 55 : 35;
+  if (byWords?.keywords.length) score += 5;
+  if (tender.amount !== null) {
+    if (tender.amount >= 50_000_000) score += 15; else if (tender.amount >= 10_000_000) score += 10; else if (tender.amount > 0) score += 5;
+  }
+  if (Number.isFinite(closes)) {
+    const days = Math.floor((closes - Date.parse(now)) / DAY);
+    if (days >= 5) score += 10; else if (days >= 2) score += 5;
+    reasons.push(days <= 0 ? 'cierra hoy' : days === 1 ? 'cierra mañana' : `cierra en ${days} días`);
+  }
+  if (tender.region && profile.regions.some(region => fold(region) === fold(tender.region!))) { score += 10; reasons.push(`en ${tender.region}`); }
+  return { score: Math.min(100, score), reasons, keywords: byWords?.keywords ?? [], ai: verdict };
+}

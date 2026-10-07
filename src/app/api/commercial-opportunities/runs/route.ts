@@ -44,8 +44,8 @@ export async function POST(request: Request) {
       // The ticket of whoever clicks: their own, or the shared one when they are on its list.
       const resolved = await resolveTicketForUser(auth.admin, auth.user);
       if (!resolved.ticket) throw new HiringSyncError('Conecta tu ticket de Mercado Público para buscar licitaciones. Es gratis y se pide una sola vez.', 409);
-      if (!profile.keywords.length && !profile.unspscCodes.length) {
-        throw new HiringSyncError('Completa en Perfil qué vendes: con eso generamos las palabras para buscar licitaciones.', 409);
+      if (!profile.keywords.length && !profile.unspscCodes.length && !profile.offer) {
+        throw new HiringSyncError('Completa en Perfil qué vendes: con eso la IA elige las licitaciones que te sirven.', 409);
       }
       const result = await runTenderSync({
         store: supabaseTenderStore(auth.admin, storeScope, 'manual'), profile, ticket: resolved.ticket, organizationId: auth.organizationId,
