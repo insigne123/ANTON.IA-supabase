@@ -37,6 +37,20 @@ export const PREFERENCIAS_CORPUS: CorpusCase[] = [
     // asked the person to decide something they did not ask about, so the common next-step and quick-reply checks do not apply.
     checks: [...CORPUS_COMMON_CHECKS.filter(check => !['cierra con un siguiente paso o una propuesta', 'ofrece respuestas sugeridas u opciones para seguir'].includes(check.label)), noPreference,
       { label: 'dice que ya lo tiene presente', test: result => /(ya (lo )?(tengo|recuerdo|tenia|estaba|esta)|ya (lo )?tengo presente|ya lo recuerdo|ya esta guardad)/.test(shown(result)) }] },
+  // A standing instruction said in passing, without «recuerda» (Plan 14, 4): the task is done with it, and a quick reply offers to
+  // keep it; nothing is remembered without asking.
+  { id: 'pref-de-pasada', title: 'Una instrucción permanente dicha de pasada', preferences: true,
+    request: 'escríbeles un correo corto a los gerentes de personas de retail para invitarlos a una reunión; siempre firma como Nico',
+    origin: 'Plan 14, 4: «siempre…» sin «recuerda» se aplica ahora y se ofrece recordar, como Odysseus y ChatGPT aprenden lo durable.',
+    checks: [...CORPUS_COMMON_CHECKS, noPreference,
+      { label: 'entrega el correo', test: result => (result.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence') },
+      { label: 'firma como Nico', test: result => /\bnico\b/.test(shown(result)) },
+      { label: 'ofrece recordar la firma', test: result => (result.suggestions || []).some(chip => /recuerd|record/i.test(`${chip.label} ${chip.message}`) && /nico/i.test(chip.message)) }] },
+  { id: 'pref-de-pasada-chat', title: 'Una regla del negocio dicha junto a una pregunta', preferences: true,
+    request: 'nunca le escribimos a empresas de seguridad privada, ¿cuántos contactos de retail tengo?',
+    origin: 'Plan 14, 4: la pregunta se responde y la regla queda ofrecida para recordar.',
+    checks: [...CORPUS_COMMON_CHECKS, noPreference,
+      { label: 'ofrece recordar la regla', test: result => (result.suggestions || []).some(chip => /recuerd|record/i.test(`${chip.label} ${chip.message}`) && /seguridad privada/i.test(chip.message)) }] },
   { id: 'pref-solo-esta-vez', title: 'Una instrucción de una sola vez', preferences: true,
     request: 'esta vez escríbele en tono formal a los gerentes de finanzas de minería: una invitación corta a conversar',
     origin: 'Plan 12, 5: «esta vez» no es una preferencia: no se propone recordarla.',

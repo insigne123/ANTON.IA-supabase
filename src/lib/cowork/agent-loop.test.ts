@@ -1921,3 +1921,16 @@ test('a turn that already has an answer keeps it instead of rescuing (Plan 14, 2
   assert.equal(kept.reply, 'Revisé tus 12 contactos.');
   assert.equal(rescues, 0);
 });
+
+test('a standing instruction said in passing gets a quick reply to remember it in any answer (Plan 14, 4)', async () => {
+  const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Te dejo el correo firmado como Nico.\n¿Lo ajusto?', document: null,
+    suggestions: [{ label: 'Hazlo más corto', message: 'Hazlo más corto' }] } };
+  const base = { message: 'escríbele a Marcela para agendar; siempre firma como Nico', signal: new AbortController().signal,
+    authorize: async () => {}, execute: async () => ({}), record: async () => {}, decide: async () => answer };
+  const offered = await runCoworkReadLoop({ ...base, preferences: true });
+  assert.deepEqual(offered.suggestions?.map(chip => chip.message), ['Hazlo más corto', 'Recuerda que siempre firma como Nico']);
+  // Already remembered, or with preferences off: nothing to offer.
+  const kept = await runCoworkReadLoop({ ...base, preferences: true, userContext: { memories: ['Siempre firma como Nico'] } });
+  assert.deepEqual(kept.suggestions?.map(chip => chip.message), ['Hazlo más corto']);
+  assert.deepEqual((await runCoworkReadLoop(base)).suggestions?.map(chip => chip.message), ['Hazlo más corto']);
+});

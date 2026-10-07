@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { coworkPreferenceAlreadyKept, coworkPreferenceKey, coworkPreferenceLabel, coworkPreferenceSchema, coworkRememberSuggestion } from './preference-proposal';
+import { coworkPreferenceAlreadyKept, coworkPreferenceKey, coworkPreferenceLabel, coworkPreferenceSchema, coworkPreferenceSuggestion, coworkRememberSuggestion, coworkStandingPreference } from './preference-proposal';
 
 test('the card says what will be remembered and for whom', () => {
   assert.equal(coworkPreferenceLabel({ text: 'No le escribo a empresas de la competencia', scope: 'personal' }),
@@ -38,4 +38,19 @@ test('a preference asked for next to another task becomes a quick reply that ask
   assert.equal(coworkRememberSuggestion('De ahora en adelante, tuteamos a los prospectos. Escríbele a Ana')?.message, 'Recuerda que tuteamos a los prospectos');
   assert.equal(coworkRememberSuggestion('escríbele a Ana para agendar'), null);
   assert.equal(coworkRememberSuggestion('¿recuerdas qué le escribí a Ana?'), null);
+});
+
+test('a standing instruction said in passing becomes a quick reply to remember it, never a past, a question or a one-off (Plan 14, 4)', () => {
+  assert.equal(coworkStandingPreference('escríbele a Marcela para agendar; siempre firma como Nico'), 'siempre firma como Nico');
+  assert.equal(coworkStandingPreference('nunca uses emojis en los correos, ¿qué asunto le pongo?'), 'nunca uses emojis en los correos');
+  assert.equal(coworkStandingPreference('Nunca le escribimos a empresas de seguridad privada. Busca gerentes de retail'), 'Nunca le escribimos a empresas de seguridad privada');
+  assert.equal(coworkStandingPreference('ojo: no trabajamos con el sector público'), 'no trabajamos con el sector público');
+  for (const request of ['nunca tuvimos respuesta de ellos', '¿siempre les escribo a los gerentes?', 'esta vez escríbele en tono formal',
+    'nunca me respondió Marcela', 'escríbele a Ana para agendar', 'siempre']) {
+    assert.equal(coworkStandingPreference(request), null, request);
+  }
+  assert.deepEqual(coworkPreferenceSuggestion('escríbele a Marcela; siempre firma como Nico'),
+    { label: 'Recordarlo para la próxima', message: 'Recuerda que siempre firma como Nico' });
+  assert.equal(coworkPreferenceSuggestion('escríbele a Marcela; siempre firma como Nico', ['Siempre firma como Nico']), null, 'already remembered');
+  assert.equal(coworkPreferenceSuggestion('y recuerda que siempre firmo como Nico')?.message, 'Recuerda que siempre firmo como Nico', 'an explicit request keeps its wording');
 });
