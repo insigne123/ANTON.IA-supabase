@@ -84,6 +84,11 @@ env:
   - variable: COWORK_OFFERED_READS_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Plan 13: estado propio de la cuenta en paralelo, solo lectura y tope de 2,5 s.
+  # Apagarlo si añade latencia a los turnos. Reasoning effort se deja sin definir (low por defecto).
+  - variable: COWORK_WORKSPACE_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   - variable: COWORK_CODE_ARTIFACTS_ENABLED
     value: "true"
     availability: [RUNTIME]
