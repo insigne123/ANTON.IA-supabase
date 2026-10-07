@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
+import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { answerHelpQuestion, createHelpRateLimiter, HELP_QUESTION_MAX } from '@/lib/help/answer-help-question';
 import { visibleHelpSections } from '@/lib/help/manual';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
@@ -29,8 +30,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Hiciste varias preguntas seguidas. Espera unos minutos y vuelve a intentarlo.' }, { status: 429, headers: noStore });
     }
     const sections = visibleHelpSections({
-      // The same rule as the page and the menu: the confirmed accounts in OPPORTUNITIES_ALLOWED_EMAILS.
-      opportunities: isOpportunitiesUserAllowed(auth.user, process.env.OPPORTUNITIES_ALLOWED_EMAILS),
+      // The same rule as the page and the menu: OPPORTUNITIES_ALLOWED_EMAILS or a member an admin let in.
+      opportunities: await canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId),
       admin: auth.organizationRole === 'owner' || auth.organizationRole === 'admin',
     });
     const answer = await answerHelpQuestion({ question: body.data.question, sectionId: body.data.sectionId, sections });

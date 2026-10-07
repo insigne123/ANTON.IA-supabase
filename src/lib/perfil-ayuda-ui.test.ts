@@ -16,7 +16,8 @@ test('the help shows Oportunidades with the same rule as the menu, and the old p
   }
   assert.match(read('src/components/app-shell.tsx'), /<NavAccessProvider value=\{access\}>\{children\}<\/NavAccessProvider>/);
   const ask = read('src/app/api/help/ask/route.ts');
-  assert.match(ask, /opportunities: isOpportunitiesUserAllowed\(auth\.user, process\.env\.OPPORTUNITIES_ALLOWED_EMAILS\)/);
+  // The same rule as the page (Plan 15): the list, or a member an admin let in.
+  assert.match(ask, /opportunities: await canUseOpportunities\(getSupabaseAdminClient\(\), auth\.user, auth\.organizationId\)/);
   assert.doesNotMatch(ask, /isOpportunitiesEnabled/);
   assert.equal(existsSync('src/lib/opportunities/access.ts'), false);
   assert.doesNotMatch(read('apphosting.yaml'), /NEXT_PUBLIC_OPPORTUNITIES_ENABLED/);
