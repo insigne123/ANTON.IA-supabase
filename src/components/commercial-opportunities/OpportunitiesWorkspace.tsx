@@ -17,6 +17,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -27,6 +29,7 @@ import { DECISION_MAKER_TITLES } from '@/lib/commercial-opportunities/pilot';
 import type { HiringProfileSuggestion } from '@/lib/commercial-opportunities/profile-suggestion';
 import type { HiringOpportunityData, OpportunityStatus, ProjectOpportunityData, TenderOpportunityData } from '@/lib/commercial-opportunities/records';
 import { SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
+import { DEFAULT_SCHEDULE, WEEK_DAYS, describeSchedule, type OpportunitySchedule } from '@/lib/commercial-opportunities/schedule';
 import { ticketNeedsAction, type TicketStatus } from '@/lib/commercial-opportunities/ticket';
 import {
   FILTER_LABELS, OPPORTUNITIES_SEEN_KEY, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, isNewSince, lastSearch, opportunitiesVisit, parseList, relativeTime, seiaReminderDays, sourceLabel, statusCounts,
@@ -64,6 +67,8 @@ type Overview = {
   profile: Profile | null; suggestion?: HiringProfileSuggestion; perfil: Perfil;
   /** What the person marked «Me interesa» (Plan 15). */
   mine: MyOpportunity[];
+  /** When the search runs by itself (Plan 15); `available` once its columns exist. Absent without a profile. */
+  schedule?: Schedule;
   plan: Plan; month: { spentUsd: number; capUsd: number };
   tenderSearch: { ticket: boolean; ticketStatus?: TicketStatus; keywords: string[]; unspscCodes: string[] };
   opportunities: Opportunity[]; tenders: TenderOpportunity[]; projects: ProjectOpportunity[]; runs: Run[];
@@ -73,6 +78,7 @@ type ReadyOverview = Overview & { profile: Profile };
 const hasProfile = (overview: Overview | null): overview is ReadyOverview => Boolean(overview?.profile);
 const EMPTY_DRAFT: ProfileDraft = { name: 'Qué buscamos', offer: '', roles: [], regions: [], minAds: 5, keywords: [], unspscCodes: [], sectors: [], minInvestmentUsd: null };
 type Tab = 'hiring' | 'tenders' | 'projects' | 'mine';
+type Schedule = OpportunitySchedule & { available: boolean };
 /** What the person marked «Me interesa», of every kind (Plan 15). */
 type MyOpportunity = {
   id: string; kind: 'hiring' | 'tender' | 'compra_agil' | 'project'; title: string; who: string | null; domain: string | null; region: string | null;
@@ -276,7 +282,7 @@ export function OpportunitiesWorkspace() {
           <TicketGuide open={guideOpen} onOpenChange={setGuideOpen} onSaved={updateTicket} />
           <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.suggestion || EMPTY_DRAFT} perfil={overview.perfil} firstTime pilot={Boolean(overview.suggestion?.pilot)}
             onSaved={next => {
-              setOverview(current => current && { ...current, profile: next.profile, plan: next.plan });
+              setOverview(current => current && { ...current, profile: next.profile, plan: next.plan, schedule: next.schedule });
               void load();
               // «Guardar y buscar»: the search of companies costs money, so it goes through the same dialog as «Buscar ahora».
               if (next.plan.sources.some(source => !source.missing)) setConfirmOpen(true);
@@ -371,8 +377,8 @@ export function OpportunitiesWorkspace() {
           <HiringSearchDialog open={confirmOpen} onOpenChange={setConfirmOpen} initialRoles={overview.profile.roles} initialRegions={overview.profile.regions}
             month={overview.month} onConfirm={choice => void runSearch('hiring', choice)} />
           <TicketGuide open={guideOpen} onOpenChange={setGuideOpen} onSaved={updateTicket} />
-          <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.profile} perfil={overview.perfil}
-            onSaved={next => { setOverview(current => current && { ...current, profile: next.profile, plan: next.plan }); void load(); }} />
+          <ProfileSheet open={editOpen} onOpenChange={setEditOpen} profile={overview.profile} perfil={overview.perfil} schedule={overview.schedule}
+            onSaved={next => { setOverview(current => current && { ...current, profile: next.profile, plan: next.plan, schedule: next.schedule }); void load(); }} />
         </>
       ) : null}
       <span className="sr-only" aria-live="polite">{running ? (tab === 'hiring' ? 'Buscando empresas que están contratando. Puede tardar hasta 2 minutos.'
@@ -440,7 +446,7 @@ function SearchSummary({ overview, running }: { overview: ReadyOverview; running
   return (
     <section aria-label="Qué buscamos" className="grid gap-4 rounded-xl border border-border/70 bg-card p-4 shadow-sm md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="min-w-0 space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Búsqueda diaria</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Búsqueda programada · {describeSchedule(overview.schedule ?? DEFAULT_SCHEDULE)}</p>
         <OfferFromPerfil offer={overview.perfil?.offer || profile.offer} />
         {profile.roles.length ? (
           <ul className="flex flex-wrap gap-1.5" aria-label="Cargos de la búsqueda diaria">
@@ -779,7 +785,7 @@ function TenderSummary({ overview, running, onTicketChange, onOpenGuide }: {
         {!ticketNeedsAction(tenderSearch.ticketStatus) ? (
           <MercadoPublicoTicketCard status={tenderSearch.ticketStatus} onChange={onTicketChange} onOpenGuide={onOpenGuide} />
         ) : null}
-        <p className="text-xs text-muted-foreground">Sin costo: usa tu ticket de Mercado Público. Se actualiza sola cada mañana.</p>
+        <p className="text-xs text-muted-foreground">Sin costo: usa tu ticket de Mercado Público. Se actualiza sola: {describeSchedule(overview.schedule ?? DEFAULT_SCHEDULE).toLowerCase()}.</p>
       </div>
     </section>
   );
@@ -1015,7 +1021,7 @@ function ProjectEmpty({ overview, filter, query, disabled, onUpload }: {
   );
 }
 
-function ProfileSheet({ open, onOpenChange, profile, perfil, firstTime = false, pilot = false, onSaved }: {
+function ProfileSheet({ open, onOpenChange, profile, perfil, schedule, firstTime = false, pilot = false, onSaved }: {
   open: boolean; onOpenChange: (open: boolean) => void; profile: ProfileDraft;
   /** What «Perfil» says today (Plan 15): the offer comes from there and is never edited here. */
   perfil: Perfil;
@@ -1023,7 +1029,9 @@ function ProfileSheet({ open, onOpenChange, profile, perfil, firstTime = false, 
   firstTime?: boolean;
   /** The values come from the pilot's suggestion, to be reviewed before saving. */
   pilot?: boolean;
-  onSaved: (next: { profile: Profile; plan: Plan }) => void;
+  /** When the search runs by itself (Plan 15): editable once its columns exist. */
+  schedule?: Schedule;
+  onSaved: (next: { profile: Profile; plan: Plan; schedule?: Schedule }) => void;
 }) {
   const { toast } = useToast();
   const [roles, setRoles] = useState(profile.roles.join('\n'));
@@ -1033,6 +1041,7 @@ function ProfileSheet({ open, onOpenChange, profile, perfil, firstTime = false, 
   const [codes, setCodes] = useState(profile.unspscCodes.join(', '));
   const [sectors, setSectors] = useState<string[]>(profile.sectors);
   const [minInvestment, setMinInvestment] = useState(profile.minInvestmentUsd ? String(profile.minInvestmentUsd / 1_000_000) : '');
+  const [when, setWhen] = useState<OpportunitySchedule>(schedule ?? DEFAULT_SCHEDULE);
   const [saving, setSaving] = useState<'save' | 'regenerate' | null>(null);
   const [problem, setProblem] = useState('');
   useEffect(() => {
@@ -1040,7 +1049,8 @@ function ProfileSheet({ open, onOpenChange, profile, perfil, firstTime = false, 
     setRoles(profile.roles.join('\n')); setRegions(profile.regions); setMinAds(String(profile.minAds));
     setKeywords(profile.keywords.join('\n')); setCodes(profile.unspscCodes.join(', ')); setSectors(profile.sectors);
     setMinInvestment(profile.minInvestmentUsd ? String(profile.minInvestmentUsd / 1_000_000) : ''); setProblem('');
-  }, [open, profile]);
+    setWhen(schedule ?? DEFAULT_SCHEDULE);
+  }, [open, profile, schedule]);
 
   const save = async (regenerate = false) => {
     const roleList = parseList(roles);
@@ -1049,15 +1059,17 @@ function ProfileSheet({ open, onOpenChange, profile, perfil, firstTime = false, 
     const minimum = Number(minAds);
     if (!Number.isInteger(minimum) || minimum < 1 || minimum > 100) return setProblem('El mínimo de avisos va de 1 a 100.');
     if (codeList.some(code => !/^\d{2,8}$/.test(code))) return setProblem('Los códigos UNSPSC son números de 2 a 8 dígitos, separados por coma.');
+    if (schedule?.available && !when.days.length) return setProblem('Elige al menos un día para la búsqueda programada.');
     const investment = minInvestment.trim() ? Number(minInvestment.replace(',', '.')) : null;
     if (investment !== null && (!Number.isFinite(investment) || investment < 0)) return setProblem('La inversión mínima es un número de millones de dólares.');
     setSaving(regenerate ? 'regenerate' : 'save');
     setProblem('');
     try {
-      const next = await readJson<{ profile: Profile; plan: Plan }>(await fetch('/api/commercial-opportunities/profile', {
+      const next = await readJson<{ profile: Profile; plan: Plan; schedule?: Schedule }>(await fetch('/api/commercial-opportunities/profile', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: profile.name, roles: roleList, regions, minAds: minimum, keywords: keywordList, unspscCodes: codeList,
-          sectors, minInvestmentUsd: investment === null ? null : Math.round(investment * 1_000_000), ...(regenerate ? { regenerate: true } : {}) }),
+          sectors, minInvestmentUsd: investment === null ? null : Math.round(investment * 1_000_000), ...(regenerate ? { regenerate: true } : {}),
+          ...(schedule?.available ? { schedule: { enabled: when.enabled, days: when.days, hour: when.hour } } : {}) }),
       }));
       onSaved(next);
       if (regenerate) {
@@ -1118,6 +1130,41 @@ function ProfileSheet({ open, onOpenChange, profile, perfil, firstTime = false, 
             <Label htmlFor="opportunity-min">Mínimo de avisos en 30 días</Label>
             <Input id="opportunity-min" type="number" inputMode="numeric" min={1} max={100} value={minAds} onChange={event => setMinAds(event.target.value)} className="w-28" />
           </div>
+          {schedule?.available ? (
+            <fieldset className="space-y-3 rounded-lg border border-border/60 p-3">
+              <legend className="px-1 text-sm font-medium text-foreground">Cuándo se busca sola</legend>
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="opportunity-schedule-on" className="font-normal">Búsqueda programada</Label>
+                <Switch id="opportunity-schedule-on" checked={when.enabled} onCheckedChange={enabled => setWhen(current => ({ ...current, enabled }))} />
+              </div>
+              <div className={cn('space-y-3', !when.enabled && 'opacity-60')}>
+                <div role="group" aria-label="Días de la búsqueda" className="flex flex-wrap gap-1.5">
+                  {WEEK_DAYS.map(item => {
+                    const on = when.days.includes(item.day);
+                    return (
+                      <button key={item.day} type="button" aria-pressed={on} aria-label={item.label} title={item.label} disabled={!when.enabled}
+                        onClick={() => setWhen(current => ({ ...current, days: on ? current.days.filter(day => day !== item.day) : [...current.days, item.day].sort() }))}
+                        className={cn('h-9 w-9 rounded-full text-sm font-medium ring-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed',
+                          on ? 'bg-primary text-primary-foreground ring-primary' : 'bg-background text-foreground ring-border hover:bg-muted')}>
+                        {item.short}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label htmlFor="opportunity-schedule-hour" className="font-normal">A las</Label>
+                  <Select value={String(when.hour)} onValueChange={value => setWhen(current => ({ ...current, hour: Number(value) }))} disabled={!when.enabled}>
+                    <SelectTrigger id="opportunity-schedule-hour" className="w-28"><SelectValue /></SelectTrigger>
+                    <SelectContent>{Array.from({ length: 24 }, (_, hour) => <SelectItem key={hour} value={String(hour)}>{`${String(hour).padStart(2, '0')}:00`}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">hora de Chile</span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {describeSchedule(when)}. Busca licitaciones, Compra Ágil y Google for Jobs; LinkedIn solo cuando buscas tú, porque antes ves su costo.
+              </p>
+            </fieldset>
+          ) : null}
           <Collapsible defaultOpen={pilot} className="rounded-lg border border-border/60">
             <CollapsibleTrigger asChild>
               <Button type="button" variant="ghost" className="group flex h-auto w-full items-center justify-between px-3 py-2.5 text-left">

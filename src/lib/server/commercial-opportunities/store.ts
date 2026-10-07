@@ -11,6 +11,7 @@ import type { JobAd } from '@/lib/commercial-opportunities/hiring';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import { commaItems } from '@/lib/profile/profile-lists';
 import { regionsFromPlaces } from '@/lib/commercial-opportunities/search-terms';
+import { DEFAULT_SCHEDULE, normalizeSchedule, type OpportunitySchedule } from '@/lib/commercial-opportunities/schedule';
 import { profileOffer, profileOfferDetails, readOrganizationOffer } from '@/lib/server/suplia-context';
 import { generateTenderTerms, type PerfilOffer, type TenderTerms } from './search-ai';
 import type { HiringSearchProfile, HiringStore, HiringSyncSource } from './sync';
@@ -486,4 +487,33 @@ export async function listMyOpportunities(client: SupabaseClient, scope: Scope):
     url: row.url, score: row.score, reasons: row.reasons || [], status: row.status, ads: row.signal_count, firstSeenAt: row.first_seen_at,
     markedAt: row.updated_at, data: row.data && typeof row.data === 'object' ? row.data : {},
   }));
+}
+
+/**
+ * When the organization's search runs by itself (Plan 15). Until the schedule columns exist (migration 20261008100000) the
+ * search keeps today's schedule and the page does not offer to change it (`available: false`).
+ */
+export async function readSchedule(client: SupabaseClient, scope: Scope, profileId: string): Promise<OpportunitySchedule & { available: boolean }> {
+  const { data, error } = await client.from('commercial_opportunity_profiles').select('schedule_enabled,schedule_days,schedule_hour')
+    .eq('id', profileId).eq('organization_id', scope.organizationId).maybeSingle();
+  if (error || !data) return { ...DEFAULT_SCHEDULE, available: !error && Boolean(data) };
+  const row = data as { schedule_enabled?: unknown; schedule_days?: unknown; schedule_hour?: unknown };
+  return { ...normalizeSchedule({ enabled: row.schedule_enabled, days: row.schedule_days, hour: row.schedule_hour }), available: true };
+}
+
+export async function saveSchedule(client: SupabaseClient, scope: Scope, profileId: string, schedule: OpportunitySchedule) {
+  const clean = normalizeSchedule(schedule);
+  const { error } = await client.from('commercial_opportunity_profiles').update({
+    schedule_enabled: clean.enabled, schedule_days: clean.days, schedule_hour: clean.hour, updated_at: new Date().toISOString(),
+  }).eq('id', profileId).eq('organization_id', scope.organizationId);
+  if (error) fail('guardar el horario de la búsqueda', error);
+  return clean;
+}
+
+/** When the organization's last scheduled search started, of any source, skipped ones included: one a day is enough. */
+export async function lastScheduledRunAt(client: SupabaseClient, scope: Scope) {
+  const { data, error } = await client.from('commercial_opportunity_runs').select('started_at')
+    .eq('organization_id', scope.organizationId).eq('trigger', 'schedule').order('started_at', { ascending: false }).limit(1);
+  if (error) fail('leer la última búsqueda programada', error);
+  return (data?.[0] as { started_at?: string } | undefined)?.started_at ?? null;
 }

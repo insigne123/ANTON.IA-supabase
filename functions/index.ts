@@ -237,7 +237,8 @@ export const privacyRetentionTick = functions.scheduler.onSchedule({
 });
 
 export const commercialOpportunitiesTick = functions.scheduler.onSchedule({
-    schedule: '15 11 * * *',
+    // Hourly (Plan 15): the route searches each organization at its own time.
+    schedule: '15 * * * *',
     timeZone: 'Etc/UTC',
     // A retry would repeat the paid JSearch queries of a run that already spent them; the next morning searches again.
     retryCount: 0,
@@ -245,7 +246,7 @@ export const commercialOpportunitiesTick = functions.scheduler.onSchedule({
     memory: '512MiB',
     secrets: ['FIREBASE_SCHEDULER_SECRET'],
 }, async () => {
-    // Oportunidades (plan 8, phase 3): public tenders and the cheap hiring source, every morning (08:15 in Chile).
+    // Oportunidades (plan 8, phase 3): public tenders and the cheap hiring source.
     await invokeFirebaseSchedulerBridge({
         name: 'commercial-opportunities',
         path: '/api/cron/commercial-opportunities',

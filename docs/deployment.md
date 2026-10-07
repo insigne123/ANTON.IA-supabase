@@ -78,7 +78,7 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 | Reply sync | `replySyncTick` | cada 5 minutos | Invoca `/api/cron/reply-sync` por par organizacion/usuario. |
 | Retencion de privacidad | `privacyRetentionTick` | 03:30 UTC diario | Invoca `/api/cron/privacy-retention`. |
 | Rollups ANTON.IA | `antoniaRollupsTick` | 00:10 UTC diario | Invoca `/api/cron/antonia-rollups`. |
-| Oportunidades comerciales | `commercialOpportunitiesTick` | 11:15 UTC diario (08:15 en Chile) | Invoca `/api/cron/commercial-opportunities`: licitaciones y Compra Ágil (con el ticket de Mercado Público de un miembro de la organización) y avisos de JSearch dentro del tope mensual. |
+| Oportunidades comerciales | `commercialOpportunitiesTick` | Cada hora, al minuto 15 (Plan 15) | Invoca `/api/cron/commercial-opportunities`, que busca para cada organización en sus días y a su hora (08:00 todos los días por omisión): licitaciones y Compra Ágil (con el ticket de Mercado Público de un miembro de la organización) y avisos de JSearch dentro del tope mensual. |
 
 No agregues estas cargas a Vercel, App Hosting ni a un Cloud Scheduler HTTP externo. `vercel.json` ya no programa ningún cron: SUPL.IA se retiró junto con el suyo (3 oct 2026).
 
