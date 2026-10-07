@@ -168,6 +168,10 @@ export function axisCorpus(userContext: CoworkUserContext | null): CorpusCase[] 
         failed: 'Ninguna: corrigió la hipótesis con evidencia sin discutir.' }),
     world: w({}),
     checks: commonWith(
+      // It asked for companies of Chile: a search, if any, looks in Chile and nowhere else (Plan 14, 1).
+      { label: 'si busca, busca en Chile como pidió', test: result => !result.search
+        || ['locations', 'companyLocations'].flatMap(field => Array.isArray(result.search?.[field]) ? result.search?.[field] as string[] : [])
+          .some(place => /^\s*chile\s*$/i.test(place)) },
       reads('mira su propia audiencia antes de planear', 'audience.analyze'),
       says('usa las cifras de su historial por vertical', /557/, /186/, /\b84\b/),
       says('corrige la hipótesis: aseo y seguridad ya están trabajados', /(aseo|limpieza|outsourcing)/, /81 ?%/, /62 ?%/),

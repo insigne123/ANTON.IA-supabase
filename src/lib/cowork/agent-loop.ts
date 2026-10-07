@@ -4,6 +4,7 @@ import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishC
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from './search-proposal';
+import { coworkExplainsSearchScope, coworkMentionsPlaces, coworkSearchScope, coworkSearchScopeNotice, type CoworkSearchDefaults } from './search-scope';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
 import { coworkCampaignEmails, coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
@@ -803,6 +804,11 @@ async function runCoworkLoop(input: {
   userContext?: unknown;
   /** Keeps the summary of the conversation a decision carries (thread-memory.ts). Best effort: it never fails the turn. */
   remember?: (memory: CoworkThreadMemory) => Promise<void>;
+  /** Where a search looks when nobody said where: the places in «Perfil», or the account's default (search-scope.ts). */
+  searchDefaults?: CoworkSearchDefaults | null;
+  /** What a search has to keep, when it is not this turn's message: inside a long task, the plan the person approved (its
+   * goal and steps), since its turns run by themselves with an automatic message. */
+  scopeRequest?: string;
 }, observations: CoworkObservation[]) {
   const remember = async (decision: Decision) => {
     if (decision.memory && input.remember) await input.remember(decision.memory).catch(() => undefined);
@@ -877,6 +883,8 @@ async function runCoworkLoop(input: {
   let filesListed = false;
   // The correction that makes the read an answer offered is the loop's, not the judge's: it is not reported as one.
   let offerCorrected = false;
+  // A search that dropped or changed the place asked for goes back once (Plan 14, 1); after that, the card shows its criteria.
+  let scopeCorrected = false;
   const keepsVersionOnly = coworkOnlyUsesVersion(input.message);
   // Emails the Writer wrote when the person asked for the campaign in the same request (Plan 12, 4a-2): the next
   // decision proposes it with them, word for word. Whatever happens after, the Writer's answer is never lost.
@@ -1073,9 +1081,20 @@ async function runCoworkLoop(input: {
         const parsed = coworkSearchCriteriaSchema.safeParse(decision.searchCriteria);
         if (!parsed.success) throw rejected('Invalid external search proposal', `Criterios de búsqueda inválidos: ${issueSummary(parsed.error)}. Corrígelos.`);
         if (decision.answer?.document && turn < last) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
-        const note = await explain(decision) ?? await recordNote(searchNote(parsed.data, input.message));
+        // The place asked for stays in the search, and a search with no place gets the person's market (Plan 14, 1). Inside a
+        // long task the search is approved by itself: nobody would see the card before it spends the quota.
+        const scope = coworkSearchScope(parsed.data, input.scopeRequest ?? input.message, input.searchDefaults ?? null);
+        if (scope.problem && turn < last && !scopeCorrected && !coworkExplainsSearchScope(decision.answer?.reply || '', scope.missing)) {
+          scopeCorrected = true;
+          throw rejected('Search scope changed', scope.problem);
+        }
+        const searchCriteria = scope.criteria;
+        if (scope.added && decision.answer?.reply?.trim() && !coworkMentionsPlaces(decision.answer.reply, scope.added.places)) {
+          decision.answer = { ...decision.answer, reply: `${decision.answer.reply.trim()} ${coworkSearchScopeNotice(scope.added)}` };
+        }
+        const note = await explain(decision) ?? await recordNote(searchNote(searchCriteria, input.message));
         await input.authorize(); input.signal.throwIfAborted();
-        try { await input.proposeSearch(parsed.data); } catch (error) { throw proposalRejection(error, input.signal); }
+        try { await input.proposeSearch(searchCriteria); } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || (decision.searchCriteria.target === 'companies'
           ? 'Revisa los criterios antes de buscar empresas.' : 'Revisa los criterios antes de buscar nuevos contactos.'), document: null };
       }

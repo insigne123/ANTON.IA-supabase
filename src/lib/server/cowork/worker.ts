@@ -38,6 +38,7 @@ import { coworkAnswerHoldEnabled, coworkDraftWriter, coworkStreamingEnabled } fr
 import { coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
 import { COWORK_JUDGE_HELD_TIMEOUT_MS, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
 import { coworkJevShadow, coworkReviewEngine } from '@/lib/cowork/review-engine';
+import { coworkSearchDefaults } from '@/lib/cowork/search-scope';
 import { askJev } from '@/lib/server/jev';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
@@ -263,6 +264,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     }) : null;
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
+      // Where a search looks when nobody said where (Plan 14, 1): «Perfil», or COWORK_DEFAULT_SEARCH_LOCATION (Chile).
+      searchDefaults: coworkSearchDefaults(userContext),
+      // Inside a long task the search keeps what the approved plan says («…de retail en Santiago»), not the automatic message.
+      ...(activeTask ? { scopeRequest: [activeTask.plan.goal, ...activeTask.plan.steps.map(step => step.label)].join('. ') } : {}),
       resumedObservations: coworkSpecialistQueueEnabled() ? await loadCoworkSpecialistResume(client, scope, run.id) : undefined,
       review: coworkSpecialistQueueEnabled() ? async (tasks, observations) => {
         await authorize();
