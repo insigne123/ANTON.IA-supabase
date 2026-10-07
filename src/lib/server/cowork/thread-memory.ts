@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { coworkThreadMemorySchema, readCoworkThreadMemory, type CoworkThreadMemory } from '@/lib/cowork/thread-memory';
+import { coworkThreadMemorySchema, coworkThreadMemoryTitle, readCoworkThreadMemory, type CoworkThreadMemory } from '@/lib/cowork/thread-memory';
 
 /**
  * The memory of a conversation in cowork_thread_memory (migration 20261001230000), one row per conversation (its first run).
@@ -65,4 +65,26 @@ export async function loadCoworkOfferInPlay(client: SupabaseClient, scope: Scope
   } catch {
     return null;
   }
+}
+
+/**
+ * The names Cowork gave the person's conversations (memory.title, Plan 13), by first run, for the list. cowork_thread_memory is
+ * the worker's table (service role only), so it is read with that client and always scoped to the person and their
+ * organization. Best effort: without it the list names conversations by their first message, as before.
+ */
+export async function loadCoworkThreadTitles(admin: SupabaseClient, scope: Scope, rootIds: string[]): Promise<Record<string, string>> {
+  const titles: Record<string, string> = {};
+  const ids = [...new Set(rootIds.filter(Boolean))].slice(0, 200);
+  if (!ids.length) return titles;
+  try {
+    // Only the name leaves the database, never the rest of the memory.
+    const { data, error } = await admin.from('cowork_thread_memory').select('root_run_id,title:memory->>title')
+      .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).in('root_run_id', ids);
+    if (error || !Array.isArray(data)) return titles;
+    for (const row of data as Array<{ root_run_id?: unknown; title?: unknown }>) {
+      const title = coworkThreadMemoryTitle(row);
+      if (typeof row.root_run_id === 'string' && title) titles[row.root_run_id] = title;
+    }
+  } catch { /* the list names them by their first message */ }
+  return titles;
 }

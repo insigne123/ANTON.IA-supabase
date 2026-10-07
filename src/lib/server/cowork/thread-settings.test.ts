@@ -134,13 +134,17 @@ test('the route, the list and the workspace wire rename and delete, and hide the
   assert.match(route, /ACTIVE: \{ status: 409/);
   const list = readFileSync('src/app/api/cowork/runs/route.ts', 'utf8');
   assert.match(list, /listCoworkRuns\(auth, \{ hiddenRootIds: threads\.hiddenRootIds \}\)/);
-  assert.match(list, /threads: \{ available: threads\.available, titles: threads\.titles \}/);
+  assert.match(list, /threads: \{ available: threads\.available, titles: threads\.titles, autoTitles \}/);
+  // The names Cowork gave each conversation (Plan 13) come from the worker's table, scoped to the person.
+  assert.match(list, /loadCoworkThreadTitles\(getSupabaseAdminClient\(\), \{ userId: auth\.user\.id, organizationId: auth\.organizationId \}, rootIds\)/);
   const menu = readFileSync('src/components/cowork/CoworkThreadList.tsx', 'utf8');
   assert.match(menu, /Renombrar/);
   assert.match(menu, /disabled=\{working\}/);
   assert.match(menu, /maxLength=\{TITLE_MAX\}/);
   const workspace = readFileSync('src/components/cowork/CoworkWorkspace.tsx', 'utf8');
   assert.match(workspace, /const threadActions = threadNames\.available/);
+  // A name the person chose wins over the one Cowork gave.
+  assert.match(workspace, /groupCoworkThreads\(runs, \{ \.\.\.autoTitles, \.\.\.threadNames\.titles \}\)/);
   assert.match(workspace, /<ToastAction altText="Deshacer la eliminación"/);
   assert.equal((workspace.match(/\{\.\.\.threadActions\}/g) || []).length, 2, 'the rail and the phone drawer');
 });

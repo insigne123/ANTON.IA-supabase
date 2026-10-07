@@ -117,7 +117,7 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
                   onBlur={() => { if (skipBlurSave.current) { skipBlurSave.current = false; return; } void save(); }}
                   aria-describedby={`${idPrefix}-rename-help`}
                   className="h-8 w-full rounded-lg border border-cw-border-strong bg-cw-elevated px-2.5 text-[13.5px] text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]" />
-                <p id={`${idPrefix}-rename-help`} className="px-1 pt-1 text-[11.5px] text-cw-muted">Enter guarda · Esc cancela · vacío vuelve al primer mensaje</p>
+                <p id={`${idPrefix}-rename-help`} className="px-1 pt-1 text-[11.5px] text-cw-muted">Enter guarda · Esc cancela · vacío vuelve al nombre automático</p>
               </li>;
             }
             return <li key={thread.rootId} className="group/thread relative">
