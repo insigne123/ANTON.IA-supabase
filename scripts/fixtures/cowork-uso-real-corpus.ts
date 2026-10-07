@@ -94,7 +94,11 @@ export const USO_REAL_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'entrega el correo como tarjeta', test: r => (r.blocks || []).some(block => block.type === 'email_draft') },
       { label: 'el correo queda más corto', test: r => (r.blocks || []).some(block => block.type === 'email_draft' && block.body.length < ORIGINAL_EMAIL.length) },
-      { label: 'termina con una pregunta fácil de responder', test: r => (r.blocks || []).some(block => block.type === 'email_draft' && /\?/.test(block.body)) }] },
+      { label: 'termina con una pregunta fácil de responder', test: r => (r.blocks || []).some(block => block.type === 'email_draft' && /\?/.test(block.body)) },
+      // Plan 13: it was one email to three people together; a campaign template («Hola {{nombre}},») sends three separate ones.
+      { label: 'sigue siendo para Marcela, Romualdo y Verónica juntos', test: r => (r.blocks || []).some(block => block.type === 'email_draft'
+        && ['Marcela', 'Romualdo', 'Verónica'].every(name => block.body.includes(name)) && !/\{\{\s*nombre\s*\}\}/.test(block.body)) },
+      { label: 'no ofrece convertirlo en campaña', test: r => !/campa[ñn]a/i.test(r.question || '') && r.proposal?.kind !== 'campaign_create' }] },
   { id: 'ur-escribir-sin-correo', title: 'Escribirle igual y cómo conseguir su correo',
     request: 'ya, entonces escribeme igual un correo para el con lo que sepas de la empresa, y dime como consigo su correo',
     history: [{ request: 'investiga a carlos, el que guardamos de minera centinela, quiero escribirle', at,
