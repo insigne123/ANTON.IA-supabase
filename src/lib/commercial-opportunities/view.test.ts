@@ -52,3 +52,21 @@ test('the SEIA file is reminded from its 30th day, never without a file or with 
   assert.equal(seiaReminderDays('2026-09-05T12:00:00Z', now), 30);
   assert.equal(seiaReminderDays('2026-08-20T12:00:00Z', '2026-10-05T12:00:00Z'), 46, 'the date can come as text, as Cowork passes it');
 });
+
+test('«Nueva» is what appeared since the previous visit, and reloading in the same sitting keeps the badges', async () => {
+  const { opportunitiesVisit, isNewSince, FILTER_LABELS } = await import('./view');
+  const first = opportunitiesVisit(null, '2026-10-08T10:00:00.000Z');
+  assert.equal(first.newSince, '2026-10-06T10:00:00.000Z', 'the first time, the last two days');
+  assert.deepEqual(first.next, { at: '2026-10-08T10:00:00.000Z', since: '2026-10-06T10:00:00.000Z' });
+  const reload = opportunitiesVisit(first.next, '2026-10-08T10:20:00.000Z');
+  assert.equal(reload.newSince, first.newSince, 'the same sitting');
+  const later = opportunitiesVisit(reload.next, '2026-10-08T15:00:00.000Z');
+  assert.equal(later.newSince, '2026-10-08T10:20:00.000Z', 'the next visit: what appeared after the previous one');
+  assert.deepEqual(later.next, { at: '2026-10-08T15:00:00.000Z', since: '2026-10-08T10:20:00.000Z' });
+  assert.equal(opportunitiesVisit(later.next, '2026-10-08T15:05:00.000Z').newSince, '2026-10-08T10:20:00.000Z');
+  assert.equal(opportunitiesVisit({ at: 'nada' }, '2026-10-08T10:00:00.000Z').newSince, '2026-10-06T10:00:00.000Z', 'anything malformed is a first visit');
+  assert.equal(isNewSince('2026-10-08T11:00:00Z', '2026-10-08T10:20:00Z'), true);
+  assert.equal(isNewSince('2026-10-08T09:00:00Z', '2026-10-08T10:20:00Z'), false);
+  assert.equal(isNewSince(null, '2026-10-08T10:20:00Z'), false);
+  assert.equal(FILTER_LABELS.new, 'Por revisar', '«Nueva» is the badge now; the status reads «Por revisar»');
+});
