@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isOpportunitiesUserAllowed, type OpportunitiesIdentity } from '@/lib/commercial-opportunities/access';
+import { hasConfirmedEmail, isOpportunitiesUserAllowed, type OpportunitiesIdentity } from '@/lib/commercial-opportunities/access';
+import { opportunitiesGrantedUserIds } from './grants';
 import { decryptStoredToken, encryptStoredToken } from '@/lib/server/token-crypto';
 import { MERCADO_PUBLICO_BASE } from './mercado-publico';
 
@@ -76,6 +77,8 @@ export async function resolveTicketForOrganization(client: SupabaseClient, input
     return error ? null : data?.user ?? null;
   };
   if (memberIds.length) {
+    // The members an admin let in (Plan 15) count as those of the list.
+    const granted = await opportunitiesGrantedUserIds(client, input.organizationId);
     const tickets = await client.from(TABLE).select(COLUMNS).in('user_id', memberIds);
     if (tickets.error) fail('buscar', tickets.error);
     const candidates = ((tickets.data || []) as TicketRow[])
@@ -84,7 +87,8 @@ export async function resolveTicketForOrganization(client: SupabaseClient, input
         || Date.parse(b.verified_at || '') - Date.parse(a.verified_at || '') || 0);
     for (const row of candidates) {
       const ticket = decryptStoredToken(row.ticket_encrypted);
-      if (ticket && isOpportunitiesUserAllowed(await userOf(row.user_id), env.OPPORTUNITIES_ALLOWED_EMAILS)) {
+      const owner = ticket ? await userOf(row.user_id) : null;
+      if (ticket && (isOpportunitiesUserAllowed(owner, env.OPPORTUNITIES_ALLOWED_EMAILS) || (granted.has(row.user_id) && hasConfirmedEmail(owner)))) {
         return { ticket, userId: row.user_id, source: 'own' as const };
       }
     }

@@ -5,7 +5,7 @@ import { readCoworkLinkedinQuota } from '@/lib/server/cowork/linkedin-reads';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkFirstName, type CoworkOverview } from '@/lib/cowork/overview';
-import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
+import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { loadCoworkSinceLastVisit } from '@/lib/server/cowork/since-visit';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +28,7 @@ export async function GET() {
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const own = (table: string) => auth.supabase.from(table).select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
+    const opportunities = await canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId);
     const [contacts, withEmail, campaigns, linkedin, context, since] = await Promise.allSettled([
       own('leads'),
       own('leads').not('email', 'is', null).neq('email', ''),
@@ -37,8 +38,7 @@ export async function GET() {
       Promise.resolve().then(() => readCoworkLinkedinQuota(getSupabaseAdminClient(), scope)),
       loadCoworkUserContext(auth.supabase, scope, { memories: false }),
       // «Desde tu última visita»: replies, research and opportunities through your session; LinkedIn as the quota above.
-      loadCoworkSinceLastVisit({ client: auth.supabase, admin: getSupabaseAdminClient,
-        opportunities: isOpportunitiesUserAllowed(auth.user, process.env.OPPORTUNITIES_ALLOWED_EMAILS) }, scope),
+      loadCoworkSinceLastVisit({ client: auth.supabase, admin: getSupabaseAdminClient, opportunities }, scope),
     ]);
     const quota = linkedin.status === 'fulfilled' ? linkedin.value : null;
     const person = context.status === 'fulfilled' ? context.value : null;

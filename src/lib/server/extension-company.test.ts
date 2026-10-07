@@ -64,7 +64,8 @@ test('the company: its saved contacts once each, with what the organization know
   assert.deepEqual(presenceCalls, [['https://www.linkedin.com/in/ana-rojas', 'https://www.linkedin.com/in/pedro-diaz']]);
   assert.equal(view.searchHref, '/search?company=Minera+Norte+S.A.&domain=mineranorte.cl&titles=Gerente+de+Operaciones%2C+Jefe+de+Abastecimiento');
   assert.equal(view.opportunity, null, 'Not an account of the pilot list: no opportunity, and the opportunities are not read');
-  assert.ok(!calls.some(call => call.table.startsWith('commercial_')));
+  // Only who may see them (Plan 15: a member an admin let in) is read, never the opportunities themselves.
+  assert.ok(!calls.some(call => call.table.startsWith('commercial_') && call.table !== 'commercial_opportunity_members'));
   // Every read is the active organization's, and the name is searched without its legal suffix.
   for (const call of calls.filter(item => ['enriched_leads', 'leads'].includes(item.table))) {
     assert.deepEqual(call.filters.find(filter => (filter as unknown[])[0] === 'eq'), ['eq', 'organization_id', 'org-1']);

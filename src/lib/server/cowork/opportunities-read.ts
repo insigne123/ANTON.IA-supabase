@@ -1,28 +1,28 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
 import { coworkOpportunitiesSummary } from '@/lib/commercial-opportunities/cowork';
 import {
   findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities, recentRuns,
 } from '@/lib/server/commercial-opportunities/store';
 import { hiringSyncEnvironment } from '@/lib/server/commercial-opportunities/sync';
 import { resolveTicketForUser } from '@/lib/server/commercial-opportunities/tickets';
+import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 
 type Scope = { userId: string; organizationId: string };
 
 /**
- * Whether the owner of a Cowork run may see «Oportunidades»: the same list as the page (OPPORTUNITIES_ALLOWED_EMAILS, with a
- * confirmed email), read from the auth record with the worker's service client. Any doubt is a no.
+ * Whether the owner of a Cowork run may see «Oportunidades» in the run's organization: the same rule as the page
+ * (OPPORTUNITIES_ALLOWED_EMAILS, or a member an admin let in, with a confirmed email), read from the auth record with the
+ * worker's service client. Any doubt is a no.
  */
-export async function coworkOpportunitiesAllowed(client: SupabaseClient, userId: string, configured = process.env.OPPORTUNITIES_ALLOWED_EMAILS) {
-  return Boolean(await coworkOpportunitiesUser(client, userId, configured));
+export async function coworkOpportunitiesAllowed(client: SupabaseClient, scope: Scope, configured = process.env.OPPORTUNITIES_ALLOWED_EMAILS) {
+  return Boolean(await coworkOpportunitiesUser(client, scope, configured));
 }
 
 /** The auth record of the run owner when they may see «Oportunidades», or null. */
-async function coworkOpportunitiesUser(client: SupabaseClient, userId: string, configured = process.env.OPPORTUNITIES_ALLOWED_EMAILS) {
-  if (!configured?.trim()) return null;
+async function coworkOpportunitiesUser(client: SupabaseClient, scope: Scope, configured = process.env.OPPORTUNITIES_ALLOWED_EMAILS) {
   try {
-    const { data, error } = await client.auth.admin.getUserById(userId);
-    return !error && data?.user && isOpportunitiesUserAllowed(data.user, configured) ? data.user : null;
+    const { data, error } = await client.auth.admin.getUserById(scope.userId);
+    return !error && data?.user && await canUseOpportunities(client, data.user, scope.organizationId, configured) ? data.user : null;
   } catch {
     return null;
   }
@@ -34,7 +34,7 @@ async function coworkOpportunitiesUser(client: SupabaseClient, userId: string, c
  * Read only: without a profile it says so instead of creating one, and the access is checked again on every read.
  */
 export async function readCoworkOpportunities(client: SupabaseClient, scope: Scope, value: string) {
-  const user = await coworkOpportunitiesUser(client, scope.userId);
+  const user = await coworkOpportunitiesUser(client, scope);
   if (!user) throw new Error('Esta consulta no está disponible para esta cuenta.');
   const now = new Date().toISOString();
   const profile = await findHiringProfile(client, scope);

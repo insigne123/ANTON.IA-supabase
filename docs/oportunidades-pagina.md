@@ -60,7 +60,14 @@ La pestaña «Licitaciones y Compra Ágil» busca con el ticket propio de cada p
 
 ## Acceso
 
-- **`OPPORTUNITIES_ALLOWED_EMAILS`** (en `apphosting.yaml`) dice quién ve la sección: solo cuentas con correo confirmado de esa lista. Hoy, nicolas.yarur.g@yago.cl.
+- **Quién ve la sección** (Plan 15), siempre con el correo confirmado:
+  - las cuentas de **`OPPORTUNITIES_ALLOWED_EMAILS`** (en `apphosting.yaml`), en cualquiera de sus organizaciones, como antes;
+  - los miembros que un propietario o administrador deja entrar en **Administración › Personas**, con el interruptor «Oportunidades». Vale solo en esa organización.
+- **El interruptor:**
+  - se guarda en `commercial_opportunity_members` (migración `20261008090000`), que solo lee y escribe el servidor;
+  - quien viene de la lista aparece como «Incluida por ANTON.IA», sin poder quitarse desde ahí;
+  - sin correo confirmado, el interruptor queda apagado con «Confirma su correo primero»;
+  - mientras la tabla no exista, la columna no aparece y vale solo la lista.
 - **El servidor lo comprueba en tres lugares:**
   - la página (`src/app/(app)/opportunities/page.tsx`);
   - cada ruta de `/api/commercial-opportunities`;
