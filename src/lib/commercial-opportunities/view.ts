@@ -6,7 +6,8 @@ export type OpportunityFilter = 'new' | 'interested' | 'dismissed' | 'all';
 export type OpportunityListItem = { id: string; company: string; status: 'new' | 'interested' | 'dismissed' | 'converted'; score: number };
 export type RunListItem = { source: string; status: string; startedAt: string; finishedAt: string | null; fetched: number; created: number; costUsd: number; error: string | null };
 
-export const FILTER_LABELS: Record<OpportunityFilter, string> = { new: 'Nuevas', interested: 'Me interesan', dismissed: 'Descartadas', all: 'Todas' };
+// «Nueva» is now the badge of what appeared since the last visit (Plan 15): the status «new» reads «Por revisar».
+export const FILTER_LABELS: Record<OpportunityFilter, string> = { new: 'Por revisar', interested: 'Me interesan', dismissed: 'Descartadas', all: 'Todas' };
 const SOURCE_LABELS: Record<string, string> = { jsearch: 'Google for Jobs', linkedin: 'LinkedIn', jooble: 'Jooble', mercado_publico: 'Mercado Público', compra_agil: 'Compra Ágil' };
 export const sourceLabel = (source: string) => SOURCE_LABELS[source] || source;
 
@@ -91,4 +92,30 @@ export function closesIn(deadline: string | null, now = Date.now()) {
   const days = Math.floor((Date.parse(deadline) - now) / 86_400_000);
   if (Date.parse(deadline) < now) return 'cerrada';
   return `${days <= 0 ? 'cierra hoy' : days === 1 ? 'cierra mañana' : `cierra en ${days} días`} · ${formatDay(deadline)}`;
+}
+
+/**
+ * «Nueva» (Plan 15): what appeared since the person's previous visit to «Oportunidades». The visit is kept in the browser as
+ * { at, since }: when it was and what counts as new during it. Opening the page writes nothing on the server. A visit is one
+ * sitting, so reloading within half an hour keeps the same badges. The first time, what appeared in the last two days is new.
+ */
+export const OPPORTUNITIES_SEEN_KEY = 'anton.opportunities.visit';
+export type OpportunitiesVisit = { at: string; since: string };
+const SITTING_MS = 30 * 60_000;
+const FIRST_VISIT_MS = 48 * 3_600_000;
+
+const validDate = (value: unknown) => (typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null);
+
+export function opportunitiesVisit(stored: unknown, now = new Date().toISOString()): { newSince: string; next: OpportunitiesVisit } {
+  const at = validDate((stored as { at?: unknown } | null)?.at);
+  const since = validDate((stored as { since?: unknown } | null)?.since);
+  const newSince = !at ? new Date(Date.parse(now) - FIRST_VISIT_MS).toISOString()
+    : Date.parse(now) - Date.parse(at) > SITTING_MS ? at
+      : since ?? new Date(Date.parse(now) - FIRST_VISIT_MS).toISOString();
+  return { newSince, next: { at: now, since: newSince } };
+}
+
+/** Whether an opportunity appeared after `since`. */
+export function isNewSince(firstSeenAt: string | null | undefined, since: string | null | undefined) {
+  return Boolean(firstSeenAt && since && Date.parse(firstSeenAt) > Date.parse(since));
 }

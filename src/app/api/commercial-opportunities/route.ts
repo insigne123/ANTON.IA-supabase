@@ -2,7 +2,7 @@ import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunitie
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import {
   findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities, monthSpentUsd, readHiringProfileSuggestion,
-  readPerfilForOpportunities, recentRuns,
+  listMyOpportunities, readPerfilForOpportunities, recentRuns,
 } from '@/lib/server/commercial-opportunities/store';
 import { MANUAL_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
 import { hiringSyncEnvironment, hiringSyncPlan, monthStart, monthlyCapUsd } from '@/lib/server/commercial-opportunities/sync';
@@ -29,20 +29,22 @@ export async function GET() {
         readHiringProfileSuggestion(auth.admin, scope),
       ]);
       return opportunitiesJson({
-        profile: null, suggestion, perfil: fromPerfil, plan: { sources: [], estimateUsd: 0, queries: [], left: 0 }, month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
+        profile: null, suggestion, perfil: fromPerfil, mine: [], plan: { sources: [], estimateUsd: 0, queries: [], left: 0 }, month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
         tenderSearch: { ticket: Boolean(ticket.ticket), ticketStatus: ticket.status, keywords: [], unspscCodes: [] },
         opportunities: [], tenders: [], projects: [], runs,
       });
     }
-    const [opportunities, tenders, projects, runs, spentUsd, ticket] = await Promise.all([
+    const [opportunities, tenders, projects, runs, spentUsd, ticket, mine] = await Promise.all([
       listHiringOpportunities(auth.admin, scope, { minAds: profile.minAds, now }),
       listTenderOpportunities(auth.admin, scope, { now }),
       listProjectOpportunities(auth.admin, scope),
       recentRuns(auth.admin, scope),
       monthSpentUsd(auth.admin, scope, monthStart(now)),
       resolveTicketForUser(auth.admin, auth.user),
+      listMyOpportunities(auth.admin, scope),
     ]);
     return opportunitiesJson({
+      mine,
       profile, perfil: fromPerfil, plan: hiringSyncPlan(profile, hiringSyncEnvironment(), { cap: MANUAL_JSEARCH_QUERIES }), month: { spentUsd: Math.round(spentUsd * 100) / 100, capUsd: monthlyCapUsd() },
       // Whether this person can search tenders (their own ticket, or the shared one when they are on its list), never the ticket.
       tenderSearch: { ticket: Boolean(ticket.ticket), ticketStatus: ticket.status, keywords: profile.keywords, unspscCodes: profile.unspscCodes },

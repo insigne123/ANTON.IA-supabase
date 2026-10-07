@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHiringProfile, readHiringProfileSuggestion, recentRuns, refreshHiringProfileFromPerfil } from './store';
+import { createHiringProfile, listMyOpportunities, readHiringProfileSuggestion, recentRuns, refreshHiringProfileFromPerfil } from './store';
 
 type Row = Record<string, any>;
 const ORG = '00000000-0000-4000-8000-000000000002';
@@ -25,6 +25,7 @@ function fakeClient(tables: Record<string, Row[]>, options: { failInsert?: boole
         select() { return builder; },
         eq(column: string, value: unknown) { filters.push(row => row[column] === value); return builder; },
         contains(column: string, values: unknown[]) { filters.push(row => values.every(value => (row[column] || []).includes(value))); return builder; },
+        in(column: string, values: unknown[]) { filters.push(row => values.includes(row[column])); return builder; },
         order(column: string, input: { ascending: boolean }) { order = { column, ascending: input.ascending }; return builder; },
         limit(value: number) { limit = value; return builder; },
         insert(row: Row) { write = { kind: 'insert', row }; return builder; },
@@ -128,4 +129,25 @@ test('the search follows «Perfil»: words are generated when missing or when th
   assert.deepEqual((await refreshHiringProfileFromPerfil(asked.client, scope, profile, { terms, perfil: perfil('Arriendo de grúas'), force: true })).keywords,
     ['arriendo de grúas', 'servicio de izaje'], '«Volver a generar»');
   assert.deepEqual(calls, ['Arriendo de grúas e izaje', 'Arriendo de grúas']);
+});
+
+test('«Mis oportunidades» are the ones the person marked, of every kind, closed ones included, the newest mark first', async () => {
+  const row = (id: string, extra: Record<string, unknown>) => ({ id, organization_id: ORG, kind: 'tender', title: `Licitación ${id}`, company_name: null, company_domain: null,
+    buyer_name: 'Municipalidad', region: 'Maule', amount: '1000', currency: 'CLP', deadline_at: '2026-09-01T00:00:00Z', published_at: null, url: null, score: 70,
+    reasons: ['r'], status: 'interested', claimed_by: USER, signal_count: 1, first_seen_at: '2026-08-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', data: { code: id }, ...extra });
+  const { client } = fakeClient({ commercial_opportunities: [
+    row('t1', {}),
+    row('h1', { kind: 'hiring', title: 'name:retail', company_name: 'Retail Andino', company_domain: 'retail.cl', buyer_name: null, signal_count: 12, updated_at: '2026-10-05T00:00:00Z' }),
+    row('p1', { kind: 'project', title: 'Centro de distribución', company_name: 'Inmobiliaria Pacífico', status: 'converted', updated_at: '2026-10-03T00:00:00Z' }),
+    row('other', { claimed_by: 'otra-persona' }),
+    row('dismissed', { status: 'dismissed' }),
+    row('elsewhere', { organization_id: 'otra-org' }),
+  ] });
+  const mine = await listMyOpportunities(client, scope);
+  assert.deepEqual(mine.map(item => [item.id, item.kind, item.title, item.who]), [
+    ['h1', 'hiring', 'Retail Andino', null], ['p1', 'project', 'Centro de distribución', 'Inmobiliaria Pacífico'], ['t1', 'tender', 'Licitación t1', 'Municipalidad'],
+  ], 'a teammate\'s, a dismissed one and another organization\'s are not here');
+  assert.equal(mine[2].amount, 1000);
+  assert.equal(mine[2].deadlineAt, '2026-09-01T00:00:00Z', 'a closed tender stays');
+  assert.equal(mine[0].domain, 'retail.cl');
 });

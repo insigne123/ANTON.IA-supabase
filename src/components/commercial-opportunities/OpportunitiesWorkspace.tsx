@@ -29,7 +29,7 @@ import type { HiringOpportunityData, OpportunityStatus, ProjectOpportunityData, 
 import { SEIA_SECTORS } from '@/lib/commercial-opportunities/projects';
 import { ticketNeedsAction, type TicketStatus } from '@/lib/commercial-opportunities/ticket';
 import {
-  FILTER_LABELS, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, lastSearch, parseList, relativeTime, seiaReminderDays, sourceLabel, statusCounts,
+  FILTER_LABELS, OPPORTUNITIES_SEEN_KEY, closesIn, filterOpportunities, formatClp, formatDay, formatUsd, isNewSince, lastSearch, opportunitiesVisit, parseList, relativeTime, seiaReminderDays, sourceLabel, statusCounts,
   type OpportunityFilter,
 } from '@/lib/commercial-opportunities/view';
 import { companySearchHref } from '@/lib/search/company-prefill';
@@ -62,6 +62,8 @@ type Perfil = { offer: string | null; regions: string[] };
 type Overview = {
   /** Null until the organization saves «Define qué buscas» (Plan 10): opening the page creates nothing. */
   profile: Profile | null; suggestion?: HiringProfileSuggestion; perfil: Perfil;
+  /** What the person marked «Me interesa» (Plan 15). */
+  mine: MyOpportunity[];
   plan: Plan; month: { spentUsd: number; capUsd: number };
   tenderSearch: { ticket: boolean; ticketStatus?: TicketStatus; keywords: string[]; unspscCodes: string[] };
   opportunities: Opportunity[]; tenders: TenderOpportunity[]; projects: ProjectOpportunity[]; runs: Run[];
@@ -70,13 +72,19 @@ type Overview = {
 type ReadyOverview = Overview & { profile: Profile };
 const hasProfile = (overview: Overview | null): overview is ReadyOverview => Boolean(overview?.profile);
 const EMPTY_DRAFT: ProfileDraft = { name: 'Qué buscamos', offer: '', roles: [], regions: [], minAds: 5, keywords: [], unspscCodes: [], sectors: [], minInvestmentUsd: null };
-type Tab = 'hiring' | 'tenders' | 'projects';
+type Tab = 'hiring' | 'tenders' | 'projects' | 'mine';
+/** What the person marked «Me interesa», of every kind (Plan 15). */
+type MyOpportunity = {
+  id: string; kind: 'hiring' | 'tender' | 'compra_agil' | 'project'; title: string; who: string | null; domain: string | null; region: string | null;
+  amount: number | null; currency: string | null; deadlineAt: string | null; url: string | null; score: number; reasons: string[]; status: OpportunityStatus;
+  ads: number; firstSeenAt: string; markedAt: string; data: Record<string, unknown>;
+};
 type ProjectResult = { status: 'done'; read: number; skipped: number; matched: number; created: number };
 type HiringResult =
   | { status: 'done' | 'partial' | 'failed'; fetched: number; qualifying: number; newQualifying: number; costUsd: number; sources: Array<{ source: string; error: string | null }> }
   | { status: 'capped'; message: string };
 type TenderResult = { status: 'done' | 'partial' | 'failed'; found: number; matched: number; created: number; screened?: number; sources: Array<{ source: string; error: string | null }> };
-const TAB_SOURCES: Record<Tab, string[]> = { hiring: ['jsearch', 'linkedin'], tenders: ['mercado_publico', 'compra_agil'], projects: ['seia'] };
+const TAB_SOURCES: Record<Tab, string[]> = { hiring: ['jsearch', 'linkedin'], tenders: ['mercado_publico', 'compra_agil'], projects: ['seia'], mine: [] };
 const SEIA_MAP_URL = 'https://sig.sea.gob.cl/mapadeproyectos/';
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -112,6 +120,15 @@ export function OpportunitiesWorkspace() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // «Nueva»: what appeared since the previous visit, kept in this browser (Plan 15). Without storage, the last two days.
+  const [newSince, setNewSince] = useState<string | null>(null);
+  useEffect(() => {
+    let stored: unknown = null;
+    try { stored = JSON.parse(window.localStorage.getItem(OPPORTUNITIES_SEEN_KEY) || 'null'); } catch { /* no storage */ }
+    const visit = opportunitiesVisit(stored);
+    setNewSince(visit.newSince);
+    try { window.localStorage.setItem(OPPORTUNITIES_SEEN_KEY, JSON.stringify(visit.next)); } catch { /* no storage */ }
+  }, []);
   // The person's own Mercado Público ticket changed (saved, replaced or removed): tenders follow it without reloading.
   const updateTicket = (status: TicketStatus) => setOverview(current => current && {
     ...current, tenderSearch: { ...current.tenderSearch, ticketStatus: status, ticket: status.connected || status.shared },
@@ -179,6 +196,7 @@ export function OpportunitiesWorkspace() {
       opportunities: current.opportunities.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
       tenders: current.tenders.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
       projects: current.projects.map(row => row.id === item.id ? { ...row, status: value, mine: value === 'interested' } : row),
+      mine: value === 'interested' || value === 'converted' ? current.mine : current.mine.filter(row => row.id !== item.id),
     });
     setBusy(current => new Set(current).add(item.id));
     setOverview(patch(overview, status));
@@ -186,6 +204,8 @@ export function OpportunitiesWorkspace() {
       await readJson(await fetch(`/api/commercial-opportunities/${item.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
       }));
+      // «Mis oportunidades» follows what the person marks or unmarks.
+      if (status === 'interested' || previous === 'interested' || previous === 'converted') void load();
     } catch (failure) {
       setOverview(current => current && patch(current, previous));
       toast({ title: 'No se guardó el cambio', description: failure instanceof Error ? failure.message : undefined, variant: 'destructive' });
@@ -209,6 +229,11 @@ export function OpportunitiesWorkspace() {
   const tendersDisabled = running || !overview || !overview.tenderSearch.ticket
     || (!overview.tenderSearch.keywords.length && !overview.tenderSearch.unspscCodes.length && !overview.perfil?.offer);
   const searchDisabled = tab === 'hiring' ? hiringDisabled : tab === 'tenders' ? tendersDisabled : running || !overview;
+  const newCount = (items: Array<{ firstSeenAt: string }>) => items.filter(item => isNewSince(item.firstSeenAt, newSince)).length;
+  const visibleMine = useMemo(() => {
+    const wanted = query.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+    return (overview?.mine || []).filter(item => !wanted || [item.title, item.who].filter(Boolean).join(' ').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().includes(wanted));
+  }, [overview, query]);
   const startSearch = () => (tab === 'hiring' ? setConfirmOpen(true) : tab === 'tenders' ? void runSearch('tenders') : fileInput.current?.click());
 
   return (
@@ -218,7 +243,7 @@ export function OpportunitiesWorkspace() {
         description="Empresas que están contratando para los cargos de tu oferta, licitaciones públicas que calzan con ella y proyectos de inversión por partir, con la evidencia de cada una."
       >
         {/* Without a profile the only action is «Definir búsqueda», in the welcome below. */}
-        {overview && !overview.profile ? null : (
+        {(overview && !overview.profile) || tab === 'mine' ? null : (
           <>
             <Button variant="outline" onClick={() => setEditOpen(true)} disabled={!overview}>
               <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -262,12 +287,18 @@ export function OpportunitiesWorkspace() {
           <Tabs value={tab} onValueChange={value => { setTab(value as Tab); setFilter('new'); setQuery(''); }}>
             <TabsList className="mb-4 h-auto flex-wrap">
               <TabsTrigger value="hiring" className="gap-1.5"><Building2 className="h-4 w-4" aria-hidden="true" />Empresas contratando
-                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground/70">{overview.opportunities.length}</span></TabsTrigger>
+                <TabCount total={overview.opportunities.length} fresh={newCount(overview.opportunities)} /></TabsTrigger>
               <TabsTrigger value="tenders" className="gap-1.5"><Gavel className="h-4 w-4" aria-hidden="true" />Licitaciones y Compra Ágil
-                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground/70">{overview.tenders.length}</span></TabsTrigger>
+                <TabCount total={overview.tenders.length} fresh={newCount(overview.tenders)} /></TabsTrigger>
               <TabsTrigger value="projects" className="gap-1.5"><Factory className="h-4 w-4" aria-hidden="true" />Proyectos de inversión
-                <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground/70">{overview.projects.length}</span></TabsTrigger>
+                <TabCount total={overview.projects.length} fresh={newCount(overview.projects)} /></TabsTrigger>
+              <TabsTrigger value="mine" className="gap-1.5"><Star className="h-4 w-4" aria-hidden="true" />Mis oportunidades
+                <TabCount total={overview.mine.length} fresh={0} /></TabsTrigger>
             </TabsList>
+            <TabsContent value="mine" className="mt-0">
+              <MineSection items={visibleMine} total={overview.mine.length} query={query} onQuery={setQuery} busy={busy}
+                onRemove={item => changeStatus(item, 'new')} />
+            </TabsContent>
             {(['hiring', 'tenders', 'projects'] as Tab[]).map(kind => (
               <TabsContent key={kind} value={kind} className="mt-0">
                 {kind === 'hiring' ? <SearchSummary overview={overview} running={running} />
@@ -304,7 +335,7 @@ export function OpportunitiesWorkspace() {
                     <ul className="grid gap-4 lg:grid-cols-2">
                       {visible.map(item => (
                         <li key={item.id} className="min-w-0">
-                          <OpportunityCard item={item} minAds={overview.profile.minAds} busy={busy.has(item.id)} onStatus={status => changeStatus(item, status)} />
+                          <OpportunityCard item={item} minAds={overview.profile.minAds} busy={busy.has(item.id)} isNew={isNewSince(item.firstSeenAt, newSince)} onStatus={status => changeStatus(item, status)} />
                         </li>
                       ))}
                     </ul>
@@ -314,7 +345,7 @@ export function OpportunitiesWorkspace() {
                     <ul className="grid gap-4 lg:grid-cols-2">
                       {visibleProjects.map(item => (
                         <li key={item.id} className="min-w-0">
-                          <ProjectCard item={item} busy={busy.has(item.id)} onStatus={status => changeStatus(item, status)} />
+                          <ProjectCard item={item} busy={busy.has(item.id)} isNew={isNewSince(item.firstSeenAt, newSince)} onStatus={status => changeStatus(item, status)} />
                         </li>
                       ))}
                     </ul>
@@ -324,7 +355,7 @@ export function OpportunitiesWorkspace() {
                     <ul className="grid gap-4 lg:grid-cols-2">
                       {visibleTenders.map(item => (
                         <li key={item.id} className="min-w-0">
-                          <TenderCard item={item} busy={busy.has(item.id)} onStatus={status => changeStatus(item, status)} />
+                          <TenderCard item={item} busy={busy.has(item.id)} isNew={isNewSince(item.firstSeenAt, newSince)} onStatus={status => changeStatus(item, status)} />
                         </li>
                       ))}
                     </ul>
@@ -470,6 +501,111 @@ function OfferFromPerfil({ offer }: { offer: string | null | undefined }) {
   );
 }
 
+/** «Nueva»: appeared since the person's previous visit (Plan 15). */
+function NewBadge() {
+  return <span className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary-foreground" title="Apareció desde tu última visita">Nueva</span>;
+}
+
+/** The count of a tab, with how many are new since the last visit. */
+function TabCount({ total, fresh }: { total: number; fresh: number }) {
+  return (
+    <>
+      <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground/70">{total}</span>
+      {fresh ? <span className="rounded-full bg-primary px-1.5 text-xs font-medium tabular-nums text-primary-foreground">{fresh} {fresh === 1 ? 'nueva' : 'nuevas'}</span> : null}
+    </>
+  );
+}
+
+const MINE_KIND: Record<MyOpportunity['kind'], string> = {
+  hiring: 'Empresa contratando', tender: 'Licitación', compra_agil: 'Compra Ágil', project: 'Proyecto de inversión',
+};
+
+/**
+ * «Mis oportunidades» (Plan 15): everything the person marked «Me interesa», newest mark first, in one place. A closed tender
+ * or a company out of the 30-day window stays, marked as such, until the person takes it out.
+ */
+function MineSection({ items, total, query, onQuery, busy, onRemove }: {
+  items: MyOpportunity[]; total: number; query: string; onQuery: (value: string) => void; busy: Set<string>; onRemove: (item: MyOpportunity) => void;
+}) {
+  if (!total) {
+    return <EmptyState icon={Star} headingLevel="h3" title="Aún no marcas ninguna"
+      description="Usa «Me interesa» en una empresa, licitación o proyecto: queda aquí, a tu nombre, aunque cierre o salga de la búsqueda." />;
+  }
+  return (
+    <section aria-label="Mis oportunidades" className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">{total} {total === 1 ? 'oportunidad marcada' : 'oportunidades marcadas'} por ti, la última primero.</p>
+        <div className="relative w-full sm:w-64">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input value={query} onChange={event => onQuery(event.target.value)} placeholder="Buscar en tus oportunidades" aria-label="Buscar en tus oportunidades" className="pl-9" />
+        </div>
+      </div>
+      {items.length ? (
+        <ul className="grid gap-4 lg:grid-cols-2">
+          {items.map(item => <li key={item.id} className="min-w-0"><MyOpportunityCard item={item} busy={busy.has(item.id)} onRemove={() => onRemove(item)} /></li>)}
+        </ul>
+      ) : <EmptyState icon={Search} headingLevel="h3" title="Ninguna con ese texto" description="Prueba con otra parte del nombre." />}
+    </section>
+  );
+}
+
+function MyOpportunityCard({ item, busy, onRemove }: { item: MyOpportunity; busy: boolean; onRemove: () => void }) {
+  const { toast } = useToast();
+  const closed = Boolean(item.deadlineAt && Date.parse(item.deadlineAt) < Date.now());
+  const ai = item.data.ai && typeof item.data.ai === 'object' ? (item.data.ai as { reason?: unknown }).reason : null;
+  const reason = typeof ai === 'string' && ai ? ai : item.reasons[0] || null;
+  const code = typeof item.data.code === 'string' ? item.data.code : null;
+  const investment = typeof item.data.investmentMusd === 'number' ? item.data.investmentMusd : null;
+  const detail = item.kind === 'hiring' ? `${item.ads} avisos en 30 días`
+    : item.kind === 'project' ? (investment !== null ? `Inversión de US$${investment.toLocaleString('es-CL')} millones` : 'Inversión no informada')
+      : `${formatClp(item.amount, item.currency)} · ${closed ? 'cerrada' : closesIn(item.deadlineAt)}`;
+  const copyCode = async () => {
+    if (!code) return;
+    try { await navigator.clipboard.writeText(code); toast({ title: 'Código copiado', description: `${code}: búscalo en Mercado Público.` }); }
+    catch { toast({ title: 'No se pudo copiar', description: code }); }
+  };
+  return (
+    <article className={cn('flex h-full flex-col rounded-xl border border-primary/40 bg-card p-4 shadow-sm', closed && 'opacity-80')}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">{MINE_KIND[item.kind]}</span>
+            {closed ? <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-foreground/70">Cerrada</span> : null}
+            <span className="text-muted-foreground">Marcada {relativeTime(item.markedAt)}</span>
+          </p>
+          <h3 className="line-clamp-2 text-base font-semibold text-foreground">{item.title}</h3>
+          {item.who || item.region ? <p className="mt-1 truncate text-xs text-muted-foreground">{[item.who, item.region].filter(Boolean).join(' · ')}</p> : null}
+        </div>
+        <ScorePill score={item.score} />
+      </div>
+      <p className="mt-3 text-sm text-foreground">{detail}</p>
+      {reason ? <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">{reason}</p> : null}
+      <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onRemove}>
+          <X className="h-4 w-4" aria-hidden="true" />Quitar de mis oportunidades
+        </Button>
+        {item.kind === 'hiring' ? (
+          <Button size="sm" variant="secondary" asChild className="sm:ml-auto">
+            <Link href={companySearchHref({ company: item.title, domain: item.domain, titles: DECISION_MAKER_TITLES })}>
+              <Users className="h-4 w-4" aria-hidden="true" />Buscar decisores
+            </Link>
+          </Button>
+        ) : item.url ? (
+          <Button size="sm" variant="secondary" asChild className="sm:ml-auto">
+            <a href={item.url} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />{item.kind === 'project' ? 'Ver ficha' : 'Ver en Mercado Público'}<span className="sr-only">(se abre en otra pestaña)</span>
+            </a>
+          </Button>
+        ) : code ? (
+          <Button size="sm" variant="secondary" className="sm:ml-auto" onClick={() => void copyCode()}>
+            <Copy className="h-4 w-4" aria-hidden="true" />Copiar código
+          </Button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 function ScorePill({ score }: { score: number }) {
   return (
     <span className="flex shrink-0 flex-col items-center rounded-lg bg-primary/10 px-2.5 py-1 text-primary" title="Calce de 0 a 100: avisos, ritmo, cargos de tu oferta, región y tamaño">
@@ -479,7 +615,7 @@ function ScorePill({ score }: { score: number }) {
   );
 }
 
-function OpportunityCard({ item, minAds, busy, onStatus }: { item: Opportunity; minAds: number; busy: boolean; onStatus: (status: OpportunityStatus) => void }) {
+function OpportunityCard({ item, minAds, busy, isNew = false, onStatus }: { item: Opportunity; minAds: number; busy: boolean; isNew?: boolean; onStatus: (status: OpportunityStatus) => void }) {
   const { data } = item;
   const regions = data.regions.slice(0, 2).map(entry => entry.region);
   const interested = item.status === 'interested' || item.status === 'converted';
@@ -496,6 +632,7 @@ function OpportunityCard({ item, minAds, busy, onStatus }: { item: Opportunity; 
           <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
             <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span className="truncate">{item.company}</span>
+            {isNew ? <NewBadge /> : null}
           </h3>
           <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {item.domain ? external(`https://${item.domain}`, item.domain) : null}
@@ -648,7 +785,7 @@ function TenderSummary({ overview, running, onTicketChange, onOpenGuide }: {
   );
 }
 
-function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: boolean; onStatus: (status: OpportunityStatus) => void }) {
+function TenderCard({ item, busy, isNew = false, onStatus }: { item: TenderOpportunity; busy: boolean; isNew?: boolean; onStatus: (status: OpportunityStatus) => void }) {
   const { toast } = useToast();
   // `data` is stored JSON: a row written before a field existed must not take the whole tab down.
   const keywords = Array.isArray(item.data?.keywords) ? item.data.keywords : [];
@@ -667,6 +804,7 @@ function TenderCard({ item, busy, onStatus }: { item: TenderOpportunity; busy: b
             <span className={cn('rounded-full px-2 py-0.5 font-medium', isCompraAgil ? 'bg-cw-success-soft text-cw-success' : 'bg-primary/10 text-primary')}>
               {isCompraAgil ? 'Compra Ágil' : 'Licitación'}
             </span>
+            {isNew ? <NewBadge /> : null}
             <span className="text-muted-foreground">{item.data.code}</span>
           </p>
           <h3 className="line-clamp-2 text-base font-semibold text-foreground">{item.title}</h3>
@@ -800,7 +938,7 @@ function ProjectSummary({ overview, running, onUpload }: { overview: ReadyOvervi
   );
 }
 
-function ProjectCard({ item, busy, onStatus }: { item: ProjectOpportunity; busy: boolean; onStatus: (status: OpportunityStatus) => void }) {
+function ProjectCard({ item, busy, isNew = false, onStatus }: { item: ProjectOpportunity; busy: boolean; isNew?: boolean; onStatus: (status: OpportunityStatus) => void }) {
   const interested = item.status === 'interested' || item.status === 'converted';
   const sector = SEIA_SECTORS.find(entry => entry.id === item.data.sector)?.label;
   return (
@@ -809,6 +947,7 @@ function ProjectCard({ item, busy, onStatus }: { item: ProjectOpportunity; busy:
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
+            {isNew ? <NewBadge /> : null}
             {item.data.presentation ? <span className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">{item.data.presentation}</span> : null}
             {item.data.state ? <span className="text-muted-foreground">{item.data.state}</span> : null}
           </p>

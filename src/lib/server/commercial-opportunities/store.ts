@@ -457,3 +457,33 @@ export async function listProjectOpportunities(client: SupabaseClient, scope: Sc
     firstSeenAt: row.first_seen_at, data: row.data,
   }));
 }
+
+const MINE_COLUMNS = 'id,kind,title,company_name,company_domain,buyer_name,region,amount,currency,deadline_at,published_at,url,score,reasons,status,signal_count,first_seen_at,updated_at,data';
+type MineRow = {
+  id: string; kind: 'hiring' | 'tender' | 'compra_agil' | 'project'; title: string; company_name: string | null; company_domain: string | null; buyer_name: string | null; region: string | null;
+  amount: number | string | null; currency: string | null; deadline_at: string | null; published_at: string | null; url: string | null; score: number;
+  reasons: string[]; status: OpportunityStatus; signal_count: number; first_seen_at: string; updated_at: string; data: Record<string, unknown> | null;
+};
+export type MyOpportunityView = {
+  id: string; kind: MineRow['kind']; title: string; who: string | null; domain: string | null; region: string | null; amount: number | null; currency: string | null;
+  deadlineAt: string | null; url: string | null; score: number; reasons: string[]; status: OpportunityStatus; ads: number; firstSeenAt: string;
+  markedAt: string; data: Record<string, unknown>;
+};
+
+/**
+ * «Mis oportunidades» (Plan 15): what the person marked «Me interesa», of every kind, the newest mark first. Unlike the tabs,
+ * a closed tender or a company out of the 30-day window stays: the person decided to work on it.
+ */
+export async function listMyOpportunities(client: SupabaseClient, scope: Scope): Promise<MyOpportunityView[]> {
+  const { data, error } = await client.from('commercial_opportunities').select(MINE_COLUMNS)
+    .eq('organization_id', scope.organizationId).eq('claimed_by', scope.userId).in('status', ['interested', 'converted'])
+    .order('updated_at', { ascending: false }).limit(200);
+  if (error) fail('leer tus oportunidades', error);
+  return ((data || []) as MineRow[]).map(row => ({
+    id: row.id, kind: row.kind, title: row.kind === 'hiring' ? row.company_name || row.title : row.title,
+    who: row.kind === 'hiring' ? null : row.kind === 'project' ? row.company_name : row.buyer_name, domain: row.company_domain, region: row.region,
+    amount: row.amount === null || row.amount === undefined ? null : Number(row.amount), currency: row.currency, deadlineAt: row.deadline_at,
+    url: row.url, score: row.score, reasons: row.reasons || [], status: row.status, ads: row.signal_count, firstSeenAt: row.first_seen_at,
+    markedAt: row.updated_at, data: row.data && typeof row.data === 'object' ? row.data : {},
+  }));
+}
