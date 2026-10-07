@@ -2,6 +2,7 @@
 // fixture tools. The decider is injected: a scripted one for offline tests, or
 // the configured model for `scripts/evaluate-cowork-conversations.ts --live`.
 import { coworkPreferenceLabel } from '../../src/lib/cowork/preference-proposal';
+import { coworkTaskPlanLabel } from '../../src/lib/cowork/task-plan';
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
 import { coworkTurnIntents } from '../../src/lib/cowork/intents';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
@@ -103,6 +104,8 @@ export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, optio
     contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch),
     campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
     preferences: Boolean(entry.preferences),
+    // Long tasks (Plan 13, 4c), as production with COWORK_TASKS_ENABLED=true.
+    tasks: process.env.COWORK_TASKS_ENABLED === 'true',
     prepareBatch: corpusPrepareBatch,
     intents: corpusIntentPrompts ? coworkTurnIntents(entry.request, entry.history || []) : null,
     threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
@@ -255,6 +258,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
       preferences: Boolean(entry.preferences),
+      tasks: process.env.COWORK_TASKS_ENABLED === 'true',
       prepareBatch: corpusPrepareBatch,
       // Figures from what the person saved in their profile are not new when a correction uses them.
       userContext,
@@ -323,8 +327,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         const batch = proposal.linkedinBatch
           ? corpusStageLinkedinBatch(proposal.kind === 'linkedin_invite_batch' ? 'invite' : 'message', proposal.linkedinBatch, entry.world?.read ?? corpusRead) : null;
         result.proposal = { kind: proposal.kind, label: staged?.label ?? reply?.label ?? batch?.label
-            ?? (proposal.preference ? coworkPreferenceLabel(proposal.preference) : proposal.label),
+            ?? (proposal.preference ? coworkPreferenceLabel(proposal.preference) : proposal.task ? coworkTaskPlanLabel(proposal.task) : proposal.label),
           ...(proposal.preference ? { preference: proposal.preference } : {}),
+          ...(proposal.task ? { task: proposal.task } : {}),
           ...(batch ? { linkedinBatch: { kind: batch.kind, items: batch.items, deferred: batch.deferred } } : {}), targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
           ...(proposal.replyThread && reply ? { replyThread: { contactedId: proposal.replyThread.contactedId, to: reply.to, subject: reply.subject, body: reply.body } } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),

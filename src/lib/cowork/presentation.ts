@@ -239,6 +239,7 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   reply_thread: { title: 'Responder en el hilo', icon: 'mail', help: 'Si la apruebas, esta respuesta sale tal cual dentro de la conversación de esa persona, desde tu correo. Revisa el texto antes.' },
   memory_save: { title: 'Recordar preferencia', icon: 'bookmark', help: 'Se guardará esta preferencia, tal como está escrita, y la tendré en cuenta en tus próximas conversaciones.' },
   lead_prepare_batch: { title: 'Preparar contactos', icon: 'audience', help: 'A cada persona de la lista se le hace solo lo que le falta: guardarla, buscar su correo (1 crédito) e investigarla. Lo ya hecho no se repite ni se cobra; quita a quien no quieras antes de aprobar.' },
+  task_plan: { title: 'Plan de la tarea', icon: 'list', help: 'Se aprueba una vez: cada paso que cabe en el plan y en su gasto máximo se hace solo, y lo que salga de él vuelve a pedir tu aprobación.' },
 };
 
 export function coworkEffectCopy(kind: unknown): CoworkEffectCopy {
@@ -325,6 +326,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   reply_thread: { happens: 'La respuesta sale en el hilo de esa conversación, con el texto que ves, desde tu correo.', not: 'No se envía nada más ni a nadie más, y no sale hasta que la apruebes.' },
   memory_save: { happens: 'Se guarda la preferencia y la tengo en cuenta desde tu próximo pedido.', not: 'No cambian tus contactos, tus campañas ni lo que ya se escribió.' },
   lead_prepare_batch: { happens: 'A cada persona que dejes en la lista se le hace lo que le falta, en orden: guardarla, buscar su correo e investigarla.', not: 'No se le escribe a nadie, y lo que ya estaba hecho no se repite ni se cobra de nuevo.' },
+  task_plan: { happens: 'Hago los pasos del plan en orden, sin preguntarte en cada uno, y te cuento el avance.', not: 'No se envía nada, no se activa ninguna campaña y no se gasta más de lo que dice el plan.' },
 };
 
 export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' | 'payload'>): CoworkOutcome {

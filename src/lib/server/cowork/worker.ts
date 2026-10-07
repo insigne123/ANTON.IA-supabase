@@ -63,6 +63,8 @@ import { coworkCodeArtifactsEnabled, coworkDesignerModel, coworkDesignerTurn } f
 import { coworkAnalystEnabled, coworkAnalystModel, coworkAnalystTurn } from './analyst-run';
 import { coworkArtifactStore } from './artifact-store';
 import { coworkPreferencesEnabled, stageCoworkPreference } from './preference';
+import { coworkTasksEnabled, loadCoworkActiveTask, recordCoworkTaskStep, stageCoworkTaskPlan } from './task';
+import { coworkTaskApproves, coworkTaskContext, coworkTaskThreadBudget } from '@/lib/cowork/task-plan';
 import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
@@ -165,7 +167,11 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const executionPolicy = coworkExecutionPolicy(run.mode, autonomyEnabled);
     // Fase 1 (CW-06): thread budgets bound automatic chains. A single proposal
     // per run keeps these counts accurate for the whole conversational turn.
-    const budgets = coworkThreadBudgets(run.mode, autonomyEnabled);
+    // Long tasks (Plan 13, 4c): the approved plan this turn continues, if any. It has room for its steps, and what fits in it is
+    // approved by itself below. Off unless COWORK_TASKS_ENABLED=true (it needs the task_plan effect, migration 20261007120000).
+    const tasksEnabled = coworkTasksEnabled();
+    const activeTask = tasksEnabled ? await loadCoworkActiveTask(client, scope, run.id).catch(() => null) : null;
+    const budgets = coworkTaskThreadBudget(coworkThreadBudgets(run.mode, autonomyEnabled), activeTask);
     const stats = await loadCoworkThreadStats(client, scope, run.id);
     const limits = await getEffectiveDailyQuotaLimits({ userId: scope.userId, organizationId: scope.organizationId });
     const searchQuota = await getDailyQuotaStatus({
@@ -222,6 +228,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       codeArtifacts: codeArtifactsEnabled,
       preferences: preferencesEnabled,
       analyst: analystEnabled,
+      // A plan is proposed only outside a task: inside one, the turn does its next step.
+      tasks: tasksEnabled && !activeTask,
       // Only the parts of the prompt this request needs (intents.ts), with COWORK_INTENT_PROMPTS_ENABLED=true; off, the whole prompt.
       intents: coworkIntentPromptsEnabled() ? coworkTurnIntents(run.message, history.turns) : null,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
@@ -281,6 +289,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
             history, request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
             ...(threadMemory ? { threadMemory } : {}),
             ...(previousVersions.length ? { previousVersions } : {}),
+            ...(activeTask ? { task: coworkTaskContext(activeTask) } : {}),
             ...(rejections.length ? { rejectedDecisions: rejections } : {}),
           })),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
@@ -345,6 +354,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       linkedinBatch: linkedinBatchEnabled,
       prepareBatch: prepareBatchEnabled,
       preferences: preferencesEnabled,
+      tasks: tasksEnabled && !activeTask,
       opportunities: opportunitiesEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       offeredReads: process.env.COWORK_OFFERED_READS_ENABLED === 'true',
@@ -367,12 +377,16 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // Persisted run.mode is user input accepted by admission, never model output.
         // Database primary key permits at most one search proposal per run.
         // The flag is re-read here so revoking autonomy mid-flight stops admission.
-        if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true') {
+        const autonomous = executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true';
+        // The search of an approved task's plan runs by itself while the plan has a search left (Plan 13, 4c).
+        const planned = !autonomous && activeTask !== null && coworkTaskApproves(activeTask, null, { searches: 1, credits: 0 });
+        if (autonomous || planned) {
           await requireCoworkWorkerAccess(client, scope);
           const admitted = await client.rpc('cowork_claim_search', {
             p_run_id: run.id, p_user_id: scope.userId, p_organization_id: scope.organizationId, p_approve: true,
           });
           if (admitted.error) throw admitted.error;
+          if (planned) await recordCoworkTaskStep(client, scope, run.id, { kind: 'search', searches: 1, credits: 0 });
         }
       },
       proposeEffect: async proposal => {
@@ -381,6 +395,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // so execution refuses anything else, even if the draft changed since.
         let targetId = proposal.targetId;
         let label = proposal.label;
+        // What this proposal spends, as an approved task counts it (Plan 13, 4c): a looked-up email is a credit.
+        let taskCredits = proposal.kind === 'enrich_contact' ? 1 : 0;
         // Saving someone already saved, looking up an email already looked up or researching someone already researched never
         // reaches the person as an approval: the model is told and moves on.
         const alreadyDone = await coworkEffectAlreadyDone(scope, proposal.kind, proposal.targetId);
@@ -487,6 +503,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.enrichBatch) throw new Error('Missing batch targets');
           const staged = await stageCoworkEnrichBatch(scope, run.id, proposal.enrichBatch);
           targetId = `enrichbatch:${staged.hash}`;
+          taskCredits = staged.costEstimate;
           label = `Enriquecer ${proposal.enrichBatch.length} contactos (máx. ${staged.costEstimate} crédito${staged.costEstimate === 1 ? '' : 's'})`;
         }
         if (proposal.kind === 'campaign_schedule_batch') {
@@ -547,12 +564,21 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.prepareBatch) throw new Error('Missing batch people');
           const staged = await stageCoworkPrepareBatch(scope, run.id, proposal.prepareBatch);
           targetId = `preparebatch:${staged.hash}`;
+          taskCredits = staged.cost.lookups;
           label = staged.label;
         }
         if (proposal.kind === 'memory_save') {
           if (!preferencesEnabled) throw new Error('Recordar preferencias no está disponible.');
           if (!proposal.preference) throw new Error('Missing preference');
           const staged = await stageCoworkPreference(scope, run.id, proposal.preference);
+          targetId = staged.targetId;
+          label = staged.label;
+        }
+        if (proposal.kind === 'task_plan') {
+          if (!tasksEnabled) throw new Error('Las tareas largas no están disponibles.');
+          if (activeTask) throw new Error('Ya hay una tarea en curso en este hilo: sigue con su siguiente paso.');
+          if (!proposal.task) throw new Error('Missing task plan');
+          const staged = await stageCoworkTaskPlan(scope, run.id, proposal.task);
           targetId = staged.targetId;
           label = staged.label;
         }
@@ -569,6 +595,12 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // campaign-stop effects never self-approve: they always wait for a
         // human decision. Creating a paused draft is harmless and may proceed.
         if (coworkEffectCanAutoApprove(run.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true', proposal.kind)) {
+          const approved = await resolveCoworkEffect(client, scope, run.id, true);
+          if (!approved) throw new Error('Could not approve effect');
+        } else if (activeTask && coworkTaskApproves(activeTask, proposal.kind, { searches: 0, credits: taskCredits })) {
+          // Inside an approved task's plan and limits (Plan 13, 4c): approved by the person when they approved the plan.
+          // Sending, activating, LinkedIn or a bigger spend never fit, and wait for the person as always.
+          await recordCoworkTaskStep(client, scope, run.id, { kind: proposal.kind, searches: 0, credits: taskCredits });
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         }

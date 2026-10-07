@@ -28,6 +28,7 @@ import { CampaignRetryReview } from './CampaignRetryReview';
 import { PhoneRevealReview } from './PhoneRevealReview';
 import { LinkedinBatchResults, LinkedinBatchReview } from './LinkedinBatchReview';
 import { PrepareBatchResults, PrepareBatchReview } from './PrepareBatchReview';
+import { TaskPlanReview } from './TaskPlanReview';
 import { ReviewActions, ReviewChips, ReviewField, ReviewFields, ReviewNote, ReviewPaper } from './ReviewParts';
 import { DoneMark } from './CoworkActivity';
 import { AnimatePresence, CW_EASE, CwCollapse, cwPop, cwSwap, cwVariants, m, useReducedMotion } from './motion';
@@ -59,6 +60,7 @@ const REVIEWS: Record<string, (props: ReviewProps) => ReactNode> = {
   linkedin_invite_batch: props => <LinkedinBatchReview {...props} />,
   linkedin_message_batch: props => <LinkedinBatchReview {...props} />,
   lead_prepare_batch: props => <PrepareBatchReview {...props} />,
+  task_plan: props => <TaskPlanReview {...props} />,
 };
 
 const SENIORITY: Record<string, string> = {

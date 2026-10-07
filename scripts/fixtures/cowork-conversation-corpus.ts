@@ -183,7 +183,9 @@ export type CorpusTurnResult = {
     /** A profile update's fields, as the approval card shows them. */
     profile?: Record<string, unknown>;
     /** A preference to remember (Plan 12, 5): the sentence the card shows and for whom. */
-    preference?: { text: string; scope: 'personal' | 'organization' } } | null;
+    preference?: { text: string; scope: 'personal' | 'organization' };
+    /** A long task's plan (Plan 13, 4c): its goal, steps and limits, as the plan card shows them. */
+    task?: { goal: string; steps: Array<{ label: string; kind: string }>; limits: { searches: number; credits: number } } } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;
