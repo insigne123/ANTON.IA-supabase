@@ -359,6 +359,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: 'Tu firma va al final de cada correo que envías, y tus estilos le dicen a la IA cómo escribir tus borradores.',
     steps: [
       'En «Firma», elige un diseño (Clásica, Con logo, Compacta o Imagen) y completa tus datos: vienen de tu perfil. La vista previa muestra cómo se ve en un correo.',
+      '¿Ya tienes una firma? Elige «Tu firma actual» y pégala desde Gmail u Outlook, o sube el archivo .htm de tu firma de Outlook.',
       'Deja encendido «Usar al enviar» y pulsa «Guardar firma». Es una sola firma para Gmail y Outlook; apaga «Una firma para todas tus cuentas» si quieres una distinta en cada una.',
       'En «Estilos», pulsa «Crear estilo» y sigue los 3 pasos: punto de partida, tono y largo, y «En tus palabras». Puedes pedir un «Ajuste con IA».',
       'En el asunto y el cuerpo, «Insertar» agrega datos de cada contacto, como {Nombre} o {Empresa}. Se reemplazan solos en cada correo.',
@@ -367,6 +368,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     faqs: [
       { q: '¿Dónde se usa mi estilo?', a: 'El predeterminado se usa solo en Redactar, en tus campañas y en Cowork. En Redactar puedes elegir otro en «Perfil de estilo».' },
       { q: '¿Tengo que agregar la firma en cada correo?', a: 'No. Con «Usar al enviar» encendido, se agrega sola al final de cada correo que envías desde la app, antes del enlace para darse de baja.' },
+      { q: '¿Puedo usar la firma que ya tengo en Gmail u Outlook?', a: 'Sí. Elige «Tu firma actual», cópiala desde tu correo y pégala en el recuadro, o sube su archivo .htm. Se conservan el formato, los enlaces y las imágenes publicadas; si una imagen está solo en tu computador, la pantalla te lo dice.' },
       { q: '¿Puedo usar la imagen de firma que ya tengo?', a: 'Sí. Elige el diseño «Imagen» y súbela en PNG o JPG, hasta 2 MB.' },
     ],
     related: ['correo', 'perfil'],

@@ -4,7 +4,10 @@
  * value escaped, links only https, mailto or tel, and images only over https. The fields are kept with the signature
  * so it can be edited again instead of starting over.
  */
-export type SignatureDesign = 'clasica' | 'con-logo' | 'compacta' | 'imagen';
+/** What the server keeps of a signature when it sends it (src/lib/server/email-signature.ts). */
+export const SIGNATURE_MAX_HTML = 20_000;
+
+export type SignatureDesign = 'propia' | 'clasica' | 'con-logo' | 'compacta' | 'imagen';
 
 export type SignatureFields = {
   name: string;
@@ -16,9 +19,12 @@ export type SignatureFields = {
   /** A logo or a photo (with-logo design), or the whole signature as an image (image design). https only. */
   imageUrl: string;
   imageWidth: number;
+  /** The signature the person already uses, pasted or read from its file and already cleaned (signature-import.ts). */
+  customHtml: string;
 };
 
 export const SIGNATURE_DESIGNS: Array<{ id: SignatureDesign; label: string; description: string }> = [
+  { id: 'propia', label: 'Tu firma actual', description: 'Pega la que ya usas en Gmail u Outlook, o sube su archivo.' },
   { id: 'clasica', label: 'Clásica', description: 'Tu nombre y tus datos, uno por línea.' },
   { id: 'con-logo', label: 'Con logo', description: 'Logo o foto a la izquierda y tus datos al lado.' },
   { id: 'compacta', label: 'Compacta', description: 'Todo en dos líneas, para correos breves.' },
@@ -26,7 +32,7 @@ export const SIGNATURE_DESIGNS: Array<{ id: SignatureDesign; label: string; desc
 ];
 
 export const EMPTY_SIGNATURE_FIELDS: SignatureFields = {
-  name: '', title: '', company: '', phone: '', website: '', linkedin: '', imageUrl: '', imageWidth: 320,
+  name: '', title: '', company: '', phone: '', website: '', linkedin: '', imageUrl: '', imageWidth: 320, customHtml: '',
 };
 
 const INK = '#1f2937';
@@ -65,6 +71,8 @@ function normalize(fields: Partial<SignatureFields>): SignatureFields {
     linkedin: /linkedin\.com\//i.test(String(fields.linkedin || '')) ? safeHttpsUrl(fields.linkedin) : '',
     imageUrl: safeHttpsUrl(fields.imageUrl),
     imageWidth: Math.min(600, Math.max(48, width)),
+    // Cleaned when it was imported, and again by the server when it sends: kept whole here, never cut mid-tag.
+    customHtml: typeof fields.customHtml === 'string' ? fields.customHtml.trim() : '',
   };
 }
 
@@ -84,6 +92,7 @@ const roleLine = (fields: SignatureFields) => [fields.title, fields.company].fil
 /** The HTML of the signature for one design; empty when there is nothing to sign with. */
 export function buildSignatureHtml(input: Partial<SignatureFields>, design: SignatureDesign) {
   const fields = normalize(input);
+  if (design === 'propia') return fields.customHtml;
   if (design === 'imagen') {
     return fields.imageUrl
       ? `<table cellpadding="0" cellspacing="0" border="0"><tr><td><img src="${escapeHtml(fields.imageUrl)}" alt="${escapeHtml(fields.name || 'Firma')}" width="${fields.imageWidth}" style="display:block;max-width:100%;height:auto;border:0;"></td></tr></table>`
@@ -120,6 +129,8 @@ export function buildSignatureHtml(input: Partial<SignatureFields>, design: Sign
 /** The plain-text version: the same data, one item per line. */
 export function buildSignatureText(input: Partial<SignatureFields>, design: SignatureDesign) {
   const fields = normalize(input);
+  // The server reads the text out of the signature itself when it sends.
+  if (design === 'propia') return '';
   if (design === 'imagen') return fields.name;
   const role = [fields.title, fields.company].filter(Boolean).join(' · ');
   const contact = [fields.phone, fields.website ? displayUrl(fields.website) : '', fields.linkedin].filter(Boolean);
@@ -130,6 +141,11 @@ export function buildSignatureText(input: Partial<SignatureFields>, design: Sign
 /** What can be signed with: the image design needs an image, the others a name or a way to reach the person. */
 export function signatureProblem(input: Partial<SignatureFields>, design: SignatureDesign) {
   const fields = normalize(input);
+  if (design === 'propia') {
+    if (!fields.customHtml) return 'Pega tu firma o sube su archivo.';
+    if (fields.customHtml.length > SIGNATURE_MAX_HTML) return 'Tu firma es demasiado larga para enviarla. Pega una versión más simple o usa otro diseño.';
+    return null;
+  }
   if (design === 'imagen') return fields.imageUrl ? null : 'Sube la imagen de tu firma.';
   if (design === 'con-logo' && !fields.imageUrl) return 'Sube tu logo o foto, o elige otro diseño.';
   if (!fields.name) return 'Escribe tu nombre.';
