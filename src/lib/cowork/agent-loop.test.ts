@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutOfferedRead, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
+import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutAgendaAside, coworkWithoutOfferedRead, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
@@ -1935,4 +1935,28 @@ test('a standing instruction said in passing gets a quick reply to remember it i
   const kept = await runCoworkReadLoop({ ...base, preferences: true, userContext: { memories: ['Siempre firma como Nico'] } });
   assert.deepEqual(kept.suggestions?.map(chip => chip.message), ['Hazlo más corto']);
   assert.deepEqual((await runCoworkReadLoop(base)).suggestions?.map(chip => chip.message), ['Hazlo más corto']);
+});
+
+test('a turn that read today\'s agenda closes without the «Por cierto» aside, whoever it names (Plan 15)', () => {
+  const answer = { reply: 'Hoy lo prioritario es responderle a Marcela Rojas. Por cierto, todavía espera respuesta; conviene retomar hoy.' };
+  assert.equal(coworkWithoutAgendaAside(answer, [{ action: 'agenda.today' }]).reply, 'Hoy lo prioritario es responderle a Marcela Rojas.');
+  assert.equal(coworkWithoutAgendaAside(answer, [{ action: 'leads.search' }]), answer);
+});
+
+test('a person leads.recommend put first can be researched: the recommendation counts as seen (Plan 15)', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const leadId = '00000000-0000-4000-8000-000000000031';
+  const proposals: Array<{ kind: string; targetId: string; label: string; originRunId: string }> = [];
+  await runCoworkReadLoop({
+    message: '¿A quiénes les ofrezco AXIS?', runId, signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({ top: [{ leadId, name: 'Valentina Fuentes', title: 'Jefa de RR. HH.', company: 'Retail Andes' }] }),
+    proposeEffect: async (proposal: { kind: string; targetId: string; label: string; originRunId: string }) => { proposals.push(proposal); },
+    decide: async observations => observations.length
+      ? { action: 'research.start' as const, query: null, leadId, providerId: null, snapshotId: null, note: null,
+        answer: { reply: 'Valentina es la que mejor calza: la investigo.', document: null } }
+      : { action: 'leads.recommend' as const, query: 'recursos humanos', leadId: null, providerId: null, snapshotId: null, note: null, answer: null },
+  });
+  assert.equal(proposals.length, 1);
+  assert.equal(proposals[0].targetId, leadId);
+  assert.equal(proposals[0].label, 'Investigar contacto Valentina Fuentes (Retail Andes)');
 });

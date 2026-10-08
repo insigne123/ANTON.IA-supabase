@@ -219,18 +219,56 @@ export function withoutTrailingQuestions(line: string): string {
 /**
  * «Por cierto, …» is the aside about what the person should not miss today (workspace.ts): it names someone the answer has not
  * named. When the answer already talked about that person («¿Qué toca hoy?» with Marcela in the table), the aside only repeats it
- * (Plan 15: the judge marked it «mala»), so it goes. Only an aside that closes its line, so nothing after it is cut.
+ * (Plan 15: the judge marked it «mala»), so it goes; `always` takes it out whoever it names (the turn read today's agenda). Only
+ * an aside that closes its line, so nothing after it is cut.
  */
-export function withoutRepeatedAside(reply: string, elsewhere = ''): string {
+export function withoutRepeatedAside(reply: string, elsewhere = '', always = false): string {
   const match = /Por cierto,\s*([^\n]*?[.!?])(?=[ \t]*(?:\n|$|¿))/u.exec(reply);
   if (!match) return reply;
-  const before = `${reply.slice(0, match.index)}\n${elsewhere}`;
-  const name = (match[1].match(/\p{Lu}\p{Ll}{2,}(?:\s+\p{Lu}\p{Ll}+)*/gu) || [])[0];
-  if (!name || !before.includes(name)) return reply;
+  if (!always) {
+    const before = `${reply.slice(0, match.index)}\n${elsewhere}`;
+    const name = (match[1].match(/\p{Lu}\p{Ll}{2,}(?:\s+\p{Lu}\p{Ll}+)*/gu) || [])[0];
+    if (!name || !before.includes(name)) return reply;
+  }
   const head = reply.slice(0, match.index).replace(/[ \t]+$/, '');
   const tail = reply.slice(match.index + match[0].length).replace(/^[ \t]+/, '');
   const joined = head && tail && !head.endsWith('\n') && !tail.startsWith('\n') ? `${head} ${tail}` : `${head}${tail}`;
   return joined.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+const PIPE_ROW = /^\s*\|.*\|\s*$/;
+const PIPE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const pipeCells = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+
+/**
+ * A Markdown table written in the reply (Plan 15). The table block is the card the person copies and downloads; written in the
+ * text it shows as raw «| --- |» and, next to the card, says everything twice. With a table block already, the copy in the text
+ * goes; without one, the first table becomes the block.
+ */
+export function withTablesAsBlocks(reply: string, blocks: CoworkBlock[]): { reply: string; blocks: CoworkBlock[] } {
+  // Code is shown as written.
+  if (reply.includes('```')) return { reply, blocks };
+  const lines = reply.split('\n');
+  const kept: string[] = [];
+  const tables: string[][][] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (PIPE_ROW.test(lines[index]) && PIPE_RULE.test(lines[index + 1] || '')) {
+      let end = index + 2;
+      while (end < lines.length && PIPE_ROW.test(lines[end])) end++;
+      tables.push([pipeCells(lines[index]), ...lines.slice(index + 2, end).map(pipeCells)]);
+      index = end - 1;
+      continue;
+    }
+    kept.push(lines[index]);
+  }
+  if (!tables.length) return { reply, blocks };
+  const text = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (blocks.some(block => block.type === 'table') || blocks.length >= COWORK_BLOCK_LIMIT) {
+    return blocks.some(block => block.type === 'table') ? { reply: text, blocks } : { reply, blocks };
+  }
+  const [columns, ...rows] = tables[0];
+  const made = coworkBlocks([{ type: 'table', title: 'Tabla', columns, rows }]);
+  return made.length ? { reply: text, blocks: [...blocks, ...made] } : { reply, blocks };
 }
 
 /** A closed question always gets a one-tap yes: when the model offered no quick
@@ -244,11 +282,12 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
   answer: T,
 ): T & { question: string | null; blocks: CoworkBlock[] | null; suggestions: CoworkSuggestion[] | null; choices: CoworkChoices | null } {
   const suggestions = coworkSuggestions(answer.suggestions);
-  const blocks = coworkBlocks(answer.blocks);
+  const tabled = withTablesAsBlocks(polishCoworkText(answer.reply).trimEnd(), coworkBlocks(answer.blocks));
+  const blocks = tabled.blocks;
   const question = coworkQuestion(answer.question);
   // Options answer the closing question, so they need one; with them, the question is picked, not tapped «sí».
   const choices = question ? coworkChoices(answer.choices) : null;
-  let reply = withoutRepeatedAside(polishCoworkText(answer.reply).trimEnd(), blocks.length ? JSON.stringify(blocks) : '');
+  let reply = withoutRepeatedAside(tabled.reply, blocks.length ? JSON.stringify(blocks) : '');
   if (question) {
     const lines = reply.split('\n');
     let last = lines.length - 1;

@@ -42,6 +42,25 @@ export function collectCoworkLeadRows(observations: unknown[]) {
   return [...rows.values()];
 }
 
+/**
+ * The saved contacts leads.recommend put in front of Cowork (its top list): the organization's own people, so a proposal may
+ * target them as it does the ones leads.search returned. Before (Plan 15), «¿A quiénes les ofrezco AXIS?» recommended Valentina
+ * and Matías and every proposal to prepare them was rejected as unseen, until the turn failed.
+ */
+export function collectCoworkRecommendedLeadIds(observations: unknown[]): Set<string> {
+  const ids = new Set<string>();
+  for (const observation of observations) {
+    if (!observation || typeof observation !== 'object' || (observation as { action?: unknown }).action !== 'leads.recommend') continue;
+    const top = ((observation as { result?: { top?: unknown } }).result?.top);
+    if (!Array.isArray(top)) continue;
+    for (const item of top) {
+      const leadId = item && typeof item === 'object' ? (item as { leadId?: unknown }).leadId : null;
+      if (typeof leadId === 'string' && leadId) ids.add(leadId);
+    }
+  }
+  return ids;
+}
+
 export function buildCoworkLeadCsv(observations: unknown[]) {
   const rows = collectCoworkLeadRows(observations);
   if (!rows.length) return null;
