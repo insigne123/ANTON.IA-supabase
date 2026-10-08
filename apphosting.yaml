@@ -180,8 +180,9 @@ env:
     value: gpt-6-luna
     availability: [RUNTIME]
 
+  # Borradores de cuentas prioridad A: luna con esfuerzo medio, medido a ciegas contra sol (docs/borradores-luna.md).
   - variable: OPENAI_REASONING_MODEL
-    value: gpt-6-sol
+    value: gpt-6-luna
     availability: [RUNTIME]
 
   - variable: NATIVE_RESEARCH_REPORT_MODEL
