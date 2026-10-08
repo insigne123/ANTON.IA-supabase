@@ -9,7 +9,8 @@ import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '
 import { COWORK_FILE_NOTICE, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTablePreview, coworkTextPreview } from '../../src/lib/cowork/file-read';
 import { coworkWithAttachments } from '../../src/lib/cowork/attachments';
 import { coworkOfferMessage } from '../../src/lib/cowork/overview';
-import { CORPUS_COMMON_CHECKS, CORPUS_USER_CONTEXT, corpusShown, corpusWithEmailQuery, corpusWithLinkedinQuery, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { coworkSentPeriod } from '../../src/lib/cowork/sent-period';
+import { CORPUS_COMMON_CHECKS, CORPUS_NOW, CORPUS_USER_CONTEXT, corpusShown, corpusWithEmailQuery, corpusWithLinkedinQuery, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const MARKETING_LEAD = { marcela: id(101), felipe: id(102), andrea: id(103), rodrigo: id(104), camila: id(105) };
@@ -71,8 +72,14 @@ function read(action: string, input: string): unknown {
         last_7_days: { days: 7, sent: 1, rates: { reply: { unit: 'per_contact', value: 0, period: 'last_7_days', numerator: 0, denominator: 1 } } },
         last_30_days: { days: 30, sent: 1, rates: { reply: { unit: 'per_contact', value: 0, period: 'last_30_days', numerator: 0, denominator: 1 } } } };
     case 'contacted.search': {
-      const items = !term || /marcela|sodexo/.test(term) ? [marcelaSent] : [];
+      // A period («últimos 7 días») filters by send date, as the server does.
+      const period = coworkSentPeriod(term);
+      const rest = period ? period.rest : term;
+      const since = period ? CORPUS_NOW.getTime() - period.days * 24 * 60 * 60 * 1000 : null;
+      const inPeriod = since === null || Date.parse(marcelaSent.sentAt) >= since;
+      const items = inPeriod && (!rest || /marcela|sodexo/.test(rest)) ? [marcelaSent] : [];
       return { items, limit: 20, scope: 'organization_contacted', returned: items.length, truncated: false,
+        ...(period && since !== null ? { period: { days: period.days, since: new Date(since).toISOString() } } : {}),
         evidence: { source: 'application_contact_records', limitation: 'Lista de registros, no cola de respuestas pendientes confirmadas.', pendingStatus: 'needs_verification', mailboxCoverage: noCoverage } };
     }
     case 'contacted.timeline':

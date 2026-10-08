@@ -5,7 +5,8 @@ import { analyzeStoredAudience } from '../../src/lib/cowork/audience-analysis';
 import { analyzeIcp, type IcpTouch } from '../../src/lib/cowork/icp';
 import { coworkArtifactChangeMessage, coworkArtifactFixMessage } from '../../src/lib/cowork/code-artifact-frame';
 import { COWORK_ARTIFACT_EXAMPLES } from '../../src/lib/server/cowork/code-artifact-examples';
-import { CORPUS_COMMON_CHECKS, corpusRead, corpusWithEmailQuery, type CorpusCase, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
+import { coworkSentPeriod } from '../../src/lib/cowork/sent-period';
+import { CORPUS_COMMON_CHECKS, CORPUS_NOW, corpusRead, corpusWithEmailQuery, type CorpusCase, type CorpusHistoryTurn, type CorpusTurnResult, type CorpusWorld } from './cowork-conversation-corpus';
 import { OPPORTUNITIES_READ, OPPORTUNITY_HIRING, OPPORTUNITY_PROJECTS, OPPORTUNITY_TENDERS } from './cowork-opportunities-corpus';
 
 const at = '2026-09-25T13:00:00Z';
@@ -92,7 +93,12 @@ export const ARTIFACT_RICH_WORLD: CorpusWorld = {
       return { items, returned: items.length, limit: withEmail ? 25 : 20, scope: 'own_saved_contacts', truncated: false, partial: false };
     }
     if (action === 'contacted.search') {
-      const items = RICH_SENDS.filter(send => match([send.name, send.company]));
+      // A period («últimos 30 días») filters by send date, as the server does.
+      const period = coworkSentPeriod(term);
+      const since = period ? CORPUS_NOW.getTime() - period.days * 24 * 60 * 60 * 1000 : null;
+      const matchRest = (values: unknown[]) => !period ? match(values) : !period.rest || values.some(value => words(String(value || '')).split(/\s+/)
+        .some(word => period.rest.split(/\s+/).some(part => part.length > 2 && word.includes(part))));
+      const items = RICH_SENDS.filter(send => matchRest([send.name, send.company]) && (since === null || Date.parse(send.sent_at) >= since));
       return { items, returned: items.length, limit: 40, scope: 'organization_contacted', truncated: false };
     }
     if (action === 'campaigns.list') return { scope: 'own', campaigns: RICH_CAMPAIGNS };

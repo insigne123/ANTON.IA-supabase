@@ -24,7 +24,8 @@ function mockClient(tables: Record<string, { rows?: unknown[]; count?: number; e
       const chain: Record<string, (...args: any[]) => any> = {
         select: (...args) => { calls.push({ table, method: 'select', args }); return chain; },
         eq: (...args) => { calls.push({ table, method: 'eq', args }); return chain; },
-        order: () => chain, limit: () => chain, or: () => chain, gte: () => chain, in: () => chain, not: (...args) => { calls.push({ table, method: 'not', args }); return chain; },
+        order: () => chain, limit: () => chain, or: (...args) => { calls.push({ table, method: 'or', args }); return chain; },
+        gte: (...args) => { calls.push({ table, method: 'gte', args }); return chain; }, in: () => chain, not: (...args) => { calls.push({ table, method: 'not', args }); return chain; },
         maybeSingle: async () => state.error
           ? { data: null, error: state.error }
           : { data: (state.single ?? null) as unknown, error: null },
@@ -73,6 +74,27 @@ test('contacted.timeline requires UUID and database errors stay generic', async 
   await assert.rejects(
     queryCoworkExtendedReads(failing.client, scope, 'contacted.search', 'Ana'),
     /No se pudieron consultar los contactados/);
+});
+
+test('contacted.search reads a period as a send date filter, not as text', async () => {
+  const { client, calls } = mockClient({ contacted_leads: { rows: [{ id: 'c1', name: 'Marcela Rojas', sent_at: new Date().toISOString() }] } });
+  const result = await queryCoworkExtendedReads(client, scope, 'contacted.search', 'últimos 7 días') as { returned: number; period?: { days: number; since: string } };
+  assert.equal(result.returned, 1);
+  assert.equal(result.period?.days, 7);
+  const since = calls.find(call => call.table === 'contacted_leads' && call.method === 'gte');
+  assert.equal(since?.args[0], 'sent_at');
+  assert.ok(Math.abs(Date.parse(String(since?.args[1])) - (Date.now() - 7 * 24 * 60 * 60 * 1000)) < 60_000);
+  assert.ok(!calls.some(call => call.table === 'contacted_leads' && call.method === 'or'), 'the period is not a text filter');
+
+  const named = mockClient({ contacted_leads: { rows: [] } });
+  await queryCoworkExtendedReads(named.client, scope, 'contacted.search', 'Sodexo esta semana');
+  assert.ok(named.calls.some(call => call.method === 'or' && String(call.args[0]).includes('company.ilike.%Sodexo%')));
+  assert.ok(named.calls.some(call => call.method === 'gte' && call.args[0] === 'sent_at'));
+
+  const plain = mockClient({ contacted_leads: { rows: [] } });
+  const text = await queryCoworkExtendedReads(plain.client, scope, 'contacted.search', 'Marcela') as { period?: unknown };
+  assert.equal(text.period, undefined);
+  assert.ok(!plain.calls.some(call => call.table === 'contacted_leads' && call.method === 'gte'));
 });
 
 test('contacted.timeline derives whose turn it is without trusting prose', async () => {

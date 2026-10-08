@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { contactRecordEvidence } from '@/lib/cowork/contact-evidence';
+import { coworkSentPeriod } from '@/lib/cowork/sent-period';
 import { readMailboxCoverage } from './reply-reads';
 import { buildSupliaContext, readOrganizationOffer } from '@/lib/server/suplia-context';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
@@ -99,16 +100,20 @@ export async function queryCoworkExtendedReads(
     return { lead, contacted: contacted || [], scope: 'organization_crm' };
   }
   if (action === 'contacted.search') {
-    const term = searchTerm(value);
+    const period = coworkSentPeriod(value);
+    const term = searchTerm(period ? period.rest : value);
+    const since = period ? new Date(Date.now() - period.days * 24 * 60 * 60 * 1000).toISOString() : null;
     let query = client.from('contacted_leads')
       .select('id,lead_id,name,email,company,status,provider,subject,sent_at,replied_at,reply_intent')
       .eq('organization_id', scope.organizationId)
       .order('sent_at', { ascending: false }).limit(20);
     if (term) query = query.or(`name.ilike.%${term}%,email.ilike.%${term}%,company.ilike.%${term}%,subject.ilike.%${term}%`);
+    if (since) query = query.gte('sent_at', since);
     const { data, error } = await query;
     if (error) throw new Error('No se pudieron consultar los contactados.');
     const coverage = await readMailboxCoverage(client, scope);
     return { items: data || [], returned: data?.length || 0, limit: 20, scope: 'organization_contacted', truncated: (data?.length || 0) >= 20,
+      ...(period && since ? { period: { days: period.days, since } } : {}),
       evidence: { source: 'application_contact_records', queriedAt: new Date().toISOString(),
         mailboxSyncedAt: coverage.gmail?.lastCompletedAt || coverage.outlook?.lastCompletedAt || null,
         mailboxCoverage: coverage, pendingStatus: 'needs_verification',
