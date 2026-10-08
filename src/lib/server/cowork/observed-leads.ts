@@ -1,6 +1,6 @@
-import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { collectCoworkLeadRows, collectCoworkRecommendedLeadIds } from '@/lib/cowork/lead-export';
 
-/** The saved contacts a thread has already looked at: what leads.search and leads.get returned, and the people of a list review.
+/** The saved contacts a thread has already looked at: what leads.search, leads.get and leads.recommend returned, and the people of a list review.
  * A batch only takes people from here, so nobody enters one that nobody saw. */
 export function observedCoworkLeadIds(events: Array<{ kind: string; payload: unknown }>): Set<string> {
   const ids = new Set<string>();
@@ -12,6 +12,7 @@ export function observedCoworkLeadIds(events: Array<{ kind: string; payload: unk
       for (const item of result?.items || []) if (typeof item.leadId === 'string') ids.add(item.leadId);
     }
     for (const row of collectCoworkLeadRows([payload])) ids.add(row.id);
+    for (const leadId of collectCoworkRecommendedLeadIds([payload])) ids.add(leadId);
   }
   return ids;
 }

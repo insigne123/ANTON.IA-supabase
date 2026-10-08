@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withoutRepeatedAside } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -250,4 +250,28 @@ test('a «Por cierto» about someone the answer already named goes; a new one st
   // Through the polish, with its closing question.
   const polished = polishCoworkAnswer({ reply: 'Marcela Rojas espera respuesta. Por cierto, Marcela Rojas pidió una reunión hace 4 días.', document: null, question: '¿Te preparo la respuesta?' });
   assert.equal(polished.reply, 'Marcela Rojas espera respuesta.\n\n¿Te preparo la respuesta?');
+});
+
+test('a Markdown table in the reply becomes the table card, or goes when the card is already there (Plan 15)', () => {
+  const reply = 'Hoy hay 2 pendientes.\n\n| Orden | Quién | Qué hago |\n|---|---|---|\n| 1 | Marcela Rojas | Responder |\n| 2 | Héctor Vidal | Responder |\n\n¿Te preparo las respuestas?';
+  const made = withTablesAsBlocks(reply, []);
+  assert.equal(made.reply, 'Hoy hay 2 pendientes.\n\n¿Te preparo las respuestas?');
+  assert.deepEqual(made.blocks, [{ type: 'table', title: 'Tabla', columns: ['Orden', 'Quién', 'Qué hago'], rows: [['1', 'Marcela Rojas', 'Responder'], ['2', 'Héctor Vidal', 'Responder']] }]);
+  const card = { type: 'table' as const, title: 'Pendientes de hoy', columns: ['Orden', 'Quién'], rows: [['1', 'Marcela Rojas']] };
+  const twice = withTablesAsBlocks(reply, [card]);
+  assert.equal(twice.reply, 'Hoy hay 2 pendientes.\n\n¿Te preparo las respuestas?');
+  assert.deepEqual(twice.blocks, [card]);
+  // Without a table, or inside code, nothing changes.
+  assert.deepEqual(withTablesAsBlocks('Sin tabla | aquí.', []), { reply: 'Sin tabla | aquí.', blocks: [] });
+  const code = '```\n| a | b |\n|---|---|\n| 1 | 2 |\n```';
+  assert.equal(withTablesAsBlocks(code, []).reply, code);
+  // Through the polish.
+  const polished = polishCoworkAnswer({ reply, document: null, question: '¿Te preparo las respuestas?' });
+  assert.equal(polished.blocks?.[0]?.type, 'table');
+  assert.doesNotMatch(polished.reply, /\|/);
+});
+
+test('with `always`, the aside goes whoever it names (the turn read today\'s agenda)', () => {
+  assert.equal(withoutRepeatedAside('Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.', '', true), 'Responde hoy a Marcela Rojas.');
+  assert.equal(withoutRepeatedAside('Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.'), 'Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.');
 });

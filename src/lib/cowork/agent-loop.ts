@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, coworkSameLine, type CoworkBlock, type CoworkPlanStep } from './contracts';
-import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText, withoutTrailingQuestions } from './answer-quality';
+import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText, withoutRepeatedAside, withoutTrailingQuestions } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCriteria } from './search-proposal';
 import { coworkExplainsSearchScope, coworkMentionsPlaces, coworkSearchScope, coworkSearchScopeNotice, type CoworkSearchDefaults } from './search-scope';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
-import { collectCoworkLeadRows } from './lead-export';
+import { collectCoworkLeadRows, collectCoworkRecommendedLeadIds } from './lead-export';
 import { coworkCampaignEmails, coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
@@ -238,13 +238,13 @@ function effectTargetRun(
   if (action === 'lead.enrich_batch') {
     return observationRunId(observations, history, currentRunId, payload =>
       (payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'
-        || payload.action === 'leads.search' || payload.action === 'leads.get'));
+        || payload.action === 'leads.search' || payload.action === 'leads.get' || payload.action === 'leads.recommend'));
   }
   if (action === 'contacts.prepare_batch') {
     // The server checks each person against everything the conversation saw; this only anchors the proposal to a turn that saw people.
     return observationRunId(observations, history, currentRunId, payload =>
       (payload.action === 'prospecting.search' || payload.action === 'leads.search' || payload.action === 'leads.get'
-        || payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'));
+        || payload.action === 'leads.recommend' || payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'));
   }
   if (action === 'campaign.schedule_batch') {
     return observationRunId(observations, history, currentRunId, payload =>
@@ -269,11 +269,11 @@ function effectTargetRun(
   if (action === 'linkedin.invite' || action === 'linkedin.message' || action === 'linkedin.invite_batch' || action === 'linkedin.message_batch') {
     return observationRunId(observations, history, currentRunId, payload =>
       (payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'
-        || payload.action === 'leads.search' || payload.action === 'leads.get'
+        || payload.action === 'leads.search' || payload.action === 'leads.get' || payload.action === 'leads.recommend'
         || payload.action === 'linkedin.followups'));
   }
   return observationRunId(observations, history, currentRunId, payload =>
-    collectCoworkLeadRows([payload]).some(row => row.id === targetId));
+    collectCoworkLeadRows([payload]).some(row => row.id === targetId) || collectCoworkRecommendedLeadIds([payload]).has(targetId));
 }
 
 /** Display name for lead-scoped effects, resolved from already-observed rows.
@@ -310,6 +310,15 @@ function observedLeadName(leadId: string, observations: CoworkObservation[], his
     const company = String((row as Record<string, unknown>).company || '').trim();
     if (name && company) return `${name} (${company})`;
     if (name) return name;
+  }
+  // A person leads.recommend put first (Plan 15) shows with the name it gave.
+  for (const payload of payloads as Array<{ action?: unknown; result?: unknown } | null>) {
+    if (payload?.action !== 'leads.recommend') continue;
+    const top = (payload.result as { top?: Array<{ leadId?: string; name?: string | null; company?: string | null }> } | null)?.top;
+    const item = Array.isArray(top) ? top.find(entry => entry?.leadId === leadId) : null;
+    const name = String(item?.name || '').trim();
+    const company = String(item?.company || '').trim();
+    if (name) return company ? `${name} (${company})` : name;
   }
   return null;
 }
@@ -782,7 +791,17 @@ export async function runCoworkReadLoop(input: Parameters<typeof runCoworkLoop>[
   const kept = proposed ? answer : coworkWithPreferenceSuggestion(input, coworkKeptPreferenceAnswer(input, answer));
   // With offered reads on, an offer the turn could not make leaves rather than asking permission for it.
   const closed = proposed || !input.offeredReads ? kept : coworkWithoutOfferedRead(kept);
-  return coworkWithCharts<typeof closed>(closed, observations);
+  return coworkWithCharts<typeof closed>(coworkWithoutAgendaAside(closed, observations), observations);
+}
+
+/**
+ * The «Por cierto, …» aside brings up what is pending today (workspace.ts). When the turn read today's agenda, the answer is
+ * about exactly that, so the aside only repeats it, even when it names nobody («Por cierto, todavía espera respuesta»; Plan 15).
+ */
+export function coworkWithoutAgendaAside<T extends { reply: string }>(answer: T, observations: Pick<CoworkObservation, 'action'>[]): T {
+  if (!observations.some(item => item.action === 'agenda.today')) return answer;
+  const reply = withoutRepeatedAside(answer.reply, '', true);
+  return reply === answer.reply ? answer : { ...answer, reply };
 }
 
 // A sentence that says something was proposed, saved or waits for approval.
