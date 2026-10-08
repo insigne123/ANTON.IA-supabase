@@ -14,7 +14,7 @@ import { serializeReportV2Context } from './write-report-v2-section';
 import { buildReportV2VolumeModel, type VolumeAssumptionsV2 } from './build-report-v2-volume';
 import { briefReportV2Specialists } from './report-v2-specialists';
 
-export const REASON_REPORT_V2_PROMPT_VERSION = 'report-v2/p5-analysis/6';
+export const REASON_REPORT_V2_PROMPT_VERSION = 'report-v2/p5-analysis/7';
 
 export type SellerProductContextV2 = {
   key: string;
@@ -24,6 +24,8 @@ export type SellerProductContextV2 = {
   regulatoryContext?: string | null;
   capabilities?: string[] | null;
   positioning?: string | null;
+  /** Results the seller declares in its profile; the report cites them as is. */
+  proofPoints?: string[] | null;
   volumeAssumptions?: VolumeAssumptionsV2 | null;
 };
 
@@ -94,7 +96,7 @@ UTILIDAD COMERCIAL:
 
 PROHIBIDO:
 - Afirmar dolor, necesidad, presupuesto o intencion de compra sin evidencia.
-- Inventar experiencia, traccion, clientes, conversaciones en curso o resultados del vendedor. Sus capacidades declaradas no prueban actividad comercial pasada o actual. En entryAngle.hooks usa una capacidad explicita y una pregunta exploratoria, no 'ya ayudamos a equipos', 'estamos conversando con empresas' ni casos de exito ausentes del perfil del vendedor.
+- Inventar experiencia, traccion, clientes, conversaciones en curso o resultados del vendedor. Sus capacidades declaradas no prueban actividad comercial pasada o actual. En entryAngle.hooks usa una capacidad explicita y una pregunta exploratoria, no 'ya ayudamos a equipos', 'estamos conversando con empresas' ni casos de exito ausentes del perfil del vendedor. Los proofPoints de un producto si estan en su perfil: puedes usarlos tal cual como respaldo de un hook, sin ampliarlos.
 - Presentar datos de proveedor como hechos investigados.
 - Usar un claim de jurisdiccion distinta a ${input.entity.contactCountry} para construir encaje sin marcarlo como contexto de casa matriz.
 - Producir prosa final; aqui solo produces estructura.`;

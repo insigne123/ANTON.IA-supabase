@@ -68,6 +68,25 @@ test('uses the personal offer only as fallback when the organization has no shar
   assert.ok(admin.calls.includes('profiles'));
 });
 
+test('the personal offer carries its proof points and the name of a single named service', async () => {
+  const admin = adminFixture({
+    antonia_workflow_settings: { data: { user_company_profile: {}, icp: {}, research_config: {}, profile_revision: 1 } },
+    profiles: {
+      data: {
+        full_name: 'Ada',
+        company_name: 'Yago SpA',
+        signatures: { profile_extended: {
+          services: ['AXIS: consultas judiciales automáticas para revisar antecedentes laborales'],
+          proofPoints: ['Un cliente en piloto ya lo usa a diario'],
+        } },
+      },
+    },
+  });
+  const configuration = await loadReportV2SellerConfiguration({ organizationId: 'org', userId: 'user' }, admin);
+  assert.equal(configuration.sellerProfile.products[0].name, 'AXIS');
+  assert.deepEqual(configuration.sellerProfile.products[0].proofPoints, ['Un cliente en piloto ya lo usa a diario']);
+});
+
 test('does not silently accept malformed organization ICP settings', async () => {
   const admin = adminFixture({
     antonia_workflow_settings: {
