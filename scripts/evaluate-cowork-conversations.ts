@@ -61,6 +61,7 @@ import { coworkDesignerOutputSchema, runCoworkDesigner } from '../src/lib/server
 import { COWORK_ANALYST_RULES, coworkAnalystOutputSchema, coworkAnalystPrompt } from '../src/lib/cowork/analyst';
 import { coworkTimeZone } from '../src/lib/cowork/decision-context';
 import { coworkReasoningEffort } from '../src/lib/cowork/turn-budget';
+import { COWORK_RESCUE_REASONING_EFFORT } from '../src/lib/cowork/rescue-model';
 import { renderCoworkArtifacts } from './fixtures/cowork-artifact-render';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
 import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
@@ -271,8 +272,8 @@ async function main() {
             // The rescue (Plan 14, 2) asks the same with COWORK_RESCUE_MODEL; every other decision uses COWORK_MODEL.
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: meta?.model ?? process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
-            // The same effort as the worker (COWORK_REASONING_EFFORT, low by default).
-            reasoningEffort: coworkReasoningEffort(),
+            // The same effort as the worker: COWORK_REASONING_EFFORT (low by default), and the rescue's own.
+            reasoningEffort: meta?.model ? COWORK_RESCUE_REASONING_EFFORT : coworkReasoningEffort(),
             // First words of an answer as the page would get them: read at most every 50 ms.
             ...(stream ? { onPartial: (text: string) => {
               if (firstTextMs !== null || Date.now() - lastPeek < 50) return;

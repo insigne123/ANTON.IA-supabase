@@ -434,7 +434,8 @@ const RESCUE_REASONS: Record<CoworkTurnFailure, string> = {
 /** What the rescue reads, as one more refused decision: answer now with what was observed, nothing else. */
 export function coworkRescueNote(failure: CoworkTurnFailure): string {
   return `Este turno no alcanzó a terminar (${RESCUE_REASONS[failure]}). Responde ahora con action answer usando solo lo observado: `
-    + 'en la primera frase, qué revisaste o hiciste y qué faltó; después lo útil que encontraste, y cierra con el siguiente paso concreto. '
+    + 'en la primera frase, qué revisaste o hiciste y qué faltó; después lo útil que encontraste, y termina con una pregunta corta que proponga el siguiente paso concreto. '
+    + 'Deja en suggestions una o dos respuestas cortas que la persona pueda tocar para seguir. '
     + 'No propongas acciones ni pidas más lecturas, y no menciones el problema interno ni que hubo un rescate.';
 }
 
