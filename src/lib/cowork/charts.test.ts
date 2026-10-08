@@ -106,4 +106,5 @@ test('the chart card in the chat reads its largest value first', () => {
   assert.equal(coworkChartHeadline(bar), 'Mayor: Nuevos, 8 · 2 categorías');
   const line = { ...bar, kind: 'line' as const, unit: 'percent' as const, labels: ['Sem 1', 'Sem 2', 'Sem 3'], series: [{ name: 'Respuesta', values: [0.1, 0.25, 0.2] }, { name: 'Rebote', values: [0, 0, 0] }] };
   assert.match(coworkChartHeadline(line), /^Mayor: Sem 2, .+ \(Respuesta\) · 3 puntos$/);
+  assert.equal(coworkChartHeadline({ ...bar, labels: ['Nuevos'], series: [{ name: 'Contactos', values: [24] }] }), 'Mayor: Nuevos, 24 · 1 categoría');
 });

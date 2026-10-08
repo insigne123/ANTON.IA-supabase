@@ -194,7 +194,9 @@ export function coworkChartHeadline(block: Chart) {
   if (!series?.values.length) return `${block.labels.length} ${block.labels.length === 1 ? 'punto' : 'puntos'}`;
   const at = series.values.indexOf(Math.max(...series.values));
   const name = block.series.length > 1 ? ` (${series.name})` : '';
-  return `Mayor: ${block.labels[at]}, ${coworkChartValue(block, series.values[at])}${name} · ${block.labels.length} ${block.kind === 'bar' ? 'categorías' : 'puntos'}`;
+  const count = block.labels.length;
+  const unit = block.kind === 'bar' ? (count === 1 ? 'categoría' : 'categorías') : (count === 1 ? 'punto' : 'puntos');
+  return `Mayor: ${block.labels[at]}, ${coworkChartValue(block, series.values[at])}${name} · ${count} ${unit}`;
 }
 
 function people(to: string[] | null) {
