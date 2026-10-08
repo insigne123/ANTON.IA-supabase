@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generatePhoneScript } from '@/ai/flows/generate-phone-script';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { aiFailureMessage, aiFailureStatus } from '@/lib/ai-failure-message';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
         if (e?.name === 'AuthError') return handleAuthError(e);
         console.error('AI phone script generation error:', e);
-        return NextResponse.json({ error: e?.message || 'Error al generar el guion con IA' }, { status: 500 });
+        // The provider's raw error («OPENAI_HTTP_429:{…}») used to reach the toast as is.
+        return NextResponse.json({ error: aiFailureMessage(e, 'No se pudo generar el guion con IA. Reintenta en un momento.') }, { status: aiFailureStatus(e) });
     }
 }

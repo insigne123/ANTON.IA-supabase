@@ -19,6 +19,9 @@ El 8 oct la cuenta de OpenAI de las pruebas quedó sin créditos. OpenAI respond
 - `failure-messages.ts` agrega la categoría `model_quota`: «El servicio de IA no está disponible por un problema de la cuenta de
   ANTON.IA con su proveedor, no por tu solicitud, y reintentar ahora no lo resuelve. Tu solicitud quedó guardada: avisa a soporte de
   ANTON.IA y reintenta cuando te confirmen que volvió.» No nombra al proveedor ni la facturación.
+- El guion de llamada (`/api/ai/generate-phone-script`) devolvía el error crudo del proveedor, y el aviso del modal lo mostraba
+  tal cual («OPENAI_HTTP_429:{…}»). Ahora usa `aiFailureMessage` (`src/lib/ai-failure-message.ts`): sin saldo, el mensaje de arriba
+  y 503; otro error, «No se pudo generar el guion con IA. Reintenta en un momento.».
 - La categoría sale en el log del worker (`[cowork] run failed`, `reason: model_quota`), así el equipo distingue «sin saldo» de «saturado».
 
 ## Verificación
@@ -26,5 +29,6 @@ El 8 oct la cuenta de OpenAI de las pruebas quedó sin créditos. OpenAI respond
 - `openai-json.test.ts`: con dos modelos y 3 intentos, una cuenta sin saldo hace 1 sola llamada; una saturación no se confunde con
   falta de saldo.
 - `failure-messages.test.ts`: el mensaje nuevo, sin «saturado» ni «un minuto».
+- `ai-failure-message.test.ts`: nunca muestra el error del proveedor.
 
 Sin migraciones ni flags.
