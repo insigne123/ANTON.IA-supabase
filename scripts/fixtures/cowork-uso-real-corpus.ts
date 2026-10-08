@@ -49,6 +49,11 @@ export const USO_REAL_CORPUS: CorpusCase[] = [
       { label: 'cubre buscar, escribir, LinkedIn y cifras', test: r => /busc/i.test(r.reply) && /correo/i.test(r.reply) && /linkedin/i.test(r.reply)
         && /(?:cifra|número|resultado|métrica|cómo vas|campaña)/i.test(r.reply) },
       { label: 'nombra su oferta (AXIS)', test: r => /axis/i.test(r.reply) }] },
+  { id: 'ur-a-quien-hoy', title: 'A quién escribir hoy, con muchos contactos', request: '¿a quién le escribo hoy?',
+    origin: 'Lectura ciega del 8 oct: con 256 contactos, la receta miraba solo los 20 más recientes (4 en el banco, 1 con correo).',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'mira a quiénes ya se les escribió', test: r => r.actions.some(action => ['contacted.search', 'leads.recommend'].includes(action)) },
+      { label: 'nombra al menos dos contactos con correo', test: r => (corpusShown(r).match(/Contacto \d+|Jose/g) || []).length >= 2 }] },
   { id: 'ur-perfil-info', title: '¿No tienes info en mi perfil?', request: 'no tienes info en mi perfil?',
     origin: 'Producción, 29 sep: el usuario tuvo que recordarle que su perfil existe.',
     checks: [...CORPUS_COMMON_CHECKS,
