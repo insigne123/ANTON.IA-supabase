@@ -50,8 +50,9 @@ El detalle de cada uno está en `docs/informe-claro-plan15.md`, `docs/borradores
   informe con casos armados de 3 fuentes. Falta medir cobertura y tiempos con empresas reales.
 - **Ofrecer una consulta en un botón de respuesta sugerida** («Revisar contactos») sigue siendo lo más frecuente en las respuestas
   «mejorables» del juez.
-- **Tableros y vistas** que arma la diseñadora usan solo las filas que se leyeron en el turno: con muchas filas, conviene que digan
-  cuántas muestran de cuántas.
+- **Tableros en el banco de prueba**: el juez marca que muestran 4 contactos de 256. En la app no pasa: la diseñadora recibe los datos
+  desde la base con su total y su recorte (`artifact-data.ts`); en el banco recibe las 4 filas que se leyeron. Conviene que el banco
+  arme esos datos como producción para que el juez no los cuente como error.
 - **Teléfonos de varias personas** se proponen de a uno.
 - `ur-oferta-app`: la receta «Ayúdame a vender» parte por los contactos con correo y el caso espera una búsqueda de prospectos nuevos;
   hay que decidir cuál es lo correcto cuando el usuario pide explícitamente «encontrar clientes».
