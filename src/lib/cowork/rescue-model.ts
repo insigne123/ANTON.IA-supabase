@@ -1,5 +1,5 @@
 /**
- * The model that rescues a turn about to fail (Plan 14, 2): COWORK_RESCUE_MODEL, gpt-6.1-sol in production. Unset, there is
+ * The model that rescues a turn about to fail (Plan 14, 2): COWORK_RESCUE_MODEL, gpt-6-luna in production. Unset, there is
  * no rescue and a failed turn says so as before. The owner's rule is that astra is never used in ANTON.IA (6 Oct 2026): a
  * setting that names it turns the rescue off instead of calling it.
  */
@@ -8,6 +8,10 @@ export function coworkRescueModel(env: Record<string, string | undefined> = proc
   if (!model || /astra/i.test(model)) return null;
   return model.slice(0, 120);
 }
+
+/** The rescue thinks harder than a regular decision: it is the turn's last word and happens rarely (with luna, measured in
+ * docs/cowork-rescate-luna.md). */
+export const COWORK_RESCUE_REASONING_EFFORT = 'high' as const;
 
 /** The least time a rescue needs to answer: with less, the turn fails as before instead of being cut off mid-answer. */
 export const COWORK_RESCUE_MIN_MS = 12_000;
