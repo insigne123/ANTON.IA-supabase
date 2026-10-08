@@ -1385,6 +1385,23 @@ test('an answer that offers a read it could make gets it made, once, with room f
   }
 });
 
+test('a corrected offer does not come back as its question or its «Sí, revisa…» chip once the read is made', async () => {
+  const readSent = { action: 'contacted.search' as const, query: '', leadId: null, answer: null };
+  const base = { message: '¿A quién le escribo?', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({ items: [{ name: 'Marcela Rojas' }] }), offeredReads: true };
+  const offers = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados.', document: null, question: '¿Reviso a quiénes ya les escribiste?',
+      suggestions: [{ label: 'Sí, revísalo', message: 'Sí, revisa a quiénes ya les escribí' }, { label: 'Buscar prospectos', message: 'Busca 10 prospectos de RR. HH. en Chile' }] } };
+  // The edit made the read and closed without a question or quick replies of its own.
+  const bare = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 5 contactos guardados; a Marcela ya le escribiste.', document: null, question: null, suggestions: null } };
+  let step = 0;
+  const made = await runCoworkReadLoop({ ...base, decide: async () => [offers, readSent][step++] ?? bare });
+  assert.equal(made.reply, bare.answer.reply);
+  assert.equal(made.question ?? null, null, 'the offered question does not come back');
+  assert.deepEqual(made.suggestions?.map(chip => chip.message), ['Busca 10 prospectos de RR. HH. en Chile'], 'only the other path stays');
+});
+
 test('a sequence asked with its campaign: the Writer writes it and the same turn proposes the campaign with that exact text', async () => {
   const brief = { kind: 'sequence' as const, recipients: ['Jose'], objective: 'Una reunión sobre AXIS', angle: null, tone: null, steps: 2, notes: null, findings: null, campaign: true };
   const write = coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });

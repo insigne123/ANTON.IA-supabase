@@ -549,6 +549,10 @@ function offeredRead(answer: { reply: string; question?: unknown }): string | nu
   return question && OFFERED_READ.test(question) ? question : null;
 }
 
+/** A quick reply that asks Cowork to look something up («Sí, revisa…», «Muéstrame mis campañas…», «Busca cuántos…»), not to do
+ * something that needs approval («Busca el correo de…», «Prepara una campaña…»): after the read it offered was made, it is stale. */
+const READ_CHIP = /^\s*(?:s[íi][,.]?\s*)?(?:revis[ae]|consult[ae]|mir[ae]|mu[ée]strame|muestra|compar[ae]|verific[ae]|chequea|identific[ae]|analiz[ae]|prioriz[ae]|lista|dime\s+(?:cu[áa]nt|cu[áa]l|qui[ée]n)|busca\s+(?:cu[áa]nt|cu[áa]l))/iu;
+
 /**
  * The last word on an offered read (Plan 13): when the turn could not make it (its decisions were spent, or the model offered
  * it again), the answer closes without that question instead of asking permission for work Cowork does without approval. Its
@@ -698,16 +702,23 @@ function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
  * document the first answer had and the retry dropped come back, unless the
  * retry now carries the emails in the chat itself (then that document would
  * repeat them). */
-function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
+function completeFrom(first: CoworkAnswer, retry: CoworkAnswer, offered: string | null = null): CoworkAnswer {
   const emailsInChat = (retry.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2;
+  // A correction that made the read the first answer offered (Plan 16) never gets that offer back: neither its question nor the
+  // quick replies that said yes to it or asked for a read. They came back as «Sí, revisa…» once the read was already made.
+  const firstQuestion = closingQuestion(first);
+  const keptQuestion = offered && firstQuestion && (coworkSameLine(firstQuestion, offered) || OFFERED_READ.test(firstQuestion)) ? null : firstQuestion;
+  const firstSuggestions = offered
+    ? coworkSuggestions(first.suggestions).filter(chip => !SAYS_YES.test(chip.label) && !SAYS_YES.test(chip.message) && !READ_CHIP.test(chip.message))
+    : first.suggestions ?? null;
   return {
     ...retry,
     document: retry.document ?? (emailsInChat ? null : first.document),
     // Blocks come back too, unless they were the problem (a [placeholder] in a card).
     blocks: coworkBlocks(retry.blocks).length ? retry.blocks
       : emailsInChat || coworkBlocks(first.blocks).some(hasFiller) ? null : first.blocks ?? null,
-    question: closingQuestion(retry) ? retry.question ?? null : closingQuestion(first),
-    suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
+    question: closingQuestion(retry) ? retry.question ?? null : keptQuestion,
+    suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : firstSuggestions?.length ? firstSuggestions : null,
     choices: coworkChoices(retry.choices) ? retry.choices : first.choices ?? null,
   };
 }
@@ -959,6 +970,7 @@ async function runCoworkLoop(input: {
   let filesListed = false;
   // The correction that makes the read an answer offered is the loop's, not the judge's: it is not reported as one.
   let offerCorrected = false;
+  let offeredText: string | null = null;
   // A search that dropped or changed the place asked for goes back once (Plan 14, 1); after that, the card shows its criteria.
   let scopeCorrected = false;
   // The turn's last word when it would fail (Plan 14, 2): an answer already given stands first; then, once, the rescue.
@@ -1099,7 +1111,7 @@ async function runCoworkLoop(input: {
         // The judge's correction edits the judged answer: it keeps what the correction dropped, and
         // it is kept only if it is one (not empty, not the same, no figures without support).
         if (judgedFallback) {
-          const corrected = completeFrom(judgedFallback, decision.answer);
+          const corrected = completeFrom(judgedFallback, decision.answer, offerCorrected ? offeredText : null);
           const verdict = coworkCorrectionVerdict(judgedFallback, corrected, [observations, input.history ?? [], input.userContext ?? null]);
           if (!offerCorrected) input.onCorrection?.(verdict);
           return verdict.keep === 'first' ? judgedFallback : corrected;
@@ -1123,6 +1135,7 @@ async function runCoworkLoop(input: {
           last = Math.max(last, turn + 2);
           judged = true;
           offerCorrected = true;
+          offeredText = offered;
           judgedFallback = decision.answer;
           judgeReadsAt = readsUsed;
           judgeCanRead = true;
