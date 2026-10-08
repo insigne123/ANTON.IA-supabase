@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  coworkApolloPayload, coworkCompanyStepPayload, coworkPeopleStepPayload, coworkSearchCriteriaSchema, coworkSearchStrategy,
+  coworkApolloPayload, coworkCompanyStepPayload, coworkPeopleStepPayload, coworkSearchCriteriaSchema, coworkSearchStrategy, coworkSplitTerms,
 } from './search-proposal';
 import { runCoworkReadLoop } from './agent-loop';
 
@@ -129,4 +129,20 @@ test('companies first finds the companies by industry and country, then the peop
   // One people search keeps its own page and turns similar titles on too.
   const single = coworkApolloPayload(coworkSearchCriteriaSchema.parse({ ...criteria, limit: 100, page: 3 }), 'owner');
   assert.equal(single.include_similar_titles, true); assert.equal(single.page, 3); assert.equal(single.per_page, 100);
+});
+
+test('a packed entry becomes one title per term, without the piece the length limit cut, and five at most', () => {
+  const cut = 'Head of People / Head of HR / People Director / HR Director / Human Resources Manager / Gerente de S';
+  assert.equal(cut.length, 100);
+  const parsed = coworkSearchCriteriaSchema.parse({ titles: ['Gerente de Recursos Humanos', 'Gerente de Personas', 'Director de Recursos Humanos',
+    'Chief Human Resources Officer', cut], industries: ['retail'], locations: ['Chile'], limit: 10 });
+  assert.deepEqual(parsed.titles, ['Gerente de Recursos Humanos', 'Gerente de Personas', 'Director de Recursos Humanos', 'Chief Human Resources Officer', 'Head of People']);
+  // First pieces first, then the rest; no repeats (accents and case aside); «Director/a» and «Santiago, Chile» stay whole.
+  assert.deepEqual(coworkSplitTerms(['Reclutamiento / Recruiter', 'Selección; Talent Acquisition', 'reclutamiento', 'Director/a de Personas']),
+    ['Reclutamiento', 'Selección', 'Director/a de Personas', 'Recruiter', 'Talent Acquisition']);
+  assert.deepEqual(coworkSplitTerms(['Santiago, Chile | Antofagasta']), ['Santiago, Chile', 'Antofagasta']);
+  // A short packed entry was not cut: every piece counts.
+  assert.deepEqual(coworkSplitTerms(['Gerente de Personas / People Manager']), ['Gerente de Personas', 'People Manager']);
+  // The card parses the stored criteria again: the split is stable.
+  assert.deepEqual(coworkSearchCriteriaSchema.parse(parsed).titles, parsed.titles);
 });
