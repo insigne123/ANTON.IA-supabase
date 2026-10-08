@@ -372,7 +372,7 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   const anchorPrompt = anchorLines.length > 0
     ? input.sequenceContext
       ? `
-ANCLA FACTUAL (verificación automática, no la nombres ni la expliques): el hecho de REQUIRED_FACTUAL_PERSONALIZATION ya se dijo en el primer correo. Aquí basta una referencia breve, de 2 a 5 palabras, con dos de estos términos juntos (${anchorLines.join(' / ')}), dentro de la frase del enfoque nuevo: por ejemplo «para la faena minera» o «con las tiendas nuevas». No repitas la oración, las cifras ni los detalles del primer correo, y no abras el correo con ese hecho.
+ANCLA FACTUAL (verificación automática, no la nombres ni la expliques): el hecho de REQUIRED_FACTUAL_PERSONALIZATION ya se dijo en el primer correo. Aquí basta una referencia breve, de 2 a 5 palabras, con dos de estos términos juntos (${anchorLines.join(' / ')}), dentro de la frase del enfoque nuevo: por ejemplo «para la faena minera» o «con las tiendas nuevas». No repitas la oración, las cifras ni los detalles del primer correo, y no abras el correo con ese hecho. La referencia acompaña lo que harías para ellos («para las obras del Biobío, revisamos…»): no la pegues a una prueba ni a otra idea con la que no tiene relación («Con la Navidad, un cliente en piloto…») y no sugieras que ya trabajas con su empresa («En Minera Cascada, ponemos…»).
 `
       : `
 ANCLA FACTUAL (verificación automática, no la nombres ni la expliques): el hecho de REQUIRED_FACTUAL_PERSONALIZATION debe quedar reconocible en una misma oración de opening o value. ${anchorLines.join(' / ')}. Escríbelos con naturalidad dentro de la frase; el resto del correo sí puede parafrasear libremente.
