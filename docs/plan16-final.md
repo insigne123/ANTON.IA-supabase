@@ -15,10 +15,12 @@ sin envíos. Ningún PR trae migraciones ni flags nuevos.
 | #261 Consultas | Una consulta ya hecha no vuelve como pregunta ni como botón «Sí, revisa…». Ante el saldo, Cowork dice cuántos contactos no tienen correo. | Botón viejo de vuelta 2 de 6 → 0 de 7; contactos sin correo 0 de 2 → 3 de 4; checks 19 → 24 de 26 |
 | #262 Palabras simples | Reintentos sin «terminal» ni «conciliar»; dominio con cada registro explicado y los rebotes en la misma consulta; gráficos en Excel o CSV (la guía decía Word o PDF); cifras de la organización dichas como tales. | «conciliar» o «terminal» 7 → 0; Word o PDF para gráficos 4 → 0; claridad 4,00 → 4,83; veracidad 4,00 → 4,44 |
 | #263 Encontrar clientes | «Ayúdame a encontrar clientes» propone buscar prospectos nuevos; «ayúdame a vender» sigue partiendo por los contactos con correo. Era la decisión pendiente del Plan 15. | Propone la búsqueda 0 → 2 de 2; los otros casos sin cambios (4 de 4) |
+| #266 IA sin saldo | Con la cuenta del proveedor sin créditos, la llamada falla al primer intento (antes reintentaba y probaba otros modelos de la misma cuenta) y Cowork dice que no es la solicitud del usuario y que reintentar no sirve (antes «saturado, reintenta en un minuto»). El guion de llamada ya no muestra «OPENAI_HTTP_429:{…}» en el aviso. | Con 2 modelos y 3 intentos: 1 sola llamada; pruebas unitarias |
 | #264 Seguimientos de LinkedIn | «Una persona por empresa»: Cowork elige, deja a la otra para otra semana y ofrece los mensajes con una prueba de la oferta. El juez sabe que los teléfonos se aprueban de a uno. | Elige sin preguntar 1 → 3 de 3; ofrece los mensajes con una prueba 0 → 3 de 3 |
 
 El detalle de cada uno está en `docs/cowork-plan16-juez.md`, `docs/cowork-plan16-cargos.md`, `docs/cowork-plan16-consultas.md`,
-`docs/cowork-plan16-palabras-simples.md`, `docs/cowork-plan16-encontrar-clientes.md` y `docs/cowork-plan16-uno-por-empresa.md`.
+`docs/cowork-plan16-palabras-simples.md`, `docs/cowork-plan16-encontrar-clientes.md`, `docs/cowork-plan16-uno-por-empresa.md` y
+`docs/ia-sin-saldo.md`.
 
 ## Lo que se probó y no se integró
 
