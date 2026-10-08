@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
-import { CORPUS, LEAD, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
+import { CORPUS, LEAD, corpusRead, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusSearchText, corpusShownAnswer, corpusStageImport, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusArtifactData, corpusSearchText, corpusShownAnswer, corpusStageImport, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -437,4 +437,20 @@ test('an import is staged as the server stages it: the judge sees the card, the 
   assert.throws(() => corpusStageImport({ file: 'brief-axis.pdf', columns: null }, read), /este archivo no trae una tabla/);
   assert.throws(() => corpusStageImport({ file: 'no-existe.csv', columns: null }, read), /No encontré «no-existe.csv» entre los archivos que subiste/);
   assert.throws(() => corpusStageImport({ file: 'asistentes-feria-rrhh.csv', columns: { name: 'Contacto' } }, read), /no tiene la columna «Contacto»/);
+});
+
+test('the corpus dashboards read the whole account, as production does: 256 contacts, 21 with email, and 19 campaigns', () => {
+  const data = corpusArtifactData(corpusRead, ['contacts', 'campaigns', 'pipeline']);
+  const contacts = data.tables.contacts;
+  assert.equal(contacts.rows.length, 256);
+  assert.equal(contacts.total, 256);
+  assert.equal(contacts.truncated, false);
+  assert.equal(contacts.rows.filter(row => row.has_email === 'Sí').length, 21);
+  // The contacts the world details come first, as they are; the rest is the same every run.
+  assert.equal(contacts.rows[0].name, 'Carlos Ah***a');
+  assert.equal(contacts.rows.filter(row => row.industry === 'Retail').length, 37);
+  assert.deepEqual(corpusArtifactData(corpusRead, ['contacts']).tables.contacts.rows, contacts.rows);
+  assert.equal(data.tables.campaigns.rows.length, 19);
+  assert.equal(data.tables.campaigns.rows[0].name, 'Campaña de prueba');
+  assert.equal(data.tables.pipeline.rows.length, 256);
 });
