@@ -47,7 +47,7 @@ export async function queryCoworkExtendedReads(
 ): Promise<{ scope: string; draftId: string; versionId: string; revision: number; channel: string; subject: string | null; contentHash: string; recipientEmail: string | null; recipientName: string | null; lifecycle: string; textLength: number }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'campaigns.list', value: string,
-): Promise<{ scope: string; campaigns: Array<{ id: string; name: string; status: string; revision: number; recipients: number; createdAt: string }> }>;
+): Promise<{ scope: string; campaigns: Array<{ id: string; name: string; status: string; revision: number; recipients: number; createdAt: string }>; byStatus: Record<string, number> }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'files.list', value: string,
 ): Promise<{ scope: string; files: Array<{ name: string; runId: string; size: number; updatedAt: string }> }>;
@@ -207,9 +207,13 @@ export async function readCoworkCampaigns(client: SupabaseClient, scope: Scope) 
     recipients: Array.isArray(row.recipients) ? row.recipients.length : 0, createdAt: row.created_at,
   }));
   const total = typeof count === 'number' ? count : null;
+  // Counted here so Cowork does not count 19 rows by hand («15 en borrador y 4 pausadas» when they were 14 and 5).
+  const byStatus: Record<string, number> = {};
+  for (const campaign of campaigns) byStatus[campaign.status] = (byStatus[campaign.status] || 0) + 1;
   return {
     scope: 'own_campaigns',
     campaigns,
+    byStatus,
     returned: campaigns.length,
     total,
     truncated: total === null ? campaigns.length >= CAMPAIGNS_LISTED : total > campaigns.length,

@@ -18,6 +18,12 @@ export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const LEAD = { carlos: id(21), nehal: id(22), jose: id(23), paula: id(24) };
 export const CAMPAIGN_ID = id(31);
+/** The account's 19 campaigns, newest first: drafts and paused tests that never sent (Plan 12 production account). */
+const CORPUS_CAMPAIGNS = [
+  { id: CAMPAIGN_ID, name: 'Campaña de prueba', status: 'draft', revision: 1, recipients: 7, createdAt: '2026-09-18T15:00:00Z' },
+  ...Array.from({ length: 18 }, (_, index) => ({ id: id(600 + index), name: `Prueba ${18 - index}`, status: index % 4 === 1 ? 'paused' : 'draft',
+    revision: 1, recipients: index % 3 === 0 ? 0 : 1 + (index % 5), createdAt: new Date(Date.UTC(2026, 8, 12) - index * 4 * 86_400_000).toISOString() })),
+];
 
 const ownLeads = [
   { id: LEAD.carlos, name: 'Carlos Ah***a', title: 'Operations Manager', company: 'Minera Centinela', email: null, status: 'saved', created_at: '2026-09-25T04:26:06Z' },
@@ -144,9 +150,10 @@ export function corpusRead(action: string, input: string): unknown {
         { sector: 'Servicios de RR. HH. y outsourcing', contacts: 118, contacted: 0 }, { sector: 'Minería y proveedores', contacts: 41, contacted: 0 },
         { sector: 'Retail', contacts: 37, contacted: 0 }], contactsWithEmail: 21, contactsTotal: 256 };
     case 'campaigns.list':
-      // The account has 19 campaigns (app.context and workspace); the corpus details the most recent one.
-      return { scope: 'own', campaigns: [{ id: CAMPAIGN_ID, name: 'Campaña de prueba', status: 'draft', revision: 1, recipients: 7, createdAt: '2026-09-18T15:00:00Z' }],
-        returned: 1, total: 19, truncated: true };
+      // The account has 19 campaigns (app.context and workspace) and production lists up to 20, so all of them: none has sent
+      // anything (contacted is 0), the most recent is the detailed one.
+      return { scope: 'own', campaigns: CORPUS_CAMPAIGNS, byStatus: CORPUS_CAMPAIGNS.reduce<Record<string, number>>((counts, campaign) => ({ ...counts, [campaign.status]: (counts[campaign.status] || 0) + 1 }), {}),
+        returned: CORPUS_CAMPAIGNS.length, total: CORPUS_CAMPAIGNS.length, truncated: false };
     case 'message.context':
       return { configured: true, context: { defaultStyle: 'Profesional, claro y directo', trialOffer: null, approvedClaims: [], prohibitedTerms: [], voiceExamples: [] } };
     case 'deliverability.check':
