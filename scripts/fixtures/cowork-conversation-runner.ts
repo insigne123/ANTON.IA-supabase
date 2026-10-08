@@ -2,6 +2,7 @@
 // fixture tools. The decider is injected: a scripted one for offline tests, or
 // the configured model for `scripts/evaluate-cowork-conversations.ts --live`.
 import { coworkSearchDefaults } from '../../src/lib/cowork/search-scope';
+import { COWORK_SEARCH_COMPANIES, coworkSearchCriteriaSchema, coworkSearchStrategy } from '../../src/lib/cowork/search-proposal';
 import { coworkRescueModel } from '../../src/lib/cowork/rescue-model';
 import { coworkPreferenceLabel } from '../../src/lib/cowork/preference-proposal';
 import { coworkTaskPlanLabel } from '../../src/lib/cowork/task-plan';
@@ -346,7 +347,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
           ...(proposal.replyThread && reply ? { replyThread: { contactedId: proposal.replyThread.contactedId, to: reply.to, subject: reply.subject, body: reply.body } } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}),
           ...(proposal.contactsImport ? { contactsImport: { ...proposal.contactsImport, card: staged?.card } } : {}),
-          ...(proposal.profile ? { profile: proposal.profile } : {}) };
+          ...(proposal.profile ? { profile: proposal.profile } : {}),
+          ...(proposal.enrichBatch ? { enrichBatch: proposal.enrichBatch.length } : {}),
+          ...(proposal.prepareBatch ? { prepareBatch: { goal: proposal.prepareBatch.goal, people: proposal.prepareBatch.people.length } } : {}) };
       },
     });
     // Without the loop's verdict (the correction became the Writer's emails), a different reply is the correction:
@@ -396,9 +399,62 @@ function corpusCampaignEmailsText(messages: unknown) {
   }).join('\n\n---\n\n');
 }
 
+const SENIORITY: Record<string, string> = {
+  owner: 'Dueño', founder: 'Fundador', c_suite: 'Alta dirección', partner: 'Socio', vp: 'Vicepresidente', head: 'Head',
+  director: 'Director', manager: 'Gerente', senior: 'Senior', entry: 'Inicial', intern: 'Práctica',
+};
+const fields = (rows: Array<[string, string | null | undefined | false]>) => rows.flatMap(([label, value]) => value ? [`${label}: ${value}`] : []).join('\n');
+const listed = (values: string[] | null | undefined) => values?.length ? values.join(', ') : '';
+
+/** The search card as the person reads it (CoworkApproval.tsx): what it looks for, how many, the criteria and the cost, in words.
+ * The judge used to read the criteria as JSON («rolePolicy», «companies_first») and graded the card as unreadable. */
+export function corpusSearchText(search: unknown) {
+  const parsed = coworkSearchCriteriaSchema.safeParse(search);
+  if (!parsed.success) return 'No se pudieron leer los criterios de la búsqueda.';
+  const data = parsed.data;
+  const strategy = coworkSearchStrategy(data);
+  if (strategy === 'profile') return fields([['Buscar', 'La persona de este perfil exacto'], ['Perfil de LinkedIn', data.linkedinUrl],
+    ['Costo', 'Aproximadamente 1 crédito del proveedor y 1 búsqueda de tu cuota.']]);
+  const more = (data.page || 1) > 1 || Boolean(data.offset);
+  const noun = strategy === 'companies' ? (data.limit === 1 ? 'empresa' : 'empresas') : (data.limit === 1 ? 'persona' : 'personas');
+  const role = data.rolePolicy;
+  return [fields([
+    ['Buscar', strategy === 'companies_first'
+      ? `Empresas primero (hasta ${COWORK_SEARCH_COMPANIES} empresas de esos rubros y, dentro de ellas, las personas con esos cargos o parecidos)`
+      : strategy === 'companies' ? 'Empresas' : 'Personas, en una sola búsqueda'],
+    ['Cantidad', `Hasta ${data.limit} ${noun}${more ? ' más, después de las que ya viste' : ''}`],
+    [strategy === 'companies' ? 'Cargos' : 'Cargos (y parecidos)', listed(data.titles)],
+    [strategy === 'companies_first' ? 'Rubros de las empresas' : 'Sectores', listed(data.industries)],
+    ['Ubicación de la persona', listed(data.locations)],
+    ['Nivel de responsabilidad', listed(data.seniorities?.map(value => SENIORITY[value] || value))],
+    ['Ubicación de la empresa', listed(data.companyLocations)],
+    ['Número de empleados', listed(data.employeeRanges)],
+    ['Dominios de empresas', listed(data.companyDomains)],
+    ['Clasificación por cargo', role && `posibles compradores: ${role.decisionTerms.join(', ') || 'sin criterio'}; usuarios: ${role.userTerms.join(', ') || 'sin criterio'}; referidores: ${role.referralTerms.join(', ') || 'sin criterio'}; excluir: ${role.excludeTerms.join(', ') || 'ninguno'}`],
+  ]), ...(strategy !== 'companies' ? ['Los posibles compradores aparecen primero, agrupados por empresa; nadie se descarta.'] : [])].join('\n');
+}
+
+/** What the cards that spend credits say they cost (EnrichContact, EnrichBatchReview, PrepareBatchReview, PhoneRevealReview): the
+ * judge read only their label and graded «la tarjeta indica el costo» as unsupported. The corpus does not know who already has an
+ * email, so a batch says «hasta», as the card does. */
+function corpusCostText(proposal: NonNullable<CorpusTurnResult['proposal']>) {
+  const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+  if (proposal.kind === 'enrich_contact') return 'Busca el correo (solo email, 1 crédito de enriquecimiento).';
+  if (proposal.kind === 'enrich_phone') return 'Costo: 10 créditos por este teléfono. La tarjeta muestra tu saldo antes de aprobar.';
+  if (proposal.kind === 'enrich_batch' && proposal.enrichBatch) return `Costo estimado: ${plural(proposal.enrichBatch, 'crédito', 'créditos')} de enriquecimiento (máximo 1 por contacto).`;
+  const batch = proposal.prepareBatch;
+  if (proposal.kind === 'lead_prepare_batch' && batch) {
+    const parts = [batch.goal !== 'save' ? `hasta ${plural(batch.people, 'crédito', 'créditos')} para buscar correos (1 por persona; quien ya tiene correo no gasta)` : '',
+      batch.goal === 'research' ? `${plural(batch.people, 'investigación', 'investigaciones')} de tu cupo diario` : ''].filter(Boolean);
+    return `${plural(batch.people, 'persona', 'personas')}. ${parts.length ? `Usa ${parts.join(' y ')}.` : 'Solo guarda contactos: no gasta créditos.'}`;
+  }
+  return null;
+}
+
 /** What the person saw in a corpus turn. */
 export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
   const campaign = result.proposal?.campaign as { name?: unknown; objective?: unknown; messages?: unknown; emails?: unknown } | undefined;
+  const cost = result.proposal ? corpusCostText(result.proposal) : null;
   return {
     reply: result.reply,
     cards: result.blocks?.length ? coworkBlocksText(result.blocks) : null,
@@ -407,7 +463,9 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
     ...(result.choices ? { choices: result.choices } : {}),
     proposal: result.proposal ? { kind: result.proposal.kind, label: result.proposal.label, note: result.note,
       // The review card shows the campaign's name and objective above its recipients and emails.
-      ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: corpusCampaignEmailsText(campaign.messages) } }
+      ...(campaign ? { detail: `${fields([['Nombre', String(campaign.name ?? '')], ['Objetivo', String(campaign.objective ?? '')],
+        ['Destinatarios', Array.isArray(campaign.emails) ? campaign.emails.join(', ') : '']])}\n\n${corpusCampaignEmailsText(campaign.messages)}` }
+        : cost ? { detail: cost }
         : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage }
         // The code card shows the files it runs on and the code itself.
         : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } }
@@ -422,7 +480,7 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
         : result.proposal.replyThread ? { detail: { para: result.proposal.replyThread.to, asunto: result.proposal.replyThread.subject, respuesta: result.proposal.replyThread.body } }
         // The profile card shows the fields it saves.
         : result.proposal.profile ? { detail: result.proposal.profile } : {}) } : null,
-    search: result.search,
+    search: result.search ? corpusSearchText(result.search) : null,
     document: result.document,
     ...(result.artifact ? { artifact: { title: result.artifact.title, tables: result.artifact.tables, text: result.artifact.render?.text ?? null,
       errors: result.artifact.render?.errors ?? [] } } : {}),
