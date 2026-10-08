@@ -59,14 +59,51 @@ export type CorpusAnalyst = (brief: CoworkAnalysisBrief, observations: CoworkObs
  * The tables of an artifact from the case's world, shaped as loadCoworkArtifactData shapes the database: the saved
  * contacts (leads.search with no words), their stages (none kept: all «Nuevos»), the campaigns and what was sent.
  */
+const FILLER_TITLES = ['Jefe de Recursos Humanos', 'Gerente de Personas', 'Analista de Selección', 'Jefe de Operaciones', 'Encargado de Remuneraciones'];
+const FILLER_STATUS = ['completed', 'paused', 'draft'];
+
+/**
+ * The account as production's artifact-data reads it (Plan 16): every saved contact and every campaign, not only the few a search
+ * returns. The corpus worlds detail 4 contacts and 1 campaign of an account with 256 and 19, and the pages drew «4 contactos» and
+ * «1 campaña», which the judge counted as false figures. The rest is made up and the same every run: «Contacto N» of «Empresa N»,
+ * with as many emails as the account has and the industries its audience reads (audience.analyze), up to app.context's counts, and
+ * the campaigns up to campaigns.list's total.
+ */
+function corpusAccountRows(read: (action: string, input: string) => unknown) {
+  const safe = (action: string) => { try { return read(action, '') as Record<string, unknown> | null; } catch { return null; } };
+  const items = (value: unknown, key = 'items') => ((value as Record<string, unknown> | null)?.[key] || []) as Array<Record<string, unknown>>;
+  const shown = items(safe('leads.search'));
+  const app = safe('app.context') as { counts?: { leads?: number } } | null;
+  const audience = safe('audience.analyze') as { contactsWithEmail?: number; sectors?: Array<{ sector: string; contacts: number }> } | null;
+  const total = typeof app?.counts?.leads === 'number' ? app.counts.leads : shown.length;
+  const industries = (audience?.sectors || []).flatMap(sector => new Array<string>(Math.max(0, sector.contacts)).fill(sector.sector));
+  const emails = Math.max(0, (audience?.contactsWithEmail ?? 0) - shown.filter(lead => lead.email).length);
+  const contacts = [...shown, ...Array.from({ length: Math.max(0, total - shown.length) }, (_, index) => {
+    const n = shown.length + index + 1;
+    return { id: `00000000-0000-4000-a000-${String(n).padStart(12, '0')}`, name: `Contacto ${n}`, title: FILLER_TITLES[index % FILLER_TITLES.length],
+      company: `Empresa ${n}`, industry: industries[shown.length + index] ?? 'Otros', email: index < emails ? `contacto${n}@empresa${n}.cl` : null,
+      status: 'saved', created_at: new Date(Date.UTC(2026, 8, 20) - index * 86_400_000).toISOString() };
+  })];
+  const listed = safe('campaigns.list') as { total?: number } | null;
+  const campaignRows = items(listed, 'campaigns');
+  const campaignTotal = typeof listed?.total === 'number' ? listed.total : campaignRows.length;
+  const campaigns = [...campaignRows, ...Array.from({ length: Math.max(0, campaignTotal - campaignRows.length) }, (_, index) => {
+    const n = campaignRows.length + index + 1;
+    return { name: `Campaña ${n}`, status: FILLER_STATUS[index % FILLER_STATUS.length], recipients: 5 + ((n * 7) % 36),
+      createdAt: new Date(Date.UTC(2026, 7, 30) - index * 5 * 86_400_000).toISOString() };
+  })];
+  return { contacts, campaigns };
+}
+
 export function corpusArtifactData(read: (action: string, input: string) => unknown, tables: CoworkArtifactTableName[]): CoworkArtifactData {
   const items = (value: unknown, key = 'items') => ((value as Record<string, unknown> | null)?.[key] || []) as Array<Record<string, unknown>>;
   const out: Record<string, CoworkArtifactTable> = {};
+  const account = corpusAccountRows(read);
   for (const name of new Set(tables)) {
-    if (name === 'contacts') out.contacts = coworkArtifactContacts(items(read('leads.search', '')));
-    else if (name === 'pipeline') out.pipeline = coworkArtifactPipeline(items(read('leads.search', '')), []);
+    if (name === 'contacts') out.contacts = coworkArtifactContacts(account.contacts);
+    else if (name === 'pipeline') out.pipeline = coworkArtifactPipeline(account.contacts, []);
     else if (name === 'activity') out.activity = coworkArtifactActivity(items(read('contacted.search', '')));
-    else if (name === 'campaigns') out.campaigns = coworkArtifactCampaigns(items(read('campaigns.list', ''), 'campaigns').map(campaign => ({
+    else if (name === 'campaigns') out.campaigns = coworkArtifactCampaigns(account.campaigns.map(campaign => ({
       definition: { name: campaign.name }, status: campaign.status, recipients: Array.from({ length: Number(campaign.recipients) || 0 }), created_at: campaign.createdAt,
     })));
     else {
