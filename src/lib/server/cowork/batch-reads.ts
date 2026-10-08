@@ -352,7 +352,7 @@ export async function readCoworkRetryReview(client: SupabaseClient, scope: Scope
         error: touch.error, retryAt: touch.retryAt,
         action: touch.retryAction, reason: touch.retryReason,
         reconcileAt: touch.retryAction === 'reconcile_first' ? 'Contactados' : null,
-        idempotencyNote: 'La clave bulk:campaign:draft protege el despacho; un resultado incierto requiere conciliación antes de reintentar.',
+        idempotencyNote: 'Un correo nunca sale dos veces; si no se sabe si salió, primero se revisa en Contactados.',
       })));
   return { scope: 'own_campaign_retry_review', campaignId: campaign.id,
     summary: {
@@ -360,7 +360,7 @@ export async function readCoworkRetryReview(client: SupabaseClient, scope: Scope
       terminal: items.filter(item => item.action === 'terminal').length,
       reconcileFirst: items.filter(item => item.action === 'reconcile_first').length,
     },
-    items, limitation: 'Los inciertos exigen conciliar en Contactados; un reintento a ciegas esta prohibido.' };
+    items, limitation: 'De los envíos sin confirmar (reconcileFirst) no se sabe si salieron: antes de reintentarlos hay que ver en Contactados si se enviaron, para no mandar dos veces el mismo correo. Los que no se pueden reintentar (terminal) rebotaron, se dieron de baja, ya se enviaron o su empresa ya respondió.' };
 }
 
 /** The touches of a campaign that failed for a reason that can be retried (classifySendRetry says «retry»), with the draft each one

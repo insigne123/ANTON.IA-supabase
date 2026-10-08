@@ -7,12 +7,12 @@ import { CORPUS_COMMON_CHECKS, corpusRead, corpusShown, type CorpusCase, type Co
 export const RETRY_CAMPAIGN_ID = '00000000-0000-4000-8000-000000000071';
 const item = (email: string, status: string, action: string, reason: string, error: string | null) => ({
   email, touchNumber: 1, status, error, retryAt: null, action, reason, reconcileAt: action === 'reconcile_first' ? 'Contactados' : null,
-  idempotencyNote: 'La clave bulk:campaign:draft protege el despacho; un resultado incierto requiere conciliación antes de reintentar.' });
+  idempotencyNote: 'Un correo nunca sale dos veces; si no se sabe si salió, primero se revisa en Contactados.' });
 
 const reviewOf = (items: ReturnType<typeof item>[]) => ({ scope: 'own_campaign_retry_review', campaignId: RETRY_CAMPAIGN_ID,
   summary: { retryable: items.filter(entry => entry.action === 'retry').length, terminal: items.filter(entry => entry.action === 'terminal').length,
     reconcileFirst: items.filter(entry => entry.action === 'reconcile_first').length },
-  items, limitation: 'Los inciertos exigen conciliar en Contactados; un reintento a ciegas esta prohibido.' });
+  items, limitation: 'De los envíos sin confirmar (reconcileFirst) no se sabe si salieron: antes de reintentarlos hay que ver en Contactados si se enviaron, para no mandar dos veces el mismo correo. Los que no se pueden reintentar (terminal) rebotaron, se dieron de baja, ya se enviaron o su empresa ya respondió.' });
 
 const FAILED = reviewOf([
   item('paula@transportes.cl', 'failed', 'retry', 'daily_quota', 'Se alcanzó la cuota diaria'),
@@ -53,7 +53,7 @@ export const REINTENTO_CORPUS: CorpusCase[] = [
       reads('lee la revisión de reintentos de la campaña', 'campaigns.retry_review'),
       proposes,
       says('dice cuántos se reintentan (3)', /\b3\b|\btres\b/),
-      says('dice aparte que lo terminal y lo incierto no entran', /(terminal|no existe|casilla|invalid|rebot|no entra|fuera)/, /(conciliar|incierto|no se confirm)/),
+      says('dice aparte que lo terminal y lo incierto no entran', /(terminal|no existe|casilla|invalid|rebot|no entra|fuera)/, /(conciliar|incierto|no se confirm|sin confirm|no (esta|estan) confirmad|no se sabe si sali)/),
       avoids('no promete que salen hoy ni ya', /(salen hoy|salen ahora|se envian ahora|ya salieron|quedan enviados)/),
       onlyKnownFigures([1, 2, 3, 5])] },
   { id: 'reintento-nada-que-reintentar', title: 'No hay nada que reintentar', request: '¿Puedes reintentar los envíos fallidos de «Prospección transporte»?',
@@ -63,7 +63,7 @@ export const REINTENTO_CORPUS: CorpusCase[] = [
       reads('lee la revisión de reintentos', 'campaigns.retry_review'),
       noProposal,
       saysAny('dice que no hay nada que se pueda reintentar', /(no hay|ninguno|nada)[^.]{0,60}(reintent)/, /(reintent)[^.]{0,60}(ninguno|nada)/),
-      says('explica que uno es incierto y hay que conciliarlo en Contactados', /(conciliar|incierto|no se confirm)/, /contactados/),
+      says('explica que uno es incierto y hay que conciliarlo en Contactados', /(conciliar|incierto|no se confirm|sin confirm|no (esta|estan) confirmad|no se sabe si sali)/, /contactados/),
       onlyKnownFigures([0, 1, 2])] },
   { id: 'reintento-sin-flag', title: 'Reintentar sin que el reintento esté disponible', request: 'Reintenta los envíos que fallaron de la campaña «Prospección transporte»',
     origin: 'Con el flag apagado (como está hoy) Cowork lee y explica, pero no propone: dice que el reintento se hace desde la campaña y que lo incierto no se reintenta a ciegas.',
@@ -71,7 +71,7 @@ export const REINTENTO_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       reads('lee la revisión de reintentos', 'campaigns.retry_review'),
       noProposal,
-      says('dice cuántos se pueden reintentar (3) y cuántos no', /\b3\b|\btres\b/, /(terminal|conciliar|incierto)/),
+      says('dice cuántos se pueden reintentar (3) y cuántos no', /\b3\b|\btres\b/, /(terminal|conciliar|incierto|sin confirm|no (esta|estan) confirmad|no se sabe si sali|no se pueden?|rebot)/),
       avoids('no promete que ya los reintentó', /(ya (los )?reintent|dej[eé] .*en la cola)/),
       onlyKnownFigures([1, 2, 3, 5])] },
 ];
