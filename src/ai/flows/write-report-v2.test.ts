@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { selectReportV2EditorClaims, writeReportV2 } from './write-report-v2';
+import { reportV2WordRange, selectReportV2EditorClaims, writeReportV2 } from './write-report-v2';
 import { serializeReportV2Context } from './write-report-v2-section';
 
 test('editor permits profile and commercial reasoning without decorative citations and bounds model selection', async () => {
@@ -72,7 +72,7 @@ test('initial and repair editor prompts require per-opportunity measurement and 
         assert.match(options.prompt, /PROHIBIDO inventar experiencia, traccion, clientes, conversaciones en curso o resultados del vendedor/);
         assert.match(options.prompt, /basis=recommendation no exime de respaldo/);
         assert.match(options.prompt, /heuristica no calibrada/);
-        assert.match(options.prompt, /ticket y monto sin datos/);
+        assert.match(options.prompt, /no hay ticket, monto ni conversion que estimar/);
         assert.match(options.prompt, /aprobador de presupuesto, firmante/);
         assert.match(options.prompt, /no se identificaron detonantes recientes verificables/);
         assert.match(options.prompt, /no hay caso comparable disponible/);
@@ -96,16 +96,27 @@ test('the angle section is the guide to write: angles with their support, a firs
     generate: (async (options: any) => {
       schema = options.schema;
       assert.match(options.prompt, /angle \(como usarlo en el correo y los seguimientos\)/);
-      assert.match(options.prompt, /de 3 a 5 angulos para este contacto, cada uno con el dato o la senal que lo respalda/);
+      assert.match(options.prompt, /de 2 a 5 angulos para este contacto \(con poca evidencia, 2 o 3 buenos; no estires\), cada uno con el dato o la senal que lo respalda/);
       assert.match(options.prompt, /Una idea de primer correo, basis=recommendation: asunto y 2 o 3 frases/);
       assert.match(options.prompt, /Dos ideas de seguimiento en un parrafo/);
       assert.match(options.prompt, /nunca 'solo queria saber si viste mi correo'/);
       assert.match(options.prompt, /Que no afirmar/);
-      assert.match(options.prompt, /de 1300 a 1900 palabras/);
+      // No claims: the short report (Plan 15).
+      assert.match(options.prompt, /de 600 a 1000 palabras: el largo sigue a la evidencia/);
+      assert.match(options.prompt, /SALVEDADES UNA SOLA VEZ/);
+      assert.match(options.prompt, /Abre verdict con la decision en una frase/);
+      assert.doesNotMatch(options.prompt, /me gustaria entender/);
       return { data: { sections: [{ key: 'angle', title: 'Guia', paragraphs: [paragraph('Angulo 1', 'analysis')] }] }, telemetry: { modelName: 'gpt-6-luna', durationMs: 1 } };
     }) as any,
   });
   const section = (count: number) => ({ sections: [{ key: 'angle', title: 'Guia', paragraphs: Array.from({ length: count }, (_, index) => paragraph(`Parte ${index + 1}`)) }] });
   assert.equal(schema.safeParse(section(9)).success, true, 'five angles, the email, the follow-ups and what not to claim fit');
   assert.equal(schema.safeParse(section(10)).success, false, 'still bounded');
+});
+
+test('the report is as long as its evidence: short with a few facts, longer with many (Plan 15)', () => {
+  assert.deepEqual(reportV2WordRange(3), { min: 600, max: 1000 });
+  assert.deepEqual(reportV2WordRange(6), { min: 600, max: 1000 });
+  assert.deepEqual(reportV2WordRange(12), { min: 900, max: 1400 });
+  assert.deepEqual(reportV2WordRange(40), { min: 1200, max: 1700 });
 });
