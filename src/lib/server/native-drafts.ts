@@ -923,31 +923,56 @@ function explicitOpeningKind(explicit: unknown): OutreachOpeningKind | null {
   return (OUTREACH_OPENING_KINDS as string[]).includes(normalized) ? (normalized as OutreachOpeningKind) : null;
 }
 
-// Si el cuerpo generado es de usted y el estilo trae alternativa (o usa el
-// CTA por defecto), se anexa el CTA de usted para no mezclar tratamientos.
-// Con CTA personalizado distinto del default se conserva y se avisa.
-export function resolveEffectiveCta(context: DraftContextV2, modelBody: string): string {
+// Si el correo es de usted y el estilo trae alternativa (o usa el CTA por defecto), se anexa el CTA de usted para no mezclar
+// tratamientos. Con CTA personalizado distinto del default se conserva y se avisa.
+// Plan 15: el tratamiento sale primero de lo que se pidió (la instrucción del usuario o el estilo: «de usted», «tutea») y solo
+// si nada lo dice, del cuerpo, con marcas que no se confunden con el plural: «les faltó gente» o «su equipo» hablan de la
+// empresa (ustedes, ella) y no prueban el usted; «le escribo», «servirle» o «usted» sí. Antes, «les faltó gente» en un correo
+// de tú le ponía «¿Le parece…?» y «servirle» en uno de usted le dejaba «¿Te parece…?».
+const USTED_MARK = /\b(?:usted(?:es)?|le (?:escribo|comparto|cuento|parece|sirve|interesa|propongo|pregunto|ofrezco|acomoda|consulto|dejo|envio|mando|escribimos)|\p{L}{3,}(?:ar|er|ir)le)\b/u;
+const TU_MARK = /\b(?:tu|tus|te|ti|contigo|tienes|puedes|quieres|necesitas|sabes|avisame|cuentame|dime|escribeme|mandame)\b/;
+const normalizeTreatment = (value: unknown) => String(value || '')
+  .toLocaleLowerCase('es')
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^\p{L}\p{N}]+/gu, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+function treatmentIn(value: unknown): 'usted' | 'tu' | null {
+  const asked = normalizeTreatment(value);
+  // «tutea», «tuteo», «de tú» (not «de tu empresa»).
+  if (/\btute[ao]\w*/.test(asked) || /\bde tu(?! \p{L}{3,})/u.test(asked)) return 'tu';
+  if (/\busted\b/.test(asked) && !/\bnunca (?:de |trates de |uses )?usted\b/.test(asked)) return 'usted';
+  return null;
+}
+
+/** «usted», «tu» or null when the request and the style say nothing about how to address the person; the request first. */
+function requestedTreatment(context: DraftContextV2, requested: string | null | undefined): 'usted' | 'tu' | null {
+  const profile = (context.style?.profile || {}) as Record<string, unknown>;
+  for (const source of [requested, profile.tone, profile.instructions]) {
+    const found = typeof source === 'string' ? treatmentIn(source) : null;
+    if (found) return found;
+  }
+  return null;
+}
+
+export function resolveEffectiveCta(context: DraftContextV2, modelBody: string, requested?: string | null): string {
   const base = context.constraints.cta.exactText;
   const profile = (context.style?.profile || {}) as Record<string, unknown>;
   const cta = (profile.cta || {}) as Record<string, unknown>;
   const alternate = typeof cta.ctaUsted === 'string' ? cta.ctaUsted.trim() : '';
-  const normalized = String(modelBody || '')
-    .toLocaleLowerCase('es')
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const usted = /\b(usted|le|les|su|sus|consigo)\b/.test(normalized)
-    && !/\b(tu|te|ti|contigo|tienes|puedes|quieres|necesitas|sabes|avisame|cuentame|dime|escribeme|mandame)\b/.test(normalized);
+  const normalized = normalizeTreatment(modelBody);
+  const asked = requestedTreatment(context, requested);
+  const usted = asked ? asked === 'usted' : USTED_MARK.test(normalized) && !TU_MARK.test(normalized);
   if (!usted) return base;
   if (alternate.length >= 8 && alternate.length <= 240) return alternate;
   if (base === DEFAULT_DRAFT_CTA) return DEFAULT_DRAFT_CTA_USTED;
   return base;
 }
 
-function contextWithEffectiveCta(context: DraftContextV2, modelBody: string): DraftContextV2 {
-  const effective = resolveEffectiveCta(context, modelBody);
+function contextWithEffectiveCta(context: DraftContextV2, modelBody: string, requested?: string | null): DraftContextV2 {
+  const effective = resolveEffectiveCta(context, modelBody, requested);
   if (effective === context.constraints.cta.exactText) return context;
   return { ...context, constraints: { ...context.constraints, cta: { ...context.constraints.cta, exactText: effective } } };
 }
@@ -1191,7 +1216,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     }
 
     const ctaPolicy = ctaPolicyFor(sequenceContext);
-    const effectiveContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body) : context;
+    const effectiveContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, [userInstruction, instruction].filter(Boolean).join(' ')) : context;
     let generatedOutput = outputForPreflight(effectiveContext, generated, ctaPolicy);
     let validation = validateDraftPreflightV2(effectiveContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
     bufferedAttempts.push({
@@ -1224,7 +1249,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
           now,
         });
       }
-      const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body) : context;
+      const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, [userInstruction, instruction].filter(Boolean).join(' ')) : context;
       generatedOutput = outputForPreflight(retryContext, generated, ctaPolicy);
       validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
       bufferedAttempts.push({
@@ -1310,7 +1335,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       }
     }
     await flushAttempts(persisted.draftId, persisted.versionId);
-    const activeContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body) : context;
+    const activeContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, [userInstruction, instruction].filter(Boolean).join(' ')) : context;
     return {
       status: 'drafted',
       draft: persisted,
@@ -1545,7 +1570,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
       throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
     }
     const ctaPolicy = ctaPolicyFor(sequenceContext);
-    const effectiveContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body) : context;
+    const effectiveContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, instruction) : context;
     let generatedOutput = outputForPreflight(effectiveContext, generated, ctaPolicy);
     let validation = validateDraftPreflightV2(effectiveContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
     bufferedAttempts.push({
@@ -1570,7 +1595,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
         await flushAttempts(null);
         throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
       }
-      const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body) : context;
+      const retryContext = ctaPolicy.ctaMode === 'append-exact' ? contextWithEffectiveCta(context, generated.body, instruction) : context;
       generatedOutput = outputForPreflight(retryContext, generated, ctaPolicy);
       validation = validateDraftPreflightV2(retryContext, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
       bufferedAttempts.push({

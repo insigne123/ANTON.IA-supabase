@@ -1,1 +1,1 @@
-export const NATIVE_DRAFT_PROMPT_VERSION = 'native-draft/v18' as const;
+export const NATIVE_DRAFT_PROMPT_VERSION = 'native-draft/v19' as const;

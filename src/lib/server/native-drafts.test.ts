@@ -1324,3 +1324,19 @@ test('effective CTA follows the body tratamiento without touching custom CTAs', 
   assert.equal(resolveEffectiveCta(custom, ustedBody), '¿Coordinamos una visita el martes?');
   assert.equal(resolveEffectiveCta(custom, tuBody), '¿Coordinamos una visita el martes?');
 });
+
+test('the CTA treatment comes from what was asked, and «les» or «su» about the company is not usted (Plan 15)', () => {
+  const base = draftContextFixture();
+  const usted = '¿Le parece si lo conversamos 15 minutos esta semana?';
+  // A tú email that speaks of the company in plural kept getting «¿Le parece…?».
+  const plural = 'Hola Marcela,\n\nLa temporada pasada les faltó gente en selección. Su equipo podría cubrir ese período con dotación temporal.';
+  assert.equal(resolveEffectiveCta(base, plural), base.constraints.cta.exactText);
+  // An usted email without «usted» kept the tú CTA.
+  assert.equal(resolveEffectiveCta(base, 'Hola Ricardo,\n\nLa dotación temporal puede servirle para cubrir períodos puntuales.'), usted);
+  // What was asked wins over the body.
+  assert.equal(resolveEffectiveCta(base, plural, 'Usa tratamiento de usted en todo el correo. Nunca tutees.'), usted);
+  assert.equal(resolveEffectiveCta(base, 'Hola Ricardo,\n\nLe escribo por la dotación.', 'Escríbele de tú'), base.constraints.cta.exactText);
+  assert.equal(resolveEffectiveCta(base, plural, 'Menciona el nombre de tu empresa'), base.constraints.cta.exactText);
+  const formalStyle = { ...base, style: { ...base.style, profile: { ...base.style.profile, tone: 'Formal, de usted' } } };
+  assert.equal(resolveEffectiveCta(formalStyle, plural), usted);
+});

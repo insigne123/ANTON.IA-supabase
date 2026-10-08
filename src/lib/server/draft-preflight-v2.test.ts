@@ -231,6 +231,27 @@ En Northstar automatizamos operaciones repetitivas para reducir trabajo manual.
   }, { expectedCtaCount: 'model' });
   assert.ok(noMinutes.issues.some((issue) => issue.code === 'cta_count'));
 
+  // The first follow-up may ask how they do it today: a question that asks for no meeting needs no minutes.
+  const howToday = validateDraftPreflightV2(context, {
+    ...base,
+    body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir trabajo manual. ¿Hoy esas tareas las hace alguien del equipo a mano?`,
+  }, { expectedCtaCount: 'model' });
+  assert.ok(!howToday.issues.some((issue) => issue.code === 'cta_count'), JSON.stringify(howToday.issues));
+
+  const callWithoutMinutes = validateDraftPreflightV2(context, {
+    ...base,
+    body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir trabajo manual. ¿Hablamos por teléfono?`,
+  }, { expectedCtaCount: 'model' });
+  assert.ok(callWithoutMinutes.issues.some((issue) => issue.code === 'cta_count'));
+
   const withLink = validateDraftPreflightV2(context, {
     ...base,
     body: `Hola Ada,
