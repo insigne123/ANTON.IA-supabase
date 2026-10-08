@@ -27,6 +27,8 @@ for (const result of run.results) {
     tipo: result.type, tratamiento: evalCase.tratamiento,
     destinatario: evalCase.destinatario, actividadEmpresa: evalCase.actividadEmpresa,
     senal: evalCase.senal, objecion: evalCase.objecion,
+    // La relación anterior de una reconexión es un dato del caso, no algo inventado.
+    ...(evalCase.reconexion ? { reconexion: evalCase.reconexion } : {}),
     hechos_permitidos: [
       `Vendedor: ${evalSet.seller.name}, ${evalSet.seller.jobTitle} de ${evalSet.seller.companyName}`,
       ...(evalSet.seller.description ? [evalSet.seller.description] : []),

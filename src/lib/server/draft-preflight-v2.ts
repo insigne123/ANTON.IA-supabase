@@ -205,6 +205,9 @@ function sentenceParts(value: string) {
 const draftCtaCue = /\b(?:agenda(?:mos|r)?|agend(?:amos|ar)?|coordina(?:mos|r)?\s+(?:una\s+)?(?:reunion|reunión|llamada|call|cita)|conversemos|conversar|hablemos|hablar|reunion|reunión|llamada|call|calendly|calendar|te parece|te sirve|podemos (?:hablar|conversar|coordinar)|responde|disponibilidad)\b/i;
 const commercialOutcomeCue = /\b(?:para\s+\p{L}|podr[ií]a|quiz[aá]s|si\b|cuando\b|as[ií]|sin\s+\p{L})/iu;
 const meetingLinkCue = /\b(?:https?:\/\/|www\.|calendly|calendar|cal\.com|meet\.|zoom\.|teams\.)/i;
+// A follow-up may close with an easy question about how they do it today instead of another meeting ask
+// («¿Hoy esas consultas las hace alguien del equipo una por una?»). Only a meeting ask must carry the minutes.
+const meetingAskCue = /\b(?:convers\w*|llam\w*|reuni\w*|minutos?|agend\w*|junt[oa]s|juntarnos|semana|videollamad\w*|telefon\w*|habl(?:emos|amos|ar)|vernos|veamos|coordinemos)\b/;
 
 // Meeting length configured by the user in their approved CTA (e.g. "15 minutos").
 // Follow-up steps restate it in their own words instead of repeating the exact text.
@@ -639,15 +642,16 @@ export function validateDraftPreflightV2(
     const minutes = draftCtaMinutes(context.constraints.cta.exactText);
     const questionCount = (bodyOutsideRequiredCta.match(/\?/g) || []).length;
     const question = sentenceParts(bodyOutsideRequiredCta).find((item) => /[¿?]/.test(item)) || '';
+    const normalizedQuestion = normalizeForMatch(question);
     const modelCtaOk = questionCount === 1
       && requiredCtaCount === 0
       && ctaSentenceCount(bodyOutsideRequiredCta) <= 1
       && !meetingLinkCue.test(bodyOutsideRequiredCta)
-      && (!minutes || normalizeForMatch(question).split(' ').includes(minutes));
+      && (!minutes || !meetingAskCue.test(normalizedQuestion) || normalizedQuestion.split(' ').includes(minutes));
     if (!modelCtaOk) {
       add('cta_count', minutes
-        ? `El seguimiento cierra con una sola pregunta que proponga una conversación breve de ${minutes} minutos, con tus palabras y sin enlaces. No repitas el CTA aprobado literalmente.`
-        : 'El seguimiento cierra con una sola pregunta que proponga una conversación breve, con tus palabras y sin enlaces.', 'body');
+        ? `El seguimiento cierra con una sola pregunta, con tus palabras y sin enlaces: una pregunta fácil sobre cómo lo resuelven hoy, o una conversación breve de ${minutes} minutos. No repitas el CTA aprobado literalmente.`
+        : 'El seguimiento cierra con una sola pregunta, con tus palabras y sin enlaces: una pregunta fácil sobre cómo lo resuelven hoy, o una conversación breve.', 'body');
     }
   } else if (expectedCtaCount === 0) {
     const closeQuestionCount = (bodyOutsideRequiredCta.match(/\?/g) || []).length;

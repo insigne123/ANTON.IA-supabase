@@ -435,7 +435,7 @@ test('follow-up steps write their own single minutes question without the approv
       sequenceContext: {
         sequenceInstruction: 'Aportar valor nuevo.',
         priorMessages: [{ kind: 'initial', index: 0, name: 'Inicial', subject: 'Tema', body: 'Acme reduce trabajo manual.' }],
-        currentStep: { index: 1, total: 3, name: 'Respaldo', offsetDays: 3, instruction: 'Aportar prueba.' },
+        currentStep: { index: 2, total: 3, name: 'Segundo ángulo', offsetDays: 5, instruction: 'Otra aplicación.' },
       },
     });
     assert.match(prompt, /UNA sola pregunta de cierre que proponga una conversación breve de 15 minutos/);
@@ -443,6 +443,69 @@ test('follow-up steps write their own single minutes question without the approv
     assert.match(prompt, /El servidor agregará solo el saludo: tu pregunta de cierre/);
     assert.match(result.body, /¿Te sirve que lo revisemos juntos 15 minutos esta semana\?/);
     assert.ok(!result.body.includes(draftContextFixture().constraints.cta.exactText));
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('the first follow-up asks how they do it today instead of a second meeting', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Avance en Acme', opening: 'Con el trabajo manual de Acme.', value: 'Northstar automatiza tareas repetitivas. ¿Hoy esas tareas las hace alguien del equipo a mano?' }) } }], usage: {} });
+    };
+    await generateOutreachFromDraftContextV2({
+      context: draftContextFixture(),
+      sequenceContext: {
+        // The default instruction of research sequences and campaigns speaks of «la conversación»: not a meeting ask.
+        sequenceInstruction: 'Haz avanzar la conversación de forma breve y útil, sin repetir los correos anteriores.',
+        priorMessages: [{ kind: 'initial', index: 0, name: 'Inicial', subject: 'Tema', body: 'Acme reduce trabajo manual.' }],
+        currentStep: { index: 1, total: 3, name: 'Respaldo', offsetDays: 3, instruction: 'Aportar prueba.' },
+      },
+    });
+    assert.match(prompt, /UNA sola pregunta fácil de responder en una línea sobre cómo resuelven hoy/);
+    assert.match(prompt, /No pidas reunión, llamada ni minutos en este correo/);
+    assert.doesNotMatch(prompt, /UNA sola pregunta de cierre que proponga una conversación breve/);
+    assert.match(prompt, /nómbralo en pocas palabras/);
+
+    // A campaign step that asks for the meeting keeps its meeting ask.
+    await generateOutreachFromDraftContextV2({
+      context: draftContextFixture(),
+      sequenceContext: {
+        sequenceInstruction: 'Aportar valor nuevo.',
+        priorMessages: [{ kind: 'initial', index: 0, name: 'Inicial', subject: 'Tema', body: 'Acme reduce trabajo manual.' }],
+        currentStep: { index: 1, total: 3, name: 'Recordatorio', offsetDays: 3, instruction: 'Recuerda el caso y pide una reunión.' },
+      },
+    });
+    assert.match(prompt, /UNA sola pregunta de cierre que proponga una conversación breve de 15 minutos/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('the prompt asks for the service in present tense and the benefit in the seller words', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const prompts: string[] = [];
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompts.push(JSON.parse(String(init?.body)).messages[1].content);
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Avance en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar automatiza tareas repetitivas.' }) } }], usage: {} });
+    };
+    await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
+    assert.match(prompts[0], /Lo que hace el vendedor va en presente y con sujeto/);
+    assert.match(prompts[0], /"hay un dato concreto"/);
+    assert.match(prompts[0], /El beneficio se dice con las palabras de valueProposition/);
+    assert.match(prompts[1], /Quita los anuncios y rodeos/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
