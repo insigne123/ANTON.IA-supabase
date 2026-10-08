@@ -1,4 +1,4 @@
-# Plan 16 (pendiente de medir): sin botones secundarios que ofrecen otra consulta
+# Plan 16: sin botones secundarios que ofrecen otra consulta
 
 ## Problema
 
@@ -15,8 +15,19 @@ medidos del Plan 16, eso pasó en 9 de 26 respuestas en `main`.
 
 Un turno sin consultas (una respuesta de chat) queda igual.
 
-## Estado
+## Medición
 
-**Sin medir.** La cuenta de OpenAI de las pruebas está sin créditos. Para medirlo: los mismos 13 casos de
-`docs/cowork-plan16-consultas.md`, 2 o más veces, en `main` y en esta rama, con el juez de #259. Se integra solo si bajan las quejas
-por consultas ofrecidas sin bajar la utilidad (un botón menos es también un camino menos).
+El cambio solo quita botones de la respuesta final, así que se midió sobre las mismas respuestas. Se tomaron las 15 respuestas guardadas
+de los 13 casos de `docs/cowork-plan16-consultas.md` que tienen un botón así, 9 de `main` antes de #261 y 6 después. Cada una se juzgó
+con y sin esos botones, dos veces, con `gpt-6.1-sol` y el juez de #259:
+
+| | con botones secundarios | sin ellos |
+|---|---|---|
+| Quejas por ofrecer una consulta que podía hacer | 8 y 6 de 15 | 1 y 2 de 15 |
+| Fricción | 3,33 y 3,33 | 4,33 y 4,27 |
+| Utilidad | 4,00 y 4,07 | 4,33 y 4,27 |
+| Buenas / malas | 2/3 y 3/5 | 5/2 y 5/3 |
+
+La utilidad no baja: el botón quitado pedía algo que la respuesta ya debía traer, y queda el primero, que responde la pregunta final.
+
+Sin migraciones ni flags.
