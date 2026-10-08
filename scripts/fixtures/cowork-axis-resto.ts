@@ -428,7 +428,7 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
       noSend, endsAsking)});
 
   const retryItem = (n: number, action: 'retry' | 'terminal', reason: string, error: string) => ({ email: `p${n}@ejemplo.cl`, touchNumber: 1, status: 'failed', error, retryAt: action === 'retry' ? '2026-09-25T14:00:00Z' : null,
-    action, reason, reconcileAt: null, idempotencyNote: 'La clave bulk:campaign:draft protege el despacho; un resultado incierto requiere conciliación antes de reintentar.' });
+    action, reason, reconcileAt: null, idempotencyNote: 'Un correo nunca sale dos veces; si no se sabe si salió, primero se revisa en Contactados.' });
   const d4Items = [...Array.from({ length: 27 }, (_, index) => retryItem(index, 'retry', 'provider_connection_unavailable', 'La conexión con el proveedor no estuvo disponible.')),
     ...Array.from({ length: 3 }, (_, index) => retryItem(27 + index, 'terminal', 'recipient_invalid', 'La dirección del destinatario no existe.'))];
   add({ id: 'axis-d4-fallas-de-envio', title: 'Recuperarse de fallas de envío',
@@ -443,7 +443,7 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
         summary: { recipients: 116, touches: 116, sent: 86, deferred: 0, failed: 30, uncertain: 0 }, recipients: [],
         limitation: 'Historial de la app con consultas acotadas; la bandeja del proveedor puede traer respuestas aun no sincronizadas.' },
       'campaigns.retry_review': { scope: 'own_campaign_retry_review', campaignId: AXIS_REST.tanda,
-        summary: { retryable: 27, terminal: 3, reconcileFirst: 0 }, items: d4Items, limitation: 'Los inciertos exigen conciliar en Contactados; un reintento a ciegas esta prohibido.' },
+        summary: { retryable: 27, terminal: 3, reconcileFirst: 0 }, items: d4Items, limitation: 'De los envíos sin confirmar (reconcileFirst) no se sabe si salieron: antes de reintentarlos hay que ver en Contactados si se enviaron, para no mandar dos veces el mismo correo. Los que no se pueden reintentar (terminal) rebotaron, se dieron de baja, ya se enviaron o su empresa ya respondió.' },
     }),
     checks: commonWith(
       reads('mira qué se puede reintentar y qué es terminal', 'campaigns.retry_review'),
@@ -451,7 +451,8 @@ export function axisRestCorpus(userContext: CoworkUserContext | null): CorpusCas
       says('separa los que fallaron por conexión de los de dirección inválida', /(conexion|red)/, /(direccion invalida|correo invalido|direcciones invalidas|no existe)/),
       says('reintenta solo los 27 que fallaron por conexión', /\b27\b/, /(solo|unicamente|exactamente)[^.]{0,80}reintent|reintent[^.]{0,80}(solo|unicamente|exactamente)/),
       says('no toca a los 86 que salieron bien y nadie recibe el mismo correo dos veces', /(sin tocar|no toco|no reenvio|no repito)[^.]{0,80}\b86\b|\b86\b[^.]{0,80}(sin tocar|no (se )?(reenvian|repiten|toco))/, /(dos veces|duplicad|mismo correo)/),
-      saysAny('un resultado incierto se concilia antes de repetirlo', /concili/),
+      // Plan 16: in plain words, «hay que revisar si salió» counts as much as «conciliar».
+      saysAny('un resultado incierto se revisa antes de repetirlo', /(concili|sin confirm|no (esta|estan) confirmad|no se sabe si sali|(revis|verific|confirm|comprob)\w*[^.]{0,60}si (sali|se envi))/),
       avoids('no reintenta los terminales', /reintento (los )?(30|treinta)\b/),
       onlyKnown('no inventa cifras', known(116)),
       noSend, endsAsking)});

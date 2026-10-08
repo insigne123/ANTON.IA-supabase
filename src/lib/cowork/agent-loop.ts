@@ -1357,7 +1357,7 @@ async function runCoworkLoop(input: {
           throw rejected('Reply in thread unavailable', 'Enviar una respuesta dentro del hilo desde Cowork todavía no está disponible: entrega el borrador en un bloque email_draft y di que se envía desde Contactados (Respuestas).');
         }
         if (decision.action === 'campaign.retry' && !input.campaignRetry) {
-          throw rejected('Campaign retry unavailable', 'Reintentar envíos desde Cowork todavía no está disponible: di qué envíos se pueden reintentar (campaigns.retry_review) y que se reintentan desde la campaña en la app; los que necesitan conciliar no se reintentan.');
+          throw rejected('Campaign retry unavailable', 'Reintentar envíos desde Cowork todavía no está disponible: di qué envíos se pueden reintentar (campaigns.retry_review) y que se reintentan desde la campaña en la app; los que quedaron sin confirmar si salieron no se reintentan hasta revisar en Contactados si se enviaron.');
         }
         if (decision.action === 'campaign.retry' && !decision.campaignId) throw rejected('Missing campaign', MISSING_PROPOSAL_FIELDS);
         if (decision.action === 'lead.enrich_phone' && !input.phoneReveal) {
