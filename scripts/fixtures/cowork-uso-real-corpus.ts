@@ -15,6 +15,7 @@ const visual = (result: CorpusTurnResult) => Boolean(result.document)
   || Boolean(result.artifact);
 const asksWhatTheySell = (result: CorpusTurnResult) => /qué (?:producto|servicio|vendes|ofreces?|ofrece)|a qué te dedicas|cuéntame (?:qué|sobre tu)/i
   .test(`${result.reply}\n${result.question || ''}`);
+const startsWithSearch = (result: CorpusTurnResult) => result.proposal?.kind === 'task_plan' && result.proposal.task?.steps[0]?.kind === 'search';
 const titlesOf = (result: CorpusTurnResult) => (Array.isArray(result.search?.titles) ? result.search?.titles as string[] : []).join(' | ').toLowerCase();
 // Where a proposed search looks: the people's places and the companies' (Plan 14, 1).
 const placesOf = (result: CorpusTurnResult) => ['locations', 'companyLocations']
@@ -63,8 +64,10 @@ export const USO_REAL_CORPUS: CorpusCase[] = [
     request: 'tengo una app que se encarga de automatizar el proceso de revision de antecedentes penales para nuevas contrataciones, ayudame a encontrar clientes',
     origin: 'Producción, 1 oct.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'propone una búsqueda', test: r => Boolean(r.search) },
-      { label: 'busca a quienes contratan (RR. HH. o selección)', test: r => /rr|recurs|human|selecc|reclut|talent|persona|people/i.test(titlesOf(r)) },
+      // Plan 16: a long task (COWORK_TASKS_ENABLED, on in production) that starts with the search proposes it too, approved with the rest.
+      { label: 'propone una búsqueda', test: r => Boolean(r.search) || startsWithSearch(r) },
+      { label: 'busca a quienes contratan (RR. HH. o selección)', test: r => /rr|recurs|human|selecc|reclut|talent|persona|people/i.test(titlesOf(r)
+        || (startsWithSearch(r) ? `${JSON.stringify(r.proposal?.task)} ${r.note || ''}` : '')) },
       { label: 'explica a quién apunta y por qué', test: r => (r.note || r.reply).length > 60 }] },
   { id: 'ur-retail-alto-cargo', title: 'Leads del retail con cargo alto en selección',
     request: 'ayudame a buscar leads del retail, necesito leads que tengan un cargo alto en la parte de contratacion o seleccion',
