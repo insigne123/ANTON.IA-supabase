@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { draftReasoningEffort, generateOutreachFromDraftContextV2 } from './generate-outreach-from-report';
+import { generateOutreachFromDraftContextV2 } from './generate-outreach-from-report';
+import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { draftContextFixture } from '@/lib/server/draft-v2-test-fixtures';
 
 test('editor receives each screenshot-style candidate and returns the edited content, never the first pass', async () => {
