@@ -179,10 +179,31 @@ function modelForDraftPriority(priority: DraftContextV2['quality']['priority']) 
     return String(
       process.env.SUPLIA_OPENAI_REASONING_MODEL
       || process.env.OPENAI_REASONING_MODEL
-      || 'gpt-6-sol',
+      || 'gpt-6-luna',
     ).trim();
   }
   return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-6-luna').trim();
+}
+
+type DraftEffort = 'low' | 'medium' | 'high';
+/** Measured blind against gpt-6-sol: medium on both calls reads as well at about 34 s a draft; high took 74 s for no gain. */
+const PRIORITY_WRITE_EFFORT: DraftEffort = 'medium';
+const PRIORITY_EDIT_EFFORT: DraftEffort = 'medium';
+const DRAFT_EFFORTS = ['low', 'medium', 'high'] as const;
+const effortFrom = (value: string | undefined, fallback: DraftEffort): DraftEffort => (
+  DRAFT_EFFORTS.find((effort) => effort === value?.trim()) || fallback
+);
+
+/**
+ * How hard the model thinks on each call of a draft. Priority-A accounts (well researched) used gpt-6-sol; with luna thinking
+ * harder they read as well, measured blind (docs/borradores-luna.md). OPENAI_DRAFT_PRIORITY_EFFORT and
+ * OPENAI_DRAFT_PRIORITY_EDIT_EFFORT override it. Rewrites and the rest of the accounts keep the client's default (low).
+ */
+export function draftReasoningEffort(input: Pick<GenerateOutreachFromDraftContextV2Input, 'rewrite' | 'context'>, pass: 'write' | 'edit'): DraftEffort | undefined {
+  if (input.rewrite || input.context.quality.priority !== 'A') return undefined;
+  return pass === 'write'
+    ? effortFrom(process.env.OPENAI_DRAFT_PRIORITY_EFFORT, PRIORITY_WRITE_EFFORT)
+    : effortFrom(process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT, PRIORITY_EDIT_EFFORT);
 }
 
 function modelForDraftRequest(input: GenerateOutreachFromDraftContextV2Input) {
@@ -665,6 +686,7 @@ export async function generateOutreachFromDraftContextV2(
     provider: 'openai',
     openAiModel: modelForDraftRequest(parsed),
     temperature: parsed.rewrite ? 0.35 : 0.2,
+    reasoningEffort: draftReasoningEffort(parsed, 'write'),
   });
   // A separate editorial pass reads the entire candidate in context. The native
   // draft service still validates the edited result against evidence and CTA.
@@ -686,6 +708,7 @@ ${JSON.stringify({ subject: result.data.subject.slice(0, 1_000), opening: result
     provider: 'openai',
     openAiModel: modelForDraftRequest(parsed),
     temperature: 0.3,
+    reasoningEffort: draftReasoningEffort(parsed, 'edit'),
   });
   return {
     subject: edited.data.subject,
