@@ -60,6 +60,15 @@ function profileFilter(profile: string) {
  * that is also saved shows once, as the saved contact, with the email and LinkedIn the email search found. Each item says its
  * source: «saved» or «enriched» (in «Por escribir», already with an email).
  */
+/**
+ * «con correo» in a search keeps only the contacts with an email (Plan 15), alone or with other words («con correo recursos
+ * humanos»). The 20 most recent of 256 contacts may hold one or two of the 21 with an email, and a campaign only goes to the
+ * people Cowork saw: «una campaña para mis contactos con correo» left most of them out.
+ */
+export const COWORK_WITH_EMAIL_QUERY = /(?:^|\s)con\s+(?:correo|email|e-mail|mail)(?=\s|$)/i;
+/** As many as a campaign Cowork proposes can take (campaign.create, 25 observed emails). */
+export const COWORK_WITH_EMAIL_MAX = 25;
+
 export async function queryCoworkLeads(
   client: SupabaseClient,
   scope: { userId: string; organizationId: string },
@@ -68,7 +77,8 @@ export async function queryCoworkLeads(
   /** How many rows a search returns: 20 for Cowork's turn, up to COWORK_FULL_LIST_MAX for «Ver todos» (Plan 13). */
   options: { max?: number } = {},
 ) {
-  const max = Math.min(COWORK_FULL_LIST_MAX, Math.max(1, Math.floor(options.max ?? 20)));
+  const withEmail = action === 'leads.search' && COWORK_WITH_EMAIL_QUERY.test(String(value || ''));
+  const max = Math.min(COWORK_FULL_LIST_MAX, Math.max(1, Math.floor(options.max ?? (withEmail ? COWORK_WITH_EMAIL_MAX : 20))));
   const fetchLimit = Math.max(60, max);
   let query = client.from('leads')
     .select('id,name,title,company,email,status,industry,linkedin_url,location,city,country,created_at')
@@ -89,7 +99,7 @@ export async function queryCoworkLeads(
     // GrupoExpro Santiago» still finds a recruiter even when the city is
     // unknown. PostgREST OR grammar must never receive raw model-supplied
     // punctuation.
-    const raw = z.string().max(500).parse(value);
+    const raw = z.string().max(500).parse(value).replace(COWORK_WITH_EMAIL_QUERY, ' ').trim();
     profile = normalizeLinkedinProfileUrl(raw);
     if (!profile) z.string().max(120).parse(raw);
     if (/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*linkedin\.com(?:\/|$)/i.test(raw) && !profile) {
@@ -104,6 +114,10 @@ export async function queryCoworkLeads(
     if (terms.length > 0) {
       query = query.or(terms.flatMap(term => SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
       enriched = enriched.or(terms.flatMap(term => ENRICHED_SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
+    }
+    if (withEmail) {
+      query = query.not('email', 'is', null).neq('email', '');
+      enriched = enriched.not('email', 'is', null);
     }
     query = query.limit(fetchLimit);
     enriched = enriched.limit(fetchLimit);
@@ -145,6 +159,7 @@ export async function queryCoworkLeads(
     truncated: ranked.length > max || cut,
     partial: terms.length > 0 && items.length > 0 && best < terms.length,
     terms: terms.length,
+    withEmailOnly: withEmail || undefined,
   };
 }
 

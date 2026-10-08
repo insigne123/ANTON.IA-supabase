@@ -9,7 +9,7 @@ import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '
 import { COWORK_FILE_NOTICE, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTablePreview, coworkTextPreview } from '../../src/lib/cowork/file-read';
 import { coworkWithAttachments } from '../../src/lib/cowork/attachments';
 import { coworkOfferMessage } from '../../src/lib/cowork/overview';
-import { CORPUS_COMMON_CHECKS, CORPUS_USER_CONTEXT, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { CORPUS_COMMON_CHECKS, CORPUS_USER_CONTEXT, corpusShown, corpusWithEmailQuery, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const MARKETING_LEAD = { marcela: id(101), felipe: id(102), andrea: id(103), rodrigo: id(104), camila: id(105) };
@@ -39,10 +39,13 @@ function read(action: string, input: string): unknown {
   const term = input.toLowerCase().trim();
   switch (action) {
     case 'leads.search': {
-      const words = term.split(/\s+/).filter(word => word.length > 2);
-      const items = !term ? contacts : contacts.filter(lead => PEOPLE_TEAMS.test(term) ? isPeopleTeam(lead)
+      const { withEmail, rest } = corpusWithEmailQuery(term);
+      const words = rest.split(/\s+/).filter(word => word.length > 2);
+      const found = !rest ? contacts : contacts.filter(lead => PEOPLE_TEAMS.test(rest) ? isPeopleTeam(lead)
         : [lead.name, lead.title, lead.company, lead.email].some(value => words.some(word => String(value || '').toLowerCase().includes(word))));
-      return { items, returned: items.length, limit: 20, scope: 'own_saved_contacts', truncated: false, partial: false };
+      const items = withEmail ? found.filter(lead => lead.email) : found;
+      return { items, returned: items.length, limit: withEmail ? 25 : 20, scope: 'own_saved_contacts', truncated: false, partial: false,
+        ...(withEmail ? { withEmailOnly: true } : {}) };
     }
     case 'leads.get':
       return { items: contacts.filter(lead => lead.id === input), returned: 1, limit: 1, scope: 'own_saved_contacts', truncated: false };

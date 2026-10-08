@@ -187,18 +187,27 @@ export async function readCoworkDraft(scope: Scope, value: string) {  const draf
 
 /** Own bulk campaigns with recipient counts: the observation activate/pause
  * effects must reference. Full definitions stay out of observations. */
+const CAMPAIGNS_LISTED = 20;
+
+/** The person's 20 most recent campaigns, and how many there are in all: with more than 20, «tienes 20 campañas» would be wrong
+ * (Plan 15). total is null when the count could not be read. */
 export async function readCoworkCampaigns(client: SupabaseClient, scope: Scope) {
-  const { data, error } = await client.from('bulk_campaigns')
-    .select('id,definition,status,revision,recipients,created_at')
+  const { data, error, count } = await client.from('bulk_campaigns')
+    .select('id,definition,status,revision,recipients,created_at', { count: 'exact' })
     .eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
-    .order('created_at', { ascending: false }).limit(20);
+    .order('created_at', { ascending: false }).limit(CAMPAIGNS_LISTED);
   if (error) throw new Error('No se pudieron consultar las campañas.');
+  const campaigns = (data || []).map((row: { id: string; definition: { name?: string }; status: string; revision: number; recipients?: unknown[]; created_at: string }) => ({
+    id: row.id, name: row.definition?.name || 'Campaña', status: row.status, revision: row.revision,
+    recipients: Array.isArray(row.recipients) ? row.recipients.length : 0, createdAt: row.created_at,
+  }));
+  const total = typeof count === 'number' ? count : null;
   return {
     scope: 'own_campaigns',
-    campaigns: (data || []).map((row: { id: string; definition: { name?: string }; status: string; revision: number; recipients?: unknown[]; created_at: string }) => ({
-      id: row.id, name: row.definition?.name || 'Campaña', status: row.status, revision: row.revision,
-      recipients: Array.isArray(row.recipients) ? row.recipients.length : 0, createdAt: row.created_at,
-    })),
+    campaigns,
+    returned: campaigns.length,
+    total,
+    truncated: total === null ? campaigns.length >= CAMPAIGNS_LISTED : total > campaigns.length,
   };
 }
 
