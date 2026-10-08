@@ -1763,7 +1763,9 @@ test('a chat answer that read nothing closes on its quick replies, without anoth
 test('more ways of offering a read are seen; offers that write or need approval are not', () => {
   const offered = (question: string) => coworkOfferedRead({ reply: 'Listo.', question });
   for (const question of ['¿Quieres que te resuma toda la información de tu perfil?', '¿Comparo tus resultados de lunes y martes?',
-    '¿Te listo los 21 contactos?', '¿Verifico el dominio?', '¿Te muestro cuáles tienen correo?']) assert.ok(offered(question), question);
+    '¿Te listo los 21 contactos?', '¿Verifico el dominio?', '¿Te muestro cuáles tienen correo?',
+    '¿Quieres que identifique cuáles de tus contactos con correo calzan mejor?', '¿Analizo tus respuestas de septiembre?',
+    '¿Priorizo a quién escribirle primero?']) assert.ok(offered(question), question);
   for (const question of ['¿Te redacto el correo?', '¿Busco el correo de los 235 que no lo tienen?', '¿Armo una campaña pausada para esos 21?',
     '¿Cuento con tu aprobación para crearla?', '¿Listo para enviarlo?']) assert.equal(offered(question), null, question);
 });

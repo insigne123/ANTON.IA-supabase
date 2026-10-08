@@ -216,6 +216,23 @@ export function withoutTrailingQuestions(line: string): string {
   return /[\p{L}\p{N}]/u.test(kept) ? kept : '';
 }
 
+/**
+ * «Por cierto, …» is the aside about what the person should not miss today (workspace.ts): it names someone the answer has not
+ * named. When the answer already talked about that person («¿Qué toca hoy?» with Marcela in the table), the aside only repeats it
+ * (Plan 15: the judge marked it «mala»), so it goes. Only an aside that closes its line, so nothing after it is cut.
+ */
+export function withoutRepeatedAside(reply: string, elsewhere = ''): string {
+  const match = /Por cierto,\s*([^\n]*?[.!?])(?=[ \t]*(?:\n|$|¿))/u.exec(reply);
+  if (!match) return reply;
+  const before = `${reply.slice(0, match.index)}\n${elsewhere}`;
+  const name = (match[1].match(/\p{Lu}\p{Ll}{2,}(?:\s+\p{Lu}\p{Ll}+)*/gu) || [])[0];
+  if (!name || !before.includes(name)) return reply;
+  const head = reply.slice(0, match.index).replace(/[ \t]+$/, '');
+  const tail = reply.slice(match.index + match[0].length).replace(/^[ \t]+/, '');
+  const joined = head && tail && !head.endsWith('\n') && !tail.startsWith('\n') ? `${head} ${tail}` : `${head}${tail}`;
+  return joined.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 /** A closed question always gets a one-tap yes: when the model offered no quick
  * replies, this one answers answer.question as a person would type it. */
 export const COWORK_YES_CHIP: CoworkSuggestion = { label: 'Sí, adelante', message: 'Sí, adelante.' };
@@ -231,7 +248,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
   const question = coworkQuestion(answer.question);
   // Options answer the closing question, so they need one; with them, the question is picked, not tapped «sí».
   const choices = question ? coworkChoices(answer.choices) : null;
-  let reply = polishCoworkText(answer.reply).trimEnd();
+  let reply = withoutRepeatedAside(polishCoworkText(answer.reply).trimEnd(), blocks.length ? JSON.stringify(blocks) : '');
   if (question) {
     const lines = reply.split('\n');
     let last = lines.length - 1;

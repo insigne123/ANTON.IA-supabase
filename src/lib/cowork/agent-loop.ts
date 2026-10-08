@@ -527,7 +527,8 @@ function closingQuestion(answer: { reply: string; question?: unknown }): string 
  * judge marked «mala» 55 of the 62 measured turns that closed like this (Plan 12, 4a-4). Offers that need
  * approval («¿Busco su correo?») or write something («¿Te redacto…?») are not reads and stay. */
 // «Listo» alone is «ready» («¿Listo para enviarlo?»): it lists only after whom («¿Te listo…?»).
-const OFFERED_READ = /¿\s*(?:(?:quieres|prefieres|deseas|te parece)\s+(?:que\s+)?)?(?:(?:te\s+|les?\s+|lo\s+|la\s+|los\s+|las\s+)?(?:revis[eo]|consult[eo]|mir[eo]|muestr[eo]|revisemos|veamos|resum[ao]|compar[eo]|verifi(?:co|que)|chequ[eo])|(?:te|les?|los|las)\s+list[eo])\b/i;
+// Plan 15: also «¿Quieres que identifique cuáles…?», «¿Analizo…?», «¿Priorizo…?»: the judge marked them as work handed back.
+const OFFERED_READ = /¿\s*(?:(?:quieres|prefieres|deseas|te parece)\s+(?:que\s+)?)?(?:(?:te\s+|les?\s+|lo\s+|la\s+|los\s+|las\s+)?(?:revis[eo]|consult[eo]|mir[eo]|muestr[eo]|revisemos|veamos|resum[ao]|compar[eo]|verifi(?:co|que)|chequ[eo]|identifi(?:co|que)|analiz[oa]|analic[eo]|prioriz[oa]|prioric[eo])|(?:te|les?|los|las)\s+list[eo])\b/i;
 
 /** The closing question when it offers a read Cowork could make itself («¿Reviso tus contactos?»), or null. The evaluation counts them. */
 export function coworkOfferedRead(answer: { reply: string; question?: unknown }): string | null {
