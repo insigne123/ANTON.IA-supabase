@@ -443,7 +443,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!draft || draft.channel !== 'email') throw new Error('Send target unavailable');
           const sender = await resolveCoworkSender(scope);
           targetId = `${draft.draftId}:${draft.versionId}:${hashMessagingDraftContent(draft)}:${sender.provider}:${sender.identityHash}`;
-          label = `Enviar «${(draft.content.subject || 'sin asunto').slice(0, 60)}» desde ${sender.email} (rev ${draft.revision})`.slice(0, 280);
+          label = `Enviar «${(draft.content.subject || 'sin asunto').slice(0, 60)}» desde ${sender.email}`.slice(0, 280);
         }
         if (proposal.kind === 'campaign_create') {
           if (!proposal.campaign) throw new Error('Missing campaign definition');
@@ -455,7 +455,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           const campaign = await getBulkCampaign(
             { user: { id: scope.userId }, organizationId: scope.organizationId } as never, proposal.targetId);
           targetId = `${campaign.id}:${campaign.revision}:${campaign.review_hash}`;
-          label = `${proposal.kind === 'campaign_activate' ? 'Aprobar y activar' : 'Pausar'} campaña «${String(campaign.definition?.name || campaign.id).slice(0, 80)}» (rev ${campaign.revision})`;
+          // The revision travels in targetId (what is approved); «(rev 1)» on the card was internal jargon.
+          label = `${proposal.kind === 'campaign_activate' ? 'Aprobar y activar' : 'Pausar'} campaña «${String(campaign.definition?.name || 'sin nombre').slice(0, 80)}»`;
         }
         if (proposal.kind === 'code_execute') {
           if (!proposal.code) throw new Error('Missing code proposal');
