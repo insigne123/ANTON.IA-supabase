@@ -6,6 +6,7 @@ import { updateStyleProfile } from '@/ai/flows/update-style-profile';
 import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
 import { getTemplateById } from '@/lib/email-studio/storage';
 import { buildTemplateContext, renderTemplateString } from '@/lib/email-studio/template-engine';
+import { aiErrorForPerson, aiFailureStatus } from '@/lib/ai-failure-message';
 
 // Render: llama a tu endpoint existente de render (servidor a servidor)
 function renderEmail(style: StyleProfile, mode: 'leads' | 'opportunities', sampleData: any) {
@@ -89,6 +90,6 @@ export async function POST(req: Request) {
     const authResponse = requestAuthErrorResponse(e);
     if (authResponse) return authResponse;
     console.error('Error in chat style API:', e);
-    return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
+    return NextResponse.json({ error: aiErrorForPerson(e, 'No pude ajustar el estilo esta vez. Reintenta en un momento.') }, { status: aiFailureStatus(e) });
   }
 }
