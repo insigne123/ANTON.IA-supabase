@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch -q origin main)",
+      "Bash(npx tsc --noEmit -p .)",
+      "Bash(npm run test:unit)",
+      "Bash(git fetch origin main -q)",
+      "mcp__github__pull_request_read",
+      "Bash(npx tsc --noEmit -p tsconfig.json)",
+      "Bash(git ls-tree *)",
+      "Bash(npm run -s typecheck)",
+      "mcp__github__list_pull_requests",
+      "mcp__Supabase__list_migrations",
+      "mcp__Supabase__query_logs"
+    ]
+  }
+}
