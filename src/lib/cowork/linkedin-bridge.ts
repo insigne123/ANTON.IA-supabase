@@ -64,17 +64,20 @@ export function verifyLinkedinIdentity(
     nameCheck: targetTokens.length >= 2 && evidenceTokens.length >= 2 ? 'verified' : 'unverified' };
 }
 
-export type InviteQuota = { pending: number; sent7d: number; limit: number; allowed: boolean; reason: string };
+export type InviteQuota = { pending: number; sent7d: number; limit: number; remaining: number; allowed: boolean; reason: string };
 
 /** 5.6: contar pendientes, no enviadas. Las invitaciones en cola o reclamadas
  * ocupan cupo porque LinkedIn limita tambien las pendientes de aceptacion. */
 export function classifyInviteQuota(pending: number, sent7d: number, limit = LINKEDIN_WEEKLY_INVITE_LIMIT): InviteQuota {
   const used = pending + sent7d;
+  const remaining = Math.max(0, limit - used);
   if (used >= limit) {
-    return { pending, sent7d, limit, allowed: false,
+    return { pending, sent7d, limit, remaining, allowed: false,
       reason: `Cupo semanal cubierto (${used}/${limit} entre pendientes y enviadas de 7 días). Retira pendientes o espera al próximo ciclo.` };
   }
-  return { pending, sent7d, limit, allowed: true, reason: `Cupo disponible (${used}/${limit}).` };
+  // «Cupo disponible (22/100)» read as 22 left in two of three answers (Plan 15): it was 22 used and 78 left. Said in words now.
+  return { pending, sent7d, limit, remaining, allowed: true,
+    reason: `Cupo disponible: quedan ${remaining} de ${limit} esta semana (${used} usadas entre pendientes y enviadas de 7 días).` };
 }
 
 export type FollowupInput = {

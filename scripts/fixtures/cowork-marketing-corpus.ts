@@ -207,8 +207,11 @@ export const MARKETING_CORPUS: CorpusCase[] = [
     request: 'busca 10 gerentes de rrhh en empresas de retail en santiago y despues armame una campaña para ellos',
     origin: 'Dos pasos encadenados: el primero es la búsqueda y la nota debe explicar qué sigue después de aprobarla.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'propone la búsqueda', test: r => Boolean(r.search) },
-      { label: 'respeta el tamaño pedido (10)', test: r => !r.search || Number(r.search.limit) === 10 },
+      // With long tasks on (COWORK_TASKS_ENABLED, Plan 13, 4c) a request of several steps is one plan approved once, starting with the search.
+      { label: 'propone la búsqueda (sola o como primer paso de una tarea)', test: r => Boolean(r.search)
+        || (r.proposal?.kind === 'task_plan' && /busc/i.test(JSON.stringify((r.proposal as { task?: unknown }).task ?? ''))) },
+      { label: 'respeta el tamaño pedido (10)', test: r => r.search ? Number(r.search.limit) === 10
+        : r.proposal?.kind !== 'task_plan' || /\b10\b/.test(JSON.stringify((r.proposal as { task?: unknown }).task ?? '')) },
       { label: 'explica que la campaña viene después', test: r => /campa/i.test(r.note || r.reply) }] },
   { id: 'mkt-necesito-clientes', title: 'Pedido vago con faltas de ortografía', request: 'nesesito mas clientes pa axis, ayuda', world,
     origin: 'Escritura informal y vaga: debe entender igual, aterrizar en la cuenta y proponer el primer paso.',

@@ -31,7 +31,7 @@ const searchOf = (query: string) => {
 const world = (): NonNullable<CorpusCase['world']> => ({
   read: (action, query) => action === 'leads.search' ? searchOf(query)
     : action === 'leads.get' ? { items: BATCH_SAVED.filter(lead => lead.id === query), returned: 1, limit: 1, scope: 'own_saved_contacts', truncated: false }
-      : action === 'linkedin.quota' ? { scope: 'own_linkedin_quota', pending: 8, sent7d: 12, limit: 100, windowDays: 7, allowed: true, reason: 'Cupo disponible (20/100).',
+      : action === 'linkedin.quota' ? { scope: 'own_linkedin_quota', pending: 8, sent7d: 12, limit: 100, windowDays: 7, allowed: true, remaining: 80, reason: 'Cupo disponible: quedan 80 de 100 esta semana (20 usadas entre pendientes y enviadas de 7 días).',
         limitation: 'Límite operativo observado en cuentas gratuitas, no oficial de LinkedIn.' }
         : corpusRead(action, query),
   savedEmails: [],
@@ -120,7 +120,9 @@ export const BATCH_CORPUS: CorpusCase[] = [
     world: world(), linkedinBatch: true,
     checks: [...CORPUS_COMMON_CHECKS,
       readsFirst('leads.search'),
-      { label: 'no propone ninguna invitación', test: result => !result.proposal && !result.search },
+      // Rule 10: without a saved profile, finding her data (email and, if the provider has it, her profile) is the way to an
+      // invitation; what never goes is an invitation without a profile.
+      { label: 'no propone ninguna invitación', test: result => !result.search && !/^linkedin_/.test(String(result.proposal?.kind || '')) },
       says('nombra a Paz Soto', /paz/),
       saysAny('dice que no tiene perfil de LinkedIn guardado', /(no tiene|no tengo|no hay|no figura|no consta|no cuenta con|sin|falta)[^.]{0,40}(perfil|linkedin|url)/, /\bno\s+(un\s+|el\s+|su\s+)?perfil/, /(perfil|linkedin|url)[^.]{0,40}(no (esta|figura|tiene)|falta|sin)/),
       saysAny('ofrece otra vía: escribirle por correo', /(correo|email|mail)/),

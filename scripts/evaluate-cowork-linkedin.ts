@@ -67,7 +67,7 @@ async function main() {
               return { scope: 'own_linkedin_quota', pending: 95, sent7d: 5, limit: 100,
                 allowed: false, reason: 'Cupo semanal cubierto (100/100).', windowDays: 7 };
             }
-            return { scope: 'own_linkedin_quota', pending: 2, sent7d: 3, limit: 100, allowed: true, reason: 'Cupo disponible (5/100).', windowDays: 7 };
+            return { scope: 'own_linkedin_quota', pending: 2, sent7d: 3, limit: 100, allowed: true, remaining: 95, reason: 'Cupo disponible: quedan 95 de 100 esta semana (5 usadas entre pendientes y enviadas de 7 días).', windowDays: 7 };
           }
           if (action === 'linkedin.inbox') return { scope: 'own_linkedin_inbox', threads: [
             { thread_key: 't1', display_name: 'Ana', last_direction: 'in', last_at: '2026-09-21T12:00:00Z', reply_needed: true, resolved_at: null } ],

@@ -49,7 +49,12 @@ test('quota counts pending invitations against the observed weekly limit', () =>
   assert.equal(classifyInviteQuota(99, 0).allowed, true);
   const full = classifyInviteQuota(90, 10);
   assert.equal(full.allowed, false);
+  assert.equal(full.remaining, 0);
   assert.match(full.reason, /100/);
+  // What is left, in words: «22/100» was read as 22 left when it was 22 used (Plan 15).
+  const open = classifyInviteQuota(4, 18);
+  assert.equal(open.remaining, 78);
+  assert.equal(open.reason, 'Cupo disponible: quedan 78 de 100 esta semana (22 usadas entre pendientes y enviadas de 7 días).');
 });
 
 test('followup requires cooldown, silence, open stage and new content', () => {

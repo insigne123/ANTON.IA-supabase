@@ -19,7 +19,7 @@ const IDEAL: Record<string, CorpusDecider> = {
     'Tienes 214 contactos guardados que calzan con reclutamiento o recursos humanos, y 180 de ellos tienen correo. El conteo es exacto y se hace por texto en el cargo, la empresa y el sector.',
     '¿Te muestro a los primeros con correo?', [{ label: 'Sí, muéstramelos', message: 'Muéstrame los primeros contactos de reclutamiento con correo' }]),
   'lectura-cupo-pendientes': ideal('linkedin.quota', '',
-    'Hoy tienes cupo: 4 pendientes en la cola y 18 enviadas en los últimos 7 días, de un límite operativo de 100. Además, al menos 61 de las que enviaste desde ANTON.IA siguen sin aceptar; las que enviaste directo en LinkedIn no las veo desde aquí.',
+    'Te quedan 78 invitaciones esta semana: 4 pendientes en la cola y 18 enviadas en los últimos 7 días, de un límite operativo de 100. Además, al menos 61 de las que enviaste desde ANTON.IA siguen sin aceptar; las que enviaste directo en LinkedIn no las veo desde aquí.',
     '¿Cuántas pendientes ves tú en LinkedIn, para ajustar el cupo?', [{ label: 'Te lo digo', message: 'En LinkedIn veo 86 invitaciones pendientes' }]),
   'lectura-seguimiento-empresa': ideal('linkedin.followups', '',
     'Esta semana te conviene escribirle a Paula Ríos (Transportes del Sur) y a Sara Lira (Minera Norte): una por empresa. Hugo Mena es de la misma empresa que Paula y queda para otro día. De Tomás Vega no conozco la empresa y no la voy a adivinar.',
