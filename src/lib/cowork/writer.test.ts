@@ -26,6 +26,8 @@ test('the checks catch what the text alone shows, once per kind and place', () =
   // An email to one person may greet by name; an approved trial offer allows «gratis».
   const email = { type: 'email_draft' as const, title: 'Correo a Felipe', to: ['Felipe'], subject: 'Hola', body: signed.replace('Hola {{nombre}},', 'Hola Felipe,').replace('en minutos', 'gratis') };
   assert.deepEqual(coworkDraftIssues([email], { ...context, trialOffer: true }), []);
+  // An email to one person greets by name, never with the campaign variable.
+  assert.deepEqual(coworkDraftIssues([{ ...email, body: signed }], { ...context, trialOffer: true }).map(issue => issue.short), ['con su nombre']);
   // Tables and figures are not emails.
   assert.deepEqual(coworkDraftIssues([{ type: 'table', title: 'x', columns: ['a'], rows: [['[relleno]']] }], context), []);
 });
