@@ -7,6 +7,7 @@ import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
+import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { firstNameOf } from '@/lib/lead-name';
 import { buildDraftMessageBrief, draftMessageBriefForModel, draftPriorMessageReference } from '@/lib/draft-message-brief';
 import { selectOutreachExamples, selectOpeningScaffold, type OutreachOpeningKind } from '@/lib/outreach-example-library';
@@ -179,7 +180,7 @@ function modelForDraftPriority(priority: DraftContextV2['quality']['priority']) 
     return String(
       process.env.SUPLIA_OPENAI_REASONING_MODEL
       || process.env.OPENAI_REASONING_MODEL
-      || 'gpt-6-sol',
+      || 'gpt-6-luna',
     ).trim();
   }
   return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-6-luna').trim();
@@ -666,6 +667,7 @@ export async function generateOutreachFromDraftContextV2(
     provider: 'openai',
     openAiModel: modelForDraftRequest(parsed),
     temperature: parsed.rewrite ? 0.35 : 0.2,
+    reasoningEffort: draftReasoningEffort(parsed, 'write'),
   });
   // A separate editorial pass reads the entire candidate in context. The native
   // draft service still validates the edited result against evidence and CTA.
@@ -687,6 +689,7 @@ ${JSON.stringify({ subject: result.data.subject.slice(0, 1_000), opening: result
     provider: 'openai',
     openAiModel: modelForDraftRequest(parsed),
     temperature: 0.3,
+    reasoningEffort: draftReasoningEffort(parsed, 'edit'),
   });
   return {
     subject: edited.data.subject,

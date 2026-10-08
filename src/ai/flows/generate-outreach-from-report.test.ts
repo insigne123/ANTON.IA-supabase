@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { generateOutreachFromDraftContextV2 } from './generate-outreach-from-report';
+import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { draftContextFixture } from '@/lib/server/draft-v2-test-fixtures';
 
 test('editor receives each screenshot-style candidate and returns the edited content, never the first pass', async () => {
@@ -569,5 +570,27 @@ test('writing prompt anchors the factual terms the grounding check requires', as
     globalThis.fetch = previousFetch;
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
+  }
+});
+
+test('priority-A drafts think at medium effort, overridable; rewrites and other accounts keep the default', () => {
+  const previous = { write: process.env.OPENAI_DRAFT_PRIORITY_EFFORT, edit: process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT };
+  try {
+    delete process.env.OPENAI_DRAFT_PRIORITY_EFFORT;
+    delete process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT;
+    const context = draftContextFixture();
+    const priorityA = { ...context, quality: { ...context.quality, priority: 'A' as const } };
+    const priorityB = { ...context, quality: { ...context.quality, priority: 'B' as const } };
+    assert.equal(draftReasoningEffort({ context: priorityA }, 'write'), 'medium');
+    assert.equal(draftReasoningEffort({ context: priorityA }, 'edit'), 'medium');
+    assert.equal(draftReasoningEffort({ context: priorityB }, 'write'), undefined);
+    assert.equal(draftReasoningEffort({ context: priorityA, rewrite: { previous: { subject: 'a', body: 'b', personalization: null, hypothesisIds: [] }, errors: [] } as never }, 'write'), undefined);
+    process.env.OPENAI_DRAFT_PRIORITY_EFFORT = 'high';
+    process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT = 'nonsense';
+    assert.equal(draftReasoningEffort({ context: priorityA }, 'write'), 'high');
+    assert.equal(draftReasoningEffort({ context: priorityA }, 'edit'), 'medium');
+  } finally {
+    if (previous.write === undefined) delete process.env.OPENAI_DRAFT_PRIORITY_EFFORT; else process.env.OPENAI_DRAFT_PRIORITY_EFFORT = previous.write;
+    if (previous.edit === undefined) delete process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT; else process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT = previous.edit;
   }
 });
