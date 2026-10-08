@@ -220,7 +220,7 @@ export function coworkReadCapabilities(
       name: 'replies.meeting_chain', version: 1, effect: 'read', description: 'Cadena verificable envío-respuesta-compromiso-reunión, por UUID de contacto',
       input: z.string().uuid(), output: z.unknown(), execute: input => readMeetingChain(client, scope, input as string),
     },
-    extended('contacted.search', 'Historial de contactados del equipo que coincide con un texto'),
+    extended('contacted.search', 'Historial de contactados del equipo que coincide con un texto, o enviados en un período («últimos 7 días», «esta semana», «este mes»); vacío lista los últimos 20'),
     extended('contacted.timeline', 'Historial de envíos de un contacto por UUID de ficha'),
     extended('metrics.overview', 'Métricas de la organización de los últimos 7 días, sin entrada'),
     extended('app.context', 'Conexiones de correo, volúmenes y oferta (de Perfil o de la organización), sin entrada'),
