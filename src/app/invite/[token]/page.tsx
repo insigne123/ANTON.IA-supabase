@@ -132,7 +132,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
         if (!preview.signedIn) {
             body = (
                 <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">Es para {recipient}. Inicia sesión o crea tu cuenta con ese correo para aceptarla.</p>
+                    <p className="text-sm text-muted-foreground">Es para {recipient}. Inicia sesión con ese correo para aceptarla. Si aún no tienes cuenta, solicita tu acceso a la administración de ANTON.IA.</p>
                     <Button asChild className="w-full"><Link href={loginHref}>Iniciar sesión para aceptar</Link></Button>
                 </div>
             );
