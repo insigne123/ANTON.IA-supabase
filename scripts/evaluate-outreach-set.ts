@@ -21,6 +21,7 @@ import {
 } from '../src/lib/outreach-sequence-brief';
 import { validateDraftPreflightV2 } from '../src/lib/server/draft-preflight-v2';
 import { OUTREACH_OPENING_KINDS } from '../src/lib/outreach-example-library';
+import { resolveEffectiveCta } from '../src/lib/server/native-drafts';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY required');
 
@@ -34,6 +35,10 @@ const outDir = join(
   new Date().toISOString().replace(/[:.]/g, '-'),
 );
 mkdirSync(outDir, { recursive: true });
+
+const withCta = (context: any, exactText: string) => exactText === context.constraints.cta.exactText
+  ? context
+  : { ...context, constraints: { ...context.constraints, cta: { ...context.constraints.cta, exactText } } };
 
 // El vendedor tal como lo guarda «Perfil»: también el sector, el dominio y los clientes o pruebas, si el conjunto los trae.
 const seller = normalizeDraftSellerProfileV2(evalSet.seller);
@@ -232,9 +237,11 @@ for (const evalCase of evalSet.cases) {
         const tried = await generateWithRetry(
           baseArgs,
           (candidate) => {
-            const candidateBody = index === 0 ? `${candidate.body}\n\n${context.constraints.cta.exactText}` : candidate.body;
+            // Como la app: un correo de usted lleva el CTA de usted (resolveEffectiveCta) y se valida con ese CTA.
+            const effective = withCta(context, resolveEffectiveCta(context, candidate.body, (requestExtras as { userInstruction?: string }).userInstruction));
+            const candidateBody = index === 0 ? `${candidate.body}\n\n${effective.constraints.cta.exactText}` : candidate.body;
             const validation = validateDraftPreflightV2(
-              context,
+              effective,
               { subject: candidate.subject, body: candidateBody, personalization: candidate.personalization as never, hypothesisIds: candidate.hypothesisIds as never },
               { checkGeneratedCopy: true, checkHumanTone: true, ...policy },
             );
@@ -252,16 +259,17 @@ for (const evalCase of evalSet.cases) {
         });
         priorMessages.push({ kind: index ? 'follow_up' : 'initial', index, name: step?.name || 'Inicial', subject: output.subject, body });
       }
-      results.push({ id: evalCase.id, type: evalCase.type, openingKind, cta: context.constraints.cta.exactText, steps });
+      results.push({ id: evalCase.id, type: evalCase.type, openingKind, cta: steps[0] ? resolveEffectiveCta(context, steps[0].body, (requestExtras as { userInstruction?: string }).userInstruction) : context.constraints.cta.exactText, steps });
       continue;
     }
 
     const tried = await generateWithRetry(
       { context, ...requestExtras, ...(openingKind ? { openingKind } : {}) },
       (candidate) => {
-        const candidateBody = `${candidate.body}\n\n${context.constraints.cta.exactText}`;
+        const effective = withCta(context, resolveEffectiveCta(context, candidate.body, (requestExtras as { userInstruction?: string }).userInstruction));
+        const candidateBody = `${candidate.body}\n\n${effective.constraints.cta.exactText}`;
         const validation = validateDraftPreflightV2(
-          context,
+          effective,
           { subject: candidate.subject, body: candidateBody, personalization: candidate.personalization as never, hypothesisIds: candidate.hypothesisIds as never },
           { checkGeneratedCopy: true, checkHumanTone: true },
         );
@@ -271,7 +279,7 @@ for (const evalCase of evalSet.cases) {
     );
     const { output, validation, body, attempts, recovered } = tried;
     results.push({
-      id: evalCase.id, type: evalCase.type, openingKind, cta: context.constraints.cta.exactText,
+      id: evalCase.id, type: evalCase.type, openingKind, cta: resolveEffectiveCta(context, body, (requestExtras as { userInstruction?: string }).userInstruction),
       subject: output.subject, body, model: output.model,
       words: wordCount(body), subjectWords: wordCount(output.subject),
       valid: validation.valid, attempts, recovered,
