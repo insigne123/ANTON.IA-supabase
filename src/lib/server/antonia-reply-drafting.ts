@@ -6,7 +6,10 @@ import { generateAntoniaReply } from '@/ai/flows/generate-antonia-reply';
 import { classifyReply, type ReplyClassification } from '@/lib/reply-classifier';
 import type { AntoniaConfig } from '@/lib/types';
 import { findCachedLeadResearchReport } from '@/lib/server/lead-research-reports';
+import { loadSellerProfile } from '@/lib/server/seller-profile';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { stripHtmlToText } from '@/lib/email-outbound';
+import type { DraftSellerProfileV2 } from '@/lib/server/draft-context-v2';
 
 type ReplyAsset = {
   name: string;
@@ -35,6 +38,44 @@ function getResearchSummary(report: any) {
 
 function truncate(value: string, max = 320) {
   return String(value || '').trim().slice(0, max);
+}
+
+/** The text of a sent email, from the snapshot given to the provider or the approved version's content. */
+export function sentEmailText(content: unknown) {
+  const record = content && typeof content === 'object' ? content as Record<string, unknown> : {};
+  const text = typeof record.text === 'string' ? record.text : '';
+  return (text.trim() ? text : stripHtmlToText(typeof record.html === 'string' ? record.html : '')).trim();
+}
+
+/** What the lead is answering, the same sources as the conversation view: the dispatch snapshot, else the approved version. */
+async function loadSentEmailText(admin: any, organizationId: string, contacted: any) {
+  const data = contacted?.data && typeof contacted.data === 'object' ? contacted.data : {};
+  try {
+    if (data.dispatchId) {
+      const dispatch = await admin.from('outbound_dispatches').select('provider_response')
+        .eq('organization_id', organizationId).eq('id', data.dispatchId).maybeSingle();
+      const text = sentEmailText(dispatch.data?.provider_response?.outboundSnapshot);
+      if (text) return text;
+    }
+    if (data.draftVersionId) {
+      const version = await admin.from('messaging_draft_versions').select('payload')
+        .eq('organization_id', organizationId).eq('id', data.draftVersionId).maybeSingle();
+      return sentEmailText(version.data?.payload?.content);
+    }
+  } catch (error) {
+    console.warn('[antonia-reply] sent email unavailable:', error);
+  }
+  return '';
+}
+
+/** The sender's offer for the reply: what the profile says they sell, never the lead's research. */
+export function replySellerOffer(seller: DraftSellerProfileV2) {
+  return {
+    description: seller.description || '',
+    services: seller.services.slice(0, 8),
+    valueProposition: seller.valueProposition || '',
+    proofPoints: seller.proofPoints.slice(0, 4),
+  };
 }
 
 function escapeHtml(value: string) {
@@ -80,7 +121,7 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
     throw new Error('Contacted lead not found');
   }
 
-  const [configRes, profileRes, missionRes, replyRes] = await Promise.all([
+  const [configRes, profileRes, missionRes, replyRes, seller, sentText] = await Promise.all([
     admin
       .from('antonia_config')
       .select('*')
@@ -105,6 +146,8 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
       .eq('contacted_id', input.contactedId)
       .order('created_at', { ascending: false })
       .limit(6),
+    loadSellerProfile(input.userId, input.organizationId, admin),
+    loadSentEmailText(admin, input.organizationId, contacted),
   ]);
 
   let replyRows = (replyRes.data || []) as any[];
@@ -156,10 +199,10 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
 
   const missionGoal = missionRes.data?.goal_summary || buildMissionGoalSummary(missionRes.data?.params || {});
   const conversationSummary = [
-    contacted.subject ? {
+    contacted.subject || sentText ? {
       role: 'outbound' as const,
-      subject: contacted.subject,
-      text: `Ultimo asunto enviado: ${contacted.subject}`,
+      subject: contacted.subject || '',
+      text: sentText ? truncate(sentText, 1200) : `Ultimo asunto enviado: ${contacted.subject}`,
       createdAt: contacted.sent_at,
     } : null,
     ...replyRows
@@ -211,7 +254,7 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
           bookingLink: String(config.bookingLink || ''),
           meetingInstructions: String(config.meetingInstructions || ''),
           missionGoal,
-          valueProposition: truncate(getResearchSummary(report), 600),
+          valueProposition: truncate(seller.valueProposition || '', 600),
         },
         lastInbound: {
           subject: input.replySubject || contacted.reply_subject || contacted.subject || '',
@@ -222,6 +265,7 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
         conversationSummary,
         researchSummary: truncate(getResearchSummary(report), 1000),
         assets: enabledAssets,
+        sellerOffer: replySellerOffer(seller),
       });
     } catch (error) {
       const fallbackText = buildSuggestedMeetingReply({
