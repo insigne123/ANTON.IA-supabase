@@ -273,3 +273,13 @@ test('files.read finds a file by a word of its name, and lists the candidates wh
     available: ['asistentes-feria-rrhh.csv', 'feria-2025.csv'], candidates: ['asistentes-feria-rrhh.csv', 'feria-2025.csv'],
     nextStep: 'Varias subidas coinciden: pregunta cuál es, nombrando candidates.' });
 });
+
+test('campaigns.list says how many there are in all, not only the 20 it lists (Plan 15)', async () => {
+  const row = (index: number) => ({ id: `c${index}`, definition: { name: `Campaña ${index}` }, status: 'draft', revision: 1, recipients: [], created_at: '2026-10-01T00:00:00Z' });
+  const many = mockClient({ bulk_campaigns: { rows: Array.from({ length: 20 }, (_, index) => row(index)), count: 34 } });
+  const listed = await queryCoworkExtendedReads(many.client, scope, 'campaigns.list', '') as unknown as { returned: number; total: number | null; truncated: boolean };
+  assert.deepEqual({ returned: listed.returned, total: listed.total, truncated: listed.truncated }, { returned: 20, total: 34, truncated: true });
+  const few = mockClient({ bulk_campaigns: { rows: [row(1), row(2)], count: 2 } });
+  const all = await queryCoworkExtendedReads(few.client, scope, 'campaigns.list', '') as unknown as { returned: number; total: number | null; truncated: boolean };
+  assert.deepEqual({ returned: all.returned, total: all.total, truncated: all.truncated }, { returned: 2, total: 2, truncated: false });
+});
