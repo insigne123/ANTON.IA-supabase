@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { generateStructured } from '@/ai/openai-json';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { aiErrorForPerson, aiFailureStatus } from '@/lib/ai-failure-message';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -116,6 +117,6 @@ ${JSON.stringify(examples, null, 2)}
   } catch (e: any) {
     if (e?.name === 'AuthError') return handleAuthError(e);
     console.error('[bulk-edit] error:', e);
-    return NextResponse.json({ error: e.message || 'Error processing with AI' }, { status: 500 });
+    return NextResponse.json({ error: aiErrorForPerson(e, 'No se pudieron editar los correos con IA. Reintenta en un momento.') }, { status: aiFailureStatus(e) });
   }
 }

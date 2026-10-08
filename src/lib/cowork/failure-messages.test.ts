@@ -21,6 +21,12 @@ test('known operational causes say what to do next', () => {
   assert.match(coworkFailureMessage(new Error('Daily search quota exhausted')), /búsquedas externas de hoy/);
   assert.match(coworkFailureMessage(new Error('Thread effect budget exhausted')), /Escríbeme para seguir: retomo en esta misma conversación/);
   assert.match(coworkFailureMessage(new Error('OPENAI_HTTP_429:{"error":"rate"}')), /saturado/);
+  // An account without credits is not a busy service (8 oct): retrying in a minute does not help, and the person is not at fault.
+  const quota = new Error('OPENAI_HTTP_429:{"error":{"message":"You have no credits remaining.","type":"insufficient_quota","code":"credit_balance_exhausted"}}');
+  assert.equal(coworkFailureCategory(quota), 'model_quota');
+  assert.match(coworkFailureMessage(quota), /no por tu solicitud/);
+  assert.match(coworkFailureMessage(quota), /reintentar ahora no lo resuelve/);
+  assert.doesNotMatch(coworkFailureMessage(quota), /saturado|un minuto|insufficient|cr[ée]ditos? de OpenAI/i);
   const timeout = new Error('Structured generation timed out.'); timeout.name = 'TimeoutError';
   assert.match(coworkFailureMessage(timeout), /tardó demasiado/);
   const auth = Object.assign(new Error('Acceso Cowork revocado.'), { name: 'AuthError', status: 403 });
