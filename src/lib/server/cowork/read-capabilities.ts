@@ -115,7 +115,7 @@ export function coworkReadCapabilities(
       execute: input => readCoworkNextTouch(client, scope, input as string),
     },
     {
-      name: 'campaigns.retry_review', version: 1, effect: 'read', description: 'Qué se puede reintentar, qué es terminal y qué debe conciliarse',
+      name: 'campaigns.retry_review', version: 1, effect: 'read', description: 'Qué envíos se pueden reintentar, cuáles no y cuáles hay que revisar primero en Contactados',
       input: z.string().uuid(), output: z.unknown(),
       execute: input => readCoworkRetryReview(client, scope, input as string),
     },

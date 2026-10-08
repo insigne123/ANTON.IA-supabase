@@ -67,7 +67,7 @@ export const COWORK_GUIDE: CoworkGuideGroup[] = [
   },
   {
     id: 'informes', icon: 'chart', title: 'Cifras e informes', helpSection: 'hoy',
-    summary: 'Te muestro cómo van tus envíos y campañas, con cifras y gráficos que puedes bajar en Excel, Word o PDF.',
+    summary: 'Te muestro cómo van tus envíos y campañas, con cifras y gráficos que puedes bajar en Excel o CSV, e informes en Word o PDF.',
     examples: [
       { label: '¿Cómo voy?', message: '¿Cómo me ha ido esta semana con mis correos y campañas? Dame los números y qué conviene mejorar.' },
       { label: 'Informe para mi jefe', message: 'Hazme un informe de mis últimos 30 días de prospección para mostrárselo a mi jefe.' },
