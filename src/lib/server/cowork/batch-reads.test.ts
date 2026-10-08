@@ -125,7 +125,7 @@ test('retry review separates retryable, terminal and reconcile-first', async () 
   assert.equal(quota.action, 'retry');
   const suppressed = review.items.find((item: any) => item.reason === 'recipient_suppressed');
   assert.equal(suppressed.action, 'terminal');
-  assert.ok(review.items.every((item: any) => item.idempotencyNote.includes('bulk:campaign:draft')));
+  assert.ok(review.items.every((item: any) => item.idempotencyNote.includes('nunca sale dos veces')));
 });
 
 test('company plan staggers one company per day from today', async () => {
