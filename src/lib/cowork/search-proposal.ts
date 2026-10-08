@@ -11,7 +11,35 @@ export const COWORK_SEARCH_COMPANY_GROUP = 50;
 export const COWORK_SEARCH_MAX_PAGE = 20;
 export const COWORK_SEARCH_MAX_OFFSET = 199;
 
-const terms = z.array(z.string().trim().min(1).max(100)).max(5);
+const TERM_LENGTH = 100;
+const TERM_COUNT = 5;
+
+/**
+ * «Gerente de Personas / People Manager; Director de RR. HH.» are three criteria, not one: the provider matches each title on
+ * its own, and a packed one matches nobody. Every piece goes on its own, without repeats: first the first piece of each entry,
+ * then the rest, five at most (the provider's similar titles cover the variants that do not fit). A packed entry that reached
+ * the length limit was cut mid-word («… / Gerente de S»): its last piece is dropped.
+ */
+export function coworkSplitTerms(values: string[]) {
+  const lists = values.map(value => {
+    const pieces = value.split(/\s+\/\s+|\s*[;|]\s*/).map(piece => piece.trim()).filter(Boolean);
+    return pieces.length > 1 && value.length >= TERM_LENGTH ? pieces.slice(0, -1) : pieces;
+  });
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (let round = 0; out.length < TERM_COUNT && lists.some(list => round < list.length); round++) {
+    for (const list of lists) {
+      const piece = list[round];
+      const key = piece?.toLocaleLowerCase('es').normalize('NFD').replace(/\p{M}/gu, '');
+      if (!piece || !key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(piece);
+    }
+  }
+  return out.slice(0, TERM_COUNT);
+}
+
+const terms = z.array(z.string().trim().min(1).max(TERM_LENGTH)).max(TERM_COUNT).transform(coworkSplitTerms);
 export const coworkSearchCriteriaSchema = z.object({
   target: z.enum(['people', 'companies']).nullish(),
   linkedinUrl: z.string().trim().min(1).max(500)
