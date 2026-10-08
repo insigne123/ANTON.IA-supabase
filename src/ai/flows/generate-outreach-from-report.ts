@@ -367,8 +367,14 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
     .map((terms) => (terms.length === 1
       ? `conserva este término: ${terms[0]}`
       : `conserva al menos dos de estos términos: ${terms.join(', ')}`));
+  // A later email already had the fact in the initial one: two of its terms in a short reference pass the same check
+  // («para la faena minera»), so asking for the whole fact again only made every follow-up open by repeating it (Plan 16).
   const anchorPrompt = anchorLines.length > 0
-    ? `
+    ? input.sequenceContext
+      ? `
+ANCLA FACTUAL (verificación automática, no la nombres ni la expliques): el hecho de REQUIRED_FACTUAL_PERSONALIZATION ya se dijo en el primer correo. Aquí basta una referencia breve, de 2 a 5 palabras, con dos de estos términos juntos (${anchorLines.join(' / ')}), dentro de la frase del enfoque nuevo: por ejemplo «para la faena minera» o «con las tiendas nuevas». No repitas la oración, las cifras ni los detalles del primer correo, y no abras el correo con ese hecho.
+`
+      : `
 ANCLA FACTUAL (verificación automática, no la nombres ni la expliques): el hecho de REQUIRED_FACTUAL_PERSONALIZATION debe quedar reconocible en una misma oración de opening o value. ${anchorLines.join(' / ')}. Escríbelos con naturalidad dentro de la frase; el resto del correo sí puede parafrasear libremente.
 `
     : '';
@@ -452,7 +458,7 @@ ${JSON.stringify({
   exploratory: strategy.exploratory,
 })}
 
- Sigue esta estrategia: integra el hecho primario en un motivo concreto para escribir, conéctalo con la capacidad indicada y usa el punto de respaldo solo si encaja sin forzar. Si exploratory es true, plantea una aplicación condicional, no un problema confirmado ni una pregunta adicional. ${isCloseStep ? 'En este cierre no pidas reunión: solo una pregunta directa de sí o no.' : asksHowToday ? 'El único pedido será tu pregunta sobre cómo lo resuelven hoy.' : isFollowUpStep ? 'El único pedido será tu pregunta de conversación breve.' : 'El único pedido será el CTA aprobado que agregará el servidor.'}
+ Sigue esta estrategia: ${input.sequenceContext ? 'el hecho primario ya abrió el primer correo; aquí va solo como referencia breve y el motivo para escribir es el enfoque nuevo de este correo: la capacidad aplicada a un momento concreto del trabajo del destinatario (qué resuelve, para quién y cuándo), dicha como lo que haces, no como un problema que tiene' : 'integra el hecho primario en un motivo concreto para escribir, conéctalo con la capacidad indicada'} y usa el punto de respaldo solo si encaja sin forzar. Si exploratory es true, plantea una aplicación condicional, no un problema confirmado ni una pregunta adicional. ${isCloseStep ? 'En este cierre no pidas reunión: solo una pregunta directa de sí o no.' : asksHowToday ? 'El único pedido será tu pregunta sobre cómo lo resuelven hoy.' : isFollowUpStep ? 'El único pedido será tu pregunta de conversación breve.' : 'El único pedido será el CTA aprobado que agregará el servidor.'}
 `
     : '';
   const examplesPrompt = examples.length > 0
@@ -547,7 +553,7 @@ ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
     : '';
   const structureRules = input.sequenceContext
     ? `- Este es un correo posterior: no resumas el correo anterior ni vuelvas a presentar a la empresa o al remitente.
-  - opening aporta un detalle factual que no repita el asunto anterior, integrado en el enfoque de ESTE correo, no en otra descripción de la empresa. Conserva el tema comercial del inicial, pero cambia el enfoque: si el inicial propuso una aplicación, este aporta una prueba, otro ángulo o el cierre directo. No cambies de producto solo para parecer diferente.
+  - opening abre con el enfoque de ESTE correo, no con el hecho del destinatario ni con otra descripción de la empresa. Conserva el tema comercial del inicial, pero cambia el enfoque: si el inicial propuso una aplicación, este aporta una prueba, otro ángulo o el cierre directo. No cambies de producto solo para parecer diferente.
   - En seguimientos, value debe probar un enfoque que NO se haya usado en los mensajes anteriores: una prueba autorizada, otra aplicación, un límite de alcance o una distinción útil. Reformular el mismo enfoque con otras palabras es repetición aunque el vocabulario cambie.
   - Entra directo, sin aclaraciones innecesarias: nada de "hay otro punto además de…", "retomo…", "te escribo de nuevo para…" o "como te decía". La primera frase ya es el enfoque nuevo, con su beneficio concreto.
   ${isCloseStep ? '- Este es el cierre: breakup directo y breve. Retoma el BENEFICIO en una frase (el costo que se va, lo que queda resuelto), no solo el tema; di que esta es la última vez que escribes sobre esto y termina con una pregunta directa de sí o no. Sin nueva aplicación ni pedido de reunión.' : `- Este es un seguimiento intermedio. Está prohibido anunciar que es la última vez, cerrar el hilo, despedirte de forma definitiva o preguntar si se deja el tema aquí. Aporta un enfoque nuevo y ${asksHowToday ? 'cierra con una pregunta fácil sobre cómo lo resuelven hoy' : 'pide una conversación breve'}.`}

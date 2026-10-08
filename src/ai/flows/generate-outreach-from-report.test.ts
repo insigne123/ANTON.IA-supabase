@@ -364,7 +364,8 @@ test('DraftContextV2 generation preserves prior bodies as untrusted continuity w
 
     assert.match(prompt, /SEQUENCE_WRITING_CONTEXT \(metadata privada de redacción, no publicable\)/);
     assert.match(prompt, /Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia/);
-    assert.match(prompt, /opening aporta un detalle factual que no repita el asunto anterior/);
+    assert.match(prompt, /opening abre con el enfoque de ESTE correo, no con el hecho del destinatario/);
+    assert.match(prompt, /Aquí basta una referencia breve, de 2 a 5 palabras/);
     assert.match(prompt, /previousMessages/);
     assert.match(prompt, /no resumas el correo anterior ni vuelvas a presentar a la empresa/);
     assert.doesNotMatch(prompt, /Seguimiento inicial|Segundo seguimiento|offsetDays/);
