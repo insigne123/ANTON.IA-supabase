@@ -85,6 +85,7 @@ function normalizeReportV2Products(value: unknown): SellerProductContextV2[] {
       regulatoryContext: text(product.regulatoryContext || product.regulatory_context) || null,
       capabilities: list(product.capabilities || product.services),
       positioning: text(product.positioning || product.valueProposition || product.value_proposition) || null,
+      proofPoints: list(product.proofPoints || product.proof_points),
       volumeAssumptions: multipliers.length === 3 && Number.isFinite(minutesPerEvent) && minutesPerEvent > 0
         ? { scenarioMultipliers: multipliers, minutesPerEvent }
         : null,
@@ -92,17 +93,25 @@ function normalizeReportV2Products(value: unknown): SellerProductContextV2[] {
   }).slice(0, 50);
 }
 
+// A single service written as «AXIS: consultas judiciales…» names the product; otherwise the offer goes by the company.
+function personalOfferName(profile: DraftSellerProfileV2) {
+  const named = profile.services.length === 1 ? /^([^:]{2,40}):\s+\S/.exec(profile.services[0]) : null;
+  return named?.[1].trim() || profile.companyName;
+}
+
 function reportV2ProfileFromPersonal(profile: DraftSellerProfileV2): SellerProfileContextV2 {
   return {
     companyName: profile.companyName,
     products: [{
       key: 'personal-offer',
-      name: profile.companyName,
+      name: personalOfferName(profile),
       description: profile.description,
       jurisdictions: null,
       regulatoryContext: null,
       capabilities: profile.services,
       positioning: profile.valueProposition,
+      // What the seller says it has achieved (Perfil): the report may cite it as is, never more.
+      proofPoints: profile.proofPoints,
       volumeAssumptions: null,
     }],
   };
