@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { CoworkDesignBrief } from '@/lib/cowork/design-brief';
 import { COWORK_ARTIFACT_EXAMPLES, coworkExamplePipeline } from './code-artifact-examples';
-import { COWORK_DESIGNER_RULES, coworkDesignerPrompt, coworkDesignerSuggestions, runCoworkDesigner, type CoworkDesignerOutput } from './designer';
+import { COWORK_DESIGNER_RULES, coworkDesignerPrompt, coworkDesignerReply, coworkDesignerSuggestions, runCoworkDesigner, type CoworkDesignerOutput } from './designer';
 import { coworkDesignerTurn, type CoworkArtifactStore } from './designer-run';
 import type { CoworkCodeArtifact } from './code-artifact';
 
@@ -124,4 +124,11 @@ test('a chip label too long for the chat is cut at a word, keeping the whole req
   assert.equal(long.label, 'Busca los correos de los 3 contactos');
   assert.equal(long.message, 'Busca los correos de los 3 contactos sin correo');
   assert.deepEqual(short, { label: 'Solo minería', message: 'Deja solo minería' });
+});
+
+test('a marker meant for the page never reaches the chat: the sentence that holds it goes', () => {
+  assert.equal(coworkDesignerReply('Tus 4 contactos están en Nuevos. Puedes filtrar por etapa.'), 'Tus 4 contactos están en Nuevos. Puedes filtrar por etapa.');
+  assert.equal(coworkDesignerReply('En septiembre se crearon {{dato calculado por el tablero}} campañas; no hay envíos registrados. El tablero muestra el estado de las campañas.'),
+    'El tablero muestra el estado de las campañas.');
+  assert.equal(coworkDesignerReply('Este mes hay {{n}} contactos nuevos.'), 'El tablero está listo al lado del chat.');
 });

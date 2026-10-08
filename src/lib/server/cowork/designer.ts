@@ -97,6 +97,16 @@ export function coworkDesignerSuggestions(suggestions: CoworkDesignerOutput['sug
   });
 }
 
+const MARKER = /\{\{[^{}]*\}\}/;
+
+/** A marker the Designer meant for the page («{{dato calculado por el tablero}}») never reaches the chat: the sentence that holds it
+ * goes, and the rest of the reply stays. */
+export function coworkDesignerReply(reply: string) {
+  if (!MARKER.test(reply)) return reply;
+  const kept = reply.split(/(?<=[.!?])\s+/).filter(sentence => !MARKER.test(sentence)).join(' ').trim();
+  return kept || 'El tablero está listo al lado del chat.';
+}
+
 /**
  * Writes the artifact: one call, and one more to fix it if the check refused the code. Throws when the
  * second one fails too (the turn then answers without it). `generate` makes the model call (writer role).
@@ -115,7 +125,7 @@ export async function runCoworkDesigner(input: {
       prompt: coworkDesignerPrompt({ brief: input.brief, request: input.request, data: input.data, previous: input.previous, userContext: input.userContext, issues, rejected }) }));
     const code = { html: output.html, css: output.css, js: output.js };
     const built = buildCoworkArtifactDocument({ title: output.title, code, data: input.data, generatedAt: input.generatedAt });
-    if (built.ok) return { output: { ...output, suggestions: coworkDesignerSuggestions(output.suggestions) }, html: built.html, bytes: built.bytes, attempts: attempt };
+    if (built.ok) return { output: { ...output, reply: coworkDesignerReply(output.reply), suggestions: coworkDesignerSuggestions(output.suggestions) }, html: built.html, bytes: built.bytes, attempts: attempt };
     issues = built.issues;
     rejected = code;
   }
