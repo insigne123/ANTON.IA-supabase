@@ -391,3 +391,29 @@ test('«Ver todos» brings the whole list up to 500, and says when even that is 
   assert.ok(all.calls.some(call => call[0] === 'limit' && call[1] === 'leads' && call[2] === 500));
   assert.equal((await queryCoworkLeads(tablesClient({ leads: many, enriched_leads: [] }).db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'personas', { max: 9999 })).limit, 500);
 });
+
+test('«con correo» keeps only contacts with an email, up to 25, alone or with other words (Plan 15)', async () => {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const chain: Record<string, unknown> = {};
+  for (const name of ['select', 'eq', 'order', 'limit', 'or', 'not', 'neq']) {
+    chain[name] = (...args: unknown[]) => { calls.push([name, ...args]); return chain; };
+  }
+  chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: [], error: null }));
+  const db = { from: (table: string) => { calls.push(['from', table]); return chain; } } as unknown as SupabaseClient;
+  const alone = await queryCoworkLeads(db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'con correo');
+  assert.ok(calls.some(call => call[0] === 'not' && call[1] === 'email' && call[2] === 'is' && call[3] === null));
+  assert.ok(calls.some(call => call[0] === 'neq' && call[1] === 'email' && call[2] === ''));
+  assert.ok(!calls.some(call => call[0] === 'or'), 'the words «con correo» are a filter, not search terms');
+  assert.equal(alone.limit, 25);
+  assert.equal((alone as { withEmailOnly?: boolean }).withEmailOnly, true);
+  calls.length = 0;
+  await queryCoworkLeads(db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'con correo recursos humanos');
+  const filter = String(calls.find(call => call[0] === 'or')?.[1]);
+  assert.match(filter, /recursos/);
+  assert.doesNotMatch(filter, /correo/);
+  // A plain search is as before: no email filter, 20 rows.
+  calls.length = 0;
+  const plain = await queryCoworkLeads(db, { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
+  assert.ok(!calls.some(call => call[0] === 'not'));
+  assert.equal(plain.limit, 20);
+});

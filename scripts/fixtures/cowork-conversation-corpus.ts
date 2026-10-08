@@ -31,6 +31,14 @@ const ownLeads = [
 const savedRows = [...ownLeads.map(lead => ({ id: lead.id, email: lead.email })),
   ...Array.from({ length: 252 }, (_, index) => ({ id: id(1000 + index), email: index < 20 ? `contacto${index + 1}@empresa${index + 1}.cl` : null }))];
 const savedWithEmail = savedRows.filter(row => row.email).length;
+/** «con correo» in a leads.search (Plan 15): the server keeps only contacts with an email and searches the other words. */
+export function corpusWithEmailQuery(term: string): { withEmail: boolean; rest: string } {
+  const pattern = /(?:^|\s)con\s+(?:correo|email|e-mail|mail)(?=\s|$)/i;
+  return { withEmail: pattern.test(term), rest: term.replace(pattern, ' ').trim() };
+}
+
+/** The 21 emails of the saved contacts: a campaign may go to any of them (the server checks recipients against saved contacts). */
+export const CORPUS_SAVED_EMAILS = savedRows.flatMap(row => (row.email ? [row.email] : []));
 
 const unknownCoverage = { gmail: null, outlook: null };
 
@@ -63,9 +71,16 @@ export function corpusRead(action: string, input: string): unknown {
   const term = input.toLowerCase();
   switch (action) {
     case 'leads.search': {
+      // «con correo» (Plan 15): the 21 of 256 with an email, the 1 shown among the four and the other 20 of the account.
+      if (/(?:^|\s)con\s+(?:correo|email|e-mail|mail)(?=\s|$)/i.test(term)) {
+        const withEmail = [...ownLeads.filter(lead => lead.email), ...savedRows.filter(row => row.email && !ownLeads.some(lead => lead.id === row.id))
+          .map((row, index) => ({ id: row.id, name: `Contacto ${index + 1}`, title: 'Jefe de Recursos Humanos', company: `Empresa ${index + 1}`, email: row.email, status: 'saved', created_at: '2026-09-20T12:00:00Z' }))];
+        return { items: withEmail.slice(0, 25), returned: Math.min(25, withEmail.length), limit: 25, scope: 'own_saved_contacts', truncated: withEmail.length > 25, partial: false, withEmailOnly: true };
+      }
       const items = !term ? ownLeads : ownLeads.filter(lead => [lead.name, lead.title, lead.company, lead.email]
         .some(value => String(value || '').toLowerCase().split(/\s+/).some(word => term.split(/\s+/).some(part => part.length > 2 && word.includes(part)))));
-      return { items, returned: items.length, limit: 20, scope: 'own_saved_contacts', truncated: false, partial: false };
+      // Without a query, the 4 shown are the most recent of 256 (Plan 15): production says there are more.
+      return { items, returned: items.length, limit: 20, scope: 'own_saved_contacts', truncated: !term && savedRows.length > items.length, partial: false };
     }
     case 'leads.get':
       return { items: ownLeads.filter(lead => lead.id === input), returned: 1, limit: 1, scope: 'own_saved_contacts', truncated: false };
@@ -119,7 +134,9 @@ export function corpusRead(action: string, input: string): unknown {
         { sector: 'Servicios de RR. HH. y outsourcing', contacts: 118, contacted: 0 }, { sector: 'Minería y proveedores', contacts: 41, contacted: 0 },
         { sector: 'Retail', contacts: 37, contacted: 0 }], contactsWithEmail: 21, contactsTotal: 256 };
     case 'campaigns.list':
-      return { scope: 'own', campaigns: [{ id: CAMPAIGN_ID, name: 'Campaña de prueba', status: 'draft', revision: 1, recipients: 7, createdAt: '2026-09-18T15:00:00Z' }] };
+      // The account has 19 campaigns (app.context and workspace); the corpus details the most recent one.
+      return { scope: 'own', campaigns: [{ id: CAMPAIGN_ID, name: 'Campaña de prueba', status: 'draft', revision: 1, recipients: 7, createdAt: '2026-09-18T15:00:00Z' }],
+        returned: 1, total: 19, truncated: true };
     case 'message.context':
       return { configured: true, context: { defaultStyle: 'Profesional, claro y directo', trialOffer: null, approvedClaims: [], prohibitedTerms: [], voiceExamples: [] } };
     case 'deliverability.check':
