@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { applyStyleToDraft } from '@/ai/flows/apply-style-to-draft';
 import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
+import { aiErrorForPerson, aiFailureStatus } from '@/lib/ai-failure-message';
 
 export async function POST(req: Request) {
   try {
@@ -29,6 +30,6 @@ export async function POST(req: Request) {
   } catch (e: any) {
     const authResponse = requestAuthErrorResponse(e);
     if (authResponse) return authResponse;
-    return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
+    return NextResponse.json({ error: aiErrorForPerson(e, 'No se pudo aplicar el estilo al borrador. Reintenta en un momento.') }, { status: aiFailureStatus(e) });
   }
 }
