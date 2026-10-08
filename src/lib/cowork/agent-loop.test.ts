@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutAgendaAside, coworkWithoutOfferedRead, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
+import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutAgendaAside, coworkWithoutOfferedRead, coworkWithoutSecondaryReadChips, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
@@ -1976,4 +1976,17 @@ test('a person leads.recommend put first can be researched: the recommendation c
   assert.equal(proposals.length, 1);
   assert.equal(proposals[0].targetId, leadId);
   assert.equal(proposals[0].label, 'Investigar contacto Valentina Fuentes (Retail Andes)');
+});
+
+test('after reading, a quick reply other than the first that asks for another read leaves; the rest stay', () => {
+  const read = [{ action: 'leads.search', input: '', result: { items: [] } }] as never[];
+  const answer = { reply: 'Tienes 21 contactos con correo.', suggestions: [
+    { label: 'Preparar campaña', message: 'Sí, prepara una campaña pausada para mis 21 contactos con correo.' },
+    { label: 'Revisar contactos', message: 'Revisa mis contactos y dime cuáles están listos para escribirles.' },
+    { label: 'Buscar prospectos', message: 'Busca prospectos de RR. HH. en retail.' }] };
+  assert.deepEqual(coworkWithoutSecondaryReadChips(answer, read).suggestions?.map(chip => chip.label), ['Preparar campaña', 'Buscar prospectos']);
+  // Nothing read (a chat answer), or a single chip: as it came.
+  assert.equal(coworkWithoutSecondaryReadChips(answer, []), answer);
+  const single = { reply: 'Listo.', suggestions: [answer.suggestions[1]] };
+  assert.equal(coworkWithoutSecondaryReadChips(single, read), single);
 });

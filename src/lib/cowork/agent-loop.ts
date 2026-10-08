@@ -801,8 +801,20 @@ export async function runCoworkReadLoop(input: Parameters<typeof runCoworkLoop>[
   const answer = await runCoworkLoop(proposeEffect ? { ...input, proposeEffect: async proposal => { proposed = true; await proposeEffect(proposal); } } : input, observations);
   const kept = proposed ? answer : coworkWithPreferenceSuggestion(input, coworkKeptPreferenceAnswer(input, answer));
   // With offered reads on, an offer the turn could not make leaves rather than asking permission for it.
-  const closed = proposed || !input.offeredReads ? kept : coworkWithoutOfferedRead(kept);
+  const closed = proposed || !input.offeredReads ? kept : coworkWithoutSecondaryReadChips(coworkWithoutOfferedRead(kept), observations);
   return coworkWithCharts<typeof closed>(coworkWithoutAgendaAside(closed, observations), observations);
+}
+
+/**
+ * Plan 16 (pending measurement): after reading, a quick reply other than the first that asks for another free read («Revisa mis
+ * contactos y dime cuáles…») was the judge's most frequent complaint: the read belonged in the answer. The first one, which answers
+ * the closing question, stays, and so do the ones that ask for something else (write, propose, search for new people).
+ */
+export function coworkWithoutSecondaryReadChips<T extends { suggestions?: unknown }>(answer: T, observations: CoworkObservation[]): T {
+  const chips = coworkSuggestions(answer.suggestions);
+  if (chips.length < 2 || !observations.some(item => !ASSISTANT_ACTIONS.has(item.action))) return answer;
+  const kept = chips.filter((chip, index) => index === 0 || !READ_CHIP.test(chip.message));
+  return kept.length === chips.length ? answer : { ...answer, suggestions: kept };
 }
 
 /**
