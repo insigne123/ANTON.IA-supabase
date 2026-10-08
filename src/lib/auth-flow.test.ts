@@ -38,6 +38,12 @@ test('the forms show Spanish errors on the page and one password rule', () => {
   assert.match(login, /role=\{notice\.tone === 'error' \? 'alert' : 'status'\}/);
   assert.doesNotMatch(login, /useToast|toast\(/, 'errors no longer live only in a toast');
   assert.doesNotMatch(login, /minLength=\{6\}/);
-  assert.match(login, /newPasswordProblem\(password, confirmPassword\)/);
   assert.match(reset, /newPasswordProblem\(password, confirmation\)/);
+});
+
+test('public access has no registration flow and the browser auth context cannot create accounts', () => {
+  assert.doesNotMatch(login, /signUp|handleSignUp|Crear cuenta|Crea tu cuenta|email-register|value="register"/);
+  assert.doesNotMatch(auth, /signUpWithPassword|auth\.signUp\(/);
+  assert.match(login, /Las cuentas las crea la administración de ANTON\.IA/);
+  assert.match(login, /signInWithPassword\(email, password\)/);
 });
