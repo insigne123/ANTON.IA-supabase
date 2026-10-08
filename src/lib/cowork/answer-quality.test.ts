@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withoutRepeatedAside } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -238,4 +238,16 @@ test('the page reads stored options as they came, and picking sends what the per
   assert.equal(coworkChoiceMessage(['RR. HH.', 'Retail']), 'RR. HH. y Retail');
   assert.equal(coworkChoiceMessage(['RR. HH.', 'Retail', ' solo los de Santiago ']), 'RR. HH., Retail y solo los de Santiago');
   assert.equal(coworkChoiceMessage([]), '');
+});
+
+test('a «Por cierto» about someone the answer already named goes; a new one stays (Plan 15)', () => {
+  const repeated = 'Hoy hay 1 persona interesada: Marcela Rojas pidió una reunión hace 4 días.\n\nPor cierto, Marcela Rojas pidió una reunión hace 4 días.\n\n¿Te preparo una respuesta para Marcela?';
+  assert.equal(withoutRepeatedAside(repeated), 'Hoy hay 1 persona interesada: Marcela Rojas pidió una reunión hace 4 días.\n\n¿Te preparo una respuesta para Marcela?');
+  const fresh = 'Tienes una campaña en borrador con 7 destinatarios. Por cierto, Marcela Rojas pidió una reunión hace 4 días.';
+  assert.equal(withoutRepeatedAside(fresh), fresh);
+  // Named in a table block, not in the reply.
+  assert.equal(withoutRepeatedAside('Tienes 1 pendiente. Por cierto, Marcela Rojas pidió una reunión.', '{"rows":[["1","Marcela Rojas"]]}'), 'Tienes 1 pendiente.');
+  // Through the polish, with its closing question.
+  const polished = polishCoworkAnswer({ reply: 'Marcela Rojas espera respuesta. Por cierto, Marcela Rojas pidió una reunión hace 4 días.', document: null, question: '¿Te preparo la respuesta?' });
+  assert.equal(polished.reply, 'Marcela Rojas espera respuesta.\n\n¿Te preparo la respuesta?');
 });
