@@ -22,6 +22,7 @@ export const COWORK_ARTIFACT_BASE_CSS = String.raw`
 :root{color-scheme:light;--bg:#f8fafc;--surface:#ffffff;--panel:#f8fafc;--text:#0f172a;--muted:#64748b;--faint:#8996a9;--border:#e2e8f0;--border-strong:#c9d2de;--accent:#0a5adb;--accent-text:#0a5adb;--accent-soft:rgba(10,90,219,.09);--on-accent:#f8fafc;--success:#047857;--success-soft:#ecfdf5;--warning:#b45309;--warning-soft:#fffbeb;--danger:#b81e1e;--danger-soft:#fef2f2;--series-1:#3d84f5;--series-2:#fb923c;--series-3:#7456fb;--series-4:#21c45d;--series-5:#ef4343;--stage-1:#6da2f8;--stage-2:#4689f6;--stage-3:#1a6df4;--stage-4:#0a57d4;--stage-5:#0846ab;--stage-6:#063581;--radius:14px;--radius-sm:10px;--shadow:0 1px 2px rgba(15,23,42,.04),0 10px 28px -16px rgba(15,23,42,.18);--font:'PT Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace}
 :root[data-theme=dark]{color-scheme:dark;--bg:#090e1a;--surface:#0c1322;--panel:#111a2c;--text:#e1e7ef;--muted:#94a3b8;--faint:#6b7c94;--border:#1e293b;--border-strong:#344156;--accent:#3b82f6;--accent-text:#5e98f8;--accent-soft:rgba(59,130,246,.14);--on-accent:#020817;--success:#34d399;--success-soft:rgba(16,185,129,.12);--warning:#fbbf24;--warning-soft:rgba(245,158,11,.12);--danger:#e66565;--danger-soft:rgba(239,68,68,.12);--stage-1:#07409c;--stage-2:#0951c5;--stage-3:#0b63f1;--stage-4:#3780f6;--stage-5:#619af8;--stage-6:#88b3fa;--shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -16px rgba(0,0,0,.7)}
 *,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
 html{background:var(--bg);color:var(--text);font:15px/1.5 var(--font);-webkit-text-size-adjust:100%}
 body{margin:0;padding:24px;background:var(--bg);color:var(--text);font:inherit;overflow-wrap:anywhere}
 @media (max-width:480px){body{padding:16px}}
@@ -632,7 +633,8 @@ export const COWORK_ARTIFACT_RUNTIME_JS = String.raw`(function () {
     if (!first || !spec.labels.length) return kinds[spec.type] + ' sin datos.';
     var best = 0;
     first.values.forEach(function (value, i) { if ((value || 0) > (first.values[best] || 0)) best = i; });
-    return kinds[spec.type] + ' con ' + spec.labels.length + ' categorías' + (spec.series.length > 1 ? ' y ' + spec.series.length + ' series' : '')
+    var unit = spec.type === 'funnel' ? (spec.labels.length === 1 ? ' etapa' : ' etapas') : (spec.labels.length === 1 ? ' categoría' : ' categorías');
+    return kinds[spec.type] + ' con ' + spec.labels.length + unit + (spec.series.length > 1 ? ' y ' + spec.series.length + ' series' : '')
       + '. Mayor' + (spec.series.length > 1 ? ' en ' + first.name + ': ' : ': ') + spec.labels[best] + ', ' + chartValue(spec, first.values[best]) + '. La tabla de datos está debajo.';
   }
   function dataTable(spec) {
@@ -996,7 +998,7 @@ export const COWORK_ARTIFACT_RUNTIME_JS = String.raw`(function () {
       count.textContent = list.length === rows.length ? format.number(rows.length) + (rows.length === 1 ? ' fila' : ' filas') : format.number(list.length) + ' de ' + format.number(rows.length) + ' filas';
       var left = list.length - state.limit;
       more.hidden = left <= 0;
-      more.textContent = 'Mostrar ' + Math.min(options.pageSize || 25, Math.max(0, left)) + ' más (quedan ' + format.number(Math.max(0, left)) + ')';
+      more.textContent = left > 0 ? 'Mostrar ' + Math.min(options.pageSize || 25, left) + ' más (quedan ' + format.number(left) + ')' : '';
     }
     if (filter) filter.addEventListener('input', function () { state.query = filter.value.trim(); state.limit = options.pageSize || 25; render(); });
     more.addEventListener('click', function () { state.limit += options.pageSize || 25; render(); });

@@ -162,6 +162,21 @@ test('a table sorts and filters; a chart keeps its numbers in a table beside it'
   dom.window.close();
 });
 
+test('a table with nothing left to show hides «Mostrar más», and a one-bar chart says «1 categoría»', () => {
+  const { antonia, document, dom } = load('', coworkExampleContacts());
+  const table = antonia.table('#app', antonia.data.contacts, { pageSize: 25 });
+  const more = table.querySelector('.antonia-more') as HTMLButtonElement;
+  assert.equal(more.hidden, true);
+  assert.equal(more.textContent, '');
+  // .btn shows as inline-flex: without this rule a hidden «Mostrar 0 más (quedan 0)» stays on screen.
+  assert.match(document.querySelector('style')!.textContent || '', /\[hidden\]\{display:none!important\}/);
+  const one = antonia.chart(null, { type: 'bar', labels: ['Nuevos'], series: [{ name: 'Contactos', values: [24] }] });
+  assert.match(one.querySelector('.sr-only')!.textContent || '', /^Gráfico de barras con 1 categoría\./);
+  const funnel = antonia.chart(null, { type: 'funnel', labels: ['Nuevos', 'Contactados'], series: [{ name: 'Contactos', values: [24, 3] }] });
+  assert.match(funnel.querySelector('.sr-only')!.textContent || '', /^Embudo con 2 etapas\./);
+  dom.window.close();
+});
+
 test('charts fold extra slices and series into «Otros» instead of inventing colors', () => {
   const { antonia, dom } = load();
   const donut = antonia.chart(null, { type: 'donut', labels: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], series: [{ name: 'n', values: [8, 7, 6, 5, 4, 3, 2, 1] }] });
