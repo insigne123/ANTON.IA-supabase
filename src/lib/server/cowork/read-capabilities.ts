@@ -225,7 +225,7 @@ export function coworkReadCapabilities(
     extended('metrics.overview', 'Métricas de la organización de los últimos 7 días, sin entrada'),
     extended('app.context', 'Conexiones de correo, volúmenes y oferta (de Perfil o de la organización), sin entrada'),
     extended('draft.get', 'Versión vigente de un borrador propio con su hash de contenido, por UUID'),
-    extended('campaigns.list', 'Campañas propias con estado y destinatarios, sin entrada'),
+    extended('campaigns.list', 'Campañas propias con estado y destinatarios, y cuántas hay por estado (byStatus, ya contadas), sin entrada'),
     extended('files.list', 'Archivos subidos (nombre, trabajo, tamaño), sin contenido'),
     {
       name: 'files.read', version: 1, effect: 'read',
