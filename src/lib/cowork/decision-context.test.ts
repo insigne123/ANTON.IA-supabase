@@ -316,7 +316,7 @@ test('a person is proposed for LinkedIn only with a saved profile: without one C
   assert.match(linkedin, /linkedin\.invite con leadId de un contacto observado con linkedin_url propone invitación sin nota/);
   assert.match(linkedin, /Un contacto con linkedin_url null no tiene perfil guardado \(no es que no tenga LinkedIn\): no propongas invitarlo ni escribirle por LinkedIn; propón lead\.enrich/);
   // The quota adds the pending to the sent of 7 days: when it is cited, the two are told apart, never «se usaron 20».
-  assert.match(linkedin, /linkedin\.quota cuenta las invitaciones pendientes y las enviadas de los últimos 7 días contra el límite operativo semanal: si citas el cupo, separa pending y sent7d/);
+  assert.match(linkedin, /linkedin\.quota cuenta las invitaciones pendientes y las enviadas de los últimos 7 días contra el límite operativo semanal: si citas el cupo, lo que queda es remaining \(no el número usado\), y separa pending y sent7d/);
 });
 
 test('the account state travels with the user context, and with it how to use it and the one-line heads-up', () => {

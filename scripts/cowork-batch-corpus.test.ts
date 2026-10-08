@@ -55,7 +55,7 @@ test('the world is what the app reads: saved contacts with their profile (one wi
   assert.equal(all.items.filter(lead => lead.company === 'Servicios Norte').length, 2);
   assert.equal((world.read('leads.search', 'Héctor') as { items: unknown[] }).items.length, 1);
   assert.deepEqual(world.read('linkedin.quota', ''), { scope: 'own_linkedin_quota', pending: 8, sent7d: 12, limit: 100, windowDays: 7, allowed: true,
-    reason: 'Cupo disponible (20/100).', limitation: 'Límite operativo observado en cuentas gratuitas, no oficial de LinkedIn.' });
+    remaining: 80, reason: 'Cupo disponible: quedan 80 de 100 esta semana (20 usadas entre pendientes y enviadas de 7 días).', limitation: 'Límite operativo observado en cuentas gratuitas, no oficial de LinkedIn.' });
 });
 
 for (const item of BATCH_CORPUS) {

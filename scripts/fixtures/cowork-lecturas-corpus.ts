@@ -14,7 +14,7 @@ const world = (reads: Record<string, unknown>): NonNullable<CorpusCase['world']>
 
 const COUNT = { scope: 'own_saved_contacts', phrases: ['reclutador', 'recursos humanos', 'talent'], exact: true, total: 214, withEmail: 180, withoutEmail: 34, withLinkedinProfile: 150,
   matchedIn: ['title', 'company', 'industry'], limitation: 'Cuenta por texto en cargo, empresa y sector de tus contactos guardados; un cargo escrito de otra forma no entra. Los conteos son exactos, pero «quiénes son» se ve con leads.search.' };
-const QUOTA = { scope: 'own_linkedin_quota', pending: 4, sent7d: 18, limit: 100, allowed: true, reason: 'Cupo disponible (22/100).', windowDays: 7,
+const QUOTA = { scope: 'own_linkedin_quota', pending: 4, sent7d: 18, limit: 100, allowed: true, remaining: 78, reason: 'Cupo disponible: quedan 78 de 100 esta semana (22 usadas entre pendientes y enviadas de 7 días).', windowDays: 7,
   awaitingAcceptance: { count: 61, sentFromApp: 70, windowDays: 30, networkSynced: true, basis: 'Invitaciones confirmadas desde ANTON.IA cuyo perfil no aparece entre tus conexiones observadas.' },
   limitation: 'Límite operativo observado en cuentas gratuitas, no oficial de LinkedIn. Las invitaciones que enviaste directo en LinkedIn no se ven desde aquí: si sabes cuántas pendientes ves en LinkedIn («Mi red» → «Invitaciones» → «Enviadas»), dímelo y lo uso.' };
 const followup = (name: string, slug: string, company: string | null) => ({ canonicalUrl: `https://www.linkedin.com/in/${slug}`, displayName: name, lastConfirmedAt: '2026-09-10T12:00:00Z',
@@ -43,7 +43,9 @@ export const LECTURAS_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       readsOnly('lee el cupo en una sola lectura', 'linkedin.quota'),
       says('separa pendientes (4) y enviadas (18) sin mezclarlas', /\b4\b[^.]{0,30}pendiente/, /\b18\b[^.]{0,30}enviada/),
-      says('dice que hay al menos 61 sin aceptar, enviadas desde ANTON.IA', /\b61\b/, /(sin aceptar|sin respuesta|esperan|pendientes de aceptar)/),
+      says('dice que hay al menos 61 sin aceptar, enviadas desde ANTON.IA', /\b61\b/, /(sin acepta|sin respuesta|esperan|pendientes de aceptar|no (?:aparecen|figuran|est[aá]n) aceptadas)/),
+      // Plan 15: «22/100» was read as 22 left; what is left is 78.
+      says('dice que le quedan 78', /\b78\b/),
       says('dice que lo enviado directo en LinkedIn no lo ve', /(directo|directamente|fuera de anton)/),
       avoids('no dice «se usaron 22»', /se usaron|se han usado/),
       noEffect] },
