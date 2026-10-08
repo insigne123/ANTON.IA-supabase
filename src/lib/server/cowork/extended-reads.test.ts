@@ -296,6 +296,14 @@ test('files.read finds a file by a word of its name, and lists the candidates wh
     nextStep: 'Varias subidas coinciden: pregunta cuál es, nombrando candidates.' });
 });
 
+test('campaigns.list counts the listed campaigns by status, so Cowork does not count them by hand', async () => {
+  const row = (index: number, status: string) => ({ id: `c${index}`, definition: { name: `Campaña ${index}` }, status, revision: 1, recipients: [], created_at: '2026-10-01T00:00:00Z' });
+  const rows = [...Array.from({ length: 14 }, (_, index) => row(index, 'draft')), ...Array.from({ length: 5 }, (_, index) => row(14 + index, 'paused'))];
+  const { client } = mockClient({ bulk_campaigns: { rows, count: 19 } });
+  const listed = await queryCoworkExtendedReads(client, scope, 'campaigns.list', '');
+  assert.deepEqual(listed.byStatus, { draft: 14, paused: 5 });
+});
+
 test('campaigns.list says how many there are in all, not only the 20 it lists (Plan 15)', async () => {
   const row = (index: number) => ({ id: `c${index}`, definition: { name: `Campaña ${index}` }, status: 'draft', revision: 1, recipients: [], created_at: '2026-10-01T00:00:00Z' });
   const many = mockClient({ bulk_campaigns: { rows: Array.from({ length: 20 }, (_, index) => row(index)), count: 34 } });
