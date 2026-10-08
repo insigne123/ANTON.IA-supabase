@@ -204,7 +204,9 @@ export type CorpusTurnResult = {
     /** A preference to remember (Plan 12, 5): the sentence the card shows and for whom. */
     preference?: { text: string; scope: 'personal' | 'organization' };
     /** A long task's plan (Plan 13, 4c): its goal, steps and limits, as the plan card shows them. */
-    task?: { goal: string; steps: Array<{ label: string; kind: string }>; limits: { searches: number; credits: number } } } | null;
+    task?: { goal: string; steps: Array<{ label: string; kind: string }>; limits: { searches: number; credits: number } };
+    /** How many contacts an email lookup batch covers, and a prepare batch's goal and people: what its card's cost line counts. */
+    enrichBatch?: number; prepareBatch?: { goal: 'save' | 'email' | 'research'; people: number } } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
-import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
+import { CORPUS, LEAD, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusShownAnswer, corpusStageImport, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { corpusSearchText, corpusShownAnswer, corpusStageImport, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -314,11 +314,30 @@ test('a corpus turn keeps each read with its input and what the person saw, for 
   const shown = corpusShownAnswer(outcome.result);
   assert.equal(shown.proposal?.kind, 'campaign_create');
   assert.match(String(shown.proposal?.note), /Tus contactos de RR\. HH\. con correo son 3/);
-  const detail = shown.proposal?.detail as { nombre: string; destinatarios: string[] };
-  assert.deepEqual(detail.destinatarios, ['mrojas@sodexo.cl', 'fmunoz@securitas.cl', 'cfuentes@adecco.cl']);
-  // The review card's title travels too.
-  assert.equal(detail.nombre, (outcome.result.proposal?.campaign as { name: string }).name);
-  assert.ok(detail.nombre);
+  // The card in words, as the review shows it: its title, who it goes to and the emails.
+  const detail = String(shown.proposal?.detail);
+  assert.match(detail, /Destinatarios: mrojas@sodexo\.cl, fmunoz@securitas\.cl, cfuentes@adecco\.cl/);
+  const name = (outcome.result.proposal?.campaign as { name: string }).name;
+  assert.ok(name);
+  assert.ok(detail.includes(`Nombre: ${name}`));
+  assert.match(detail, /Correo 1 · día 1\nAsunto: /);
+});
+
+test('the judge reads a search card and the cost of a card in words, as the person sees them', () => {
+  const text = corpusSearchText({ target: 'people', strategy: 'companies_first', titles: ['Gerente de personas'], industries: ['retail'],
+    locations: ['Chile'], limit: 10, rolePolicy: { decisionTerms: ['gerente'], userTerms: [], referralTerms: [], excludeTerms: [] } });
+  assert.match(text, /^Buscar: Empresas primero/);
+  assert.match(text, /Cantidad: Hasta 10 personas/);
+  assert.match(text, /Rubros de las empresas: retail/);
+  assert.match(text, /posibles compradores: gerente; usuarios: sin criterio/);
+  assert.doesNotMatch(text, /rolePolicy|companies_first|\{/);
+  const base: CorpusTurnResult = { actions: [], reply: '', document: null, proposal: null, search: null, note: 'Busco sus correos.', failed: null };
+  const prepare = corpusShownAnswer({ ...base, proposal: { kind: 'lead_prepare_batch', label: 'Preparar 2 contactos', prepareBatch: { goal: 'research', people: 2 } } });
+  assert.equal(prepare.proposal?.detail, '2 personas. Usa hasta 2 créditos para buscar correos (1 por persona; quien ya tiene correo no gasta) y 2 investigaciones de tu cupo diario.');
+  const phone = corpusShownAnswer({ ...base, proposal: { kind: 'enrich_phone', label: 'Buscar teléfono de Paula Ríos' } });
+  assert.match(String(phone.proposal?.detail), /10 créditos/);
+  const search = corpusShownAnswer({ ...base, search: { target: 'people', titles: ['Reclutador'], industries: [], locations: ['Chile'], limit: 5 } });
+  assert.match(String(search.search), /Cargos \(y parecidos\): Reclutador/);
 });
 
 test('with the Writer on, a drafting turn hands the emails over and still passes its checks, and the judge sees who wrote them', async () => {
