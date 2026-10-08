@@ -54,10 +54,38 @@ La Redactora con esfuerzo de razonamiento medio. En una primera ronda ganó 6 de
 del esfuerzo bajo: posición media 4,36 contra 3,68 y malas 11 contra 6 de 22. Además suma latencia: la llamada pasa de 5 a 9 s en
 la mediana, con un máximo de 26 s cuando el límite es 30 s. Sigue en esfuerzo bajo.
 
+## Ajuste: sin apertura repetida ni cierre de fórmula
+
+La regla de #283 traía un ejemplo de apertura que coincide con la oferta del banco: «revisar los antecedentes de cada postulante uno
+por uno». El modelo lo copiaba, así que 17 de 22 primeros correos abrían casi igual («Revisar los antecedentes laborales de cada
+postulante…»). Antes de #283, ninguno. Para un usuario que vende eso, todos sus correos empezarían igual.
+
+- **Apertura:** sin ejemplos de un rubro. Se pide la tarea como la vive esta persona según su cargo y su empresa, con palabras
+  propias, sin copiar la descripción de la oferta, y que dos correos a personas distintas no abran con la misma frase.
+- **Cierre:** una pregunta propia del correo (cómo lo hacen hoy, quién lo hace o cuánto les toma), no la fórmula «¿Te serviría
+  conversar sobre cómo podría apoyar…?».
+- **Trato:** el mismo, tú o usted, en todo el correo y en toda la secuencia.
+- **Cargo:** nunca le nombra su nivel al destinatario («junior», «senior»).
+
+Mismos 11 casos, 2 veces, contra #283:
+
+| | #283 | Con el ajuste |
+|---|---|---|
+| Primeros correos que abren con la misma frase | 17 de 22 | 9 de 22 |
+| Cierre «¿Te serviría conversar sobre cómo podría…?» | 5 de 22 | 0 de 22 |
+| Buenas / mejorables / malas (lectura ciega) | 6 / 13 / 3 | 13 / 7 / 2 |
+| Calidad del correo (1 a 5) | 3,18 | 3,59 |
+| Veracidad | 4,95 | 4,77 |
+| Posición media (1 = mejor de 4) | 2,77 | 2,23 |
+| Mejor respuesta del caso | 3 de 11 | 8 de 11 |
+| Checks automáticos | — | 224 de 224 |
+
+La veracidad baja por dos respuestas sueltas: una dice que el correo «quedó dirigido a tus contactos con correo» sin haberlos
+consultado, y otra cambia «procesa 1.000 personas» por «ha procesado». No se repiten.
+
 Queda pendiente, según los evaluadores:
 
-- cierres que repiten la misma fórmula («¿Te serviría conversar sobre cómo podría apoyar…?»);
-- nombrar «junior» al prospecto;
-- mezclar tú y usted.
+- con una oferta acotada, los correos todavía se parecen entre sí: misma estructura (problema, qué hace, prueba, pregunta);
+- versiones «por persona» que casi no cambian entre una y otra.
 
 Sin migraciones ni flags.
