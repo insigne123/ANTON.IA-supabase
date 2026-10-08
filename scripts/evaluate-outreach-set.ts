@@ -151,6 +151,10 @@ function firstWords(body: string, n = 6) {
   return (noGreeting[0] || '').split(/\s+/).slice(0, n).join(' ').toLocaleLowerCase('es');
 }
 
+/** Plan 16: an opening that invents a situation («Si hay un peak de…», «Si aparece…», «Para una cadena con 40 tiendas como…»)
+ * instead of saying what the sender saw or does. Counted per email so a prompt change can be measured without the judge alone. */
+export const HYPOTHETICAL_OPENING = /^(?:si\s+(?:hay|aparece|aparecen|falta|faltan|llega|llegan|tienen|necesitan|se\s+viene)|para\s+una?\s+(?:cadena|empresa|startup|compañía|faena|constructora)\b|cuando\s+(?:hay|aparece|falta))/i;
+
 function trigrams(text: string) {
   const words = (text.toLocaleLowerCase('es').match(/[\p{L}\p{N}]+/gu) || []);
   const set = new Set<string>();
@@ -326,6 +330,7 @@ for (const result of results) {
   });
 }
 const repeatedOpenings = [...openings.entries()].filter(([, ids]) => ids.length > 1);
+const hypotheticalOpenings = [...openings.entries()].filter(([opening]) => HYPOTHETICAL_OPENING.test(opening)).flatMap(([, ids]) => ids);
 const sets = flatBodies.map(trigrams);
 const similarPairs: Array<[string, string, number]> = [];
 const labels = results.flatMap((result) => result.steps ? result.steps.map((_: any, stepIndex: number) => `${result.id}#${stepIndex}`) : [result.id]);
@@ -356,6 +361,7 @@ const summary = {
   recoveredByRetry: allGenerations.filter((r: any) => r.recovered).length,
   totalGenerations: allGenerations.length,
   repeatedOpenings: repeatedOpenings.map(([opening, ids]) => ({ opening, ids })),
+  hypotheticalOpenings: { count: hypotheticalOpenings.length, of: flatBodies.length, ids: hypotheticalOpenings },
   similarPairs,
   model: evalModel,
   // Un modelo sin precio en la lista cuenta al precio de sol: la estimación nunca sale baja.
