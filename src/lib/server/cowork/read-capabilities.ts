@@ -70,7 +70,7 @@ export function coworkReadCapabilities(
     },
     {
       name: 'leads.search', version: 1, effect: 'read',
-      description: 'Contactos propios por texto o URL exacta de perfil LinkedIn; una URL no trae coincidencias de otras personas',
+      description: 'Contactos propios por texto o URL exacta de perfil LinkedIn; una URL no trae coincidencias de otras personas. «con correo» deja solo a quienes tienen correo y «con LinkedIn», solo a quienes tienen perfil de LinkedIn guardado, en toda la cuenta y no solo entre los más recientes',
       input: z.string().max(500), output: z.unknown(),
       execute: input => queryCoworkLeads(client, scope, 'leads.search', input as string),
     },

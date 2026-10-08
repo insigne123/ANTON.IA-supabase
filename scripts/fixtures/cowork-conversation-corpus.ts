@@ -37,6 +37,12 @@ export function corpusWithEmailQuery(term: string): { withEmail: boolean; rest: 
   return { withEmail: pattern.test(term), rest: term.replace(pattern, ' ').trim() };
 }
 
+/** «con LinkedIn» in a leads.search: the server keeps only contacts with a saved LinkedIn profile, across the account. */
+export function corpusWithLinkedinQuery(term: string): { withLinkedin: boolean; rest: string } {
+  const pattern = /(?:^|\s)con\s+(?:(?:un\s+|su\s+)?perfil\s+(?:de\s+|en\s+)?)?linked\s?in(?=\s|$)/i;
+  return { withLinkedin: pattern.test(term), rest: term.replace(pattern, ' ').trim() };
+}
+
 /** The 21 emails of the saved contacts: a campaign may go to any of them (the server checks recipients against saved contacts). */
 export const CORPUS_SAVED_EMAILS = savedRows.flatMap(row => (row.email ? [row.email] : []));
 
@@ -76,6 +82,10 @@ export function corpusRead(action: string, input: string): unknown {
         const withEmail = [...ownLeads.filter(lead => lead.email), ...savedRows.filter(row => row.email && !ownLeads.some(lead => lead.id === row.id))
           .map((row, index) => ({ id: row.id, name: `Contacto ${index + 1}`, title: 'Jefe de Recursos Humanos', company: `Empresa ${index + 1}`, email: row.email, status: 'saved', created_at: '2026-09-20T12:00:00Z' }))];
         return { items: withEmail.slice(0, 25), returned: Math.min(25, withEmail.length), limit: 25, scope: 'own_saved_contacts', truncated: withEmail.length > 25, partial: false, withEmailOnly: true };
+      }
+      // None of the 256 has a saved LinkedIn profile (leads.count says withLinkedinProfile 0): «con LinkedIn» finds nobody.
+      if (corpusWithLinkedinQuery(term).withLinkedin) {
+        return { items: [], returned: 0, limit: 25, scope: 'own_saved_contacts', truncated: false, partial: false, withLinkedinOnly: true };
       }
       const items = !term ? ownLeads : ownLeads.filter(lead => [lead.name, lead.title, lead.company, lead.email]
         .some(value => String(value || '').toLowerCase().split(/\s+/).some(word => term.split(/\s+/).some(part => part.length > 2 && word.includes(part)))));
