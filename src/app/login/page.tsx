@@ -2,7 +2,7 @@
 
 import { Suspense, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, MailCheck } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Loader2, MailCheck } from 'lucide-react';
 
 import Logo from '@/components/logo';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -10,17 +10,15 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/context/AuthContext';
-import { PASSWORD_MIN_LENGTH, PASSWORD_RESET_SENT, authErrorMessage, newPasswordProblem } from '@/lib/auth-messages';
+import { PASSWORD_RESET_SENT, authErrorMessage } from '@/lib/auth-messages';
 import { safeNextPath } from '@/lib/safe-next-path';
 
-type View = 'login' | 'register' | 'recover';
+type View = 'login' | 'recover';
 type Notice = { tone: 'error' | 'success'; text: string } | null;
 
 const HEADINGS: Record<View, { title: string; description: string }> = {
     login: { title: 'Entra a tu cuenta', description: 'Prospecta, escribe y da seguimiento desde un solo lugar.' },
-    register: { title: 'Crea tu cuenta', description: 'Empieza a buscar prospectos y a escribirles en minutos.' },
     recover: { title: 'Recupera tu contraseña', description: 'Te enviamos un enlace para crear una contraseña nueva.' },
 };
 
@@ -68,7 +66,7 @@ function PasswordField({ id, label, value, onChange, autoComplete, visible, onTo
 }
 
 function LoginContent() {
-    const { signInWithPassword, signUpWithPassword, signInWithGoogle, requestPasswordReset } = useAuth();
+    const { signInWithPassword, signInWithGoogle, requestPasswordReset } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
     // Only a path of this app: a link to the login page cannot hand the session off to another site.
@@ -80,14 +78,12 @@ function LoginContent() {
     const [notice, setNotice] = useState<Notice>(null);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
 
     const changeView = (next: View) => {
         setView(next);
         setNotice(null);
         setPassword('');
-        setConfirmPassword('');
     };
 
     const run = async (action: () => Promise<void>, fallback?: string) => {
@@ -108,23 +104,6 @@ function LoginContent() {
             await signInWithPassword(email, password);
             router.push(redirectTo);
         });
-    };
-
-    const handleSignUp = (event: FormEvent) => {
-        event.preventDefault();
-        const problem = newPasswordProblem(password, confirmPassword);
-        if (problem) {
-            setNotice({ tone: 'error', text: problem });
-            return;
-        }
-        void run(async () => {
-            const { needsConfirmation } = await signUpWithPassword(email, password);
-            if (needsConfirmation) {
-                setNotice({ tone: 'success', text: `Te enviamos un correo a ${email.trim()} para confirmar tu cuenta. Ábrelo y vuelve a entrar.` });
-                return;
-            }
-            router.push(redirectTo);
-        }, 'No pudimos crear la cuenta. Intenta de nuevo.');
     };
 
     const handleRecover = (event: FormEvent) => {
@@ -189,58 +168,24 @@ function LoginContent() {
                             </Button>
                         </form>
                     ) : (
-                        <Tabs value={view} onValueChange={(next) => changeView(next as View)} className="w-full">
-                            <TabsList className="mb-4 grid w-full grid-cols-2">
-                                <TabsTrigger value="login">Iniciar sesión</TabsTrigger>
-                                <TabsTrigger value="register">Crear cuenta</TabsTrigger>
-                            </TabsList>
-
-                            <TabsContent value="login">
-                                <form onSubmit={handleLogin} className="space-y-4">
-                                    {emailField('email-login')}
-                                    <PasswordField
-                                        id="password-login"
-                                        label="Contraseña"
-                                        value={password}
-                                        onChange={setPassword}
-                                        autoComplete="current-password"
-                                        visible={showPassword}
-                                        onToggle={() => setShowPassword((current) => !current)}
-                                    />
-                                    <div className="-mt-2 flex justify-end">
-                                        <button type="button" className="rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => changeView('recover')}>
-                                            ¿Olvidaste tu contraseña?
-                                        </button>
-                                    </div>
-                                    {submit('Entrar')}
-                                </form>
-                            </TabsContent>
-
-                            <TabsContent value="register">
-                                <form onSubmit={handleSignUp} className="space-y-4">
-                                    {emailField('email-register')}
-                                    <PasswordField
-                                        id="password-register"
-                                        label="Contraseña"
-                                        value={password}
-                                        onChange={setPassword}
-                                        autoComplete="new-password"
-                                        visible={showPassword}
-                                        onToggle={() => setShowPassword((current) => !current)}
-                                        hint={`Al menos ${PASSWORD_MIN_LENGTH} caracteres.`}
-                                    />
-                                    <PasswordField
-                                        id="confirm-password"
-                                        label="Repite la contraseña"
-                                        value={confirmPassword}
-                                        onChange={setConfirmPassword}
-                                        autoComplete="new-password"
-                                        visible={showPassword}
-                                    />
-                                    {submit('Crear cuenta')}
-                                </form>
-                            </TabsContent>
-                        </Tabs>
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            {emailField('email-login')}
+                            <PasswordField
+                                id="password-login"
+                                label="Contraseña"
+                                value={password}
+                                onChange={setPassword}
+                                autoComplete="current-password"
+                                visible={showPassword}
+                                onToggle={() => setShowPassword((current) => !current)}
+                            />
+                            <div className="-mt-2 flex justify-end">
+                                <button type="button" className="rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => changeView('recover')}>
+                                    ¿Olvidaste tu contraseña?
+                                </button>
+                            </div>
+                            {submit('Entrar')}
+                        </form>
                     )}
 
                     {view !== 'recover' && (
@@ -260,6 +205,12 @@ function LoginContent() {
                         </>
                     )}
 
+                    {view === 'login' && (
+                        <p className="text-center text-sm text-muted-foreground">
+                            Las cuentas las crea la administración de ANTON.IA. Usa el correo con el que te dieron acceso.
+                        </p>
+                    )}
+
                     <p className="text-center text-xs text-muted-foreground">
                         Al continuar, aceptas nuestra{' '}
                         <a href="/privacy" className="underline underline-offset-4 hover:text-primary" target="_blank" rel="noopener noreferrer">
@@ -268,15 +219,6 @@ function LoginContent() {
                     </p>
                 </CardContent>
             </Card>
-            {notice?.tone === 'success' && view === 'register' && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CheckCircle2 className="h-4 w-4 text-cw-success" aria-hidden="true" />
-                    ¿Ya confirmaste?{' '}
-                    <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => changeView('login')}>
-                        Inicia sesión
-                    </button>
-                </p>
-            )}
         </main>
     );
 }

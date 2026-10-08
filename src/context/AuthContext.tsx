@@ -20,8 +20,6 @@ interface AuthContextType {
     error: string | null;
     signInWithGoogle: (nextPath?: string) => Promise<void>;
     signInWithPassword: (email: string, password: string) => Promise<void>;
-    /** `needsConfirmation`: Supabase asks the person to confirm the email before the first sign-in. */
-    signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
     /** Sends the reset link; Supabase answers the same whether or not the account exists. */
     requestPasswordReset: (email: string) => Promise<void>;
     updatePassword: (password: string) => Promise<void>;
@@ -156,22 +154,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const signUpWithPassword = async (email: string, password: string) => {
-        setError(null);
-        const { data, error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                emailRedirectTo: `${window.location.origin}/api/auth/callback`,
-            },
-        });
-        if (error) {
-            setError(error.message);
-            throw error;
-        }
-        return { needsConfirmation: !data.session };
-    };
-
     const requestPasswordReset = async (email: string) => {
         setError(null);
         const next = encodeURIComponent('/restablecer-clave');
@@ -201,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, organizationId, organizationRole, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, requestPasswordReset, updatePassword, signOut, refreshOrganization }}>
+        <AuthContext.Provider value={{ user, session, organizationId, organizationRole, loading, error, signInWithGoogle, signInWithPassword, requestPasswordReset, updatePassword, signOut, refreshOrganization }}>
             <Fragment key={scopeResolved ? authScopeKey({ userId: user?.id, organizationId }) : authScopeKey(initialScope)}>
                 {children}
             </Fragment>

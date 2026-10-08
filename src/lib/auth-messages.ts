@@ -1,4 +1,4 @@
-/** One rule for every password the app asks for: sign-up and the new password after a reset. */
+/** One rule for the new password after a reset. */
 export const PASSWORD_MIN_LENGTH = 8;
 
 /** What is wrong with a new password, in the words the form shows, or null when it can be saved. */
@@ -13,6 +13,7 @@ export const PASSWORD_RESET_SENT =
   'Si hay una cuenta con ese correo, te llegará un enlace para crear una contraseña nueva. Revisa también la carpeta de spam.';
 
 const MESSAGES: Array<{ match: RegExp; message: string }> = [
+  { match: /signup_disabled|signups? (?:are )?not allowed|signups? (?:are )?disabled/i, message: 'Las cuentas las crea la administración de ANTON.IA. Solicita tu acceso.' },
   { match: /invalid_credentials|invalid login credentials/i, message: 'El correo o la contraseña no coinciden.' },
   { match: /email_not_confirmed|email not confirmed/i, message: 'Confirma tu correo antes de entrar: te enviamos un enlace al crear la cuenta.' },
   { match: /user_already_exists|already registered|already been registered/i, message: 'Ya hay una cuenta con ese correo. Inicia sesión o recupera tu contraseña.' },
