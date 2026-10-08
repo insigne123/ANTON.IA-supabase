@@ -417,3 +417,32 @@ test('«con correo» keeps only contacts with an email, up to 25, alone or with 
   assert.ok(!calls.some(call => call[0] === 'not'));
   assert.equal(plain.limit, 20);
 });
+
+test('«con LinkedIn» keeps only contacts with a saved LinkedIn profile, across the account, alone or with other words', async () => {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const chain: Record<string, unknown> = {};
+  for (const name of ['select', 'eq', 'order', 'limit', 'or', 'not', 'neq']) {
+    chain[name] = (...args: unknown[]) => { calls.push([name, ...args]); return chain; };
+  }
+  chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: [], error: null }));
+  const db = { from: (table: string) => { calls.push(['from', table]); return chain; } } as unknown as SupabaseClient;
+  for (const query of ['con LinkedIn', 'con perfil de LinkedIn', 'con un perfil en linkedin']) {
+    calls.length = 0;
+    const alone = await queryCoworkLeads(db, { userId: 'owner', organizationId: 'org' }, 'leads.search', query);
+    assert.ok(calls.some(call => call[0] === 'not' && call[1] === 'linkedin_url' && call[2] === 'is' && call[3] === null), query);
+    assert.ok(calls.some(call => call[0] === 'neq' && call[1] === 'linkedin_url' && call[2] === ''), query);
+    assert.ok(!calls.some(call => call[0] === 'or'), `the words «${query}» are a filter, not search terms`);
+    assert.equal(alone.limit, 25);
+    assert.equal((alone as { withLinkedinOnly?: boolean }).withLinkedinOnly, true);
+  }
+  calls.length = 0;
+  await queryCoworkLeads(db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'gerentes con LinkedIn');
+  const filter = String(calls.find(call => call[0] === 'or')?.[1]);
+  assert.match(filter, /gerentes/);
+  assert.doesNotMatch(filter, /linkedin/i);
+  // A profile URL is still an exact lookup, not the «con LinkedIn» filter.
+  calls.length = 0;
+  const exact = await queryCoworkLeads(db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'https://www.linkedin.com/in/ana-perez');
+  assert.ok(!calls.some(call => call[0] === 'not' && call[1] === 'linkedin_url'));
+  assert.equal((exact as { match?: string }).match, 'linkedin_url');
+});
