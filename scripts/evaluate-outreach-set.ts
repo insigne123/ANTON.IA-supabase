@@ -25,6 +25,19 @@ import { resolveEffectiveCta } from '../src/lib/server/native-drafts';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY required');
 
+// AGENTS.md: las pruebas con el modelo real usan gpt-6-luna. Los casos del banco son cuentas prioridad A, que la app escribe con
+// OPENAI_REASONING_MODEL (gpt-6-sol en producción, 20 veces más caro): sin OUTREACH_EVAL_MODEL explícito, la prueba usa luna.
+const evalModel = process.env.OUTREACH_EVAL_MODEL?.trim() || 'gpt-6-luna';
+process.env.SUPLIA_OPENAI_REASONING_MODEL = evalModel;
+process.env.OPENAI_REASONING_MODEL = evalModel;
+
+/** USD por millón de tokens (lista estándar de OpenAI, contexto corto). El uso no trae los tokens en caché: el costo es un techo. */
+const PRICES: Record<string, { input: number; output: number }> = {
+  'gpt-6-luna': { input: 0.10, output: 0.50 },
+  'gpt-6-sol': { input: 2, output: 10 },
+  'gpt-6.1-sol': { input: 2, output: 10 },
+};
+
 const setPath = process.env.OUTREACH_EVAL_SET
   ? resolve(process.env.OUTREACH_EVAL_SET)
   : new URL('./fixtures/outreach-eval-set.json', import.meta.url);
@@ -150,10 +163,10 @@ function trigrams(text: string) {
 async function generateWithRetry(
   baseArgs: Record<string, unknown>,
   validate: (candidate: { subject: string; body: string; personalization: unknown; hypothesisIds: unknown }) => { validation: { valid: boolean; issues: Array<{ message: string }>; preflight: { warnings: string[] } }; body: string },
-  onUsage: (usage: { inputTokens: number; outputTokens: number }) => void,
+  onUsage: (usage: { inputTokens: number; outputTokens: number }, model: string) => void,
 ) {
   let output = await generateOutreachFromDraftContextV2(baseArgs as never);
-  onUsage(output.usage);
+  onUsage(output.usage, output.model);
   let checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds });
   if (checked.validation.valid) return { output, validation: checked.validation, body: checked.body, attempts: 1, recovered: false };
   const retry = await generateOutreachFromDraftContextV2({
@@ -163,7 +176,7 @@ async function generateWithRetry(
       errors: checked.validation.issues.map((issue) => issue.message),
     },
   } as never);
-  onUsage(retry.usage);
+  onUsage(retry.usage, retry.model);
   checked = validate({ subject: retry.subject, body: retry.body, personalization: retry.personalization, hypothesisIds: retry.hypothesisIds });
   return { output: retry, validation: checked.validation, body: checked.body, attempts: 2, recovered: checked.validation.valid };
 }
@@ -171,6 +184,14 @@ async function generateWithRetry(
 const results: any[] = [];
 let inputTokens = 0;
 let outputTokens = 0;
+const usageByModel: Record<string, { inputTokens: number; outputTokens: number }> = {};
+const addUsage = (usage: { inputTokens: number; outputTokens: number }, model: string) => {
+  inputTokens += usage.inputTokens;
+  outputTokens += usage.outputTokens;
+  const entry = usageByModel[model] ||= { inputTokens: 0, outputTokens: 0 };
+  entry.inputTokens += usage.inputTokens;
+  entry.outputTokens += usage.outputTokens;
+};
 let startedAt = Date.now();
 
 for (const evalCase of evalSet.cases) {
@@ -247,7 +268,7 @@ for (const evalCase of evalSet.cases) {
             );
             return { validation, body: candidateBody };
           },
-          (usage) => { inputTokens += usage.inputTokens; outputTokens += usage.outputTokens; },
+          addUsage,
         );
         const { output, validation, body, attempts, recovered } = tried;
         steps.push({
@@ -275,7 +296,7 @@ for (const evalCase of evalSet.cases) {
         );
         return { validation, body: candidateBody };
       },
-      (usage) => { inputTokens += usage.inputTokens; outputTokens += usage.outputTokens; },
+      addUsage,
     );
     const { output, validation, body, attempts, recovered } = tried;
     results.push({
@@ -336,7 +357,12 @@ const summary = {
   totalGenerations: allGenerations.length,
   repeatedOpenings: repeatedOpenings.map(([opening, ids]) => ({ opening, ids })),
   similarPairs,
-  usage: { inputTokens, outputTokens, costUsd: Math.round((inputTokens * 0.10 + outputTokens * 0.50) / 1_000_000 * 10000) / 10000 },
+  model: evalModel,
+  // Un modelo sin precio en la lista cuenta al precio de sol: la estimación nunca sale baja.
+  usage: { inputTokens, outputTokens, byModel: usageByModel, costUsd: Math.round(Object.entries(usageByModel).reduce((total, [model, usage]) => {
+    const price = PRICES[model] || PRICES['gpt-6-sol'];
+    return total + (usage.inputTokens * price.input + usage.outputTokens * price.output) / 1_000_000;
+  }, 0) * 10000) / 10000 },
   elapsedMs,
 };
 
