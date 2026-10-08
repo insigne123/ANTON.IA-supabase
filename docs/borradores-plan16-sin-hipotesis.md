@@ -31,3 +31,7 @@ node --loader ./scripts/ts-test-loader.mjs scripts/judge-outreach-set.ts <dir>/o
 ```
 
 Se integra solo si sube «suena humano» sin bajar la veracidad ni los «listos para enviar».
+
+`scripts/evaluate-outreach-set.ts` cuenta ahora las aperturas con situación inventada (`summary.hypotheticalOpenings`), para medir el
+cambio sin depender solo del juez. En las corridas guardadas de `native-draft/v19` (ServiPro, 25 correos cada una) salieron 6, 3 y 1
+de 25; en `v18`, 1 de 25. El cambio debería bajarlas a cerca de 0.
