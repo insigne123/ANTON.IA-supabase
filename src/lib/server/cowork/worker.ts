@@ -1,6 +1,6 @@
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { coworkDecisionSchema, coworkRescueNote, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from '@/lib/cowork/agent-loop';
-import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
+import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_REASONING_EFFORT, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
 import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling, type CoworkTurnBudget } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
@@ -327,7 +327,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           systemPrompt: decisionSystemPrompt,
           prompt: decisionPrompt(observations, true, [...rejections, { action: 'turn', reason: coworkRescueNote(failure) }]),
           openAiModel: rescueModel, allowDefaultModelFallback: false, provider: 'openai',
-          maxAttempts: 1, timeoutMs: Math.min(COWORK_RESCUE_TIMEOUT_MS, left), maxOutputTokens: 6000, reasoningEffort,
+          maxAttempts: 1, timeoutMs: Math.min(COWORK_RESCUE_TIMEOUT_MS, left), maxOutputTokens: 6000, reasoningEffort: COWORK_RESCUE_REASONING_EFFORT,
           signal: controller.signal,
         });
         await recordCoworkModelUsage(client, reservationId, run.lease_token, turn.telemetry);

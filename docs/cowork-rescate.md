@@ -1,5 +1,7 @@
 # Cowork · rescate de un turno que iba a fallar (Plan 14, 2)
 
+> **8 oct:** el rescate usa `gpt-6-luna` con esfuerzo de razonamiento alto, no sol (`docs/cowork-rescate-luna.md`).
+
 Segunda mejora de comportamiento del Plan 14. Está inspirada en Odysseus, el espacio de trabajo con IA de código abierto de PewDiePie: cuando su modelo pequeño falla un turno, un modelo más fuerte lo toma y responde.
 
 ## El problema

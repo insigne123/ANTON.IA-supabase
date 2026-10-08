@@ -21,9 +21,10 @@ env:
   - variable: COWORK_MODEL
     value: gpt-6-luna
     availability: [RUNTIME]
-  # Rescate (Plan 14, 2): una sola respuesta de este modelo cuando un turno iba a fallar. Nunca astra (regla del dueño).
+  # Rescate (Plan 14, 2): una sola respuesta de este modelo cuando un turno iba a fallar. Luna, como todo (regla del dueño, 8 oct);
+  # nunca astra.
   - variable: COWORK_RESCUE_MODEL
-    value: gpt-6.1-sol
+    value: gpt-6-luna
     availability: [RUNTIME]
   - variable: COWORK_PROVIDER
     value: openai
@@ -176,7 +177,7 @@ env:
     availability: [RUNTIME]
 
   - variable: OPENAI_ORCHESTRATOR_MODEL
-    value: gpt-6-sol
+    value: gpt-6-luna
     availability: [RUNTIME]
 
   - variable: OPENAI_REASONING_MODEL
@@ -188,7 +189,7 @@ env:
     availability: [RUNTIME]
 
   - variable: OPENAI_CRITICAL_MODEL
-    value: gpt-6-sol
+    value: gpt-6-luna
     availability: [RUNTIME]
 
   - variable: OPENAI_FALLBACK_MODEL
