@@ -63,11 +63,31 @@ Otra sesión de Claude leyó a ciegas las 24 secuencias mezcladas, 6 por caso, s
 
 Lo que baja la veracidad: a veces la referencia breve se pega a otra idea y sugiere un vínculo que no existe. Por ejemplo, «Con la
 temporada de Navidad, un cliente en piloto ya usa AXIS a diario» (el piloto no tiene que ver con Navidad), o «En Minera Cascada,
-ServiPro pone dotación temporal» (se lee como si ya trabajaran ahí). Queda para un ajuste siguiente, medido sobre esta versión.
+ServiPro pone dotación temporal» (se lee como si ya trabajaran ahí).
 
-Queda pendiente, según el evaluador:
+## Ajuste: la referencia no crea vínculos falsos (`native-draft/v23`)
 
-- con una oferta de un solo servicio (AXIS), los correos 3 y 4 vuelven a describir la oferta;
+El ancla de los seguimientos agrega que la referencia acompaña lo que harías para ellos («para las obras del Biobío, revisamos…»). No
+se pega a una prueba ni a otra idea con la que no tiene relación, y no sugiere que ya trabajas con su empresa.
+
+Mismos 4 casos, 3 corridas, contra la versión anterior (#280). Lectura ciega de otra sesión de Claude, 24 secuencias:
+
+| | #280 | Con el ajuste |
+|---|---|---|
+| Posición media (1 = mejor de 6) | 4,17 | 2,83 |
+| Mejor secuencia del caso | 0 de 4 | 4 de 4 |
+| Buenas / mejorables / malas | 0 / 8 / 4 | 0 / 11 / 1 |
+| Veracidad (1 a 5) | 3,50 | 4,00 |
+| Avance / concreción / naturalidad | 2,42 / 2,33 / 2,17 | 2,58 / 2,58 / 2,42 |
+| Pasos válidos | 48 de 48 | 47 de 48 |
+
+El evaluador de esta ronda fue más estricto con la veracidad que el anterior; la comparación vale dentro de la ronda.
+
+Queda pendiente, según los evaluadores:
+
+- con una oferta de un solo servicio (AXIS), los correos 3 y 4 vuelven a describir la oferta con la misma frase («consultas
+  judiciales automáticas… sin trámites manuales»);
+- ningún seguimiento usa el volumen o el plazo de la señal (300 trabajadores, 150 vendedores) para aterrizar el beneficio;
 - falta un paso más fácil, como ver un ejemplo o probar con pocos casos;
 - el cierre repite la propuesta del primer correo.
 
