@@ -29,6 +29,9 @@ const RULES: Rule[] = [
     message: () => 'Esta respuesta usó todo lo que puedo en un solo paso. Escríbeme «sigue» y continúo desde aquí, en esta misma conversación.' },
   { category: 'model_timeout', test: error => error.name === 'TimeoutError' || /timed out/i.test(error.message),
     message: () => 'El asistente tardó demasiado en responder. Tu solicitud quedó guardada: reintenta en un momento.' },
+  // An account without credits is not a busy service: retrying in a minute does not help, and it is not the person's request.
+  { category: 'model_quota', test: error => /(?:OPENAI|GLM)_HTTP_4\d\d/.test(error.message) && /insufficient_quota|credit_balance_exhausted|billing_hard_limit|exceeded your current quota/i.test(error.message),
+    message: () => 'El servicio de IA no está disponible por un problema de la cuenta de ANTON.IA con su proveedor, no por tu solicitud, y reintentar ahora no lo resuelve. Tu solicitud quedó guardada: avisa a soporte de ANTON.IA y reintenta cuando te confirmen que volvió.' },
   { category: 'model_rate_limit', test: error => /(?:OPENAI|GLM)_HTTP_429/.test(error.message),
     message: () => 'El servicio de IA está saturado. Reintenta en un minuto.' },
   { category: 'model_unavailable', test: error => /(?:OPENAI|GLM)_HTTP_5\d\d/.test(error.message),

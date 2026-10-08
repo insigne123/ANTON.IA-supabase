@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { z } from 'genkit';
 
-import { generateStructured, generateStructuredWithTelemetry } from './openai-json';
+import { generateStructured, generateStructuredWithTelemetry, isProviderQuotaExhausted } from './openai-json';
 
 type RequestBody = {
   model?: string;
@@ -593,4 +593,16 @@ test('never calls an Astra model: it is skipped for the next allowed one, and al
   process.env.OPENAI_MODEL = 'gpt-6-astra';
   await assert.rejects(generateStructuredWithTelemetry({ prompt: 'Return a value.', schema, provider: 'openai' }), /no está permitido/);
   assert.deepEqual(requested, ['gpt-6-luna']);
+});
+
+test('an account without credits fails at once: no retries and no other model of the same account', async (t) => {
+  const fetchMock = mockOpenAi(t, async () => new Response(JSON.stringify({ error: {
+    message: 'You have no credits remaining.', type: 'insufficient_quota', code: 'credit_balance_exhausted' } }), { status: 429 }));
+  await assert.rejects(generateStructured({
+    prompt: 'Return a value.', schema: z.object({ value: z.string() }), provider: 'openai',
+    openAiModels: ['primary-model', 'fallback-model'], maxAttempts: 3,
+  }), (error: Error) => /OPENAI_HTTP_429/.test(error.message) && isProviderQuotaExhausted(error));
+  assert.equal(fetchMock.mock.callCount(), 1);
+  // A busy service is still retried: only the exhausted account stops at once.
+  assert.equal(isProviderQuotaExhausted(new Error('OPENAI_HTTP_429:{"error":{"type":"rate_limit_exceeded"}}')), false);
 });

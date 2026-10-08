@@ -150,7 +150,15 @@ function isCancellationError(error: any) {
   return error?.name === 'AbortError' || error?.name === 'TimeoutError';
 }
 
+/** The provider account ran out of credits (OpenAI answers 429 with insufficient_quota): neither a retry nor another model of the
+ * same account can answer, so the call fails at once instead of making the person wait through every attempt. */
+export function isProviderQuotaExhausted(error: unknown) {
+  return /insufficient_quota|credit_balance_exhausted|billing_hard_limit|exceeded your current quota/i
+    .test(String((error as { message?: unknown } | null)?.message ?? error ?? ''));
+}
+
 function isRetryableError(error: any) {
+  if (isProviderQuotaExhausted(error)) return false;
   const text = String(error?.message || error || '').toLowerCase();
   return (
     text.includes('429') ||
@@ -383,7 +391,7 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
       return await withRetries(() => tryChatCompletions({ ...opts, openAiModel: model }, config), opts.signal, Math.max(1, Math.min(3, opts.maxAttempts ?? 3)));
     } catch (error) {
       opts.signal?.throwIfAborted();
-      if (isCancellationError(error)) throw error;
+      if (isCancellationError(error) || isProviderQuotaExhausted(error)) throw error;
       lastError = error;
       console.warn(`[${config.displayName}] Structured generation failed with ${model}:`, error);
     }
