@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile, rename } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 /** Disk-backed idempotency store: a retry with the same key returns the saved
@@ -53,6 +54,15 @@ export function createResultStore({ dir, ttlMs = 24 * 60 * 60 * 1000, maxEntries
     }
   }
   return {
+    async list() {
+      const result = [];
+      for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+        const saved = await this.get(entry.name.slice(0, -5));
+        if (saved) result.push(saved);
+      }
+      return result;
+    },
     async init() {
       await mkdir(dir, { recursive: true });
       await prune(Date.now());
@@ -75,7 +85,9 @@ export function createResultStore({ dir, ttlMs = 24 * 60 * 60 * 1000, maxEntries
       const payload = JSON.stringify({ key: safe, storedAt: Date.now(), size: 0, result });
       const sized = JSON.stringify({ key: safe, storedAt: Date.now(), size: Buffer.byteLength(payload, 'utf8'), result });
       await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, `${safe}.json`), sized, { mode: 0o600 });
+      const temp = join(dir, `${safe}.${randomUUID()}.tmp`);
+      await writeFile(temp, sized, { mode: 0o600 });
+      await rename(temp, join(dir, `${safe}.json`));
       await prune(Date.now());
     },
   };

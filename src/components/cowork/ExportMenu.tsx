@@ -49,6 +49,7 @@ export function ExportMenu({ onError, onAccessDenied, compact = false, size = 's
   const fail = onError ?? handlers?.onError;
   const denied = onAccessDenied ?? handlers?.onAccessDenied;
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   const [ready, setReady] = useState<{ name: string; size: number } | null>(null);
   const active = useRef<AbortController | null>(null);
   const sourceKey = source.block ? `${source.kind}` : `${source.kind}:${source.runId}:${source.read ?? ''}`;
@@ -62,11 +63,13 @@ export function ExportMenu({ onError, onAccessDenied, compact = false, size = 's
   const formats: readonly CoworkFileFormat[] = source.kind === 'contacts' ? ['xlsx', 'csv'] : source.kind === 'document' ? COWORK_DOCUMENT_FORMATS : COWORK_BLOCK_FORMATS[source.kind];
   const noun = source.kind === 'contacts' ? 'contactos' : source.kind === 'document' ? 'documento' : COWORK_BLOCK_NOUN[source.kind];
 
-  async function download(format: CoworkFileFormat) {
+  async function download(format: CoworkFileFormat | 'zip') {
     if (active.current) return;
-    const controller = new AbortController(); active.current = controller; setBusy(true); setReady(null);
+    const controller = new AbortController(); active.current = controller; setBusy(true); setReady(null); setError('');
     try {
-      const response = source.block
+      const response = format === 'zip' && !source.block
+        ? await fetch(`/api/cowork/runs/${source.runId}/marketing-kit`, { cache: 'no-store', signal: controller.signal })
+        : source.block
         ? await fetch('/api/cowork/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store', signal: controller.signal,
           body: JSON.stringify({ format, block: source.block() }) })
         : await fetch(`/api/cowork/runs/${source.runId}/export?format=${format}${source.read ? `&read=${source.read}` : ''}`, { cache: 'no-store', signal: controller.signal });
@@ -85,7 +88,10 @@ export function ExportMenu({ onError, onAccessDenied, compact = false, size = 's
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setReady({ name, size: blob.size });
     } catch (error) {
-      if (!controller.signal.aborted) fail?.(error instanceof Error ? error.message : 'No se pudo descargar el archivo.');
+      if (!controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : 'No se pudo descargar el archivo.';
+        setError(message); fail?.(message);
+      }
     } finally { active.current = null; if (!controller.signal.aborted) setBusy(false); }
   }
 
@@ -112,8 +118,13 @@ export function ExportMenu({ onError, onAccessDenied, compact = false, size = 's
             <Icon className="h-4 w-4 text-cw-muted" aria-hidden="true" />{COWORK_FORMAT_LABEL[format]}
           </DropdownMenuItem>;
         })}
+        {source.kind === 'contacts' && !source.read && <DropdownMenuItem onSelect={() => void download('zip')}
+          className="gap-2 rounded-lg px-2.5 py-2 text-[13px] focus:bg-cw-hover focus:text-cw-text">
+          <FileText className="h-4 w-4 text-cw-muted" aria-hidden="true" />Informe y datos (ZIP)
+        </DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
+    {error && <p role="alert" className="basis-full text-[12.5px] text-cw-danger">{error} Vuelve a intentar la descarga.</p>}
     <span role="status" className="sr-only">{ready ? `Archivo listo: ${ready.name}, ${coworkFileSize(ready.size)}` : busy ? 'Preparando el archivo…' : ''}</span>
   </>;
 }

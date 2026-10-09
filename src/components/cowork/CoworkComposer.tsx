@@ -38,7 +38,7 @@ type Props = {
   attaching?: boolean;
   /** Files dropped anywhere on the box. */
   onDropFiles?: ((files: FileList) => void) | null;
-  queued?: { text: string; note: string; onCancel: () => void; onSendNow?: (() => void) | null } | null;
+  queued?: { text: string; note: string; onCancel: () => void; onSendNow?: (() => void) | null; sendNowLabel?: string } | null;
   footnote?: ReactNode;
   size?: 'large' | 'regular';
   /** «@» lists these saved contacts (V6); the picked one is reported so the message can carry its ID. */
@@ -134,7 +134,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
   }, [value, size]);
 
   const canSend = ready && !sending && !attaching && (Boolean(value.trim()) || hasAttachments);
-  const showStop = Boolean(onStop) && !value.trim() && !hasAttachments && !sending;
+  const showStop = Boolean(onStop) && !sending;
   const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes('Files');
 
   return <div className="relative w-full">
@@ -147,7 +147,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
             <p className="text-cw-muted">{queued.note}</p>
             <p className="truncate text-cw-text">«{queued.text}»</p>
           </div>
-          {queued.onSendNow && <CwButton size="xs" variant="secondary" onClick={queued.onSendNow}>Enviar ahora</CwButton>}
+          {queued.onSendNow && <CwButton size="xs" variant="secondary" onClick={queued.onSendNow}>{queued.sendNowLabel || 'Reemplazar propuesta'}</CwButton>}
           <CwButton size="xs" variant="ghost" onClick={queued.onCancel} aria-label="Editar mensaje en espera"><X aria-hidden="true" />Editar</CwButton>
         </div>
       </div>}
@@ -212,8 +212,8 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
             ? <button type="button" onClick={() => onStop?.()} disabled={stopping} aria-label="Detener" title="Detener"
               className="flex h-9 w-9 items-center justify-center rounded-full bg-cw-text text-cw-bg transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] disabled:opacity-40">
               {stopping ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />}
-            </button>
-            : <button type="submit" disabled={!canSend} aria-label={submitLabel} title={submitLabel}
+            </button> : null}
+          {(!showStop || value.trim() || hasAttachments) && <button type="submit" disabled={!canSend} aria-label={submitLabel} title={submitLabel}
               className="flex h-9 w-9 items-center justify-center rounded-full bg-cw-accent text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-[background-color,opacity] hover:bg-cw-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35">
               {sending ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.25} aria-hidden="true" />}
             </button>}

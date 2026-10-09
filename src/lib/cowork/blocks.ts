@@ -35,15 +35,27 @@ export function coworkBlockWithSteps(block: Draftable, steps: CoworkEditedEmail[
   return { ...block, steps: block.steps.map((step, index) => ({ ...step, subject: steps[index]?.subject ?? step.subject, body: steps[index]?.body ?? step.body })) };
 }
 
+/** A local edit is tied to the exact generated base. Titles and recipients never come from storage. */
+export function coworkEffectiveDraft<T extends Draftable>(block: T, stored: unknown): T {
+  const original = coworkDraftSteps(block);
+  const record = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored as { base?: unknown; steps?: unknown } : null;
+  if (record && record.base !== JSON.stringify(original)) return block;
+  const steps = record ? record.steps : stored; // Read pre-versioned edits from existing tabs.
+  if (!Array.isArray(steps) || steps.length !== original.length || !steps.every(step => step && typeof step.subject === 'string'
+    && typeof step.body === 'string' && step.subject.length <= 300 && step.body.length <= 12000)) return block;
+  return coworkBlockWithSteps(block, steps.map((step, index) => ({ ...original[index], subject: step.subject, body: step.body }))) as T;
+}
+
 const USE_LEAD = 'Usa exactamente esta versión';
 const CAMPAIGN_LEAD = 'Crea una campaña pausada con esta versión';
 
 /** The message sent from a card: what to do and the exact text, in a shape the
  * loop reads back (coworkEditedEmails) so a campaign carries it word for word. */
-export function coworkVersionMessage(block: Draftable, steps: CoworkEditedEmail[], intent: 'use' | 'campaign', edited: boolean) {
+export function coworkVersionMessage(block: Draftable, steps: CoworkEditedEmail[], intent: 'use' | 'campaign', edited: boolean, resultId?: string) {
   const what = `${edited ? ' editada' : ''} de «${block.title}», sin cambiar el texto`;
   const to = block.type === 'email_draft' && block.to?.length ? `, para ${block.to.join(', ')}` : '';
-  const lead = intent === 'campaign' ? `${CAMPAIGN_LEAD}${what}${to}.` : `${USE_LEAD}${what}.`;
+  const reference = resultId && /^[0-9a-f-]{36}:block:\d+$/.test(resultId) ? ` (Resultado: ${resultId})` : '';
+  const lead = (intent === 'campaign' ? `${CAMPAIGN_LEAD}${what}${to}.` : `${USE_LEAD}${what}.`) + reference;
   const body = steps.length === 1 && steps[0].day === null
     ? coworkEmailText(steps[0])
     : steps.map((step, index) => `Correo ${index + 1}${step.day === null ? '' : ` · día ${step.day}`}\n${coworkEmailText(step)}`).join('\n\n---\n\n');
@@ -68,12 +80,13 @@ export function coworkEditedEmails(message: string): CoworkEditedEmail[] | null 
 }
 
 /** Which card a version message came from (by its title), whether it was edited and what it asked for. */
-export function coworkVersionSource(message: string): { title: string; edited: boolean; intent: 'use' | 'campaign' } | null {
+export function coworkVersionSource(message: string): { title: string; edited: boolean; intent: 'use' | 'campaign'; resultId?: string } | null {
   if (!coworkEditedEmails(message)) return null;
   const lead = String(message).replace(/\r\n/g, '\n').split('\n\n')[0];
   const match = /( editada)? de «(.+?)», sin cambiar el texto/.exec(lead);
   if (!match) return null;
-  return { title: match[2], edited: Boolean(match[1]), intent: lead.startsWith(CAMPAIGN_LEAD) ? 'campaign' : 'use' };
+  const resultId = /\(Resultado: ([0-9a-f-]{36}:block:\d+)\)/.exec(lead)?.[1];
+  return { title: match[2], edited: Boolean(match[1]), intent: lead.startsWith(CAMPAIGN_LEAD) ? 'campaign' : 'use', ...(resultId ? { resultId } : {}) };
 }
 
 /** Whether the person asked for a campaign with the exact text (not only to keep it). */

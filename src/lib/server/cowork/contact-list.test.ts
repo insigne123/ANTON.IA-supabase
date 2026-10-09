@@ -27,7 +27,10 @@ test('the whole list re-runs the search the turn read, on your own contacts', as
   const leads = Array.from({ length: 45 }, (_, n) => ({ id: `00000000-0000-4000-8000-${String(n + 1).padStart(12, '0')}`, name: `Persona ${n}`,
     title: 'Jefa de RR. HH.', company: `Empresa ${n}`, email: null, created_at: '2026-01-01' }));
   const { auth, scopes } = session([{ sequence: 7, kind: 'tool.completed', payload: { action: 'leads.search', input: 'RR. HH.', result: { items: [], truncated: true } } }], leads);
-  const list = await loadCoworkFullContactList(auth as never, RUN, 7);
+  const objects = new Map<string, Buffer>();
+  const storageClient = { storage: { from: () => ({ download: async (key: string) => ({ data: objects.has(key) ? { arrayBuffer: async () => objects.get(key) } : null, error: null }),
+    upload: async (key: string, bytes: Buffer) => { objects.set(key, bytes); return { error: null }; } }) } };
+  const list = await loadCoworkFullContactList(auth as never, RUN, 7, { storageClient: storageClient as never });
   assert.equal(list.action, 'leads.search');
   assert.equal(list.input, 'RR. HH.');
   assert.equal(list.result.items.length, 45);

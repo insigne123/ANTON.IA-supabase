@@ -58,6 +58,18 @@ test('continuations are expected after effects and searches but not after discar
   assert.equal(coworkExpectsContinuation([event('effect.completed'), event('run.completed', { reply: 'ok', document: null }), event('thread.budget_exhausted')]), false);
 });
 
+test('an effect without a receipt stays unconfirmed; the confirmed campaign links to its exact native identity', () => {
+  const requested = event('approval.requested', { action: 'cowork.effect', kind: 'campaign_create', label: 'Crear campaña' });
+  const interrupted = coworkProposalView({ status: 'cancelled' }, [requested, event('effect.approved'), event('effect.started')]);
+  assert.equal(interrupted?.state, 'uncertain');
+  const id = '00000000-0000-4000-8000-000000000001';
+  const done = coworkProposalView({ status: 'completed' }, [requested, event('effect.completed', { kind: 'campaign_create', result: { campaignId: id, status: 'draft' } })])!;
+  assert.equal(coworkProposalLink(done)?.href, `/campaigns?campaign=${id}`);
+  const pendingSend = coworkProposalView({ status: 'completed' }, [event('approval.requested', { action: 'cowork.effect', kind: 'send_email' }),
+    event('effect.completed', { kind: 'send_email', result: { status: 'unknown' } })]);
+  assert.equal(pendingSend?.state, 'uncertain');
+});
+
 test('artifacts come only from persisted results', () => {
   const events = [
     event('tool.completed', { action: 'leads.search', input: 'Ana', result: { scope: 'own_saved_contacts', items: [{ id: '00000000-0000-4000-8000-000000000001', name: 'Ana' }] } }),
@@ -283,11 +295,17 @@ test('each email or sequence card knows what happened to it later in the thread'
   const edited = coworkDraftSteps(correo).map(step => ({ ...step, body: 'Hola Felipe, corto.' }));
   assert.deepEqual(coworkCardStatuses([first, { run: run('b', 2, { message: coworkVersionMessage(correo, edited, 'use', true) }), events: answer([]) }]).get('a:block:1'),
     { label: 'Tu versión, elegida · no se ha enviado', tone: 'accent' });
-  // Two cards with the same title: the later one is the one used.
+  // A legacy title is ambiguous with two cards: do not attach an outcome to either one.
   const again = { run: run('c', 3), events: answer([secuencia]) };
   const statuses = coworkCardStatuses([first, again, { run: run('d', 4, { message: campaign, status: 'running' }), events: [] }]);
   assert.equal(statuses.has('a:block:0'), false);
-  assert.equal(statuses.get('c:block:0')?.label, 'Preparando la campaña…');
+  assert.equal(statuses.has('c:block:0'), false);
+  const firstId = '00000000-0000-4000-8000-000000000001', secondId = '00000000-0000-4000-8000-000000000002';
+  const exact = coworkVersionMessage(secuencia, coworkDraftSteps(secuencia), 'campaign', false, `${firstId}:block:0`);
+  const precise = coworkCardStatuses([{ ...first, run: run(firstId, 1) }, { ...again, run: run(secondId, 3) },
+    { run: run('d', 4, { message: exact, status: 'running' }), events: [] }]);
+  assert.equal(precise.get(`${firstId}:block:0`)?.label, 'Preparando la campaña…');
+  assert.equal(precise.has(`${secondId}:block:0`), false);
   // A typed message that only quotes a title is not a use of the card.
   assert.equal(coworkCardStatuses([first, { run: run('b', 2, { message: 'Crea una campaña con «Secuencia AXIS»' }), events: [request] }]).size, 0);
 });
