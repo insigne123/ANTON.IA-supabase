@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { coworkBlockSchema, coworkSuggestionSchema, type CoworkAgentEvent, type CoworkBlock } from './contracts';
+import { commercialBrief } from '../commercial-brief';
+import { coworkCompetencies } from './competencies';
+import { coworkEvidenceBundle } from './evidence';
 
 /**
  * The Writer and the Reviewer (plan 2, G1). When a turn has to write emails,
@@ -29,7 +32,7 @@ export type CoworkWriteBrief = z.infer<typeof coworkWriteBriefSchema>;
 export const coworkWriterOutputSchema = z.object({
   reply: z.string().trim().min(1).max(1200),
   blocks: z.array(coworkBlockSchema).min(1).max(3),
-  question: z.string().trim().min(1).max(400),
+  question: z.string().trim().min(1).max(400).nullable(),
   suggestions: z.array(coworkSuggestionSchema).min(1).max(3),
 }).strict();
 export type CoworkWriterOutput = z.infer<typeof coworkWriterOutputSchema>;
@@ -63,6 +66,9 @@ export const COWORK_WRITER_RULES = [
   'Secuencia (kind sequence): steps correos (3 si no se indica), cada uno con day (el primero es 1; luego 3, 7, 11, 16, 23, 38 según la cantidad), asunto y cuerpo. Cada correo tiene su papel y no repite el planteamiento de los otros: el 1 nombra un problema del rol, presenta la oferta en una frase y pregunta cuánto les toma hoy; el 2 pregunta cómo lo hacen hoy o quién lo hace, sin describir la oferta; el 3 muestra un uso concreto en el día a día del rol y pregunta si le sirve verlo con un caso suyo; los siguientes, un criterio de decisión o una pregunta más fácil; el último cierra en dos frases. Cada correo cierra con una sola pregunta, y ninguna repite la de otro correo con otras palabras. Desde el segundo, la oferta se nombra solo por su nombre. Solo el último puede decir que es el último mensaje; ninguno dice «retomo», «vuelvo a escribirte» ni «no respondiste».',
   'Salida: reply en 2 a 5 frases que expliquen lo que escribiste, sin repetir el texto de los correos: si brief.findings no es null, parte por lo que ahí le sirve al usuario (cifras, a quiénes va, quiénes quedan fuera y por qué, lo que no se puede hacer) sin agregar datos; después di a quién va, qué ángulo usaste y por qué (de qué dato de la persona, de su empresa o de la oferta sale), nombrando solo a quienes están en los bloques. No menciones reglas internas (contexto de redacción, términos prohibidos, ofertas o afirmaciones aprobadas, la revisión) ni uses sus palabras: nada de «dato aprobado», «afirmación aprobada», «sincronización del buzón» o «según el dato de tu perfil»; di «el resultado que cargaste en tu Perfil» o «no veo si respondió porque tu correo no está conectado a ANTON.IA». No le expliques al usuario qué hace su propia oferta ni lo que evitaste suponer («sin asumir…», «sin atribuirles…», «sin dar por hecho…»): lo que no consta simplemente no se afirma. Si no ves sus respuestas, dilo una sola vez. blocks lleva un bloque email_draft (kind email) o sequence (kind sequence) con title específico. question propone el paso siguiente que Cowork hace con aprobación: si hay destinatarios con correo, crear la campaña pausada con ellos («¿Creo la campaña pausada para Felipe y Camila?»); si el encargo no trae destinatarios, usarla en una campaña pausada con los contactos que calzan («¿La uso en una campaña pausada para tus contactos de RR. HH. con correo?»), sin decir que falta algo: lo que entregas está completo. Si mejoraste un correo que el usuario pegó y enviará él (a un grupo o a alguien que no está en sus contactos), question no ofrece una campaña, ni para ellos ni para otros contactos: va null, y suggestions ofrece ajustes que Cowork hace («Hazlo más corto», «Tono más cercano»). Nunca preguntes si lo dejas como borrador, listo para enviar o para copiar: ya está a la vista. Si request pide el correo como archivo (Word o PDF), reply lo dice en una frase: la tarjeta se baja con su botón «Descargar», en Word o PDF; nunca digas que no puedes entregar o adjuntar un archivo. suggestions trae 1 a 3 respuestas que el usuario tocaría; si hay question, la primera le dice que sí.',
   'Si recibes issues, corrige exactamente eso y conserva todo lo demás igual. reply no menciona la corrección: el usuario no vio la versión anterior.',
+  'referenceClock fija la fecha de este trabajo. Para fechas relativas usa solo esa referencia y la fecha observada del envío; seis días nunca son «hace unas semanas». Sin una referencia temporal suficiente, escribe «Te escribí sobre…» o conserva la fecha exacta observada, sin inventar antigüedad. Al editar el correo original conserva el contexto temporal que el usuario declaró salvo que pida cambiarlo.',
+  'La oferta que el usuario declara expresamente para este encargo en request manda sobre la oferta por defecto de otro producto. Puedes usar una prueba que declara expresamente como autorizada para este encargo, conservando sus condiciones y tiempo verbal; no es verificación externa ni una garantía. No transfieras cifras, servicios ni pruebas de AXIS a un servicio nuevo. Pegar un correo para mejorarlo no autoriza sus cifras ni superlativos: las afirmaciones nuevas siguen exigiendo una fuente válida.',
+  'Las condiciones de una prueba se conservan dentro del correo («en un piloto de dos semanas…»). No agregues notas de evaluación como «no es una garantía», «no constituye una garantía» o «no está verificado externamente»: la condición del piloto ya delimita el hecho. El correo no explica tus reglas de revisión.',
 ];
 
 export const COWORK_REVIEWER_RULES = [
@@ -70,6 +76,8 @@ export const COWORK_REVIEWER_RULES = [
   'Marca: datos inventados (cifras, clientes, resultados, nombres o procesos del destinatario que no están en observations ni en userContext, que trae la oferta, los servicios y las pruebas del perfil del usuario), promesas o garantías sin respaldo, un nombre fijo o un «Hola,» sin nombre en el saludo de un texto que irá a varias personas por separado (debe ser «Hola {{nombre}},»; un correo que el usuario escribió para un grupo que lo recibe junto conserva sus nombres y el plural), un correo que no pide nada concreto, jerga interna o códigos, faltas de ortografía, y un tono que no calza con el encargo.',
   'No son problemas: el nombre de pila en el saludo de un correo con un solo destinatario en to (va solo a esa persona), las variables {{nombre}}, {{empresa}} y {{cargo}} (la campaña las completa con los datos de cada persona) y el singular en un correo con varios destinatarios o en una secuencia (cada persona lo recibe por separado), ni preferencias de estilo en un texto que ya cumple el encargo.',
   'No reescribas: por cada problema di dónde (título del bloque y correo), qué está mal y cómo corregirlo en una frase, y en short cómo queda una vez corregido, en 2 a 5 palabras en minúscula («sin cifras inventadas», «pregunta más concreta»). Máximo 5 problemas, los más importantes primero.',
+  'request conserva el encargo original. Al editar un correo pegado por el usuario, su relación previa, conversación, adjuntos y destinatarios declarados son contexto del remitente: no los marques como inventados por no aparecer en una herramienta. No elimines lo conversado ni lo adjunto para corregir estilo. Los números o garantías comerciales siguen requiriendo evidencia autorizada.',
+  'Si el usuario pide expresamente conservar una prueba y sus condiciones del original, ese resultado de piloto es una declaración del vendedor para esta edición: no lo elimines por no aparecer en una herramienta. Conserva la condición de piloto. Esto no aprueba superlativos, promesas incondicionales ni cifras de otro producto.',
 ];
 
 type Observation = { action: string; input?: string; result?: unknown };
@@ -131,6 +139,7 @@ const alike = (a: Set<string>, b: Set<string>) => {
 export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext): CoworkDraftIssue[] {
   const issues: CoworkDraftIssue[] = [];
   for (const { where, email, index, total, group, single } of draftEmails(blocks)) {
+    if (!email.subject.trim()) issues.push({ where, problem: 'Falta el asunto del correo.', fix: 'Si el original no traía asunto, propone uno sobrio sobre el mismo tema; conserva el cuerpo y lo que el usuario pidió mantener.', short: 'asunto presente' });
     const text = `${email.subject}\n${email.body}`;
     const plain = normalize(text);
     if (PLACEHOLDER.test(text)) issues.push({ where, problem: 'Tiene texto de relleno entre corchetes.', fix: 'Reemplázalo con datos observados o quítalo.', short: 'sin relleno' });
@@ -141,6 +150,9 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     if (free && !context.trialOffer) issues.push({ where, problem: `Ofrece algo «${free[1]}» sin una oferta de prueba aprobada.`, fix: 'Quita la oferta gratuita o el descuento.', short: `sin «${free[1]}»` });
     const promise = PROMISE.exec(plain);
     if (promise) issues.push({ where, problem: `Promete «${promise[1]}» sin respaldo.`, fix: 'Cámbialo por un beneficio concreto y verificable.', short: 'sin promesas' });
+    if (/\b(?:no es|no constituye|no representa|no implica) una garantia\b|\bno (?:es|son) (?:una )?verificacion externa\b/.test(plain)) {
+      issues.push({ where, problem: 'Incluye una nota de evaluación dentro del correo para el destinatario.', fix: 'Conserva el hecho y las condiciones del piloto; quita la nota sobre garantías o verificación.', short: 'prueba sin nota interna' });
+    }
     if (CLOSING.test(plain) && index < total - 1) issues.push({ where, problem: 'Anuncia el cierre antes del último correo.', fix: 'Solo el último correo puede decir que es el último.', short: 'cierre solo al final' });
     if (!GREETING.test(email.body)) issues.push({ where, problem: 'No abre con un saludo.', fix: group ? 'Abre con «Hola {{nombre}},».' : 'Abre con «Hola» y el nombre de pila del destinatario.', short: 'con saludo' });
     else if (group && GREETING_NAME.test(email.body)) issues.push({ where, problem: 'Saluda con un nombre fijo un texto que irá a varias personas.', fix: 'Usa «Hola {{nombre}},»: la campaña pone el nombre de cada una.', short: 'saludo con {{nombre}}' });
@@ -188,19 +200,31 @@ export function coworkReviewIssues(issues: CoworkDraftIssue[], blocks: CoworkBlo
 }
 
 /** The Writer's input, as the model reads it. */
-export function coworkWriterPrompt(input: { request: string; brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; issues?: CoworkDraftIssue[]; previous?: CoworkWriterOutput }) {
+export function coworkWriterPrompt(input: { request: string; brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; issues?: CoworkDraftIssue[]; previous?: CoworkWriterOutput; now?: Date }) {
+  const user = input.userContext as { offer?: string; offerInPlay?: string; services?: string[]; proofPoints?: string[]; differentiators?: string[];
+    fullName?: string; companyName?: string; jobTitle?: string } | null;
   return JSON.stringify({
     request: input.request,
+    referenceClock: input.now?.toISOString() ?? null,
     brief: input.brief,
     userContext: input.userContext ?? null,
+    commercialBrief: commercialBrief({ request: input.request, offer: user?.offerInPlay || user?.offer,
+      services: user?.services, proofPoints: user?.proofPoints, differentiators: user?.differentiators,
+      sender: { name: user?.fullName, company: user?.companyName, title: user?.jobTitle }, audience: input.brief.recipients,
+      evidence: coworkEvidenceBundle(input.observations), previous: input.previous,
+      relationship: /mejora|acorta|edita|reescribe/i.test(input.request) ? 'edit' : /seguimiento/i.test(input.brief.objective) ? 'follow_up' : 'initial' }),
+    competencies: coworkCompetencies(`${input.request} ${input.brief.objective}`),
+    evidenceIndex: coworkEvidenceBundle(input.observations),
     observations: input.observations.map(item => ({ action: item.action, input: item.input ?? '', result: item.result })),
     ...(input.issues?.length ? { issues: input.issues.map(({ where, problem, fix }) => ({ where, problem, fix })), previous: input.previous } : {}),
   });
 }
 
 /** The Reviewer's input: the brief, the data it may rely on and the draft. */
-export function coworkReviewerPrompt(input: { brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; draft: CoworkWriterOutput }) {
+export function coworkReviewerPrompt(input: { request?: string; brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; draft: CoworkWriterOutput; now?: Date }) {
   return JSON.stringify({
+    request: input.request ?? null,
+    referenceClock: input.now?.toISOString() ?? null,
     brief: input.brief,
     userContext: input.userContext ?? null,
     observations: input.observations.map(item => ({ action: item.action, result: item.result })),
@@ -231,6 +255,7 @@ const problemList = (issues: CoworkDraftIssue[]) => [...new Set(issues.map(issue
 
 type WriterInput = {
   request: string;
+  now?: Date;
   brief: CoworkWriteBrief;
   userContext: ({ fullName?: string | null } & Record<string, unknown>) | null;
   observations: Observation[];
@@ -262,7 +287,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   let first: CoworkWriterOutput;
   try {
     first = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt, stream: true,
-      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations }) });
+      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, now: input.now }) });
     if (!coworkWriterBlocks(first).length) throw new Error('Writer returned no email');
   } catch (error) {
     // The row never stays «writing» after the Writer gave up: the coordinator takes over and says so.
@@ -285,7 +310,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
     await input.step({ agent: 'reviewer', state: 'working', label: `Revisando ${what}` });
     try {
       const review = await input.generate({ role: 'reviewer', schema: coworkReviewSchema, systemPrompt: COWORK_REVIEWER_RULES.join('\n'),
-        prompt: coworkReviewerPrompt({ brief: input.brief, userContext: input.userContext, observations: input.observations, draft: first }) });
+        prompt: coworkReviewerPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, draft: first, now: input.now }) });
       if (review.verdict === 'fix') issues = coworkReviewIssues(review.issues, coworkWriterBlocks(first));
     } catch {
       await input.step({ agent: 'reviewer', state: 'done', label: 'No alcanzó a revisar', outcome: 'skipped', changes: [] });
@@ -305,13 +330,20 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   let corrected: CoworkWriterOutput | null = null;
   try {
     const output = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt,
-      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, issues, previous: first }) });
+      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, issues, previous: first, now: input.now }) });
     if (coworkWriterBlocks(output).length) corrected = output;
   } catch {
     // The first draft stands: a failed correction never loses the answer.
   }
   const firstLeft = checked(first);
   const left = corrected ? checked(corrected) : firstLeft;
+  if (corrected && /conserv|manten/i.test(input.request) && /prueba|condiciones|pregunta exacta/i.test(input.request)) {
+    const protectedText = [...(input.request.match(/En un piloto[^\n]+/gi) || []), ...(input.request.match(/¿[^?]+\?/g) || [])];
+    const before = draftEmails(coworkWriterBlocks(first)).map(item => item.email.body).join('\n');
+    const after = draftEmails(coworkWriterBlocks(corrected)).map(item => item.email.body).join('\n');
+    for (const text of protectedText) if (before.includes(text) && !after.includes(text)) left.push({ where: 'Texto conservado',
+      problem: 'La corrección cambió una prueba o pregunta que el usuario pidió conservar.', fix: 'Mantén ese texto exacto y corrige únicamente el punto solicitado.', short: 'contenido conservado' });
+  }
   // A correction that breaks more than it fixes is not kept.
   const draft = corrected && left.length <= firstLeft.length ? corrected : first;
   const remaining = draft === corrected ? left : firstLeft;

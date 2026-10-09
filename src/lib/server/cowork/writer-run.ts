@@ -52,7 +52,7 @@ export function coworkWriterTurn(deps: {
 }) {
   return async (brief: CoworkWriteBrief, observations: CoworkObservation[]): Promise<CoworkAnswer> => {
     const output = await runCoworkWriter({
-      request: deps.request, brief, userContext: deps.userContext, observations,
+      request: deps.request, brief, userContext: deps.userContext, observations, now: new Date(),
       generate: async ({ role, schema, systemPrompt, prompt, stream }) => {
         const limits = CALLS[role];
         const left = deps.timeLeft();

@@ -273,7 +273,8 @@ export function corpusWorkspace(read: (action: string, input: string) => unknown
   });
 }
 
-export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter, judge?: CorpusJudge, design?: CorpusDesigner, analyze?: CorpusAnalyst): Promise<CorpusOutcome> {
+export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter, judge?: CorpusJudge, design?: CorpusDesigner, analyze?: CorpusAnalyst,
+  review?: (tasks: import('../../src/lib/cowork/specialists').SpecialistTask[], observations: CoworkObservation[], world: CorpusCase['world']) => Promise<unknown>): Promise<CorpusOutcome> {
   const turns = (entry.history || []).map((turn, index) => ({
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
     reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
@@ -298,6 +299,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
       preferences: Boolean(entry.preferences),
+      metricPeriods: entry.id.startsWith('integral-'),
       tasks: process.env.COWORK_TASKS_ENABLED === 'true',
       prepareBatch: corpusPrepareBatch,
       // Figures from what the person saved in their profile are not new when a correction uses them.
@@ -334,6 +336,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
       } : {}),
       execute: async (action, value) => { actions.push(action); reads.push({ action, input: value }); return (entry.world?.read ?? corpusRead)(action, value); },
       record: async observation => { recorded.push(observation); },
+      ...(review ? { review: async (tasks: import('../../src/lib/cowork/specialists').SpecialistTask[], observations: CoworkObservation[]) => {
+        const result = await review(tasks, observations, entry.world); actions.push('specialists.review'); return result;
+      } } : {}),
       proposeSearch: async criteria => { result.search = criteria as unknown as Record<string, unknown>; },
       proposeNote: async () => { result.proposal = { kind: 'crm_note', label: 'Nota CRM' }; },
       ...(write ? { write: async (brief: CoworkWriteBrief, observations: CoworkObservation[]) => {

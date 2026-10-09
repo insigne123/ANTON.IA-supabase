@@ -22,7 +22,7 @@ export type CoworkArtifactRender = {
   /** Horizontal overflow at 390 px, in pixels (0 is good). */
   overflow390: number;
   /** axe violations as «rule×nodes», per theme at 1280 px. */
-  axe: { light: string[]; dark: string[] };
+  axe: { status: 'measured' | 'not_measured'; light: string[]; dark: string[] };
   screenshots: string[];
 };
 
@@ -44,7 +44,7 @@ function loadPlaywright(): Playwright {
 }
 
 function loadAxe() {
-  try { return readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8'); } catch { return null; }
+  try { return readFileSync(createRequire(import.meta.url).resolve(process.env.AXE_MODULE || 'axe-core/axe.min.js'), 'utf8'); } catch { return null; }
 }
 
 /** Renders each page; `shots` keeps light, dark and 390 px screenshots as `<id>-<theme>-<width>.png`. */
@@ -73,7 +73,7 @@ export async function renderCoworkArtifacts(pages: Array<{ id: string; html: str
   if (options.shots && !existsSync(options.shots)) mkdirSync(options.shots, { recursive: true });
   try {
     for (const { id } of pages) {
-      const render: CoworkArtifactRender = { ok: false, errors: [], text: '', svgs: 0, overflow390: 0, axe: { light: [], dark: [] }, screenshots: [] };
+      const render: CoworkArtifactRender = { ok: false, errors: [], text: '', svgs: 0, overflow390: 0, axe: { status: axe ? 'measured' : 'not_measured', light: [], dark: [] }, screenshots: [] };
       let started = false;
       for (const [theme, width] of [['light', 1280], ['dark', 1280], ['light', 390]] as const) {
         const context = await browser.newContext({ viewport: { width, height: 900 } });

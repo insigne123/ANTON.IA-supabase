@@ -9,6 +9,7 @@ import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-rea
 import { collectCoworkLeadRows, collectCoworkRecommendedLeadIds } from './lead-export';
 import { coworkCampaignEmails, coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
+import { coworkRequestedMetricQuery } from './metric-period';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
 import { coworkProfileDecisionSchema, coworkProfilePatchFromDecision, type CoworkProfilePatch } from './profile-proposal';
@@ -884,6 +885,8 @@ async function runCoworkLoop(input: {
   proposeEffect?: (proposal: CoworkEffectProposal) => Promise<void>;
   /** The Writer: writes the emails of a `draft.write` decision and returns the turn's answer. */
   write?: (brief: CoworkWriteBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
+  /** Lease-fenced delivery of the final Writer version into an approved task graph. */
+  onWriteDelivery?: (answer: CoworkAnswer) => Promise<void>;
   /** The Designer: writes the artifact of an `artifact.create` decision, stores it and returns the turn's answer (COWORK_CODE_ARTIFACTS_ENABLED). */
   design?: (brief: CoworkDesignBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
   /** The Analyst: answers the question of an `analysis.write` decision with what the turn read (COWORK_ANALYST_ENABLED). */
@@ -914,6 +917,8 @@ async function runCoworkLoop(input: {
   onCorrection?: (verdict: CoworkCorrectionVerdict) => void;
   /** An answer that closes offering a read it could make gets it made first (COWORK_OFFERED_READS_ENABLED). */
   offeredReads?: boolean;
+  /** Exact user period/scope counts can be obtained without spending a model decision on obvious routing. */
+  metricPeriods?: boolean;
   /** Who the person is and what they sell: figures from it are not new when a correction uses them. */
   userContext?: unknown;
   /** Keeps the summary of the conversation a decision carries (thread-memory.ts). Best effort: it never fails the turn. */
@@ -1024,6 +1029,25 @@ async function runCoworkLoop(input: {
     return withCoworkReports(decision.answer, observations);
   };
   const keepsVersionOnly = coworkOnlyUsesVersion(input.message);
+  const requestedMetrics = coworkRequestedMetricQuery(input.message);
+  const smallTalk = input.message.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const informationOnly = /^(?:hola(?: anton(?: ia)?| cowork)?|buen(?:os dias|as tardes|as noches)|(?:hola )?(?:que haces|que puedes hacer(?: tu| por mi)?|dime (?:todo )?(?:lo )?que puedes hacer|como me puedes ayudar|para que sirves))$/.test(smallTalk);
+  if (requestedMetrics && input.metricPeriods && !observations.some(item => item.action === 'metrics.rates') && readsUsed < readLimit()) {
+    await input.authorize(); input.signal.throwIfAborted();
+    const query = JSON.stringify(requestedMetrics);
+    if (!outlined) {
+      await input.record({ action: COWORK_PLAN_ACTION, input: '', result: { steps: [
+        { label: requestedMetrics.scope === 'own' ? 'Cuento tu actividad del período' : 'Cuento la actividad del equipo', read: 'metrics.rates' },
+        { label: 'Te resumo las cifras y su base', read: null },
+      ] } });
+      outlined = true;
+    }
+    readsUsed++;
+    const result = await input.execute('metrics.rates', query);
+    await input.authorize(); input.signal.throwIfAborted();
+    const observation: CoworkObservation = { action: 'metrics.rates', input: query, result };
+    await input.record(observation); observations.push(observation);
+  }
   // Emails the Writer wrote when the person asked for the campaign in the same request (Plan 12, 4a-2): the next
   // decision proposes it with them, word for word. Whatever happens after, the Writer's answer is never lost.
   let written: { emails: CoworkEditedEmail[]; answer: CoworkAnswer } | null = null;
@@ -1035,7 +1059,7 @@ async function runCoworkLoop(input: {
     let decision: Decision;
     try {
       decision = coworkDecisionSchema.parse(await input.decide(observations,
-        turn === last || readsUsed >= readLimit() || closingFallback !== null || overdue || judgeReadDone(), rejections.slice(), budget));
+        informationOnly || turn === last || readsUsed >= readLimit() || closingFallback !== null || overdue || judgeReadDone(), rejections.slice(), budget));
     } catch (error) {
       const reason = invalidDecisionReason(error);
       const standing = closingFallback ?? judgedFallback;
@@ -1047,8 +1071,15 @@ async function runCoworkLoop(input: {
       continue;
     }
     input.signal.throwIfAborted();
+    if (requestedMetrics) {
+      const bind = (value: string) => value.trim().startsWith('{') ? value : JSON.stringify(requestedMetrics);
+      if (decision.action === 'metrics.rates') decision.query = bind(decision.query || '');
+      if (decision.action === 'reads.parallel') decision.reads = decision.reads?.map(task => task.action === 'metrics.rates' ? { ...task, input: bind(task.input) } : task);
+      if (decision.action === 'reads.plan') decision.plan = decision.plan?.map(task => task.read.action === 'metrics.rates' ? { ...task, read: { ...task.read, input: bind(task.read.input) } } : task);
+    }
     await remember(decision);
     try {
+      if (informationOnly && decision.action !== 'answer') throw rejected('Orientation needs no tools', 'El usuario solo saluda o pregunta qué haces. Responde con las capacidades disponibles y el contexto ya recibido, sin consultas ni propuestas de ejecución.');
       if (decision.action === 'draft.write') {
         // «Usar esta versión» keeps the person's text as it is: nobody rewrites it.
         if (keepsVersionOnly) {
@@ -1070,6 +1101,9 @@ async function runCoworkLoop(input: {
         let answer: CoworkAnswer;
         try {
           answer = await input.write(decision.write, observations);
+          const normalized = coworkBlocks(answer.blocks);
+          if (answer.blocks?.length && JSON.stringify(normalized) !== JSON.stringify(answer.blocks)) answer = { ...answer, blocks: normalized.length ? normalized : null };
+          await input.onWriteDelivery?.(answer);
         } catch (error) {
           if (input.signal.aborted) throw error;
           if (turn === last) return lastResort();
@@ -1156,7 +1190,7 @@ async function runCoworkLoop(input: {
         // read (past the ceiling if needed) and the edited answer, with the offered one standing if that fails.
         // A turn that spent its decisions reading gets the two it needs, up to the ledger's coordinator calls:
         // that was where most offers stayed unmade (Plan 12, final round).
-        const offered = input.offeredReads && !judged && !keepsVersionOnly && turn + 2 <= Math.max(last, COWORK_MAX_COORDINATOR_CALLS - 1) && !late()
+        const offered = !informationOnly && input.offeredReads && !judged && !keepsVersionOnly && turn + 2 <= Math.max(last, COWORK_MAX_COORDINATOR_CALLS - 1) && !late()
           ? offeredRead(decision.answer) : null;
         if (offered) {
           last = Math.max(last, turn + 2);
@@ -1524,15 +1558,14 @@ async function runCoworkLoop(input: {
       if (decision.action === 'reads.plan') {
         if (!decision.plan || readsUsed + decision.plan.length > readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
         readsUsed += decision.plan.length;
-        const results = await executeCoworkReadPlan(decision.plan, {
+        await executeCoworkReadPlan(decision.plan, {
           signal: input.signal, authorize: input.authorize,
           execute: read => input.execute(read.action, read.input),
-          record: (task, result) => input.record({
-            action: task.read.action, input: task.read.input, result,
-            task: { id: task.id, dependsOn: task.dependsOn },
-          }),
+          record: async (task, result) => {
+            const observation = { action: task.read.action, input: task.read.input, result, task: { id: task.id, dependsOn: task.dependsOn } };
+            await input.record(observation); observations.push(observation);
+          },
         });
-        observations.push(...results.map(({ task, result }) => ({ ...task.read, result })));
         continue;
       }
       if (decision.action === 'reads.parallel') {
@@ -1541,12 +1574,14 @@ async function runCoworkLoop(input: {
           all.findIndex(other => other.action === task.action && other.input === task.input) === index);
         if (!reads || readsUsed + reads.length > readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
         readsUsed += reads.length;
-        const results = await executeCoworkParallelReads(reads, {
+        await executeCoworkParallelReads(reads, {
           signal: input.signal, authorize: input.authorize,
           execute: task => input.execute(task.action, task.input),
-          record: (task, result) => input.record({ action: task.action, input: task.input, result }),
+          record: async (task, result) => {
+            const observation = { action: task.action, input: task.input, result };
+            await input.record(observation); observations.push(observation);
+          },
         });
-        observations.push(...reads.map((task, index) => ({ ...task, result: results[index] })));
         continue;
       }
       if (decision.action === 'privacy.contactability_batch' || decision.action === 'lists.review_batch') {
@@ -1570,9 +1605,9 @@ async function runCoworkLoop(input: {
           || decision.action === 'files.read'
         ? (decision.query ?? (decision.reads?.length === 1 && decision.reads[0].action === decision.action
             ? decision.reads[0].input : null))
-          : decision.action === 'icp.analyze' || decision.action === 'leads.recommend' || decision.action === 'opportunities.list'
+          : decision.action === 'icp.analyze' || decision.action === 'leads.recommend' || decision.action === 'opportunities.list' || decision.action === 'metrics.rates'
             ? (decision.query ?? '')
-          : decision.action === 'metrics.overview' || decision.action === 'metrics.rates' || decision.action === 'metrics.diagnose' || decision.action === 'metrics.channels' || decision.action === 'metrics.incidents' || decision.action === 'deliverability.bounces' || decision.action === 'deliverability.sender' || decision.action === 'compliance.law' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
+          : decision.action === 'metrics.overview' || decision.action === 'metrics.diagnose' || decision.action === 'metrics.channels' || decision.action === 'metrics.incidents' || decision.action === 'deliverability.bounces' || decision.action === 'deliverability.sender' || decision.action === 'compliance.law' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
           || decision.action === 'linkedin.network' || decision.action === 'linkedin.inbox' || decision.action === 'linkedin.quota'
           || decision.action === 'linkedin.followups' || decision.action === 'linkedin.jobs'
           || decision.action === 'replies.attention' || decision.action === 'replies.stalled' || decision.action === 'leads.summary'

@@ -129,3 +129,7 @@ test('delegated reads preserve the shared budget, role allowlist and observed ta
   assert.throws(() => prepareCoworkSpecialists([{ ...task, role: 'analyst' }], [{ result: { id } }]), /tool unavailable/);
   assert.throws(() => prepareCoworkSpecialists([task], [{ result: { id } }, {}, {}]), /shared read budget/);
 });
+test('an explicit null read from strict structured output means synthesis without an extra tool', () => {
+  const assignments = prepareCoworkSpecialists([{ role: 'analyst', objective: 'Compara el alcance', evidence: [0], read: null }], [{ action: 'metrics.overview', result: {} }]);
+  assert.equal(assignments[0].task.read, null);
+});
