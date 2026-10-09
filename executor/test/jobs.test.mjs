@@ -45,3 +45,34 @@ test('a stop that cannot be confirmed blocks new compute, including after anothe
     assert.equal((await restarted.inspect('job-uncertain-1')).status, 'interrupted');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('restart removes the recorded inputs only after confirmed stop and never exposes the host path', { timeout: 10000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cw-restart-inputs-'));
+  try {
+    const store = createResultStore({ dir }); await store.init();
+    const workspace = '/jobs/job-123-456-AbCdEf';
+    let staged;
+    const recorded = new Promise(resolve => { staged = resolve; });
+    const manager = createJobManager({ store, stop: async () => {}, run: async (_job, deps) => {
+      await deps.onWorkspace(workspace);
+      staged();
+      return new Promise(() => {}); // Simulate supervisor loss after input staging.
+    } });
+    await manager.init();
+    const body = { idempotencyKey: 'job-input-restart-1', language: 'node', code: 'x' };
+    await manager.admit(body);
+    await recorded;
+    assert.equal((await store.get(body.idempotencyKey)).job.workingDirectory, workspace);
+    assert.equal((await manager.inspect(body.idempotencyKey)).workingDirectory, undefined);
+    const order = [];
+    const failedStop = createJobManager({ store, stop: async () => { throw Error('Cannot confirm stop'); }, cleanup: async () => assert.fail('do not remove live inputs') });
+    await failedStop.init(); assert.equal(failedStop.busy(), true);
+    const restarted = createJobManager({ store, stop: async () => order.push('stop'), cleanup: async directory => {
+      assert.equal(directory, workspace); order.push('cleanup');
+    }, run: async () => assert.fail('never replay') });
+    await restarted.init();
+    assert.deepEqual(order, ['stop', 'cleanup']);
+    assert.equal((await restarted.inspect(body.idempotencyKey)).status, 'interrupted');
+    assert.equal((await restarted.inspect(body.idempotencyKey)).workingDirectory, undefined);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

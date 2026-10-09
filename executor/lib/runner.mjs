@@ -99,6 +99,9 @@ export async function runJob(job, deps = {}) {
   const workDir = join(root, 'work');
   const outDir = join(root, 'out');
   try {
+  // Persist this exact temporary directory before code can run, so restart
+  // reconciliation can remove its inputs after confirming the container stopped.
+  await deps.onWorkspace?.(root);
   deps.signal?.throwIfAborted();
   await mkdir(workDir, { recursive: true });
   await mkdir(outDir, { recursive: true });
