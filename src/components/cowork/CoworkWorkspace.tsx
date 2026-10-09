@@ -34,6 +34,7 @@ import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type Cowork
 import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwVariants, m } from './motion';
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
 import { useCoworkQueue } from './useCoworkQueue';
+import { useCoworkHistory } from './useCoworkHistory';
 
 type ThreadState = CoworkTurnData & {
   ancestors?: CoworkTurnData[];
@@ -175,6 +176,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   // Contacts picked with «@» in the composer, sent as references with the next message (V6).
   const mentions = useRef<CoworkMention[]>([]);
   const scroller = useRef<HTMLDivElement>(null);
+  const historyScroll = useRef<{ height: number; top: number } | null>(null);
   const conversation = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const artifactHeading = useRef<HTMLHeadingElement>(null);
@@ -186,11 +188,12 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const namedRuns = useRef(new Set<string>());
   const autoOpened = useRef(new Set<string>());
   const clearQueued = useRef<() => void>(() => {});
+  const clearHistory = useRef<() => void>(() => {});
   /** A historical turn opened on purpose (an older document version) is not auto-forwarded. */
   const pinnedRun = useRef<string | null>(null);
 
   const clearPrivateResults = useCallback(() => {
-    setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); clearQueued.current();
+    setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); clearQueued.current(); clearHistory.current();
   }, []);
   // A failed download or a lost session is told the same way from every card that can be downloaded.
   const exportHandlers = useMemo(() => ({ onError: setError, onAccessDenied: clearPrivateResults }), [clearPrivateResults]);
@@ -434,8 +437,11 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   }, [clearAttachments]);
 
   // While following a continuation the previous state stays on screen until the new turn loads.
-  const turns: CoworkTurnData[] = useMemo(() => state && selected
+  const recentTurns: CoworkTurnData[] = useMemo(() => state && selected
     ? [...(state.ancestors || []), { run: state.run, events: state.events }] : [], [state, selected]);
+  const history = useCoworkHistory(recentTurns, { selected, more: Boolean(state?.olderTurnsOmitted), request });
+  const turns = history.turns;
+  clearHistory.current = history.clear;
   const latest = turns[turns.length - 1] || null;
   const shownTurns = useMemo(() => optimistic && replacing ? turns.filter(turn => turn.run.id !== replacing) : turns, [turns, optimistic, replacing]);
   const latestIsCurrent = Boolean(latest && latest.run.id === selected);
@@ -566,8 +572,12 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   // Keep the newest content in view unless the reader scrolled up.
   useIsomorphicLayoutEffect(() => {
     const node = scroller.current;
-    if (node && stickToBottom.current) node.scrollTop = node.scrollHeight;
-  }, [turns, optimistic, queued]);
+    if (node && historyScroll.current && !history.busy) {
+      const previous = historyScroll.current;
+      node.scrollTop = previous.top + Math.max(0, node.scrollHeight - previous.height);
+      historyScroll.current = null;
+    } else if (node && stickToBottom.current) node.scrollTop = node.scrollHeight;
+  }, [turns, optimistic, queued, history.busy]);
 
   // Cards that load their details later (approvals, previews) must not push the decision out of view.
   useEffect(() => {
@@ -955,7 +965,21 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         : <>
           <div ref={scroller} onScroll={onScroll} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
             <div ref={conversation} className="mx-auto w-full max-w-[46rem] space-y-9 px-4 pb-8 pt-7 sm:px-6">
-              {state?.olderTurnsOmitted && <p className="text-center text-[12px] text-cw-faint">Se muestran los últimos ocho turnos anteriores.</p>}
+              {history.more && <div className="space-y-2 text-center">
+                <CwButton size="sm" variant="secondary" disabled={history.busy} onClick={() => {
+                  const node = scroller.current; stickToBottom.current = false;
+                  if (node) historyScroll.current = { height: node.scrollHeight, top: node.scrollTop };
+                  const anchor = turns[0]?.run.id;
+                  void history.load().then(page => {
+                    if (page && !page.more && anchor) requestAnimationFrame(() => {
+                      document.querySelector<HTMLElement>(`[data-cowork-turn="${anchor}"]`)?.focus({ preventScroll: true });
+                    });
+                  });
+                }}>
+                  <History aria-hidden="true" />{history.busy ? 'Recuperando mensajes…' : 'Ver mensajes anteriores'}
+                </CwButton>
+                {history.error && <p role="alert" className="text-[12.5px] text-cw-danger">{history.error}</p>}
+              </div>}
               {shownTurns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === shownTurns.length - 1}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
                 onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}

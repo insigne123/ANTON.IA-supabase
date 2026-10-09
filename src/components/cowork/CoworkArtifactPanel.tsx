@@ -143,7 +143,7 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
           canResearch={canResearch} onUseReport={onUseReport} showHeader={false} onSend={onSend} sendHint={sendHint} />
       </div>}
       {artifact.kind === 'file' && <div className="px-4 py-5 sm:px-6">
-        <ArtifactPreview key={artifact.id} runId={artifact.runId} name={artifact.name} size={artifact.size ?? undefined} defaultOpen />
+        <ArtifactPreview key={artifact.id} runId={artifact.runId} name={artifact.name} size={artifact.size ?? undefined} defaultOpen onAccessDenied={onAccessDenied} />
       </div>}
       {artifact.kind === 'sources' && <div className="px-4 py-5 sm:px-6">
         <ResearchSources events={events} runId={artifact.runId} sequence={artifact.sequence} canCreateDraft={canCreateDraft} onAccessDenied={onAccessDenied} />

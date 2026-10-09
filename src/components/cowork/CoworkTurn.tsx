@@ -280,7 +280,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
       onFeedback={run.status === 'completed' ? onFeedback : null} onRegenerate={onRegenerate} /></div>}
   </div> : null;
 
-  return <article className="space-y-4" aria-label={run.automatic ? 'Continuación automática' : 'Turno'}>
+  return <article data-cowork-turn={run.id} tabIndex={-1} className="space-y-4" aria-label={run.automatic ? 'Continuación automática' : 'Turno'}>
     {run.automatic
       ? <p className="flex items-center gap-2 text-[12.5px] text-cw-muted"><CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />
         {run.automaticReason === 'research' ? 'Terminaron las investigaciones que pediste' : 'Continuó automáticamente con el resultado'}</p>

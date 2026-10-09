@@ -4,7 +4,7 @@
 
 Se ejecutó el trabajo de código, evaluación controlada y verificación independiente disponible durante el encargo nocturno. **El programa completo todavía no está aceptado en producción:** faltan sesión legítima del dueño para recorridos autenticados, conformidad/activación de infraestructura por el mantenedor y validación con ejecutivos/material de equipo. No se sustituyen por simulaciones ni se declaran medidos.
 
-Referencia: [plan integral](plan-integral-cowork-2026-10-09.md). Bases congeladas `25e18428` (evaluación inicial), `4e307302` (documentación entrante) y `b8ec6148` (runner integrado). El código del programa quedó integrado en `main` `8300af8aed2e73aee648aee3009c6f5d5beea0ef`. Última revisión productiva observada: `studio-build-2026-10-08-002`, release `9cb94681`; no se realizó un deploy en este encargo.
+Referencia: [plan integral](plan-integral-cowork-2026-10-09.md). Bases congeladas `25e18428` (evaluación inicial), `4e307302` (documentación entrante) y `b8ec6148` (runner integrado). El código inicial del programa quedó integrado en `main` `8300af8aed2e73aee648aee3009c6f5d5beea0ef`, con reporte/lectura completos en `bf917c11`. La comprobación read-only del 9 oct a las 17:24 UTC observa `studio-build-2026-10-09-001` con el 100 % del tráfico. La revisión del 8 oct queda como observación histórica; no se ejecutó un deploy en este encargo ni se infiere el SHA de fuente del runtime solo por su nombre.
 
 ## Entregas por ticket
 
@@ -26,7 +26,7 @@ Referencia: [plan integral](plan-integral-cowork-2026-10-09.md). Bases congelada
 | CW-14 | Routing/calls/latencia en harness; corregido `read:null` | Analista real invocado en 7,8 s; cola productiva no medida, no se amplían roles sin comparación |
 | CW-15 | Inputs SHA inmutables, salida tmpfs/inodos, cleanup, cuarentena y publicación por intento | Adapters/12 tests + SQL de fencing; Docker real/VM e imágenes pendientes |
 | CW-16 | Jobs durables v2 y adapter neutral, inspección, cancelación/reinicio sin replay | Tests de conflicto/stop/salida tardía; conformance remoto pendiente |
-| CW-17 | Assets propios publicados reutilizables con hash; workspace lógico separado de cómputo | Integración gated; preview multiarchivo externo/toolchain/browser remotos pendientes |
+| CW-17 | Assets propios publicados reutilizables con hash; workspace lógico separado de cómputo; preview multiarchivo en origen opaco | HTML/CSS/JS clásico e imágenes ensamblados y renderizados; origen externo con TTL/toolchain/browser remotos pendientes |
 | CW-18 | Informe PDF/Word/Markdown/Excel y calculadora autocontenida + manifest/ZIP | Piloto local de 45 contactos/30 correos y 20 renders; piloto cloud auténtico pendiente |
 | CW-19 | Versión/targets a campaña pausada y apertura de identidad exacta | Transform/handoff y UI; ciclo nativo autenticado pendiente |
 | CW-20 | Routing proactivo de cifras y orientación sin lecturas superfluas; casos de avisos existentes | Dedupe existente preservado; eventos reales/atención de usuario pendientes |
@@ -91,6 +91,7 @@ PR de trabajo desde main, etiqueta `ia-automerge`, revisión de integración y a
 - [#309](https://github.com/insigne123/ANTON.IA-supabase/pull/309) contexto y evaluación: integrado con CI verde.
 - [#310](https://github.com/insigne123/ANTON.IA-supabase/pull/310) settlement/cancelación del executor: integrado con CI verde.
 - [#312](https://github.com/insigne123/ANTON.IA-supabase/pull/312) runtime/entregas/SQL candidato: integrado con revisión y ambos gates CI verdes sobre el head exacto. Merge `8300af8a`.
+- [#313](https://github.com/insigne123/ANTON.IA-supabase/pull/313) evidencia, ADRs y lectura completa: integrado con CI verde. Merge `bf917c11`.
 
 La actualización entrante [#311](https://github.com/insigne123/ANTON.IA-supabase/pull/311) corrige login y pertenece a otro trabajo. Se preservó al actualizar la base de #312; no se presenta como una entrega de este plan.
 
@@ -103,6 +104,19 @@ En `C:/Users/nicol/AppData/Local/Temp/opencode/`: `cowork-integral-20261009-{pil
 ## Bloqueos finales observables
 
 1. No hay sesión legítima del dueño disponible para un recorrido autenticado; no se generaron tokens ni se suplantó la sesión.
-2. No hay Docker local. La última consulta read-only al executor no pudo autenticarse en infraestructura (401 de la sesión de plataforma), por lo que su versión/capabilities no están medidas. No se ejecutaron jobs remotos ni se asignó gasto cloud adicional.
-3. El repositorio reserva deploy/activación y rollback al mantenedor. Los merges del encargo no cambian la revisión productiva observada.
+2. El acceso de infraestructura se recuperó. El executor real responde `/v1/health` 200, `ok:true`, `busy:false`; `/v2/capabilities` responde 404. La base v2 implementada no está disponible en ese endpoint. No se ejecutaron jobs remotos ni se asignó gasto cloud adicional.
+3. La lectura de producción confirma que las funciones de aclaraciones/fencing aún no existen y que los cinco flags nuevos siguen ausentes. El repositorio reserva deploy/activación y rollback al mantenedor; un merge no activa esos caminos.
 4. Apertura a equipos, catálogo aprobado y estudio con ejecutivos requieren sus datos/personas; no pueden darse por validados por la revisión del asistente.
+
+## Continuación · historial y miniapps multiarchivo
+
+Problema de flujo/componente: se reutilizan la composición documentada de Cowork (hilos, conversación y panel de resultado), los botones `CwButton` y las surfaces/tokens `cw-*`. La acción de historial aparece donde faltan mensajes; loading y error se mantienen junto al control. La preview conserva el panel existente y suma feedback de preparación y recuperación, sin un nuevo shell ni bloques duplicados.
+
+- UX-10: «Ver mensajes anteriores» recupera páginas de ocho turnos por los GET con sesión existentes. Valida la rama, conserva scroll, restituye foco, reintenta sin perder el contexto y permite abrir documentos antiguos sin cambiar el trabajo activo. El límite de contexto del modelo permanece igual.
+- CW-17/18: preview estática de HTML + CSS + JS clásico + imágenes de una misma versión publicada, con comprobación de hashes y tamaño. Recursos ausentes/externos y módulos no compilados devuelven un error útil. La descarga original no cambia.
+- Chrome reprodujo un defecto que el render standalone no detectaba: el sandbox sin `allow-forms` impedía que una calculadora manejara submit. Se habilitó ese evento local y se comprobó que `form-action 'none'` sigue bloqueando envíos externos.
+- Diez renders adicionales: 360/390/768/1024/1440, light/dark. Calculadora correcta, CSS/JS ensamblados, foco por teclado, carga, error/reintento, revocación y origen opaco; cero overflow, page errors, requests externos o violaciones axe en parent y preview. Es una revisión fixture, no aceptación de un build cloud remoto.
+- `typecheck`, `build` y suite completa del incremento aprobados: **2.748/2.748**, 499 archivos en 16 lotes. DOM de historial/preview/continuaciones también aprobado. No hubo llamadas de modelo adicionales: exposición sigue en **US$0,91650922**.
+- Producción se inspeccionó solo en lectura: modelos Luna, funciones/flags y health/capabilities. En la ventana de logs de la revisión `studio-build-2026-10-09-001` consultada hasta las 17:24 UTC no aparecieron entradas ERROR. No equivale a garantía de ausencia futura de errores.
+
+Evidencia privada nueva: `cowork-executor-inspect-live-20261009.json`, inventario actualizado y `cowork-multifile-rendered-20261009/evidence.json` con capturas. La conformidad del supervisor y la aceptación autenticada del dueño siguen pendientes.
