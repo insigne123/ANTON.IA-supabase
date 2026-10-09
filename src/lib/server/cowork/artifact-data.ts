@@ -211,7 +211,10 @@ export function coworkArtifactTableSummary(value: CoworkArtifactTable) {
       out[column.key] = { ...Object.fromEntries([...counts].sort((a, b) => b[1] - a[1]).slice(0, 8)), ...(empty ? { '(vacío)': empty } : {}) };
     } else if (column.type === 'date') {
       const days = cells.flatMap(cell => (typeof cell === 'string' && /^\d{4}-\d{2}-\d{2}/.test(cell) ? [cell.slice(0, 10)] : [])).sort();
-      if (days.length) out[column.key] = { first: days[0], last: days[days.length - 1], ...(empty ? { empty } : {}) };
+      // Rows per month, so a reply about «septiembre» counts every row and not the five of the sample (the board counts them all).
+      const months = new Map<string, number>();
+      for (const day of days) months.set(day.slice(0, 7), (months.get(day.slice(0, 7)) || 0) + 1);
+      if (days.length) out[column.key] = { first: days[0], last: days[days.length - 1], byMonth: Object.fromEntries([...months].slice(-12)), ...(empty ? { empty } : {}) };
     } else {
       const numbers = cells.filter((cell): cell is number => typeof cell === 'number' && Number.isFinite(cell));
       if (numbers.length) out[column.key] = { sum: numbers.reduce((sum, cell) => sum + cell, 0), min: Math.min(...numbers), max: Math.max(...numbers), ...(empty ? { empty } : {}) };

@@ -47,12 +47,21 @@ test('the Designer sees each table’s columns, its size and five short rows, ne
   assert.ok(preview.contacts.columns.includes('has_email (text): Con correo'));
 });
 
+test('a date column counts its rows per month, so «en septiembre» is every row of the month and not the sample', () => {
+  const rows = Array.from({ length: 30 }, (_, index) => ({ id: `l${index}`, name: `Persona ${index}`, created_at: index < 24 ? `2026-09-${String(1 + index).padStart(2, '0')}T12:00:00Z` : '2026-08-15T12:00:00Z' }));
+  const summary = coworkArtifactTableSummary(coworkArtifactContacts(rows)) as Record<string, { byMonth?: Record<string, number> }>;
+  assert.deepEqual(summary.created_at?.byMonth, { '2026-08': 6, '2026-09': 24 });
+  const preview = coworkArtifactDataPreview({ tables: { contacts: coworkArtifactContacts(rows) } });
+  assert.equal(preview.contacts.sample.length, 5);
+  assert.deepEqual((preview.contacts.summary as Record<string, { byMonth?: unknown }>).created_at?.byMonth, { '2026-08': 6, '2026-09': 24 });
+});
+
 test('the summary counts the few-valued columns, adds the numbers and spans the dates, for the chat reply', () => {
   const pipeline = coworkArtifactPipeline(leads, [{ id: 'lead_saved|a', stage: 'meeting', deal_value: 2_000_000 }, { id: 'lead_saved|b', deal_value: 500_000 }]);
   const summary = coworkArtifactTableSummary(pipeline) as Record<string, Record<string, unknown>>;
   assert.deepEqual(summary.stage, { Nuevos: 2, Reunión: 1 });
   assert.deepEqual(summary.value, { sum: 2_500_000, min: 500_000, max: 2_000_000, empty: 1 });
-  assert.deepEqual(summary.created_at, { first: '2026-09-20', last: '2026-09-21', empty: 1 });
+  assert.deepEqual(summary.created_at, { first: '2026-09-20', last: '2026-09-21', byMonth: { '2026-09': 2 }, empty: 1 });
   assert.equal(summary.owner, undefined);
   // Many different names: no counts for them.
   const many = coworkArtifactContacts(Array.from({ length: 20 }, (_, index) => ({ name: `Persona ${index}`, email: index % 2 ? 'a@b.cl' : null })));
