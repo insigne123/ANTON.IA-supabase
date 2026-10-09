@@ -236,6 +236,54 @@ export function withoutRepeatedAside(reply: string, elsewhere = '', always = fal
   return joined.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// An offer of the next step: «puedo preparar…», «el próximo paso es…».
+// «Conviene…» is not one: it is the recommendation the person asked for («¿qué mejoro?»).
+const OFFER = /^(?:para partir,\s*)?(?:te\s+)?(?:puedo|podemos|podr[ií]a|el (?:pr[oó]ximo|siguiente) paso(?: m[aá]s concreto)? es|lo que har[ií]a (?:ahora )?es)\b/iu;
+const OFFER_STOP = new Set(['para', 'tus', 'con', 'que', 'una', 'uno', 'los', 'las', 'del', 'por', 'sin', 'hasta', 'esta', 'este', 'ellos', 'ellas', 'puedo', 'podemos', 'conviene']);
+const offerStems = (text: string) => new Set((text.toLocaleLowerCase('es').normalize('NFD').replace(/[̀-ͯ]/g, '').match(/[a-zñ]{3,}/g) || [])
+  .filter(word => !OFFER_STOP.has(word)).map(word => word.slice(0, 4)));
+
+/**
+ * The closing question already offers the next step (rule 4): the reply does not offer it again just before («…4 tienen correo; puedo
+ * preparar una primera campaña para ellos.» and «¿Te preparo una primera campaña…?»). Only in the last paragraph, only the clause that
+ * offers (a sentence, or what follows «;» or «así que»), and only when the question covers it: two words in common and every name
+ * it says (a clause that adds another person keeps it). A reply is never left empty.
+ */
+export function withoutRepeatedOffer(reply: string, question: string): string {
+  const asked = offerStems(question);
+  const paragraphs = reply.split(/\n{2,}/);
+  // The last paragraph that is not a question: the reply often ends with the closing question already.
+  let index = paragraphs.length - 1;
+  while (index > 0 && /\?\W*$/u.test(paragraphs[index].trim())) index--;
+  // An abbreviation in capitals («RR. HH.», «S. A.») does not end a sentence: its periods are kept apart while splitting.
+  const guarded = paragraphs[index].replace(/\b(\p{Lu}{1,3})\.(?=\s*\p{Lu}{1,3}\.|\s+\p{Ll})/gu, '$1\u2024');
+  const sentences = guarded.match(/[^.!?]+[.!?]+\s*|[^.!?]+$/g) || [guarded];
+  // Only text split exactly into its sentences is touched.
+  if (sentences.join('') !== guarded) return reply;
+  for (let at = sentences.length - 1; at >= 0; at--) {
+    const sentence = sentences[at];
+    const parts = sentence.trimEnd().split(/(;\s*|,?\s+así que\s+)/u);
+    for (let part = 0; part < parts.length; part += 2) {
+      const clause = parts[part].trim().replace(/[.!?]+$/, '');
+      if (!OFFER.test(clause)) continue;
+      const shared = [...offerStems(clause)].filter(stem => asked.has(stem)).length;
+      const names = clause.slice(1).match(/\p{Lu}\p{Ll}{2,}/gu) || [];
+      if (shared < 2 || names.some(name => !question.includes(name))) continue;
+      const before = parts.slice(0, Math.max(0, part - 1)).join('').trim().replace(/[,;:]$/, '');
+      const after = parts.slice(part + 2).join('').trim().replace(/[.!?]+$/, '');
+      // What follows leans on the offer («…; después, si te sirve, …», «…; nada se envía hasta que la actives»): without it, it would hang.
+      if (/^(?:despu[eé]s|luego|y|adem[aá]s|entonces|as[ií])\b/iu.test(after)) continue;
+      if (!before && after && !/\b(?:campañas?|correos?|secuencias?|seguimientos?|invitaci[oó]n|mensajes?)\b/iu.test(after)) continue;
+      const rest = [before, after].filter(Boolean).join('; ');
+      sentences[at] = rest ? `${rest.charAt(0).toLocaleUpperCase('es')}${rest.slice(1)}.${/\s$/.test(sentence) ? ' ' : ''}` : '';
+      paragraphs[index] = sentences.join('').trim().replace(/\u2024/g, '.');
+      const result = paragraphs.filter(paragraph => paragraph.trim()).join('\n\n');
+      return /[\p{L}]{3,}/u.test(result) ? result : reply;
+    }
+  }
+  return reply;
+}
+
 const PIPE_ROW = /^\s*\|.*\|\s*$/;
 const PIPE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const pipeCells = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
@@ -288,6 +336,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
   // Options answer the closing question, so they need one; with them, the question is picked, not tapped «sí».
   const choices = question ? coworkChoices(answer.choices) : null;
   let reply = withoutRepeatedAside(tabled.reply, blocks.length ? JSON.stringify(blocks) : '');
+  if (question) reply = withoutRepeatedOffer(reply, question);
   if (question) {
     const lines = reply.split('\n');
     let last = lines.length - 1;
