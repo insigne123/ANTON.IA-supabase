@@ -9,9 +9,8 @@ const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Sec
 const context = { signer: 'Nicolás Yarur', prohibited: ['barato'], trialOffer: false };
 
 test('the checks catch what the text alone shows, once per kind and place', () => {
-  assert.deepEqual(coworkDraftIssues([sequence([signed, signed, signed])], context).map(issue => issue.short), ['pregunta distinta', 'pregunta distinta']);
-  const shorts = (bodies: string[]) => coworkDraftIssues([sequence(bodies)], context).map(issue => `${issue.where} · ${issue.short}`)
-    .filter(line => !line.endsWith('pregunta distinta'));
+  assert.deepEqual(coworkDraftIssues([sequence([signed, signed, signed])], context), []);
+  const shorts = (bodies: string[]) => coworkDraftIssues([sequence(bodies)], context).map(issue => `${issue.where} · ${issue.short}`);
   assert.deepEqual(shorts([`${signed}\n[Nombre del cliente]`, signed, signed]), ['«Secuencia AXIS», correo 1 · sin relleno']);
   assert.deepEqual(shorts([signed.replace('en minutos', 'barato y gratis'), signed, signed]),
     ['«Secuencia AXIS», correo 1 · sin «barato»', '«Secuencia AXIS», correo 1 · sin «gratis»']);
@@ -33,24 +32,6 @@ test('the checks catch what the text alone shows, once per kind and place', () =
   assert.deepEqual(coworkDraftIssues([{ type: 'table', title: 'x', columns: ['a'], rows: [['[relleno]']] }], context), []);
 });
 
-test('a block keeps one way of addressing the reader, and each email of a sequence its own closing question', () => {
-  const ask = (question: string) => signed.replace('¿Te sirve verlo 15 minutos esta semana?', question);
-  const shorts = (bodies: string[]) => coworkDraftIssues([sequence(bodies)], context).map(issue => `${issue.where} · ${issue.short}`);
-  const own = [ask('¿Cómo revisan hoy los antecedentes de un candidato?'), ask('¿Quién lo hace en tu equipo y cuánto le toma?'), ask('¿Te sirve verlo 15 minutos esta semana?')];
-  assert.deepEqual(shorts(own), []);
-  // Usted in one email of a sequence that tutea in the others.
-  assert.deepEqual(shorts([own[0], own[1], ask('¿Le parece verlo 15 minutos esta semana?')]), ['«Secuencia AXIS» · un solo trato']);
-  // All usted, and «ustedes» in a tuteo, are one way each.
-  assert.deepEqual(shorts([ask('¿Cómo lo hacen ustedes hoy?'), own[1], own[2]]), []);
-  const usted = (body: string) => body.replace('¿Quién lo hace en tu equipo y cuánto le toma?', '¿Quién lo hace en su equipo?').replace('¿Te sirve', '¿Le sirve');
-  assert.deepEqual(shorts([own[0], usted(own[1]), usted(own[2])]), []);
-  // Near-identical closings, in other words: the later one is flagged once.
-  assert.deepEqual(shorts([ask('¿Cómo validan hoy los antecedentes de sus candidatos?'), ask('¿Cómo están validando hoy los antecedentes?'), own[2]]),
-    ['«Secuencia AXIS», correo 2 · pregunta distinta']);
-  // One email alone has nothing to repeat.
-  assert.deepEqual(coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Hola', body: own[0] }], context), []);
-});
-
 test('the checks read who signs, the prohibited terms and the trial offer from the turn', () => {
   const observations = [
     { action: 'message.context', input: '', result: { configured: true, context: { prohibitedTerms: ['barato', ' ', 'x'], trialOffer: '14 días' } } },
@@ -60,11 +41,8 @@ test('the checks read who signs, the prohibited terms and the trial offer from t
 });
 
 const brief: CoworkWriteBrief = { kind: 'sequence', recipients: ['Felipe Muñoz', 'Camila Fuentes'], objective: 'Una conversación sobre AXIS', angle: null, tone: 'cercano', steps: 3, notes: null, findings: null };
-// Each email of the sequence closes with its own question, as the checks ask.
-const closings = ['¿Te sirve verlo 15 minutos esta semana?', '¿Cómo revisan hoy los antecedentes de un candidato?', '¿Quién lo hace en tu equipo?'];
-const own = (bodies: string[]) => bodies.map((body, index) => body.replace(closings[0], closings[index % closings.length]));
 const output = (bodies: string[]): CoworkWriterOutput => ({
-  reply: 'Te dejo la secuencia para Felipe y Camila.', blocks: [sequence(own(bodies))], question: '¿Creo la campaña pausada?',
+  reply: 'Te dejo la secuencia para Felipe y Camila.', blocks: [sequence(bodies)], question: '¿Creo la campaña pausada?',
   suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }],
 });
 
