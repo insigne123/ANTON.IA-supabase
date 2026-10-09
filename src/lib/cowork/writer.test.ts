@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkReviewIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
@@ -30,6 +30,20 @@ test('the checks catch what the text alone shows, once per kind and place', () =
   assert.deepEqual(coworkDraftIssues([{ ...email, body: signed }], { ...context, trialOffer: true }).map(issue => issue.short), ['con su nombre']);
   // Tables and figures are not emails.
   assert.deepEqual(coworkDraftIssues([{ type: 'table', title: 'x', columns: ['a'], rows: [['[relleno]']] }], context), []);
+});
+
+test('a Reviewer issue about a fixed name goes when the email is for one person', () => {
+  const fixedName = { where: '«Seguimiento a Marcela Rojas», correo', problem: 'El saludo usa un nombre fijo, aunque se enviará por separado a cada persona.',
+    fix: 'Usa «Hola {{nombre}},».', short: 'saludo con {{nombre}}' };
+  const other = { where: '«Seguimiento a Marcela Rojas», correo', problem: 'No pide nada concreto.', fix: 'Cierra con una pregunta.', short: 'pregunta concreta' };
+  const one = { type: 'email_draft' as const, title: 'Seguimiento a Marcela Rojas', to: ['mrojas@sodexo.cl'], subject: 'Re: AXIS', body: 'Hola Marcela,' };
+  assert.deepEqual(coworkReviewIssues([fixedName, other], [one]), [other]);
+  // To several people, or in a sequence, the issue stands.
+  assert.deepEqual(coworkReviewIssues([fixedName], [{ ...one, to: ['a@x.cl', 'b@x.cl'] }]), [fixedName]);
+  assert.deepEqual(coworkReviewIssues([fixedName], [sequence([signed])]), [fixedName]);
+  // With several blocks, the one the issue names decides.
+  assert.deepEqual(coworkReviewIssues([fixedName], [one, { ...one, title: 'Correo a Felipe' }]), []);
+  assert.deepEqual(coworkReviewIssues([{ ...fixedName, where: 'correo' }], [one, { ...one, title: 'Correo a Felipe' }]), [{ ...fixedName, where: 'correo' }]);
 });
 
 test('the checks read who signs, the prohibited terms and the trial offer from the turn', () => {

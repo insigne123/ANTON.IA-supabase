@@ -68,7 +68,7 @@ export const COWORK_WRITER_RULES = [
 export const COWORK_REVIEWER_RULES = [
   'Eres la Revisora de Cowork. Lees correos de prospección antes de que el usuario los vea y marcas solo problemas reales; si están bien, verdict es ok e issues va vacío.',
   'Marca: datos inventados (cifras, clientes, resultados, nombres o procesos del destinatario que no están en observations ni en userContext, que trae la oferta, los servicios y las pruebas del perfil del usuario), promesas o garantías sin respaldo, un nombre fijo o un «Hola,» sin nombre en el saludo de un texto que irá a varias personas por separado (debe ser «Hola {{nombre}},»; un correo que el usuario escribió para un grupo que lo recibe junto conserva sus nombres y el plural), un correo que no pide nada concreto, jerga interna o códigos, faltas de ortografía, y un tono que no calza con el encargo.',
-  'No son problemas: las variables {{nombre}}, {{empresa}} y {{cargo}} (la campaña las completa con los datos de cada persona) y el singular en un correo con varios destinatarios o en una secuencia (cada persona lo recibe por separado), ni preferencias de estilo en un texto que ya cumple el encargo.',
+  'No son problemas: el nombre de pila en el saludo de un correo con un solo destinatario en to (va solo a esa persona), las variables {{nombre}}, {{empresa}} y {{cargo}} (la campaña las completa con los datos de cada persona) y el singular en un correo con varios destinatarios o en una secuencia (cada persona lo recibe por separado), ni preferencias de estilo en un texto que ya cumple el encargo.',
   'No reescribas: por cada problema di dónde (título del bloque y correo), qué está mal y cómo corregirlo en una frase, y en short cómo queda una vez corregido, en 2 a 5 palabras en minúscula («sin cifras inventadas», «pregunta más concreta»). Máximo 5 problemas, los más importantes primero.',
 ];
 
@@ -142,6 +142,23 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
   // One issue per kind and place is enough to fix it.
   const seen = new Set<string>();
   return issues.filter(issue => !seen.has(`${issue.where}|${issue.short}`) && seen.add(`${issue.where}|${issue.short}`)).slice(0, 8);
+}
+
+// A Reviewer issue about greeting with a fixed name instead of {{nombre}}.
+const FIXED_NAME_ISSUE = /nombre fijo|\{\{\s*nombre\s*\}\}|variable/i;
+
+/**
+ * The Reviewer's issues without the ones the draft's recipients disprove: an email to one person greets her by name, so «usa un nombre
+ * fijo» there is wrong, and fixing it would break the checks and leave the draft pending. The block is the one the issue names, or the
+ * only one.
+ */
+export function coworkReviewIssues(issues: CoworkDraftIssue[], blocks: CoworkBlock[]): CoworkDraftIssue[] {
+  return issues.filter(issue => {
+    if (!FIXED_NAME_ISSUE.test(`${issue.problem} ${issue.fix}`)) return true;
+    const named = blocks.filter(block => issue.where.includes(block.title));
+    const block = named.length === 1 ? named[0] : blocks.length === 1 ? blocks[0] : null;
+    return !(block?.type === 'email_draft' && block.to?.length === 1);
+  });
 }
 
 /** The Writer's input, as the model reads it. */
@@ -243,7 +260,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
     try {
       const review = await input.generate({ role: 'reviewer', schema: coworkReviewSchema, systemPrompt: COWORK_REVIEWER_RULES.join('\n'),
         prompt: coworkReviewerPrompt({ brief: input.brief, userContext: input.userContext, observations: input.observations, draft: first }) });
-      if (review.verdict === 'fix') issues = review.issues;
+      if (review.verdict === 'fix') issues = coworkReviewIssues(review.issues, coworkWriterBlocks(first));
     } catch {
       await input.step({ agent: 'reviewer', state: 'done', label: 'No alcanzó a revisar', outcome: 'skipped', changes: [] });
       return first;
