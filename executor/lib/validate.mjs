@@ -8,7 +8,7 @@ const MAX_TIMEOUT_MS = 120_000;
 const MIN_TIMEOUT_MS = 5_000;
 const MAX_NAME_LENGTH = 120;
 const MAX_KEY_LENGTH = 128;
-const INPUT_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx']);
+const INPUT_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx', 'docx', 'pptx', 'pdf', 'html', 'css', 'js', 'mjs', 'png', 'svg']);
 const LANGUAGE_PATTERN = /^(python|node)$/;
 const KEY_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 
@@ -26,6 +26,7 @@ export function sanitizeFileName(raw) {
     fail(`Invalid file name: ${name.slice(0, 40)}`);
   }
   if (name.startsWith('.')) fail('Hidden files are not allowed.');
+  if (/^(?:main|launcher)\.(?:py|mjs)$/i.test(name)) fail('Reserved runtime input name.');
   const dot = name.lastIndexOf('.');
   if (dot < 1) fail(`File needs an allowed extension: ${name.slice(0, 40)}`);
   const ext = name.slice(dot + 1).toLowerCase();
