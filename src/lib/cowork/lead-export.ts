@@ -8,7 +8,8 @@ const rowSchema = z.object({ id: z.string().min(1).max(215), name: cell, title: 
   // Why a person of an external search is on the list (search-ranking.ts).
   fit: cell,
 }).strip();
-const resultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().uuid() })).max(20), scope: z.literal('own_saved_contacts') });
+export const COWORK_OBSERVED_CONTACT_MAX = 500;
+const resultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().uuid() })).max(COWORK_OBSERVED_CONTACT_MAX), scope: z.literal('own_saved_contacts') });
 // Up to 100 per search (COWORK_SEARCH_MAX); older results had up to 25.
 const externalResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo:').max(207) })).max(100), scope: z.literal('external_search') });
 const companyResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo-company:').max(215), website: optionalUrl })).max(100), scope: z.literal('external_company_search') });

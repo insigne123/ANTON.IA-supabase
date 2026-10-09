@@ -6,12 +6,12 @@ import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
-import { coworkWithMentions, type CoworkMention } from '@/lib/cowork/mentions';
+import { coworkWithMentions, coworkMessageMentions, type CoworkMention } from '@/lib/cowork/mentions';
 import { coworkEditedMessage, coworkTurnVersions, coworkVersionLeaf, type CoworkFeedback } from '@/lib/cowork/turn-actions';
 import { COWORK_KEY_HANDLERS, coworkIsMac, coworkShortcut, coworkTypesIntoComposer } from '@/lib/cowork/shortcuts';
 import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
-  coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
+  coworkCleanTitle, coworkDisplayMessage, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
   coworkCardStatuses, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
   type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
@@ -33,12 +33,14 @@ import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './Cowork
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
 import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwVariants, m } from './motion';
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
+import { useCoworkQueue } from './useCoworkQueue';
 
 type ThreadState = CoworkTurnData & {
   ancestors?: CoworkTurnData[];
   olderTurnsOmitted?: boolean;
   canCreateDraft?: boolean;
   canResearch?: boolean;
+  canClarify?: boolean;
   budget?: { depth: number; maxDepth: number; exhausted: boolean };
   continuation?: { id: string; status: string } | null;
 };
@@ -113,7 +115,7 @@ function PendingTurn({ text }: { text: string }) {
 }
 
 /** userId scopes the unsent draft; the page passes it from the server session. */
-export function CoworkWorkspace({ userId = null }: { userId?: string | null } = {}) {
+export function CoworkWorkspace({ userId = null, organizationId = null }: { userId?: string | null; organizationId?: string | null } = {}) {
   const [runs, setRuns] = useState<CoworkRun[]>([]);
   // Names the person gave and conversations they deleted (hidden), when the server can keep them (cowork_thread_settings).
   const [threadNames, setThreadNames] = useState<{ available: boolean; titles: Record<string, string> }>({ available: false, titles: {} });
@@ -151,7 +153,6 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const [optimistic, setOptimistic] = useState<{ text: string; runId: string | null } | null>(null);
   /** The turn a new version or an edited message replaces: out of sight while the new one is on its way. */
   const [replacing, setReplacing] = useState<string | null>(null);
-  const [queued, setQueued] = useState<string | null>(null);
   const [awaitingContinuation, setAwaitingContinuation] = useState(false);
   // The worker should resume after an approved action; if it never does, offer the next step instead of a dead end.
   const [continuationMissing, setContinuationMissing] = useState(false);
@@ -166,7 +167,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const isDesktop = useMedia('(min-width: 1024px)');
   const isWide = useMedia('(min-width: 1280px)');
   useEffect(() => { if (isWide) setSummaryOpen(false); }, [isWide]);
-  const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
+  const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode; clarificationOf?: string } | null>(null);
   const composer = useRef<CoworkComposerHandle>(null);
   const listOpener = useRef<HTMLButtonElement>(null);
   const summaryOpener = useRef<HTMLButtonElement>(null);
@@ -184,11 +185,12 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   /** Finished turns whose conversation name the list already went to read. */
   const namedRuns = useRef(new Set<string>());
   const autoOpened = useRef(new Set<string>());
+  const clearQueued = useRef<() => void>(() => {});
   /** A historical turn opened on purpose (an older document version) is not auto-forwarded. */
   const pinnedRun = useRef<string | null>(null);
 
   const clearPrivateResults = useCallback(() => {
-    setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); setQueued(null);
+    setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); clearQueued.current();
   }, []);
   // A failed download or a lost session is told the same way from every card that can be downloaded.
   const exportHandlers = useMemo(() => ({ onError: setError, onAccessDenied: clearPrivateResults }), [clearPrivateResults]);
@@ -413,7 +415,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const restore = () => {
       const id = new URL(window.location.href).searchParams.get('work');
       setSelected(id && UUID.test(id) ? id : null);
-      setState(null); setArtifactId(null); setError(''); setOptimistic(null); setQueued(null); setLiveAnswer(null);
+      setState(null); setArtifactId(null); setError(''); setOptimistic(null); setLiveAnswer(null);
       stickToBottom.current = true;
     };
     restore();
@@ -426,7 +428,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     setWorkUrl(id, 'push');
     setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setSummaryOpen(false); setError(''); setLiveAnswer(null);
     // Attached files belong to the message being written in this conversation.
-    setOptimistic(null); setQueued(null); setShowFiles(false); clearAttachments();
+    setOptimistic(null); setShowFiles(false); clearAttachments();
     stickToBottom.current = true;
     if (!id) requestAnimationFrame(() => composer.current?.focus());
   }, [clearAttachments]);
@@ -461,6 +463,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     }
     return cursor.id;
   }, [runs, selected, turns]);
+  const [queued, setQueued, queuedMeta, bindQueued, acknowledgeQueued] = useCoworkQueue({ userId, organizationId, rootId: selectedRoot });
+  clearQueued.current = () => setQueued(null);
 
   const renameThread = useCallback(async (rootId: string, title: string) => {
     try {
@@ -614,7 +618,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     node.focus({ preventScroll: true });
   }
 
-  async function post(text: string, parentRunId: string | null) {
+  async function post(text: string, parentRunId: string | null, clarificationOf?: string, requestId?: string, frozen = false) {
     // A contact picked from a table travels as a reference the model can use,
     // without showing its ID in the composer or in your message bubble. Contacts
     // picked with «@» travel the same way (V6). References go before the files,
@@ -623,9 +627,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const reference = contactRef.current;
     const mentioned = coworkWithMentions(body, mentions.current);
     const referenced = reference && !mentioned.includes(reference) ? `${mentioned}\n\n(ID del contacto: ${reference})` : mentioned;
-    const outgoing = files.length ? coworkWithAttachments(referenced, files) : referenced;
-    if (pending.current?.message !== outgoing || pending.current?.parentRunId !== parentRunId || pending.current?.mode !== mode) {
-      pending.current = { message: outgoing, requestId: crypto.randomUUID(), parentRunId, mode };
+    const outgoing = frozen ? text : files.length ? coworkWithAttachments(referenced, files) : referenced;
+    const effectiveMode = clarificationOf || frozen ? 'approval' : mode;
+    if (pending.current?.message !== outgoing || pending.current?.parentRunId !== parentRunId || pending.current?.mode !== effectiveMode || pending.current?.clarificationOf !== clarificationOf || (requestId && pending.current?.requestId !== requestId)) {
+      pending.current = { message: outgoing, requestId: requestId || crypto.randomUUID(), parentRunId, mode: effectiveMode, ...(clarificationOf ? { clarificationOf } : {}) };
     }
     setSending(true); setError('');
     // The bubble shows what is sent: mentions as chips, references out of sight.
@@ -637,9 +642,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
         body: JSON.stringify(pending.current),
       });
       pending.current = null;
-      contactRef.current = null;
+      if (!frozen) contactRef.current = null;
       // Mentions picked for a message written meanwhile (a queued one went first) still travel with it.
-      mentions.current = mentions.current.filter(mention => !outgoing.includes(mention.id));
+      if (!frozen) mentions.current = mentions.current.filter(mention => !outgoing.includes(mention.id));
       setOptimistic({ text: outgoing, runId: data.id });
       liveRuns.current.add(data.id);
       if (parentRunId && selected) {
@@ -689,19 +694,29 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const text = coworkWithAttachments(typed, files.map(file => file.name));
     if (!text || sending || !ready || attach.uploading) return;
     // The files leave the box with the message, and come back with the text if it could not be saved.
-    const send = async (parentRunId: string | null) => {
+    const send = async (parentRunId: string | null, clarificationOf?: string) => {
       setMessage(''); attach.clear(); setShowFiles(false);
-      if (await post(text, parentRunId)) return;
+      if (await post(text, parentRunId, clarificationOf)) return;
       setMessage(typed); attach.restore(files);
     };
-    const queue = () => { queuedFiles.current = files; setQueued(text); setMessage(''); attach.clear(); setShowFiles(false); };
+    const queue = () => {
+      if (queued) { setError('Ya hay un mensaje en espera. Puedes editarlo o esperar a que se envíe; conservamos lo que estás escribiendo.'); return; }
+      const named = coworkWithMentions(typed, mentions.current);
+      const referenced = contactRef.current && !named.includes(contactRef.current) ? `${named}\n\n(ID del contacto: ${contactRef.current})` : named;
+      const frozen = coworkWithAttachments(referenced, files.map(file => file.name));
+      if (frozen.length > 20000) { setError('El mensaje con sus referencias es demasiado largo. Acórtalo antes de dejarlo en espera.'); return; }
+      queuedFiles.current = files; setQueued(frozen); contactRef.current = null; mentions.current = []; setMessage(''); attach.clear(); setShowFiles(false);
+    };
     if (!selected) { await send(null); return; }
     if (!latest || !latestIsCurrent) { queue(); return; }
     const status = latest.run.status;
     if (pendingDecision) {
-      // Writing instead of deciding means "no, do this instead".
-      if (!await resolve(false)) return;
-      await send(latest.run.id);
+      // A typed question is not a rejection of the pending work. Replacement is an explicit action of the queue.
+      if (state?.canClarify && (/[?¿]/.test(typed) || /^(?:cu[aá]nto|c[oó]mo|por qu[eé]|qu[eé] (?:pasa|har[aá]|incluye)|expl[ií]came)\b/i.test(typed))) {
+        await send(latest.run.id, latest.run.id);
+        return;
+      }
+      queue();
       return;
     }
     if (busy) { queue(); return; }
@@ -710,12 +725,11 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
 
   // Send a message written while the previous step was still running.
   useEffect(() => {
-    if (!queued || sending || !latest || !latestIsCurrent || busy || isCoworkActive(latest.run.status)) return;
-    const text = queued;
-    setQueued(null);
-    // A message that could not be saved goes back to the box instead of vanishing.
-    void post(text, latest.run.status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null))
-      .then(sent => { if (!sent) setMessage(current => current.trim() ? current : text); });
+    if (!queued || !queuedMeta || queuedMeta.entry.state === 'failed' || sending || !latest || !latestIsCurrent || busy || isCoworkActive(latest.run.status)) return;
+    const bound = bindQueued(queuedMeta, latest.run.status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null));
+    // Keep the frozen message and its admission identity until acknowledgement, including across reloads.
+    void post(bound.entry.text, bound.entry.parentRunId!, undefined, bound.entry.requestId, true)
+      .then(sent => acknowledgeQueued(bound, sent));
     // post is recreated each render; the queue only reacts to state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queued, sending, latest, latestIsCurrent, busy]);
@@ -726,11 +740,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   useEffect(() => { if (!optimistic) setReplacing(null); }, [optimistic]);
 
   async function sendQueuedNow() {
-    if (!queued || !latest || !pendingDecision) return;
-    const text = queued;
-    if (!await resolve(false)) return;
-    setQueued(null);
-    if (!await post(text, latest.run.id)) setMessage(current => current.trim() ? current : text);
+    if (!queued || !queuedMeta || !latest || sending) return;
+    if (pendingDecision && !await resolve(false)) return;
+    const bound = bindQueued(queuedMeta, latest.run.status === 'completed' || pendingDecision ? latest.run.id : latest.run.parent_run_id ?? null);
+    acknowledgeQueued(bound, await post(bound.entry.text, bound.entry.parentRunId!, undefined, bound.entry.requestId, true));
   }
 
   /**
@@ -803,11 +816,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const row = rows.find(item => item.id === leadId);
     const who = row?.name ? `${row.name}${row.company ? ` (${row.company})` : ''}` : 'este contacto guardado';
     contactRef.current = leadId;
+    if (!isDesktop) { setArtifactId(null); setMaximized(false); }
     setMessage(`Consulta la ficha de ${who} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`);
     requestAnimationFrame(() => composer.current?.focus());
   }
 
   function applySuggestion(prompt: string) {
+    if (!isDesktop) { setArtifactId(null); setMaximized(false); }
     setMessage(prompt);
     requestAnimationFrame(() => {
       composer.current?.focus();
@@ -950,6 +965,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
                 onEdit={index === shownTurns.length - 1 && canEdit ? editLatest : null}
                 onRegenerate={index === shownTurns.length - 1 && canRegenerate ? regenerate : null}
                 onFeedback={feedback => sendFeedback(turn.run.id, feedback)} />)}
+              {latest?.run.clarificationOf && <div className="flex flex-wrap items-center gap-2 text-[13px] text-cw-muted">
+                <p>La propuesta original sigue esperando tu decisión.</p>
+                <CwButton size="sm" variant="secondary" onClick={() => choose(latest.run.clarificationOf!, { pin: true })}>Ver propuesta</CwButton>
+              </div>}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
                   onClick={() => { setContinuationMissing(false); void post(CONTINUE_PROMPT, latest.run.id); }}>
@@ -986,13 +1005,17 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
                 canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
                 {...fileProps('cowork-followup')}
                 queued={queued ? {
-                  text: queuedView ? queuedView.text || `Archivos: ${queuedView.files.join(', ')}` : queued,
-                  note: pendingDecision ? 'Se enviará cuando resuelvas la propuesta' : 'Se enviará cuando termine este paso',
+                  text: coworkDisplayMessage(queuedView ? queuedView.text || `Archivos: ${queuedView.files.join(', ')}` : queued),
+                  note: queuedMeta?.entry.state === 'failed' ? 'No se confirmó la solicitud. Reintenta conservando el mismo mensaje.'
+                    : pendingDecision ? 'Se enviará cuando resuelvas la propuesta' : 'Se enviará cuando termine este paso',
                   onCancel: () => {
-                    setMessage(queuedView?.text ?? queued); attach.restore(queuedFiles.current); queuedFiles.current = []; setQueued(null);
+                    mentions.current = coworkMessageMentions(queued);
+                    contactRef.current = /\(ID del contacto: ([0-9a-f-]{36})\)/i.exec(queued)?.[1] ?? null;
+                    setMessage(coworkDisplayMessage(queuedView?.text ?? queued)); attach.restore(queuedFiles.current); queuedFiles.current = []; setQueued(null);
                     requestAnimationFrame(() => composer.current?.focus());
                   },
-                  onSendNow: pendingDecision ? () => void sendQueuedNow() : null,
+                  onSendNow: pendingDecision || queuedMeta?.entry.state === 'failed' ? () => void sendQueuedNow() : null,
+                  sendNowLabel: pendingDecision ? 'Reemplazar propuesta' : 'Reintentar mensaje',
                 } : null}
                 footnote="ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla." />
             </div>

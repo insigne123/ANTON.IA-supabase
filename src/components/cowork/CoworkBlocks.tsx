@@ -5,7 +5,7 @@ import { BadgeCheck, ChartColumn, Check, ChevronRight, Copy, ListOrdered, Mail, 
 import type { CoworkBlock } from '@/lib/cowork/contracts';
 import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
-  coworkBlockMeta, coworkBlockWithSteps, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableTsv, coworkVersionMessage,
+  coworkBlockMeta, coworkBlockWithSteps, coworkDraftSteps, coworkEffectiveDraft, coworkEmailText, coworkSequenceText, coworkTableTsv, coworkVersionMessage,
   coworkFigureNumber, coworkWordDiff, coworkChartHeadline, coworkChartRows, coworkChartSummary, coworkChartValue, type CoworkEditedEmail,
 } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
@@ -151,16 +151,18 @@ const EDITED_STATUS: CoworkCardStatus = { label: 'Editado por ti · no se ha env
 const DRAFT_EDIT_EVENT = 'cowork:draft-edit';
 
 /** Whether this card's text was edited in the panel; the edit lives in this tab only. */
-function useEditedHere(key: string) {
-  const [edited, setEdited] = useState(false);
+function useEffectiveBlock(artifact: BlockArtifact) {
+  const key = `cowork:draft:${artifact.id}`;
+  const [block, setBlock] = useState(artifact.block);
   useEffect(() => {
-    const read = () => { try { setEdited(sessionStorage.getItem(key) !== null); } catch { setEdited(false); } };
+    const read = () => setBlock(artifact.block.type === 'email_draft' || artifact.block.type === 'sequence'
+      ? savedDraft(artifact.block, artifact.id) : artifact.block);
     read();
     const changed = (event: Event) => { if ((event as CustomEvent<string>).detail === key) read(); };
     window.addEventListener(DRAFT_EDIT_EVENT, changed);
     return () => window.removeEventListener(DRAFT_EDIT_EVENT, changed);
-  }, [key]);
-  return edited;
+  }, [key, artifact.block, artifact.id]);
+  return block;
 }
 
 /** Where the card stands, at the end of its actions: a draft nobody sent, your edit, or what a
@@ -223,8 +225,8 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
   /** How the Reviewer left this turn's emails (coworkDraftReview); null when nobody reviewed them. */
   review?: CoworkDraftReview | null;
 }) {
-  const { block } = artifact;
-  const editedHere = useEditedHere(`cowork:draft:${artifact.id}`);
+  const block = useEffectiveBlock(artifact);
+  const editedHere = JSON.stringify(block) !== JSON.stringify(artifact.block);
   const draftStatus = status || (editedHere ? EDITED_STATUS : DRAFT_STATUS);
   const open = (event: MouseEvent<HTMLButtonElement>) => onOpen(artifact, event.currentTarget);
   const openButton = <CwButton size="xs" variant="ghost" onClick={open}><ChevronRight aria-hidden="true" />Abrir</CwButton>;
@@ -320,7 +322,7 @@ function EmailBody({ subject, body, to, before = null }: { subject: string; body
         <p className="text-[12px] font-medium text-cw-muted">Asunto</p>
         <CopyButton text={subject} label="Copiar asunto" />
       </div>
-      <p className="text-[15px] font-semibold text-cw-text"><Marked text={subject} before={before?.subject ?? null} /></p>
+      <p className="text-[15px] font-semibold text-cw-text"><Marked text={subject || 'Sin asunto · agrégalo al editar'} before={before?.subject ?? null} /></p>
     </div>
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
@@ -341,16 +343,18 @@ function useSessionSteps(key: string, original: CoworkEditedEmail[]) {
   useEffect(() => {
     try {
       const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
-      const fits = Array.isArray(saved) && saved.length === original.length
-        && saved.every(step => step && typeof step.subject === 'string' && typeof step.body === 'string');
-      setSteps(fits ? saved.map((step: CoworkEditedEmail, index: number) => ({ ...original[index], subject: step.subject, body: step.body })) : original);
+      const fits = saved?.base === JSON.stringify(original) && Array.isArray(saved.steps) && saved.steps.length === original.length
+        && saved.steps.every((step: CoworkEditedEmail) => step && typeof step.subject === 'string' && typeof step.body === 'string');
+      const legacy = Array.isArray(saved) && saved.length === original.length && saved.every(step => step && typeof step.subject === 'string' && typeof step.body === 'string');
+      const values = fits ? saved.steps : legacy ? saved : original;
+      setSteps(values.map((step: CoworkEditedEmail, index: number) => ({ ...original[index], subject: step.subject, body: step.body })));
     } catch { setSteps(original); }
   }, [key, original]);
   const save = (next: CoworkEditedEmail[]) => {
     setSteps(next);
     try {
       if (JSON.stringify(next) === JSON.stringify(original)) sessionStorage.removeItem(key);
-      else sessionStorage.setItem(key, JSON.stringify(next));
+      else sessionStorage.setItem(key, JSON.stringify({ base: JSON.stringify(original), steps: next }));
     } catch { /* The edit still works for as long as the panel is open. */ }
     // The card in the chat says «Editado por ti» while the edit is kept.
     window.dispatchEvent(new CustomEvent(DRAFT_EDIT_EVENT, { detail: key }));
@@ -362,10 +366,7 @@ function useSessionSteps(key: string, original: CoworkEditedEmail[]) {
 function savedDraft(block: Extract<CoworkBlock, { type: 'email_draft' | 'sequence' }>, artifactId: string) {
   try {
     const saved = JSON.parse(sessionStorage.getItem(`cowork:draft:${artifactId}`) || 'null');
-    const original = coworkDraftSteps(block);
-    if (Array.isArray(saved) && saved.length === original.length && saved.every(step => step && typeof step.subject === 'string' && typeof step.body === 'string')) {
-      return coworkBlockWithSteps(block, saved.map((step, index) => ({ ...original[index], subject: step.subject, body: step.body })));
-    }
+    return coworkEffectiveDraft(block, saved);
   } catch { /* As Cowork wrote it. */ }
   return block;
 }
@@ -413,7 +414,7 @@ function DraftView({ block, draftKey, onSend, sendHint }: {
   const edited = JSON.stringify(steps) !== JSON.stringify(original);
   const complete = steps.every(step => step.subject.trim() && step.body.trim());
   const text = block.type === 'email_draft' ? coworkEmailText(steps[0]) : coworkSequenceText({ ...block, steps: steps.map((step, index) => ({ ...step, day: step.day ?? index + 1 })) });
-  const send = (intent: 'use' | 'campaign') => onSend?.(coworkVersionMessage(block, steps.map(step => ({ ...step, subject: step.subject.trim(), body: step.body.trim() })), intent, edited));
+  const send = (intent: 'use' | 'campaign') => onSend?.(coworkVersionMessage(block, steps.map(step => ({ ...step, subject: step.subject.trim(), body: step.body.trim() })), intent, edited, draftKey.replace(/^cowork:draft:/, '')));
   const update = (index: number, step: CoworkEditedEmail) => setSteps(steps.map((item, at) => at === index ? step : item));
   const sequence = block.type === 'sequence';
 

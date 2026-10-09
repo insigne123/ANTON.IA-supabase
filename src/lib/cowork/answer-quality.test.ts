@@ -260,7 +260,8 @@ test('a Markdown table in the reply becomes the table card, or goes when the car
   const card = { type: 'table' as const, title: 'Pendientes de hoy', columns: ['Orden', 'Quién'], rows: [['1', 'Marcela Rojas']] };
   const twice = withTablesAsBlocks(reply, [card]);
   assert.equal(twice.reply, 'Hoy hay 2 pendientes.\n\n¿Te preparo las respuestas?');
-  assert.deepEqual(twice.blocks, [card]);
+   assert.deepEqual(twice.blocks, [card, made.blocks[0]], 'different columns/rows are distinct results');
+   assert.deepEqual(withTablesAsBlocks(reply, made.blocks).blocks, made.blocks, 'only an identical table is removed');
   // Without a table, or inside code, nothing changes.
   assert.deepEqual(withTablesAsBlocks('Sin tabla | aquí.', []), { reply: 'Sin tabla | aquí.', blocks: [] });
   const code = '```\n| a | b |\n|---|---|\n| 1 | 2 |\n```';
@@ -269,6 +270,15 @@ test('a Markdown table in the reply becomes the table card, or goes when the car
   const polished = polishCoworkAnswer({ reply, document: null, question: '¿Te preparo las respuestas?' });
   assert.equal(polished.blocks?.[0]?.type, 'table');
   assert.doesNotMatch(polished.reply, /\|/);
+});
+
+test('tables preserve bounded rows and columns for export; excess Markdown stays visible', () => {
+  const table = { type: 'table' as const, title: 'Completa', columns: Array.from({ length: 12 }, (_, i) => `Col ${i}`),
+    rows: Array.from({ length: 120 }, (_, i) => Array.from({ length: 12 }, (_, j) => `${i}:${j}`)) };
+  assert.deepEqual(coworkBlocks([table]), [table]);
+  const markdown = '| Nombre |\n|---|\n| Ana |';
+  const full = Array.from({ length: 4 }, (_, i) => ({ ...table, title: `${i}` }));
+  assert.equal(withTablesAsBlocks(markdown, full).reply, markdown);
 });
 
 test('with `always`, the aside goes whoever it names (the turn read today\'s agenda)', () => {

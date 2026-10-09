@@ -41,7 +41,7 @@ const MAX_RECIPIENTS = 100;
 const SEND_BATCHES_PER_CLICK = 4;
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
-export function BulkCampaignWorkspace() {
+export function BulkCampaignWorkspace({ initialCampaignId }: { initialCampaignId?: string } = {}) {
   const confirm = useConfirm();
   const [items, setItems] = useState<BulkCampaign[]>([]);
   const [editing, setEditing] = useState(false);
@@ -107,7 +107,7 @@ export function BulkCampaignWorkspace() {
     finally { setBusy(false); }
   }
   const refresh = async () => { const result = await request(''); setItems(result.campaigns); setAutomationEnabled(result.automationEnabled === true); };
-  useEffect(() => { void run(refresh); }, []);
+  useEffect(() => { void run(async () => { await refresh(); if (initialCampaignId) await open(initialCampaignId); }); }, [initialCampaignId]);
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => { if (dirty || busy || individual) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', guard);

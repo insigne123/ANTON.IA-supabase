@@ -101,15 +101,18 @@ try {
   await waitFor(() => new URL(window.location.href).searchParams.get('work') === C, 'follow the new turn');
   await waitFor(() => wakes > 0, 'worker woken');
 
-  // 4. Writing instead of approving discards the proposal, then sends the new instruction.
+  // 4. Writing preserves a pending proposal; replacement is explicit.
   world.runs[C].status = 'waiting_approval';
   world.events[C].push({ sequence: 1, kind: 'approval.requested', payload: { action: 'cowork.effect', kind: 'enrich_contact', targetId: A, label: 'Enriquecer contacto Paula Herrera (LogiSur)' }, created_at: at });
   await waitFor(() => text().includes('Necesita tu aprobación'), 'approval card');
   type('Mejor investígala primero');
   await waitFor(() => !window.document.querySelector('[aria-label="Enviar mensaje"]').disabled, 'send enabled for change');
   send();
+  await waitFor(() => text().includes('Reemplazar propuesta'), 'explicit replacement');
+  assert.equal(posts.length, 1, 'typing does not discard the existing proposal');
+  [...window.document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Reemplazar propuesta').click();
   await waitFor(() => posts.length === 3, 'discard then follow-up');
   assert.deepEqual(posts[1], { approval: C, approve: false });
   assert.deepEqual({ message: posts[2].message, parentRunId: posts[2].parentRunId }, { message: 'Mejor investígala primero', parentRunId: C });
-  console.log('PASS: follows continuations, hides synthetic prompts, queues messages while working, writing replaces a pending proposal, wakes the worker.');
+  console.log('PASS: follows continuations, hides synthetic prompts, queues messages, preserves pending proposals until explicit replacement, wakes the worker.');
 } finally { window.close(); }

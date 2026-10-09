@@ -190,12 +190,14 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
     : state === 'approved' ? (search ? 'Búsqueda aprobada' : `Aprobado: ${proposal.title}`)
       : state === 'running' ? (search ? 'Buscando en el proveedor…' : `Ejecutando: ${proposal.title}`)
         : state === 'done' ? (search ? 'Búsqueda realizada' : `Aprobaste: ${proposal.title}`)
-          : state === 'discarded' ? `Descartaste: ${proposal.title}` : `No se pudo completar: ${proposal.title}`;
+          : state === 'uncertain' ? `Resultado sin confirmar: ${proposal.title}`
+            : state === 'discarded' ? `Descartaste: ${proposal.title}` : `No se pudo completar: ${proposal.title}`;
   const detail = state === 'approved' ? (search ? 'La búsqueda está aprobada y espera su turno. Puedes cerrar esta pestaña y volver después.'
     : 'La acción está aprobada y en cola. Puedes cerrar esta pestaña y volver después.')
     : state === 'running' ? (search ? 'La búsqueda está en curso. Puedes cerrar esta pestaña y volver después.'
       : 'La acción está en curso. Puedes cerrar esta pestaña y volver después.')
-      : state === 'discarded' ? 'No se ejecutó ningún cambio.' : '';
+      : state === 'uncertain' ? 'No tenemos una confirmación del resultado. Compruébalo en su destino antes de repetir la acción.'
+        : state === 'discarded' ? 'No se ejecutó ningún cambio.' : '';
 
   const kind = String(proposal.payload.kind || '');
   const approve = () => onResolve(true);
@@ -227,7 +229,8 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
   }
 
   const icon = state === 'done' ? <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cw-success-soft text-cw-success"><Check className="h-4 w-4" strokeWidth={2.5} /></span>
-    : state === 'failed' ? <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cw-danger-soft text-cw-danger"><TriangleAlert className="h-4 w-4" /></span>
+    : state === 'uncertain' ? <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cw-warning-soft text-cw-warning"><TriangleAlert className="h-4 w-4" /></span>
+      : state === 'failed' ? <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cw-danger-soft text-cw-danger"><TriangleAlert className="h-4 w-4" /></span>
       : folded ? <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cw-panel text-cw-muted"><CircleSlash className="h-4 w-4" /></span>
         : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cw-accent-soft text-cw-accent"><CoworkIcon name={proposal.icon} className="h-4 w-4" /></span>;
 
