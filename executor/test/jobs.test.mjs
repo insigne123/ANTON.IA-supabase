@@ -31,3 +31,17 @@ test('durable admission deduplicates retries; cancellation rejects late output a
     assert.deepEqual(stopped, ['cowork-old']); assert.equal((await restarted.inspect('job-restart-1')).status, 'interrupted');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('a stop that cannot be confirmed blocks new compute, including after another restart', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cw-stop-'));
+  try {
+    const store = createResultStore({ dir }); await store.init();
+    await store.set('job-uncertain-1', { requestHash: 'h', job: { id: 'job-uncertain-1', generation: 'old', status: 'running', container: 'cowork-old', requestHash: 'h' } });
+    const manager = createJobManager({ store, stop: async () => { throw new Error('Docker unavailable'); }, run: async () => assert.fail('unknown writers cannot overlap') });
+    await manager.init(); assert.equal(manager.busy(), true);
+    await assert.rejects(manager.admit({ idempotencyKey: 'job-other-123', language: 'node', code: 'x' }), /busy/);
+    const restarted = createJobManager({ store, stop: async () => {}, run: async () => {} });
+    await restarted.init(); assert.equal(restarted.busy(), false);
+    assert.equal((await restarted.inspect('job-uncertain-1')).status, 'interrupted');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
