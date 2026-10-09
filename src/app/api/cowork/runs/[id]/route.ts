@@ -18,7 +18,7 @@ export async function GET(_req: NextRequest, context: Context) {
     // an approved effect or search). The workspace follows it automatically.
     const continuation = state && !['queued', 'running', 'waiting_approval', 'waiting_workers'].includes(String(state.run.status))
       ? await getCoworkContinuation(auth, id).catch(() => null) : null;
-    return NextResponse.json(state ? { ...state, continuation, canResearch: process.env.COWORK_RESEARCH_ENABLED === 'true', canCreateDraft: process.env.COWORK_NATIVE_DRAFTS_ENABLED === 'true' } : { error: 'Trabajo no encontrado.' }, { status: state ? 200 : 404, headers });
+    return NextResponse.json(state ? { ...state, continuation, canClarify: process.env.COWORK_CLARIFICATIONS_ENABLED === 'true', canResearch: process.env.COWORK_RESEARCH_ENABLED === 'true', canCreateDraft: process.env.COWORK_NATIVE_DRAFTS_ENABLED === 'true' } : { error: 'Trabajo no encontrado.' }, { status: state ? 200 : 404, headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     return NextResponse.json({ error: 'No se pudo consultar el trabajo.' }, { status: error instanceof ZodError ? 400 : 503, headers });

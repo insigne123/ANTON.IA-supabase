@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { coworkTaskPlanSchema, type CoworkActiveTask, type CoworkTaskCost } from '@/lib/cowork/task-plan';
 import { coworkRunIsAutomatic } from './runs';
+import { coworkTaskGraph } from '@/lib/cowork/task-graph';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -70,7 +71,18 @@ export async function loadCoworkActiveTask(client: SupabaseClient, scope: Scope,
       if (startedAt === null || (clock.now ?? Date.now()) - startedAt > ttl) return null;
       const steps = (await Promise.all(visited.map(id => coworkTaskRunEvents(client, scope, id, COWORK_TASK_EVENTS.step)))).flat();
       const sum = (key: 'searches' | 'credits') => steps.reduce((total, payload) => total + (Number(payload[key]) || 0), 0);
-      return { startRunId: run.id, startDepth: run.depth || 0, plan: plan.data, used: { steps: steps.length, searches: sum('searches'), credits: sum('credits') } };
+      let graph, deliveryEvents;
+      if (process.env.COWORK_TASK_GRAPH_ENABLED === 'true') {
+        const events = await Promise.all([...visited].reverse().map(async id => {
+          const found = await client.from('cowork_run_events').select('kind,payload').eq('run_id', id)
+            .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).order('sequence', { ascending: true }).limit(200);
+          if (found.error) throw new Error('No se pudieron recuperar los entregables de la tarea.');
+          return (found.data || []).map(event => ({ runId: id, kind: String(event.kind), payload: event.payload as Record<string, unknown> }));
+        }));
+        deliveryEvents = events.flat();
+        graph = coworkTaskGraph(run.id, plan.data, deliveryEvents);
+      }
+      return { startRunId: run.id, startDepth: run.depth || 0, plan: plan.data, used: { steps: steps.length, searches: sum('searches'), credits: sum('credits') }, ...(graph ? { graph, deliveryEvents } : {}) };
     }
     if (!coworkRunIsAutomatic(run)) return null;
     visited.push(run.id);
@@ -80,7 +92,7 @@ export async function loadCoworkActiveTask(client: SupabaseClient, scope: Scope,
 }
 
 /** A step the task approved by itself, with what it spent: the next turns count it against the plan's limits. */
-export async function recordCoworkTaskStep(client: SupabaseClient, scope: Scope, runId: string, step: { kind: string } & CoworkTaskCost) {
+export async function recordCoworkTaskStep(client: SupabaseClient, scope: Scope, runId: string, step: { kind: string; stepId?: string; targets?: string[] } & CoworkTaskCost) {
   const recorded = await client.from('cowork_run_events').insert({
     run_id: runId, user_id: scope.userId, organization_id: scope.organizationId,
     kind: COWORK_TASK_EVENTS.step, payload: step,

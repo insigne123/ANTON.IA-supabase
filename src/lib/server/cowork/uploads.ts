@@ -18,7 +18,7 @@ export async function listCoworkUploads(client: SupabaseClient, scope: { userId:
     const { data: files, error: runError } = await client.storage.from(COWORK_UPLOAD_BUCKET).list(`${root}/${run.name}`, { limit: 50 });
     if (runError) continue;
     for (const file of files || []) {
-      if (!file.name) continue;
+      if (!file.name || file.name === 'frozen') continue;
       uploads.set(file.name, [...(uploads.get(file.name) || []),
         { runId: run.name, size: Number(file.metadata?.size || 0), updatedAt: String(file.updated_at || file.created_at || '') }]);
     }

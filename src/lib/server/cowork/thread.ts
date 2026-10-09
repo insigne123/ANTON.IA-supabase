@@ -16,7 +16,7 @@ export async function getCoworkThread(auth: AuthContext, id: string) {
     // Fail closed rather than revealing a partially unauthorized thread.
     if (!parent) throw new Error('Thread context unavailable');
     ancestors.unshift(parent);
-    cursor = parent.run.parent_run_id;
+    cursor = parent.run.parent_run_id ?? null;
   }
   // Fase 1 (CW-06): surface the automatic-chain budget so the UI can explain
   // why a thread stopped chaining on its own.

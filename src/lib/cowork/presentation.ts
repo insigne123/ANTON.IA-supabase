@@ -675,7 +675,11 @@ export function coworkTurnProgress(run: Pick<CoworkRun, 'status' | 'automatic'>,
     }
   }
   if (run.status === 'failed') steps.push({ key: 'result', label: 'No se pudo completar', state: 'error' });
-  if (run.status === 'cancelled') steps.push({ key: 'result', label: 'Lo detuviste', state: 'skipped' });
+  if (run.status === 'cancelled') {
+    const computePending = events.some(event => event.kind === 'build.cancel_requested') && !events.some(event => event.kind === 'build.cancelled');
+    steps.push({ key: 'result', label: computePending ? 'Cierre del cómputo solicitado' : 'Lo detuviste', state: 'skipped',
+      ...(computePending ? { detail: 'El trabajo no publicará resultados; falta confirmar que el entorno dejó de ejecutar.' } : {}) });
+  }
   return steps;
 }
 

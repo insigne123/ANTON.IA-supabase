@@ -1,0 +1,46 @@
+// Isolated actual Postgres function execution; never loads environments or accesses remote databases.
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+const require = createRequire(import.meta.url);
+if (!process.env.PGLITE_MODULE) throw new Error('Explicit PGLITE_MODULE required');
+const { PGlite } = require(process.env.PGLITE_MODULE);
+const db = new PGlite();
+const user='00000000-0000-4000-8000-000000000001',org='00000000-0000-4000-8000-000000000002',id='00000000-0000-4000-8000-000000000003';
+try {
+  await db.exec(`create role anon;create role authenticated;create role service_role;create schema auth;
+    create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
+    create table public.organization_members(user_id uuid,organization_id uuid);
+    create table public.cowork_access_grants(user_id uuid,enabled boolean);
+    create table public.cowork_runs(id uuid primary key,user_id uuid,organization_id uuid,status text,updated_at timestamptz default now());
+    create table public.cowork_effect_proposals(run_id uuid primary key,user_id uuid,organization_id uuid,kind text,label text,status text,result jsonb,error_code text,updated_at timestamptz default now());
+    create table public.cowork_run_events(sequence bigserial,run_id uuid,user_id uuid,organization_id uuid,kind text,payload jsonb);
+    create function public.cowork_open_access(email text) returns boolean language sql as $$select email='owner@example.test'$$;
+    insert into auth.users values('${user}','owner@example.test',now());insert into public.organization_members values('${user}','${org}');insert into public.cowork_access_grants values('${user}',true);
+    insert into public.cowork_runs values('${id}','${user}','${org}','waiting_approval',now());
+    insert into public.cowork_effect_proposals(run_id,user_id,organization_id,kind,label,status) values('${id}','${user}','${org}','code_execute','Build','executing');`);
+  const source=readFileSync('supabase/migrations/20260930020000_cowork_access_policy.sql','utf8');
+  const legacy=source.match(/create or replace function public\.cowork_finish_effect\([\s\S]*?\$\$;/)?.[0];
+  assert.ok(legacy);await db.exec(legacy);
+  await db.exec(readFileSync('supabase/migrations/20261009093000_cowork_code_attempt_fencing.sql','utf8'));
+  const attempt=async()=> (await db.query('select updated_at::text as at from public.cowork_effect_proposals')).rows[0].at;
+  const call=async(fn,args)=> (await db.query(`select public.${fn}(${args.map((_,i)=>'$'+(i+1)).join(',')}) as ok`,args)).rows[0].ok;
+  const first=await attempt();
+  assert.equal(await call('cowork_mark_code_dispatch',[id,user,org,first,`cowork-code-${id}`,'a'.repeat(64)]),true);
+  assert.equal(await call('cowork_mark_code_dispatch',[id,user,org,first,`cowork-code-${id}`,'a'.repeat(64)]),false,'dispatch marker blocks replay after remote expiry');
+  assert.equal(await call('cowork_requeue_code_effect',[id,user,org,first]),true);
+  await db.exec("update public.cowork_effect_proposals set status='executing',updated_at=clock_timestamp()+interval '1 microsecond'");
+  const second=await attempt();
+  const finish=at=>call('cowork_finish_code_effect',[id,user,org,at,true,'Files ready',JSON.stringify({files:[{name:'report.pdf',size:12}]})]);
+  assert.equal(await finish(first),false,'old attempt cannot publish after recovery');
+  await db.exec('update public.cowork_access_grants set enabled=false');assert.equal(await finish(second),false,'revocation prevents publication');
+  await db.exec('update public.cowork_access_grants set enabled=true');
+  await db.exec("update public.cowork_runs set status='cancelled'");assert.equal(await finish(second),false,'cancelled parent cannot revive');
+  await db.exec("update public.cowork_runs set status='waiting_approval'");
+  assert.equal(await finish(second),true);assert.equal(await finish(second),false,'only one terminal publish');
+  const events=(await db.query("select kind,payload from public.cowork_run_events where kind='effect.completed'")).rows;
+  assert.equal(events.length,1);assert.equal(events[0].payload.result.files[0].name,'report.pdf');
+  const privileges=(await db.query("select has_function_privilege('authenticated','public.cowork_finish_code_effect(uuid,uuid,uuid,timestamptz,boolean,text,jsonb)','EXECUTE') as client,has_function_privilege('service_role','public.cowork_finish_code_effect(uuid,uuid,uuid,timestamptz,boolean,text,jsonb)','EXECUTE') as worker")).rows[0];
+  assert.deepEqual(privileges,{client:false,worker:true});
+  console.log('PASS: actual finish/requeue/dispatch SQL, stale attempt, revocation, cancellation, atomic manifest and service-only grants. No production writes.');
+} finally {await db.close();}
