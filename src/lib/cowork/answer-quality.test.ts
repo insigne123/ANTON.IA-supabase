@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutCaveats } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutRepeatedOffer, withoutCaveats } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -285,4 +285,32 @@ test('the reply drops what it avoided supposing, and keeps the rest of the sente
   // A line that is only the clause, and replies without one, stay as they are.
   assert.equal(withoutCaveats('Sin asumir nada.'), 'Sin asumir nada.');
   assert.equal(withoutCaveats('Le escribí a Marcela sin respuesta registrada.'), 'Le escribí a Marcela sin respuesta registrada.');
+});
+
+test('the reply does not offer again what the closing question offers', () => {
+  const question = '¿Creo la campaña pausada para Marcela, Felipe y Camila?';
+  assert.equal(withoutRepeatedOffer('El correo va a Marcela, Felipe y Camila. Puedo crear la campaña pausada para estos tres contactos.', question),
+    'El correo va a Marcela, Felipe y Camila.');
+  // After «;» or «así que», only the offering clause goes; a closing question already in the reply stays.
+  assert.equal(withoutRepeatedOffer('Revisé tus campañas: 4 tienen correo; puedo preparar una primera campaña para ellos y dejarla pausada.\n\n¿Te preparo una primera campaña pausada para tus 4 contactos con correo?',
+    '¿Te preparo una primera campaña pausada para tus 4 contactos con correo?'),
+    'Revisé tus campañas: 4 tienen correo.\n\n¿Te preparo una primera campaña pausada para tus 4 contactos con correo?');
+  // A recommendation («conviene…») is the answer, not an offer; nor does an offer go when what follows leans on it.
+  const advice = 'El correo fue el 19 sep; no muestra respuesta, así que conviene preparar un seguimiento. Solo veo lo registrado en ANTON.IA.';
+  assert.equal(withoutRepeatedOffer(advice, '¿Te preparo un seguimiento para Marcela Rojas?'), advice);
+  const leaning = 'Podemos partir preparando un primer correo para los 4 contactos; después, si te sirve, se deja una campaña pausada.';
+  assert.equal(withoutRepeatedOffer(leaning, '¿Partimos preparando un primer correo para tus 4 contactos?'), leaning);
+  assert.equal(withoutRepeatedOffer('Con un solo envío no se puede evaluar; el próximo paso es preparar un seguimiento para Marcela.', '¿Te preparo un seguimiento para Marcela Rojas?'),
+    'Con un solo envío no se puede evaluar.');
+  assert.equal(withoutRepeatedOffer('No va dirigida a contactos específicos, así que puedo usarla en una campaña pausada para tus contactos de RR. HH. con correo.',
+    '¿La uso en una campaña pausada para tus contactos de RR. HH. con correo?'), 'No va dirigida a contactos específicos.');
+  const dangling = 'Esta guía también está en la portada. Puedo preparar una campaña pausada para tus 4 contactos con correo; nada se envía hasta que la actives.';
+  assert.equal(withoutRepeatedOffer(dangling, '¿Preparo la campaña pausada para tus 4 contactos con correo?'), dangling);
+  assert.equal(withoutRepeatedOffer('Revisé tus envíos. Puedo dejar una campaña pausada para Felipe y Camila; nada se envía hasta que actives la campaña.',
+    '¿Dejo la campaña pausada para Felipe y Camila?'), 'Revisé tus envíos. Nada se envía hasta que actives la campaña.');
+  // What the question does not cover stays: another person, another step, or the whole reply.
+  assert.equal(withoutRepeatedOffer('Te conviene dejar pausada la campaña y preparar aparte el seguimiento de Marcela.', '¿Preparo la campaña pausada para Felipe?'),
+    'Te conviene dejar pausada la campaña y preparar aparte el seguimiento de Marcela.');
+  assert.equal(withoutRepeatedOffer('Marcela abrió tu correo. Puedo buscar su teléfono.', question), 'Marcela abrió tu correo. Puedo buscar su teléfono.');
+  assert.equal(withoutRepeatedOffer('Puedo crear la campaña pausada para estos tres contactos.', question), 'Puedo crear la campaña pausada para estos tres contactos.');
 });
