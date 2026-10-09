@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutCaveats } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -274,4 +274,15 @@ test('a Markdown table in the reply becomes the table card, or goes when the car
 test('with `always`, the aside goes whoever it names (the turn read today\'s agenda)', () => {
   assert.equal(withoutRepeatedAside('Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.', '', true), 'Responde hoy a Marcela Rojas.');
   assert.equal(withoutRepeatedAside('Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.'), 'Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.');
+});
+
+test('the reply drops what it avoided supposing, and keeps the rest of the sentence', () => {
+  assert.equal(withoutCaveats('El ángulo presenta AXIS sin atribuirles una necesidad confirmada.'), 'El ángulo presenta AXIS.');
+  assert.equal(withoutCaveats('Adapté cada mensaje a sus cargos, sin dar por hecho cómo hacen hoy las consultas.\n\n¿Creo la campaña?'),
+    'Adapté cada mensaje a sus cargos.\n\n¿Creo la campaña?');
+  assert.equal(withoutCaveats('El seguimiento menciona el envío anterior sin asumir que lo recibió y combina la evidencia con el dato de capacidad.'),
+    'El seguimiento menciona el envío anterior y combina la evidencia con el dato de capacidad.');
+  // A line that is only the clause, and replies without one, stay as they are.
+  assert.equal(withoutCaveats('Sin asumir nada.'), 'Sin asumir nada.');
+  assert.equal(withoutCaveats('Le escribí a Marcela sin respuesta registrada.'), 'Le escribí a Marcela sin respuesta registrada.');
 });

@@ -236,6 +236,20 @@ export function withoutRepeatedAside(reply: string, elsewhere = '', always = fal
   return joined.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// «…, sin asumir que lo necesiten», «sin atribuirles un problema», «sin dar por hecho cómo trabajan»: what the answer avoided
+// supposing, said out loud. Rule 3 asks not to explain prudence; the clause goes up to its comma, semicolon or stop, or to an «y» with
+// the next verb («sin asumir que lo recibió y combina…» keeps «y combina…»).
+const CAVEAT = /,?[ \t]+sin (?:asumir|suponer|presumir|dar por (?:hecho|sentad[oa]s?|confirmad[oa]s?)|atribuir(?:le|les)?)\b[^.;,:\n?!]*?(?=[.;,:\n?!]|$| y \p{Ll}{3,}(?:a|e|é|ó)\b)/giu;
+
+/** The reply without the clauses that only say what it avoided supposing (rule 3). A sentence that is only that stays. */
+export function withoutCaveats(reply: string): string {
+  return reply.split('\n').map(line => {
+    const cleaned = line.replace(CAVEAT, '').replace(/\s+([.;,])/g, '$1').replace(/,\s*\./g, '.').replace(/[ \t]{2,}/g, ' ');
+    // A clause that was the whole sentence leaves too little: keep the line as it was.
+    return /[\p{L}]{3,}.*[\p{L}]{3,}/u.test(cleaned.replace(/^[\s*•-]+/, '')) ? cleaned.trimEnd() : line;
+  }).join('\n');
+}
+
 const PIPE_ROW = /^\s*\|.*\|\s*$/;
 const PIPE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 const pipeCells = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
@@ -287,7 +301,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
   const question = coworkQuestion(answer.question);
   // Options answer the closing question, so they need one; with them, the question is picked, not tapped «sí».
   const choices = question ? coworkChoices(answer.choices) : null;
-  let reply = withoutRepeatedAside(tabled.reply, blocks.length ? JSON.stringify(blocks) : '');
+  let reply = withoutCaveats(withoutRepeatedAside(tabled.reply, blocks.length ? JSON.stringify(blocks) : ''));
   if (question) {
     const lines = reply.split('\n');
     let last = lines.length - 1;
