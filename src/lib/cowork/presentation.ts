@@ -3,6 +3,7 @@ import { collectCoworkLeadRows } from './lead-export';
 import { coworkSearchCriteriaSchema, coworkSearchStrategy } from './search-proposal';
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
+import { coworkPublishedFiles } from './published-files';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
   coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent, type CoworkDraftPhase } from './contracts';
 
@@ -246,7 +247,7 @@ export function coworkEffectCopy(kind: unknown): CoworkEffectCopy {
   return EFFECTS[String(kind || '')] || { title: 'Revisar acción', icon: 'check', help: 'Revisa la propuesta antes de aprobarla.' };
 }
 
-export type CoworkProposalState = 'pending' | 'approved' | 'running' | 'done' | 'discarded' | 'failed';
+export type CoworkProposalState = 'pending' | 'approved' | 'running' | 'done' | 'discarded' | 'failed' | 'uncertain';
 export type CoworkProposalView = {
   type: 'search' | 'note' | 'effect';
   payload: Record<string, unknown>;
@@ -254,6 +255,7 @@ export type CoworkProposalView = {
   title: string;
   label: string;
   icon: CoworkIconKey;
+  receipt?: { result: Record<string, unknown>; at: string };
 };
 
 /** Current decision state of the proposal in one run, derived from its events. */
@@ -282,12 +284,16 @@ export function coworkProposalView(run: Pick<CoworkRun, 'status'>, events: Cowor
       label: String(payload.leadName || 'Contacto del CRM') };
   }
   const copy = coworkEffectCopy(payload.kind);
-  const state: CoworkProposalState = kinds.has('effect.completed') ? 'done'
+  const receiptEvent = events.slice().reverse().find(event => event.kind === 'effect.completed' && event.sequence > request.sequence);
+  const result = receiptEvent?.payload?.result;
+  const receipt = result && typeof result === 'object' && !Array.isArray(result) ? { result: result as Record<string, unknown>, at: receiptEvent!.created_at } : undefined;
+  const sendUnconfirmed = receipt && (payload.kind === 'send_email' || payload.kind === 'reply_thread') && receipt.result.status !== 'sent';
+  const state: CoworkProposalState = kinds.has('effect.completed') ? (sendUnconfirmed ? 'uncertain' : 'done')
     : kinds.has('effect.failed') ? 'failed'
-      : kinds.has('effect.started') ? (run.status === 'waiting_approval' ? 'running' : failed ? 'failed' : 'done')
-        : kinds.has('effect.approved') ? (run.status === 'waiting_approval' ? 'approved' : failed ? 'failed' : 'done')
+      : kinds.has('effect.started') ? (run.status === 'waiting_approval' ? 'running' : 'uncertain')
+        : kinds.has('effect.approved') ? (run.status === 'waiting_approval' ? 'approved' : completed?.applied === false || run.status === 'cancelled' ? 'discarded' : 'uncertain')
           : run.status === 'waiting_approval' ? 'pending' : 'discarded';
-  return { type: 'effect', payload, state, icon: copy.icon, title: copy.title, label: String(payload.label || copy.title) };
+  return { type: 'effect', payload, state, icon: copy.icon, title: copy.title, label: String(payload.label || copy.title), ...(receipt ? { receipt } : {}) };
 }
 
 export type CoworkOutcome = { happens: string; not: string };
@@ -364,14 +370,20 @@ export function coworkProposalTimeline(state: CoworkProposalState): CoworkTimeli
     done: ['done', 'done', 'done', 'done'],
     discarded: ['done', 'skipped', 'skipped', 'skipped'],
     failed: ['done', 'done', 'failed', 'skipped'],
+    uncertain: ['done', 'done', 'done', 'pending'],
   };
   return ['Propuesta', 'Tu aprobación', 'Ejecución', 'Resultado'].map((label, index) => ({ label, state: steps[state][index] }));
 }
 
 /** Where a finished action can be seen, when it has a page of its own. */
-export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | 'payload' | 'state'>): { href: string; label: string } | null {
+export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | 'payload' | 'state'> & Partial<Pick<CoworkProposalView, 'receipt'>>): { href: string; label: string } | null {
+  if (proposal.state === 'uncertain' && (proposal.payload.kind === 'send_email' || proposal.payload.kind === 'reply_thread')) return { href: '/contacted', label: 'Comprobar en Contactados' };
   if (proposal.state !== 'done' || proposal.type !== 'effect') return null;
   const kind = String(proposal.payload.kind || '');
+  const campaignId = proposal.receipt?.result.campaignId;
+  if (kind.startsWith('campaign_') && typeof campaignId === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(campaignId)) {
+    return { href: `/campaigns?campaign=${encodeURIComponent(campaignId)}`, label: 'Abrir esta campaña' };
+  }
   if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch' || kind === 'campaign_retry') return { href: '/campaigns', label: 'Ver campañas' };
   if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch' || kind === 'contacts_import' || kind === 'enrich_phone'
     || kind === 'lead_prepare_batch') return { href: '/saved/leads', label: 'Ver tus contactos' };
@@ -467,6 +479,7 @@ const CAMPAIGN_STATUS: Record<CoworkProposalState, CoworkCardStatus> = {
   done: { label: 'Campaña creada · guardada sin enviar', tone: 'success' },
   discarded: { label: 'Campaña descartada · no se creó', tone: 'neutral' },
   failed: { label: 'No se pudo crear la campaña', tone: 'danger' },
+  uncertain: { label: 'Creación sin confirmar · revisa Campañas', tone: 'attention' },
 };
 
 /**
@@ -478,10 +491,13 @@ const CAMPAIGN_STATUS: Record<CoworkProposalState, CoworkCardStatus> = {
  */
 export function coworkCardStatuses(turns: Array<{ run: CoworkRun; events: CoworkEvent[] }>): Map<string, CoworkCardStatus> {
   const statuses = new Map<string, CoworkCardStatus>();
-  const cardByTitle = new Map<string, string>();
+  const cardsByTitle = new Map<string, string[]>();
+  const knownCards = new Set<string>();
   for (const { run, events } of turns) {
     const source = coworkVersionSource(run.message);
-    const card = source ? cardByTitle.get(source.title) : undefined;
+    const matching = source ? cardsByTitle.get(source.title) || [] : [];
+    const card = source?.resultId ? (knownCards.has(source.resultId) ? source.resultId : undefined)
+      : matching.length === 1 ? matching[0] : undefined;
     if (source && card) {
       if (source.intent === 'use') {
         statuses.set(card, { label: `${source.edited ? 'Tu versión, elegida' : 'Versión elegida'} · no se ha enviado`, tone: 'accent' });
@@ -492,7 +508,9 @@ export function coworkCardStatuses(turns: Array<{ run: CoworkRun; events: Cowork
       }
     }
     for (const artifact of coworkTurnArtifacts(run, events)) {
-      if (artifact.kind === 'block' && (artifact.block.type === 'email_draft' || artifact.block.type === 'sequence')) cardByTitle.set(artifact.title, artifact.id);
+      if (artifact.kind === 'block' && (artifact.block.type === 'email_draft' || artifact.block.type === 'sequence')) {
+        knownCards.add(artifact.id); cardsByTitle.set(artifact.title, [...(cardsByTitle.get(artifact.title) || []), artifact.id]);
+      }
     }
   }
   return statuses;
@@ -517,7 +535,9 @@ export function coworkTurnOutput(events: CoworkEvent[]): CoworkTurnOutput | null
 /** Cards of a finished answer (emails, sequences, tables and figures); older turns have none. */
 export function coworkTurnBlocks(events: CoworkEvent[]): CoworkBlock[] {
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
-  return coworkStoredBlocks(completed?.blocks);
+  const blocks = coworkStoredBlocks(completed?.blocks);
+  const written = events.slice().reverse().find(event => event.kind === 'tool.completed' && event.payload?.action === 'assistant.written')?.payload?.result as { blocks?: unknown } | undefined;
+  return blocks.length ? blocks : coworkStoredBlocks(written?.blocks);
 }
 
 /** Quick replies of a finished answer; turns saved before they existed have none. */
@@ -603,10 +623,6 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
           name, key: payload.key, version: Number(payload.version), tables, createdAt: event.created_at });
         continue;
       }
-      const dot = name.lastIndexOf('.');
-      artifacts.push({ kind: 'file', id: `${run.id}:file:${name}`, runId: run.id, title: name, name,
-        extension: dot > 0 ? name.slice(dot + 1).toLowerCase() : '', size: typeof payload?.size === 'number' ? payload.size : null,
-        createdAt: event.created_at });
     }
     if (event.kind === 'tool.completed' && event.payload?.action === 'research.get_existing') {
       const result = event.payload.result as { availability?: string; research?: { sources?: unknown[] } } | null;
@@ -615,6 +631,11 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
           title: 'Fuentes de la investigación', count: result.research.sources.length, createdAt: event.created_at });
       }
     }
+  }
+  for (const file of coworkPublishedFiles(events)) {
+    const dot = file.name.lastIndexOf('.');
+    artifacts.push({ kind: 'file', id: `${run.id}:file:${file.name}`, runId: run.id, title: file.name, name: file.name,
+      extension: dot > 0 ? file.name.slice(dot + 1).toLowerCase() : '', size: file.size ?? null, createdAt: file.at });
   }
   return artifacts;
 }
@@ -673,7 +694,7 @@ const ID_REFERENCE = new RegExp(`\\s*\\((?:ID(?: del contacto| de [^():\\n]{1,80
 
 /** Your message as you wrote it: internal references (contact IDs) stay out of sight. */
 export function coworkDisplayMessage(message: string) {
-  return String(message || '').replace(ID_REFERENCE, '').trim();
+  return String(message || '').replace(ID_REFERENCE, '').replace(/\s*\(Resultado: [0-9a-f-]{36}:block:\d+\)/g, '').trim();
 }
 
 /** A thread's title: the text of its first message, or its files when it only carried files. */

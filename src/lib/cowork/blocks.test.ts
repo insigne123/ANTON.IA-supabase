@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   coworkBlockMeta, coworkBlocksText, coworkDraftSteps, coworkEditedEmails, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv,
-  coworkOnlyUsesVersion, coworkVersionMessage, coworkVersionSource, coworkWantsCampaignFromVersion, coworkWordDiff, coworkFigureNumber,
+  coworkOnlyUsesVersion, coworkVersionMessage, coworkVersionSource, coworkWantsCampaignFromVersion, coworkWordDiff, coworkFigureNumber, coworkEffectiveDraft,
 } from './blocks';
 
 const sequence = { type: 'sequence' as const, title: 'Secuencia AXIS', steps: [
@@ -11,6 +11,13 @@ const sequence = { type: 'sequence' as const, title: 'Secuencia AXIS', steps: [
 const table = { type: 'table' as const, title: 'A quién le escribo', columns: ['Contacto', 'Nota'], rows: [
   ['Felipe Muñoz', 'Dijo "sí"'], ['=HYPERLINK("x")', 'con\ttab'],
 ] };
+test('effective edit preserves metadata and refuses drift from its generated base', () => {
+  const stored = { base: JSON.stringify(coworkDraftSteps(sequence)), steps: coworkDraftSteps(sequence).map(step => ({ ...step, body: 'Editado' })) };
+  const effective = coworkEffectiveDraft(sequence, stored);
+  assert.equal(effective.steps[1].body, 'Editado');
+  assert.equal(coworkDraftSteps(effective)[1].day, 4);
+  assert.equal(coworkEffectiveDraft({ ...sequence, steps: [{ ...sequence.steps[0], body: 'Nuevo' }, sequence.steps[1]] }, stored).steps[0].body, 'Nuevo');
+});
 
 test('what a card copies reads as an email, a numbered sequence or a pasteable table', () => {
   assert.equal(coworkEmailText({ subject: 'Hola', body: 'Cuerpo' }), 'Asunto: Hola\n\nCuerpo');

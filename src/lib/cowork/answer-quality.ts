@@ -151,21 +151,22 @@ export function coworkBlocks(value: unknown): CoworkBlock[] {
     if (block.type === 'email_draft' || block.type === 'sequence') {
       const steps = (block.type === 'sequence' ? block.steps : [{ day: 1, subject: block.subject, body: block.body }])
         .map(step => ({ day: Math.max(1, step.day), subject: visible(step.subject, 200), body: text(step.body, block.type === 'sequence' ? 4000 : 6000) }))
-        .filter(step => step.subject && step.body && !UUID.test(step.body))
+        .filter(step => step.body && !UUID.test(step.body))
         .sort((a, b) => a.day - b.day)
         .slice(0, COWORK_BLOCK_DISPLAY.steps);
       if (!steps.length) continue;
       const title = visible(block.title, 120);
       if (block.type === 'email_draft' || steps.length === 1) {
         const to = (block.type === 'email_draft' ? block.to || [] : []).map(value => visible(value, 160)).filter(Boolean).slice(0, COWORK_BLOCK_DISPLAY.recipients);
-        blocks.push({ type: 'email_draft', title: title || steps[0].subject, to: to.length ? to : null, subject: steps[0].subject, body: steps[0].body });
+        blocks.push({ type: 'email_draft', title: title || steps[0].subject || 'Correo', to: to.length ? to : null, subject: steps[0].subject, body: steps[0].body });
       } else {
         blocks.push({ type: 'sequence', title: title || `Secuencia de ${steps.length} correos`, steps });
       }
     } else if (block.type === 'table') {
-      const columns = block.columns.slice(0, COWORK_BLOCK_DISPLAY.columns).map((column, index) => visible(column, 60) || `Columna ${index + 1}`);
-      const rows = block.rows.map(row => columns.map((_, index) => visible(row[index], 300)))
-        .filter(row => row.some(Boolean)).slice(0, COWORK_BLOCK_DISPLAY.rows);
+      // Preserve the bounded result; preview density is a rendering concern, never an export transform.
+      const columns = block.columns.map((column, index) => visible(column, 120) || `Columna ${index + 1}`);
+      const rows = block.rows.map(row => columns.map((_, index) => visible(row[index], 1000)))
+        .filter(row => row.some(Boolean));
       if (!columns.length || !rows.length) continue;
       blocks.push({ type: 'table', title: visible(block.title, 120) || 'Tabla', columns, rows });
     } else if (block.type === 'chart') {
@@ -312,25 +313,29 @@ export function withTablesAsBlocks(reply: string, blocks: CoworkBlock[]): { repl
   if (reply.includes('```')) return { reply, blocks };
   const lines = reply.split('\n');
   const kept: string[] = [];
-  const tables: string[][][] = [];
+  const next = [...blocks];
+  const identity = (table: Extract<CoworkBlock, { type: 'table' }>) => JSON.stringify([table.columns, table.rows]);
+  let found = false;
   for (let index = 0; index < lines.length; index++) {
     if (PIPE_ROW.test(lines[index]) && PIPE_RULE.test(lines[index + 1] || '')) {
       let end = index + 2;
       while (end < lines.length && PIPE_ROW.test(lines[end])) end++;
-      tables.push([pipeCells(lines[index]), ...lines.slice(index + 2, end).map(pipeCells)]);
+      found = true;
+      const columns = pipeCells(lines[index]);
+      const rows = lines.slice(index + 2, end).map(pipeCells);
+      const made = coworkBlocks([{ type: 'table', title: 'Tabla', columns, rows }])[0];
+      const complete = made?.type === 'table' && made.rows.length === rows.length && made.columns.length === columns.length;
+      const duplicate = complete && next.some(block => block.type === 'table' && identity(block) === identity(made));
+      if (!duplicate && complete && next.length < COWORK_BLOCK_LIMIT) next.push(made);
+      else if (!duplicate) kept.push(...lines.slice(index, end));
       index = end - 1;
       continue;
     }
     kept.push(lines[index]);
   }
-  if (!tables.length) return { reply, blocks };
+  if (!found) return { reply, blocks };
   const text = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  if (blocks.some(block => block.type === 'table') || blocks.length >= COWORK_BLOCK_LIMIT) {
-    return blocks.some(block => block.type === 'table') ? { reply: text, blocks } : { reply, blocks };
-  }
-  const [columns, ...rows] = tables[0];
-  const made = coworkBlocks([{ type: 'table', title: 'Tabla', columns, rows }]);
-  return made.length ? { reply: text, blocks: [...blocks, ...made] } : { reply, blocks };
+  return { reply: text, blocks: next };
 }
 
 /** A closed question always gets a one-tap yes: when the model offered no quick
@@ -378,7 +383,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
 
 /** Jargon the person should never have to decode. Used by the evaluation corpus. */
 export const COWORK_JARGON: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /\bcobertura\b/i, label: 'habla de «cobertura»' },
+  { pattern: /\bcobertura\b(?:\s+(?:del?|de los|de las))?\s+(?:Gmail|Outlook|correo|buz[oó]n|LinkedIn)\b/i, label: 'expone la cobertura técnica del correo' },
   { pattern: /registros de la app/i, label: 'dice «registros de la app»' },
   { pattern: /dominio desnudo/i, label: 'dice «dominio desnudo»' },
   { pattern: /\bbarrido\b/i, label: 'dice «barrido»' },

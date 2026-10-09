@@ -6,6 +6,7 @@ export const coworkRequestSchema = z.object({
   message: z.string().trim().min(1).max(20000),
   mode: z.enum(['approval', 'autonomous']).default('approval'),
   parentRunId: z.string().uuid().nullable().optional(),
+  clarificationOf: z.string().uuid().optional(),
 }).strict();
 
 export type CoworkRunStatus = 'queued' | 'running' | 'waiting_approval' | 'waiting_workers' | 'completed' | 'failed' | 'cancelled';
@@ -25,6 +26,7 @@ export type CoworkRun = {
   /** Why an automatic run started, when it was not to resume: the research the conversation asked for finished. */
   automaticReason?: 'research';
   depth?: number;
+  clarificationOf?: string;
 };
 
 export type CoworkEvent = {
@@ -110,7 +112,7 @@ export function coworkAgentEvent(payload: unknown): CoworkAgentEvent | null {
 /** Tool events the assistant wrote about itself (its note, its plan, its agents), not data it read. */
 export function coworkIsAssistantEvent(payload: unknown): boolean {
   const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : null;
-  return action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION || action === COWORK_AGENT_ACTION;
+  return action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION || action === COWORK_AGENT_ACTION || action === COWORK_WRITTEN_ACTION;
 }
 
 /** A quick reply the person can click to continue: `label` is what the button

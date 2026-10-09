@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Papa from 'papaparse';
-import { buildCoworkLeadCsv } from './lead-export';
+import { buildCoworkLeadCsv, collectCoworkLeadRows } from './lead-export';
 
 const id = '00000000-0000-4000-8000-000000000001';
+test('own lists retain every observed row at query and expanded-list boundaries', () => {
+  for (const count of [0, 1, 20, 21, 25, 26, 45, 500]) {
+    const items = Array.from({ length: count }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`, name: `Persona ${i}` }));
+    const observations = [{ action: 'leads.search', result: { scope: 'own_saved_contacts', items } }];
+    assert.equal(collectCoworkLeadRows(observations).length, count);
+    if (count) assert.equal(Papa.parse(buildCoworkLeadCsv(observations)!, { header: true }).data.length, count);
+  }
+});
 test('observed company results export domains and remain distinct from people', () => {
   const result = { scope: 'external_company_search', items: [{ id: 'apollo-company:org-1', name: 'Empresa', domain: 'example.com', employees: 80, website: 'https://example.com' }] };
   const csv = buildCoworkLeadCsv([{ action: 'prospecting.search', result }]);
