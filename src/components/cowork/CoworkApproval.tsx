@@ -101,12 +101,13 @@ function SearchDetails({ criteria }: { criteria: unknown }) {
       {!!data.companyLocations?.length && <ReviewField label="Ubicación de la empresa"><ReviewChips values={data.companyLocations} /></ReviewField>}
       {!!data.employeeRanges?.length && <ReviewField label="Número de empleados"><ReviewChips values={data.employeeRanges} /></ReviewField>}
       {!!data.companyDomains?.length && <ReviewField label="Dominios de empresas"><ReviewChips values={data.companyDomains} /></ReviewField>}
-      {data.rolePolicy && <ReviewField label="Clasificación por cargo">
+      {data.rolePolicy && (data.rolePolicy.decisionTerms.length + data.rolePolicy.userTerms.length + data.rolePolicy.referralTerms.length + data.rolePolicy.excludeTerms.length > 0) && <ReviewField label="Clasificación por cargo">
         <span className="block space-y-1 text-[13px]">
-          <span className="block"><span className="text-cw-muted">Posibles compradores:</span> {data.rolePolicy.decisionTerms.join(', ') || 'Sin criterio'}</span>
-          <span className="block"><span className="text-cw-muted">Usuarios:</span> {data.rolePolicy.userTerms.join(', ') || 'Sin criterio'}</span>
-          <span className="block"><span className="text-cw-muted">Referidores:</span> {data.rolePolicy.referralTerms.join(', ') || 'Sin criterio'}</span>
-          <span className="block"><span className="text-cw-muted">Excluir:</span> {data.rolePolicy.excludeTerms.join(', ') || 'Ninguno'}</span>
+          {/* Only what the search sets: «Sin criterio» on an empty line read as a gap in the search, not as nothing to do. */}
+          {data.rolePolicy.decisionTerms.length > 0 && <span className="block"><span className="text-cw-muted">Posibles compradores:</span> {data.rolePolicy.decisionTerms.join(', ')}</span>}
+          {data.rolePolicy.userTerms.length > 0 && <span className="block"><span className="text-cw-muted">Usuarios:</span> {data.rolePolicy.userTerms.join(', ')}</span>}
+          {data.rolePolicy.referralTerms.length > 0 && <span className="block"><span className="text-cw-muted">Pueden recomendarte:</span> {data.rolePolicy.referralTerms.join(', ')}</span>}
+          {data.rolePolicy.excludeTerms.length > 0 && <span className="block"><span className="text-cw-muted">Se excluyen:</span> {data.rolePolicy.excludeTerms.join(', ')}</span>}
         </span>
       </ReviewField>}
     </ReviewFields>
