@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
+import { resolve, dirname, basename } from 'node:path';
 import { validateJob, hashJobRequest } from './validate.mjs';
 import { runJob } from './runner.mjs';
 import { createJobManager } from './jobs.mjs';
@@ -54,7 +55,12 @@ export function createApp({ store, config, run = runJob, now = Date.now } = {}) 
   const stop = container => new Promise((resolve, reject) => execFile('docker', ['rm', '-f', container], { timeout: 10000 }, (error, _out, err) => {
     if (error && !/No such container/i.test(err || '')) reject(error); else resolve();
   }));
-  const jobs = createJobManager({ store, run, baseDir: config.baseDir, stop, occupied: () => busy, clock: now });
+  const cleanup = async directory => {
+    const target = resolve(directory);
+    if (dirname(target) !== resolve(config.baseDir) || !/^job-\d+-\d+-[A-Za-z0-9]+$/.test(basename(target))) throw new Error('Invalid restart workspace');
+    await rm(target, { recursive: true, force: true });
+  };
+  const jobs = createJobManager({ store, run, baseDir: config.baseDir, stop, cleanup, occupied: () => busy, clock: now });
   const initialized = jobs.init();
   const server = createServer(async (request, response) => {
     const started = now();

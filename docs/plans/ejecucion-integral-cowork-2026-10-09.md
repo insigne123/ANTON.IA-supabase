@@ -120,3 +120,15 @@ Problema de flujo/componente: se reutilizan la composición documentada de Cowor
 - Producción se inspeccionó solo en lectura: modelos Luna, funciones/flags y health/capabilities. En la ventana de logs de la revisión `studio-build-2026-10-09-001` consultada hasta las 17:24 UTC no aparecieron entradas ERROR. No equivale a garantía de ausencia futura de errores.
 
 Evidencia privada nueva: `cowork-executor-inspect-live-20261009.json`, inventario actualizado y `cowork-multifile-rendered-20261009/evidence.json` con capturas. La conformidad del supervisor y la aceptación autenticada del dueño siguen pendientes.
+
+## Continuación · despliegue solicitado por el dueño
+
+El 9 oct el dueño pidió revisar recuperación de contraseña y desplegar las mejoras de Cowork. Las observaciones anteriores permanecen como snapshots de su fecha; esta autorización inicia su activación.
+
+- Recuperación: [#315](https://github.com/insigne123/ANTON.IA-supabase/pull/315), merge `4823b340`, revisión y ambos gates CI verdes. Chrome con SDK/Provider/callback/middleware reales y Auth HTTP simulado comprobó PKCE, fragmentos de emails antiguos, token-hash, formulario, errores/validación, guardado y continuación. No se cambió la contraseña de cuentas reales durante esas pruebas.
+- SQL productivo, una migración por vez: `cowork_pending_clarifications` (`20261009202749`) y `cowork_code_attempt_fencing` (`20261009203044`). Después de cada una se verificaron firmas, `security definer`, search path vacío, ejecución exclusiva de `service_role`, RLS conservada y ausencia de errores en los logs consultados. No se corrieron seeds/reset/suites contra producción.
+- Executor v2 instalado en la VM existente desde `main` verificado, con fuente previa preservada. Conformidad Docker real con datos sintéticos: 45 filas a Excel/Word/PDF, miniapp HTML/CSS/JS, hashes, usuario sin privilegios, red denegada, idempotencia/conflicto, cancelación, timeout y reinicio sin replay. No se contrató un proveedor ni se ejecutaron modelos.
+- La conformidad encontró un input temporal remanente tras reiniciar. El cierre registra el directorio exacto antes de ejecutar y lo elimina solo después de confirmar stop, sin exponer rutas en el protocolo público. La regresión de reinicio y 13 tests del executor quedaron en verde; el re-test remoto debe preceder a activar la app.
+- `apphosting.yaml` incorpora los cinco flags del incremento. Configuración versionada no equivale a runtime activo: el rollout, tráfico y smoke se registran al concluir el despliegue.
+
+La aceptación con usuarios/material de equipo y el score de tareas comerciales mantienen el alcance no medido anterior. La revisión operativa no es un estudio humano ni acredita esas dimensiones.

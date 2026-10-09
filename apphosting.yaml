@@ -113,6 +113,24 @@ env:
   - variable: COWORK_TASKS_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Activación solicitada por el dueño el 9 oct: SQL de aclaraciones/fencing
+  # aplicado y permisos/RLS/logs verificados. Supervisor v2 comprobado con Docker
+  # real; activar la app después de instalar el cierre de inputs tras reinicio.
+  - variable: COWORK_TASK_GRAPH_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_CLARIFICATIONS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_CODE_FENCING_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_EXECUTOR_ASYNC_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_BUILD_WORKSPACES_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Lotes autorizados, pendientes de prueba real guiada con un contacto.
   - variable: COWORK_LINKEDIN_BATCH_ENABLED
     value: "false"

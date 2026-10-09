@@ -17,19 +17,21 @@ async function withStore(fn) {
   }
 }
 
-test('set/get round-trips and expires', async () => {
+test('set/get round-trips and expires', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   await withStore(async store => {
     await store.set('key-1234', { requestHash: 'abc', result: { status: 'completed' } });
     const hit = await store.get('key-1234');
     assert.equal(hit.result.status, 'completed');
     assert.equal(hit.requestHash, 'abc');
     assert.equal(hit.reused, true);
-    await new Promise(resolve => setTimeout(resolve, 70));
+    t.mock.timers.tick(70);
     assert.equal(await store.get('key-1234'), null);
   });
 });
 
-test('prunes oldest beyond count and size caps', async () => {
+test('prunes oldest beyond count and size caps', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   await withStore(async (store, dir) => {
     await store.set('key-aaaa', { requestHash: 'a', result: { v: 'x'.repeat(200) } });
     await store.set('key-bbbb', { requestHash: 'b', result: { v: 'y'.repeat(200) } });
@@ -57,7 +59,8 @@ function post(port, path, body, auth = 'Bearer s3cret') {
   });
 }
 
-test('app: auth, replay, busy and validation', async () => {
+test('app: auth, replay, busy and validation', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   await withStore(async store => {
     const dir = await mkdtemp(join(tmpdir(), 'secret-'));
     try {

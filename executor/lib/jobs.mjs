@@ -4,20 +4,25 @@ import { runJob } from './runner.mjs';
 
 /** Single-supervisor durable jobs. A restart reconciles interrupted execution, never repeats code.
  * HTTP retries inspect the same idempotency identity and inputs; late writers cannot publish after cancellation. */
-export function createJobManager({ store, run = runJob, baseDir, stop, occupied = () => false, clock = Date.now }) {
+export function createJobManager({ store, run = runJob, baseDir, stop, cleanup = async () => {}, occupied = () => false, clock = Date.now }) {
   let active = null;
   let unsettled = false;
   let chain = Promise.resolve();
   const serial = work => { const next = chain.then(work); chain = next.catch(() => {}); return next; };
   const save = record => store.set(record.id, { requestHash: record.requestHash, job: record });
-  const publicRecord = record => ({ ...record, request: undefined });
+  const publicRecord = record => ({ ...record, request: undefined, workingDirectory: undefined });
   async function execute(record, job) {
     const controller = new AbortController();
     active = { id: record.id, generation: record.generation, controller };
     record.status = 'running'; record.updatedAt = clock();
     try {
       await save(record);
-      const result = await run(job, { baseDir, signal: controller.signal, container: record.container });
+      const result = await run(job, { baseDir, signal: controller.signal, container: record.container,
+        onWorkspace: directory => serial(async () => {
+          const current = (await store.get(record.id))?.job;
+          if (!current || current.generation !== record.generation) throw new Error('Job claim changed before execution');
+          await save({ ...current, workingDirectory: directory });
+        }) });
       // Stop/cancellation is confirmed by the runner before resolving. A changed generation cannot publish.
       await serial(async () => {
         const current = (await store.get(record.id))?.job;
@@ -45,7 +50,7 @@ export function createJobManager({ store, run = runJob, baseDir, stop, occupied 
         if (!record || !( ['queued', 'running', 'cancel_requested'].includes(record.status) || record.status === 'outcome_unknown' && record.stopConfirmed !== true)) continue;
         // Remove the stable container identity before reporting stop. Fail closed if Docker is unavailable.
         let stopped = false;
-        try { await stop(record.container); stopped = true; } catch { /* unknown */ }
+        try { await stop(record.container); if (record.workingDirectory) await cleanup(record.workingDirectory); stopped = true; } catch { /* unknown */ }
         if (!stopped) unsettled = true;
         await save({ ...record, status: stopped ? 'interrupted' : 'outcome_unknown', updatedAt: clock(), result: null, stopConfirmed: stopped,
           error: 'Supervisor restarted. The same job is retained and will not be replayed.' });
