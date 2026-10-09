@@ -6,6 +6,7 @@ import { runJob } from './runner.mjs';
  * HTTP retries inspect the same idempotency identity and inputs; late writers cannot publish after cancellation. */
 export function createJobManager({ store, run = runJob, baseDir, stop, occupied = () => false, clock = Date.now }) {
   let active = null;
+  let unsettled = false;
   let chain = Promise.resolve();
   const serial = work => { const next = chain.then(work); chain = next.catch(() => {}); return next; };
   const save = record => store.set(record.id, { requestHash: record.requestHash, job: record });
@@ -18,29 +19,35 @@ export function createJobManager({ store, run = runJob, baseDir, stop, occupied 
       await save(record);
       const result = await run(job, { baseDir, signal: controller.signal, container: record.container });
       // Stop/cancellation is confirmed by the runner before resolving. A changed generation cannot publish.
-      const current = (await store.get(record.id))?.job;
-      if (!current || current.generation !== record.generation) return;
-      const cancelled = controller.signal.aborted || current.status === 'cancel_requested';
-      const final = { ...current, status: cancelled ? 'cancelled' : result.status, updatedAt: clock(),
-        result: cancelled ? null : result, manifest: cancelled || result.status !== 'completed' ? null
-          : { requestHash: record.requestHash, generation: record.generation, files: result.files.map(file => ({ name: file.name, size: file.size, sha256: file.sha256 })) } };
-      await save(final);
+      await serial(async () => {
+        const current = (await store.get(record.id))?.job;
+        if (!current || current.generation !== record.generation) return;
+        const cancelled = controller.signal.aborted || current.status === 'cancel_requested';
+        const final = { ...current, status: cancelled ? 'cancelled' : result.status, updatedAt: clock(), stopConfirmed: true,
+          result: cancelled ? null : result, manifest: cancelled || result.status !== 'completed' ? null
+            : { requestHash: record.requestHash, generation: record.generation, files: result.files.map(file => ({ name: file.name, size: file.size, sha256: file.sha256 })) } };
+        await save(final);
+      });
     } catch {
-      const current = (await store.get(record.id))?.job;
-      if (current?.generation === record.generation) await save({ ...current, status: 'outcome_unknown', updatedAt: clock(), result: null,
-        error: 'Execution or stop could not be confirmed. Inspect the supervisor; do not resubmit automatically.' });
+      unsettled = true;
+      await serial(async () => {
+        const current = (await store.get(record.id))?.job;
+        if (current?.generation === record.generation) await save({ ...current, status: 'outcome_unknown', updatedAt: clock(), result: null, stopConfirmed: false,
+          error: 'Execution or stop could not be confirmed. Inspect the supervisor; do not resubmit automatically.' });
+      });
     } finally { if (active?.generation === record.generation) active = null; }
   }
   return {
-    busy: () => Boolean(active),
+    busy: () => Boolean(active) || unsettled,
     async init() {
       for (const saved of await store.list()) {
         const record = saved.job;
-        if (!record || !['queued', 'running', 'cancel_requested'].includes(record.status)) continue;
+        if (!record || !( ['queued', 'running', 'cancel_requested'].includes(record.status) || record.status === 'outcome_unknown' && record.stopConfirmed !== true)) continue;
         // Remove the stable container identity before reporting stop. Fail closed if Docker is unavailable.
         let stopped = false;
         try { await stop(record.container); stopped = true; } catch { /* unknown */ }
-        await save({ ...record, status: stopped ? 'interrupted' : 'outcome_unknown', updatedAt: clock(), result: null,
+        if (!stopped) unsettled = true;
+        await save({ ...record, status: stopped ? 'interrupted' : 'outcome_unknown', updatedAt: clock(), result: null, stopConfirmed: stopped,
           error: 'Supervisor restarted. The same job is retained and will not be replayed.' });
       }
     },
@@ -52,7 +59,7 @@ export function createJobManager({ store, run = runJob, baseDir, stop, occupied 
           if (existing.requestHash !== hash || !existing.job) throw Object.assign(new Error('Idempotency conflict.'), { statusCode: 409 });
           return { ...publicRecord(existing.job), reused: true };
         }
-        if (active || occupied()) throw Object.assign(new Error('Executor busy.'), { statusCode: 409 });
+        if (active || unsettled || occupied()) throw Object.assign(new Error('Executor busy.'), { statusCode: 409 });
         const record = { id: job.idempotencyKey, requestHash: hash, generation: randomUUID(), attempt: 1, status: 'queued',
           container: `cowork-build-${randomUUID()}`, acceptedAt: clock(), updatedAt: clock(), result: null, manifest: null };
         await save(record);
