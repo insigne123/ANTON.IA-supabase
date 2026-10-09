@@ -59,7 +59,7 @@ export const COWORK_WRITER_RULES = [
   'Respuestas dentro de conversaciones ya abiertas (notes lo dice y observations trae el replies.thread de cada persona): un bloque email_draft por persona, con to su correo y asunto «Re: » más el asunto del envío original tal como lo trae su lectura, sin cambiarlo; cada correo contesta solo lo que esa persona escribió, sin inventar precios, plazos ni fechas, y lo que debe decidir el usuario no va en el texto. No es una campaña: question no la ofrece; ofrece el paso que dicen notes o findings, con esas palabras: si es proponer el envío de la primera respuesta, «¿Propongo enviar primero la de <nombre>?» (no «¿Apruebas…?»: aún no hay tarjeta que aprobar), y nunca aprobar todas juntas. Los borradores no se aprueban: no digas que se aprueban en su tarjeta; di que cada envío se aprueba cuando se proponga.',
   'El correo es el texto que se envía: nunca lleva notas para el usuario ni lo que no sabes («no tengo más antecedentes de la empresa»); eso va en reply.',
   'Si observations trae opportunities.list con la empresa del destinatario, su signal es un hecho público con fuente y fecha: puedes abrir con él («Vi que publicaron 14 avisos para operarios en septiembre») sin cambiar sus cifras ni deducir necesidades que no dice.',
-  'Seguimiento de un correo ya enviado (lo dicen objective, notes u observations): retoma ese contacto en media frase («Te escribí hace unos días sobre…») y aporta algo nuevo, otro ángulo o una pregunta más fácil; no repitas la presentación del primero.',
+  'Seguimiento de un correo ya enviado (lo dicen objective, notes u observations): retoma ese contacto en media frase («Te escribí hace unos días sobre…») y aporta algo nuevo, otro ángulo o una pregunta más fácil; no repitas la presentación del primero. clock.localDate es hoy: cuenta los días desde la fecha del envío y di el plazo que calza (hasta 9 días, «hace unos días» o «la semana pasada»; de 10 a 20, «hace un par de semanas»; más, «hace unas semanas» o el mes), nunca uno más largo ni más corto.',
   'Secuencia (kind sequence): steps correos (3 si no se indica), cada uno con day (el primero es 1; luego 3, 7, 11, 16, 23, 38 según la cantidad), asunto y cuerpo. Cada correo tiene su papel y no repite el planteamiento de los otros: el 1 nombra un problema del rol y presenta la oferta en una frase; el 2 pregunta cómo lo hacen hoy, sin describir la oferta; el 3 muestra un uso concreto en el día a día del rol; los siguientes, un criterio de decisión o una pregunta más fácil; el último cierra en dos frases. Desde el segundo, la oferta se nombra solo por su nombre. Solo el último puede decir que es el último mensaje; ninguno dice «retomo», «vuelvo a escribirte» ni «no respondiste».',
   'Salida: reply en 2 a 5 frases que expliquen lo que escribiste, sin repetir el texto de los correos: si brief.findings no es null, parte por lo que ahí le sirve al usuario (cifras, a quiénes va, quiénes quedan fuera y por qué, lo que no se puede hacer) sin agregar datos; después di a quién va, qué ángulo usaste y por qué (de qué dato de la persona, de su empresa o de la oferta sale), nombrando solo a quienes están en los bloques. No menciones reglas internas (contexto de redacción, términos prohibidos, ofertas o afirmaciones aprobadas, la revisión) ni uses sus palabras: nada de «dato aprobado», «afirmación aprobada», «sincronización del buzón» o «según el dato de tu perfil»; di «el resultado que cargaste en tu Perfil» o «no veo si respondió porque tu correo no está conectado a ANTON.IA». No le expliques al usuario qué hace su propia oferta. blocks lleva un bloque email_draft (kind email) o sequence (kind sequence) con title específico. question propone el paso siguiente que Cowork hace con aprobación: si hay destinatarios con correo, crear la campaña pausada con ellos («¿Creo la campaña pausada para Felipe y Camila?»); si el encargo no trae destinatarios, usarla en una campaña pausada con los contactos que calzan («¿La uso en una campaña pausada para tus contactos de RR. HH. con correo?»), sin decir que falta algo: lo que entregas está completo. Si mejoraste un correo que el usuario pegó y enviará él (a un grupo o a alguien que no está en sus contactos), question no ofrece una campaña, ni para ellos ni para otros contactos: va null, y suggestions ofrece ajustes que Cowork hace («Hazlo más corto», «Tono más cercano»). Nunca preguntes si lo dejas como borrador, listo para enviar o para copiar: ya está a la vista. Si request pide el correo como archivo (Word o PDF), reply lo dice en una frase: la tarjeta se baja con su botón «Descargar», en Word o PDF; nunca digas que no puedes entregar o adjuntar un archivo. suggestions trae 1 a 3 respuestas que el usuario tocaría; si hay question, la primera le dice que sí.',
   'Si recibes issues, corrige exactamente eso y conserva todo lo demás igual. reply no menciona la corrección: el usuario no vio la versión anterior.',
@@ -73,7 +73,25 @@ export const COWORK_REVIEWER_RULES = [
 ];
 
 type Observation = { action: string; input?: string; result?: unknown };
-type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: boolean };
+type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: boolean; daysSinceSent?: number | null };
+
+/** Days from the latest email sent in the observations (a sentAt, or a «sent» event's at) to now; null without one. */
+export function coworkDaysSinceSent(observations: Observation[], now: Date): number | null {
+  let latest = 0;
+  const visit = (value: unknown, depth: number) => {
+    if (!value || typeof value !== 'object' || depth > 8) return;
+    if (Array.isArray(value)) { for (const item of value) visit(item, depth + 1); return; }
+    const record = value as Record<string, unknown>;
+    const stamps = [record.sentAt, record.sent_at, record.kind === 'sent' ? record.at : undefined];
+    for (const stamp of stamps) {
+      const time = typeof stamp === 'string' ? Date.parse(stamp) : NaN;
+      if (Number.isFinite(time) && time <= now.getTime() && time > latest) latest = time;
+    }
+    for (const item of Object.values(record)) visit(item, depth + 1);
+  };
+  for (const item of observations) visit(item.result, 0);
+  return latest ? Math.floor((now.getTime() - latest) / 86_400_000) : null;
+}
 
 // «firmo como Nico», «Firma exactamente como «Nico»», «firmar siempre como Nicolás Y.»: the name that follows, as written.
 const SIGNS_AS = /\b[Ff]irm(?:o|a|ar|ame|amos|as|e)?\s+(?:siempre\s+|exactamente\s+|solo\s+)?(?:como|con)\s+[«"“']?(\p{Lu}[\p{L}.'-]*(?:\s+\p{Lu}[\p{L}.'-]*)?)/u;
@@ -116,6 +134,14 @@ const GREETING = /^\s*(?:hola|estimad[oa]s?|buen(?:os|as) (?:d[ií]as|tardes)|sa
 // The campaign fills {{nombre}} with each person's first name (renderCampaignMessage).
 const NAME_VARIABLE = /\{\{\s*nombre\s*\}\}/;
 
+// How long ago a follow-up says the first email went out, on accent-free lowercase text, and the days each one fits.
+const SINCE = [
+  { pattern: /\b(?:hace (?:unos|pocos|un par de) dias|la semana pasada|hace una semana)\b/, say: 'hace unos días', min: 0, max: 13 },
+  { pattern: /\b(?:hace (?:un par de|unas|dos|algunas) semanas)\b/, say: 'hace un par de semanas', min: 10, max: 45 },
+  { pattern: /\b(?:hace un mes|el mes pasado)\b/, say: 'hace un mes', min: 21, max: 60 },
+  { pattern: /\b(?:hace (?:unos|algunos|un par de) meses|hace (?:un|bastante) tiempo)\b/, say: 'hace un tiempo', min: 45, max: 100_000 },
+];
+
 /** Deterministic checks, before any model: what can be told from the text alone. */
 export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext): CoworkDraftIssue[] {
   const issues: CoworkDraftIssue[] = [];
@@ -131,6 +157,13 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     const promise = PROMISE.exec(plain);
     if (promise) issues.push({ where, problem: `Promete «${promise[1]}» sin respaldo.`, fix: 'Cámbialo por un beneficio concreto y verificable.', short: 'sin promesas' });
     if (CLOSING.test(plain) && index < total - 1) issues.push({ where, problem: 'Anuncia el cierre antes del último correo.', fix: 'Solo el último correo puede decir que es el último.', short: 'cierre solo al final' });
+    const since = SINCE.find(item => item.pattern.test(plain));
+    const days = context.daysSinceSent;
+    if (since && typeof days === 'number' && (days < since.min || days > since.max)) {
+      const fits = SINCE.find(item => days >= item.min && days <= item.max)?.say;
+      issues.push({ where, problem: `Dice «${since.say}» y el correo anterior salió hace ${days} ${days === 1 ? 'día' : 'días'}.`,
+        fix: fits ? `Di «${fits}».` : 'Di el plazo que calza con la fecha del envío.', short: 'plazo exacto' });
+    }
     if (!GREETING.test(email.body)) issues.push({ where, problem: 'No abre con un saludo.', fix: group ? 'Abre con «Hola {{nombre}},».' : 'Abre con «Hola» y el nombre de pila del destinatario.', short: 'con saludo' });
     else if (group && GREETING_NAME.test(email.body)) issues.push({ where, problem: 'Saluda con un nombre fijo un texto que irá a varias personas.', fix: 'Usa «Hola {{nombre}},»: la campaña pone el nombre de cada una.', short: 'saludo con {{nombre}}' });
     else if (single && NAME_VARIABLE.test(email.body)) issues.push({ where, problem: 'Es un correo a una sola persona y usa {{nombre}}.', fix: 'Salúdala por su nombre de pila; {{nombre}} es solo para campañas a varias personas.', short: 'con su nombre' });
@@ -145,11 +178,14 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
 }
 
 /** The Writer's input, as the model reads it. */
-export function coworkWriterPrompt(input: { request: string; brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; issues?: CoworkDraftIssue[]; previous?: CoworkWriterOutput }) {
+export function coworkWriterPrompt(input: { request: string; brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; issues?: CoworkDraftIssue[]; previous?: CoworkWriterOutput;
+  now?: Date; timeZone?: string }) {
   return JSON.stringify({
     request: input.request,
     brief: input.brief,
     userContext: input.userContext ?? null,
+    // Today, so a follow-up says how long ago the first email went out without guessing.
+    ...(input.now ? { clock: { localDate: new Intl.DateTimeFormat('es-CL', { timeZone: input.timeZone || 'America/Santiago', dateStyle: 'full' }).format(input.now) } } : {}),
     observations: input.observations.map(item => ({ action: item.action, input: item.input ?? '', result: item.result })),
     ...(input.issues?.length ? { issues: input.issues.map(({ where, problem, fix }) => ({ where, problem, fix })), previous: input.previous } : {}),
   });
@@ -199,6 +235,9 @@ type WriterInput = {
   onAdjust?: () => void;
   /** Whether there is still time for a review and a correction in the turn. */
   canReview?: () => boolean;
+  /** Today, for how long ago a follow-up's first email went out (the server's clock; the evaluation's fixed date). */
+  now?: Date;
+  timeZone?: string;
 };
 
 /**
@@ -219,7 +258,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   let first: CoworkWriterOutput;
   try {
     first = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt, stream: true,
-      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations }) });
+      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, now: input.now, timeZone: input.timeZone }) });
     if (!coworkWriterBlocks(first).length) throw new Error('Writer returned no email');
   } catch (error) {
     // The row never stays «writing» after the Writer gave up: the coordinator takes over and says so.
@@ -229,8 +268,9 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   await input.step({ agent: 'writer', state: 'done', label: `Escribió ${what}` });
 
   const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
-  const context = coworkWriterContext(input.userContext as { fullName?: string | null } | null, input.observations,
-    coworkSignerPreference([input.request, input.brief.notes, ...(Array.isArray(memories) ? memories.map(String) : [])]));
+  const context = { ...coworkWriterContext(input.userContext as { fullName?: string | null } | null, input.observations,
+    coworkSignerPreference([input.request, input.brief.notes, ...(Array.isArray(memories) ? memories.map(String) : [])])),
+    daysSinceSent: input.now ? coworkDaysSinceSent(input.observations, input.now) : null };
   const checked = (draft: CoworkWriterOutput) => coworkDraftIssues(coworkWriterBlocks(draft), context);
   let issues = checked(first);
   if (!hasTime()) {
@@ -262,7 +302,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   let corrected: CoworkWriterOutput | null = null;
   try {
     const output = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt,
-      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, issues, previous: first }) });
+      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, issues, previous: first, now: input.now, timeZone: input.timeZone }) });
     if (coworkWriterBlocks(output).length) corrected = output;
   } catch {
     // The first draft stands: a failed correction never loses the answer.

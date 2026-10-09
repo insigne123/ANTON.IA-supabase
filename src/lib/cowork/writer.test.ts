@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDaysSinceSent, coworkDraftIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
@@ -30,6 +30,27 @@ test('the checks catch what the text alone shows, once per kind and place', () =
   assert.deepEqual(coworkDraftIssues([{ ...email, body: signed }], { ...context, trialOffer: true }).map(issue => issue.short), ['con su nombre']);
   // Tables and figures are not emails.
   assert.deepEqual(coworkDraftIssues([{ type: 'table', title: 'x', columns: ['a'], rows: [['[relleno]']] }], context), []);
+});
+
+test('a follow-up says how long ago the first email went out as the dates say', () => {
+  const now = new Date('2026-09-25T13:10:00Z');
+  const observations = [
+    { action: 'contacted.timeline', input: '', result: { events: [{ kind: 'sent', at: '2026-09-19T13:02:00Z' }, { kind: 'opened', at: '2026-09-24T10:00:00Z' }] } },
+    { action: 'contacted.search', input: '', result: { items: [{ sentAt: '2026-08-01T10:00:00Z' }, { sentAt: '2026-10-01T10:00:00Z' }] } },
+  ];
+  // The latest email sent before now: an opening is not a send, and a date after now is not one either.
+  assert.equal(coworkDaysSinceSent(observations, now), 6);
+  assert.equal(coworkDaysSinceSent([], now), null);
+  const body = (since: string) => `Hola Marcela,\n\nTe escribí ${since} sobre AXIS.\n\n¿Quién lo revisa hoy?\n\nNicolás Yarur`;
+  const shorts = (since: string, days: number | null) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento', to: ['Marcela'], subject: 'Re: AXIS', body: body(since) }],
+    { ...context, daysSinceSent: days }).map(issue => `${issue.short}: ${issue.fix}`);
+  assert.deepEqual(shorts('hace unas semanas', 6), ['plazo exacto: Di «hace unos días».']);
+  assert.deepEqual(shorts('hace unos días', 6), []);
+  assert.deepEqual(shorts('la semana pasada', 9), []);
+  assert.deepEqual(shorts('hace unos días', 30), ['plazo exacto: Di «hace un par de semanas».']);
+  assert.deepEqual(shorts('hace un par de semanas', 15), []);
+  // Without a date there is nothing to compare.
+  assert.deepEqual(shorts('hace unas semanas', null), []);
 });
 
 test('the checks read who signs, the prohibited terms and the trial offer from the turn', () => {

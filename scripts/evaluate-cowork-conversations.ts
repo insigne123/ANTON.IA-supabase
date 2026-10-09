@@ -173,7 +173,7 @@ async function main() {
       const started = Date.now();
       // The Writer and the Reviewer, with their own models and the same call budget.
       const write: CorpusWriter | undefined = writerOn ? (brief, observations, meta) => runCoworkWriter({
-        request: meta.request, brief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step,
+        request: meta.request, brief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step, now: CORPUS_NOW, timeZone: coworkTimeZone(),
         generate: async ({ role, schema, systemPrompt, prompt }) => {
           if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
           calls++;

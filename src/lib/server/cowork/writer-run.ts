@@ -3,6 +3,7 @@ import type { StructuredResult, StructuredTelemetry } from '@/ai/openai-json';
 import { COWORK_AGENT_ACTION } from '@/lib/cowork/contracts';
 import type { CoworkAnswer, CoworkObservation } from '@/lib/cowork/agent-loop';
 import { coworkWriterBlocks, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief } from '@/lib/cowork/writer';
+import { coworkTimeZone } from '@/lib/cowork/decision-context';
 
 /** The Writer and the Reviewer write the emails of a turn (plan 2, G1). Off, the coordinator writes them as before. */
 export function coworkWriterEnabled(env: Record<string, string | undefined> = process.env) {
@@ -52,7 +53,7 @@ export function coworkWriterTurn(deps: {
 }) {
   return async (brief: CoworkWriteBrief, observations: CoworkObservation[]): Promise<CoworkAnswer> => {
     const output = await runCoworkWriter({
-      request: deps.request, brief, userContext: deps.userContext, observations,
+      request: deps.request, brief, userContext: deps.userContext, observations, now: new Date(), timeZone: coworkTimeZone(),
       generate: async ({ role, schema, systemPrompt, prompt, stream }) => {
         const limits = CALLS[role];
         const left = deps.timeLeft();
