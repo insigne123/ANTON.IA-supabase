@@ -24,7 +24,7 @@ type Result = {
   reply?: string; question?: string | null; blocks?: Array<Record<string, unknown>> | null; choices?: { options?: string[] } | null;
   suggestions?: Array<{ label: string }> | null; search?: unknown; proposal?: { kind?: string; campaign?: { emails?: string[]; messages?: Email[] } } | null;
 };
-type Outcome = { id: string; attempt?: number; result: Result };
+type Outcome = { id: string; request?: string; attempt?: number; result: Result };
 
 const REQUESTS = new Map<string, string>([...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS]
   .map(entry => [entry.id, entry.request]));
@@ -49,8 +49,8 @@ export function blindEmails(result: Result): Array<{ kind: string; steps: Email[
 }
 
 /** One answer as the reader sees it: the request, the reply, what it offers to tap and its emails. */
-export function blindAnswer(tag: string, id: string, result: Result): string {
-  const lines = [`## ${tag}`, `**Pedido:** ${REQUESTS.get(id) || id}`, '', '**Respuesta:**', result.reply || '(sin respuesta)'];
+export function blindAnswer(tag: string, id: string, result: Result, frozenRequest?: string): string {
+  const lines = [`## ${tag}`, `**Pedido:** ${frozenRequest || REQUESTS.get(id) || id}`, '', '**Respuesta:**', result.reply || '(sin respuesta)'];
   if (result.question) lines.push('', `**Pregunta final:** ${result.question}`);
   if (result.choices?.options?.length) lines.push('', `**Opciones para tocar:** ${result.choices.options.join(' · ')}`);
   if (result.suggestions?.length) lines.push('', `**Sugerencias para tocar:** ${result.suggestions.map(chip => chip.label).join(' · ')}`);
@@ -75,7 +75,7 @@ function mix(out: string, keyFile: string, pairs: string[]) {
     if (item.id !== items[index - 1]?.id) parts.push(`# Caso ${item.id}`);
     const tag = `R${String(index + 1).padStart(2, '0')}`;
     key[tag] = { label: item.label, id: item.id, attempt: item.attempt };
-    parts.push(blindAnswer(tag, item.id, item.result));
+    parts.push(blindAnswer(tag, item.id, item.result, item.request));
   });
   writeFileSync(out, `${parts.join('\n\n')}\n`);
   writeFileSync(keyFile, JSON.stringify(key, null, 2));

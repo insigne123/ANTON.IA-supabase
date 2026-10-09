@@ -3,6 +3,8 @@ import { coworkAgentInstructions } from './agent-instructions';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_WRITTEN_ACTION } from './contracts';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 import { COWORK_WORKSPACE_INSTRUCTION, type CoworkWorkspace } from './workspace';
+import { coworkEvidenceBundle } from './evidence';
+import { coworkCompetencies } from './competencies';
 
 /** The organization's working time zone. ANTON.IA schedules and reports in
  * Chile; override with COWORK_TIME_ZONE for another market. */
@@ -188,6 +190,8 @@ export function coworkDecisionContext(
     ...(historyHasFeedback(input.history) ? { historyFeedbackInstruction: COWORK_HISTORY_FEEDBACK_INSTRUCTION } : {}),
     ...(input.previousVersions?.length ? { previousVersions: input.previousVersions, previousVersionsInstruction: COWORK_PREVIOUS_VERSIONS_INSTRUCTION } : {}),
     observations: coworkWithLocalTimes(input.observations, timeZone) as unknown[],
+    evidenceIndex: coworkEvidenceBundle(input.observations),
+    competencies: coworkCompetencies(input.request),
     // A correction edits the answer it was asked to fix: it travels apart from the reasons.
     ...(input.rejectedDecisions ? { rejectedDecisions: input.rejectedDecisions.map(withoutPrevious) } : {}),
     ...coworkAnswerToCorrect(input.rejectedDecisions),

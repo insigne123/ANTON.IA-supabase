@@ -16,7 +16,7 @@ export const specialistTaskSchema = z.object({
   role: z.enum(['analyst', 'researcher', 'verifier']),
   objective: z.string().trim().min(1).max(600),
   evidence: z.array(z.number().int().min(0).max(2)).min(1).max(3),
-  read: coworkReadTaskSchema.optional(),
+  read: coworkReadTaskSchema.nullish(),
 }).strict();
 export const specialistTasksSchema = z.array(specialistTaskSchema).min(1).max(2)
   .refine(tasks => new Set(tasks.map(task => task.role)).size === tasks.length, 'Duplicate specialist');

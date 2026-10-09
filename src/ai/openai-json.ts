@@ -332,16 +332,20 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
       usage = payload?.usage;
     }
     signal?.throwIfAborted();
-    const parsed = parseJsonFromModelText(content);
-    return {
-      data: opts.schema.parse(parsed),
-      telemetry: {
+    const telemetry: StructuredTelemetry = {
         modelName: typeof responseModel === 'string' && responseModel.trim() ? responseModel : model,
         requestedModel: model,
         usage: (usage as Record<string, unknown> | null) || null,
         durationMs: Date.now() - startedAt,
-      },
     };
+    try {
+      const parsed = parseJsonFromModelText(content);
+      return { data: opts.schema.parse(parsed), telemetry };
+    } catch (error) {
+      // A paid response still has usage when its JSON/schema is invalid. Keep telemetry separate from user-facing errors.
+      if (error instanceof Error) Object.defineProperty(error, 'structuredTelemetry', { value: telemetry, enumerable: false });
+      throw error;
+    }
   } catch (error) {
     signal?.throwIfAborted();
     throw error;

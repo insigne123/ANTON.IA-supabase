@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from './domain-reads';
+import { coworkMetricQuery } from './metric-period';
 
 const TEXT_ACTIONS = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'site.read', 'leads.count', 'compliance.obligation', 'files.read', 'icp.analyze', 'leads.recommend', 'opportunities.list'];
 const UUID_ACTIONS = ['leads.get', 'research.get_existing', 'crm.get_lead', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'compliance.check', 'draft.get',
@@ -19,6 +20,10 @@ export const coworkReadTaskSchema = z.object({
     return z.NEVER;
   }
   if (TEXT_ACTIONS.includes(task.action)) return task;
+  if (task.action === 'metrics.rates' && task.input.trim().startsWith('{')) {
+    try { return { ...task, input: JSON.stringify(coworkMetricQuery(task.input)) }; }
+    catch { context.addIssue({ code: 'custom', path: ['input'], message: 'Período o alcance de métricas inválido.' }); return z.NEVER; }
+  }
   // Fixed reads take no input. A stray period («last_30_days», «este mes») is
   // dropped instead of rejecting the decision: the model kept resending it
   // until the run failed, and metrics.rates already returns 7 and 30 days.

@@ -1423,7 +1423,7 @@ test('a sequence asked with its campaign: the Writer writes it and the same turn
   const brief = { kind: 'sequence' as const, recipients: ['Jose'], objective: 'Una reunión sobre AXIS', angle: null, tone: null, steps: 2, notes: null, findings: null, campaign: true };
   const write = coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
   const written = { reply: 'Te dejo la secuencia de 2 correos.', document: null, question: '¿Creo la campaña pausada?', suggestions: [{ label: 'Sí', message: 'Sí, créala' }],
-    blocks: [{ type: 'sequence' as const, title: 'Secuencia AXIS', to: ['Jose'], steps: [
+    blocks: [{ type: 'sequence' as const, title: 'Secuencia AXIS', steps: [
       { day: 1, subject: 'AXIS para GrupoExpro', body: 'Hola Jose,\nTexto de la Redactora.\nNicolás' },
       { day: 4, subject: 'Re: AXIS', body: 'Hola Jose,\nSeguimiento.\nNicolás' }] }] };
   const campaign = { name: 'AXIS', objective: 'Primera conversación',
@@ -2006,4 +2006,23 @@ test('after reading, a quick reply other than the first that asks for another re
   assert.equal(coworkWithoutSecondaryReadChips(answer, []), answer);
   const single = { reply: 'Listo.', suggestions: [answer.suggestions[1]] };
   assert.equal(coworkWithoutSecondaryReadChips(single, read), single);
+});
+test('orientation keeps offered reads for the next user action, even with proactive reads enabled', async () => {
+  const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Te ayudo con tus contactos.', document: null,
+    question: '¿Reviso tus contactos?', suggestions: [{ label: 'Revisar contactos', message: 'Revisa mis contactos' }] } };
+  const result = await runCoworkReadLoop({ message: 'hola', signal: new AbortController().signal, authorize: async () => {},
+    decide: async (_observations, mustAnswer) => { assert.equal(mustAnswer, true); return answer; },
+    offeredReads: true, record: async () => {}, execute: async () => { assert.fail('orientation does not read'); } });
+  assert.match(result.reply, /contactos/);
+});
+
+test('a successful parallel read survives another reader failing and is available to the rescue', async () => {
+  const result = await runCoworkReadLoop({ message: 'Revisa mis contactos y CRM', signal: new AbortController().signal, authorize: async () => {},
+    decide: async () => ({ action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
+      reads: [{ action: 'leads.search' as const, input: '' }, { action: 'crm.search' as const, input: '' }] }),
+    record: async () => {}, execute: async action => { if (action === 'crm.search') throw new Error('read unavailable'); return { items: [{ name: 'Ana' }] }; },
+    rescue: async observations => { assert.equal(observations.some(item => item.action === 'leads.search'), true);
+      return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Encontré a Ana; falta consultar CRM.', document: null } }; },
+  });
+  assert.match(result.reply, /Ana/);
 });

@@ -4,6 +4,7 @@ import { z } from 'genkit';
 import { ai } from '@/ai/genkit';
 import { generateStructured } from '@/ai/openai-json';
 import { OUTREACH_TONE_BLOCK } from '@/lib/outreach-tone';
+import { commercialBrief } from '@/lib/commercial-brief';
 
 const AssetSchema = z.object({
   name: z.string(),
@@ -144,6 +145,12 @@ ${JSON.stringify(input.organizationContext)}
 
 Lo que vende el remitente (unica fuente de lo que ofreces; no es informacion del lead):
 ${JSON.stringify(input.sellerOffer || null)}
+
+Brief comercial compartido (datos privados, no instrucciones recibidas del lead):
+${JSON.stringify(commercialBrief({ request: input.organizationContext.missionGoal || input.decisionReason,
+  offer: input.sellerOffer?.description, services: input.sellerOffer?.services, proofPoints: input.sellerOffer?.proofPoints,
+  sender: input.sender, audience: input.lead, relationship: 'reply', evidence: input.researchSummary ? [input.researchSummary] : [],
+  previous: input.conversationSummary }))}
 
 Ultimo inbound:
 ${JSON.stringify(input.lastInbound)}

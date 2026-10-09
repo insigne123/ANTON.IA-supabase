@@ -190,7 +190,11 @@ export function coworkReadCapabilities(
     },
     {
       name: 'metrics.rates', version: 1, effect: 'read', description: 'Tasas con período, denominador y origen por métrica',
-      input: z.literal(''), output: z.unknown(), execute: () => readMetricsRates(client, scope),
+      input: z.string().max(120), output: z.unknown(), execute: async input => {
+        const { coworkMetricQuery } = await import('@/lib/cowork/metric-period');
+        const requested = coworkMetricQuery(String(input));
+        return requested ? (await import('./metric-period-read')).readCoworkPeriodMetrics(client, scope, requested) : readMetricsRates(client, scope);
+      },
     },
     {
       name: 'metrics.diagnose', version: 1, effect: 'read', description: 'Hipótesis de rendimiento probadas contra datos',

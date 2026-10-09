@@ -1,5 +1,6 @@
 import type { OutreachSequenceContextV2 } from './campaigns-v2/outreach-sequence-context';
 import { requiredReportAwareDraftPersonalizationV2, type DraftContextV2 } from './server/draft-context-v2';
+import { commercialBrief } from './commercial-brief';
 
 // Preserve wording and paragraph boundaries, not instructions embedded in old copy.
 export function draftPriorMessageReference(value: string) {
@@ -16,6 +17,14 @@ export function buildDraftMessageBrief(context: DraftContextV2, sequence?: Outre
   const provenance = requiredReportAwareDraftPersonalizationV2(context);
   return {
     version: 'draft-message-brief/v1',
+    commercialBrief: commercialBrief({ request: sequence ? 'Seguimiento del mismo tema' : 'Primer correo comercial',
+      services: context.seller.services, proofPoints: context.seller.proofPoints, offer: context.seller.valueProposition,
+      sender: { name: context.seller.name, title: context.seller.jobTitle, company: context.seller.companyName },
+      audience: { name: context.recipient.displayName, role: context.person.title },
+      evidence: provenance.map(item => { const fact = context.evidence.find(evidence => evidence.evidenceId === item.evidenceId)!;
+        return { statement: fact.statement, subjectScope: fact.subjectScope }; }),
+      relationship: sequence ? 'follow_up' : 'initial', previous: sequence?.priorMessages.map(message => ({ index: message.index,
+        subject: draftPriorMessageReference(message.subject), body: draftPriorMessageReference(message.body) })) }),
     recipient: {
       name: context.recipient.displayName,
       role: context.person.title || null,

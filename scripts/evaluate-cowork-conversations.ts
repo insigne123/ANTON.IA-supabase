@@ -39,9 +39,14 @@
 // judge-cowork-conversations.ts, which also compares each answer with what the previous AI achieved.
 //
 // To compare prompts, run it on the previous commit and on this one with the same flags.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
+import { generateStructuredWithTelemetry as generateUnbudgeted } from '../src/ai/openai-json';
+import { CoworkEvaluationBudget, evidenceHash } from './lib/cowork-evaluation-budget';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { prepareCoworkSpecialists, coworkSpecialistInstructions, specialistResultSchema } from '../src/lib/cowork/specialists';
+import { corpusRead } from './fixtures/cowork-conversation-corpus';
 import { coworkDecisionSchema, coworkOfferedRead } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
@@ -78,6 +83,7 @@ import { VERSION_CORPUS } from './fixtures/cowork-version-corpus';
 import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
 import { CAMPANA_CORPUS } from './fixtures/cowork-campana-corpus';
 import { PREFERENCIAS_CORPUS } from './fixtures/cowork-preferencias-corpus';
+import { INTEGRAL_CORPUS } from './fixtures/cowork-integral-corpus';
 
 // Production conversations first, then the marketing use cases (email and LinkedIn),
 // every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
@@ -122,12 +128,34 @@ CORPUS.push(...CHAT_CORPUS);
 
 // «Otra versión» and the 👎 (Plan 13; scripts/fixtures/cowork-version-corpus.ts): ver-*. COWORK_EVAL_VERSIONS=off runs them without.
 CORPUS.push(...VERSION_CORPUS);
+CORPUS.push(...INTEGRAL_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
     throw new Error('Requires --live and explicit OPENAI_API_KEY/COWORK_MODEL. The offline check is scripts/cowork-conversation-corpus.test.ts.');
   }
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const ledgerFile = arg('budget-ledger');
+  const budget = ledgerFile ? new CoworkEvaluationBudget(ledgerFile, Number(arg('budget-usd') || 10)) : null;
+  if (budget && ['COWORK_MODEL', 'COWORK_WRITER_MODEL', 'COWORK_REVIEWER_MODEL', 'COWORK_DESIGNER_MODEL', 'COWORK_ANALYST_MODEL', 'COWORK_RESCUE_MODEL']
+    .some(name => process.env[name] && process.env[name] !== 'gpt-6-luna')) throw new Error('Evaluation configuration only permits gpt-6-luna');
+  if (arg('budget-usd') && !budget) throw new Error('--budget-ledger is required with --budget-usd');
+  const snapshots: unknown[] = [];
+  let activeCase: { id: string; attempt: number } | null = null;
+  const generateStructuredWithTelemetry: typeof generateUnbudgeted = async options => {
+    const snapshot = { model: options.openAiModel, systemPrompt: options.systemPrompt, prompt: options.prompt,
+      schema: zodToJsonSchema(options.schema, { $refStrategy: 'none' }), maxOutputTokens: options.maxOutputTokens, reasoningEffort: options.reasoningEffort };
+    snapshots.push({ ...snapshot, case: activeCase, hash: evidenceHash(snapshot) });
+    const reservation = budget?.reserve(snapshot);
+    try {
+      const response = await generateUnbudgeted(options);
+      if (reservation) budget!.settle(reservation, response.telemetry);
+      return response;
+    } catch (error) {
+      if (reservation) { try { budget!.settle(reservation, (error as { structuredTelemetry?: import('../src/ai/openai-json').StructuredTelemetry })?.structuredTelemetry); } catch { /* Keep exposure reserved. */ } }
+      throw error;
+    }
+  };
   // `--cases=axis-*` takes every case whose id starts with «axis-»; `axis:star` and `axis:rest` take the 20 ★ and the other 24.
   // Without --cases, the corpus as it always was: the AXIS operations are asked for by name.
   const selected = selectCases(CORPUS, arg('cases')) || CORPUS.filter(entry => !entry.axis).map(entry => entry.id);
@@ -139,6 +167,8 @@ async function main() {
 
   const stream = process.argv.includes('--stream');
   const writerOn = process.argv.includes('--writer');
+  const specialistsOn = process.argv.includes('--specialists');
+  const specialistUsage: Array<{ role: string; seconds: number; status: string }> = [];
   // --artifacts turns on code artifacts (Plan 12, 3b), as COWORK_CODE_ARTIFACTS_ENABLED does: the coordinator may hand a brief
   // to the Designer (COWORK_DESIGNER_MODEL, then the Writer's model). Each page is rendered in Chromium at the end.
   const artifactsOn = process.argv.includes('--artifacts');
@@ -164,16 +194,17 @@ async function main() {
   const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
   let calls = 0;
   const usage: unknown[] = [];
-  const outcomes: Array<CorpusOutcome & { attempt: number; seconds: number; decisions: unknown[]; issues: string[]; contactsImport: boolean; replyThread: boolean; linkedinBatch: boolean }> = [];
+  const outcomes: Array<CorpusOutcome & { request: string; attempt: number; seconds: number; decisions: unknown[]; issues: string[]; contactsImport: boolean; replyThread: boolean; linkedinBatch: boolean }> = [];
   for (let attempt = 1; attempt <= repeat; attempt++) {
     for (const id of selected) {
       const found = CORPUS.find(item => item.id === id)!;
+      activeCase = { id, attempt };
       const entry = { ...found, ...(importOn ? { contactsImport: true } : {}), ...(preferencesOn ? { preferences: true } : {}) };
       const decisions: unknown[] = [];
       const started = Date.now();
       // The Writer and the Reviewer, with their own models and the same call budget.
       const write: CorpusWriter | undefined = writerOn ? (brief, observations, meta) => runCoworkWriter({
-        request: meta.request, brief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step,
+        request: meta.request, brief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step, now: CORPUS_NOW,
         generate: async ({ role, schema, systemPrompt, prompt }) => {
           if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
           calls++;
@@ -268,7 +299,9 @@ async function main() {
         try {
           response = await generateStructuredWithTelemetry({
             schema,
-            systemPrompt: `${corpusCaseInstructions(entry, writerOn, { codeArtifacts: artifactsOn, analyst: analystOn }).systemPrompt}\nspecialists.review está deshabilitado.`,
+            systemPrompt: `${corpusCaseInstructions(entry, writerOn, { codeArtifacts: artifactsOn, analyst: analystOn }).systemPrompt}\n${specialistsOn
+              ? 'specialists.review está habilitado: hasta dos roles analyst|researcher|verifier con objective y evidence (índices de observaciones). Reserva una decisión para responder después de su resultado.'
+              : 'specialists.review está deshabilitado.'}`,
             // The rescue (Plan 14, 2) asks the same with COWORK_RESCUE_MODEL; every other decision uses COWORK_MODEL.
             prompt: JSON.stringify(context), provider: 'openai', openAiModel: meta?.model ?? process.env.COWORK_MODEL,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 45000,
@@ -292,13 +325,40 @@ async function main() {
           leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
           outline: response.data.outline ?? null });
         return response.data;
-      }, write, judgeInTurn, design, analyze);
+      }, write, judgeInTurn, design, analyze, specialistsOn ? async (tasks, observations, world) => {
+        const assignments = prepareCoworkSpecialists(tasks, observations);
+        const results = [];
+        for (const { task, evidence } of assignments) {
+          const started = Date.now();
+          if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
+          if (task.read) evidence.push({ index: Math.max(...task.evidence) + 1,
+            observation: { action: task.read.action, input: task.read.input, result: (world?.read ?? corpusRead)(task.read.action, task.read.input) } });
+          calls++;
+          try {
+            const response = await generateStructuredWithTelemetry({ schema: specialistResultSchema,
+              systemPrompt: coworkSpecialistInstructions(task.role), prompt: JSON.stringify({ objective: task.objective, evidence }),
+              provider: 'openai', openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
+              maxAttempts: 1, timeoutMs: 20000, maxOutputTokens: 1800 });
+            if (response.data.findings.some(finding => finding.evidence.some(index => !evidence.some(item => item.index === index)))) throw new Error('Unobserved specialist evidence');
+            usage.push(coworkModelUsage(response.telemetry));
+            specialistUsage.push({ role: task.role, seconds: (Date.now() - started) / 1000, status: 'completed' });
+            results.push({ role: task.role, result: response.data });
+          } catch (error) {
+            specialistUsage.push({ role: task.role, seconds: (Date.now() - started) / 1000, status: 'failed' }); throw error;
+          }
+        }
+        return results;
+      } : undefined);
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
-      outcomes.push({ ...outcome, attempt, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
+      outcomes.push({ ...outcome, request: entry.request, attempt, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), seconds: Math.round((Date.now() - started) / 100) / 10, decisions,
         issues: coworkAnswerIssues(shown, { expectNextStep: !(outcome.result.proposal || outcome.result.search) }).map(issue => issue.detail) });
-      if (calls >= maxCalls) break;
+       if (calls >= maxCalls) break;
     }
   }
+
+  const census = selected.flatMap(id => Array.from({ length: repeat }, (_, index) => ({ id, attempt: index + 1,
+    status: outcomes.find(outcome => outcome.id === id && outcome.attempt === index + 1)?.result.failed ? 'failed'
+      : outcomes.some(outcome => outcome.id === id && outcome.attempt === index + 1) ? 'evaluated' : 'not_measured' })));
 
   // Each artifact as the app shows it: sandboxed in Chromium, its visible text for the judge, 390 px and axe in both themes.
   const output = arg('output');
@@ -316,6 +376,7 @@ async function main() {
   const checks = outcomes.flatMap(outcome => outcome.checks);
   const summary = {
     model: process.env.COWORK_MODEL, calls, cases: outcomes.length,
+    specialists: { enabled: specialistsOn, calls: specialistUsage, limitation: 'synchronous fixture handoff; does not certify the durable production queue' },
     ...(importOn ? { contactsImport: 'all cases' } : {}),
     ...(preferencesOn ? { preferences: 'all cases', preferenceProposals: outcomes.filter(outcome => outcome.result.proposal?.kind === 'memory_save').map(outcome => outcome.id) } : {}),
     // With --writer: how many answers the Writer wrote, and how many calls it and the Reviewer made.
@@ -338,7 +399,7 @@ async function main() {
       firstTry: made.filter(outcome => outcome.result.artifact!.attempts === 1).length,
       rendered: made.filter(outcome => outcome.result.artifact!.render?.ok).length,
       fit390: made.filter(outcome => (outcome.result.artifact!.render?.overflow390 ?? 1) <= 0).length,
-      axeClean: made.filter(outcome => outcome.result.artifact!.render && !outcome.result.artifact!.render.axe.light.length && !outcome.result.artifact!.render.axe.dark.length).length,
+      axeClean: made.filter(outcome => outcome.result.artifact!.render?.axe.status === 'measured' && !outcome.result.artifact!.render.axe.light.length && !outcome.result.artifact!.render.axe.dark.length).length,
       seconds: made.map(outcome => outcome.result.artifact!.seconds) } } : {}),
     // With --analyst: how many turns the coordinator handed to the Analyst.
     ...(analystOn ? { analyst: { model: analystModel, calls: analystCalls, used: outcomes.filter(outcome => outcome.result.analyst).length } } : {}),
@@ -349,7 +410,7 @@ async function main() {
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,
     // Fewer reads and model calls per case mean faster turns with the same answer.
-    readsPerCase: Math.round(outcomes.reduce((sum, outcome) => sum + outcome.result.actions.length, 0) / Math.max(1, outcomes.length) * 100) / 100,
+    readsPerCase: Math.round(outcomes.reduce((sum, outcome) => sum + (outcome.result.reads || []).length, 0) / Math.max(1, outcomes.length) * 100) / 100,
     callsPerCase: Math.round(calls / Math.max(1, outcomes.length) * 100) / 100,
     answersWithIssues: outcomes.filter(outcome => outcome.issues.length).length,
     answersWithSuggestions: `${outcomes.filter(outcome => outcome.result.suggestions?.length).length}/${outcomes.filter(outcome => !outcome.result.proposal && !outcome.result.search && !outcome.result.failed).length}`,
@@ -390,7 +451,14 @@ async function main() {
       return `${planned.filter(Boolean).length}/${planned.length}`;
     })(),
   };
-  const report = { mode: 'real_model_real_loop_corpus_tools', summary, usage, outcomes,
+  const sources = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '--', 'src/lib/cowork', 'scripts/fixtures', 'src/lib/commercial-brief.ts', 'src/ai/openai-json.ts', 'package-lock.json'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
+  const sourceHashes = Object.fromEntries([...new Set(sources)].map(file => [file, evidenceHash(readFileSync(file, 'utf8'))]));
+  const manifest = { version: 1, baseCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceHashes,
+    sourceHash: evidenceHash(sourceHashes), evidenceHash: evidenceHash(snapshots),
+    runtimeEnv: Object.fromEntries(Object.entries(process.env).filter(([key]) => /^COWORK_.*(?:_ENABLED|_EFFORT)$/.test(key))),
+    corpusHash: evidenceHash(CORPUS), selected, repeat, rubric: 'cowork-integral-v1', evaluator: 'asistente-responsable',
+    flags: { writerOn, artifactsOn, analystOn, judgeOn, stream, specialistsOn }, census, budget: budget?.summary() ?? null };
+  const report = { mode: 'real_model_real_loop_corpus_tools', manifest, snapshots, summary, usage, outcomes,
     limitation: 'Fixture tools copied from one production workspace; lexical checks screen behavior and need a human read of the replies.' };
   if (output) writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   console.log(JSON.stringify(summary, null, 2));
