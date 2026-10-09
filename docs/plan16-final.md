@@ -46,6 +46,17 @@ medición.
 | #281 Informe con las pruebas del Perfil | El informe recibe los proofPoints del vendedor (antes no le llegaban) y el nombre del producto, y los cita tal cual. | Posición media 5,00 → 2,00; buenos 0 → 4 de 6; veracidad 3,83 → 4,50 |
 | #282 Referencia breve sin vínculos falsos | Ajuste de #280: la referencia al hecho no se pega a la prueba ni sugiere que ya trabajan juntos. | Posición media 4,17 → 2,83 contra #280; veracidad 3,50 → 4,00 |
 | #283 Redactora de Cowork | Los correos abren con el trabajo del destinatario, no con su cargo; una capacidad, sin listas; nombre real a una persona; sin jerga en la respuesta. | Buenas 4 → 15 de 22; malas 7 → 2; calidad del correo 2,86 → 3,68 |
+| #285 Redactora sin apertura repetida | Ajuste de #283: sin ejemplos de un rubro (el modelo los copiaba), cierre propio de cada correo, un solo trato y sin «junior». | Aperturas iguales 17 → 9 de 22; cierre de fórmula 5 → 0; posición 2,77 → 2,23 contra #283 |
+| #286 Sin jerga de sincronización | Cowork no nombra la sincronización del buzón; recomienda con lo registrado y, si importa, dice «si te respondió por fuera de ANTON.IA, avísame». | Jerga 5 → 0 de 16; buenas 10 → 12; posición 2,81 → 2,19 |
+| #287 «Con LinkedIn» | `leads.search` filtra «con LinkedIn» en toda la cuenta (antes miraba los 20 más recientes); los seguimientos de LinkedIn se leen junto con la red. | Veracidad 3,80 → 4,90; malas 4 → 1 de 10 |
+| #288 Tablero sin marcadores | El texto del chat de un tablero quita la oración con un marcador `{{…}}`. | Prueba unitaria |
+| #289 «¿A quién le escribo hoy?» | Lee a todos los que tienen correo en la cuenta, no los 20 más recientes. | Malas 4 → 1 de 9; posición 4,11 → 2,89 |
+| #290 Envíos por período | `contacted.search` entiende «últimos 7 días» o «esta semana» como fecha de envío (antes lo buscaba como texto y volvía vacío). | Sabe a quién se escribió 2 → 5 de 5; posición 7,00 → 4,00 |
+| #291 Textos de tableros | «Mostrar 0 más» ya no queda visible (`.btn` le ganaba a `[hidden]`) y los plurales dicen «1 categoría». | Pruebas unitarias |
+| #292 Seguimiento pendiente | Un envío sin respuesta de 5 días o más se propone como seguimiento, aparte de los primeros correos. | Lo descarta 4 → 0 de 12; posición 4,08 → 2,92 |
+| #293 Campañas por estado | `campaigns.list` devuelve `byStatus` y el banco lista las 19 campañas (listaba 1). | Dice cuántas hay por estado 4 de 14 → 8 de 10; conteo equivocado 1 → 0 |
+| #294 Tarjetas de campaña | La tarjeta nombra la campaña, sin ID ni «(rev N)». | Prueba unitaria |
+| #295 «Los de la feria» | «Feria», «evento» o «asistentes» activan la parte de archivos: lee la lista subida en vez de pedirla. | 4 → 5 de 5; 8 de 8 casos de archivos |
 
 Con #272 y #275, ninguna variable de modelo de `apphosting.yaml` apunta a sol.
 
@@ -70,6 +81,9 @@ Con #272 y #275, ninguna variable de modelo de `apphosting.yaml` apunta a sol.
   ciega empeoró (posición 3,83 contra 3,17; malas 7 contra 2). Con una oferta de un solo servicio falta material nuevo.
 - **«Descargar» en el informe para el jefe**: la regla nueva lo hizo decir en 1 de 3 informes (0 de 3 antes); no alcanza para
   integrarla.
+- **Conteos por mes para la Diseñadora** (`byMonth`): 4 contra 4 tableros del mes, sin diferencia.
+- **«¿A quién le escribo hoy?» con `leads.recommend`**: en la cuenta grande solo ve 4 contactos y vuelve el «es el único de tus 4».
+
 
 ## Para el mantenedor
 
