@@ -81,6 +81,23 @@ test('lead-scoped effect labels use the observed contact name, never raw IDs', a
     label: 'Enriquecer contacto José C. (GrupoExpro)', originRunId: runId }]);
 });
 
+test('a campaign card names the campaign campaigns.list showed, never its ID', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const campaignId = '00000000-0000-4000-8000-000000000031';
+  const proposals: Array<{ kind: string; targetId: string; label: string }> = [];
+  const listed = { action: 'campaigns.list' as const, query: null, leadId: null, answer: null };
+  const activate = { action: 'campaign.activate' as const, query: null, leadId: null, campaignId, note: 'Activa la más reciente.', answer: null };
+  await runCoworkReadLoop({
+    message: 'Activa la campaña de prueba', runId, signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ scope: 'own_campaigns', campaigns: [{ id: campaignId, name: 'Campaña de prueba', status: 'draft', revision: 1, recipients: 7 }] }),
+    record: async () => {},
+    proposeEffect: async (proposal: { kind: string; targetId: string; label: string }) => { proposals.push(proposal); },
+    decide: async observations => observations.length === 0 ? listed : activate,
+  });
+  assert.equal(proposals[0]?.kind, 'campaign_activate');
+  assert.equal(proposals[0]?.label, 'Aprobar y activar campaña «Campaña de prueba»');
+});
+
 test('tool loop is bounded even when the model never finishes', async () => {
   let calls = 0;
   await assert.rejects(runCoworkReadLoop({

@@ -283,8 +283,21 @@ function describeLeadTarget(
   observations: CoworkObservation[], history: CoworkHistoryTurn[],
 ): string | null {
   if (action === 'email.reply_thread') return observedThreadName(targetId, observations, history);
+  if (action === 'campaign.activate' || action === 'campaign.pause') return observedCampaignName(targetId, observations, history);
   if (action !== 'leads.save_contact' && action !== 'research.start' && action !== 'lead.enrich' && action !== 'lead.enrich_phone') return null;
   return observedLeadName(targetId, observations, history);
+}
+
+/** «Nombre» of a campaign campaigns.list showed in this thread (activating or pausing one requires it), or null. */
+function observedCampaignName(campaignId: string, observations: CoworkObservation[], history: CoworkHistoryTurn[]): string | null {
+  const payloads = [...observations, ...history.flatMap(turn => turn.observations || [])];
+  for (const payload of payloads as Array<{ action?: unknown; result?: unknown } | null>) {
+    if (payload?.action !== 'campaigns.list') continue;
+    const campaigns = (payload.result as { campaigns?: Array<{ id?: string; name?: string | null }> } | null)?.campaigns;
+    const name = String((Array.isArray(campaigns) ? campaigns.find(campaign => campaign?.id === campaignId)?.name : '') || '').trim();
+    if (name) return name.slice(0, 120);
+  }
+  return null;
 }
 
 /** «Nombre (Empresa)» of the person of a conversation read with replies.thread in this thread, or null. */
@@ -368,8 +381,9 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'lead.enrich') return named('Enriquecer contacto');
   if (action === 'email.send') return `Enviar correo del borrador ${targetId.slice(0, 120)}`;
   if (action === 'campaign.create') return 'Crear borrador de campaña';
-  if (action === 'campaign.activate') return `Aprobar y activar campaña ${targetId.slice(0, 120)}`;
-  if (action === 'campaign.pause') return `Pausar campaña ${targetId.slice(0, 120)}`;
+  // A campaign by its name, never its ID («Aprobar y activar campaña 00000000-…»), as the worker labels it when staging.
+  if (action === 'campaign.activate') return targetName ? `Aprobar y activar campaña «${targetName}»` : 'Aprobar y activar la campaña';
+  if (action === 'campaign.pause') return targetName ? `Pausar campaña «${targetName}»` : 'Pausar la campaña';
   if (action === 'code.execute') return 'Ejecutar código en entorno aislado';
   if (action === 'profile.update') return 'Actualizar tu perfil comercial';
   if (action === 'saved_search.create') return 'Guardar búsqueda';
