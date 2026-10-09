@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState, type FormEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { AlertCircle, Eye, EyeOff, Loader2, MailCheck } from 'lucide-react';
 
 import Logo from '@/components/logo';
@@ -67,7 +67,6 @@ function PasswordField({ id, label, value, onChange, autoComplete, visible, onTo
 
 function LoginContent() {
     const { signInWithPassword, signInWithGoogle, requestPasswordReset } = useAuth();
-    const router = useRouter();
     const searchParams = useSearchParams();
     // Only a path of this app: a link to the login page cannot hand the session off to another site.
     const redirectTo = safeNextPath(searchParams.get('next'), '/dashboard');
@@ -102,7 +101,9 @@ function LoginContent() {
         event.preventDefault();
         void run(async () => {
             await signInWithPassword(email, password);
-            router.push(redirectTo);
+            // The SDK has persisted the session cookies. A fresh document request avoids
+            // a stale unauthenticated router cache or a transition lost when AuthProvider remounts.
+            window.location.replace(redirectTo);
         });
     };
 
