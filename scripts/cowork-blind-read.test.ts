@@ -19,3 +19,12 @@ test('the reader sees the request, the reply, what it can tap and every email, w
   // An unknown case shows its id as the request.
   assert.match(blindAnswer('R01', 'caso-nuevo', { reply: '' }), /\*\*Pedido:\*\* caso-nuevo\n\n\*\*Respuesta:\*\*\n\(sin respuesta\)/);
 });
+
+test('review evidence includes the frozen request, complete document and numeric results, with missing render explicit', () => {
+  const shown = blindAnswer('R01', 'unknown-case', { reply:'Resumen',document:{title:'Informe de equipo',content:'## Alcance\nÚltima fila conservada'},
+    blocks:[{type:'metrics',title:'Actividad propia',period:'Este mes',items:[{label:'Envíos',value:'4',detail:'Población propia'}]}],
+    artifact:{title:'Tablero',tables:[{name:'contactos',rows:45}]} },'Solicitud congelada original');
+  assert.match(shown,/Pedido:\*\* Solicitud congelada original/);
+  assert.match(shown,/Última fila conservada/);assert.match(shown,/Población propia/);
+  assert.match(shown,/render no medido/);assert.match(shown,/not_measured/);
+});
