@@ -53,21 +53,27 @@ if (testFiles.length === 0) {
   process.exit(1);
 }
 
-const child = spawn(
-  process.execPath,
-  ['--loader', './scripts/ts-test-loader.mjs', '--test', ...testFiles],
-  {
-    cwd: ROOT,
-    // Provider credentials and remote targets are deliberately not inherited.
-    env: unitTestEnv,
-    stdio: 'inherit',
+// Windows CreateProcess caps the full command line. Bound each batch and preserve every selected file.
+const batches = [];
+let batch = [], chars = 0;
+for (const file of testFiles) {
+  if (process.platform === 'win32' && batch.length && (chars + file.length + 3 > 24000 || batch.length >= 32)) {
+    batches.push(batch); batch = []; chars = 0;
   }
-);
-
-child.on('exit', (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code ?? 1);
-});
+  batch.push(file); chars += file.length + 3;
+}
+if (batch.length) batches.push(batch);
+let failed = false;
+for (const [index, files] of batches.entries()) {
+  if (batches.length > 1) console.log(`[test:unit] Batch ${index + 1}/${batches.length}: ${files.length} files`);
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--loader', './scripts/ts-test-loader.mjs', '--test', ...(process.platform === 'win32' ? ['--test-concurrency=4'] : []), ...files], {
+      cwd: ROOT, env: unitTestEnv, stdio: 'inherit',
+    });
+    child.on('error', reject);
+    child.on('exit', (code, signal) => resolve({ code, signal }));
+  });
+  if (result.signal) { process.kill(process.pid, result.signal); break; }
+  if (result.code !== 0) failed = true;
+}
+process.exitCode = failed ? 1 : 0;
