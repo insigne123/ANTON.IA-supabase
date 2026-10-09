@@ -7,7 +7,7 @@ import { coworkThreadMemorySchema, coworkThreadMemoryTitle, readCoworkThreadMemo
  */
 
 type Scope = { userId: string; organizationId: string };
-type Run = { id: string; message: string; root_run_id?: string | null; created_at?: string | null };
+type Run = { id: string; message: string; root_run_id?: string | null; parent_run_id?: string | null; created_at?: string | null };
 
 /**
  * The first request of the conversation (when this is not that turn) and the latest memory, for the next decision. With
@@ -25,7 +25,20 @@ export async function loadCoworkThreadMemory(client: SupabaseClient, scope: Scop
   const message = (root?.data as { message?: unknown } | null)?.message;
   const row = stored.data as { memory?: unknown; source_run_id?: unknown } | null;
   const source = typeof row?.source_run_id === 'string' ? row.source_run_id : null;
-  const offBranch = Boolean(branch?.complete && source && source !== run.id && !branch.runIds.includes(source));
+  let offBranch = Boolean(branch && source && source !== run.id && !branch.runIds.includes(source));
+  if (offBranch && branch && !branch.complete) {
+    // Prove ancestry beyond the prompt's eight-turn window instead of accepting a summary from an unknown sibling version.
+    const seen = new Set<string>();
+    let cursor: string | null = branch.runIds[branch.runIds.length - 1] ?? run.parent_run_id ?? null;
+    for (let steps = 0; steps < 100 && cursor && !seen.has(cursor); steps++) {
+      if (cursor === source) { offBranch = false; break; }
+      seen.add(cursor);
+      const parent: { data: { parent_run_id?: unknown } | null; error: unknown } = await client.from('cowork_runs').select('parent_run_id')
+        .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).eq('id', cursor).maybeSingle();
+      if (parent.error || !parent.data) break;
+      cursor = typeof parent.data.parent_run_id === 'string' ? parent.data.parent_run_id : null;
+    }
+  }
   return {
     firstRequest: !root || root.error || typeof message !== 'string' ? null : message,
     memory: stored.error || offBranch ? null : readCoworkThreadMemory(row?.memory),

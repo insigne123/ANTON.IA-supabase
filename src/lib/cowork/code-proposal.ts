@@ -11,8 +11,9 @@ const fileNameSchema = z.string().trim().min(1).max(120)
   })
   .refine(name => {
     const dot = name.lastIndexOf('.');
-    return dot > 0 && ['csv', 'json', 'md', 'txt', 'xlsx'].includes(name.slice(dot + 1).toLowerCase());
-  }, { message: 'Extensión no permitida (csv, json, md, txt, xlsx).' });
+    return dot > 0 && ['csv', 'json', 'md', 'txt', 'xlsx', 'docx', 'pptx', 'pdf', 'html', 'css', 'js', 'mjs', 'png', 'svg'].includes(name.slice(dot + 1).toLowerCase())
+      && !/^(?:main|launcher)\.(?:py|mjs)$/i.test(name);
+  }, { message: 'Extensión o nombre de entrada no permitido.' });
 
 export const coworkCodeProposalSchema = z.object({
   language: z.enum(['python', 'node']),

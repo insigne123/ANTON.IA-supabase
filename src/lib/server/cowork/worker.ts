@@ -10,7 +10,7 @@ import { coworkOpportunitiesAllowed } from './opportunities-read';
 import { coworkWorkerConfigured } from './runs';
 import { loadCoworkHistory } from './conversation-context';
 import { loadCoworkThreadMemory, saveCoworkThreadMemory } from './thread-memory';
-import { coworkThreadMemoryContext } from '@/lib/cowork/thread-memory';
+import { coworkThreadMemoryContext, coworkPendingProposalMemory, type CoworkThreadMemory } from '@/lib/cowork/thread-memory';
 import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
 import { processCoworkResearchNotices } from './research-notice';
@@ -20,7 +20,8 @@ import { loadCoworkThreadStats } from './thread-stats';
 import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { coworkOperationHash, createCoworkOperationGateway } from './operations';
 import { coworkReadCapabilities } from './read-capabilities';
-import { processCoworkEffectQueue, resolveCoworkEffect } from './effects';
+import { processCoworkEffectQueue, resolveCoworkEffect, admitCoworkContinuation } from './effects';
+import { coworkTaskGraph, coworkTaskReadyEffect, coworkTaskReadyNode } from '@/lib/cowork/task-graph';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 import { stageCoworkCampaignDefinition } from './campaign-ops';
@@ -149,6 +150,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
   try {
     const telemetry: Array<{ model: string; durationMs: number }> = [];
     await authorize();
+    const question = await client.from('cowork_run_events').select('payload').eq('run_id', run.id)
+      .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).eq('kind', 'clarification.requested').limit(1).maybeSingle();
+    if (question.error) throw new Error('No se pudo verificar el alcance de la pregunta.');
+    const clarificationOnly = Boolean(question.data);
     const history = await loadCoworkHistory(client, scope, run.parent_run_id || null);
     // The whole conversation beyond the last turns: its first request and the memory the previous turns kept.
     const threadMemory = coworkThreadMemoryContext(await loadCoworkThreadMemory(client, scope, run,
@@ -165,6 +170,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const userContext = baseContext && workspace ? { ...baseContext, workspace } : baseContext;
     const reasoningEffort = coworkReasoningEffort();
     let waitingApproval = false;
+    let pendingMemory: CoworkThreadMemory | null = null;
     const autonomyEnabled = process.env.COWORK_AUTONOMY_ENABLED === 'true';
     const executionPolicy = coworkExecutionPolicy(run.mode, autonomyEnabled);
     // Fase 1 (CW-06): thread budgets bound automatic chains. A single proposal
@@ -244,6 +250,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         p_run_id: run.id, p_token: run.lease_token, p_payload: payload,
       });
       if (recorded.error || recorded.data !== true) throw new Error('Cowork run is no longer writable');
+      if (activeTask?.deliveryEvents && payload && typeof payload === 'object') {
+        activeTask.deliveryEvents.push({ runId: run.id, kind: 'tool.completed', payload: payload as Record<string, unknown> });
+        activeTask.graph = coworkTaskGraph(activeTask.startRunId, activeTask.plan, activeTask.deliveryEvents);
+      }
     };
     // The judge reads the coordinator's final answer and asks for one correction when it is worth it. Who reads it is
     // COWORK_REVIEW_ENGINE (the model, Jev, both or nobody); COWORK_JEV_SHADOW lets Jev answer next to it and only record.
@@ -281,6 +291,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const rescueModel = coworkRescueModel();
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
+      metricPeriods: !clarificationOnly,
       // Where a search looks when nobody said where (Plan 14, 1): «Perfil», or COWORK_DEFAULT_SEARCH_LOCATION (Chile).
       searchDefaults: coworkSearchDefaults(userContext),
       // Inside a long task the search keeps what the approved plan says («…de retail en Santiago»), not the automatic message.
@@ -302,7 +313,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         }
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
-          systemPrompt: decisionSystemPrompt,
+          systemPrompt: decisionSystemPrompt + (clarificationOnly ? '\nEsta es una pregunta sobre una propuesta que sigue esperando aprobación en el hilo. Aclara su alcance, costo o consecuencia usando lo observado. No crees, reemplaces, apruebes ni ejecutes efectos ni búsquedas externas; la propuesta original se conserva.' : ''),
           prompt: decisionPrompt(observations, mustAnswer, rejections, turnBudget),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',
@@ -345,6 +356,11 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         operationId: `cowork:${run.id}:${action}:${coworkOperationHash(value)}`,
       }, controller.signal),
       record: recordEvent,
+      onWriteDelivery: activeTask?.graph ? async answer => {
+        const node = coworkTaskReadyNode(activeTask.graph!, 'write');
+        if (!node || !answer.blocks?.some(block => block.type === 'email_draft' || block.type === 'sequence')) return;
+        await recordEvent({ action: 'assistant.written', input: '', result: { scope: 'task_delivery', stepId: node.id, blocks: answer.blocks } });
+      } : undefined,
       // The Writer and the Reviewer write the emails when the coordinator hands them a brief.
       write: writerEnabled ? coworkWriterTurn({
         request: run.message, signal: controller.signal, authorize,
@@ -396,8 +412,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       offeredReads: process.env.COWORK_OFFERED_READS_ENABLED === 'true',
       userContext,
-      remember: async memory => { await saveCoworkThreadMemory(client, scope, run, memory); },
+      remember: async memory => { if (!clarificationOnly) pendingMemory = memory; },
       proposeNote: async (leadId, note) => {
+        if (clarificationOnly) throw new Error('Una aclaración conserva la propuesta y no reemplaza notas.');
         const proposed = await client.rpc('cowork_propose_note', {
           p_run_id: run.id, p_token: run.lease_token, p_lead_id: leadId, p_note: note,
         });
@@ -405,6 +422,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         waitingApproval = true;
       },
       proposeSearch: async criteria => {
+        if (clarificationOnly) throw new Error('Una aclaración no admite nuevas búsquedas externas.');
         if (process.env.COWORK_EXTERNAL_SEARCH_ENABLED !== 'true') throw new Error('External search disabled');
         if (stats.searches >= budgets.maxSearches) throw new Error('Thread search budget exhausted');
         if (!searchQuota.allowed) throw new Error('Daily search quota exhausted');
@@ -427,6 +445,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         }
       },
       proposeEffect: async proposal => {
+        if (clarificationOnly) throw new Error('Esta pregunta conserva la propuesta original y no admite efectos nuevos. Responde la aclaración.');
         if (stats.effects >= budgets.maxEffects) throw new Error('Thread effect budget exhausted');
         // Version-bound review: the proposal pins draftId:versionId:contentHash
         // so execution refuses anything else, even if the draft changed since.
@@ -638,14 +657,21 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         } else if (activeTask && coworkTaskApproves(activeTask, proposal.kind, { searches: 0, credits: taskCredits })) {
           // Inside an approved task's plan and limits (Plan 13, 4c): approved by the person when they approved the plan.
           // Sending, activating, LinkedIn or a bigger spend never fit, and wait for the person as always.
-          await recordCoworkTaskStep(client, scope, run.id, { kind: proposal.kind, searches: 0, credits: taskCredits });
+          const node = coworkTaskReadyEffect(activeTask.graph, proposal.kind);
+          const targets = proposal.prepareBatch?.people.map(person => person.leadId || person.providerId).filter((id): id is string => Boolean(id)) ?? proposal.enrichBatch ?? [proposal.targetId];
+          await recordCoworkTaskStep(client, scope, run.id, { kind: proposal.kind, searches: 0, credits: taskCredits,
+            ...(node ? { stepId: node.id, targets } : {}) });
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         }
       },
     });
     await judgeTurn?.finish(result);
-    if (waitingApproval) return { claimed: true, processed: 1 };
+    if (waitingApproval) {
+      if (pendingMemory) await saveCoworkThreadMemory(client, scope, run,
+        coworkPendingProposalMemory(pendingMemory, threadMemory?.memory ?? null));
+      return { claimed: true, processed: 1 };
+    }
     controller.signal.throwIfAborted();
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_run', {
@@ -653,6 +679,16 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       p_payload: { ...polishCoworkAnswer(result), telemetry },
     });
     if (finished.error) throw finished.error;
+    if (finished.data === true && pendingMemory) await saveCoworkThreadMemory(client, scope, run, pendingMemory);
+    if (finished.data === true && activeTask?.graph) {
+      const next = activeTask.graph.find(node => node.state === 'pending' && node.dependsOn.every(id => activeTask.graph!.some(dep => dep.id === id && dep.state === 'succeeded')));
+      if (next) {
+        const child = await client.from('cowork_runs').select('id').eq('parent_run_id', run.id)
+          .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).limit(1).maybeSingle();
+        if (!child.error && !child.data) await admitCoworkContinuation(client, scope, run.id,
+          `Continúa la tarea aprobada desde su entrega guardada. Siguiente paso: ${next.label}. Conserva los targets, la oferta y la versión exacta; no repitas lo ya completado ni amplíes permisos o gasto.`);
+      }
+    }
     return { claimed: true, processed: finished.data === true ? 1 : 0 };
   } catch (error) {
     if (error instanceof CoworkSpecialistsDeferred) return { claimed: true, processed: 1 };

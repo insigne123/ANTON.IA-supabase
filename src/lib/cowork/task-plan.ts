@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { coworkTaskReadyNode, type CoworkTaskNode, type CoworkTaskDeliveryEvent } from './task-graph';
 
 /**
  * Long tasks (Plan 13, 4c): a request of several steps («busca 25 gerentes de RR. HH. de retail, guarda los 10 mejores,
@@ -59,7 +60,7 @@ export function coworkTaskPlanLabel(plan: CoworkTaskPlan) {
 /** What the approved task has spent so far: the steps it approved by itself, the searches and the credits. */
 export type CoworkTaskUsage = { steps: number; searches: number; credits: number };
 
-export type CoworkActiveTask = { startRunId: string; startDepth: number; plan: CoworkTaskPlan; used: CoworkTaskUsage };
+export type CoworkActiveTask = { startRunId: string; startDepth: number; plan: CoworkTaskPlan; used: CoworkTaskUsage; graph?: CoworkTaskNode[]; deliveryEvents?: CoworkTaskDeliveryEvent[] };
 
 /** What an effect proposed inside the task costs, as the task counts it. */
 export type CoworkTaskCost = { searches: number; credits: number };
@@ -72,6 +73,10 @@ export function coworkTaskApproves(task: CoworkActiveTask, kind: string | null, 
   const kinds = new Set(task.plan.steps.map(step => step.kind));
   const allowed = kind === null ? kinds.has('search') : [...kinds].some(step => STEP_EFFECTS[step].includes(kind));
   if (!allowed) return false;
+  if (task.graph) {
+    const stepKind = kind === null ? 'search' : [...kinds].find(step => STEP_EFFECTS[step].includes(kind));
+    if (!stepKind || !coworkTaskReadyNode(task.graph, stepKind)) return false;
+  }
   if (task.used.steps >= task.plan.steps.length + 1) return false;
   if (task.used.searches + cost.searches > task.plan.limits.searches) return false;
   return task.used.credits + cost.credits <= task.plan.limits.credits;
@@ -102,6 +107,7 @@ export function coworkTaskContext(task: CoworkActiveTask) {
     steps: task.plan.steps,
     limits: task.plan.limits,
     used: task.used,
+    ...(task.graph ? { graph: task.graph, deliveryInstruction: 'La aprobación inicia el paso; solo sus resultados confirman entrega. Los pasos blocked esperan su dependencia; partial requiere resolver lo pendiente sin repetir los éxitos.' } : {}),
     left: { searches: Math.max(0, task.plan.limits.searches - task.used.searches), credits: Math.max(0, task.plan.limits.credits - task.used.credits) },
     instruction: TASK_INSTRUCTION,
   };

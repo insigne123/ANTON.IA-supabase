@@ -66,7 +66,10 @@ test('the worker approves by itself only what fits the plan, and never past the 
   assert.match(worker, /const activeTask = tasksEnabled \? await loadCoworkActiveTask\(client, scope, run\.id\)\.catch\(\(\) => null\) : null;/);
   assert.match(worker, /if \(activeTask\) throw new Error\('Ya hay una tarea en curso en este hilo/);
   // Effects: autonomy first, then the task, which records what it spent before approving.
-  assert.match(worker, /\} else if \(activeTask && coworkTaskApproves\(activeTask, proposal\.kind, \{ searches: 0, credits: taskCredits \}\)\) \{\n[^\n]*\n[^\n]*\n\s*await recordCoworkTaskStep\(client, scope, run\.id, \{ kind: proposal\.kind, searches: 0, credits: taskCredits \}\);\n\s*const approved = await resolveCoworkEffect\(client, scope, run\.id, true\);/);
+  const gate = worker.indexOf('} else if (activeTask && coworkTaskApproves(activeTask, proposal.kind, { searches: 0, credits: taskCredits })) {');
+  const recorded = worker.indexOf('await recordCoworkTaskStep(client, scope, run.id, { kind: proposal.kind, searches: 0, credits: taskCredits', gate);
+  const approved = worker.indexOf('const approved = await resolveCoworkEffect(client, scope, run.id, true);', recorded);
+  assert.ok(gate >= 0 && recorded > gate && approved > recorded, 'budget/plan gate and durable step recording precede automatic approval');
   // A looked-up email is a credit; a batch counts its own.
   assert.match(worker, /let taskCredits = proposal\.kind === 'enrich_contact' \? 1 : 0;/);
   assert.match(worker, /taskCredits = staged\.cost\.lookups;/);

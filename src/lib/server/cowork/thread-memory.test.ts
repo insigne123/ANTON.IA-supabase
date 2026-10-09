@@ -8,7 +8,7 @@ const scope = { userId: 'u1', organizationId: 'o1' };
 const memory = { offer: 'Revisión de antecedentes', audience: null, people: [], decisions: [], pending: [] };
 
 /** A stand-in for the query builder over two tables, recording every filter and write. */
-function fakeClient(rows: { runs?: Record<string, { message: string; user_id: string; organization_id: string }>; memory?: Record<string, unknown> | null }) {
+function fakeClient(rows: { runs?: Record<string, { message: string; user_id: string; organization_id: string; parent_run_id?: string | null }>; memory?: Record<string, unknown> | null }) {
   const writes: Array<Record<string, unknown>> = [];
   const filters: Array<Record<string, unknown>> = [];
   const client = {
@@ -21,7 +21,7 @@ function fakeClient(rows: { runs?: Record<string, { message: string; user_id: st
         maybeSingle: async () => {
           if (table === 'cowork_runs') {
             const run = rows.runs?.[String(where.id)];
-            return { data: run && run.user_id === where.user_id && run.organization_id === where.organization_id ? { message: run.message } : null, error: null };
+            return { data: run && run.user_id === where.user_id && run.organization_id === where.organization_id ? { message: run.message, parent_run_id: run.parent_run_id ?? null } : null, error: null };
           }
           const stored = rows.memory;
           return { data: stored && stored.user_id === where.user_id && stored.organization_id === where.organization_id ? stored : null, error: null };
@@ -68,8 +68,14 @@ test('another version of a turn does not read the memory the version it replaces
   const turn = { id: 'turn-2b', message: 'Otra versión', root_run_id: 'root' };
   assert.equal((await loadCoworkThreadMemory(fake.client, scope, turn, { runIds: ['root'], complete: true })).memory, null);
   assert.deepEqual((await loadCoworkThreadMemory(fake.client, scope, { ...turn, id: 'turn-3' }, { runIds: ['root', 'turn-2a'], complete: true })).memory, memory);
-  // A history cut short cannot tell: the memory stays, as before versions.
-  assert.deepEqual((await loadCoworkThreadMemory(fake.client, scope, turn, { runIds: ['turn-9'], complete: false })).memory, memory);
+  // A short history needs proof beyond the prompt window; unknown ancestry cannot import sibling decisions.
+  assert.equal((await loadCoworkThreadMemory(fake.client, scope, turn, { runIds: ['turn-9'], complete: false })).memory, null);
+  const long = fakeClient({ runs: { root:{message:'Quiero vender',user_id:'u1',organization_id:'o1'},
+    'turn-9':{message:'Sigo',user_id:'u1',organization_id:'o1',parent_run_id:'turn-8'},
+    'turn-8':{message:'Sigo',user_id:'u1',organization_id:'o1',parent_run_id:'turn-2a'} },
+    memory:{root_run_id:'root',user_id:'u1',organization_id:'o1',memory,source_run_id:'turn-2a'} });
+  assert.deepEqual((await loadCoworkThreadMemory(long.client,scope,turn,{runIds:['turn-9'],complete:false})).memory,memory);
+  assert.ok(long.filters.every(where=>where.user_id==='u1'&&where.organization_id==='o1'));
 });
 
 test('the list reads the names Cowork gave the person\'s conversations, scoped to them, and goes on without them', async () => {

@@ -32,6 +32,13 @@ export const coworkThreadMemorySchema = z.object({
 }).strict();
 export type CoworkThreadMemory = z.infer<typeof coworkThreadMemorySchema>;
 
+/** A proposed operation is not an accepted decision or a delivered contact state.
+ * Keep the new goal/offer while pending, but do not let a proposed outcome overwrite observed people/decisions. */
+export function coworkPendingProposalMemory(memory: CoworkThreadMemory, previous: CoworkThreadMemory | null): CoworkThreadMemory {
+  return { ...memory, people: previous?.people ?? [], decisions: previous?.decisions ?? [],
+    pending: ['La propuesta de este turno sigue esperando aprobación o confirmación de ejecución.'] };
+}
+
 /** A stored memory, or null when there is none or it no longer reads as one. Never throws. */
 export function readCoworkThreadMemory(value: unknown): CoworkThreadMemory | null {
   const parsed = coworkThreadMemorySchema.safeParse(value);

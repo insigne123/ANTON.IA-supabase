@@ -7,9 +7,10 @@ import { buildSupliaContext, readOrganizationOffer } from '@/lib/server/suplia-c
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 import {
-  COWORK_FILE_NOTICE, COWORK_FILE_UNREADABLE, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords,
+  COWORK_FILE_NOTICE, COWORK_FILE_UNREADABLE, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords, coworkTextPreview,
 } from '@/lib/cowork/file-read';
-import { COWORK_UPLOAD_BUCKET, listCoworkUploads } from './uploads';
+import { COWORK_UPLOAD_BUCKET } from './uploads';
+import { listCoworkObservedFiles } from './observed-files';
 import { coworkBinaryPreview } from './file-binary';
 
 type Scope = { userId: string; organizationId: string };
@@ -224,6 +225,13 @@ export async function readCoworkCampaigns(client: SupabaseClient, scope: Scope) 
  * Contents stay out of observations; execution downloads exactly the approved
  * names from the proposing run's prefix. */
 export async function readCoworkFiles(client: SupabaseClient, scope: Scope) {
+  if (process.env.COWORK_BUILD_WORKSPACES_ENABLED === 'true') {
+    const assets = await listCoworkObservedFiles(client, scope);
+    const files = [...assets].flatMap(([name, versions]) => versions[0] ? [{ name, runId: versions[0].runId, size: versions[0].size,
+      updatedAt: versions[0].updatedAt, source: versions[0].bucket ? 'generated' : 'uploaded', sha256: versions[0].sha256 ?? null }] : []);
+    return { scope: 'own_files', files: files.slice(0, 30), truncated: files.length > 30,
+      limitation: 'Archivos propios observados en el historial disponible; conserva la revisión y solicita el nombre exacto antes de reutilizar.' };
+  }
   const { data, error } = await client.storage.from('cowork-uploads')
     .list(`${scope.organizationId}/${scope.userId}`, { limit: 100 });
   if (error) throw new Error('No se pudieron listar los archivos.');
@@ -246,7 +254,7 @@ export async function readCoworkFiles(client: SupabaseClient, scope: Scope) {
 const MAX_READ_BYTES = 20 * 1024 * 1024;
 
 /** An upload a name points to, as the person's files are searched for it. */
-export type CoworkUploadMatch = { name: string; sheet: string; runId: string; size: number };
+export type CoworkUploadMatch = { name: string; sheet: string; runId: string; size: number; bucket?: 'cowork-artifacts'; sha256?: string };
 
 /**
  * Which of this user's own uploads a name points to: the name itself or words of it («feria» when only
@@ -257,7 +265,7 @@ export async function findCoworkUpload(client: SupabaseClient, scope: Scope, val
   : Promise<{ found: true; upload: CoworkUploadMatch } | { found: false; missing: ReturnType<typeof coworkFileMissing> }> {
   const asked = z.string().trim().min(1).max(160).parse(value).toLowerCase();
   if (/[\\/\0]/.test(asked) || asked.startsWith('.')) throw new Error('Nombre de archivo inválido.');
-  const uploads = await listCoworkUploads(client, scope);
+  const uploads = await listCoworkObservedFiles(client, scope);
   // «archivo.xlsx#Hoja 2»: unless a whole upload has that name, what follows the last # is the sheet.
   const hash = asked.lastIndexOf('#');
   const split = hash > 0 && !uploads.has(asked) ? { file: asked.slice(0, hash).trim(), sheet: asked.slice(hash + 1).trim() } : { file: asked, sheet: '' };
@@ -265,16 +273,21 @@ export async function findCoworkUpload(client: SupabaseClient, scope: Scope, val
   const name = uploads.has(split.file) ? split.file : byWords.length === 1 ? byWords[0] : null;
   if (!name) return { found: false, missing: coworkFileMissing(split.file, [...uploads.keys()], byWords) };
   const match = (uploads.get(name) || [])[0];
-  return { found: true, upload: { name, sheet: split.sheet, runId: match.runId, size: match.size } };
+  return { found: true, upload: { name, sheet: split.sheet, runId: match.runId, size: match.size,
+    ...(match.bucket ? { bucket: match.bucket } : {}), ...(match.sha256 ? { sha256: match.sha256 } : {}) } };
 }
 
 /** The bytes of an upload, within the 20 MB Cowork reads. */
 export async function downloadCoworkUpload(client: SupabaseClient, scope: Scope, upload: CoworkUploadMatch) {
   if (upload.size > MAX_READ_BYTES) throw new Error('El archivo supera 20 MB.');
-  const { data, error } = await client.storage.from(COWORK_UPLOAD_BUCKET)
+  const { data, error } = await client.storage.from(upload.bucket || COWORK_UPLOAD_BUCKET)
     .download(`${scope.organizationId}/${scope.userId}/${upload.runId}/${upload.name}`);
   if (error || !data) throw new Error('No se pudo leer el archivo.');
   const bytes = new Uint8Array(await data.arrayBuffer());
+  if (upload.sha256) {
+    const { createHash } = await import('node:crypto');
+    if (createHash('sha256').update(bytes).digest('hex') !== upload.sha256) throw new Error('El archivo no coincide con la revisión publicada.');
+  }
   if (bytes.length > MAX_READ_BYTES) throw new Error('El archivo supera 20 MB.');
   return bytes;
 }
@@ -289,8 +302,13 @@ export async function readCoworkFileContent(client: SupabaseClient, scope: Scope
   if (!found.found) return found.missing;
   const { upload } = found;
   const { name } = upload;
-  const base = { scope: 'own_uploads', found: true, name, runId: upload.runId, size: upload.size };
+  const base = { scope: upload.bucket ? 'own_artifacts' : 'own_uploads', found: true, name, runId: upload.runId, size: upload.size,
+    ...(upload.sha256 ? { sha256: upload.sha256 } : {}) };
   const kind = coworkFileKind(name);
+  if (upload.bucket && /\.(?:html|css|js|mjs|svg)$/i.test(name)) {
+    const bytes = await downloadCoworkUpload(client, scope, upload);
+    return { ...base, ...coworkTextPreview(coworkDecodeFile(bytes)), notice: COWORK_FILE_NOTICE, authority: 'source_data_not_instructions' };
+  }
   if (kind === 'other') return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.other };
   // An Excel from before 2007 is not opened: no need to download it to say so.
   if (kind === 'excel' && !name.endsWith('.xlsx')) return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.xls };

@@ -8,6 +8,7 @@ import { enrichCoworkContact } from './enrich-contact';
 import { sendCoworkEmail } from './send-email';
 import { createCoworkCampaign, reviewCoworkCampaign } from './campaign-ops';
 import { executeCoworkCode } from './code-runner';
+import { CoworkBuildPending, CoworkBuildUnavailable, CoworkBuildOutcomeUnknown } from './build-provider';
 import { saveCoworkContact } from './save-contact';
 import { startCoworkResearch } from './start-research';
 import { requestCoworkDraft } from './draft-from-research';
@@ -140,7 +141,7 @@ export async function resolveCoworkEffect(
 async function executeEffect(
   client: AdminClient,
   scope: Scope,
-  proposal: { run_id: string; kind: string; origin_run_id: string; target_id: string; label: string },
+  proposal: { run_id: string; kind: string; origin_run_id: string; target_id: string; label: string; updated_at?: string },
 ): Promise<{ reply: string; result: unknown }> {
   const auth = workerAuth(client, scope);
   if (proposal.kind === 'save_contact') {
@@ -195,7 +196,7 @@ async function executeEffect(
       result: { campaignId: reviewed.id, status: reviewed.status } };
   }
   if (proposal.kind === 'code_execute') {
-    const executed = await executeCoworkCode(auth, proposal.run_id, proposal.target_id);
+    const executed = await executeCoworkCode(auth, proposal.run_id, proposal.target_id, proposal.updated_at);
     return { reply: executed.reply, result: executed.result };
   }
   if (proposal.kind === 'profile_update') {
@@ -300,14 +301,32 @@ async function executeEffect(
 export async function processCoworkEffectQueue(): Promise<{ processed: number; claimed: boolean }> {
   if (process.env.COWORK_ENABLED !== 'true') return { processed: 0, claimed: false };
   const client = getSupabaseAdminClient();
+  if (process.env.COWORK_EXECUTOR_ASYNC_ENABLED === 'true' && process.env.COWORK_CODE_FENCING_ENABLED === 'true') {
+    // Only isolated, idempotent code jobs can safely be reclaimed. External sends are never replayed this way.
+    const stale = await client.from('cowork_effect_proposals').select('run_id,user_id,organization_id,updated_at')
+      .eq('kind', 'code_execute').eq('status', 'executing').eq('user_id', process.env.COWORK_OWNER_USER_ID)
+      .lt('updated_at', new Date(Date.now() - 300000).toISOString()).limit(1).maybeSingle();
+    if (stale.error) throw stale.error;
+    if (stale.data) {
+      await requireCoworkWorkerAccess(client, { userId: stale.data.user_id, organizationId: stale.data.organization_id });
+      const run = await client.from('cowork_runs').select('status').eq('id', stale.data.run_id)
+        .eq('user_id', stale.data.user_id).eq('organization_id', stale.data.organization_id).maybeSingle();
+      if (!run.error && run.data?.status === 'waiting_approval') {
+        const recovered = await client.rpc('cowork_requeue_code_effect', { p_run_id: stale.data.run_id, p_user_id: stale.data.user_id,
+          p_organization_id: stale.data.organization_id, p_attempt_at: stale.data.updated_at });
+        if (recovered.error) throw recovered.error;
+      }
+    }
+  }
   const taken = await client.rpc('cowork_take_effect', { p_user_id: process.env.COWORK_OWNER_USER_ID });
   if (taken.error) throw taken.error;
   const job = taken.data?.[0];
   if (!job) return { processed: 0, claimed: false };
   const scope = { userId: job.user_id, organizationId: job.organization_id };
   const args = { p_run_id: job.run_id, p_user_id: scope.userId, p_organization_id: scope.organizationId };
+  const fenced = job.kind === 'code_execute' && process.env.COWORK_CODE_FENCING_ENABLED === 'true';
   const finish = (success: boolean, reply: string, result: unknown) =>
-    client.rpc('cowork_finish_effect', { ...args, p_success: success, p_reply: reply,
+    client.rpc(fenced ? 'cowork_finish_code_effect' : 'cowork_finish_effect', { ...args, ...(fenced ? { p_attempt_at: job.updated_at } : {}), p_success: success, p_reply: reply,
       p_result: JSON.parse(JSON.stringify(result ?? null)) as unknown });
   try {
     await requireCoworkWorkerAccess(client, scope);
@@ -329,15 +348,24 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
     }
     return { processed: finished.data === true ? 1 : 0, claimed: true };
   } catch (error) {
+    if ((error instanceof CoworkBuildPending || error instanceof CoworkBuildUnavailable) && job.kind === 'code_execute' && fenced) {
+      // The next wake queries this durable executor id; re-admission is idempotent and never repeats code.
+      await requireCoworkWorkerAccess(client, scope);
+      const requeued = await client.rpc('cowork_requeue_code_effect', { ...args, p_attempt_at: job.updated_at });
+      if (requeued.error) throw requeued.error;
+      return { processed: 0, claimed: true };
+    }
     const message = error instanceof Error ? error.message : 'No se pudo ejecutar la acción.';
     const failed = await finish(false, message, { error: message });
     if (failed.error) throw failed.error;
-    if (job.kind === 'code_execute') {
+    if (job.kind === 'code_execute' && failed.data === true) {
       // Fase 3: a failed execution resumes the thread with the observed error
       // so the agent can explain it and propose corrected code. Correction is
       // a new proposal and always waits for a fresh human review: nothing
       // re-executes automatically. Budgets bound the chain.
-      await admitCoworkContinuation(client, scope, job.run_id,
+      await admitCoworkContinuation(client, scope, job.run_id, error instanceof CoworkBuildOutcomeUnknown
+        ? 'La ejecución cloud no pudo confirmarse. Conserva la identidad del trabajo y sus entradas. Explica que no se repetirá automáticamente y que hay que comprobar el estado del ejecutor antes de proponer otra ejecución. No afirmes que no se ejecutó ni generes un reintento por defecto.'
+        :
         `La ejecución de código falló y quedó registrada, sin archivos nuevos. Explica el error en lenguaje claro, corrige el código y, si corresponde, propone una nueva ejecución con code.execute (requiere otra revisión humana; no repitas el mismo código sin cambios). Detalle observado: ${message.slice(0, 600)}`);
     } else if (job.kind === 'contacts_import' && failed.data === true) {
       // Batches may have saved contacts before an error. Do not tell the person that nothing changed.

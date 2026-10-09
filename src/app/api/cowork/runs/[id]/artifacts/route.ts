@@ -3,6 +3,8 @@ import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { getCoworkRun } from '@/lib/server/cowork/runs';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
+import { coworkPublishedFiles } from '@/lib/cowork/published-files';
+import { createHash } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,6 +19,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   zip: 'application/zip',
   html: 'text/html; charset=utf-8',
+  css: 'text/css; charset=utf-8', js: 'application/javascript; charset=utf-8', mjs: 'application/javascript; charset=utf-8',
   png: 'image/png', svg: 'image/svg+xml', pdf: 'application/pdf',
 };
 
@@ -40,14 +43,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     if (!name || name.length > 120 || name.includes('/') || name.includes('\\') || name.startsWith('.')) {
       return NextResponse.json({ error: 'Nombre inválido.' }, { status: 400, headers: privateHeaders });
     }
-    const recorded = state.events.some((event: { kind: string; payload: unknown }) => event.kind === 'artifact.created'
-      && ((event.payload as { name?: string } | null)?.name === name));
+    const recorded = coworkPublishedFiles(state.events).find(file => file.name === name)
+      || state.events.find((event: { kind: string; payload: Record<string, unknown> }) => event.kind === 'artifact.created' && event.payload?.kind === 'code' && event.payload?.name === name)?.payload;
     if (!recorded) return NextResponse.json({ error: 'Archivo no encontrado en este trabajo.' }, { status: 404, headers: privateHeaders });
     const client = getSupabaseAdminClient();
     const { data, error } = await client.storage.from(ARTIFACT_BUCKET)
       .download(`${auth.organizationId}/${auth.user.id}/${runId}/${name}`);
     if (error || !data) return NextResponse.json({ error: 'No se pudo leer el archivo.' }, { status: 503, headers: privateHeaders });
     const bytes = Buffer.from(await data.arrayBuffer());
+    if (recorded.sha256 && createHash('sha256').update(bytes).digest('hex') !== recorded.sha256) {
+      return NextResponse.json({ error: 'El archivo no coincide con la versión publicada.' }, { status: 409, headers: privateHeaders });
+    }
     if (bytes.length === 0 || bytes.length > 10 * 1024 * 1024) {
       return NextResponse.json({ error: 'Archivo inválido.' }, { status: 422, headers: privateHeaders });
     }

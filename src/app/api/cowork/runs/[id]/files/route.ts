@@ -44,7 +44,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     const { data, error } = await getSupabaseAdminClient().storage.from(COWORK_UPLOAD_BUCKET)
       .list(`${auth.organizationId}/${auth.user.id}/${runId}`, { limit: 50 });
     if (error) return NextResponse.json({ error: 'No se pudieron listar los archivos.' }, { status: 503, headers: privateHeaders });
-    return NextResponse.json({ files: (data || []).filter(file => file.name).map(file => ({
+    return NextResponse.json({ files: (data || []).filter(file => file.name && file.name !== 'frozen').map(file => ({
       name: file.name, size: Number(file.metadata?.size || 0),
     })) }, { headers: privateHeaders });
   } catch (error) {

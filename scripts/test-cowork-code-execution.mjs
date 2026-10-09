@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 process.env.COWORK_ENABLED = 'true';
 const state = {
-  listed: [{ name: 'in.csv' }], downloads: {}, uploads: [], events: [], copies: [],
+  listed: [{ name: 'in.csv' }], downloads: { 'org/owner/run-code/in.csv': 'a,b', 'org/owner/run-code/prospectos.xlsx': 'fixture' }, uploads: [], events: [], copies: [],
   // Uploads of earlier turns: «Adjuntar archivos» stores them in the turn on screen.
   earlier: {
     'run-old': [{ name: 'prospectos.xlsx', updated_at: '2026-09-20T10:00:00Z', metadata: { size: 900 } }],
@@ -32,6 +32,7 @@ const client = {
         return { data: { arrayBuffer: async () => Buffer.from(body) }, error: null };
       },
       upload: async (path, bytes, options) => {
+        state.downloads[path] = Buffer.from(bytes);
         state.uploads.push({ path, size: bytes.length });
         return { data: { path }, error: null };
       },
@@ -52,7 +53,7 @@ const client = {
         }
         return { data: null, error: null };
       },
-      insert: async row => { state.events.push(row); return { data: null, error: null }; },
+      insert: async row => { state.events.push(...(Array.isArray(row) ? row : [row])); return { data: null, error: null }; },
     };
     return chain;
   },
@@ -98,6 +99,7 @@ try {
   assert.equal(staged.files, 1);
   assert.ok(state.staged);
   const target = `code:${state.staged.code_hash}`;
+  state.uploads = [];
 
   // Success promotes artifacts and records one event per file.
   state.downloads[`org/owner/run-code/in.csv`] = 'a,b';
@@ -110,7 +112,15 @@ try {
   assert.equal(done.result.files.length, 1);
   assert.equal(state.uploads.length, 1);
   assert.ok(state.uploads[0].path.startsWith('org/owner/run-code/clean.csv'));
-  assert.equal(state.events.filter(event => event.kind === 'artifact.created').length, 1);
+  assert.equal(state.events.filter(event => event.kind === 'artifact.created').length, 0, 'outputs stay private until fenced finish publishes the manifest');
+  assert.match(done.result.files[0].sha256, /^[a-f0-9]{64}$/);
+  state.downloads['org/owner/run-code/in.csv'] = 'changed after approval';
+  await module.exports.executeCoworkCode(auth, 'run-code', target);
+  assert.equal(state.events.filter(event => event.kind === 'artifact.created').length, 0, 'pinned input still uses the atomic finish path');
+  const frozenPath = Object.keys(state.downloads).find(path => path.includes(`/frozen/${state.staged.code_hash}/inputs/in.csv`));
+  const pinnedBytes = state.downloads[frozenPath]; state.downloads[frozenPath] = 'tampered';
+  await assert.rejects(module.exports.executeCoworkCode(auth, 'run-code', target), /entradas cambiaron/);
+  state.downloads[frozenPath] = pinnedBytes;
 
   // Drift refuses even though a row exists.
   await assert.rejects(module.exports.executeCoworkCode(auth, 'run-code', `code:${'0'.repeat(64)}`), /cambió desde tu revisión/);
