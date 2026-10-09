@@ -22,6 +22,8 @@ import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fi
 type Email = { day?: number; subject: string; body: string };
 type Result = {
   reply?: string; question?: string | null; blocks?: Array<Record<string, unknown>> | null; choices?: { options?: string[] } | null;
+  document?: { title: string; content: string } | null;
+  artifact?: { title?: string; tables?: unknown; render?: { text?: string; ok?: boolean; axe?: unknown } } | null;
   suggestions?: Array<{ label: string }> | null; search?: unknown; proposal?: { kind?: string; campaign?: { emails?: string[]; messages?: Email[] } } | null;
 };
 type Outcome = { id: string; request?: string; attempt?: number; result: Result };
@@ -61,6 +63,13 @@ export function blindAnswer(tag: string, id: string, result: Result, frozenReque
       ...step.body.split('\n').map(line => `> ${line}`)));
   }
   if (result.proposal?.campaign?.emails?.length) lines.push('', `_Destinatarios: ${result.proposal.campaign.emails.join(', ')}_`);
+  if (result.document) lines.push('', `**Documento: ${result.document.title}**`, '', result.document.content);
+  for (const block of result.blocks || []) {
+    if (block.type === 'email_draft' || block.type === 'sequence') continue;
+    lines.push('', `**Resultado: ${String(block.title || block.type)}**`, '', JSON.stringify(block, null, 2));
+  }
+  if (result.artifact) lines.push('', '**Artefacto observado:**', result.artifact.title || '',
+    result.artifact.render?.text || '(render no medido)', `Comprobaciones: ${JSON.stringify({ ok: result.artifact.render?.ok ?? 'not_measured', axe: result.artifact.render?.axe ?? 'not_measured', tables: result.artifact.tables })}`);
   return lines.join('\n');
 }
 
