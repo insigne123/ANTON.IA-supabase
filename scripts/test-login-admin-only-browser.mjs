@@ -6,7 +6,7 @@ import { build } from 'esbuild';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const mocks = {
-  'next/navigation': `export const useSearchParams=()=>new URLSearchParams(location.search); export const useRouter=()=>({push:path=>window.loginDestination=path});`,
+  'next/navigation': `export const useSearchParams=()=>new URLSearchParams(location.search);`,
   'next/link': `import React from 'react';export default function Link(props){return <a {...props}/>}`,
   'next/image': `import React from 'react';export default function Image({fill,priority,unoptimized,...props}){return <img {...props}/>}`,
   '@/context/AuthContext': `export const useAuth=()=>({
@@ -35,6 +35,7 @@ try {
     await page.route('**/*', route => {
       const url = new URL(route.request().url());
       if (url.pathname === '/login') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html lang="es"><body><div id="root"></div></body></html>' });
+      if (url.pathname === '/search') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<!doctype html><html lang="es"><body><h1>Búsqueda de leads</h1></body></html>' });
       return route.abort();
     });
     await page.goto('http://localhost:9017/login?next=%2Fsearch');
@@ -65,7 +66,8 @@ try {
     await page.getByRole('button', { name: 'Entrar', exact: true }).click();
     await page.waitForFunction(() => window.loginCalls.length === 2);
     await page.evaluate(() => window.finishLogin());
-    await page.waitForFunction(() => window.loginDestination === '/search');
+    await page.waitForURL('http://localhost:9017/search');
+    await page.getByRole('heading', { name: 'Búsqueda de leads' }).waitFor();
     assert.deepEqual(errors, []);
     console.log(`PASS login ${width}/${scheme}: no registration, keyboard, loading, errors, reset and next destination.`);
     await context.close();
