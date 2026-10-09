@@ -3,6 +3,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { validateJob, hashJobRequest } from './validate.mjs';
 import { runJob } from './runner.mjs';
+import { createJobManager } from './jobs.mjs';
+import { execFile } from 'node:child_process';
 
 /** Cowork executor HTTP app (importable for tests). */
 const MAX_BODY_BYTES = 24 * 1024 * 1024;
@@ -49,7 +51,12 @@ function readBody(request) {
 export function createApp({ store, config, run = runJob, now = Date.now } = {}) {
   const readSecret = () => readFile(config.secretFile, 'utf8').then(value => value.trim()).catch(() => '');
   let busy = false;
-  return createServer(async (request, response) => {
+  const stop = container => new Promise((resolve, reject) => execFile('docker', ['rm', '-f', container], { timeout: 10000 }, (error, _out, err) => {
+    if (error && !/No such container/i.test(err || '')) reject(error); else resolve();
+  }));
+  const jobs = createJobManager({ store, run, baseDir: config.baseDir, stop, occupied: () => busy, clock: now });
+  const initialized = jobs.init();
+  const server = createServer(async (request, response) => {
     const started = now();
     try {
       const secret = await readSecret();
@@ -58,8 +65,24 @@ export function createApp({ store, config, run = runJob, now = Date.now } = {}) 
         send(response, 401, { error: 'Unauthorized.' });
         return;
       }
+      await initialized;
+      if (request.method === 'GET' && request.url === '/v2/capabilities') {
+        send(response, 200, { protocol: 2, provider: 'isolated-executor', languages: ['python', 'node'],
+          asynchronous: true, durableJobs: true, cancellation: true, maxConcurrency: 1, maxTimeoutMs: 120000,
+          network: false, outputBytes: 10485760, outputFiles: 16, toolchain: 'cowork-exec-1', privatePreviews: false }); return;
+      }
+      const operation = /^\/v2\/jobs\/([A-Za-z0-9_-]{8,128})(\/cancel)?$/.exec(request.url || '');
+      if (operation && (request.method === 'GET' && !operation[2] || request.method === 'POST' && operation[2])) {
+        const result = operation[2] ? await jobs.cancel(operation[1]) : await jobs.inspect(operation[1]);
+        send(response, result ? 200 : 404, result || { error: 'Job not found.' }); return;
+      }
+      if (request.method === 'POST' && request.url === '/v2/jobs') {
+        if (request.headers['content-type']?.split(';')[0].trim() !== 'application/json') { send(response, 415, { error: 'Content-Type must be application/json.' }); return; }
+        const result = await jobs.admit(await readBody(request));
+        send(response, ['queued', 'running', 'cancel_requested'].includes(result.status) ? 202 : 200, result); return;
+      }
       if (request.method === 'GET' && request.url === '/v1/health') {
-        send(response, 200, { ok: true, busy });
+        send(response, 200, { ok: true, busy: busy || jobs.busy() });
         return;
       }
       if (request.method !== 'POST' || request.url !== '/v1/jobs') {
@@ -82,7 +105,7 @@ export function createApp({ store, config, run = runJob, now = Date.now } = {}) 
         send(response, 200, { ...cached.result, reused: true });
         return;
       }
-      if (busy) {
+      if (busy || jobs.busy()) {
         send(response, 409, { error: 'Executor busy. Retry later.' });
         return;
       }
@@ -106,4 +129,5 @@ export function createApp({ store, config, run = runJob, now = Date.now } = {}) 
       }
     }
   });
+  return server;
 }
