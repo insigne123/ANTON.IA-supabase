@@ -46,6 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const sessionRef = useRef<Session | null>(null);
     const scopeRequestRef = useRef(0);
+    const recoveryRequestRef = useRef<Promise<string> | null>(null);
     // The last session's scope, read on the first client render. The stores point at it before any screen reads them, and
     // when the session resolves to the same person and organization the key below does not change: the app mounts once.
     // Before, every load mounted the whole app twice (anonymous, then the person), so each screen asked for its data twice.
@@ -104,6 +105,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [applySessionScope]);
 
     useEffect(() => {
+        // Legacy recovery emails carry tokens in a fragment. PKCE helpers cannot
+        // consume that flow automatically, and the callback server never sees it.
+        const fragment = new URLSearchParams(window.location.hash.slice(1));
+        if (recoveryRequestRef.current || fragment.get('type') === 'recovery' || fragment.has('error')) {
+            const access_token = fragment.get('access_token');
+            const refresh_token = fragment.get('refresh_token');
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            let active = true;
+            if (!recoveryRequestRef.current) {
+                // setSession validates the link's user with Auth and persists the
+                // shared cookies before requesting the password form.
+                const expired = '/login?recuperar=1&enlace=vencido';
+                recoveryRequestRef.current = !access_token || !refresh_token || fragment.has('error')
+                    ? Promise.resolve(expired)
+                    : supabase.auth.setSession({ access_token, refresh_token })
+                        .then(({ error }) => error ? expired : '/restablecer-clave')
+                        .catch(() => expired);
+            }
+            // StrictMode can restart the effect after removing the fragment.
+            // Retain one in-flight validation, with navigation owned by the active effect.
+            void recoveryRequestRef.current.then(target => { if (active) window.location.replace(target); });
+            return () => { active = false; };
+        }
         // Check active session
         supabase.auth.getSession().then(({ data: { session } }) => {
             void applySessionScope(session);
@@ -112,7 +136,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Listen for changes
         const {
             data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
+        } = supabase.auth.onAuthStateChange((event, session) => {
+            // Older emails return tokens in the URL fragment instead of a PKCE
+            // code. The server cannot see that fragment: route the recovery
+            // event after the SDK has saved its session cookies.
+            if (event === 'PASSWORD_RECOVERY' && window.location.pathname !== '/restablecer-clave') {
+                window.location.replace('/restablecer-clave');
+                return;
+            }
             window.setTimeout(() => void applySessionScope(session), 0);
         });
         const unsubscribeOrganization = organizationService.subscribeToCurrentOrganizationChanges(() => {

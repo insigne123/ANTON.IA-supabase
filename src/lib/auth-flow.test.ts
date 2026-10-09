@@ -16,7 +16,7 @@ test('every `next` after signing in goes through safeNextPath: callback, login p
 });
 
 test('a failed or expired link lands on the login page with a notice instead of a silent redirect', () => {
-  assert.match(callback, /const \{ error \} = await supabase\.auth\.exchangeCodeForSession\(code\)/);
+  assert.match(callback, /await supabase\.auth\.exchangeCodeForSession\(code!?\)/);
   assert.equal((callback.match(/\/login\?enlace=vencido/g) || []).length, 2, 'an exchange error and a Supabase `error` param');
   assert.match(login, /searchParams\.get\('enlace'\) === 'vencido'/);
 });

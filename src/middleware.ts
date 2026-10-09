@@ -36,7 +36,9 @@ export async function middleware(req: NextRequest) {
     } = await supabase.auth.getSession();
 
     // If user is signed in and the current path is /login, redirect the user to /dashboard
-    if (session && pathname === '/login') {
+    const recovering = req.nextUrl.searchParams.get('recuperar') === '1'
+        || req.nextUrl.searchParams.get('enlace') === 'vencido';
+    if (session && pathname === '/login' && !recovering) {
         return NextResponse.redirect(new URL('/dashboard', req.url));
     }
 
