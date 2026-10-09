@@ -60,6 +60,26 @@ medición.
 
 Con #272 y #275, ninguna variable de modelo de `apphosting.yaml` apunta a sol.
 
+## Tercera parte: correos, opciones y limpieza de la respuesta (9 oct)
+
+Misma regla de medición: luna para generar y un lector independiente que lee a ciegas. Las herramientas de esa lectura quedaron en
+el repo (#304, `docs/cowork-lectura-ciega.md`). Un barrido de 20 casos de marketing e inicio sobre `main` (60 respuestas, media 3,38)
+ordenó los problemas: cautelas innecesarias en 27 respuestas, frases raras en 15, jerga en 13 y ofertas repetidas en 10.
+
+| PR | Qué cambia | Medición (ciega salvo que se diga) |
+|---|---|---|
+| #297 Tarjeta de búsqueda | Sin líneas «Sin criterio» vacías. | Cambio de presentación |
+| #298 «¿Cómo voy?» sin campañas activas | Dice cuando ninguna campaña está enviando. | 0 → 4 de 5 (checks) |
+| #299 Un solo trato y una pregunta por correo | La Redactora tutea y escribe directo; en una secuencia, cada correo cierra con un tipo de pregunta distinto. Chequeos de tú/usted mezclado y de pregunta repetida. | Nota 2,42 → 3,25; secuencia 1,50 → 3,50; preguntas repetidas 4 → 0 de 12 |
+| #300 «Otra industria» | Sin nombrarla, Cowork no elige la industria: consulta el perfil y pregunta con opciones. | Checks 2 → 5 de 5; nota 2,60 → 4,20 |
+| #301 La Revisora y el saludo | No pide `{{nombre}}` en un correo a una sola persona (la corrección no podía conservarse y el correo quedaba «por revisar»). | «Por revisar» por el saludo 4 de 25 → 0 de 10 |
+| #302 Sin cautelas | La respuesta no cuenta lo que evitó suponer («sin asumir…», «sin atribuirles…»): limpieza determinística y regla en la Redactora. | Nota 2,92 → 3,33; cautelas 13 → 6 de 24; checks 229 → 231 de 231 |
+| #303 La oferta, una vez | Si la pregunta final ya ofrece el paso, el texto no lo ofrece antes (limpieza determinística, conservadora). | Pares: prefiere la limpia 11 de 11 con la regla final |
+| #304 Lectura ciega en el repo | `scripts/cowork-blind-read.ts` (mezclar, sumar, contar, pares) y la guía del método. | — |
+
+#302 y #303 se armaron primero sobre una base vieja y revertían #299; se corrigieron con un commit antes de fusionarse (ver «Cuidados»
+en `docs/cowork-lectura-ciega.md`).
+
 ## Lo que se probó y no se integró
 
 - **Primera parte**:
@@ -85,6 +105,16 @@ Con #272 y #275, ninguna variable de modelo de `apphosting.yaml` apunta a sol.
 - **«¿A quién le escribo hoy?» con `leads.recommend`**: en la cuenta grande solo ve 4 contactos y vuelve el «es el único de tus 4».
 
 
+- **Tercera parte**:
+  - **solo los chequeos de #299, sin cambiar las reglas**: 2,58 contra 2,42 de la base, muy poco; se integró junto con las reglas;
+  - **aperturas directas** (chequeo de «puede sumar» en la primera frase y un ejemplo en la regla): bajó los rodeos (11 → 2 de 12),
+    pero subieron las aperturas obvias (3 → 7); empate 2,83 contra 2,83, con 4 s más por la corrección. Rama
+    `claude/cowork-aperturas-directas`;
+  - **la fecha de hoy para la Redactora** (para que el seguimiento diga bien «hace unos días»): sin errores de plazo en 10 corridas
+    por lado, ni con un envío de hace 44 días (caso `mkt-seguimiento-antiguo` en la rama). Rama `claude/cowork-redactora-fecha`;
+  - **un correo por persona con 2 o 3 destinatarios**: empeoró (3,40 → 2,80; en los casos objetivo 3,80 → 2,40 y 3,40 → 2,20). Los
+    «por persona» salían con el mismo cuerpo copiado y más funciones, y tardaban 5 s más. Rama `claude/cowork-correo-por-persona`.
+
 ## Para el mantenedor
 
 1. **Desplegar `main`** con su tag `prod-AAAA-MM-DD`. Hace falta redeploy para que `apphosting.yaml` tome los modelos nuevos:
@@ -106,7 +136,11 @@ Con #272 y #275, ninguna variable de modelo de `apphosting.yaml` apunta a sol.
   correos 3 y 4 vuelven a describirla; una regla no bastó: haría falta planificar el ángulo de cada correo o pedir más material al
   usuario (pruebas, usos).
 - **Informe** (#281): largo y con salvedades repetidas; falta comprobar con investigaciones reales cómo pesa una señal fechada.
-- **Redactora** (#283): cierres con la misma fórmula, «junior» dicho al prospecto, mezcla de tú y usted.
+- **Redactora** (#283, #299): las aperturas siguen siendo obvias e intercambiables entre destinatarios («revisar antecedentes laborales
+  puede sumar trabajo…»). Ni la regla de aperturas directas ni el correo por persona lo resolvieron: falta material por destinatario
+  (investigación, señales) o planificar el ángulo antes de escribir.
+- **Primer correo a quien ya recibió uno** (`mkt-campana-rrhh`, `mkt-necesito-clientes`): sigue intermitente (4 de 60 en el barrido).
+- **Frases raras y jerga de LinkedIn** («red observada», «180 perfiles revisados», «la extensión»): 13 de 60 en el barrido.
 - **Cowork**, según las lecturas ciegas (la general de 26 casos: 13 buenas, 10 mejorables, 3 malas):
   - LinkedIn: con 93 invitaciones disponibles propone una sola, y con muchos contactos decide sobre los primeros que devuelve la búsqueda;
   - nombres enmascarados («Carlos Ah***a») en informes y tableros;
