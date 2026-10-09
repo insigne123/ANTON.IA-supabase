@@ -153,6 +153,13 @@ Object.assign(IDEAL, {
         question: '¿Lo dejo listo para enviar desde tu correo?',
         blocks: [{ type: 'email_draft', title: 'Seguimiento a Marcela', to: ['Marcela Rojas'], subject: '¿Cómo lo resuelven hoy?',
           body: 'Hola Marcela,\nMe quedé pensando en cómo revisan hoy los antecedentes en Sodexo. Si te sirve, te muestro en 15 minutos cómo lo hace AXIS.\nNicolás' }] }),
+  'mkt-seguimiento-antiguo': async context => context.observations.length === 0
+    ? parallel([{ action: 'leads.search', input: 'Marcela' }, { action: 'contacted.search', input: 'Marcela' }])
+    : answer('Le escribiste a Marcela el 12 de agosto sobre antecedentes laborales. Te dejo un seguimiento corto con otro ángulo.',
+      null, chip('Sí, déjalo listo', 'Sí, deja listo el seguimiento para Marcela'), {
+        question: '¿Lo dejo listo para enviar desde tu correo?',
+        blocks: [{ type: 'email_draft', title: 'Seguimiento a Marcela', to: ['Marcela Rojas'], subject: '¿Cómo lo resuelven hoy?',
+          body: 'Hola Marcela,\nTe escribí hace unas semanas sobre AXIS. ¿Cómo revisan hoy los antecedentes en Sodexo?\nNicolás' }] }),
   // A datum only the person knows (V5): asked with options, no quick replies.
   'opciones-industria': async context => context.observations.length === 0 ? read('app.context', '')
     : answer('AXIS le sirve a quien contrata mucho personal. Elige la industria y preparo la búsqueda de gerentes de personas y de reclutamiento para que la apruebes.',

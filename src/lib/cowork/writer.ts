@@ -67,7 +67,7 @@ export const COWORK_WRITER_RULES = [
 
 export const COWORK_REVIEWER_RULES = [
   'Eres la Revisora de Cowork. Lees correos de prospección antes de que el usuario los vea y marcas solo problemas reales; si están bien, verdict es ok e issues va vacío.',
-  'Marca: datos inventados (cifras, clientes, resultados, nombres o procesos del destinatario que no están en observations ni en userContext, que trae la oferta, los servicios y las pruebas del perfil del usuario), promesas o garantías sin respaldo, un nombre fijo o un «Hola,» sin nombre en el saludo de un texto que irá a varias personas por separado (debe ser «Hola {{nombre}},»; un correo que el usuario escribió para un grupo que lo recibe junto conserva sus nombres y el plural), un correo que no pide nada concreto, jerga interna o códigos, faltas de ortografía, y un tono que no calza con el encargo.',
+  'Marca: un plazo que no calza con la fecha del envío y clock.localDate («hace unas semanas» cuando salió hace 6 días), datos inventados (cifras, clientes, resultados, nombres o procesos del destinatario que no están en observations ni en userContext, que trae la oferta, los servicios y las pruebas del perfil del usuario), promesas o garantías sin respaldo, un nombre fijo o un «Hola,» sin nombre en el saludo de un texto que irá a varias personas por separado (debe ser «Hola {{nombre}},»; un correo que el usuario escribió para un grupo que lo recibe junto conserva sus nombres y el plural), un correo que no pide nada concreto, jerga interna o códigos, faltas de ortografía, y un tono que no calza con el encargo.',
   'No son problemas: las variables {{nombre}}, {{empresa}} y {{cargo}} (la campaña las completa con los datos de cada persona) y el singular en un correo con varios destinatarios o en una secuencia (cada persona lo recibe por separado), ni preferencias de estilo en un texto que ya cumple el encargo.',
   'No reescribas: por cada problema di dónde (título del bloque y correo), qué está mal y cómo corregirlo en una frase, y en short cómo queda una vez corregido, en 2 a 5 palabras en minúscula («sin cifras inventadas», «pregunta más concreta»). Máximo 5 problemas, los más importantes primero.',
 ];
@@ -177,6 +177,9 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
   return issues.filter(issue => !seen.has(`${issue.where}|${issue.short}`) && seen.add(`${issue.where}|${issue.short}`)).slice(0, 8);
 }
 
+/** Today, as the Writer and the Reviewer read it. */
+const writerClock = (now: Date, timeZone = 'America/Santiago') => ({ localDate: new Intl.DateTimeFormat('es-CL', { timeZone, dateStyle: 'full' }).format(now) });
+
 /** The Writer's input, as the model reads it. */
 export function coworkWriterPrompt(input: { request: string; brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; issues?: CoworkDraftIssue[]; previous?: CoworkWriterOutput;
   now?: Date; timeZone?: string }) {
@@ -185,17 +188,18 @@ export function coworkWriterPrompt(input: { request: string; brief: CoworkWriteB
     brief: input.brief,
     userContext: input.userContext ?? null,
     // Today, so a follow-up says how long ago the first email went out without guessing.
-    ...(input.now ? { clock: { localDate: new Intl.DateTimeFormat('es-CL', { timeZone: input.timeZone || 'America/Santiago', dateStyle: 'full' }).format(input.now) } } : {}),
+    ...(input.now ? { clock: writerClock(input.now, input.timeZone) } : {}),
     observations: input.observations.map(item => ({ action: item.action, input: item.input ?? '', result: item.result })),
     ...(input.issues?.length ? { issues: input.issues.map(({ where, problem, fix }) => ({ where, problem, fix })), previous: input.previous } : {}),
   });
 }
 
 /** The Reviewer's input: the brief, the data it may rely on and the draft. */
-export function coworkReviewerPrompt(input: { brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; draft: CoworkWriterOutput }) {
+export function coworkReviewerPrompt(input: { brief: CoworkWriteBrief; userContext: unknown; observations: Observation[]; draft: CoworkWriterOutput; now?: Date; timeZone?: string }) {
   return JSON.stringify({
     brief: input.brief,
     userContext: input.userContext ?? null,
+    ...(input.now ? { clock: writerClock(input.now, input.timeZone) } : {}),
     observations: input.observations.map(item => ({ action: item.action, result: item.result })),
     draft: { reply: input.draft.reply, blocks: input.draft.blocks },
   });
@@ -282,7 +286,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
     await input.step({ agent: 'reviewer', state: 'working', label: `Revisando ${what}` });
     try {
       const review = await input.generate({ role: 'reviewer', schema: coworkReviewSchema, systemPrompt: COWORK_REVIEWER_RULES.join('\n'),
-        prompt: coworkReviewerPrompt({ brief: input.brief, userContext: input.userContext, observations: input.observations, draft: first }) });
+        prompt: coworkReviewerPrompt({ brief: input.brief, userContext: input.userContext, observations: input.observations, draft: first, now: input.now, timeZone: input.timeZone }) });
       if (review.verdict === 'fix') issues = review.issues;
     } catch {
       await input.step({ agent: 'reviewer', state: 'done', label: 'No alcanzó a revisar', outcome: 'skipped', changes: [] });

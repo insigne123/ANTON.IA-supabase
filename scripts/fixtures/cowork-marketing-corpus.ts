@@ -111,6 +111,9 @@ function read(action: string, input: string): unknown {
 }
 
 const world = { read, savedEmails: contacts.map(lead => lead.email).filter((email): email is string => Boolean(email)) };
+/** The same account, with Marcela's email sent on 12 August: 44 days before the corpus date, not six. */
+const OLD_SENT_AT = '2026-08-12T13:02:00Z';
+const oldSendWorld = { ...world, read: (action: string, input: string) => JSON.parse(JSON.stringify(read(action, input) ?? null).split(marcelaSent.sentAt).join(OLD_SENT_AT)) };
 export const marketingRead = read;
 
 const text = (result: CorpusTurnResult) => [corpusShown(result), result.note || '', result.document?.content || ''].join('\n');
@@ -247,6 +250,11 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'no reprocha el silencio ni anuncia cierre', test: r => !/no (?:me )?respondiste|última vez|ultimo mensaje|último mensaje|cierro (?:el|este) hilo/i.test(text(r)) },
       { label: 'firma con el nombre del perfil', test: r => r.proposal?.kind === 'linkedin_message' || /Nicol[aá]s/.test(text(r)) },
       { label: 'el seguimiento va como tarjeta', test: r => Boolean(r.proposal) || (r.blocks || []).some(block => block.type === 'email_draft') }] },
+  { id: 'mkt-seguimiento-antiguo', title: 'Seguimiento de un correo de hace semanas', request: 'marcela no me respondio el correo, que le mando ahora?', world: oldSendWorld,
+    origin: 'El mismo seguimiento, con el primer correo enviado hace 44 días: el texto dice el plazo que calza, no «hace unos días».',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'redacta el seguimiento', test: r => /asunto/i.test(text(r)) || r.proposal?.kind === 'campaign_create' },
+      { label: 'no dice que el correo salió hace unos días', test: r => !/hace (?:unos|pocos) d[ií]as|la semana pasada|hace una semana/i.test(text(r)) }] },
   // A datum only the person knows, with few possible answers (V5): Cowork asks with options instead of guessing or making them type.
   { id: 'opciones-industria', title: 'Prospectar en otra industria sin decir cuál', world,
     request: 'quiero buscar prospectos nuevos en otra industria para axis, ayudame',
