@@ -18,6 +18,9 @@ test('each kind of request lands on its intent, without accents or case', () => 
   assert.ok(coworkIntentsOf('¿cuál es mi cliente ideal?').has('strategy'));
   assert.ok(coworkIntentsOf('¿qué licitaciones hay?').has('opportunities'));
   assert.ok(coworkIntentsOf('lee el Excel que subí').has('files'));
+  // A list of people from an event is usually an uploaded file, even if the request does not say «archivo».
+  assert.ok(coworkIntentsOf('armame una campaña para los de la feria que todavia no tengo guardados').has('files'));
+  assert.ok(coworkIntentsOf('escríbeles a los asistentes del webinar').has('files'));
   assert.ok(coworkIntentsOf('¿qué tengo pendiente hoy?').has('agenda'));
   assert.ok(coworkIntentsOf('revisa mi dominio, me llegan a spam').has('domain'));
   assert.ok(coworkIntentsOf('¿cuántos créditos me quedan?').has('credits'));

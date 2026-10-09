@@ -23,7 +23,9 @@ const PATTERNS: Array<[CoworkIntent, RegExp]> = [
   ['metrics', /como (?:voy|vamos|me ha ido|me fue|le fue|va)|resultado|metrica|tasa|cifra|numero|informe|reporte|tablero|dashboard|grafic|estadistic|semana|mes\b|mensual|semanal|rendimiento|kpi|pipeline|embudo|funnel|jefe/],
   ['strategy', /icp|cliente ideal|a quien|vender|venta|segment|audiencia|estrateg|por donde (?:parto|empiezo)|ofre[cz]|oferta|propuesta de valor|mercado|priori|recomiend|conviene|vale la pena|plan\b/],
   ['opportunities', /oportunidad|licitaci|compra agil|mercado publico|contratando|ofertas? de (?:trabajo|empleo)|avisos?|seia|proyectos?|chilecompra/],
-  ['files', /archivo|adjunt|excel|xlsx|csv|pdf|word|docx|subi|planilla|documento que|adjuntos:|descarg/],
+  // A list of people from an event is usually a file the user uploaded («los de la feria»): without the files part, Cowork asked
+  // to attach a list that was already there.
+  ['files', /archivo|adjunt|excel|xlsx|csv|pdf|word|docx|subi|planilla|documento que|adjuntos:|descarg|feria|evento|congreso|seminario|webinar|asistentes|listado/],
   ['agenda', /\bhoy\b|pendiente|que (?:toca|hago|me toca)|que queda|agenda|reunion|calendario|manana|esta semana/],
   ['replies', /respond|respuesta|contest|bandeja|hilo|rebot|bounce|interesad|no me (?:ha )?respondido/],
   ['domain', /dominio|entregabilidad|spf|dkim|dmarc|spam|ley|datos personales|cumplimiento|gdpr|baja\b|darse de baja|no contactar/],
