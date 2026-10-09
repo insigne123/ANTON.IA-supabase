@@ -31,3 +31,9 @@ Una aclaración de propuesta necesita la migración pequeña `20261009090000_cow
 - Proyección: admisión, investigación pendiente, lote parcial y resultados confirmados.
 - SQL real aislado (PGlite): gate existente, trigger root, scope, revocación, idempotencia y privilegios.
 - UI renderizada y DOM aislados: ver reporte. Persistencia cliente y Postgres aislado no acreditan aceptación autenticada en producción.
+
+## Continuación · recuperación de mensajes antiguos
+
+El workspace ahora ofrece «Ver mensajes anteriores» y recupera páginas de hasta ocho antecesores por los GET scoped existentes. El cliente valida que el ancla, las relaciones padre/hijo y el root corresponden a esa rama, conserva la posición del scroll y devuelve el foco al contenido si el botón desaparece al llegar al inicio. Los resultados de esos turnos se pueden abrir sin abandonar el trabajo actual.
+
+La paginación es solo de presentación: no modifica el historial que recibe el modelo, no despierta workers y no admite efectos. Las páginas se retiran ante pérdida de acceso y no se fusionan con otra versión del hilo. Se mantiene un máximo de 400 turnos abiertos en la vista.

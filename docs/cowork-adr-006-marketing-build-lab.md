@@ -18,7 +18,9 @@ El adapter de Studio usa requests cortos y consulta la misma identidad en los wa
 
 El workspace lógico inicial usa assets del usuario/organización y versiones por run, independientes de la vida del contenedor. Outputs publicados pueden observarse y volver a ser inputs con hash comprobado, detrás de `COWORK_BUILD_WORKSPACES_ENABLED`. La receta y fuentes siguen ligadas al código aprobado. Esto no restaura memoria de procesos ni equivale a una VM personal persistente.
 
-La preview inicial reutiliza iframe de origen opaco, CSP/sandbox y route autenticada de la app. La calculadora es autocontenida. Preview multiarchivo en un origen externo privado, dev server persistente, toolchain/browser remotos y storage por proyecto necesitan validación/infraestructura adicional. El contenido generado no autoriza publicación pública.
+La preview inicial reutiliza iframe de origen opaco, CSP/sandbox y route autenticada de la app. La calculadora es autocontenida. El incremento siguiente ensambla HTML, CSS, JavaScript clásico e imágenes locales del manifiesto de **un mismo build confirmado**, comprobando tamaño y SHA-256 de cada recurso. La lectura no ejecuta código en el servidor ni descarga URLs; el archivo original descargable conserva sus bytes. Rutas fuera del conjunto, recursos externos y módulos no compilados se rechazan con un error recuperable.
+
+La vista permite eventos de formularios locales (`allow-forms`) y bloquea las solicitudes de formulario con `form-action 'none'`: sin eso la calculadora parecía renderizada, pero no ejecutaba su handler. La prueba en Chrome comprueba ambas consecuencias, además del origen opaco y ausencia de requests externos. Un origen externo privado con TTL, dev server persistente, toolchain/browser remotos y storage por proyecto siguen necesitando validación/infraestructura adicional. El contenido generado no autoriza publicación pública.
 
 ## Piloto concreto
 

@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { coworkPublishedFiles } from '@/lib/cowork/published-files';
 import { createHash } from 'node:crypto';
+import { buildCoworkStaticPreview, CoworkPreviewError } from '@/lib/server/cowork/static-preview';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -28,7 +29,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 // network, inline scripts/styles only, so a generated dashboard cannot reach
 // the app, its cookies or the network.
 const VIEWABLE = new Set(['html', 'png', 'svg']);
-const SANDBOX_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src blob: data:";
+// Local submit handlers need allow-forms; form-action:none still prevents every network form submission.
+const SANDBOX_CSP = "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src blob: data:; base-uri 'none'; form-action 'none'";
 
 /** Download an execution artifact. The file must have been recorded in an
  * artifact.created event of this run; anything else 404s. Bytes stream
@@ -61,12 +63,27 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
     const mime = (dot > 0 && MIME_BY_EXTENSION[ext]) || 'application/octet-stream';
     if (req.nextUrl.searchParams.get('view') === '1' && VIEWABLE.has(ext)) {
-      return new Response(bytes, { headers: {
+      let rendered = bytes;
+      let assembled = false;
+      if (ext === 'html' && recorded.sha256) {
+        const completedBuild = state.events.find(event => event.kind === 'effect.completed' && event.payload?.kind === 'code_execute'
+          && coworkPublishedFiles([event]).some(file => file.name === name && file.sha256 === recorded.sha256));
+        if (completedBuild) {
+          const preview = await buildCoworkStaticPreview(bytes, coworkPublishedFiles([completedBuild]), async file => {
+            const stored = await client.storage.from(ARTIFACT_BUCKET).download(`${auth.organizationId}/${auth.user.id}/${runId}/${file.name}`);
+            if (stored.error || !stored.data) throw new CoworkPreviewError(`No se pudo recuperar ${file.name}.`, 503);
+            return Buffer.from(await stored.data.arrayBuffer());
+          });
+          rendered = preview.bytes; assembled = true;
+        }
+      }
+      return new Response(rendered, { headers: {
         'Content-Type': mime,
         'Content-Security-Policy': ext === 'html' ? SANDBOX_CSP : "sandbox; default-src 'none'; img-src data: blob:;",
         'Cross-Origin-Resource-Policy': 'same-origin',
         'Cache-Control': 'private, no-store',
         'X-Content-Type-Options': 'nosniff',
+        ...(assembled ? { 'X-ANTON-Preview': 'assembled-not-verified' } : {}),
       } });
     }
     return new Response(bytes, { headers: {
@@ -76,6 +93,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       'X-Content-Type-Options': 'nosniff',
     } });
   } catch (error) {
+    if (error instanceof CoworkPreviewError) return NextResponse.json({error:error.message},{status:error.status,headers:privateHeaders});
     if (error instanceof AuthError) {
       const response = handleAuthError(error);
       response.headers.set('Cache-Control', 'private, no-store');

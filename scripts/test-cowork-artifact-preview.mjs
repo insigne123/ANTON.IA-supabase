@@ -2,8 +2,13 @@
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 const require = createRequire(import.meta.url);
-const state = { denied: false, reads: 0, downloads: 0 };
+const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+const published=new Map([['miniapp.html',Buffer.from('<html><head><link rel="stylesheet" href="styles.css"></head><body><p id="result">Inicial</p><script src="app.js"></script></body></html>')],
+  ['styles.css',Buffer.from('body{color:blue}')],['app.js',Buffer.from('document.getElementById("result").textContent="Listo";')]]);
+const state = { denied: false, reads: 0, downloads: 0, bundle:false, published,
+  files:[...published].map(([name,bytes])=>({name,size:bytes.length,sha256:hash(bytes)})) };
 globalThis.__coworkArtifactTest = state;
 const result = await build({
   entryPoints: ['src/app/api/cowork/runs/[id]/artifacts/route.ts'],
@@ -17,12 +22,14 @@ const result = await build({
       if (args.path.endsWith('/runs')) return { contents: `export async function getCoworkRun(auth,id){
         globalThis.__coworkArtifactTest.reads++;
         if(id==='missing')return null;
+        if(globalThis.__coworkArtifactTest.bundle)return {run:{id},events:[{kind:'effect.completed',payload:{kind:'code_execute',result:{files:globalThis.__coworkArtifactTest.files}}}]};
         return {run:{id},events:[
           {kind:'artifact.created',payload:{name:'informe.html',size:42}},
           {kind:'artifact.created',payload:{name:'datos.csv',size:10}}]};
       }` };
-      return { contents: `export function getSupabaseAdminClient(){return {storage:{from:()=>({download:async()=>{
+      return { contents: `export function getSupabaseAdminClient(){return {storage:{from:()=>({download:async path=>{
         globalThis.__coworkArtifactTest.downloads++;
+        if(globalThis.__coworkArtifactTest.bundle){if(!path.startsWith('org/owner/run/'))throw new Error('Scope mismatch');const bytes=globalThis.__coworkArtifactTest.published.get(path.split('/').pop());return {data:bytes?{arrayBuffer:async()=>bytes}:null,error:bytes?null:{}};}
         return {data:{arrayBuffer:async()=>Buffer.from('<html><body>Hola</body></html>')},error:null};}})}};}` };
     });
   } }],
@@ -48,6 +55,7 @@ try {
   assert.match(preview.headers.get('content-type'), /text\/html/);
   assert.match(preview.headers.get('content-security-policy'), /sandbox allow-scripts/);
   assert.match(preview.headers.get('content-security-policy'), /default-src 'none'/);
+  assert.match(preview.headers.get('content-security-policy'), /form-action 'none'/);
   assert.equal(preview.headers.get('cross-origin-resource-policy'), 'same-origin');
   assert.match(preview.headers.get('cache-control'), /private, no-store/);
   assert.equal(await preview.text(), '<html><body>Hola</body></html>');
@@ -57,5 +65,13 @@ try {
   // Only recorded artifacts resolve.
   assert.equal((await module.exports.GET(request('otro.html'), context('run'))).status, 404);
   assert.equal((await module.exports.GET(request('informe.html'), context('missing'))).status, 404);
+  state.bundle=true;
+  const multi=await module.exports.GET(request('miniapp.html',true),context('run'));
+  assert.equal(multi.status,200);assert.equal(multi.headers.get('X-ANTON-Preview'),'assembled-not-verified');
+  assert.match(await multi.text(),/textContent="Listo"/);
+  const original=await module.exports.GET(request('miniapp.html'),context('run'));
+  assert.equal(await original.text(),published.get('miniapp.html').toString('utf8'),'download remains original source');
+  published.set('app.js',Buffer.from('other version'));
+  assert.equal((await module.exports.GET(request('miniapp.html',true),context('run'))).status,422,'changed asset is refused before rendering');
   console.log('PASS: private download default, sandboxed HTML preview, view allowlist and recorded-only artifacts.');
 } finally { delete globalThis.__coworkArtifactTest; }
