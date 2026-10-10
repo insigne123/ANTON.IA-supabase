@@ -12,9 +12,14 @@ const bundle = await build({
   },
   bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
   define: { 'process.env.NODE_ENV': '"test"' },
+  plugins:[{name:'home-auth',setup(builder){
+    builder.onResolve({filter:/@\/context\/AuthContext|@\/lib\/authenticated-api-fetch/},args=>({path:args.path,namespace:'fixture'}));
+    builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path.includes('AuthContext')?`export const useAuth=()=>({user:{id:'me'},organizationId:'org',loading:false});`:`export const authenticatedApiFetch=(url,init)=>fetch(url,init);`}));
+  }}],
 });
 
 const PLAN = {
+  scope:{userId:'me',organizationId:'org',dayKey:new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())},
   firstName: 'Gabriela',
   setupDone: 2,
   setup: [

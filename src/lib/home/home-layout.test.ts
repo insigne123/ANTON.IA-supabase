@@ -9,7 +9,7 @@ const chart = readFileSync('src/components/ui/chart.tsx', 'utf8');
 
 test('«Hoy» puts the work first and the week beside it, in the phone order step → pending → summary → recommended', () => {
   const todayAt = page.indexOf('<TodayPanel />');
-  const asideAt = page.indexOf('<aside aria-label="Tu semana"');
+  const asideAt = page.indexOf('<aside aria-label="Tu actividad de hoy"');
   const recommendedAt = page.indexOf('<RecommendedLeads />');
   assert.ok(todayAt > 0 && todayAt < asideAt && asideAt < recommendedAt, 'DOM order is the phone order');
   assert.match(page, /xl:grid-cols-\[minmax\(0,1fr\)_380px\]/);
@@ -26,10 +26,10 @@ test('the cards of «Tu semana» keep their own height on phones', () => {
 });
 
 test('the counts come from /api/home/summary and each one opens its screen', () => {
-  assert.match(summary, /fetch\('\/api\/home\/summary'/);
+  assert.match(summary, /usePersonalHome<Summary>\('\/api\/home\/summary'/);
   assert.doesNotMatch(summary, /from\('contacted_leads'\)|supabase\./);
-  for (const href of ['/contacted?view=all', '/contacted?view=reply', '/campaigns', '/saved/leads/enriched']) assert.ok(summary.includes(`href: '${href}'`), href);
-  assert.match(summary, /Campañas en curso/);
+  for (const href of ['/contacted?view=all', '/contacted?view=reply', '/saved/leads']) assert.ok(summary.includes(`href:'${href}'`), href);
+  assert.doesNotMatch(summary,/Campañas en curso|activeCampaigns|enrichedLeads/);
 });
 
 test('a finished setup shrinks to one line, still the tour target', () => {

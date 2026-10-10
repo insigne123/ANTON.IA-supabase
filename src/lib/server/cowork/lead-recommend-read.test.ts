@@ -11,12 +11,13 @@ function fakeClient(tables: Record<string, unknown[]>, profile: unknown) {
       const chain = { select() { return chain; }, eq() { return chain; }, async maybeSingle() { return { data: profile, error: null }; } };
       return chain;
     }
+    let personal=false;
     const chain = {
       select() { return chain; },
-      eq(column: string, value: string) { assert.equal(column, 'organization_id'); assert.equal(value, ORG); return chain; },
+      eq(column: string, value: string) { if(column==='user_id'){assert.equal(value,USER);personal=true;}else{assert.equal(column, 'organization_id'); assert.equal(value, ORG);}return chain; },
       not() { return chain; },
       order() { return chain; },
-      async range(start: number, end: number) { return { data: (tables[table] || []).slice(start, end + 1), error: null }; },
+      async range(start: number, end: number) { return { data: (tables[table] || []).filter((row:any)=>!personal||row.user_id===USER).slice(start, end + 1), error: null }; },
     };
     return chain;
   } };
@@ -44,6 +45,14 @@ test('the offer asked about decides; without it, the customer of «Perfil»; con
   assert.equal(fromProfile.criteria.source, 'perfil');
   assert.deepEqual(fromProfile.top.map(item => item.leadId), ['l3']);
   assert.deepEqual(fromProfile.top[0].missing, ['buscar su correo', 'investigarla']);
+});
+
+test('Home recommendations are only this user while Cowork explicitly retains its organization scope',async()=>{
+  const client=fakeClient({leads:[row('own','Gerente','Retail',null,{user_id:USER}),row('other','Gerente','Retail',null,{user_id:'another'})]},{});
+  const locks=async()=>({enabled:false,byEmail:{},byProviderId:{},byLinkedin:{}});
+  const personal=await readCoworkLeadRecommendations(client as never,{userId:USER,organizationId:ORG},'',{locks:locks as never,personal:true});
+  assert.equal(personal.scope,'personal_lead_recommendations');assert.deepEqual(personal.top.map(row=>row.leadId),['own']);
+  const organization=await readCoworkLeadRecommendations(client as never,{userId:USER,organizationId:ORG},'',{locks:locks as never});assert.equal(organization.top.length,2);
 });
 
 test('«Por escribir» counts: the enriched copy stands for the saved contact, and a send to the same address is a contact', async () => {

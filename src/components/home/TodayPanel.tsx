@@ -1,6 +1,5 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, CalendarClock, CheckCircle2, Circle, MailCheck, MessageSquareReply, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import type { TodayPlan, TodayQueueItem } from '@/lib/home/today';
+import {usePersonalHome} from './usePersonalHome';
 
 type TodayResponse = TodayPlan & { partial?: boolean; firstName?: string };
 
@@ -20,25 +20,7 @@ const QUEUE_ICONS: Record<TodayQueueItem['kind'], typeof MessageSquareReply> = {
 
 /** «Hoy»: one clear next step, what is still missing to send, and the people waiting for an answer (src/lib/home/today.ts). */
 export function TodayPanel() {
-  const [data, setData] = useState<TodayResponse | null>(null);
-  const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(false);
-    try {
-      const response = await fetch('/api/home/today', { cache: 'no-store' });
-      if (!response.ok) throw new Error(String(response.status));
-      setData(await response.json());
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
+  const {data,error,loading,load}=usePersonalHome<TodayResponse>('/api/home/today');
 
   if (loading && !data) {
     return (
@@ -64,6 +46,7 @@ export function TodayPanel() {
 
   return (
     <section aria-label="Hoy" className="space-y-4" data-tour="today">
+      {data.partial&&<p role="status" className="rounded-xl border p-3 text-sm text-muted-foreground">Se muestra parte de tus contactos preparados. Abre tus listas para revisar todos.</p>}
       <div className="space-y-4">
         <Card className="relative overflow-hidden rounded-2xl border-primary/25 bg-gradient-to-br from-primary/10 via-card to-card motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
           <CardHeader className="pb-2">
@@ -84,7 +67,7 @@ export function TodayPanel() {
         <Card className="rounded-2xl">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Lo que te espera</CardTitle>
-            <CardDescription>Respuestas, compromisos y contactos listos, en orden de urgencia.</CardDescription>
+            <CardDescription>Tus pendientes en este workspace, incluidos los anteriores que aún necesitan atención.</CardDescription>
           </CardHeader>
           <CardContent>
             {data.queue.length === 0 ? (
@@ -106,7 +89,8 @@ export function TodayPanel() {
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium">{item.title}</span>
-                          <span className="block text-xs text-muted-foreground">{item.description}</span>
+                           <span className="block text-xs text-muted-foreground">{item.description}</span>
+                           {item.occurredAt&&<time dateTime={item.occurredAt} className="mt-1 block text-xs text-muted-foreground">{item.kind==='commitment'?'Fecha del compromiso: ':'Respuesta recibida: '}{new Date(item.occurredAt).toLocaleString('es-CL',{timeZone:'America/Santiago',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</time>}
                         </span>
                         <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
                       </Link>

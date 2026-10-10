@@ -36,7 +36,8 @@ function load(file: string, modules: Record<string, unknown>) {
 const shared = (email: string, source = 'session') => ({
   'next/server': { NextResponse: { json: (body: unknown, init?: ResponseInit) => Response.json(body, init) } },
   '@/lib/server/antonia-event-ledger': { safeAppendAntoniaEvent: async () => null },
-  '@/lib/server/leads-finder/access': { hasLeadsFinderAccess: (value: unknown) => value === ALLOWED },
+  '@/lib/server/leads-finder/access': { hasLeadsFinderUserAccess: (value: any) => value?.email === ALLOWED },
+  '@/lib/server/leads-finder/company-scope': {readCompanyScope:(token:string)=>{if(token==='good')return {domain:'empresa-demo.cl'};throw Error('Selección inválida');}},
   '@/lib/server/request-auth': {
     requireSessionOrTrustedInternalRequest: async () => ({ source, user: { id: 'u1', email }, organizationId: 'org' }),
     requestAuthErrorResponse: () => null,
@@ -68,7 +69,7 @@ function searchRoute(options: { email?: string; source?: string; vaultDown?: boo
         return { results: people, fetched: 2, notApplied: ['Industria «Agro» no está en Leads Finder'], costUsd: 0.004 };
       },
     },
-    '@/lib/server/leads-finder/input': { LEADS_FINDER_MAX_PER_RUN: 100 },
+    '@/lib/server/leads-finder/input': { LEADS_FINDER_MAX_PER_RUN: 100,leadsFinderInput:()=>({ok:true}) },
     '@/lib/server/leads-finder/vault': {
       LeadsFinderVaultError,
       storeInVault: async (_client: unknown, input: any) => {
@@ -130,7 +131,7 @@ test('without access, without filters, without vault or with an Apify error the 
   assert.deepEqual(await failed.json(), { error: 'LEADS_FINDER_ERROR', message: 'Apify: no queda saldo en la cuenta.', mayHaveCharged: false });
 });
 
-function enrichRoute(options: { inVault?: string[]; existing?: any; allowed?: boolean; email?: string } = {}) {
+function enrichRoute(options: { inVault?: string[]; existing?: any; allowed?: boolean; email?: string;suppressed?:boolean } = {}) {
   const calls = { claims: [] as any[], submitted: 0, completed: [] as any[], released: 0, inserted: [] as any[], forgotten: [] as string[], identities: [] as any[] };
   const vault = new Map(people.filter(person => (options.inVault ?? [people[0].lead.id]).includes(person.lead.id)).map(person => [person.lead.id, person]));
   const POST = load('src/app/api/leads/leads-finder/enrich/route.ts', {
@@ -164,7 +165,7 @@ function enrichRoute(options: { inVault?: string[]; existing?: any; allowed?: bo
       forgetInVault: async (_client: unknown, input: { ids: string[] }) => { calls.forgotten.push(...input.ids); },
     },
     '@/lib/server/supabase-admin': {
-      getSupabaseAdminClient: () => ({ from: (table: string) => ({ insert: async (row: any) => { assert.equal(table, 'enriched_leads'); calls.inserted.push(row); return { error: null }; } }) }),
+      getSupabaseAdminClient: () => ({ from: (table: string) => ({ insert:(row:any)=>{assert.equal(table,'enriched_leads');calls.inserted.push(row);return {select:()=>({maybeSingle:async()=>({error:null,data:options.suppressed?{...row,email:null,primary_phone:null,linkedin_url:null,full_name:'Contacto',enrichment_status:'suppressed'}:row})})};} }) }),
     },
   });
   return { POST, calls };
@@ -194,7 +195,7 @@ test('«Enriquecer» reveals from the vault, charged like Apollo, and leaves the
   assert.equal(ana.fullName, 'Ana Pérez');
   assert.deepEqual([jorge.clientRef, jorge.enrichmentStatus], [SAVED_JORGE, 'expired'], 'Jorge is no longer in the vault: reported, not charged');
   assert.deepEqual(body.expired, [{ sourceProviderId: people[1].lead.id, clientRef: SAVED_JORGE }]);
-  assert.deepEqual(calls.forgotten, [people[0].lead.id], 'the vault forgets what was revealed');
+  assert.deepEqual(calls.forgotten, [], 'email-only does not lose the phone still held in the private vault');
   assert.equal(calls.identities[0].savedLeadId, SAVED_ANA, 'the saved contact gets its real name back');
   // The operation keeps the outcome for a replay, not the contact.
   assert.equal(JSON.stringify(calls.completed[0].responsePayload).includes('ana.perez'), false);
@@ -225,4 +226,19 @@ test('a retry replays, expired results are not charged, and a spent allowance wr
   assert.equal((await route.POST(post({ leads: [{ sourceProviderId: 'apollo-123' }] }, { 'idempotency-key': 'op-5' }))).status, 400);
   assert.equal((await route.POST(post({ ...enrichBody(), revealEmail: false }, { 'idempotency-key': 'op-6' }))).status, 400);
   assert.equal(route.calls.claims.length, 0);
+});
+
+test('a canonical suppressed insertion never exposes its original contact',async()=>{
+  const {POST,calls}=enrichRoute({suppressed:true});const response=await POST(post(enrichBody(),{'idempotency-key':'suppressed-op'}));
+  assert.equal(response.status,200);const body=JSON.stringify(await response.json());assert.equal(body.includes('ana.perez@'),false);assert.equal(body.includes('1234 5678'),false);
+  assert.equal(calls.identities.length,0);assert.deepEqual(calls.forgotten,[people[0].lead.id]);
+});
+
+test('combined people search requires the signed company and excludes all foreign-company results before returning or storing',async()=>{
+  const route=searchRoute();const response=await route.POST(post({company_scope:'good',titles:['Gerente'],max_results:100}));assert.equal(response.status,200);
+  assert.deepEqual(route.calls.searches[0].input.organizationDomains,['empresa-demo.cl']);assert.equal(route.calls.stored[0].entries.length,1);
+  const payload=await response.json();assert.ok(payload.leads.every((row:any)=>row.organization_domain==='empresa-demo.cl'));
+  const bad=searchRoute();assert.equal((await bad.POST(post({company_scope:'bad',titles:['Gerente']}))).status,409);
+  assert.equal((await bad.POST(post({organization_id:'apollo-company',titles:['Gerente']}))).status,400);
+  assert.equal(bad.calls.quota,0);
 });

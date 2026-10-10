@@ -5,6 +5,9 @@
  * Pure: the route reads, this decides.
  */
 
+import {displayLeadName} from '@/lib/lead-name';
+import {homeScope} from './scope';
+import {dayInZone} from '@/lib/admin/chile-time';
 export type TodaySetupStepId = 'profile' | 'mail' | 'contacts' | 'first_send';
 
 export type TodaySetupStep = { id: TodaySetupStepId; title: string; description: string; href: string; cta: string; done: boolean };
@@ -17,6 +20,7 @@ export type TodayQueueItem = {
   href: string;
   /** Meeting requests and overdue commitments first. */
   urgent: boolean;
+  occurredAt?:string;
 };
 
 export type TodayPrimary = { title: string; description: string; href: string; cta: string };
@@ -44,7 +48,7 @@ function plural(count: number, one: string, many: string) {
 }
 
 function who(name: string, company: string) {
-  const person = name.trim() || 'un contacto';
+  const person = displayLeadName(name).text || 'un contacto';
   return company.trim() ? `${person} (${company.trim()})` : person;
 }
 
@@ -88,10 +92,14 @@ export function buildTodayPlan(input: TodayInput): TodayPlan {
   const queue: TodayQueueItem[] = [];
   for (const reply of replies) {
     const meeting = reply.intent === 'meeting_request';
+    const action=meeting?'Propón horarios hoy: es lo que más acerca un cierre.':'Léelo y contesta en el mismo hilo.';
+    const replyDate=new Date(reply.repliedAt),older=Number.isFinite(replyDate.getTime())&&dayInZone(replyDate)!==dayInZone(input.now);
+    const description=older?`Pendiente desde ${replyDate.toLocaleDateString('es-CL',{timeZone:'America/Santiago',day:'numeric',month:'short',year:'numeric'})}. ${action}`:action;
     queue.push({
       id: `reply:${reply.id}`, kind: 'reply', urgent: meeting, href: conversationHref(reply.id),
       title: meeting ? `${who(reply.name, reply.company)} pidió una reunión` : `${who(reply.name, reply.company)} te respondió`,
-      description: meeting ? 'Propón horarios hoy: es lo que más acerca un cierre.' : 'Léelo y contesta en el mismo hilo.',
+      description,
+      occurredAt:reply.repliedAt,
     });
   }
   for (const commitment of commitments) {
@@ -100,6 +108,7 @@ export function buildTodayPlan(input: TodayInput): TodayPlan {
       id: `commitment:${commitment.id}`, kind: 'commitment', urgent: overdue, href: conversationHref(commitment.id),
       title: `${commitment.title} · ${who(commitment.name, commitment.company)}`,
       description: overdue ? 'Venció: cúmplelo o reprográmalo.' : 'Vence hoy.',
+      occurredAt:commitment.dueAt,
     });
   }
   if (counts.readyToWrite > 0 && mailConnected) {
@@ -160,8 +169,7 @@ export function commitmentDueToday(commitment: unknown, now: Date): { kind: stri
   const dueAt = typeof value.dueAt === 'string' ? value.dueAt : '';
   const due = Date.parse(dueAt);
   if (!Number.isFinite(due)) return null;
-  const endOfDay = new Date(now);
-  endOfDay.setHours(23, 59, 59, 999);
-  if (due > endOfDay.getTime()) return null;
+  const endOfDay=Date.parse(homeScope('','',now).to);
+  if (due >= endOfDay) return null;
   return { kind: String(value.kind || 'reminder'), title: String(value.title || 'Compromiso').slice(0, 120), dueAt };
 }

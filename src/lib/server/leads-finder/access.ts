@@ -18,3 +18,9 @@ export function hasLeadsFinderAccess(email: unknown, env: Record<string, string 
   const normalized = String(email || '').trim().toLowerCase();
   return Boolean(normalized) && leadsFinderEnabled(env) && leadsFinderAllowedEmails(env).has(normalized);
 }
+
+/** The pilot is the application owner's, not every tenant owner/admin or every allowlisted address. */
+export function hasLeadsFinderUserAccess(user:{id?:string;email?:string|null;email_confirmed_at?:string|null},env:Record<string,string|undefined>=process.env){
+  return user.id==='de3a3194-29b1-449a-828a-53608a7ebe47'&&user.email?.trim().toLowerCase()==='nicolas.yarur.g@yago.cl'
+    &&Boolean(user.email_confirmed_at)&&hasLeadsFinderAccess(user.email,env);
+}

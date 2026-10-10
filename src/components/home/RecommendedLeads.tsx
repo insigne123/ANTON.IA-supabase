@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, RefreshCw, Target, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { recommendationLink } from '@/lib/icp/view';
 import { cn } from '@/lib/utils';
+import {usePersonalHome} from './usePersonalHome';
+import {displayLeadName} from '@/lib/lead-name';
 
 type Recommended = {
   leadId: string; name: string | null; title: string | null; company: string | null; score: number;
@@ -27,27 +29,9 @@ const MISSING_LABELS: Record<string, string> = { 'buscar su correo': 'Sin correo
  * «Perfil», with why each one fits and what is missing. Each row goes where the person acts on it.
  */
 export function RecommendedLeads() {
-  const [data, setData] = useState<Recommendations | null>(null);
-  const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const {data,error,loading,load}=usePersonalHome<Recommendations>('/api/leads/recommendations');
   const [expanded, setExpanded] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(false);
-    try {
-      const response = await fetch('/api/leads/recommendations', { cache: 'no-store' });
-      if (!response.ok) throw new Error(String(response.status));
-      const json = await response.json() as Recommendations;
-      if (!json || !Array.isArray(json.top) || !json.criteria) throw new Error('unexpected response');
-      setData(json);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
 
   const visible = data ? data.top.slice(0, expanded ? data.top.length : SHOWN) : [];
   return (
@@ -64,6 +48,7 @@ export function RecommendedLeads() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {data?.partial&&<p role="status" className="mb-3 text-xs text-muted-foreground">{data.partial}</p>}
           {loading && !data ? (
             <div className="space-y-2" aria-busy="true" aria-label="Cargando recomendados">
               {[0, 1, 2].map(index => <Skeleton key={index} className="h-14 rounded-xl" />)}
@@ -104,7 +89,7 @@ export function RecommendedLeads() {
                             {item.score}
                           </span>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-foreground">{item.name || 'Sin nombre'}</p>
+                             <p className="truncate text-sm font-medium text-foreground">{displayLeadName(item.name).text || 'Sin nombre'}</p>
                             <p className="truncate text-xs text-muted-foreground">{[item.title, item.company].filter(Boolean).join(', ') || 'Sin cargo'}</p>
                             <p className="truncate text-xs text-foreground/70">{item.reasons.slice(0, 3).join(' · ')}</p>
                           </div>

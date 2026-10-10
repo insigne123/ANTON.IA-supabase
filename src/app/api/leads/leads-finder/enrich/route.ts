@@ -14,7 +14,7 @@ import {
 } from '@/lib/server/daily-quota-store';
 import { enrichmentSearchCreditsUnavailablePayload, hasEnrichmentSearchCreditAccess } from '@/lib/server/enrichment-search-access';
 import { applyEnrichedIdentity, identityFromProvider } from '@/lib/server/lead-identity';
-import { hasLeadsFinderAccess } from '@/lib/server/leads-finder/access';
+import { hasLeadsFinderUserAccess } from '@/lib/server/leads-finder/access';
 import { LEADS_FINDER_PROVIDER } from '@/lib/server/leads-finder/client';
 import { enrichedLeadRow, revealedIdentity, revealedLead } from '@/lib/server/leads-finder/reveal';
 import { forgetInVault, isLeadsFinderId, LeadsFinderVaultError, readFromVault } from '@/lib/server/leads-finder/vault';
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     if (response) return response;
     throw error;
   }
-  if (auth.source !== 'session' || !hasLeadsFinderAccess(auth.user.email)) return json({ error: 'NOT_FOUND' }, 404);
+  if (auth.source !== 'session' || !hasLeadsFinderUserAccess(auth.user)) return json({ error: 'NOT_FOUND' }, 404);
   const userId = auth.user.id;
   const userEmail = auth.user.email || null;
   const organizationId = auth.organizationId;
@@ -142,17 +142,20 @@ export async function POST(request: NextRequest) {
     const revealed: string[] = [];
     for (const lead of ready) {
       const row = enrichedLeadRow(vault.get(lead.id)!, { id: randomUUID(), userId, organizationId, revealEmail, revealPhone, now });
-      const { error } = await admin.from('enriched_leads').insert(row);
-      if (error) {
+      // Privacy/suppression triggers can scrub an insertion. Only persisted
+      // bytes may leave the server or update the saved contact's identity.
+      const { error,data:persisted } = await admin.from('enriched_leads').insert(row).select('*').maybeSingle();
+      if (error||!persisted) {
         enriched.push({ clientRef: lead.clientRef, sourceProvider: LEADS_FINDER_PROVIDER, sourceProviderId: lead.id, enrichmentStatus: 'failed', errorCode: 'LEADS_FINDER_PERSIST_FAILED' });
         continue;
       }
-      revealed.push(lead.id);
-      enriched.push(revealedLead(row, { clientRef: lead.clientRef, revealEmail, revealPhone }));
+      const entry=vault.get(lead.id)!;
+      if(persisted.enrichment_status==='suppressed'||(revealEmail||!entry.contact.email)&&(revealPhone||!entry.contact.mobileNumber))revealed.push(lead.id);
+      enriched.push(revealedLead(persisted, { clientRef: lead.clientRef, revealEmail, revealPhone }));
       // The saved contact gets its real name, LinkedIn and title (only its gaps), as after an Apollo enrichment.
-      if (lead.clientRef && UUID_RE.test(lead.clientRef)) {
+      if (persisted.enrichment_status!=='suppressed'&&lead.clientRef && UUID_RE.test(lead.clientRef)) {
         await applyEnrichedIdentity(admin, {
-          userId, organizationId, savedLeadId: lead.clientRef, providerId: lead.id, identity: identityFromProvider(revealedIdentity(row)),
+          userId, organizationId, savedLeadId: lead.clientRef, providerId: lead.id, identity: identityFromProvider(revealedIdentity(persisted)),
         }).catch(() => undefined);
       }
     }
