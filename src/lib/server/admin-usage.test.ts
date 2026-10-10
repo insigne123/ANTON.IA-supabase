@@ -22,7 +22,7 @@ class Query{
 const dependencies:Record<string,string>={
   'request-auth':`export class RequestAuthError extends Error{constructor(message,status){super(message);this.status=status}}
     export async function requireSessionRequestAuth(){if(!globalThis.__adminUsage.signedIn)throw new RequestAuthError('Unauthorized',401);return {user:globalThis.__adminUsage.user,supabase:globalThis.__adminUsage.client}}
-    export function requestAuthErrorResponse(error){return error instanceof RequestAuthError?Response.json({error:'Unauthorized'},{status:error.status,headers:{'cache-control':'private, no-store'}}):null}`, 
+    export function requestAuthErrorResponse(error){return error instanceof RequestAuthError?Response.json({error:'Unauthorized'},{status:error.status,headers:{'cache-control':'private, no-store'}}):null}`,
   'organization-context':`export const resolveActiveOrganization=async()=>({active:globalThis.__adminUsage.active?{organizationId:globalThis.__adminUsage.active}:null,memberships:[]});`,
   'server':`export const NextResponse={json:(value,init)=>Response.json(value,init)};`,
   'supabase-admin':`export const getSupabaseAdminClient=()=>globalThis.__adminUsage.client;`,
