@@ -73,3 +73,10 @@ test('«por responder» follows the conversations rule; commitments count until 
   assert.equal(commitmentDueToday({ kind: 'call', title: 'Llamar', dueAt: '2026-09-30T09:00:00Z', completedAt: '2026-09-30T10:00:00Z' }, NOW), null);
   assert.equal(commitmentDueToday(null, NOW), null);
 });
+
+test('a historical pending reply keeps its date and uses an initial instead of pretending to know a masked surname',()=>{
+  const reply={id:'old',name:'Daniela Ma***o',company:'Demo',intent:'positive',repliedAt:'2026-03-01T10:00:00Z'};
+  const plan=buildTodayPlan(base({replies:[reply]}));assert.match(plan.primary.title,/Daniela M\./);assert.doesNotMatch(plan.primary.title,/\*\*/);
+  assert.equal(plan.queue[0].occurredAt,reply.repliedAt);
+  assert.equal(commitmentDueToday({dueAt:'2026-10-02T03:00:00Z'},NOW),null,'next Chile midnight is tomorrow, even if UTC changed first');
+});

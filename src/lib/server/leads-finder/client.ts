@@ -30,6 +30,7 @@ export class LeadsFinderError extends Error {
 const text = (value: unknown) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '');
 const nullable = (value: unknown) => text(value) || null;
 const number = (value: unknown) => {
+  if(typeof value==='string'&&!/^\s*\d+(?:\.\d+)?\s*$/.test(value))return null;
   const parsed = typeof value === 'number' ? value : Number(String(value ?? '').replace(/[^\d.]/g, ''));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };

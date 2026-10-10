@@ -24,6 +24,8 @@ import { consumeEndpointRateLimit, getGatewayConfig } from '@/lib/server/apollo-
 import { executeProviderLeadSearch } from '@/lib/server/apollo-provider/lead-provider';
 import { validateLeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { buildBatchLeadSearchPayload } from '@/lib/server/lead-search-payload';
+import {hasLeadsFinderUserAccess} from '@/lib/server/leads-finder/access';
+import {issueCompanyScope} from '@/lib/server/leads-finder/company-scope';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -472,7 +474,8 @@ export async function POST(req: NextRequest) {
           ...(companiesReq.sizeRange ? [String(companiesReq.sizeRange)] : []),
         ])].map(normalizeEmployeeRangeForBackend).filter((range): range is string => Boolean(range));
         const companyName = String(companiesReq.company_name || companiesReq.companyName || '').trim();
-        if (companyKeywords.length === 0 && companyLocation.length === 0 && employeeRanges.length === 0 && !companyName) {
+        const domains=normalizeDomainList(companiesReq.organization_domains||[]);
+        if (companyKeywords.length === 0 && companyLocation.length === 0 && employeeRanges.length === 0 && !companyName && !domains.length) {
           return NextResponse.json({ error: 'INVALID_REQUEST_BODY', message: 'Agrega al menos un filtro de empresa.' }, { status: 400 });
         }
         const page = Math.min(500, Math.max(1, Number(companiesReq.page ?? 1) || 1));
@@ -484,6 +487,7 @@ export async function POST(req: NextRequest) {
           search_mode: 'organization_search',
           ...(companyName ? { company_name: companyName } : {}),
           company_keywords: companyKeywords,
+          organization_domains:domains,
           company_location: companyLocation,
           employee_ranges: employeeRanges,
           page,
@@ -496,7 +500,8 @@ export async function POST(req: NextRequest) {
         const payload = (backend.json ?? {}) as Record<string, any>;
         const response = NextResponse.json({
           count: Number(payload.count ?? (Array.isArray(payload.organizations) ? payload.organizations.length : 0)) || 0,
-          organizations: Array.isArray(payload.organizations) ? payload.organizations : [],
+          organizations: Array.isArray(payload.organizations) ? payload.organizations.map((company:any)=>({ ...company,
+            ...(ctx.source==='session'&&hasLeadsFinderUserAccess(ctx.user)?{contact_scope:issueCompanyScope(company,{userId,organizationId:organizationId!})}:{}) })) : [],
           search_mode: 'companies',
           search_strategy: 'organizations_then_people',
           page: Number(payload.page ?? page) || page,

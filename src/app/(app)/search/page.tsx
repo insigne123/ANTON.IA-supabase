@@ -78,7 +78,7 @@ import {
 } from '@/lib/search/saved-search-criteria';
 import { MultiCheckDropdown } from '@/components/search/MultiCheckDropdown';
 import {
-  buildLinkedInProfileNotice, getFriendlySearchErrorMessage, hasBatchSearchFilters, hasLeadPhone, hasVisibleLeadEmail,
+  buildLinkedInProfileNotice, getFriendlySearchErrorMessage as sourceSearchErrorMessage, hasBatchSearchFilters, hasLeadPhone, hasVisibleLeadEmail,
   hasVisibleLeadPhone, isPendingEnrichmentStatus, mapLeadToEnriched, normalizeLeadForUI, splitFilterInput, splitTitlesInput,
   normalizeUiPhoneNumbers, contactStateBadge, displayDomain, getPhoneFallback, type ProfileContactState,
   companyFilterSignature, contactedKeys, isLeadContacted, isLeadSaved, peopleFilterSignature, type SavedLeadIds,
@@ -91,7 +91,7 @@ const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
 
 type SearchMode = LeadSearchMode;
 type SearchSource = 'apollo' | 'leads_finder';
-
+function currentCompanySignature(criteria:typeof DEFAULT_FILTERS){return criteria.searchMode==='company_name'?JSON.stringify({mode:'company',name:criteria.companyName.trim().toLowerCase(),domains:splitDomainInput(criteria.companyDomains).sort()}):companyFilterSignature(criteria);}
 
 export default function SearchPage() {
   const router = useRouter();
@@ -141,12 +141,13 @@ export default function SearchPage() {
   const [criteriaOpen, setCriteriaOpen] = useState(true);
   // Leads Finder (Plan 11, PR 6c): a test next to Apollo, offered only to the accounts the server allows.
   const [leadsFinderAvailable, setLeadsFinderAvailable] = useState(false);
+  const getFriendlySearchErrorMessage=(message:unknown)=>{const text=sourceSearchErrorMessage(typeof message==='string'?message:undefined);return leadsFinderAvailable?text:text.replace(/Apollo|Leads Finder|Apify/gi,'el buscador');};
   const [searchSource, setSearchSource] = useState<SearchSource>('apollo');
   const [leadsFinderNotice, setLeadsFinderNotice] = useState<{ notApplied: string[]; alreadySaved: number } | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    // Every visit starts with Apollo, whose last search is restored below; Leads Finder is chosen on purpose.
-    void getLeadsFinderAvailability(controller.signal).then((available) => { if (available) setLeadsFinderAvailable(true); });
+    // Apollo is the default. A verified owner's checkpoint may restore their explicit pilot choice.
+    void getLeadsFinderAvailability(controller.signal).then((available) => { if (!controller.signal.aborted) setLeadsFinderAvailable(available); });
     return () => controller.abort();
   }, []);
 
@@ -163,6 +164,8 @@ export default function SearchPage() {
     hasMore: boolean;
     error: string;
     deliveredIds: string[];
+    source?:SearchSource;
+    buffer?:UILaed[];
   };
   const [filterStep, setFilterStep] = useState<'filters' | 'companies' | 'people'>('filters');
   const [companies, setCompanies] = useState<CompanySearchOrganization[]>([]);
@@ -239,20 +242,21 @@ export default function SearchPage() {
       .map((item) => item.trim()).filter(Boolean);
     return {
       legacyIndustry,
-      companyKeywords,
-      companyNameFilter: String(filters.companyNameFilter || '').trim(),
-      companyLocations: splitFilterInput(filters.location),
-      sizeRanges: [String(filters.sizeRange || '').trim()].filter(Boolean),
+      companyKeywords:filters.searchMode==='company_name'?[]:companyKeywords,
+      companyNameFilter: String(filters.searchMode==='company_name'?filters.companyName:filters.companyNameFilter || '').trim(),
+      companyLocations: filters.searchMode==='company_name'?[]:splitFilterInput(filters.location),
+      sizeRanges: filters.searchMode==='company_name'?[]:[String(filters.sizeRange || '').trim()].filter(Boolean),
       titles: splitTitlesInput(filters.title),
       seniorities: Array.isArray(filters.seniorities) ? filters.seniorities : [],
-      personLocations: splitFilterInput(filters.personLocation),
+      personLocations: filters.searchMode==='company_name'?[]:splitFilterInput(filters.personLocation),
       leadsPerCompany: Math.min(100, Math.max(1, Number(filters.maxResults) || 50)),
     };
   };
 
   const handleSearchCompanies = async (page = 1) => {
     const { legacyIndustry, companyKeywords, companyNameFilter, companyLocations, sizeRanges } = getCompanyPersonFilters();
-    if (companyKeywords.length === 0 && !companyNameFilter && companyLocations.length === 0 && sizeRanges.length === 0) {
+    const domains=filters.searchMode==='company_name'?splitDomainInput(filters.companyDomains):[];
+    if (companyKeywords.length === 0 && !companyNameFilter && companyLocations.length === 0 && sizeRanges.length === 0&&!domains.length) {
       const message = 'Agrega al menos un filtro de empresa para iniciar la búsqueda.';
       setError(message);
       toast({ title: 'Revisa los criterios', description: message });
@@ -274,6 +278,7 @@ export default function SearchPage() {
     try {
       const result = await searchCompanies({
         company_name: companyNameFilter || undefined,
+        organization_domains:domains,
         company_keywords: companyKeywords,
         company_location: companyLocations,
         employee_ranges: sizeRanges,
@@ -289,7 +294,7 @@ export default function SearchPage() {
       if (page === 1) {
         setSelectedCompanyIds(new Set());
         // A new company list starts over: the contacts found in the previous companies no longer apply.
-        setCompanySearchSignature(companyFilterSignature(filters));
+        setCompanySearchSignature(currentCompanySignature(filters));
         setCompanyWindows({});
         setActiveCompanyId(null);
         setLeads([]);
@@ -319,6 +324,20 @@ export default function SearchPage() {
 
   const fetchCompanyWindowPage = async (organization: CompanySearchOrganization, page: number, perPage: number, excludeIds: string[], signal?: AbortSignal) => {
     const { titles, seniorities, personLocations } = getCompanyPersonFilters();
+    if(usingLeadsFinder){
+      let buffer=companyWindows[organization.id]?.source==='leads_finder'?companyWindows[organization.id].buffer:undefined;
+      if(page===1){
+        if(!organization.contact_scope)throw new LeadsFinderClientError('Esta empresa necesita un dominio confirmado. Busca las empresas de nuevo o utiliza otra fuente.','COMPANY_SCOPE_UNAVAILABLE',409);
+        const found=await searchWithLeadsFinder({company_scope:organization.contact_scope,titles,seniorities,person_locations:personLocations,
+          company_location:[],industry_keywords:[],company_keywords:[],employee_ranges:[],max_results:100},signal);
+        if(signal?.aborted)throw new DOMException('Cancelled','AbortError');
+        setLeadsFinderNotice({notApplied:found.not_applied||[],alreadySaved:found.already_saved||0});
+        buffer=found.leads.map(raw=>normalizeLeadForUI(raw,{revealEmail:false,revealPhone:false,organization}));
+      }
+      if(!buffer)throw new Error('El resultado guardado no está disponible. Inicia una nueva búsqueda para esta empresa.');
+      const rows=buffer.slice((page-1)*perPage,page*perPage).filter(lead=>!excludeIds.includes(lead.id));
+      return {leads:rows,totalEntries:undefined,totalPages:Math.ceil(buffer.length/perPage),hasMore:page*perPage<buffer.length,buffer};
+    }
     const result = await searchCompanyPeople({
       organization_id: organization.id,
       titles,
@@ -344,6 +363,7 @@ export default function SearchPage() {
       totalEntries: (result as any)?.total_entries as number | undefined,
       totalPages: (result as any)?.total_pages as number | undefined,
       hasMore: page < 500 && (typeof result.total_entries === 'number' ? page * perPage < result.total_entries : Number(result.raw_count ?? rawLeads.length) >= perPage),
+      buffer:undefined,
     };
   };
 
@@ -359,7 +379,7 @@ export default function SearchPage() {
       return;
     }
     const { leadsPerCompany } = getCompanyPersonFilters();
-    const peopleSignature = peopleFilterSignature(filters);
+    const peopleSignature = peopleFilterSignature(filters)+':'+searchSource;
     const reuseWindows = peopleSearchSignature === peopleSignature;
     setIsLoadingCompanyPeople(true);
     setIsLoading(true);
@@ -368,7 +388,7 @@ export default function SearchPage() {
       // Concurrency limited so one slow company does not block the rest.
       const nextWindows: Record<string, CompanyWindowState> = {};
       const queue = [...selected];
-      const workers = Array.from({ length: Math.min(5, queue.length) }, async () => {
+       const workers = Array.from({ length: Math.min(usingLeadsFinder?1:5, queue.length) }, async () => {
         while (queue.length > 0) {
           if (controller.signal.aborted || run !== companyRun.current) return;
           const organization = queue.shift();
@@ -378,8 +398,9 @@ export default function SearchPage() {
               nextWindows[organization.id] = companyWindows[organization.id];
               continue;
             }
-            const { leads, totalEntries, totalPages, hasMore } = await fetchCompanyWindowPage(organization, 1, leadsPerCompany, [], controller.signal);
+            const { leads, totalEntries, totalPages, hasMore,buffer } = await fetchCompanyWindowPage(organization, 1, leadsPerCompany, [], controller.signal);
             nextWindows[organization.id] = {
+              source:searchSource,buffer,
               organization,
               leads,
               page: 1,
@@ -401,7 +422,7 @@ export default function SearchPage() {
               isLoading: false,
               isExpanding: false,
               hasMore: true,
-              error: getFriendlySearchErrorMessage(windowError?.message),
+              error: windowError instanceof LeadsFinderClientError?windowError.message:getFriendlySearchErrorMessage(windowError?.message),
               deliveredIds: [],
             };
           }
@@ -487,7 +508,7 @@ export default function SearchPage() {
         [organizationId]: {
           ...current[organizationId],
           isExpanding: false,
-          error: getFriendlySearchErrorMessage((expandError as any)?.message),
+          error: expandError instanceof LeadsFinderClientError?expandError.message:getFriendlySearchErrorMessage((expandError as any)?.message),
         },
       }));
     } finally {
@@ -541,11 +562,9 @@ export default function SearchPage() {
   };
 
   const [filters, setFilters] = useState({ ...DEFAULT_FILTERS, maxResults: 50 });
-  const usingLeadsFinder = leadsFinderAvailable && searchSource === 'leads_finder' && filters.searchMode === 'filters';
+    const usingLeadsFinder = leadsFinderAvailable && searchSource === 'leads_finder' && filters.searchMode !== 'linkedin_profile';
   // Once the person touches the criteria, restoring the last search no longer folds them away on a phone.
   const criteriaTouched = useRef(false);
-  const searchSourceRef = useRef<SearchSource>('apollo');
-  searchSourceRef.current = searchSource;
   const [checkpointReady, setCheckpointReady] = useState(false);
   const [checkpointLoading, setCheckpointLoading] = useState(true);
   const [checkpointNotice, setCheckpointNotice] = useState('');
@@ -595,11 +614,17 @@ export default function SearchPage() {
       checkpointRevision.current = data.revision;
       checkpointOrganization.current = String(data.scope || '').split(':')[0];
       const snapshot = data.snapshot;
+      if(snapshot?.searchSource==='leads_finder'){
+        const allowed=await getLeadsFinderAvailability();if(cancelled)return;
+        setLeadsFinderAvailable(allowed);
+        if(allowed&&!criteriaTouched.current)setSearchSource('leads_finder');
+        else if(!allowed){snapshot.companyWindows={};snapshot.filterStep='companies';}
+      }
       if (snapshot?.version === 1 && snapshot.filters && Array.isArray(snapshot.companies) && snapshot.companyWindows && typeof snapshot.companyWindows === 'object') {
         const restoredFilters = normalizeSavedSearchCriteria(snapshot.filters);
         const hasWindows = Object.keys(snapshot.companyWindows).length > 0;
         setFilters(restoredFilters);
-        setCompanySearchSignature(typeof snapshot.companySignature === 'string' ? snapshot.companySignature : snapshot.companies.length > 0 ? companyFilterSignature(restoredFilters) : '');
+        setCompanySearchSignature(typeof snapshot.companySignature === 'string' ? snapshot.companySignature : snapshot.companies.length > 0 ? currentCompanySignature(restoredFilters) : '');
         setPeopleSearchSignature(typeof snapshot.peopleSignature === 'string' ? snapshot.peopleSignature : hasWindows ? peopleFilterSignature(restoredFilters) : '');
         setCompanies(snapshot.companies);
         setCompaniesPage(snapshot.companiesPage || 1);
@@ -609,8 +634,8 @@ export default function SearchPage() {
         setActiveCompanyId(snapshot.activeCompanyId || null);
         const restored = Object.fromEntries(Object.entries(snapshot.companyWindows).map(([id, value]) => [id, { ...(value as CompanyWindowState), isLoading: false, isExpanding: false }]));
         setCompanyWindows(restored);
-        // Restored late, after Leads Finder was chosen: the Apollo people wait for Apollo to be chosen again.
-        if (searchSourceRef.current !== 'leads_finder') setLeads(Object.values(restored).flatMap((item) => item.leads || []));
+        // The checkpoint carries the exact source and its shallow result; restoration starts no provider work.
+        setLeads(Object.values(restored).flatMap((item) => item.leads || []));
         setFilterStep(['filters', 'companies', 'people'].includes(snapshot.filterStep) ? snapshot.filterStep : 'filters');
         if (snapshot.companies.length > 0 || hasWindows) {
           setCheckpointNotice('Recuperamos tu última búsqueda: sigue donde quedaste.');
@@ -670,9 +695,9 @@ export default function SearchPage() {
 
   const checkpointBaseline = useRef<string | null>(null);
   useEffect(() => {
-    if (!checkpointReady || usingLeadsFinder || filters.searchMode !== 'filters' || isLoading || Object.values(companyWindows).some((item) => item.isExpanding || item.isLoading)) return;
+    if (!checkpointReady || filters.searchMode === 'linkedin_profile' || isLoading || Object.values(companyWindows).some((item) => item.isExpanding || item.isLoading)) return;
     const snapshot = {
-      version: 1, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds: [...selectedCompanyIds],
+      version: 1, searchSource,filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds: [...selectedCompanyIds],
       activeCompanyId, companyWindows, filterStep, companySignature: companySearchSignature, peopleSignature: peopleSearchSignature,
     };
     const serialized = JSON.stringify(snapshot);
@@ -699,13 +724,15 @@ export default function SearchPage() {
       }).catch(() => { setCheckpointNotice('No pudimos guardar el avance de la búsqueda.'); });
     }, 400);
     return () => window.clearTimeout(timeout);
-  }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading, companySearchSignature, peopleSearchSignature, usingLeadsFinder]);
+  }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading, companySearchSignature, peopleSearchSignature, searchSource]);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
     criteriaTouched.current = true;
     if (field === 'searchMode') {
       companyRun.current += 1;
       companyPeopleAbortRef.current?.abort();
+      companiesAbortRef.current?.abort();setFilterStep('filters');setCompanies([]);setCompanyWindows({});setActiveCompanyId(null);setSelectedCompanyIds(new Set());
+      setCompanySearchSignature('');setPeopleSearchSignature('');
     }
     setError('');
     setProfileProblem(null);
@@ -991,6 +1018,7 @@ export default function SearchPage() {
   };
 
   const chooseSource = (source: SearchSource) => {
+    if(source==='leads_finder'&&!leadsFinderAvailable)return;
     if (source === searchSource) return;
     criteriaTouched.current = true;
     searchRunIdRef.current += 1;
@@ -1002,8 +1030,9 @@ export default function SearchPage() {
     setLeadsFinderNotice(null);
     setError('');
     setHasSearched(false);
-    // The Apollo search (companies and their people) stays as it was, and comes back when Apollo is chosen again.
-    setLeads(source === 'leads_finder' ? [] : Object.values(companyWindows).flatMap((item) => item.leads || []));
+    companyRun.current++;companiesAbortRef.current?.abort();companyPeopleAbortRef.current?.abort();
+    setCompanyWindows({});setActiveCompanyId(null);setPeopleSearchSignature('');setFilterStep(companies.length?'companies':'filters');
+    setIsLoadingCompanyPeople(false);setIsLoadingCompanies(false);setLeads([]);
   };
 
   const executeSearch = async ({
@@ -1101,20 +1130,6 @@ export default function SearchPage() {
           selected_organization_id: organization?.id,
           selected_organization_name: organization?.name,
         }, abortRef.current.signal);
-      } else if (usingLeadsFinder) {
-        // People straight from the filters, no company step; they come back as Apollo's do, with the contact hidden.
-        const found = await searchWithLeadsFinder({
-          titles: splitTitlesInput(filters.title),
-          seniorities: filters.seniorities,
-          person_locations: splitFilterInput(filters.personLocation),
-          company_location: splitFilterInput(filters.location),
-          industry_keywords: [filters.industry.trim()].filter(Boolean),
-          company_keywords: splitFilterInput(filters.companyKeywords),
-          employee_ranges: [filters.sizeRange.trim()].filter(Boolean),
-          max_results: Math.max(1, Math.min(100, Number(filters.maxResults) || 25)),
-        }, abortRef.current.signal);
-        setLeadsFinderNotice({ notApplied: found.not_applied || [], alreadySaved: found.already_saved || 0 });
-        result = found;
       } else {
         const industryKeywords = [filters.industry.trim()].filter(Boolean);
         const companyKeywords = splitFilterInput(filters.companyKeywords);
@@ -1182,12 +1197,8 @@ export default function SearchPage() {
   };
 
   const handleSearch = async () => {
-    if (filters.searchMode === 'filters') {
-      if (usingLeadsFinder) {
-        setLeadsFinderNotice(null);
-        await executeSearch();
-        return;
-      }
+    if (filters.searchMode !== 'linkedin_profile') {
+      setLeadsFinderNotice(null);
       resetCompanyFirstFlow();
       await handleSearchCompanies(1);
       return;
@@ -1642,9 +1653,9 @@ export default function SearchPage() {
     filterStep === 'people' && (companyWindowList.length > 0 || isLoadingCompanyPeople) ? 'people'
       : companies.length > 0 || isLoadingCompanies || filterStep === 'companies' ? 'companies'
         : 'intro';
-  const companiesStale = companies.length > 0 && Boolean(companySearchSignature) && companySearchSignature !== companyFilterSignature(filters);
-  const peopleStale = companyWindowList.length > 0 && Boolean(peopleSearchSignature) && peopleSearchSignature !== peopleFilterSignature(filters);
-  const hasResults = filters.searchMode === 'filters' && !usingLeadsFinder
+  const companiesStale = companies.length > 0 && Boolean(companySearchSignature) && companySearchSignature !== currentCompanySignature(filters);
+  const peopleStale = companyWindowList.length > 0 && Boolean(peopleSearchSignature) && peopleSearchSignature !== peopleFilterSignature(filters)+':'+searchSource;
+  const hasResults = filters.searchMode !== 'linkedin_profile'
     ? resultsView !== 'intro'
     : leads.length > 0 || isLoading || hasSearched || companySelectionPending;
   const activeChips = activeFilterChips(filters);
@@ -1654,7 +1665,7 @@ export default function SearchPage() {
       ? filters.companyName.trim() || filters.companyDomains.trim() || 'Escribe una empresa'
       : filters.linkedinUrl.trim() || 'Pega un perfil de LinkedIn';
   const leadsPerCompany = getCompanyPersonFilters().leadsPerCompany;
-  const showLeadsBar = selectedLeads.size > 0 && (filters.searchMode !== 'filters' || usingLeadsFinder || resultsView === 'people');
+  const showLeadsBar = selectedLeads.size > 0 && (filters.searchMode === 'linkedin_profile' || resultsView === 'people');
   const selectWindowLeads = (window: CompanyWindowState) => setSelectedLeads((current) => {
     const next = new Set(current);
     for (const lead of window.leads) if (!isSavedLead(lead) && !isContactedLead(lead)) next.add(lead.id);
@@ -1707,7 +1718,7 @@ export default function SearchPage() {
     </fieldset>
   );
 
-  const sourceSwitch = leadsFinderAvailable && filters.searchMode === 'filters' ? (
+  const sourceSwitch = leadsFinderAvailable && filters.searchMode !== 'linkedin_profile' ? (
     <fieldset disabled={isLoading || checkpointLoading} className="min-w-0 border-0 p-0">
       <legend className="mb-1.5 text-xs font-medium text-foreground/70">Fuente de los contactos</legend>
       <div className="grid h-9 w-full grid-cols-2 rounded-xl border border-border/60 bg-muted/60 p-1">
@@ -1740,8 +1751,9 @@ export default function SearchPage() {
     <div role="note" className="rounded-2xl border border-border/60 bg-cw-accent-soft px-4 py-3 text-sm">
       <p className="font-medium text-foreground">Buscando con Leads Finder (prueba)</p>
       <p className="mt-0.5 text-foreground/70">
-        Encuentra personas directo con tus filtros, sin elegir empresas antes. Como con Apollo, el apellido y el contacto quedan ocultos hasta que buscas su correo en «Por completar».
+        Primero encontramos empresas con Apollo; después buscamos los contactos con Leads Finder solo en las empresas que marcas. Los datos de contacto se completan desde «Por completar».
       </p>
+      <p className="mt-1 text-foreground/70">Una consulta recupera hasta 100 contactos por empresa. «Traer más» abre otra parte de ese resultado, sin repetir la consulta. No es el total de contactos de la empresa.</p>
       {leadsFinderNotice?.notApplied.length ? (
         <p className="mt-1 text-foreground/70">No se pudo aplicar: {leadsFinderNotice.notApplied.join(' · ')}.</p>
       ) : null}
@@ -2210,7 +2222,7 @@ export default function SearchPage() {
                       {displayDomain(window.organization.primary_domain || window.organization.website_url || '') || 'Sin sitio web'}
                     </span>
                   </span>
-                  <Badge variant={active ? 'info' : 'neutral'} className="tabular-nums">{window.leads.length}</Badge>
+                   <Badge variant={active ? 'info' : 'neutral'} className="tabular-nums dark:text-foreground">{window.leads.length}</Badge>
                 </button>
               );
             })}
@@ -2263,8 +2275,8 @@ export default function SearchPage() {
                     {peopleStale
                       ? 'Vuelve a buscar con los filtros nuevos para traer más.'
                       : activeWindow.hasMore
-                        ? `Puedes traer hasta ${activeWindow.perPage} más de esta empresa.`
-                        : 'No quedan más contactos con estos filtros en esta empresa.'}
+                         ? activeWindow.source==='leads_finder'?`Puedes mostrar hasta ${activeWindow.perPage} más del resultado guardado.`:`Puedes traer hasta ${activeWindow.perPage} más de esta empresa.`
+                         : activeWindow.source==='leads_finder'?'Ya mostraste todos los contactos del resultado recuperado.':'No quedan más contactos con estos filtros en esta empresa.'}
                   </p>
                   <Button
                     type="button"
@@ -2584,7 +2596,7 @@ export default function SearchPage() {
               {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
               <Button data-tour="search-run" className="flex-1 shadow-none sm:flex-none sm:min-w-36" onClick={runSearch} disabled={isLoading || checkpointLoading}>
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-                {isLoading ? 'Buscando…' : filters.searchMode === 'filters' ? (usingLeadsFinder ? 'Buscar contactos' : 'Buscar empresas') : 'Buscar'}
+                {isLoading ? 'Buscando…' : filters.searchMode !== 'linkedin_profile' ? 'Buscar empresas' : 'Buscar'}
               </Button>
             </div>
           </Card>
@@ -2598,7 +2610,8 @@ export default function SearchPage() {
           {filters.searchMode !== 'linkedin_profile' && profileProblem ? (
             <ProfileSearchProblemAlert message={profileProblem} busy={isLoading} onAction={handleProfileProblemAction} onDismiss={() => setProfileProblem(null)} />
           ) : null}
-          {filters.searchMode === 'filters' && !usingLeadsFinder ? (
+          {filters.searchMode!=='linkedin_profile'&&usingLeadsFinder?leadsFinderBanner:null}
+          {filters.searchMode !== 'linkedin_profile' ? (
             resultsView === 'intro' ? (
               <>
                 {searchError}

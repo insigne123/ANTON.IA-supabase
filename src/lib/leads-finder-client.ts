@@ -1,4 +1,5 @@
 import type { LeadSearchResponse } from '@/lib/schemas/leads';
+import {authenticatedApiFetch} from '@/lib/authenticated-api-fetch';
 
 /**
  * The browser side of the Leads Finder test (Plan 11, PR 6c): whether this person has it, a search with the filters of
@@ -21,6 +22,8 @@ export type LeadsFinderSearchParams = {
   company_keywords: string[];
   employee_ranges: string[];
   max_results: number;
+  company_scope?:string;
+  organization_domains?:string[];
 };
 
 export type LeadsFinderSearchResponse = LeadSearchResponse & { provider?: string; not_applied?: string[]; already_saved?: number };
@@ -50,7 +53,8 @@ function failure(json: Record<string, any>, status: number) {
 
 export async function getLeadsFinderAvailability(signal?: AbortSignal) {
   try {
-    const response = await fetch('/api/leads/leads-finder/status', { cache: 'no-store', signal });
+    const scope=(await import('@/lib/auth-scope-cache')).readCachedAuthScope();
+    const response = await authenticatedApiFetch('/api/leads/leads-finder/status', { cache: 'no-store',signal,headers:scope?.organizationId?{'x-organization-id':scope.organizationId}:undefined });
     if (!response.ok) return false;
     return (await readJson(response)).available === true;
   } catch {
@@ -59,8 +63,9 @@ export async function getLeadsFinderAvailability(signal?: AbortSignal) {
 }
 
 export async function searchWithLeadsFinder(params: LeadsFinderSearchParams, signal?: AbortSignal): Promise<LeadsFinderSearchResponse> {
-  const response = await fetch('/api/leads/leads-finder/search', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params), cache: 'no-store', signal,
+  const scope=(await import('@/lib/auth-scope-cache')).readCachedAuthScope();
+  const response = await authenticatedApiFetch('/api/leads/leads-finder/search', {
+    method: 'POST', headers: { 'Content-Type': 'application/json',...(scope?.organizationId?{'x-organization-id':scope.organizationId}:{}) }, body: JSON.stringify(params), cache: 'no-store', signal,
   });
   const json = await readJson(response);
   if (!response.ok) throw failure(json, response.status);
@@ -81,9 +86,10 @@ export async function enrichWithLeadsFinder(input: {
   revealPhone: boolean;
   operationId: string;
 }): Promise<LeadsFinderEnrichResult> {
-  const response = await fetch('/api/leads/leads-finder/enrich', {
+  const scope=(await import('@/lib/auth-scope-cache')).readCachedAuthScope();
+  const response = await authenticatedApiFetch('/api/leads/leads-finder/enrich', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': input.operationId },
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': input.operationId,...(scope?.organizationId?{'x-organization-id':scope.organizationId}:{}) },
     body: JSON.stringify({ leads: input.leads, revealEmail: input.revealEmail, revealPhone: input.revealPhone }),
     cache: 'no-store',
   });

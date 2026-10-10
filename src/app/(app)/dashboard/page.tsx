@@ -7,14 +7,12 @@ import { Search } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
-import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
-import PerformanceChart from '@/components/dashboard/PerformanceChart';
-import UserCreditsCard from '@/components/dashboard/UserCreditsCard';
+import {PersonalCredits} from '@/components/home/PersonalCredits';
 import { HomeSummary } from '@/components/home/HomeSummary';
 import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 
-const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long',timeZone:'America/Santiago' });
 
 /**
  * «Hoy» (docs/inicio-hoy.md). The work first: the next step and what is waiting, in the main column. How the week goes,
@@ -25,8 +23,9 @@ export default function DashboardPage() {
   // The date is read in the browser: the page is prerendered, and the server's day may not be the person's.
   const [today, setToday] = useState('');
   useEffect(() => {
-    const label = TODAY.format(new Date());
-    setToday(label.charAt(0).toLocaleUpperCase('es-CL') + label.slice(1));
+    const update=()=>{const label = TODAY.format(new Date());setToday(label.charAt(0).toLocaleUpperCase('es-CL') + label.slice(1));};
+    update();const timer=setInterval(update,30000);window.addEventListener('focus',update);
+    return()=>{clearInterval(timer);window.removeEventListener('focus',update);};
   }, []);
 
   return (
@@ -34,7 +33,7 @@ export default function DashboardPage() {
       <PageHeader
         title="Hoy"
         eyebrow={today || undefined}
-        description="Lo que toca ahora, lo que falta para enviar y cómo va tu semana."
+        description="Tu actividad de hoy y tus pendientes en este workspace."
       >
         <Button asChild variant="ghost" className="flex-1 text-muted-foreground sm:flex-none">
           <Link href="/search">
@@ -50,11 +49,9 @@ export default function DashboardPage() {
           <TodayPanel />
         </div>
 
-        <aside aria-label="Tu semana" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
+        <aside aria-label="Tu actividad de hoy" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
           <HomeSummary />
-          <PerformanceChart />
-          <UserCreditsCard />
-          <DailyQuotaProgress summary title="Uso diario" kinds={['contact']} />
+          <PersonalCredits />
         </aside>
 
         <div className="min-w-0 xl:col-start-1">

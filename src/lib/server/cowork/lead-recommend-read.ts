@@ -18,7 +18,7 @@ const lower = (value: unknown) => String(value || '').trim().toLowerCase();
  * declared in «Perfil».
  */
 export async function readCoworkLeadRecommendations(client: SupabaseClient, scope: Scope, value: string,
-  dependencies: { locks: typeof readTeamLocks } = { locks: readTeamLocks }) {
+  dependencies: { locks: typeof readTeamLocks; personal?:boolean } = { locks: readTeamLocks }) {
   const requested = recommendTerms(z.string().max(300).parse(value));
   const userId = z.string().uuid().parse(scope.userId);
   const organizationId = z.string().uuid().parse(scope.organizationId);
@@ -26,6 +26,7 @@ export async function readCoworkLeadRecommendations(client: SupabaseClient, scop
     const rows: T[] = [];
     for (let page = 0; page < PAGES; page++) {
       let query = client.from(table).select(columns).eq('organization_id', organizationId);
+      if(dependencies.personal)query=query.eq('user_id',userId);
       if (filter === 'sent') query = query.not('sent_at', 'is', null);
       if (filter === 'completed') query = query.not('completed_at', 'is', null);
       const { data, error } = await query.order('id', { ascending: true }).range(page * PAGE, page * PAGE + PAGE - 1);
@@ -101,7 +102,7 @@ export async function readCoworkLeadRecommendations(client: SupabaseClient, scop
   const result = lockedByOthers.size ? recommendLeads({ leads: rows, contacted, lockedByOthers, criteria }) : first;
   const complete = leads.complete && enriched.complete && touches.complete;
   return {
-    scope: 'organization_lead_recommendations', ...result,
+    scope: dependencies.personal?'personal_lead_recommendations':'organization_lead_recommendations', ...result,
     ...(complete ? {} : { partial: `Se leyeron los primeros ${PAGE * PAGES} contactos de cada lista: el orden es de esa parte.` }),
   };
 }

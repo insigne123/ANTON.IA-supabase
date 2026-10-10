@@ -15,6 +15,7 @@ import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { linkedinProfilesMatch, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
+import {readCachedAuthScope} from '@/lib/auth-scope-cache';
 import {
   ProfileSearchProblemError, profileProblemFromHttp, profileProblemFromProviderCode, profileUrlProblem,
 } from '@/lib/search/profile-search-outcome';
@@ -31,6 +32,7 @@ export class ApolloOrganizationEnrichmentClientError extends Error {
 }
 
 type SearchPayload = LeadsSearchParams | LinkedInProfileSearchRequest | CompanyNameSearchRequest;
+const searchHeaders=()=>{const scope=readCachedAuthScope();return {'Content-Type':'application/json',...(scope?.organizationId?{'x-organization-id':scope.organizationId}:{})};};
 
 function extractSearchErrorMessage(json: any, status: number): string {
   if (status === 401) return 'Tu sesión necesita renovarse. Vuelve a iniciar sesión y repite la búsqueda.';
@@ -73,7 +75,7 @@ function extractSearchErrorMessage(json: any, status: number): string {
 async function postSearch(body: SearchPayload, signal?: AbortSignal): Promise<LeadSearchResponse> {
   const res = await authenticatedApiFetch(PATH, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: searchHeaders(),
     body: JSON.stringify(body),
     cache: 'no-store',
     signal,
@@ -107,7 +109,7 @@ export async function searchCompanies(
 ): Promise<CompanySearchResponse> {
   const res = await authenticatedApiFetch(PATH, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: searchHeaders(),
     body: JSON.stringify({ ...body, search_mode: 'companies' }),
     cache: 'no-store',
     signal,

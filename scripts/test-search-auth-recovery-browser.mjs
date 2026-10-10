@@ -2,7 +2,8 @@
 // tokens, provider calls, user impersonation, paid operations or sends.
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+import {createRequire} from 'node:module';
+const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const scope = { userId: 'user-a', organizationId: 'org-a' };
 const mocks = {
   'next/navigation': `export const useRouter=()=>({push(){}});`,
@@ -54,7 +55,8 @@ try {
         calls.push({path:url.pathname,body,token,key:req.headers()['idempotency-key']});
         if (scenario === 'company-forbidden') return route.fulfill({status:403,json:{error:'User does not belong to the requested organization',code:'ORGANIZATION_ACCESS_REQUIRED'}});
         if (scenario === 'profile-expired' || token === 'Bearer stale') return route.fulfill({status:401,json:{error:'Unauthorized',code:'AUTH_SESSION_EXPIRED'}});
-        if (url.pathname === '/api/leads/search') return route.fulfill({json:{count:1,leads:[{id:'lead',name:'Persona de prueba',title:'Director',organization_name:'Acciona'}],search_mode:'company_name'}});
+        if (url.pathname === '/api/leads/search'&&body.search_mode==='companies')return route.fulfill({json:{count:1,organizations:[{id:'acciona',name:'Acciona',primary_domain:'acciona.test'}],total_pages:1,total_entries:1}});
+        if (url.pathname === '/api/leads/search') return route.fulfill({json:{count:1,leads:[{id:'lead',name:'Persona de prueba',title:'Director',organization_name:'Acciona'}],search_mode:'company_people',raw_count:1,total_entries:1}});
         return route.fulfill({json:{operationStatus:'completed',queued:false,enriched:[{id:'profile',fullName:'Perfil de prueba',title:'Director',companyName:'Acciona',linkedinUrl:'https://www.linkedin.com/in/flaviobaronti',enrichmentStatus:'completed'}]}});
       }
       return route.abort();
@@ -71,7 +73,7 @@ try {
       const profile=scenario.startsWith('profile');
       await page.getByRole('button',{name:profile?'Perfil':'Empresa',exact:true}).click();
       await page.getByLabel(profile?'URL del perfil de LinkedIn *':'Empresa *',{exact:true}).fill(profile?'https://www.linkedin.com/in/flaviobaronti/?isSelfProfile=false':'acciona');
-      await page.getByRole('button',{name:'Buscar',exact:true}).click();
+      await page.getByRole('button',{name:profile?'Buscar':'Buscar empresas',exact:true}).click();
       if (scenario==='company-forbidden') {
         await page.getByText('No pudimos confirmar tu acceso al equipo',{exact:true}).waitFor();
         await page.getByRole('button',{name:'Volver a entrar',exact:true}).waitFor();
@@ -87,7 +89,7 @@ try {
         assert.equal(recovered.filters.linkedinUrl,'https://www.linkedin.com/in/flaviobaronti/?isSelfProfile=false');
         assert.doesNotMatch(JSON.stringify(recovered),/access_token|refresh_token|private@example/);
       } else {
-        try { await page.getByText(profile?'Perfil de prueba':'Persona de prueba',{exact:true}).first().waitFor(); }
+        try { await page.getByText(profile?'Perfil de prueba':'Acciona',{exact:true}).first().waitFor(); }
         catch (error) { console.log(JSON.stringify({scenario,calls,errors,body:(await page.locator('body').textContent()).slice(-5000)}));throw error; }
         assert.equal(calls.length,scenario==='company-renew'?2:1);
         if (scenario==='company-renew') {

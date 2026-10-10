@@ -4,9 +4,10 @@ import { z } from 'zod';
 import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
-import { hasLeadsFinderAccess } from '@/lib/server/leads-finder/access';
+import { hasLeadsFinderUserAccess } from '@/lib/server/leads-finder/access';
+import {readCompanyScope} from '@/lib/server/leads-finder/company-scope';
 import { LEADS_FINDER_PROVIDER, LeadsFinderError, searchLeadsFinder } from '@/lib/server/leads-finder/client';
-import { LEADS_FINDER_MAX_PER_RUN } from '@/lib/server/leads-finder/input';
+import { LEADS_FINDER_MAX_PER_RUN,leadsFinderInput } from '@/lib/server/leads-finder/input';
 import { LeadsFinderVaultError, storeInVault } from '@/lib/server/leads-finder/vault';
 import { requestAuthErrorResponse, requireSessionOrTrustedInternalRequest } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -33,7 +34,8 @@ const FiltersSchema = z.object({
   organization_domains: list(),
   employee_ranges: list(10),
   max_results: z.number().int().min(1).max(LEADS_FINDER_MAX_PER_RUN).optional().default(25),
-});
+  company_scope:z.string().max(2000).optional(),
+}).strict();
 
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' };
 const json = (body: Record<string, unknown>, status = 200, headers: Record<string, string> = {}) =>
@@ -67,7 +69,7 @@ export async function POST(request: NextRequest) {
     throw error;
   }
   // A person tries it from the screen; agents keep using Apollo until the comparison says otherwise.
-  if (auth.source !== 'session' || !hasLeadsFinderAccess(auth.user.email)) return json({ error: 'NOT_FOUND' }, 404);
+  if (auth.source !== 'session' || !hasLeadsFinderUserAccess(auth.user)) return json({ error: 'NOT_FOUND' }, 404);
   const userId = auth.user.id;
   const organizationId = auth.organizationId;
   if (!organizationId) return json({ error: 'ORGANIZATION_REQUIRED' }, 403);
@@ -81,12 +83,16 @@ export async function POST(request: NextRequest) {
   const parsed = FiltersSchema.safeParse(body);
   if (!parsed.success) return json({ error: 'INVALID_REQUEST_BODY', message: 'Revisa los filtros: alguno es demasiado largo o no es válido.' }, 400);
   const filters = parsed.data;
+  let company:ReturnType<typeof readCompanyScope>|undefined;
+  if(filters.company_scope){try{company=readCompanyScope(filters.company_scope,{organizationId,userId});}
+    catch(error){return json({error:'COMPANY_SCOPE_UNAVAILABLE',message:error instanceof Error?error.message:'Busca la empresa de nuevo.'},409);}}
+  if(company&&filters.organization_domains.length)return json({error:'INVALID_REQUEST_BODY',message:'La empresa se fija con la selección, no con otro dominio.'},400);
   const input: LeadSearchInput = {
     provider: 'apollo',
     searchMode: 'batch',
     revealEmail: false,
     revealPhone: false,
-    organizationDomains: filters.organization_domains,
+    organizationDomains: company?[company.domain]:filters.organization_domains,
     titles: filters.titles,
     seniorities: filters.seniorities,
     industryKeywords: filters.industry_keywords,
@@ -100,6 +106,7 @@ export async function POST(request: NextRequest) {
   const hasFilter = [input.titles, input.seniorities, input.industryKeywords, input.companyKeywords, input.companyLocations,
     input.personLocations, input.organizationDomains, input.employeeRanges].some(values => values.length > 0);
   if (!hasFilter) return json({ error: 'FILTER_REQUIRED', message: 'Agrega al menos un filtro: cargo, ubicación, industria o tamaño.' }, 400);
+  const mapped=leadsFinderInput(input);if(!mapped.ok)return json({error:'FILTER_REQUIRED',message:mapped.error},400);
 
   // The same daily search quota as an Apollo search.
   const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });
@@ -127,7 +134,9 @@ export async function POST(request: NextRequest) {
   const admin = getSupabaseAdminClient() as any;
   try {
     // Shown only if it can be enriched later: the vault write comes first.
-    await storeInVault(admin, { organizationId, userId, entries: found.results });
+    if(company)found.results=found.results.filter(row=>row.lead.organization_domain===company!.domain);
+    const stored=await storeInVault(admin, { organizationId, userId, entries: found.results });
+    if(stored!==found.results.length)throw new LeadsFinderVaultError('LEADS_FINDER_VAULT_UNAVAILABLE');
   } catch (error) {
     if (error instanceof LeadsFinderVaultError) {
       return json({ error: error.code, message: 'No pudimos guardar los resultados para enriquecerlos después, así que no los mostramos. Inténtalo de nuevo más tarde.' }, 503);
