@@ -16,7 +16,7 @@ Plan 11, sección 6. **Objetivo:** probar si la búsqueda por filtros de Apify �
 
    El navegador **nunca** recibe el correo, el teléfono, el correo personal ni el LinkedIn de la persona antes de enriquecer.
 2. **Lo que trajo Apify se guarda en el servidor**, cifrado, en `lead_search_vault` (PR 6b): solo `service_role` y vence a los 30 días.
-3. **«Enriquecer» toma esos datos de la bóveda**, sin otra consulta externa. Descuenta los mismos créditos que hoy y el lead queda igual que uno enriquecido con Apollo.
+3. **«Enriquecer» toma esos datos de la bóveda**, sin otra consulta externa. Descuenta créditos internos de ANTON.IA y el lead queda igual que uno enriquecido con Apollo. No descuenta créditos de Apollo ni vuelve a ejecutar Apify por revelar datos ya obtenidos.
 
 ## Piezas
 
@@ -61,28 +61,30 @@ node --loader ./scripts/ts-test-loader.mjs scripts/compare-lead-providers.ts --l
 
 ## La búsqueda en la app (6c)
 
-Detrás de `LEADS_FINDER_ENABLED=true` y solo para los correos de `LEADS_FINDER_ALLOWED_EMAILS`, separados por coma. Con la lista vacía no entra nadie, y para el resto las rutas responden 404 y la pantalla no cambia.
+Detrás de `LEADS_FINDER_ENABLED=true`, ID/correo confirmado del dueño y `LEADS_FINDER_ALLOWED_EMAILS`. Ser admin/owner de una organización no da acceso al piloto; para el resto las rutas de búsqueda/revelado responden 404 y el selector no aparece.
 
-**En «Buscar prospectos»**, modo «Filtros», aparece «Fuente de los contactos: Apollo · Leads Finder (prueba)». Cada visita empieza en Apollo.
+**En «Buscar prospectos»**, Filtros y Empresa ofrecen al dueño «Fuente de los contactos: Apollo · Leads Finder (prueba)». Apollo es el valor inicial; un checkpoint autorizado puede recuperar la fuente elegida.
 
-- **Con Leads Finder se buscan personas directo**, con los mismos filtros (cargo, nivel, ubicación, industria, palabras clave y tamaño) y sin el paso de empresas.
+- **Flujo combinado:** Apollo descubre empresas, el usuario las selecciona y Leads Finder obtiene personas por sus dominios firmados. [Detalle del recorrido](busqueda-flujo-combinado-20261010.md). Traer más/restaurar usa el buffer del resultado, sin otra consulta.
 - **Un aviso explica la prueba**, lo que no se pudo aplicar y cuántas personas ya estaban guardadas.
 - **Los resultados se ven como los de Apollo:**
   - el apellido oculto («Ana Pé***z»; en las listas, «Ana P.»);
   - cargo, empresa y ubicación;
   - «Tiene correo: se ve al buscar su correo».
 - **El navegador no recibe** correo, teléfono, correo personal ni LinkedIn de la persona.
-- **Volver a Apollo** deja su última búsqueda (empresas y contactos) tal como estaba. Leads Finder no la sobrescribe.
+- **Cambiar la fuente** mantiene las empresas y descarta las ventanas de contactos incompatibles. Restaurar un checkpoint no ejecuta consultas; una fuente revocada retira sus ventanas.
 
 **Guardar y enriquecer**
 - Guardar deja a la persona en «Por completar», con `source_provider = leads_finder` y su id `lf_…`.
 - **«Buscar correo»** (`POST /api/leads/leads-finder/enrich`) la saca de la bóveda, sin otra llamada a Apify:
-  - **Cobro:** el mismo cupo que Apollo (`enrich`, o `investigate` si se pide el teléfono), una vez por persona revelada.
+  - **Cobro:** cupo interno de ANTON.IA (`enrich`, o `investigate` si se pide el teléfono), una vez por persona procesada según la política vigente. La RPC consume una unidad interna por contacto, aunque se pidan ambos campos. El estimado y el recibo visible identifican ANTON.IA; no confunden las tarifas externas de Apollo con el cupo interno.
   - **Reintentos:** es idempotente por `Idempotency-Key`; un reintento repite la respuesta sin volver a cobrar.
   - **El resultado:** deja la fila de `enriched_leads` igual que Apollo, con `leads_finder` como proveedor. Solo trae el correo de trabajo, nunca el personal; el teléfono, solo si se pidió.
-  - **La bóveda:** borra a la persona revelada.
+  - **La bóveda:** conserva campos todavía no revelados; retira el contacto cuando se revelan los campos disponibles o se suprime.
 - **Si el resultado venció** (pasaron más de 30 días), se avisa «búscalo de nuevo» y no se cobra.
 - En «Por completar», una misma selección puede mezclar personas de Apollo y de Leads Finder: cada una va a su proveedor.
+- En «Por escribir», actualizar un contacto LF también recupera sus datos del servidor. La actualización verifica usuario/tenant/proveedor/ID, modifica la misma fila canónica y conserva correo/teléfono no solicitados. No crea una segunda persona ni deriva silenciosamente a Apollo. Un origen LF incompleto exige recuperar su identidad, no consultar otro proveedor.
+- La ruta de Apollo rechaza marcadores/IDs LF antes de cobrar o contactar al proveedor; una fila ya vinculada a LF tampoco puede sobrescribirse como Apollo.
 
 **Búsqueda** (`POST /api/leads/leads-finder/search`):
 - **Cupo:** el mismo cupo diario de búsquedas que Apollo.
@@ -100,7 +102,7 @@ Detrás de `LEADS_FINDER_ENABLED=true` y solo para los correos de `LEADS_FINDER_
 
 - **6a, el proveedor y la comparación:** en `main`.
 - **6b, la bóveda `lead_search_vault`:** en `main`; se aplica en producción aparte.
-- **6c, la búsqueda en la app:** apagada hasta que el mantenedor aplique 6b y encienda el flag. Para la prueba, se enciende solo para quien la hace.
+- **6c, la búsqueda en la app:** piloto del dueño activo; flujo combinado de #318 publicado el 10 oct 2026. El cobro interno y el paso Por completar se conservan por decisión del dueño. Las correcciones de actualización/recibo de esta sección requieren su propio release; no se declaran publicadas por estar documentadas.
 
 ## Prueba real (Plan 12, 6 oct 2026)
 

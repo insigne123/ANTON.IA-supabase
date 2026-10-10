@@ -40,7 +40,7 @@ import { ToastAction } from '@/components/ui/toast';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
 import { formatDate } from '@/lib/dates';
-import { APOLLO_EMAIL_ENRICHMENT_CREDITS } from '@/lib/apollo-credit-costs';
+import { ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT, enrichmentCreditReceipt, partitionEnrichmentLeads } from '@/lib/leads-workspace/enrichment-provider';
 import {
   SAVED_LOOKUP_LABELS,
   classifyEnrichmentResults,
@@ -280,73 +280,81 @@ export default function SavedLeadsPage() {
     }
 
     setEnriching(true);
+    let consumed = 0;
     try {
       // People found with Leads Finder (Plan 11) are revealed from what that search already brought; the rest, with Apollo.
-      const isLeadsFinder = (lead: Lead) => lead.sourceProvider === 'leads_finder' && Boolean(lead.sourceProviderId);
-      const fromLeadsFinder = chosen.filter(isLeadsFinder);
-      const forApollo = chosen.filter(lead => !isLeadsFinder(lead));
+      const { leadsFinder: fromLeadsFinder, apollo: forApollo } = partitionEnrichmentLeads(chosen);
       const results: any[] = [];
-      let consumed = 0;
       let expiredCount = 0;
+      const failures: string[] = [];
 
       if (fromLeadsFinder.length > 0) {
-        const revealed = await enrichWithLeadsFinder({
-          leads: fromLeadsFinder.map(lead => ({ sourceProviderId: String(lead.sourceProviderId), clientRef: lead.id })),
-          revealEmail,
-          revealPhone,
-          operationId: uuid(),
-        });
-        // An expired result stays here as it was, without a «Sin correo» mark: searching it again brings it back.
-        results.push(...revealed.enriched.filter(item => item.enrichmentStatus !== 'expired'));
-        expiredCount = revealed.expired.length;
-        consumed += Number(revealed.usage?.consumed ?? 0);
+        try {
+          const revealed = await enrichWithLeadsFinder({
+            leads: fromLeadsFinder.map(lead => ({ sourceProviderId: String(lead.sourceProviderId), clientRef: lead.id })),
+            revealEmail,
+            revealPhone,
+            operationId: uuid(),
+          });
+          // Expired data stays here, without a false «Sin correo» mark.
+          results.push(...revealed.enriched.filter(item => item.enrichmentStatus !== 'expired'));
+          expiredCount = revealed.expired.length;
+          consumed += Number(revealed.usage?.consumed ?? 0);
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'No pudimos completar parte de los contactos.');
+        }
       }
 
       if (forApollo.length > 0) {
-        const payloadLeads = forApollo.map(l => ({
-          fullName: l.name,
-          linkedinUrl: l.linkedinUrl || undefined,
-          companyName: l.company || undefined,
-          companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
-          clientRef: l.id,
-          id: l.id,
-          sourceProviderId: l.sourceProvider === 'apollo' ? l.sourceProviderId : undefined,
-        }));
-        const operationId = uuid();
+        try {
+          const payloadLeads = forApollo.map(l => ({
+            fullName: l.name,
+            linkedinUrl: l.linkedinUrl || undefined,
+            companyName: l.company || undefined,
+            companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
+            clientRef: l.id,
+            id: l.id,
+            sourceProviderId: l.sourceProvider === 'apollo' ? l.sourceProviderId : undefined,
+          }));
+          const operationId = uuid();
 
-        const r = await fetch('/api/opportunities/enrich-apollo', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Idempotency-Key': operationId,
-            'x-quota-ticket': getQuotaTicket() || '',
-          },
-          body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),
-        });
-        const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
+          const r = await fetch('/api/opportunities/enrich-apollo', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': operationId,
+              'x-quota-ticket': getQuotaTicket() || '',
+            },
+            body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),
+          });
+          const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
 
-        if (process.env.NODE_ENV !== 'production' && j?.debug?.serverLogs && Array.isArray(j.debug.serverLogs)) {
-          console.groupCollapsed('[Server Logs] Apollo Enrichment');
-          j.debug.serverLogs.forEach((l: string) => console.log(l));
-          console.groupEnd();
+          if (process.env.NODE_ENV !== 'production' && j?.debug?.serverLogs && Array.isArray(j.debug.serverLogs)) {
+            console.groupCollapsed('[Server Logs] Apollo Enrichment');
+            j.debug.serverLogs.forEach((l: string) => console.log(l));
+            console.groupEnd();
+          }
+
+          if (!r.ok) {
+            const snippet = (j as any)?.error || (j as any)?.message || (j as any)?.text || 'Error interno';
+            throw new Error(`HTTP ${r.status}: ${String(snippet).slice(0, 200)}`);
+          }
+
+          if (j.note && typeof j.note === 'string' && j.note.includes('Quota')) {
+            toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: j.note });
+          }
+
+          const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
+          if (ticket) setQuotaTicket(ticket);
+
+          consumed += Number(j?.usage?.consumed ?? 0);
+          results.push(...(Array.isArray(j.enriched) ? j.enriched : []));
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'No pudimos completar parte de los contactos.');
         }
-
-        if (!r.ok) {
-          const snippet = (j as any)?.error || (j as any)?.message || (j as any)?.text || 'Error interno';
-          throw new Error(`HTTP ${r.status}: ${String(snippet).slice(0, 200)}`);
-        }
-
-        if (j.note && typeof j.note === 'string' && j.note.includes('Quota')) {
-          toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: j.note });
-        }
-
-        const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
-        if (ticket) setQuotaTicket(ticket);
-
-        consumed += Number(j?.usage?.consumed ?? 0);
-        results.push(...(Array.isArray(j.enriched) ? j.enriched : []));
       }
       if (consumed > 0) Quota.incClientQuota('enrich', consumed);
+      if (!results.length && failures.length) throw Error(failures.join(' '));
 
       // Who got an email or a phone (or is still being looked up) moves; a search that found nothing stays here, marked.
       const outcome = classifyEnrichmentResults(chosen, results, { revealPhone });
@@ -377,14 +385,15 @@ export default function SavedLeadsPage() {
         stillLooking ? `${stillLooking} ${stillLooking === 1 ? 'sigue' : 'siguen'} en búsqueda y ${stillLooking === 1 ? 'aparecerá' : 'aparecerán'} en «Por escribir»` : '',
         outcome.notFound.length ? `${outcome.notFound.length} sin correo: ${outcome.notFound.length === 1 ? 'queda' : 'quedan'} aquí, ${markedNotFound ? 'marcados' : 'aunque no pudimos marcarlos'}` : '',
         expiredCount ? `${expiredCount} de Leads Finder ${expiredCount === 1 ? 'venció' : 'vencieron'} (se guardan 30 días): ${expiredCount === 1 ? 'búscalo' : 'búscalos'} de nuevo en Buscar prospectos, no se cobró` : '',
+        ...failures.map(message => `Hay contactos pendientes: ${message}`),
       ].filter(Boolean);
       toast({
         title: outcome.toEnriched.length > 0 ? 'Búsqueda de correo lista' : 'No encontramos correos',
-        description: parts.length > 0 ? `${parts.join('. ')}.` : 'El proveedor no devolvió resultados para estos contactos.',
+        description: `${parts.length > 0 ? `${parts.join('. ')}.` : 'El proveedor no devolvió resultados para estos contactos.'} ${enrichmentCreditReceipt(consumed)}`.trim(),
         action: outcome.toEnriched.length > 0 ? <ToastAction altText="Ver «Por escribir»" onClick={() => router.push('/saved/leads/enriched')}>Ver</ToastAction> : undefined,
       });
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'No pudimos buscar los correos', description: e.message || 'Intenta de nuevo en unos minutos.' });
+      toast({ variant: 'destructive', title: 'No pudimos terminar todos los contactos', description: `${e.message || 'Intenta de nuevo en unos minutos.'} ${enrichmentCreditReceipt(consumed)}`.trim() });
     } finally {
       setEnriching(false);
       setEnrichOptionsOpen(false);
@@ -765,7 +774,7 @@ export default function SavedLeadsPage() {
           ariaLabel="Acciones con los contactos seleccionados"
           label={`${selectedLeads.length} ${selectedLeads.length === 1 ? 'contacto seleccionado' : 'contactos seleccionados'}`}
           hint={[
-            selectedToSearch.length ? `${selectedToSearch.length} sin correo: buscarlo usa ${selectedToSearch.length * APOLLO_EMAIL_ENRICHMENT_CREDITS} ${selectedToSearch.length * APOLLO_EMAIL_ENRICHMENT_CREDITS === 1 ? 'crédito' : 'créditos'}` : '',
+            selectedToSearch.length ? `${selectedToSearch.length} sin correo: completar datos usa hasta ${selectedToSearch.length * ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT} ${selectedToSearch.length === 1 ? 'crédito' : 'créditos'} de ANTON.IA` : '',
             selectedWithEmail.length ? `${selectedWithEmail.length} con correo ${selectedWithEmail.length === 1 ? 'pasa' : 'pasan'} sin costo` : '',
           ].filter(Boolean).join(' · ')}
         >

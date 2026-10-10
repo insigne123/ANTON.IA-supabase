@@ -131,8 +131,8 @@ test('without access, without filters, without vault or with an Apify error the 
   assert.deepEqual(await failed.json(), { error: 'LEADS_FINDER_ERROR', message: 'Apify: no queda saldo en la cuenta.', mayHaveCharged: false });
 });
 
-function enrichRoute(options: { inVault?: string[]; existing?: any; allowed?: boolean; email?: string;suppressed?:boolean } = {}) {
-  const calls = { claims: [] as any[], submitted: 0, completed: [] as any[], released: 0, inserted: [] as any[], forgotten: [] as string[], identities: [] as any[] };
+function enrichRoute(options: { inVault?: string[]; existing?: any; allowed?: boolean; email?: string;suppressed?:boolean; existingRow?:any } = {}) {
+  const calls = { claims: [] as any[], submitted: 0, completed: [] as any[], released: 0, inserted: [] as any[], updated: [] as any[], forgotten: [] as string[], identities: [] as any[] };
   const vault = new Map(people.filter(person => (options.inVault ?? [people[0].lead.id]).includes(person.lead.id)).map(person => [person.lead.id, person]));
   const POST = load('src/app/api/leads/leads-finder/enrich/route.ts', {
     ...shared(options.email ?? ALLOWED),
@@ -165,7 +165,19 @@ function enrichRoute(options: { inVault?: string[]; existing?: any; allowed?: bo
       forgetInVault: async (_client: unknown, input: { ids: string[] }) => { calls.forgotten.push(...input.ids); },
     },
     '@/lib/server/supabase-admin': {
-      getSupabaseAdminClient: () => ({ from: (table: string) => ({ insert:(row:any)=>{assert.equal(table,'enriched_leads');calls.inserted.push(row);return {select:()=>({maybeSingle:async()=>({error:null,data:options.suppressed?{...row,email:null,primary_phone:null,linkedin_url:null,full_name:'Contacto',enrichment_status:'suppressed'}:row})})};} }) }),
+      getSupabaseAdminClient: () => ({ from: (table: string) => {
+        assert.equal(table, 'enriched_leads'); const filters: Array<[string, any]> = []; let patch:any;
+        const chain:any = {
+          select: () => chain, eq: (key:string, value:any) => { filters.push([key,value]); return chain; },
+          update: (row:any) => {patch=row;calls.updated.push(row);return chain;},
+          maybeSingle: async () => {
+            const row=options.existingRow;
+            const matches=row&&filters.every(([key,value])=>row[key]===value);
+            return {error:null,data:matches?{...row,...patch,...(patch&&options.suppressed?{enrichment_status:'suppressed'}:{})}:null};
+          },
+          insert: (row:any) => {calls.inserted.push(row);return {select:()=>({maybeSingle:async()=>({error:null,data:options.suppressed?{...row,email:null,primary_phone:null,linkedin_url:null,full_name:'Contacto',enrichment_status:'suppressed'}:row})})};},
+        }; return chain;
+      } }),
     },
   });
   return { POST, calls };
@@ -241,4 +253,31 @@ test('combined people search requires the signed company and excludes all foreig
   const bad=searchRoute();assert.equal((await bad.POST(post({company_scope:'bad',titles:['Gerente']}))).status,409);
   assert.equal((await bad.POST(post({organization_id:'apollo-company',titles:['Gerente']}))).status,400);
   assert.equal(bad.calls.quota,0);
+});
+
+test('phone-only LF enrichment updates its scoped canonical row, preserves email and charges internal credits with zero provider calls', async t => {
+  t.mock.method(globalThis, 'fetch', async () => {assert.fail('no Apollo or Apify call');});
+  const row=reveal.enrichedLeadRow(people[0],{id:SAVED_ANA,userId:'u1',organizationId:'org',revealEmail:true,revealPhone:false,now:'2026-10-01T00:00:00Z'});
+  const route=enrichRoute({existingRow:row});
+  const body={leads:[{sourceProviderId:people[0].lead.id,clientRef:SAVED_ANA,existingRecordId:SAVED_ANA}],revealEmail:false,revealPhone:true};
+  const response=await route.POST(post(body,{'idempotency-key':'phone-lf'}));assert.equal(response.status,200);
+  const data=await response.json();assert.equal(data.usage.consumed,1);assert.equal(data.enriched[0].id,SAVED_ANA);
+  assert.equal(data.enriched[0].primaryPhone,'+56 9 1234 5678');assert.equal(route.calls.inserted.length,0);
+  assert.equal(route.calls.updated[0].email,undefined,'phone reveal never erases the existing email');
+  assert.deepEqual(route.calls.claims.map(c=>[c.resource,c.count]),[['investigate',1]]);
+  const suppressed=enrichRoute({existingRow:row,suppressed:true});
+  const suppressedResponse=await suppressed.POST(post(body,{'idempotency-key':'phone-suppressed'}));
+  assert.equal(suppressedResponse.status,200);
+  const raw=JSON.stringify(await suppressedResponse.json());
+  for(const secret of SECRETS)assert.equal(raw.includes(secret),false,'suppression during a phone update cannot expose cached contact fields');
+  for(const extra of [{user_id:'other'},{organization_id:'other'},{source_provider:'apollo'},{source_provider_id:people[1].lead.id},{enrichment_status:'suppressed'}]){
+    const denied=enrichRoute({existingRow:{...row,...extra}});
+    assert.equal((await denied.POST(post(body,{'idempotency-key':'denied'}))).status,403);
+    assert.equal(denied.calls.claims.length+denied.calls.updated.length,0);
+  }
+  for(const invalid of ['',null,7,'invalid-id']){
+    const denied=enrichRoute({existingRow:row});
+    assert.equal((await denied.POST(post({...body,leads:[{...body.leads[0],existingRecordId:invalid}]},{'idempotency-key':'invalid-target'}))).status,400);
+    assert.equal(denied.calls.claims.length+denied.calls.updated.length+denied.calls.inserted.length,0);
+  }
 });

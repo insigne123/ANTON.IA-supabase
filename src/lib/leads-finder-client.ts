@@ -47,7 +47,7 @@ async function readJson(response: Response) {
 function failure(json: Record<string, any>, status: number) {
   const code = String(json?.error || `HTTP_${status}`);
   const message = typeof json?.message === 'string' && json.message.trim() ? json.message : MESSAGES[code]
-    || 'Leads Finder no respondió. Prueba de nuevo en unos minutos; si se repite, usa Apollo.';
+    || 'No pudimos recuperar los datos de este contacto. Prueba de nuevo en unos minutos o vuelve a buscarlo en Buscar prospectos.';
   return new LeadsFinderClientError(message, code, status);
 }
 
@@ -81,7 +81,7 @@ export type LeadsFinderEnrichResult = {
 
 /** Reveals people found with Leads Finder; `clientRef` is the saved contact, so the answer is matched back to it. */
 export async function enrichWithLeadsFinder(input: {
-  leads: Array<{ sourceProviderId: string; clientRef: string }>;
+  leads: Array<{ sourceProviderId: string; clientRef: string; existingRecordId?: string }>;
   revealEmail: boolean;
   revealPhone: boolean;
   operationId: string;
@@ -94,6 +94,7 @@ export async function enrichWithLeadsFinder(input: {
     cache: 'no-store',
   });
   const json = await readJson(response);
+  if (response.status === 202) throw new LeadsFinderClientError('Estamos completando estos contactos. Espera a que termine antes de iniciar otra operación.', 'ENRICHMENT_OPERATION_PROCESSING', 202);
   // Everything expired: nothing was charged, and every person is reported so the screen can say it.
   if (response.status === 410) {
     return { enriched: [], expired: Array.isArray(json.expired) ? json.expired : input.leads.map(lead => ({ ...lead })), usage: undefined };

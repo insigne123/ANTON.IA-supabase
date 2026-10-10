@@ -34,7 +34,7 @@ export const runtime = 'nodejs';
 const MAX_CONTACTS = 25;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Resource = 'enrich' | 'investigate';
-type RequestedLead = { sourceProviderId?: unknown; clientRef?: unknown };
+type RequestedLead = { sourceProviderId?: unknown; clientRef?: unknown; existingRecordId?: unknown };
 
 const noStore = { 'Cache-Control': 'private, no-store, max-age=0' };
 const json = (body: Record<string, unknown>, status = 200, headers: Record<string, string> = {}) =>
@@ -88,8 +88,11 @@ export async function POST(request: NextRequest) {
   if (!revealEmail && !revealPhone) return json({ error: 'ENRICHMENT_FIELDS_REQUIRED' }, 400);
   const requested = (Array.isArray(body.leads) ? body.leads : []) as RequestedLead[];
   if (requested.length === 0 || requested.length > MAX_CONTACTS) return json({ error: 'INVALID_ENRICHMENT_CONTACT_COUNT' }, 400);
-  const leads = requested.map(lead => ({ id: text(lead?.sourceProviderId, 40), clientRef: text(lead?.clientRef, 64) || undefined }));
+  if (requested.some(lead => lead?.existingRecordId !== undefined && !UUID_RE.test(text(lead.existingRecordId, 64)))) return json({ error: 'INVALID_ENRICHMENT_TARGET' }, 400);
+  const leads = requested.map(lead => ({ id: text(lead?.sourceProviderId, 40), clientRef: text(lead?.clientRef, 64) || undefined,
+    existingRecordId: text(lead?.existingRecordId, 64) || undefined }));
   if (leads.some(lead => !isLeadsFinderId(lead.id))) return json({ error: 'LEADS_FINDER_ID_REQUIRED' }, 400);
+  if (leads.some(lead => lead.existingRecordId && (!UUID_RE.test(lead.existingRecordId) || lead.clientRef !== lead.existingRecordId))) return json({ error: 'INVALID_ENRICHMENT_TARGET' }, 400);
   if (new Set(leads.map(lead => lead.id)).size !== leads.length) return json({ error: 'DUPLICATE_ENRICHMENT_TARGET' }, 409);
   const operationId = operationIdOf(request, body);
   if (!operationId) return json({ error: 'IDEMPOTENCY_KEY_REQUIRED' }, 400);
@@ -108,6 +111,14 @@ export async function POST(request: NextRequest) {
   if (!hasEnrichmentSearchCreditAccess(userEmail)) return json(enrichmentSearchCreditsUnavailablePayload(), 429);
 
   const admin = getSupabaseAdminClient() as any;
+  const existingRows = new Map<string, Record<string, any>>();
+  for (const lead of leads) if (lead.existingRecordId) {
+    const result = await admin.from('enriched_leads').select('*').eq('id', lead.existingRecordId)
+      .eq('user_id', userId).eq('organization_id', organizationId).eq('source_provider', LEADS_FINDER_PROVIDER).eq('source_provider_id', lead.id).maybeSingle();
+    if (result.error) return json({ error: 'ENRICHMENT_TARGET_UNAVAILABLE' }, 503);
+    if (!result.data || result.data.enrichment_status === 'suppressed') return json({ error: 'ENRICHMENT_TARGET_UNAVAILABLE' }, 403);
+    existingRows.set(lead.id, result.data);
+  }
   let vault: Awaited<ReturnType<typeof readFromVault>>;
   try {
     vault = await readFromVault(admin, { organizationId, ids: leads.map(lead => lead.id) });
@@ -141,10 +152,22 @@ export async function POST(request: NextRequest) {
     const enriched: Array<Record<string, unknown>> = [];
     const revealed: string[] = [];
     for (const lead of ready) {
-      const row = enrichedLeadRow(vault.get(lead.id)!, { id: randomUUID(), userId, organizationId, revealEmail, revealPhone, now });
+      const existingRow = existingRows.get(lead.id);
+      const row = enrichedLeadRow(vault.get(lead.id)!, { id: existingRow?.id || randomUUID(), userId, organizationId, revealEmail, revealPhone, now });
       // Privacy/suppression triggers can scrub an insertion. Only persisted
       // bytes may leave the server or update the saved contact's identity.
-      const { error,data:persisted } = await admin.from('enriched_leads').insert(row).select('*').maybeSingle();
+      // Updating a previously revealed contact keeps its identity and fields that
+      // were not requested. Never create a second row for a phone-only reveal.
+      const update = {
+        ...(revealEmail && row.email ? { email: row.email, email_status: row.email_status } : {}),
+        ...(revealPhone && row.primary_phone ? { primary_phone: row.primary_phone, phone_numbers: row.phone_numbers } : {}),
+        enrichment_status: row.email || row.primary_phone || existingRow?.email || existingRow?.primary_phone ? 'completed' : 'failed',
+        updated_at: now,
+      };
+      const mutationQuery = existingRow ? admin.from('enriched_leads').update(update).eq('id', existingRow.id)
+        .eq('user_id', userId).eq('organization_id', organizationId).eq('source_provider', LEADS_FINDER_PROVIDER).eq('source_provider_id', lead.id)
+        : admin.from('enriched_leads').insert(row);
+      const { error,data:persisted } = await mutationQuery.select('*').maybeSingle();
       if (error||!persisted) {
         enriched.push({ clientRef: lead.clientRef, sourceProvider: LEADS_FINDER_PROVIDER, sourceProviderId: lead.id, enrichmentStatus: 'failed', errorCode: 'LEADS_FINDER_PERSIST_FAILED' });
         continue;
@@ -153,7 +176,7 @@ export async function POST(request: NextRequest) {
       if(persisted.enrichment_status==='suppressed'||(revealEmail||!entry.contact.email)&&(revealPhone||!entry.contact.mobileNumber))revealed.push(lead.id);
       enriched.push(revealedLead(persisted, { clientRef: lead.clientRef, revealEmail, revealPhone }));
       // The saved contact gets its real name, LinkedIn and title (only its gaps), as after an Apollo enrichment.
-      if (persisted.enrichment_status!=='suppressed'&&lead.clientRef && UUID_RE.test(lead.clientRef)) {
+      if (!existingRow && persisted.enrichment_status!=='suppressed'&&lead.clientRef && UUID_RE.test(lead.clientRef)) {
         await applyEnrichedIdentity(admin, {
           userId, organizationId, savedLeadId: lead.clientRef, providerId: lead.id, identity: identityFromProvider(revealedIdentity(persisted)),
         }).catch(() => undefined);

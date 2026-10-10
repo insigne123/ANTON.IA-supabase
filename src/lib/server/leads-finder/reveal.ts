@@ -68,6 +68,11 @@ export function enrichedLeadRow(entry: VaultEntry, options: RevealOptions) {
 
 /** What the screen receives for one person, the same fields as the Apollo enrichment answer. */
 export function revealedLead(row: ReturnType<typeof enrichedLeadRow>, input: { clientRef?: string; revealEmail: boolean; revealPhone: boolean }) {
+  if (row.enrichment_status === 'suppressed') return {
+    id: row.id, clientRef: input.clientRef, sourceProvider: LEADS_FINDER_PROVIDER, sourceProviderId: row.source_provider_id,
+    fullName: '', firstName: '', lastName: '', email: undefined, emailStatus: undefined,
+    phoneNumbers: undefined, primaryPhone: undefined, enrichmentStatus: 'suppressed',
+  };
   const [firstName, ...rest] = String(row.full_name || '').split(' ');
   return {
     id: row.id,
