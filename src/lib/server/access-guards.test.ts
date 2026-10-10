@@ -13,7 +13,10 @@ test('the admin panel is checked on the server before any of it renders', () => 
   assert.match(adminLayout, /export default async function AdminDashboardLayout/);
   assert.match(adminLayout, /await requireAdminDashboardAccess\(\)/);
   assert.match(adminLayout, /error\.status === 401\) redirect\('\/login\?next=\/dashboard\/admin'\)/);
-  assert.match(adminLayout, /error\.status === 403\) notFound\(\)/);
+  assert.match(adminLayout, /await requireAdminUsageAccess\(\)/);
+  assert.match(adminLayout, /if\(!access\.platform\)notFound\(\)/, 'only explicit platform analytics can open the read-only frame without an organization-admin role');
+  assert.match(adminLayout, /usageError\.status===403\)notFound\(\)/);
+  assert.match(adminLayout, /throw usageError/, 'a failed global lookup is not presented as a false 404');
   assert.match(adminLayout, /throw error;/, 'a failed lookup reaches the panel error page, not a false 404');
 });
 

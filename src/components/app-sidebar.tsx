@@ -31,13 +31,13 @@ const itemClass = 'h-10 rounded-2xl px-3 text-[0.95rem] font-medium text-sidebar
 const activeItemClass = 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]';
 
 /** `access` comes from the shell, which also uses it for the help: one request for both. */
-export function AppSidebar({ access }: { access: NavAccess }) {
+export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;adminUsage?:boolean }) {
   const pathname = usePathname();
   const { signOut, organizationId, organizationRole } = useAuth();
   const productTour = useProductTour();
   const { isMobile, setOpenMobile } = useSidebar();
   // Every organization's owners and admins see its panel; the server checks the role again (admin-dashboard-auth.ts).
-  const canAccessAdminDashboard = Boolean(organizationId) && (organizationRole === 'owner' || organizationRole === 'admin');
+  const canAccessAdminDashboard = adminUsage || Boolean(organizationId) && (organizationRole === 'owner' || organizationRole === 'admin');
 
   // On phones the menu is a sheet over the page: it closes once a screen is chosen, also when it is the one on view.
   React.useEffect(() => { setOpenMobile(false); }, [pathname, setOpenMobile]);

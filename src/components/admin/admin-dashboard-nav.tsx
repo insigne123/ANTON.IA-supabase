@@ -2,25 +2,25 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Coins, LayoutDashboard, Users, UsersRound } from 'lucide-react';
+import { Coins, LayoutDashboard, Users, UsersRound, ChartNoAxesCombined } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
 const adminNavigation = [
-  { href: '/dashboard/admin', label: 'Resumen', icon: LayoutDashboard, exact: true },
+  { href: '/dashboard/admin', label: 'Uso y resultados', icon: ChartNoAxesCombined, exact: true },
   { href: '/dashboard/admin/users', label: 'Personas', icon: Users },
   { href: '/dashboard/admin/teams', label: 'Equipos', icon: UsersRound },
   { href: '/dashboard/admin/credits', label: 'Créditos', icon: Coins },
 ];
 
-export function AdminDashboardNav() {
+export function AdminDashboardNav({usageOnly=false}:{usageOnly?:boolean}) {
   const pathname = usePathname();
 
   return (
     <div className="sticky top-12 z-[8] -mx-4 -mt-4 mb-6 border-b border-border/60 bg-background/90 px-4 backdrop-blur-xl md:-mx-6 md:-mt-5 md:px-6">
       <nav aria-label="Administración" className="mx-auto flex w-full max-w-[1320px] gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {adminNavigation.map((item) => {
-          const active = item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);
+        {adminNavigation.filter(item=>!usageOnly||item.href==='/dashboard/admin').map((item) => {
+          const active = item.exact ? pathname === item.href || pathname==='/dashboard/admin/usage' : pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
 
           return (
