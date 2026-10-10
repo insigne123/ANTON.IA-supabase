@@ -56,6 +56,8 @@ import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
 import * as Quota from '@/lib/quota-client';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
+import { enrichWithLeadsFinder } from '@/lib/leads-finder-client';
+import { enrichmentCreditReceipt, partitionEnrichmentLeads } from '@/lib/leads-workspace/enrichment-provider';
 import { createCoalescedRunner } from '@/lib/leads-workspace/coalesced-runner';
 import {
   ENRICHED_EXPORT_HEADERS,
@@ -122,9 +124,26 @@ export default function EnrichedLeadsClient() {
   async function handleConfirmEnrich(opts: { revealEmail: boolean; revealPhone: boolean }) {
     if (!leadsToEnrich.length) return;
     setEnriching(true);
+    let consumed = 0;
     try {
       // Map to minimal payload
-      const payloadLeads = leadsToEnrich.map(l => ({
+      const { leadsFinder, apollo } = partitionEnrichmentLeads(leadsToEnrich);
+      const results: Array<EnrichedLead & { clientRef?: string }> = [];
+      const failures: string[] = [];
+      if (leadsFinder.length) {
+        try {
+          const cached = await enrichWithLeadsFinder({
+            leads: leadsFinder.map(lead => ({ sourceProviderId: lead.sourceProviderId!, clientRef: lead.id, existingRecordId: lead.id })),
+            revealEmail: opts.revealEmail, revealPhone: opts.revealPhone, operationId: uuid(),
+          });
+          results.push(...cached.enriched.filter(row => row.enrichmentStatus !== 'expired') as Array<EnrichedLead & { clientRef?: string }>);
+          consumed += Number(cached.usage?.consumed || 0);
+          if (cached.expired.length) toast({ title: 'Datos guardados vencidos', description: `${cached.expired.length} contactos necesitan una nueva búsqueda. No se descontaron créditos por ellos.` });
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'No pudimos completar parte de los contactos.');
+        }
+      }
+      const payloadLeads = apollo.map(l => ({
         fullName: l.fullName,
         linkedinUrl: l.linkedinUrl,
         companyName: l.companyName,
@@ -133,53 +152,70 @@ export default function EnrichedLeadsClient() {
         sourceOpportunityId: l.sourceOpportunityId,
         clientRef: l.id,
         existingRecordId: l.id,
+        sourceProvider: l.sourceProvider,
+        sourceProviderId: l.sourceProviderId,
       }));
       const operationId = uuid();
 
-      const res = await fetch('/api/opportunities/enrich-apollo', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': operationId,
-          // The same daily-quota ticket «Por completar» sends: without it the server could not match the browser's count.
-          'x-quota-ticket': getQuotaTicket() || '',
-        },
-        body: JSON.stringify({
-          leads: payloadLeads,
-          revealEmail: opts.revealEmail,
-          revealPhone: opts.revealPhone,
-          tableName: 'enriched_leads'
-        }),
-      });
+      if (apollo.length) {
+        try {
+          const res = await fetch('/api/opportunities/enrich-apollo', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': operationId,
+              'x-quota-ticket': getQuotaTicket() || '',
+            },
+            body: JSON.stringify({
+              leads: payloadLeads,
+              revealEmail: opts.revealEmail,
+              revealPhone: opts.revealPhone,
+              tableName: 'enriched_leads'
+            }),
+          });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const reason = String(data?.error || data?.message || '').slice(0, 200);
-        throw new Error(reason || `El servidor respondió ${res.status}. Intenta de nuevo en unos minutos.`);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const reason = String(data?.error || data?.message || '').slice(0, 200);
+            throw new Error(reason || `El servidor respondió ${res.status}. Intenta de nuevo en unos minutos.`);
+          }
+
+          if (process.env.NODE_ENV !== 'production' && Array.isArray(data?.debug?.serverLogs)) {
+            console.groupCollapsed('[Server Logs] Apollo Enrichment');
+            data.debug.serverLogs.forEach((l: string) => console.log(l));
+            console.groupEnd();
+          }
+
+          const ticket = data?.ticket || res.headers.get('x-quota-ticket');
+          if (ticket) setQuotaTicket(ticket);
+          consumed += Number(data?.usage?.consumed ?? 0);
+          if (typeof data?.note === 'string' && data.note.includes('Quota')) {
+            toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: data.note });
+          }
+
+          if (Array.isArray(data.enriched)) results.push(...data.enriched);
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'No pudimos completar parte de los contactos.');
+        }
       }
-
-      if (process.env.NODE_ENV !== 'production' && Array.isArray(data?.debug?.serverLogs)) {
-        console.groupCollapsed('[Server Logs] Apollo Enrichment');
-        data.debug.serverLogs.forEach((l: string) => console.log(l));
-        console.groupEnd();
-      }
-
-      const ticket = data?.ticket || res.headers.get('x-quota-ticket');
-      if (ticket) setQuotaTicket(ticket);
-      const consumed = Number(data?.usage?.consumed ?? 0);
       if (consumed > 0) Quota.incClientQuota('enrich', consumed);
-      if (typeof data?.note === 'string' && data.note.includes('Quota')) {
-        toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: data.note });
-      }
-
-      const { enriched: newEnriched } = data;
+      if (!results.length && failures.length) throw Error(failures.join(' '));
+      const newEnriched = results;
 
       if (Array.isArray(newEnriched) && newEnriched.length) {
         const toUpdate: EnrichedLead[] = [];
         const toAdd: EnrichedLead[] = [];
+        let cachedProcessed = 0;
 
         newEnriched.forEach((incoming: EnrichedLead & { clientRef?: string }) => {
           const incomingEnrichmentStatus = (incoming as any).enrichmentStatus as EnrichedLead['enrichmentStatus'];
+          if (incomingEnrichmentStatus === 'suppressed') return; // Reload canonical rows below; never reapply withdrawn identity.
+          if (leadsFinder.some(lead => lead.id === incoming.clientRef)) {
+            // LF already committed this exact row server-side. A replay contains
+            // outcome metadata only: never overwrite canonical contacts from a stale browser copy.
+            if (incomingEnrichmentStatus === 'completed') cachedProcessed++;
+            return;
+          }
           // Match with existing
           const existing = enriched.find(e => e.id === incoming.clientRef);
           if (existing) {
@@ -191,8 +227,8 @@ export default function EnrichedLeadsClient() {
               sourceProviderId: incoming.sourceProviderId || existing.sourceProviderId,
               email: incoming.email || existing.email,
               emailStatus: incoming.emailStatus || existing.emailStatus,
-              phoneNumbers: incoming.phoneNumbers,
-              primaryPhone: incoming.primaryPhone,
+              phoneNumbers: incoming.phoneNumbers === undefined ? existing.phoneNumbers : incoming.phoneNumbers,
+              primaryPhone: incoming.primaryPhone === undefined ? existing.primaryPhone : incoming.primaryPhone,
               enrichmentStatus: incomingEnrichmentStatus || existing.enrichmentStatus,
               // If unlocked new info
               linkedinUrl: incoming.linkedinUrl || existing.linkedinUrl,
@@ -219,17 +255,17 @@ export default function EnrichedLeadsClient() {
         // Reload list
         const fresh = await enrichedLeadsStorageGet();
         setEnriched(fresh);
-        const sent = toUpdate.length + toAdd.length;
+        const sent = toUpdate.length + toAdd.length + cachedProcessed;
         toast({
           title: 'Actualizando datos',
-          description: `${sent} ${sent === 1 ? 'contacto enviado' : 'contactos enviados'}. Lo que llegue después (como un teléfono) aparece solo en la lista.`,
+          description: `${sent} ${sent === 1 ? 'contacto procesado' : 'contactos procesados'}. ${enrichmentCreditReceipt(consumed)} ${failures.length ? `Hay contactos pendientes: ${failures.join(' ')}` : apollo.length ? 'Lo que llegue después aparece solo en la lista.' : 'Mostramos los datos que estaban disponibles.'}`,
         });
       } else {
-        toast({ title: 'Sin datos nuevos', description: 'El proveedor no devolvió datos nuevos para estos contactos.' });
+        toast({ title: 'Sin datos nuevos', description: `El proveedor no devolvió datos nuevos para estos contactos. ${enrichmentCreditReceipt(consumed)}`.trim() });
       }
 
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'No pudimos actualizar los datos', description: e.message || 'Intenta de nuevo en unos minutos.' });
+      toast({ variant: 'destructive', title: 'No pudimos actualizar todos los datos', description: `${e.message || 'Intenta de nuevo en unos minutos.'} ${enrichmentCreditReceipt(consumed)}`.trim() });
     } finally {
       setEnriching(false);
       setLeadsToEnrich([]);

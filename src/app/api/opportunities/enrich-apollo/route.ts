@@ -58,6 +58,8 @@ type EnrichmentMode = 'normal' | 'deep';
 type QuotaResource = 'enrich' | 'investigate';
 
 type EnrichmentLead = {
+  sourceProvider?: string;
+  source_provider?: string;
   fullName?: string;
   linkedinUrl?: string;
   companyName?: string;
@@ -416,13 +418,15 @@ async function prepareTargets(input: {
     } else if (existingRecordId) {
       const { data: existing, error } = await admin
         .from(input.tableName)
-        .select('id, data, enrichment_status')
+        .select('id, data, enrichment_status, source_provider, source_provider_id')
         .eq('id', id)
         .eq('user_id', input.userId)
         .eq('organization_id', input.organizationId)
         .maybeSingle();
       if (error) throw error;
       if (!existing) throw new Error('ENRICHMENT_TARGET_NOT_FOUND');
+      if (existing.source_provider === 'leads_finder' || text(existing.source_provider_id, 255).startsWith('lf_')
+        || object(existing.data)?.sourceProvider === 'leads_finder') throw new Error('ENRICHMENT_PROVIDER_MISMATCH');
       if (text(existing.enrichment_status, 64) === 'suppressed') throw new Error('ENRICHMENT_TARGET_SUPPRESSED');
       existingData = object(existing.data) || {};
       const { data: prepared, error: updateError } = await admin.from(input.tableName).update({
@@ -871,6 +875,10 @@ export async function POST(request: NextRequest) {
     if (leads.length === 0 || leads.length > MAX_ENRICHMENT_CONTACTS) {
       return NextResponse.json({ error: 'INVALID_ENRICHMENT_CONTACT_COUNT' }, { status: 400 });
     }
+    if (leads.some(lead => lead && (lead.sourceProvider === 'leads_finder' || lead.source_provider === 'leads_finder'
+      || sourceProviderId(lead).startsWith('lf_') || text(lead.id, 255).startsWith('lf_')))) {
+      return NextResponse.json({ error: 'ENRICHMENT_PROVIDER_MISMATCH', message: 'Este contacto debe completarse con los datos de su proveedor original.' }, { status: 409 });
+    }
     const matchOnly = !revealEmail.value
       && !revealPhone.value
       && tableName === 'people_search_leads'
@@ -1291,6 +1299,7 @@ export async function POST(request: NextRequest) {
       'APOLLO_CALLBACK_REPLAY_REQUIRES_OPERATION_RESPONSE',
       'APOLLO_ENRICHMENT_TARGET_BUSY',
       'ENRICHMENT_TARGET_SUPPRESSED',
+      'ENRICHMENT_PROVIDER_MISMATCH',
       'APOLLO_PROVIDER_NOT_CONFIGURED',
     ]);
     const errorCode = exposed.has(code) ? code : providerBoundaryCrossed
@@ -1303,6 +1312,7 @@ export async function POST(request: NextRequest) {
       || errorCode === 'DUPLICATE_ENRICHMENT_TARGET'
       || errorCode === 'APOLLO_ENRICHMENT_TARGET_BUSY'
       || errorCode === 'ENRICHMENT_TARGET_SUPPRESSED'
+      || errorCode === 'ENRICHMENT_PROVIDER_MISMATCH'
       || errorCode === 'APOLLO_CALLBACK_REPLAY_REQUIRES_OPERATION_RESPONSE' ? 409
       : errorCode === 'ENRICHMENT_TARGET_NOT_FOUND' || errorCode === 'INVALID_EXISTING_RECORD_ID' ? 400
         : errorCode === 'APOLLO_WEBHOOK_URL_NOT_CONFIGURED' || errorCode === 'APOLLO_PROVIDER_NOT_CONFIGURED' ? 503

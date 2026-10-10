@@ -55,7 +55,8 @@ test('«Por completar» moves only what the classification says, marks the rest 
   assert.match(page, /classifyEnrichmentResults\(chosen,/);
   assert.match(page, /supabaseService\.markEmailNotFound\(outcome\.notFound, attemptedAt\)/);
   assert.doesNotMatch(page, /processedRefs/, 'a processed contact without email no longer leaves the list');
-  assert.match(page, /APOLLO_EMAIL_ENRICHMENT_CREDITS/, 'the action bar names the credits a search uses');
+  assert.match(page, /ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT/, 'the action bar names internal app credits, not upstream credits');
+  assert.match(page, /créditos.*de ANTON\.IA/);
   assert.match(page, /data-tour="saved-list"/);
   assert.deepEqual(Object.keys(SAVED_LOOKUP_LABELS).sort(), ['not_found', 'not_searched', 'with_email']);
 });

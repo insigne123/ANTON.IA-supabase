@@ -5,12 +5,7 @@ import { Label } from '@/components/ui/label';
 import { useState } from 'react';
 import { AlertCircle, Mail, Phone } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import {
-    APOLLO_EMAIL_ENRICHMENT_CREDITS,
-    APOLLO_PHONE_ENRICHMENT_CREDITS,
-    apolloEnrichmentCreditCost,
-} from '@/lib/apollo-credit-costs';
+import { ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT } from '@/lib/leads-workspace/enrichment-provider';
 
 interface EnrichmentOptionsDialogProps {
     open: boolean;
@@ -25,7 +20,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
     const [revealPhone, setRevealPhone] = useState(false);
 
     const hasSelection = revealEmail || revealPhone;
-    const creditsPerContact = apolloEnrichmentCreditCost({ revealEmail, revealPhone });
+    const creditsPerContact = ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT;
     const estimatedCredits = leadCount * creditsPerContact;
 
     const handleConfirm = () => {
@@ -55,9 +50,6 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                                 Busca un correo laboral y su estado de verificación.
                             </span>
                         </Label>
-                        <Badge variant="secondary" className="shrink-0 tabular-nums">
-                            {APOLLO_EMAIL_ENRICHMENT_CREDITS} crédito
-                        </Badge>
                     </div>
 
                     <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-card p-4 transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
@@ -71,9 +63,6 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                                 El resultado puede completarse en segundo plano.
                             </span>
                         </Label>
-                        <Badge variant="secondary" className="shrink-0 tabular-nums">
-                            {APOLLO_PHONE_ENRICHMENT_CREDITS} créditos
-                        </Badge>
                     </div>
 
                     {hasSelection ? (
@@ -81,11 +70,11 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                             <div className="flex items-center justify-between gap-3 font-medium">
                                 <span>{leadCount === 1 ? '1 contacto seleccionado' : `${leadCount} contactos seleccionados`}</span>
                                 <span className="tabular-nums">
-                                    {estimatedCredits} {estimatedCredits === 1 ? 'crédito' : 'créditos'}
+                                    {estimatedCredits} {estimatedCredits === 1 ? 'crédito' : 'créditos'} de ANTON.IA
                                 </span>
                             </div>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                Estimado: {creditsPerContact} {creditsPerContact === 1 ? 'crédito' : 'créditos'} por contacto. Tu cuota diaria cuenta una operación por contacto enviado.
+                                Estimado: {creditsPerContact} crédito interno por contacto procesado, aunque pidas correo y teléfono. Es el cupo de ANTON.IA, independiente del proveedor de datos.
                             </p>
                         </div>
                     ) : (
