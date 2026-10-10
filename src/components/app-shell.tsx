@@ -9,6 +9,8 @@ import Logo from '@/components/logo';
 import { ProductTourProvider } from '@/components/onboarding/ProductTour';
 import QuotaSync from '@/components/quota/quota-sync';
 import ThemeToggle from '@/components/theme-toggle';
+import { UsageCapture } from '@/components/admin/UsageCapture';
+import { useAdminUsageAccess } from '@/hooks/use-admin-usage-access';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/context/AuthContext';
 import { NavAccessProvider, useNavAccess } from '@/hooks/use-nav-access';
@@ -18,10 +20,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { user, organizationId, organizationRole } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const adminUsage=useAdminUsageAccess(user?.id,organizationId);
   const navAccess = useNavAccess({ userId: user?.id, email: user?.email, organizationId });
   const access = useMemo(() => ({ cowork: navAccess.cowork, opportunities: navAccess.opportunities }), [navAccess.cowork, navAccess.opportunities]);
   // The help shows the same parts of the app as the menu.
-  const helpVisibility = { opportunities: access.opportunities, admin: organizationRole === 'owner' || organizationRole === 'admin' };
+  const helpVisibility = { opportunities: access.opportunities, admin: organizationRole === 'owner' || organizationRole === 'admin' || adminUsage };
   const screenLabel = navLabelFor(pathname);
   const [workspaceAnnouncement, setWorkspaceAnnouncement] = useState('');
   const contentRef = useRef<HTMLElement>(null);
@@ -46,7 +49,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <ProductTourProvider userId={user?.id} onNavigate={(href) => router.push(href)}>
         <QuotaSync />
-        <AppSidebar access={access} />
+        <UsageCapture />
+        <AppSidebar access={access} adminUsage={adminUsage} />
         <SidebarInset>
           <p className="sr-only" role="status" aria-live="polite">{workspaceAnnouncement}</p>
           <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/85 px-2 backdrop-blur-sm md:hidden">

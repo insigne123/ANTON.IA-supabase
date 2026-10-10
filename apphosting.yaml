@@ -222,6 +222,10 @@ env:
   - variable: ADMIN_DASHBOARD_ALLOWED_EMAILS
     value: gmeneses@grupoexpro.com,nicolas.yarur.g@yago.cl
     availability: [RUNTIME]
+  # Cross-company read-only analytics, separate from company roles and credit operators.
+  - variable: ADMIN_USAGE_PLATFORM_USER_IDS
+    value: de3a3194-29b1-449a-828a-53608a7ebe47
+    availability: [RUNTIME]
 
   # Oportunidades: miembros actuales de GrupoExpro, verificados contra la organización en producción el 4 oct 2026.
   # El servidor exige correo confirmado y mantiene el alcance de la organización activa.
