@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkReviewIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkPolishDraft, coworkPolishProofs, coworkReviewIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos para {{empresa}}.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
@@ -328,8 +328,8 @@ test('the Reviewer cannot ask for a meeting the person did not want, nor for mor
   const other = issue('pregunta más concreta', 'Pregunta cuántos ingresos revisan al mes.');
   const all = [meeting, conversation, functions, noMeeting, other];
   assert.deepEqual(coworkReviewIssues(all, draft, { ...context, meeting: false }), [noMeeting, other]);
-  // When the person asked for the meeting, the Reviewer may ask for it; more functions are never asked.
-  assert.deepEqual(coworkReviewIssues(all, draft, { ...context, meeting: true }), [meeting, conversation, noMeeting, other]);
+  // When the person asked for the meeting, the Reviewer may ask for it but not take it out; more functions are never asked.
+  assert.deepEqual(coworkReviewIssues(all, draft, { ...context, meeting: true }), [meeting, conversation, other]);
 });
 
 test('the context knows whether the person asked for a meeting and the names of the offer', () => {
@@ -365,4 +365,60 @@ test('the checks catch what the matrix reading still found: the product in the f
   const followUp = coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento', to: null, subject: 'Re: AXIS para Securitas',
     body: `Hola Felipe,\n\nTe escribí el 19 de septiembre sobre AXIS. Con AXIS, cargas la lista de postulantes desde un archivo.\n\n¿Quién revisa hoy esos antecedentes en Securitas?${signature}` }], checks);
   assert.deepEqual(followUp.map(issue => issue.short), []);
+});
+
+test('a proof cited inside a sentence reads as part of it: lowercase after a colon and without quotes', () => {
+  const proofs = ['Procesa 1.000 personas en unos 30 minutos.'];
+  assert.equal(coworkPolishProofs('AXIS automatiza esas consultas: Procesa 1.000 personas en unos 30 minutos.', proofs),
+    'AXIS automatiza esas consultas: procesa 1.000 personas en unos 30 minutos.');
+  assert.equal(coworkPolishProofs('AXIS consulta por lote, con este resultado: «Procesa 1.000 personas en unos 30 minutos.»\n\n¿Quién lo hace hoy?', proofs),
+    'AXIS consulta por lote, con este resultado: procesa 1.000 personas en unos 30 minutos.\n\n¿Quién lo hace hoy?');
+  assert.equal(coworkPolishProofs('AXIS consulta por lote; Procesa 1.000 personas en unos 30 minutos.', proofs), 'AXIS consulta por lote; procesa 1.000 personas en unos 30 minutos.');
+  // A new sentence keeps its capital, and nothing else changes.
+  assert.equal(coworkPolishProofs('AXIS consulta en el PJUD. Procesa 1.000 personas en unos 30 minutos.', proofs), 'AXIS consulta en el PJUD. Procesa 1.000 personas en unos 30 minutos.');
+  assert.equal(coworkPolishProofs('Hola, ¿cómo estás?', []), 'Hola, ¿cómo estás?');
+  // Every email of the answer, in cards and sequences.
+  const output: CoworkWriterOutput = { reply: 'Listo.', question: null, suggestions: [{ label: 'Sí', message: 'Sí' }], blocks: [
+    { type: 'email_draft', title: 'Correo', to: null, subject: 'Asunto', body: 'AXIS automatiza esas consultas: Procesa 1.000 personas en unos 30 minutos.' },
+    { type: 'sequence', title: 'Secuencia', steps: [{ day: 1, subject: 'Uno', body: 'AXIS por lote: «Procesa 1.000 personas en unos 30 minutos.»' }] }] };
+  const polished = coworkPolishDraft(output, proofs);
+  assert.equal((polished.blocks[0] as { body: string }).body, 'AXIS automatiza esas consultas: procesa 1.000 personas en unos 30 minutos.');
+  assert.equal((polished.blocks[1] as { steps: Array<{ body: string }> }).steps[0].body, 'AXIS por lote: procesa 1.000 personas en unos 30 minutos.');
+  assert.equal(coworkPolishDraft(output, []), output, 'without proofs the answer is untouched');
+});
+
+test('telling the reader where a figure came from is an internal reference in any wording', () => {
+  const email = { type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes en Securitas',
+    body: 'Hola Felipe,\n\nAXIS consulta antecedentes laborales en el PJUD; el dato que compartiste para AXIS es que procesa 1.000 personas en unos 30 minutos.\n\n¿Cuántos ingresos revisan al mes?\n\nNicolás Yarur' };
+  assert.ok(coworkDraftIssues([email], context).some(issue => issue.short === 'sin referencias internas'));
+});
+
+test('a subject never puts the seller where the reader goes', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: true, products: ['axis', 'yago'] };
+  const email = (subject: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject,
+    body: 'Hola,\n\nCuando entran muchas personas a la vez, revisar uno por uno los antecedentes en el PJUD atrasa el ingreso.\n\nAXIS consulta el lote completo.\n\n¿Qué día les acomoda una demo?\n\nNicolás Y.' }], checks).map(issue => issue.short);
+  assert.deepEqual(email('Revisión de antecedentes en Yago'), ['asunto con su empresa']);
+  assert.deepEqual(email('Revisión de antecedentes para ingresos masivos'), []);
+  assert.match(COWORK_WRITER_RULES.join('\n'), /Si el correo pegado saluda sin nombre \(«Hola, les escribo…»\), queda «Hola,»: no lo conviertas en \{\{nombre\}\}/);
+});
+
+test('the Reviewer does not undo what the rules ask: the general premise of the opening, the «Hola,» of a pasted email', () => {
+  const recipients = [{ name: 'Felipe Muñoz', email: 'fmunoz@securitas.cl', company: 'Securitas Chile' }];
+  const checks = { ...context, recipients, meeting: true, products: ['axis'] };
+  const issue = (problem: string, short = 'apertura respaldada') => ({ where: '«Correo»', problem, fix: 'Ajusta la apertura.', short });
+  const general = issue('La primera frase afirma que revisar antecedentes uno por uno retrasa las incorporaciones, sin respaldo específico para afirmarlo como hecho general.');
+  const email = (opening: string, to: string[] | null = ['a@x.cl', 'b@y.cl']) => [{ type: 'email_draft' as const, title: 'Correo', to, subject: 'Antecedentes',
+    body: `Hola {{nombre}},\n\n${opening}\n\nAXIS consulta por lote.\n\n¿Cuántos ingresos revisan al mes?\n\nNicolás` }];
+  // A general premise goes; the same claim about their company stays for the Writer to fix.
+  assert.deepEqual(coworkReviewIssues([general], email('Cuando entran muchas personas a la vez, revisarlas una por una atrasa el ingreso.'), checks), []);
+  assert.deepEqual(coworkReviewIssues([general], email('En {{empresa}} revisar uno por uno atrasa el ingreso.'), checks), [general]);
+  assert.deepEqual(coworkReviewIssues([general], email('En Securitas revisar uno por uno atrasa el ingreso.'), checks), [general]);
+  // A pasted email without names, with no addresses, keeps «Hola,»; a campaign text still greets with {{nombre}}.
+  const nameless = issue('El saludo «Hola,» no lleva nombre y el correo está dirigido a empresas de forma individual.', 'saludo con nombre');
+  const pasted = [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes', body: 'Hola,\n\nCuando entran muchas personas…\n\n¿Qué día les acomoda una demo?\n\nNicolás' }];
+  assert.deepEqual(coworkReviewIssues([nameless], pasted, checks), []);
+  assert.deepEqual(coworkReviewIssues([nameless], [{ ...pasted[0], to: ['a@x.cl', 'b@y.cl'] }], checks), [nameless]);
+  // «Omite dos detalles de AXIS» asks for more functions.
+  const omits = { where: '«Correo»', problem: 'Omite dos detalles de AXIS: los resultados consolidados y la evidencia auditable.', fix: 'Agrégalos en la segunda frase.', short: 'con detalles de AXIS' };
+  assert.deepEqual(coworkReviewIssues([omits], pasted, checks), []);
 });

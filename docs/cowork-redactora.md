@@ -65,13 +65,13 @@ Primer PR de la Ola G del plan 2 de Cowork (punto G1). Cuando un turno tiene que
   - **Mientras M2 no esté aplicada**, esa función rechaza los roles nuevos («Specialist attempt unavailable»). Entonces la llamada se reserva como del coordinador: mismos topes por turno (7 llamadas, 5 del coordinador) y por conversación.
   - Un turno típico cabe: una decisión con lecturas, el encargo, la Redactora y la Revisora son 4 llamadas y 24 000 tokens; con una corrección, 5 y 30 000. Si una corrección ya no cabe, queda el primer borrador con su marca.
   - Por conversación, en cambio, el tope de 100 000 tokens alcanza para unas 16 llamadas: tres o cuatro turnos de redacción lo agotan. **Por eso el flag debe prenderse después de aplicar M2**, que sube ese tope a 180 000 tokens y 40 llamadas, y reserva 1 500 tokens por llamada de la Revisora.
-- **Modelos:** `COWORK_WRITER_MODEL` y `COWORK_REVIEWER_MODEL`; si faltan, se usa `COWORK_MODEL`.
+- **Modelos:** `COWORK_WRITER_MODEL` y `COWORK_REVIEWER_MODEL`; si faltan, se usa `COWORK_MODEL`. `COWORK_WRITER_FIX_MODEL` es el modelo de la corrección (por defecto, el de la Redactora): uno redacta y otro corrige. `COWORK_WRITER_EFFORT`, `COWORK_REVIEWER_EFFORT` y `COWORK_WRITER_FIX_EFFORT` fijan cuánto razona cada uno (sin valor, `low`). Un modelo `claude-…` responde por Anthropic con `ANTHROPIC_API_KEY` (`src/ai/anthropic-json.ts`). Qué combinación conviene, con calidad y costo medidos: `docs/cowork-correos-modelos-2026-10-12.md`.
 - **Historial:** los pasos de los agentes no son contexto del turno siguiente. `loadCoworkHistory` los salta y pide hasta 12 eventos (antes 5), así un turno que escribió conserva sus tres lecturas.
 
 ### Flags y dependencias
 
 - `COWORK_WRITER_ENABLED=true` prende la Redactora y la Revisora (apagado por defecto).
-- `COWORK_WRITER_MODEL` y `COWORK_REVIEWER_MODEL` son opcionales.
+- `COWORK_WRITER_MODEL`, `COWORK_REVIEWER_MODEL`, `COWORK_WRITER_FIX_MODEL` y sus esfuerzos (`*_EFFORT`) son opcionales.
 - **Fuera de este PR:**
   - **M2 (PR #28):** roles y topes nuevos del presupuesto. Sin M2 funciona con el respaldo descrito arriba.
   - **M1 (PR #21) y `COWORK_STREAMING_ENABLED`:** el texto en vivo. Sin ellos, la respuesta llega completa al final, como hoy.
