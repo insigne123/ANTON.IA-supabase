@@ -271,6 +271,21 @@ function momentOf(sentence: string) {
   return new Set((clause.match(/[a-zñ]{4,}/g) || []).filter(word => !STOP.has(word)).map(word => word.slice(0, 5)));
 }
 
+/** What an email's opening says is lost (the words after its last «deja», «retrasa», «obliga»…, or its last six), by their first
+ * five letters, without the task, the people and the waiting every opening shares, nor the names in the email (AXIS, Yago). */
+const CONSEQUENCE_VERB = /\b(?:deja|dejan|retrasa|atrasa|demora|alarga|frena|posterga|obliga|resta|suma|compite|interrumpe|vuelve)\b/g;
+const SHARED_STEMS = new Set(['esper', 'gente', 'perso', 'revis', 'antec', 'labor', 'grupo', 'nuevo', 'nueva', 'cada', 'antes', 'todos', 'todas',
+  'mismo', 'misma', 'otros', 'otras', 'equip', 'como', 'cuant', 'quien', 'para', 'esta', 'este', 'estos', 'estas', 'tiene', 'hacen', 'usted',
+  'ahora', 'sobre', 'entre', 'desde', 'cuand', 'porqu', 'tambi', 'varia', 'vario', 'mucha', 'mucho', 'tiemp']);
+function consequenceOf(body: string) {
+  const sentence = openingSentence(body);
+  const named = new Set((body.match(/\p{Lu}\p{L}+/gu) || []).map(word => normalize(word).slice(0, 5)));
+  const last = [...sentence.matchAll(CONSEQUENCE_VERB)].pop();
+  const part = last ? sentence.slice((last.index ?? 0) + last[0].length) : sentence.split(/\s+/).slice(-6).join(' ');
+  return new Set((part.replace(/\{\{[^}]*\}\}/g, ' ').match(/[a-zñ]{4,}/g) || []).map(word => word.slice(0, 5))
+    .filter(stem => !SHARED_STEMS.has(stem) && !named.has(stem)));
+}
+
 /** The stems of an email's closing question without the names in it (its capitalized words: «Securitas», «Transportes Andes»). */
 function personalQuestion(body: string) {
   const question = (body.match(/¿[^?]+\?/g) || []).pop() || '';
@@ -592,13 +607,24 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
       // Each email opens with a moment of its own (v10 reading: «cuando la nómina de postulantes llega cerca de la fecha de ingreso»
       // and «cuando la nómina llega encima de la fecha de ingreso» in the second and the third email, none above 3.5).
       const moments = block.steps.map(step => momentOf(openingSentence(step.body)));
+      const sameMoment = new Set<number>();
       moments.forEach((moment, later) => {
         const earlier = moments.slice(0, later).findIndex(previous => {
           const shared = [...moment].filter(stem => previous.has(stem)).length;
           return shared >= 3 && shared / Math.min(moment.size, previous.size) >= 0.6;
         });
+        if (earlier >= 0) sameMoment.add(later);
         if (earlier >= 0) issues.push({ where: `«${block.title}», correo ${later + 1}`, problem: `Abre con el mismo momento que el correo ${earlier + 1}.`,
           fix: 'Ábrelo con otro momento de su semana o con un uso concreto, distinto del de los correos anteriores.', short: 'momento distinto' });
+      });
+      // …and loses something of its own (v13 reading: «…retrasa que lleguen a sus puestos» in the first and «…para que las personas
+      // lleguen a sus puestos» in the third; 8 sequences of the v10 to v13 readings, none above 4).
+      // One fix is enough for an email that already repeats the moment.
+      const outcomes = block.steps.map(step => consequenceOf(step.body));
+      outcomes.forEach((outcome, later) => {
+        const earlier = outcomes.slice(0, later).findIndex(previous => [...outcome].filter(stem => previous.has(stem)).length >= 2);
+        if (earlier >= 0 && !sameMoment.has(later)) issues.push({ where: `«${block.title}», correo ${later + 1}`, problem: `Su primera frase termina en la misma consecuencia que la del correo ${earlier + 1}.`,
+          fix: 'Dale una consecuencia propia de su momento: quién espera, qué queda sin hacer o qué se pierde, distinta de la de los correos anteriores.', short: 'consecuencia distinta' });
       });
       const first = block.steps.findIndex(step => citedProof(step.body, context.proofs ?? []));
       block.steps.forEach((step, index) => {

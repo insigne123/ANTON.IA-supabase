@@ -769,3 +769,18 @@ test('the v12 reading: the Reviewer\'s «sin respaldo» on a trade\'s consequenc
   assert.match(COWORK_REVIEWER_RULES.join('\n'), /«cada antecedente pendiente es un conductor que no sale a ruta», «el puesto sigue vacío»\) es el planteamiento del correo/);
   assert.match(COWORK_WRITER_RULES.join('\n'), /fácil de responder en una línea y de menos de 15 palabras/);
 });
+
+test('each email of a sequence loses something of its own (v13 reading: «…lleguen a sus puestos» in the first and the third)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis'] };
+  const step = (opening: string, middle: string, question: string) => `Hola {{nombre}},\n\n${opening}${middle}\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA`;
+  const issues = (third: string) => coworkDraftIssues([sequence([
+    step('Cuando ingresan muchas personas a la vez en {{empresa}}, revisar sus antecedentes uno por uno retrasa que lleguen a sus puestos.', '\n\nAXIS consulta por lote.', '¿Cuánto les toma hoy revisar una nómina grande?'),
+    step('Cuando la lista de ingreso llega el jueves para empezar el lunes, el equipo corre para tener los antecedentes listos.', '', '¿Quién prepara hoy esa lista?'),
+    step(third, '\n\nAXIS deja evidencia auditable de cada consulta.', '¿Te sirve verlo con un caso de tu equipo?')])], checks)
+    .map(issue => `${issue.where} · ${issue.short}`);
+  assert.deepEqual(issues('Cuando recibes una nómina justo antes de una jornada de ingresos, revisarla se vuelve parte de los preparativos para que las personas lleguen a sus puestos.'),
+    ['«Secuencia AXIS», correo 3 · consecuencia distinta']);
+  assert.deepEqual(issues('Cuando alguien pregunta meses después cómo se revisó a una persona, armar ese respaldo a mano se lleva una tarde entera.'), []);
+  // Waiting and the people are what every opening shares: «deja a la gente esperando» twice is not the same consequence.
+  assert.deepEqual(issues('Cuando el cliente pide gente para mañana, revisar cada antecedente deja a la gente esperando en la puerta.'), []);
+});

@@ -6,38 +6,39 @@ banco de siempre: 7 pedidos que terminan en un correo o una secuencia, 3 repetic
 
 ## Resumen
 
-- **La nota pasó de 2,54 a 4,21 con el mismo modelo y el mismo costo:** `gpt-6-luna` con esfuerzo `low`, a US$0,0022 por
-  respuesta con correo (unos US$2,2 por cada 1.000). La escala es «¿lo enviarías tal cual?», de 1 a 5. La subieron las reglas
-  de la Redactora y del coordinador, no el modelo. Ver «Cómo cambió la nota» y las rondas 9 a 11.
-- **Con Claude como Redactora la nota sube más, y a buen precio** (ronda 11, reglas v11, misma lectura ciega):
+- **La nota pasó de 2,54 a 4,86.** La escala es «¿lo enviarías tal cual?», de 1 a 5, en lectura ciega. La mejor configuración es
+  Sonnet 5.5 escribiendo y Luna corrigiendo, con 12 de 14 respuestas en 5, a US$17 por cada 1.000 respuestas con correo. Ver las
+  rondas 9 a 13.
+- **Con las mismas reglas v13, cada modelo queda así** (rondas 12 y 13, misma lectura ciega, con anclas que repitieron su nota):
 
-  | Redactora → corrección | Nota | US$ por 1.000 respuestas |
-  |---|---|---|
-  | Luna → Luna | 4,21 | 2,2 |
-  | Haiku 5.5 low → Haiku 5.5 | 4,46 | 4,3 |
-  | Sonnet 5.5 low → Luna | 4,61 | 17,3 |
+  | Redactora → corrección | Nota v13 | Notas de 5 | US$ por 1.000 respuestas |
+  |---|---|---|---|
+  | Luna → Luna | 4,36 | 3 de 21 | 2,1 a 2,6 |
+  | Haiku 5.5 low → Haiku 5.5 | 4,50 | 4 de 14 | 4,5 |
+  | Sonnet 5.5 low → Haiku 5.5 | 4,68 | 7 de 14 | 18,0 |
+  | Sonnet 5.5 low → Sonnet 5.5 | 4,82 | 9 de 14 | 28,2 |
+  | **Sonnet 5.5 low → Luna** | **4,86** | **12 de 14** | **17,4** |
 
-  - **Mejor relación calidad/precio: Haiku 5.5 low.** +0,25 sobre Luna por US$2 más cada 1.000 respuestas. OpenAI sigue
-    coordinando y revisando.
-  - **Mejor nota: Sonnet 5.5 escribiendo y Luna corrigiendo:** 4,61, con la mitad de sus respuestas en 5, a 8 veces el costo de
-    Luna. Sirve para un plan superior.
-- **La v11 sube la nota de todos los modelos.** Medidos contra sus propias respuestas con v10 en la misma lectura: Luna +0,17,
-  Haiku +0,14 y Sonnet +0,15 (contra la ronda 10). Corrige lo que la ronda 10 encontró en las 84 respuestas de Claude y Luna:
-  - la invitación de sí o no;
-  - la misma pregunta para cada persona;
-  - el mismo momento en dos correos de una secuencia;
-  - la cautela innecesaria sobre la bandeja;
-  - la oferta pegada a la apertura.
+  - **Mejor nota: Sonnet 5.5 escribe y Luna corrige.** Es la combinación de los dos proveedores: Claude redacta y OpenAI coordina,
+    revisa y corrige. Cuesta 1,7 centavos de dólar por respuesta y es la Redactora más rápida (4 s de mediana).
+  - **Más barato: Luna sola** (4,36), con la mitad del costo de Haiku y solo 0,14 menos. Haiku (4,50) ya no se justifica por
+    defecto: tarda 11 s de mediana contra 7 s de Luna.
+  - Que Sonnet se corrija a sí mismo cuesta 60 % más y no mejora la nota. Que lo corrija Haiku la baja.
+- **La v13 es la que más subió la nota de Sonnet y Luna.** Medidos contra sus propias respuestas con v12, en la misma lectura:
+  Sonnet → Luna +0,18 (de 4,68 a 4,86) y Luna +0,17 (de 4,19 a 4,36). La causa principal: la Revisora (Luna) pedía quitar la
+  consecuencia concreta que la Redactora debe escribir («cada antecedente pendiente es un candidato que no llega a tiempo»), y la
+  corrección la cambiaba por una frase plana. Ahora ese pedido se descarta. Las respuestas que Luna corrigió en Sonnet → Luna
+  pasaron de 4,38 a 4,83.
 - **Más razonamiento o un modelo más caro no se justifican:**
-  - Haiku 5.5 `medium` saca 4,39, menos que `low`, con un p90 de 28 s, al borde del corte de 30 s de producción.
+  - Haiku 5.5 `medium` sacó 4,39 con v11, menos que `low`, con un p90 de 28 s, al borde del corte de 30 s de producción.
   - Haiku `max` no alcanzó a escribir ninguna respuesta (unos 100 s por llamada).
   - Luna `xhigh` bajó a 3,62 y se cortó por tiempo.
-  - Opus 5.5 → Luna (4,39 con v10) no le gana a Sonnet y cuesta el doble.
-  - Sol 6.1 solo saca lo mismo que Luna con v10, a 6 veces el costo.
-- **Por qué todavía no llega a 5:**
-  - Las campañas y los correos por persona ya sacan 4,5 a 5 con cualquier modelo de Claude.
-  - Lo que falta es sobre todo la apertura: «retrasa el ingreso de cada una» es correcta pero plana. Un 5 pinta la escena («el
-    camión queda detenido», «la lista llega el jueves y la gente parte el lunes»), y eso depende más del modelo que de las reglas.
+  - Opus 5.5 → Luna (4,39 con v10) no le ganó a Sonnet y cuesta el doble.
+  - Sol 6.1 solo sacó lo mismo que Luna con v10, a 6 veces el costo.
+- **Lo que todavía no llega a 5:**
+  - Las secuencias de Luna (3,6 a 3,8): repiten el momento o la consecuencia entre correos y el segundo queda abstracto. Con
+    Claude, las secuencias sacan 4,5 a 4,75.
+  - Algunos seguimientos ofrecen la evidencia auditable cuando la apertura habla de un atraso, o vuelven a la consulta por lote.
   - El banco no trae investigación ni señales de las empresas. Con `research.start`, el primer correo puede abrir con un hecho
     observado de su empresa.
 
@@ -58,7 +59,10 @@ mismo que la primera vez (3,19 y 3,60).
 | v6: sin anunciar la pregunta ni fórmulas | 3,74 ± 0,07 | — | 3,93 ± 0,05 |
 | v7: un primer correo por persona | 3,76 ± 0,07 | — | 3,98 ± 0,12 |
 | v8: la consecuencia en su negocio | 4,00 ± 0,10 | 4,21 ± 0,09 | 4,02 ± 0,10 |
-| v10: revisa a quién ya se le escribió | **4,17** | **4,17 ± 0,08** | **4,25 ± 0,08** (14) |
+| v10: revisa a quién ya se le escribió | 4,17 | 4,17 ± 0,08 | 4,25 ± 0,08 (14) |
+| v11: invitación por el día, una pregunta por persona | 4,21 ± 0,07 | — | — |
+| v12: quién espera, una capacidad en la oferta | 4,19 ± 0,08 | — | — |
+| v13: Revisora alineada, pregunta corta, paso siguiente | **4,36 ± 0,09** | — | — |
 
 ± es el error estándar de la media (21 respuestas). Lo que bajaba la nota de la base:
 - 0 de 18 correos nombraban la empresa o el rubro del destinatario;
@@ -324,32 +328,109 @@ Por caso:
   - la oferta con dos capacidades y la prueba en la misma frase;
   - el tercer correo de una secuencia que es solo la oferta.
 
+## Ronda 12: la v12 con Luna y con Claude
+
+La v12 ataca lo que la ronda 11 dejó bajo 5 (ver «Qué cambió en el código»): aperturas que dicen que se atrasa el ingreso sin
+decir quién espera, la oferta con dos capacidades en la misma frase y el tercer correo de una secuencia que es solo la oferta.
+Luna corrió aquí (21 respuestas, con Luna v11 como ancla) y Claude en una sesión aparte (14 respuestas cada uno, con Haiku y
+Sonnet v11 como anclas). Las tres anclas sacaron exactamente lo mismo que en la ronda 11.
+
+| Redactora → corrección | v11 | v12 | ≥ 4,5 (v12) | Notas de 5 (v12) | US$ por 1.000 (v12) | Redactora p50 / p90 (v12) |
+|---|---|---|---|---|---|---|
+| Luna → Luna | 4,21 | 4,19 ± 0,08 | 52 % | 0 de 21 | 2,1 | 6,2 / 7,8 s |
+| Haiku 5.5 low → Haiku 5.5 | 4,46 | 4,50 ± 0,09 | 79 % | 3 de 14 | 4,2 | 11,1 / 17,4 s |
+| Sonnet 5.5 low → Luna | 4,61 | **4,68 ± 0,10** | 86 % | 7 de 14 | 17,1 | 4,8 / 7,4 s |
+
+- **Los chequeos nuevos aciertan, pero no mueven a Luna.** En las 175 respuestas ya puntuadas marcan 51, ninguna de 5. Luna los
+  esquiva con otras palabras («atrasa la llegada de postulantes al proceso») y su corrección deja puntos sin resolver. Con Claude
+  la nota sube un poco (Haiku +0,04 y Sonnet +0,07), dentro del ruido.
+- **La corrección de Luna empeora los borradores de Sonnet.** Las respuestas que corrigió Luna sacaron 4,38 (4 respuestas), las
+  que no tocó 4,71 (7) y aquellas en que se descartó su corrección, porque empeoraba los chequeos, 5,00 (3).
+- **La Revisora pide quitar justo lo que la Redactora debe escribir.** Luna marca como «sin respaldo» la consecuencia concreta
+  del rubro («cada antecedente pendiente es un candidato que no llega a tiempo»): 20 de las 29 quejas de ese tipo en las rondas
+  10 a 12.
+- **Otros puntos bajo 5:**
+  - la respuesta cuenta lo que corrigió («Ajusté la consecuencia…»);
+  - preguntas de cierre de 16 palabras o más;
+  - «nombres observados» o «este encargo» en la respuesta;
+  - un correo con destinatario sin el paso siguiente (en una corrida, el coordinador no buscó a Felipe antes de escribir).
+
+  La v13 corrige cada uno.
+
+## Ronda 13: la v13 con Luna y con Claude
+
+La v13 corrige lo que encontró la ronda 12 (ver «Qué cambió en el código»). Luna corrió aquí (21 respuestas, con Luna v12 como
+ancla) y Claude en una sesión aparte (14 respuestas por configuración, con Sonnet → Luna v12 como ancla). Las dos anclas sacaron
+exactamente lo mismo que en la ronda 12 (4,19 y 4,68). Todas las respuestas pasan los checks del banco.
+
+| Redactora → corrección | Nota | ≥ 4,5 | Notas de 5 | US$/respuesta | Por cada 1.000 | Redactora p50 / p90 | Corrección p50 / p90 |
+|---|---|---|---|---|---|---|---|
+| Ancla v12: Sonnet → Luna | 4,68 ± 0,10 | 86 % | 7 de 14 | 0,0171 | US$17,1 | 4,8 / 7,4 s | 5,8 / 7,4 s |
+| Luna → Luna | 4,36 ± 0,09 | 67 % | 3 de 21 | 0,0026 | US$2,6 | 7,0 / 9,3 s | 5,2 / 8,2 s |
+| Haiku 5.5 low → Haiku 5.5 | 4,50 ± 0,12 | 79 % | 4 de 14 | 0,0045 | US$4,5 | 11,5 / 18,9 s | 8,9 / 13,6 s |
+| Sonnet 5.5 low → Haiku 5.5 | 4,68 ± 0,10 | 86 % | 7 de 14 | 0,0180 | US$18,0 | 4,5 / 6,7 s | 8,9 / 14,7 s |
+| Sonnet 5.5 low → Sonnet 5.5 | 4,82 ± 0,07 | 100 % | 9 de 14 | 0,0282 | US$28,2 | 4,1 / 7,1 s | 4,6 / 6,7 s |
+| **Sonnet 5.5 low → Luna** | **4,86 ± 0,10** | **86 %** | **12 de 14** | **0,0174** | **US$17,4** | **4,1 / 7,1 s** | **5,4 / 6,9 s** |
+
+Luna costó US$0,0026 por respuesta porque el cambio de instrucciones del coordinador dejó su caché fría en esta corrida. Con la
+caché al día, como en la ronda 12, cuesta unos US$0,0021.
+
+Por caso:
+
+| Caso | Luna | Haiku | Sonnet → Haiku | Sonnet → Sonnet | Sonnet → Luna |
+|---|---|---|---|---|---|
+| Correo para Felipe en Word | 4,67 | 4,50 | 4,50 | 5,00 | 5,00 |
+| Correo a mis contactos (3 personas) | 4,33 | 4,25 | 4,50 | 5,00 | 5,00 |
+| Mejorar un correo que pide una demo | 4,67 | 4,25 | 4,75 | 4,75 | 5,00 |
+| Campaña a mis contactos de RR. HH. | 4,67 | 4,50 | 4,75 | 5,00 | 5,00 |
+| Mejorar «somos Yago… Agendemos» | 4,33 | 4,75 | 4,75 | 4,75 | 5,00 |
+| Secuencia de 3 correos | 3,83 | 4,75 | 4,75 | 4,75 | 4,50 |
+| Seguimiento a Marcela | 4,00 | 4,50 | 4,75 | 4,50 | 4,50 |
+
+- **Quién corrige importa más que quién escribe.** En Sonnet → Luna, las respuestas que Luna corrigió sacaron 4,83 (6), las que
+  no necesitaron corrección 5,00 (4) y las que quedaron con algo por revisar 4,75 (4). En la v12, las corregidas sacaban 4,38. Con
+  Sonnet corrigiéndose a sí mismo, las corregidas sacan 4,92, pero cuesta 60 % más. Con Haiku corrigiendo bajan a 4,57.
+- **Haiku no subió con la v13** (4,50, igual que con la v12). Sus borradores necesitan corrección en 12 de 14 respuestas, y su
+  corrección deja frases enredadas o la oferta con tres cosas («recibe… devuelve… con evidencia»).
+- **Las secuencias de Luna siguen en 3,6 a 3,8.** El chequeo «consecuencia distinta» se agregó después de la corrida de Luna;
+  una corrida corta de 4 secuencias con ese chequeo sacó 3,63. Luna repite el momento o la consecuencia entre correos con otras
+  palabras, y el segundo correo queda abstracto («suma presión», «se suma a las coordinaciones»).
+- **Lo que queda bajo 5 en Sonnet → Luna:** una secuencia cuyo tercer correo enumera la oferta («cargas… y recibes… con evidencia»)
+  y un seguimiento que abre con un beneficio vago («reunir los respaldos a tiempo ayuda a que…»).
+
 ## Recomendación
 
-Para muchos usuarios conviene combinar los dos proveedores: OpenAI coordina y revisa, y Claude escribe.
+Conviene combinar los dos proveedores: OpenAI coordina, revisa y corrige, y Claude escribe. Con la v13, las tres opciones que
+valen la pena son estas.
 
-1. **Por defecto: Haiku 5.5 low como Redactora y como corrección; Luna como coordinador y Revisora.**
-   - Nota: 4,46, contra 4,21 de Luna sola.
-   - Costo: unos US$4,3 por cada 1.000 respuestas con correo, contra US$2,2 de Luna.
-   - Latencia: la Redactora tarda 12 s de mediana y 15 s en el p90, contra 7 y 9 s de Luna. Ninguna llamada pasó los 30 s.
-   - Variables: `COWORK_WRITER_MODEL=claude-haiku-5-5`, `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=claude-haiku-5-5`,
-     `COWORK_WRITER_FIX_EFFORT=low` y `COWORK_DESIGNER_MODEL=gpt-6-luna`.
-2. **Plan superior o campañas grandes: Sonnet 5.5 low escribiendo y Luna corrigiendo.**
-   - Nota: 4,61, con la mitad de las respuestas en 5.
-   - Costo: unos US$17 por cada 1.000 respuestas.
-   - Es el más rápido: 4 s de mediana.
+1. **Mejor calidad: Sonnet 5.5 low escribe y Luna corrige.**
+   - Nota: 4,86, con 12 de 14 respuestas en 5. Es lo más cerca de 5 que se midió.
+   - Costo: unos US$17 por cada 1.000 respuestas con correo, 1,7 centavos de dólar cada una.
+   - Es la Redactora más rápida: 4 s de mediana y 7 s en el p90.
    - Variables: `COWORK_WRITER_MODEL=claude-sonnet-5-5`, `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=gpt-6-luna` y
      `COWORK_DESIGNER_MODEL=gpt-6-luna`.
-3. **Sin clave de Anthropic, o como respaldo: Luna low para todo.** Nota 4,21 por US$2,2 por cada 1.000.
+2. **Mucho volumen o plan económico: Luna low para todo.**
+   - Nota: 4,36 por unos US$2,1 por cada 1.000 respuestas, 8 veces menos que Sonnet.
+   - Su punto débil son las secuencias (3,8). `COWORK_WRITER_SEQUENCE_MODEL=claude-sonnet-5-5` las pasa a Sonnet y deja todo lo
+     demás en Luna; las secuencias son una parte chica de los pedidos, así que el costo sube poco. No se midió esa mezcla de punta
+     a punta: con Sonnet, las secuencias sacaron 4,5 a 4,75.
+   - Es también el respaldo sin clave de Anthropic.
+3. **Haiku 5.5 low → Haiku** queda como alternativa intermedia (4,50 por US$4,5 por cada 1.000), pero con la v13 le gana a Luna
+   por poco y tarda más (11,5 s de mediana contra 7 s).
 4. **No conviene:**
+   - que Sonnet se corrija a sí mismo: 4,82, sin mejora, por US$28 por cada 1.000;
+   - que Haiku corrija a Sonnet: baja a 4,68 por el mismo costo;
    - subir el razonamiento: Haiku `medium` y `max`, Luna `high` y `xhigh`;
-   - Opus 5.5 ni Sol 6.1 como Redactora: no le ganan a Sonnet y a Haiku, y cuestan más.
+   - Opus 5.5 ni Sol 6.1 como Redactora: no le ganan a Sonnet y cuestan más.
 5. **Antes de activar Claude en producción:**
    - `ANTHROPIC_API_KEY` en Secret Manager;
    - el precio de cada modelo en `COWORK_MODEL_PRICING_JSON`, para que el registro de consumo lo cobre;
    - `COWORK_DESIGNER_MODEL` fijo en Luna, porque si no tiene valor propio toma el de `COWORK_WRITER_MODEL`.
 
    Si Anthropic falla, la Redactora no alcanza a escribir y el coordinador entrega su propio correo, como ya pasa con OpenAI.
+
+Ejemplo de escala: 100 usuarios que piden 50 respuestas con correo al día, 22 días al mes, son 110.000 respuestas. Al mes son
+unos US$230 con Luna, US$500 con Haiku y US$1.900 con Sonnet → Luna.
 
 ## Claude: cómo medirlo
 
@@ -452,6 +533,27 @@ Antes, esas peticiones empeoraban el correo o lo dejaban «por revisar».
   - un correo escrito para una persona no se ofrece a otros contactos.
 
   Cada chequeo nuevo se probó contra las 84 respuestas de la ronda 10 ya puntuadas: marcan las que perdieron puntos y ninguna de 5.
+- v12 (de la lectura de la ronda 11):
+  - «consecuencia concreta» también marca el atraso dicho de la contratación sin quién espera («retrasa el ingreso de cada una»,
+    «alarga la contratación»);
+  - la frase que nombra la oferta tiene una sola capacidad («una sola capacidad»: no «consulta por lote y entrega resultados
+    consolidados»);
+  - desde el tercer correo de una secuencia, la apertura es un momento y no la oferta, y el «es mi último mensaje» va junto a la
+    pregunta, no al abrir.
+- v13 (de la lectura de la ronda 12):
+  - la Revisora ya no puede pedir que se quite la consecuencia dicha del rubro: `coworkReviewIssues` reconoce el correo por la
+    persona que nombra y descarta su «sin respaldo» sobre una apertura que habla del rubro, salvo que nombre su empresa o traiga
+    una cifra (en las rondas 10 a 12 eran 20 de 29 quejas de ese tipo);
+  - la corrección no cuenta lo que ajustó: si su respuesta dice «Ajusté la consecuencia…», queda la del primer borrador;
+  - «pregunta corta»: la pregunta de cierre de 16 palabras o más (7 de 273 respuestas puntuadas, ninguna de 5);
+  - la respuesta no usa «observado» ni «el encargo» (13 de 273, ninguna sobre 4,5);
+  - «paso siguiente» (`coworkNextStepIssues`): correos con destinatario sin pregunta final piden crear la campaña o enviar la
+    primera respuesta (8 de 273, ninguna sobre 4,5); no aplica si el usuario ya pidió la campaña o pegó un correo para mejorarlo;
+  - «consecuencia distinta»: dos correos de una secuencia no terminan su primera frase en la misma consecuencia («…lleguen a sus
+    puestos» en el primero y el tercero; 6 secuencias de Luna, ninguna sobre 4);
+  - el coordinador busca primero a la persona que nombra el pedido («un correo para Felipe de Securitas»).
+
+  Los chequeos de v12 y v13 se probaron contra las respuestas ya puntuadas: ninguno marca una de 5.
 
 **Coordinador** (`src/lib/cowork/agent-instructions.ts`, v10): cuando el usuario pide escribirles a sus contactos, lee quién tiene
 correo y a quién ya se le escribió (`contacted.search` con la consulta vacía), deja fuera a quien ya recibió un primer correo y le
@@ -494,7 +596,7 @@ párrafo (`coworkSplitOffer`); no cambia ninguna palabra.
   y el filtro de la Revisora para correos por persona). Ese ajuste tiene pruebas y una corrida corta de los dos casos de «mejorar
   correo», pero no lectura ciega propia.
 - **Claude se midió en una sesión aparte**, con la clave del usuario. Los JSON de cada corrida están en las páginas privadas
-  «Medición Claude Redactora v10» y «v11». La lectura ciega se hizo aquí, con anclas.
+  «Medición Claude Redactora v10», «v11», «v12» y «v13». La lectura ciega se hizo aquí, con anclas.
 - **El lector reconoce respuestas que ya leyó:** las anclas son las mismas respuestas de la ronda anterior, así que su nota igual
   confirma que la vara es la misma, pero no es una segunda lectura independiente.
 - **Informes:** esta medición cubre correos y secuencias. La Analista y la Diseñadora también aceptan un modelo de Claude
