@@ -29,6 +29,22 @@ export function coworkCampaignEmails(blocks: ReadonlyArray<{ type: string }> | n
   return drafts.length === 1 ? coworkDraftSteps(drafts[0]) : null;
 }
 
+/** A first email written for one person: who it goes to and its exact text. */
+export type CoworkPersonalEmail = { email: string; subject: string; body: string };
+
+/** The first email of each person when a turn wrote one per person (only email cards, two or more, each to one distinct address), or null. */
+export function coworkPersonalEmails(blocks: ReadonlyArray<{ type: string }> | null | undefined): CoworkPersonalEmail[] | null {
+  const drafts = (blocks || []).filter((block): block is Draftable => block.type === 'email_draft' || block.type === 'sequence');
+  if (drafts.length < 2) return null;
+  const emails: CoworkPersonalEmail[] = [];
+  for (const block of drafts) {
+    const to = block.type === 'email_draft' && block.to?.length === 1 ? block.to[0].trim().toLowerCase() : '';
+    if (block.type !== 'email_draft' || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(to) || emails.some(item => item.email === to)) return null;
+    emails.push({ email: to, subject: block.subject, body: block.body });
+  }
+  return emails;
+}
+
 /** The card with the emails the person has now (their edit of the subject and body of each step); everything else as it was. */
 export function coworkBlockWithSteps(block: Draftable, steps: CoworkEditedEmail[]): Draftable {
   if (block.type === 'email_draft') return { ...block, subject: steps[0]?.subject ?? block.subject, body: steps[0]?.body ?? block.body };

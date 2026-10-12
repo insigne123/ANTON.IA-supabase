@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkPolishDraft, coworkPolishProofs, coworkReviewIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkPolishDraft, coworkReplyIssues, coworkPolishProofs, coworkReviewIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos para {{empresa}}.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
@@ -421,4 +421,65 @@ test('the Reviewer does not undo what the rules ask: the general premise of the 
   // «Omite dos detalles de AXIS» asks for more functions.
   const omits = { where: '«Correo»', problem: 'Omite dos detalles de AXIS: los resultados consolidados y la evidencia auditable.', fix: 'Agrégalos en la segunda frase.', short: 'con detalles de AXIS' };
   assert.deepEqual(coworkReviewIssues([omits], pasted, checks), []);
+});
+
+test('the question is asked, not announced, and a closing never asks whether the offer fits (v4 reading)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: true, products: ['axis'] };
+  const step = (middle: string, question = '¿Quién se encarga hoy de consultar el PJUD?') => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo',
+    to: null, subject: 'Antecedentes', body: `Hola,\n\nCuando entran muchas personas a la vez, revisar uno por uno los antecedentes atrasa el ingreso.\n\n${middle}\n\n${question}\n\nNicolás Y.` }], checks)
+    .map(issue => issue.short);
+  assert.deepEqual(step('AXIS consulta por lote.'), []);
+  for (const filler of ['Para ubicar dónde encaja AXIS, prefiero partir por la persona que lleva esa revisión.', 'Antes de profundizar en AXIS, quiero entender cómo se reparte esa revisión.',
+    'Para conversar sobre AXIS, quiero partir por cómo se reparte esa revisión.', 'Quería preguntarte cómo lo organizan hoy en tu equipo.', 'Para entender cómo lo resuelven hoy:',
+    'Para ordenar ese paso, importa tener claro quién recibe la lista.'])
+    assert.deepEqual(step(filler), ['pregunta directa'], filler);
+  assert.deepEqual(step('AXIS consulta por lote.', 'Para entender cómo se organiza, ¿cómo distribuyen hoy la revisión?'), ['pregunta directa']);
+  // «para ver si calza», «cómo podría servir»: a formula, also when the person asked for the meeting.
+  assert.deepEqual(step('AXIS consulta por lote.', '¿Qué día te acomoda conversar brevemente para ver si calza con tu proceso?'), ['pregunta concreta']);
+  assert.deepEqual(step('AXIS consulta por lote.', '¿Te acomoda agendar una conversación breve para revisar cómo podría servir en tus procesos?'), ['pregunta concreta']);
+  assert.deepEqual(step('AXIS consulta por lote.', '¿Qué día te acomoda conversar 15 minutos?'), []);
+  assert.deepEqual(step('AXIS consulta por lote.', '¿Te sirve verlo con un caso de tu equipo?'), []);
+});
+
+test('the reply to the person carries no internal jargon (v6 reading: «no confirma la cobertura del buzón»)', () => {
+  assert.deepEqual(coworkReplyIssues('El registro muestra que no hay respuesta, pero no confirma la cobertura del buzón; avísame si contestó.').map(issue => issue.short), ['respuesta sin jerga']);
+  assert.deepEqual(coworkReplyIssues('Revisé leads.search y armé el correo.').map(issue => issue.short), ['respuesta sin jerga']);
+  assert.deepEqual(coworkReplyIssues('No veo si respondió porque tu correo no está conectado a ANTON.IA.'), []);
+});
+
+test('the v6 reading: no announcing in other words, no talking about the email itself, no word said twice in the opening', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis'] };
+  const issues = (body: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes',
+    body: `Hola,\n\n${body}\n\nNicolás Y.` }], checks);
+  const shorts = (body: string) => issues(body).map(issue => issue.short);
+  const opening = 'Cuando entran muchas personas a la vez, revisar uno por uno los antecedentes atrasa el ingreso.';
+  const question = '¿Quién se encarga hoy de esa revisión?';
+  assert.deepEqual(shorts(`${opening}\n\nAXIS consulta por lote.\n\n${question}`), []);
+  for (const filler of ['Para situar AXIS en ese trabajo, quiero entender quién se encarga de esa revisión.', 'Me interesa entender cómo se reparte.'])
+    assert.deepEqual(shorts(`${opening}\n\n${filler}\n\n${question}`), ['pregunta directa'], filler);
+  for (const itself of ['Con este correo cierro la secuencia.', 'Cierro con un uso concreto: AXIS consulta por lote.', 'Cierro estos mensajes con un caso de AXIS.'])
+    assert.deepEqual(shorts(`${opening}\n\n${itself}\n\n${question}`), ['sin hablar del correo'], itself);
+  // The last email may still say it is the last one.
+  assert.deepEqual(shorts(`${opening}\n\nAXIS consulta por lote. Este es mi último mensaje sobre esto.\n\n${question}`), []);
+  for (const [said, words] of [['Cuando entran muchas personas a la vez, revisar uno por uno los antecedentes alarga la revisión.', 'revisar… revision'],
+    ['Cuando entran muchas personas a la vez, revisar uno por uno los antecedentes ocupa al equipo de personas.', 'personas… personas'],
+    ['Cuando coinciden varios ingresos en {{empresa}}, revisarlos uno por uno atrasa el ingreso.', 'ingresos… ingreso']]) {
+    assert.deepEqual(shorts(`${said}\n\nAXIS consulta por lote.\n\n${question}`), ['apertura sin repetir'], said);
+    assert.match(issues(`${said}\n\nAXIS consulta por lote.\n\n${question}`)[0].problem, new RegExp(words));
+  }
+  // The rules ask for one email per person for two or three people, and a single text with {{nombre}} for more.
+  assert.match(COWORK_WRITER_RULES.join('\n'), /para 2 o 3 personas con correo observado va en un bloque por persona/);
+  assert.match(COWORK_WRITER_RULES.join('\n'), /Para 4 o más personas, en una secuencia o si el usuario pide un solo texto para todos, va un solo bloque/);
+});
+
+test('a correction never tells the person what it changed: the first draft\'s reply stays (v6 reading)', async () => {
+  const first = output([signed.replace('en minutos', 'gratis'), signed, signed]);
+  const fixed = { ...output([signed, signed, signed]), reply: 'Ajusté el segundo correo para no atribuir tareas al equipo de la persona.' };
+  const result = await harness([first, fixed]).run();
+  assert.equal(result.reply, first.reply);
+  assert.deepEqual(result.blocks, fixed.blocks);
+  // An answer that already told what it changed in the person's own email keeps the correction's words.
+  const edit = { ...first, reply: 'Cambié la invitación abierta por una pregunta concreta.' };
+  const editFixed = { ...fixed, reply: 'Cambié el cierre por una pregunta sobre qué día les acomoda.' };
+  assert.equal((await harness([edit, editFixed]).run()).reply, editFixed.reply);
 });

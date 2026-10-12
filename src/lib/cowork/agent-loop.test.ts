@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkCampaignWithExactEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutAgendaAside, coworkWithoutOfferedRead, coworkWithoutSecondaryReadChips, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
+import { coworkCampaignWithExactEmails, coworkCampaignWithPersonalEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutAgendaAside, coworkWithoutOfferedRead, coworkWithoutSecondaryReadChips, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
@@ -2025,4 +2025,81 @@ test('a successful parallel read survives another reader failing and is availabl
       return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Encontré a Ana; falta consultar CRM.', document: null } }; },
   });
   assert.match(result.reply, /Ana/);
+});
+
+const personalCards = [
+  { type: 'email_draft' as const, title: 'Felipe en Securitas', to: ['fmunoz@securitas.cl'], subject: 'Guardias nuevos en Securitas', body: 'Hola Felipe,\nEn seguridad privada entran guardias todas las semanas.\nNicolás' },
+  { type: 'email_draft' as const, title: 'Camila en Adecco', to: ['cfuentes@adecco.cl'], subject: 'Ingresos por cliente en Adecco', body: 'Hola Camila,\nEn servicios transitorios los ingresos llegan por cliente.\nNicolás' }];
+const personalFirst = [
+  { email: 'fmunoz@securitas.cl', subject: 'Guardias nuevos en Securitas', body: 'Hola Felipe,\nEn seguridad privada entran guardias todas las semanas.\nNicolás' },
+  { email: 'cfuentes@adecco.cl', subject: 'Ingresos por cliente en Adecco', body: 'Hola Camila,\nEn servicios transitorios los ingresos llegan por cliente.\nNicolás' }];
+const personalCampaign = { name: 'AXIS · RR. HH.', objective: 'Primera conversación',
+  criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false },
+  emails: ['fmunoz@securitas.cl', 'cfuentes@adecco.cl', 'rpino@tandes.cl'], provider: 'google',
+  messages: [{ subject: 'AXIS para {{empresa}}', body: 'Hola {{nombre}},\nTexto común.\nNicolás', delayDays: 0 }],
+  firstEmails: [{ email: 'fmunoz@securitas.cl', subject: 'Resumido', body: 'Hola Felipe,\nUn resumen del modelo.\nNicolás' }] };
+const personalBase = { runId: '00000000-0000-4000-8000-0000000000aa', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+  execute: async () => ({ scope: 'own', campaigns: [] }) };
+
+test('one email per person asked with its campaign: each goes word for word as that person\'s first email', async () => {
+  const brief = { kind: 'email' as const, recipients: ['Felipe Muñoz', 'Camila Fuentes'], objective: 'Presentar AXIS', angle: null, tone: null, steps: null, notes: null, findings: null, campaign: true };
+  const write = coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
+  const written = { reply: 'Escribí un correo para cada uno.', document: null, question: '¿Creo la campaña pausada para Felipe y Camila?',
+    suggestions: [{ label: 'Sí', message: 'Sí, créala' }], blocks: personalCards };
+  const create = coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign: personalCampaign, answer: { reply: 'Te dejo la campaña pausada.', document: null } });
+  const proposed: Array<{ campaign?: { messages: Array<{ body: string }>; firstEmails: Array<{ email: string; subject: string; body: string }> } }> = [];
+  const seen: unknown[] = [];
+  await runCoworkReadLoop({ ...personalBase, message: 'Escríbeles a Felipe y Camila y créala como campaña', write: async () => written,
+    proposeEffect: async proposal => { proposed.push(proposal); },
+    decide: async observations => { seen.push(observations.at(-1)?.result); return observations.length ? create : write; } });
+  // The coordinator reads that each person has an email of their own.
+  assert.equal((seen[1] as { firstEmails: unknown[] }).firstEmails.length, 2);
+  // The common first email stays for whoever has none (Rodrigo); Felipe and Camila get theirs word for word.
+  assert.deepEqual(proposed[0].campaign?.messages.map(message => message.body), ['Hola {{nombre}},\nTexto común.\nNicolás']);
+  assert.deepEqual(proposed[0].campaign?.firstEmails, personalFirst);
+});
+
+test('a yes to the campaign after one email per person carries each one as that person\'s first email; a change of plan does not', async () => {
+  const create = coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign: personalCampaign, answer: { reply: 'Te dejo la campaña pausada.', document: null } });
+  type Turn = { runId: string; observations: unknown[]; blocks?: typeof personalCards };
+  const history: Turn[] = [{ runId: '00000000-0000-4000-8000-0000000000a1', observations: [], blocks: personalCards }];
+  const firstEmails = async (message: string, turns: Turn[] = history) => {
+    let proposed: { firstEmails: Array<{ email: string; subject: string; body: string }> } | undefined;
+    await runCoworkReadLoop({ ...personalBase, message, history: turns, proposeEffect: async proposal => { proposed = proposal.campaign; }, decide: async () => create });
+    return proposed?.firstEmails;
+  };
+  for (const yes of ['Sí, crea la campaña pausada', 'dale', 'Créala']) assert.deepEqual(await firstEmails(yes), personalFirst, yes);
+  // «Sí, pero un solo texto», an earlier turn without them, or the person's exact version: what the model proposed (the version has none).
+  assert.deepEqual(await firstEmails('Sí, pero con un solo texto para todos'), [personalCampaign.firstEmails[0]]);
+  assert.deepEqual(await firstEmails('Sí, crea la campaña pausada', [history[0], { runId: '00000000-0000-4000-8000-0000000000a2', observations: [] }]), [personalCampaign.firstEmails[0]]);
+  const version = 'Crea una campaña pausada con esta versión de «Felipe en Securitas», sin cambiar el texto, para fmunoz@securitas.cl.\n\nAsunto: Mi asunto\n\nHola Felipe,\nMi versión.';
+  assert.deepEqual(await firstEmails(version), []);
+  // People the campaign does not include are left out, and a definition that would not pass keeps the model's.
+  const two = coworkCampaignDraftSchema.parse({ ...personalCampaign, emails: ['cfuentes@adecco.cl'], firstEmails: [] });
+  assert.deepEqual(coworkCampaignWithPersonalEmails(two, personalFirst).firstEmails, [personalFirst[1]]);
+  assert.deepEqual(coworkCampaignWithPersonalEmails(two, [{ ...personalFirst[1], body: 'Hola {{rubro}}' }]).firstEmails, []);
+});
+
+test('emails the coordinator writes itself go back once to the Writer, and stand if the Writer fails or it is the last decision', async () => {
+  const brief = { kind: 'email' as const, recipients: null, objective: 'Mejorar el correo pegado', angle: null, tone: null, steps: null, notes: null, findings: null };
+  const own = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Lo mejoré.', document: null, question: null,
+    suggestions: [{ label: 'Más corto', message: 'Hazlo más corto' }],
+    blocks: [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes', body: 'Hola,\nPuede volverse una tarea manual.\nNicolás' }] } };
+  const write = coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
+  const written = { reply: 'Lo dejé más directo.', document: null, question: null, suggestions: [{ label: 'Más corto', message: 'Hazlo más corto' }],
+    blocks: [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes', body: 'Hola,\nRevisarlos uno por uno atrasa el ingreso.\nNicolás' }] };
+  const base = { message: 'mejorame este correo: «Hola, somos Yago…»', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({}) };
+  const seen: string[] = [];
+  const result = await runCoworkReadLoop({ ...base, write: async () => written,
+    decide: async (_observations, _mustAnswer, rejections = []) => { seen.push(rejections.at(-1)?.reason ?? ''); return seen.length === 1 ? own : write; } });
+  assert.match(seen[1], /Los correos los escribe la Redactora/);
+  assert.equal(result.reply, written.reply);
+  // A Writer that fails leaves the coordinator's emails; without the Writer, or on the last decision, they are the answer.
+  let calls = 0;
+  const failed = await runCoworkReadLoop({ ...base, write: async () => { throw new Error('timeout'); },
+    decide: async () => (++calls === 1 ? own : write), ceiling: { decisions: 2, reads: 3, softDeadlineMs: 50_000 } });
+  assert.equal(failed.reply, own.answer.reply);
+  assert.equal((await runCoworkReadLoop({ ...base, decide: async () => own })).reply, own.answer.reply);
+  assert.equal((await runCoworkReadLoop({ ...base, write: async () => written, decide: async () => own, ceiling: { decisions: 1, reads: 3, softDeadlineMs: 50_000 } })).reply, own.answer.reply);
 });

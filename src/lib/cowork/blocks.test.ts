@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   coworkBlockMeta, coworkBlocksText, coworkDraftSteps, coworkEditedEmails, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv,
   coworkOnlyUsesVersion, coworkVersionMessage, coworkVersionSource, coworkWantsCampaignFromVersion, coworkWordDiff, coworkFigureNumber, coworkEffectiveDraft,
+  coworkPersonalEmails,
 } from './blocks';
 
 const sequence = { type: 'sequence' as const, title: 'Secuencia AXIS', steps: [
@@ -96,4 +97,18 @@ test('a figure counts only its whole number and writes it back exactly as given'
   assert.equal(coworkFigureNumber('US$ 300')?.before, 'US$ ');
   // Decimals, grouped decimals and words stay as text.
   for (const value of ['12,5 %', '1.234,5', '3.5', 'Sin datos', '—', '']) assert.equal(coworkFigureNumber(value), null, value);
+});
+
+test('one email card per person is read back as the first email of each one', () => {
+  const card = (to: string[] | null, subject = 'Asunto', body = 'Hola Felipe,\nTexto') => ({ type: 'email_draft' as const, title: 'Correo', to, subject, body });
+  assert.deepEqual(coworkPersonalEmails([card(['FMunoz@securitas.cl ']), card(['cfuentes@adecco.cl'], 'Otro', 'Hola Camila,\nTexto')]), [
+    { email: 'fmunoz@securitas.cl', subject: 'Asunto', body: 'Hola Felipe,\nTexto' },
+    { email: 'cfuentes@adecco.cl', subject: 'Otro', body: 'Hola Camila,\nTexto' }]);
+  // A table next to the emails does not count.
+  assert.equal(coworkPersonalEmails([card(['fmunoz@securitas.cl']), card(['cfuentes@adecco.cl']), table])?.length, 2);
+  // One card, a card to a name or to several people, the same address twice or a sequence among them: not one email per person.
+  for (const blocks of [[card(['fmunoz@securitas.cl'])], [card(['fmunoz@securitas.cl']), card(['Camila Fuentes'])], [card(['fmunoz@securitas.cl']), card(null)],
+    [card(['fmunoz@securitas.cl']), card(['fmunoz@securitas.cl'])], [card(['fmunoz@securitas.cl', 'cfuentes@adecco.cl']), card(['rpino@tandes.cl'])],
+    [card(['fmunoz@securitas.cl']), sequence], [], null])
+    assert.equal(coworkPersonalEmails(blocks), null, JSON.stringify(blocks));
 });
