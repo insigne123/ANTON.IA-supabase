@@ -304,7 +304,7 @@ test('the checks catch what kept the 12 oct candidate from a 4: hedges, meetings
   // R09: the product first, and as if they already used it.
   const r09 = 'Hola {{nombre}},\n\nAXIS está pensado para revisar antecedentes laborales de postulantes. En {{empresa}}, AXIS consulta en el PJUD y consolida resultados; procesa 1.000 personas en unos 30 minutos.\n\n¿Cuánto les toma hoy revisar los antecedentes de una persona?' + signature;
   const campaign = { type: 'email_draft' as const, title: 'Campaña', to: ['a@x.cl', 'b@y.cl'], subject: 'Antecedentes en {{empresa}}', body: r09 };
-  assert.deepEqual(coworkDraftIssues([campaign], checks).map(issue => issue.short), ['apertura concreta', 'sin suponer que la usan']);
+  assert.deepEqual(coworkDraftIssues([campaign], checks).map(issue => issue.short), ['apertura concreta', 'sin suponer que la usan', 'sin frases de catálogo']);
   assert.deepEqual(coworkDraftIssues([{ ...campaign, body: r09.replace('AXIS está pensado para revisar', 'Te escribo para contarte cómo revisar') }], checks).map(issue => issue.short),
     ['apertura concreta', 'sin suponer que la usan']);
   // R33: a follow-up that repeats the proof of the first email (and hedges).
@@ -339,4 +339,30 @@ test('the context knows whether the person asked for a meeting and the names of 
   assert.equal(coworkWriterContext(userContext, [], null, 'redáctame un correo para felipe de securitas ofreciendo axis').meeting, false);
   assert.equal(coworkWriterContext(userContext, [], null, 'escríbele a felipe para agendar una reunión').meeting, true);
   assert.equal(coworkWriterContext(userContext, [], null, 'mejorame este correo: "Hola, somos Yago. Agendemos."').meeting, true);
+});
+
+test('the checks catch what the matrix reading still found: the product in the first sentence, openings that define, catalog phrases', () => {
+  const proofs = ['Procesa 1.000 personas en unos 30 minutos.'];
+  const recipients = [{ name: 'Felipe Muñoz', email: 'fmunoz@securitas.cl', company: 'Securitas Chile' }];
+  const checks = { ...context, signer: 'Nicolás Y.', proofs, recipients, meeting: false, products: ['axis', 'yago'] };
+  const signature = '\n\nNicolás Y.\nGerente Comercial\nYago SpA';
+  const shorts = (opening: string, rest = 'AXIS consulta el lote completo y procesa 1.000 personas en unos 30 minutos.') =>
+    coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo para Felipe', to: ['Felipe Muñoz'], subject: 'Antecedentes de guardias en Securitas',
+      body: `Hola Felipe,\n\n${opening} ${rest}\n\n¿Cuántos ingresos revisan en una semana normal?${signature}` }], checks).map(issue => issue.short);
+  assert.deepEqual(shorts('En seguridad privada, cuando entra un grupo de guardias, revisar uno por uno sus antecedentes en el PJUD atrasa el ingreso.'), []);
+  // The product in the first sentence (12 oct matrix: «Para revisar antecedentes…, AXIS consulta…», «Al incorporar personal, AXIS consulta…»).
+  assert.deepEqual(shorts('Para revisar antecedentes de guardias en seguridad privada, AXIS consulta en el PJUD por lote.', 'Procesa 1.000 personas en unos 30 minutos.'), ['apertura concreta']);
+  assert.deepEqual(shorts('En Yago revisamos antecedentes de guardias en minutos.'), ['apertura concreta']);
+  // Openings that define the task wherever the verb is.
+  for (const defines of ['En seguridad privada, revisar antecedentes laborales es una de las tareas que acompaña la incorporación.',
+    'En seguridad privada, revisar antecedentes a mano significa hacer una consulta por cada persona.',
+    'En los procesos de selección, revisar antecedentes en el PJUD es parte de evaluar postulantes.'])
+    assert.deepEqual(shorts(defines), ['apertura concreta'], defines);
+  // A catalog phrase anywhere: in the second email of a sequence too.
+  assert.deepEqual(shorts('En seguridad privada, cuando entra un grupo de guardias, revisar uno por uno sus antecedentes atrasa el ingreso.',
+    'AXIS está pensado para empresas que incorporan personal de forma masiva.'), ['sin frases de catálogo']);
+  // A follow-up may name the offer in its first sentence: it reopens what was sent.
+  const followUp = coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento', to: null, subject: 'Re: AXIS para Securitas',
+    body: `Hola Felipe,\n\nTe escribí el 19 de septiembre sobre AXIS. Con AXIS, cargas la lista de postulantes desde un archivo.\n\n¿Quién revisa hoy esos antecedentes en Securitas?${signature}` }], checks);
+  assert.deepEqual(followUp.map(issue => issue.short), []);
 });

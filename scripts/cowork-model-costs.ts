@@ -58,7 +58,7 @@ for (const file of files) {
       const answer = `${call.case}#${call.attempt ?? 1}`;
       const sum = perAnswer.get(answer) ?? { total: 0, writing: 0 };
       sum.total += cost ?? 0;
-      if (role === 'writer' || role === 'reviewer') sum.writing += cost ?? 0;
+      if (role === 'writer' || role === 'reviewer' || role === 'corrector') sum.writing += cost ?? 0;
       perAnswer.set(answer, sum);
     }
   }
@@ -72,5 +72,5 @@ for (const file of files) {
   const all = [...perAnswer.values()];
   console.log(`  Total: ${usd(all.reduce((sum, item) => sum + item.total, 0))} en ${all.length} respuestas.`
     + ` Con correo: ${withEmail.length}, en promedio ${usd(mean(withEmail.map(item => item.total)))} cada una`
-    + ` (Redactora y Revisora: ${usd(mean(withEmail.map(item => item.writing)))}).`);
+    + ` (Redactora, Revisora y corrección: ${usd(mean(withEmail.map(item => item.writing)))}).`);
 }

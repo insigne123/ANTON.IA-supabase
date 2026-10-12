@@ -10,18 +10,21 @@ export function coworkWriterEnabled(env: Record<string, string | undefined> = pr
   return env.COWORK_WRITER_ENABLED === 'true';
 }
 
-/** COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick their models; COWORK_MODEL by default. A «claude-» model answers
+/** COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick their models; COWORK_MODEL by default. COWORK_WRITER_FIX_MODEL is the
+ * model of the Writer's correction, the Writer's by default: one model drafts and another fixes. A «claude-» model answers
  * through Anthropic (anthropic-json.ts), any other through OpenAI. */
 export function coworkWriterModels(env: Record<string, string | undefined> = process.env) {
-  return { writer: env.COWORK_WRITER_MODEL || env.COWORK_MODEL, reviewer: env.COWORK_REVIEWER_MODEL || env.COWORK_MODEL };
+  const writer = env.COWORK_WRITER_MODEL || env.COWORK_MODEL;
+  return { writer, reviewer: env.COWORK_REVIEWER_MODEL || env.COWORK_MODEL, fix: env.COWORK_WRITER_FIX_MODEL || writer };
 }
 
 const EFFORTS: readonly StructuredEffort[] = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
-/** COWORK_WRITER_EFFORT and COWORK_REVIEWER_EFFORT: how hard each role thinks. Unset or unknown, the model's usual
- * level (low for gpt-6 and Claude), as before. */
-export function coworkWriterEfforts(env: Record<string, string | undefined> = process.env): { writer?: StructuredEffort; reviewer?: StructuredEffort } {
+/** COWORK_WRITER_EFFORT, COWORK_REVIEWER_EFFORT and COWORK_WRITER_FIX_EFFORT (the Writer's by default): how hard each role
+ * thinks. Unset or unknown, the model's usual level (low for gpt-6 and Claude), as before. */
+export function coworkWriterEfforts(env: Record<string, string | undefined> = process.env): { writer?: StructuredEffort; reviewer?: StructuredEffort; fix?: StructuredEffort } {
   const pick = (value: string | undefined) => EFFORTS.find(effort => effort === String(value || '').trim().toLowerCase());
-  return { writer: pick(env.COWORK_WRITER_EFFORT), reviewer: pick(env.COWORK_REVIEWER_EFFORT) };
+  const writer = pick(env.COWORK_WRITER_EFFORT);
+  return { writer, reviewer: pick(env.COWORK_REVIEWER_EFFORT), fix: pick(env.COWORK_WRITER_FIX_EFFORT) ?? writer };
 }
 
 /** Each call's limits: what the ledger reserves for the role (20260928030000) and how long it may take. */
@@ -58,14 +61,14 @@ export function coworkWriterTurn(deps: {
   record: (event: { action: typeof COWORK_AGENT_ACTION; input: ''; result: CoworkAgentStep }) => Promise<void>;
   liveDraft: { push: (text: string) => void; review: () => void; adjust?: () => void; flush: () => Promise<void> } | null;
   timeLeft: () => number;
-  models: { writer?: string; reviewer?: string };
-  efforts?: { writer?: StructuredEffort; reviewer?: StructuredEffort };
+  models: { writer?: string; reviewer?: string; fix?: string };
+  efforts?: { writer?: StructuredEffort; reviewer?: StructuredEffort; fix?: StructuredEffort };
   onCall?: (call: { model: string; durationMs: number }) => void;
 }) {
   return async (brief: CoworkWriteBrief, observations: CoworkObservation[]): Promise<CoworkAnswer> => {
     const output = await runCoworkWriter({
       request: deps.request, brief, userContext: deps.userContext, observations, now: new Date(),
-      generate: async ({ role, schema, systemPrompt, prompt, stream }) => {
+      generate: async ({ role, schema, systemPrompt, prompt, stream, fix }) => {
         const limits = CALLS[role];
         const left = deps.timeLeft();
         if (left < limits.minimumMs) throw new Error('Cowork turn time exhausted');
@@ -76,9 +79,9 @@ export function coworkWriterTurn(deps: {
         // A review or a correction starts once the page knows the draft on screen is being reviewed.
         if (!stream) await deps.liveDraft?.flush();
         const call = await deps.generate({
-          schema, systemPrompt, prompt, provider: 'openai', openAiModel: deps.models[role], allowDefaultModelFallback: false,
+          schema, systemPrompt, prompt, provider: 'openai', openAiModel: (fix && deps.models.fix) || deps.models[role], allowDefaultModelFallback: false,
           maxAttempts: 1, timeoutMs: Math.min(limits.timeoutMs, left), maxOutputTokens: limits.maxOutputTokens, signal: deps.signal,
-          reasoningEffort: deps.efforts?.[role],
+          reasoningEffort: (fix && deps.efforts?.fix) || deps.efforts?.[role],
           onPartial: live ? text => live.push(`${LIVE_PREFIX}${text}`) : undefined,
         });
         await live?.flush();

@@ -53,7 +53,7 @@ import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { coworkAnswerChanged } from '../src/lib/cowork/presentation';
 import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
-import { coworkWriterEfforts } from '../src/lib/server/cowork/writer-run';
+import { coworkWriterEfforts, coworkWriterModels } from '../src/lib/server/cowork/writer-run';
 import { coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
@@ -138,7 +138,7 @@ async function main() {
   const arg = (name: string) => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
   const ledgerFile = arg('budget-ledger');
   const budget = ledgerFile ? new CoworkEvaluationBudget(ledgerFile, Number(arg('budget-usd') || 10)) : null;
-  if (budget && ['COWORK_MODEL', 'COWORK_WRITER_MODEL', 'COWORK_REVIEWER_MODEL', 'COWORK_DESIGNER_MODEL', 'COWORK_ANALYST_MODEL', 'COWORK_RESCUE_MODEL']
+  if (budget && ['COWORK_MODEL', 'COWORK_WRITER_MODEL', 'COWORK_WRITER_FIX_MODEL', 'COWORK_REVIEWER_MODEL', 'COWORK_DESIGNER_MODEL', 'COWORK_ANALYST_MODEL', 'COWORK_RESCUE_MODEL']
     .some(name => process.env[name] && process.env[name] !== 'gpt-6-luna')) throw new Error('Evaluation configuration only permits gpt-6-luna');
   if (arg('budget-usd') && !budget) throw new Error('--budget-ledger is required with --budget-usd');
   const snapshots: unknown[] = [];
@@ -178,8 +178,8 @@ async function main() {
   const analystOn = process.argv.includes('--analyst');
   const analystModel = process.env.COWORK_ANALYST_MODEL || process.env.COWORK_MODEL;
   let analystCalls = 0;
-  const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
-  // COWORK_WRITER_EFFORT and COWORK_REVIEWER_EFFORT, as the worker reads them (writer-run.ts).
+  // COWORK_WRITER_MODEL, COWORK_REVIEWER_MODEL and COWORK_WRITER_FIX_MODEL (the correction), and their efforts, as the worker reads them (writer-run.ts).
+  const writerModels = coworkWriterModels();
   const writerEfforts = coworkWriterEfforts();
   const writerCalls = { writer: 0, reviewer: 0 };
   const reviewEngine = arg('review-engine') ?? 'llm';
@@ -211,14 +211,16 @@ async function main() {
       // The Writer and the Reviewer, with their own models and the same call budget.
       const write: CorpusWriter | undefined = writerOn ? (brief, observations, meta) => runCoworkWriter({
         request: meta.request, brief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step, now: CORPUS_NOW,
-        generate: async ({ role, schema, systemPrompt, prompt }) => {
+        generate: async ({ role, schema, systemPrompt, prompt, fix }) => {
           if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
           calls++;
           writerCalls[role]++;
-          const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: writerModels[role],
+          const as = fix ? 'fix' : role;
+          const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: writerModels[as],
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: 90000,
-            reasoningEffort: writerEfforts[role] });
-          recordUsage(role, response.telemetry);
+            reasoningEffort: writerEfforts[as] });
+          // The correction is priced apart («corrector»), so a model that only fixes shows its own cost.
+          recordUsage(fix ? 'corrector' : role, response.telemetry);
           decisions.push({ agent: role, output: response.data });
           return response.data;
         },
