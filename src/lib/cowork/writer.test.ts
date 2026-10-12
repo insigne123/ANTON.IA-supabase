@@ -42,9 +42,10 @@ test('a Reviewer issue about a fixed name goes when the email is for one person'
   // To several people, or in a sequence, the issue stands.
   assert.deepEqual(coworkReviewIssues([fixedName], [{ ...one, to: ['a@x.cl', 'b@x.cl'] }]), [fixedName]);
   assert.deepEqual(coworkReviewIssues([fixedName], [sequence([signed])]), [fixedName]);
-  // With several blocks, the one the issue names decides.
+  // With several blocks, the one the issue names decides; one that names none goes only when every email is for one person (one per person).
   assert.deepEqual(coworkReviewIssues([fixedName], [one, { ...one, title: 'Correo a Felipe' }]), []);
-  assert.deepEqual(coworkReviewIssues([{ ...fixedName, where: 'correo' }], [one, { ...one, title: 'Correo a Felipe' }]), [{ ...fixedName, where: 'correo' }]);
+  assert.deepEqual(coworkReviewIssues([{ ...fixedName, where: 'Saludos de los tres correos' }], [one, { ...one, title: 'Correo a Felipe' }]), []);
+  assert.deepEqual(coworkReviewIssues([{ ...fixedName, where: 'correo' }], [one, { ...one, title: 'Correo a Felipe', to: ['a@x.cl', 'b@x.cl'] }]), [{ ...fixedName, where: 'correo' }]);
 });
 
 test('a block keeps one way of addressing the reader, and each email of a sequence its own closing question', () => {
@@ -482,4 +483,45 @@ test('a correction never tells the person what it changed: the first draft\'s re
   const edit = { ...first, reply: 'Cambié la invitación abierta por una pregunta concreta.' };
   const editFixed = { ...fixed, reply: 'Cambié el cierre por una pregunta sobre qué día les acomoda.' };
   assert.equal((await harness([edit, editFixed]).run()).reply, editFixed.reply);
+});
+
+test('the v7 reading: benefits said in the abstract, «es una alternativa», «si calza», «basta con saber» and replies that apologize', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis'] };
+  const opening = 'Cuando entran muchas personas a la vez, revisar uno por uno los antecedentes atrasa el ingreso.';
+  const shorts = (middle: string, question = '¿Quién se encarga hoy de esa revisión?', first = opening) => coworkDraftIssues([{ type: 'email_draft' as const,
+    title: 'Correo', to: null, subject: 'Antecedentes', body: `Hola,\n\n${first}\n\n${middle}\n\n${question}\n\nNicolás Y.` }], checks).map(issue => issue.short);
+  assert.deepEqual(shorts('AXIS consulta por lote.'), []);
+  for (const vague of ['Tener los resultados de las consultas reunidos ayuda a revisar los antecedentes.', 'AXIS procesa 1.000 personas para apoyar esa revisión.',
+    'Contar con el respaldo de cada consulta facilita dejar registro.'])
+    assert.deepEqual(shorts(vague), ['sin beneficios vagos'], vague);
+  // A capability that «permite» something is what the offer does, not a vague benefit.
+  assert.deepEqual(shorts('AXIS permite cargar la nómina por archivo.'), []);
+  assert.deepEqual(shorts('AXIS es una alternativa para esa revisión.'), ['sin frases de catálogo']);
+  for (const formula of ['¿Te sirve revisar si AXIS calza con tus ingresos?', '¿Les sería relevante revisar antecedentes con AXIS?', '¿Es relevante para tu equipo?'])
+    assert.deepEqual(shorts('AXIS consulta por lote.', formula), ['pregunta concreta'], formula);
+  assert.deepEqual(shorts('Para ubicar dónde encaja AXIS, basta con saber quién lleva esa parte.'), ['pregunta directa']);
+  // An opening that defines the task is flagged in any email of a sequence, but not the line that reopens a follow-up.
+  assert.deepEqual(coworkDraftIssues([sequence([0, 1].map(index => `Hola {{nombre}},\n\n${index ? 'Cuando coinciden varias incorporaciones, las consultas en el PJUD forman parte de la coordinación.' : opening} AXIS consulta por lote.\n\n${['¿Cuántos ingresos revisan al mes en {{empresa}}?', '¿Quién lo hace hoy en tu equipo?'][index]}\n\nNicolás Yarur`))],
+    { ...checks, signer: 'Nicolás Yarur' }).map(issue => `${issue.where} · ${issue.short}`), ['«Secuencia AXIS», correo 2 · apertura concreta']);
+  for (const excuse of ['El correo queda genérico porque no se indicó un destinatario.', 'La secuencia es genérica para gerentes de Personas.', 'Preparé el correo, planteada como una situación general.'])
+    assert.deepEqual(coworkReplyIssues(excuse).map(issue => issue.short), ['respuesta sin excusas'], excuse);
+  assert.deepEqual(coworkReplyIssues('Escribí un correo para Felipe, Jefe de Reclutamiento de Securitas Chile.'), []);
+});
+
+test('an email the person pasted keeps the meeting it asks for, and a formula closing becomes a question by day when they asked for one (v8 reading)', () => {
+  const pasted = 'mejorame este correo: "Hola, somos Yago y tenemos un software buenisimo para RRHH, es el mejor del mercado y te ahorra 80% del tiempo. Agendemos."';
+  const base = coworkWriterContext({ fullName: 'Nicolás Y.' }, [], null, pasted);
+  assert.equal(base.keepsAsk, true);
+  assert.equal(coworkWriterContext({ fullName: 'Nicolás Y.' }, [], null, `${pasted} Quita la reunión.`).keepsAsk, false);
+  assert.equal(coworkWriterContext({ fullName: 'Nicolás Y.' }, [], null, 'escríbele a Felipe pidiendo una reunión').keepsAsk, false);
+  const checks = { ...base, products: ['axis'] };
+  const email = (question: string) => [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes',
+    body: `Hola,\n\nCuando entran muchas personas a la vez, revisar uno por uno los antecedentes atrasa el ingreso.\n\nAXIS consulta por lote.\n\n${question}\n\nNicolás Y.` }];
+  assert.deepEqual(coworkDraftIssues(email('¿Qué día te acomoda conversar?'), checks), []);
+  assert.deepEqual(coworkDraftIssues(email('¿Cuánto les toma hoy revisar una nómina?'), checks).map(issue => issue.short), ['conserva lo que pide']);
+  const formula = coworkDraftIssues(email('¿Te acomoda agendar una conversación para ver si calza con tu proceso?'), checks);
+  assert.deepEqual(formula.map(issue => issue.short), ['pregunta concreta']);
+  assert.match(formula[0].fix, /¿Qué día te acomoda conversar\?/);
+  // Without a meeting asked, the formula's fix asks for something answered in a line, and nothing else is required.
+  assert.doesNotMatch(coworkDraftIssues(email('¿Te sirve ver si calza con tu proceso?'), { ...checks, meeting: false, keepsAsk: false })[0].fix, /qué día/i);
 });
