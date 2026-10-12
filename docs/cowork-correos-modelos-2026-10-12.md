@@ -367,20 +367,34 @@ Antes, esas peticiones empeoraban el correo o lo dejaban «por revisar».
   preguntas antes del último no la nombran;
 - v10: la oferta no se nombra solo con su prueba («qué hace la oferta»); la apertura no dice un costo en abstracto sin lo que se
   atrasa («consecuencia concreta»); «¿Están evaluando…?» es una fórmula.
-- v11:
+- v11 (de la lectura de Claude con reglas v10, ronda 10):
   - el atraso dicho del «proceso» sin quién espera también es una consecuencia en abstracto («retrasa el proceso de ingreso»,
     «requiere trabajo manual», «suma otra tarea»);
-  - la pregunta no repite una frase de la apertura («…antecedentes laborales en el PJUD… ¿Cuánto les toma consultar antecedentes
-    laborales en el PJUD?»);
+  - la pregunta no repite una frase de tres palabras de la apertura («…antecedentes laborales en el PJUD… ¿Cuánto les toma
+    consultar antecedentes laborales en el PJUD?»); con dos palabras en común no se marca, porque así nombra la tarea;
   - el primer correo de una secuencia presenta la oferta;
-  - la respuesta no se excusa con «no hay destinatarios observados».
+  - cada correo de una secuencia abre con su propio momento («momento distinto»): Luna repetía «cuando la nómina llega encima de
+    la fecha de ingreso» en el segundo y el tercero;
+  - los correos a cada persona cierran con su propia pregunta («pregunta propia»), comparadas sin los nombres de sus empresas;
+  - al mejorar un correo que pedía una demo, la invitación va por el día y no con un sí o un no («pregunta por el día»);
+  - la frase de la oferta tiene un solo sujeto («un solo sujeto»: no «Con AXIS cargas la nómina y procesa…»);
+  - la respuesta no se excusa con las palabras del encargo («destinatarios observados», «su correo observado», «el encargo no
+    trae destinatarios»);
+  - si el usuario ya dice que no le respondieron, la respuesta no agrega «no veo si respondió porque tu correo no está conectado»;
+    solo ofrece «si te respondió por fuera de ANTON.IA, avísame y lo ajusto» cuando eso cambiaría lo que propone;
+  - un correo escrito para una persona no se ofrece a otros contactos.
+
+  Cada chequeo nuevo se probó contra las 84 respuestas de la ronda 10 ya puntuadas: marcan las que perdieron puntos y ninguna de 5.
 
 **Coordinador** (`src/lib/cowork/agent-instructions.ts`, v10): cuando el usuario pide escribirles a sus contactos, lee quién tiene
 correo y a quién ya se le escribió (`contacted.search` con la consulta vacía), deja fuera a quien ya recibió un primer correo y le
-ofrece su seguimiento aparte. Un correo o una secuencia para un cargo o un rubro sigue siendo genérico.
+ofrece su seguimiento aparte. Un correo o una secuencia para un cargo o un rubro sigue siendo genérico. v11: al mejorar un correo
+pegado, las notas del encargo nunca piden quitar la demo o la reunión que el correo pide (en la v11 preliminar, Luna escribió
+«evita la petición vaga de coordinar una demo» y la Redactora la quitó).
 
 **Pulido determinista** (`coworkPolishDraft`): la prueba citada dentro de una frase queda en minúscula y sin comillas. Era el
-defecto típico de Sol («: Procesa 1.000…»).
+defecto típico de Sol («: Procesa 1.000…»). v11: si la oferta aparece después de la apertura en el mismo párrafo, pasa a su propio
+párrafo (`coworkSplitOffer`); no cambia ninguna palabra.
 
 **Modelos:**
 - v11: `COWORK_WRITER_SEQUENCE_MODEL` y `COWORK_WRITER_SEQUENCE_EFFORT` para redactar solo las secuencias con otro modelo (su
