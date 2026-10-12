@@ -3,6 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 type Telemetry = { modelName: string; durationMs: number; usage?: {
   prompt_tokens?: number; completion_tokens?: number; total_tokens?: number;
   prompt_tokens_details?: { cached_tokens?: number };
+  /** Claude's 5-minute cache writes: already inside prompt_tokens, billed at 1.25 times the input price. */
+  cache_creation_input_tokens?: number;
 } | null };
 
 /** Prices are explicit configuration, never guessed from a model family.
@@ -13,6 +15,7 @@ export function coworkModelUsage(telemetry: Telemetry, pricing = process.env.COW
   const outputTokens = count(telemetry.usage?.completion_tokens);
   const totalTokens = count(telemetry.usage?.total_tokens);
   const cachedInputTokens = count(telemetry.usage?.prompt_tokens_details?.cached_tokens);
+  const cacheWriteTokens = telemetry.usage?.cache_creation_input_tokens === undefined ? 0 : count(telemetry.usage.cache_creation_input_tokens);
   let price: { version: string; inputUsdPerMillion: number; outputUsdPerMillion: number; cachedInputUsdPerMillion: number } | null = null;
   try {
     const item = JSON.parse(pricing || '{}')[telemetry.modelName];
@@ -23,9 +26,10 @@ export function coworkModelUsage(telemetry: Telemetry, pricing = process.env.COW
         outputUsdPerMillion: item.outputUsdPerMillion, cachedInputUsdPerMillion: item.cachedInputUsdPerMillion };
     }
   } catch { /* Unknown pricing must not prevent recording real usage. */ }
-  const costUsd = price && inputTokens !== null && outputTokens !== null && cachedInputTokens !== null && cachedInputTokens <= inputTokens
-    ? ((inputTokens - cachedInputTokens) * price.inputUsdPerMillion + cachedInputTokens * price.cachedInputUsdPerMillion
-      + outputTokens * price.outputUsdPerMillion) / 1_000_000 : null;
+  const costUsd = price && inputTokens !== null && outputTokens !== null && cachedInputTokens !== null && cacheWriteTokens !== null
+    && cachedInputTokens + cacheWriteTokens <= inputTokens
+    ? ((inputTokens - cachedInputTokens + cacheWriteTokens * 0.25) * price.inputUsdPerMillion
+      + cachedInputTokens * price.cachedInputUsdPerMillion + outputTokens * price.outputUsdPerMillion) / 1_000_000 : null;
   return { model: telemetry.modelName.slice(0, 200), durationMs: count(telemetry.durationMs),
     inputTokens, outputTokens, totalTokens, cachedInputTokens, costUsd, pricing: price };
 }

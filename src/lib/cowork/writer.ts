@@ -64,8 +64,8 @@ export const COWORK_WRITER_RULES = [
   'Respuestas dentro de conversaciones ya abiertas (notes lo dice y observations trae el replies.thread de cada persona): un bloque email_draft por persona, con to su correo y asunto «Re: » más el asunto del envío original tal como lo trae su lectura, sin cambiarlo; cada correo contesta solo lo que esa persona escribió, sin inventar precios, plazos ni fechas, y lo que debe decidir el usuario no va en el texto. No es una campaña: question no la ofrece; ofrece el paso que dicen notes o findings, con esas palabras: si es proponer el envío de la primera respuesta, «¿Propongo enviar primero la de <nombre>?» (no «¿Apruebas…?»: aún no hay tarjeta que aprobar), y nunca aprobar todas juntas. Los borradores no se aprueban: no digas que se aprueban en su tarjeta; di que cada envío se aprueba cuando se proponga.',
   'El correo es el texto que se envía: nunca lleva notas para el usuario ni lo que no sabes («no tengo más antecedentes de la empresa»); eso va en reply.',
   'Si observations trae opportunities.list con la empresa del destinatario, su signal es un hecho público con fuente y fecha: puedes abrir con él («Vi que publicaron 14 avisos para operarios en septiembre») sin cambiar sus cifras ni deducir necesidades que no dice.',
-  'Seguimiento de un correo ya enviado (lo dicen objective, notes u observations): abre retomándolo en media frase («Te escribí el 19 de septiembre sobre…») y aporta lo que el primero no tenía: otro ángulo de la misma oferta (un uso concreto en su día a día, otro servicio de userContext.services o una consecuencia distinta de hacerlo a mano), con una pregunta más fácil que la del primero; no repitas su presentación ni su prueba. De 40 a 70 palabras.',
-  'Secuencia (kind sequence): steps correos (3 si no se indica), cada uno con day (el primero es 1; luego 3, 7, 11, 16, 23, 38 según la cantidad), asunto y cuerpo. Cada correo tiene su papel y no repite el planteamiento de los otros: el 1 nombra el momento en que la tarea le pesa en su rubro, presenta la oferta en una frase con su prueba y pregunta cuánto les toma hoy; el 2 abre con un momento concreto de su semana («cuando la nómina llega encima de la fecha de ingreso») y pregunta cómo lo hacen hoy o quién lo hace, sin describir la oferta y sin pedir una reunión; el 3 muestra un uso concreto en el día a día del rol y pregunta si le sirve verlo con un caso suyo; los siguientes, un criterio de decisión o una pregunta más fácil; el último cierra en dos frases. Ninguno dice en abstracto lo que ya se sabe («coordinar esa tarea se vuelve parte del día a día», «tener los resultados a mano ayuda a revisar…», «AXIS es una alternativa»): cada uno dice algo concreto. Cada correo tiene de 40 a 80 palabras y cierra con una sola pregunta, y ninguna repite la de otro correo con otras palabras. La prueba va solo en el primero. Desde el segundo, la oferta se nombra solo por su nombre. Solo el último puede decir que es el último mensaje; ninguno dice «retomo», «vuelvo a escribirte» ni «no respondiste».',
+  'Seguimiento de un correo ya enviado (lo dicen objective, notes u observations): abre retomándolo en media frase («Te escribí el 19 de septiembre sobre…»), sigue con un momento de su rubro y su consecuencia en el negocio («en alimentación, cuando la nómina llega cerca del inicio de un contrato, revisarla uno por uno retrasa la entrada del personal a cocina») y aporta lo que el primero no tenía: otro ángulo de la misma oferta (un uso concreto en su día a día, otro servicio de userContext.services o una consecuencia distinta de hacerlo a mano), con una pregunta más fácil que la del primero; no repitas su presentación ni su prueba. De 40 a 70 palabras.',
+  'Secuencia (kind sequence): steps correos (3 si no se indica), cada uno con day (el primero es 1; luego 3, 7, 11, 16, 23, 38 según la cantidad), asunto y cuerpo. Cada correo tiene su papel y no repite el planteamiento de los otros: el 1 nombra el momento en que la tarea le pesa en su rubro, presenta la oferta en una frase con su prueba y pregunta cuánto les toma hoy; el 2 abre con un momento concreto de su semana («cuando la nómina llega encima de la fecha de ingreso») y pregunta cómo lo hacen hoy o quién lo hace, sin describir la oferta y sin pedir una reunión; el 3 muestra un uso concreto en el día a día del rol y pregunta si le sirve verlo con un caso suyo; los siguientes, un criterio de decisión o una pregunta más fácil; el último cierra en dos frases. Ninguno dice en abstracto lo que ya se sabe («coordinar esa tarea se vuelve parte del día a día», «tener los resultados a mano ayuda a revisar…», «AXIS es una alternativa»): cada uno dice algo concreto. Las preguntas de los correos que no son el último son sobre su trabajo de hoy y no nombran la oferta («¿Quién prepara hoy la nómina?», no «¿Quién carga los nombres en AXIS?»). Cada correo tiene de 40 a 80 palabras y cierra con una sola pregunta, y ninguna repite la de otro correo con otras palabras. La prueba va solo en el primero. Desde el segundo, la oferta se nombra solo por su nombre. Solo el último puede decir que es el último mensaje; ninguno dice «retomo», «vuelvo a escribirte» ni «no respondiste».',
   'Salida: reply en 2 a 5 frases que expliquen lo que escribiste, sin repetir el texto de los correos: si brief.findings no es null, parte por lo que ahí le sirve al usuario (cifras, a quiénes va, quiénes quedan fuera y por qué, lo que no se puede hacer) sin agregar datos; después di a quién va, qué ángulo usaste y por qué (de qué dato de la persona, de su empresa o de la oferta sale), nombrando solo a quienes están en los bloques. No menciones reglas internas (contexto de redacción, términos prohibidos, ofertas o afirmaciones aprobadas, la revisión) ni uses sus palabras: nada de «dato aprobado», «afirmación aprobada», «sincronización del buzón», «cobertura del buzón» o «según el dato de tu perfil»; di «el resultado que cargaste en tu Perfil» o «no veo si respondió porque tu correo no está conectado a ANTON.IA». No le expliques al usuario qué hace su propia oferta ni lo que evitaste suponer («sin asumir…», «sin atribuirles…», «sin dar por hecho…»): lo que no consta simplemente no se afirma. Si no ves sus respuestas, dilo una sola vez. blocks lleva el email_draft (kind email; uno por persona si son 2 o 3) o un sequence (kind sequence), cada uno con title específico; si escribiste uno por persona, reply lo dice en una frase («Escribí un correo para cada uno, con lo propio de su rubro») y que la campaña usa cada uno como su primer correo. question propone el paso siguiente que Cowork hace con aprobación: si hay destinatarios con correo, crear la campaña pausada con ellos («¿Creo la campaña pausada para Felipe y Camila?»); si el encargo no trae destinatarios, usarla en una campaña pausada con los contactos que calzan («¿La uso en una campaña pausada para tus contactos de RR. HH. con correo?»), sin decir que falta algo: lo que entregas está completo. Si mejoraste un correo que el usuario pegó y enviará él (a un grupo o a alguien que no está en sus contactos), question no ofrece una campaña, ni para ellos ni para otros contactos: va null, y suggestions ofrece ajustes que Cowork hace («Hazlo más corto», «Tono más cercano»). Nunca preguntes si lo dejas como borrador, listo para enviar o para copiar: ya está a la vista. Si request pide el correo como archivo (Word o PDF), reply lo dice en una frase: la tarjeta se baja con su botón «Descargar», en Word o PDF; nunca digas que no puedes entregar o adjuntar un archivo. suggestions trae 1 a 3 respuestas que el usuario tocaría; si hay question, la primera le dice que sí.',
   'Si recibes issues, corrige exactamente eso y conserva todo lo demás igual. reply no menciona la corrección: el usuario no vio la versión anterior.',
   'referenceClock fija la fecha de este trabajo. Para fechas relativas usa solo esa referencia y la fecha observada del envío; seis días nunca son «hace unas semanas». Sin una referencia temporal suficiente, escribe «Te escribí sobre…» o conserva la fecha exacta observada, sin inventar antigüedad. Al editar el correo original conserva el contexto temporal que el usuario declaró salvo que pida cambiarlo.',
@@ -204,10 +204,15 @@ const ANNOUNCES = /\bpara (?:entender|ubicar|situar|aterrizar|ordenar|conversar 
 // «Cierro estos mensajes con…»): the reader does not know there is a sequence.
 const SELF_REFERENCE = /\b(?:cierro|termino|cerrar|terminar) (?:la|esta) secuencia\b|\bcon este (?:correo|mensaje)\b|\bestos (?:mensajes|correos)\b|\bcierro con\b/;
 // A closing that asks whether the offer «fits» instead of something the person answers in a line («para ver si calza»).
-const FORMULA = /\b(?:ver si (?:calza|encaja|sirve|te sirve|les sirve)|como (?:encaja|calza|podria (?:servir|ayudar|apoyar))|podria (?:servir|ayudar|apoyar) en|te serviria conocer|(?:te|les) (?:seria|resultaria) (?:relevante|util|interesante)|es relevante)\b|\bsi (?:[a-z]+ )?(?:calza|encaja)\b/;
+const FORMULA = /\b(?:ver si (?:calza|encaja|sirve|te sirve|les sirve)|como (?:encaja|calza|podria (?:servir|ayudar|apoyar))|podria (?:servir|ayudar|apoyar) en|te serviria conocer|(?:te|les) (?:seria|resultaria) (?:relevante|util|interesante)|es (?:un tema )?relevante|(?:estan|estas) evaluando)\b|\bsi (?:[a-z]+ )?(?:calza|encaja)\b/;
 // A benefit said in the abstract instead of something that happens («tener los resultados a mano ayuda a revisar…», «contar con el
 // respaldo facilita…», «…para apoyar esa revisión»): it fits any offer and any reader.
-const VAGUE_BENEFIT = /\b(?:tener|contar con|disponer de|encontrar)\b[^.!?]{0,80}\b(?:ayuda a|facilita|permite)\b|\bpara apoyar (?:esa|ese|esta|este|la|el)\b/;
+const VAGUE_BENEFIT = /\b(?:tener|contar con|disponer de|encontrar|dejar|reunir)\b[^.!?]{0,80}\b(?:ayuda al?|facilita|permite)\b|\bpara apoyar (?:esa|ese|esta|este|la|el)\b/;
+// A cost said in the abstract where the consequence in their business goes («suma trabajo manual», «concentra el trabajo manual»,
+// «ocupa tiempo que el equipo necesita», «suma pasos»): 8 of 63 answers of the v8 reading, none above 4. It counts only when the
+// sentence does not also say what is delayed or who waits.
+const ABSTRACT_COST = /\b(?:suma|agrega|concentra|ocupa|consume|quita)\b(?: [a-zñ]+){0,2}? (?:trabajo manual|trabajo|tiempo|pasos|carga|horas)\b/;
+const CONCRETE_COST = /\b(?:atrasa|retrasa|demora|posterga|esperando|sin cubrir)\b|\bdeja (?:a |al |turnos|puestos|vacantes|ingresos|postulantes|personas)/;
 // Reopening an email already sent («Te escribí el 19 de septiembre sobre…»).
 const REOPENS = /^(?:te escribi|les escribi|hace (?:unos|algunos) dias te escribi|retomo|vuelvo a escribirte)\b/;
 // Capabilities said one after another: three of these verbs in one email are a list of functions.
@@ -227,6 +232,13 @@ function openingSentence(body: string) {
   const lines = body.split('\n').map(line => line.trim()).filter(Boolean);
   const start = lines.length && GREETING.test(lines[0]) ? 1 : 0;
   return normalize(lines.slice(start).join(' ')).split(/(?<=[.?!])\s/)[0] || '';
+}
+
+/** The sentence after the reopening of a follow-up («Te escribí el 19 de septiembre sobre…. Cuando…»), accent-free and lowercase. */
+function consequenceAfterReopen(body: string) {
+  const lines = body.split('\n').map(line => line.trim()).filter(Boolean);
+  const start = lines.length && GREETING.test(lines[0]) ? 1 : 0;
+  return normalize(lines.slice(start).join(' ')).split(/(?<=[.?!])\s/)[1] || '';
 }
 
 /** A proof of the profile cited with another tense or a bigger claim («hemos procesado», «más de 1.000»), or null. */
@@ -251,6 +263,24 @@ function citedProof(text: string, proofs: string[]) {
     const numbers = normalize(proof).match(NUMBER) || [];
     return numbers.length > 0 && numbers.every(number => plain.includes(number));
   }) ?? null;
+}
+
+/** The offer named only next to its proof («AXIS procesa 1.000 personas en unos 30 minutos.»): the email says how fast, not what
+ * it does (12 oct reading, per-person emails). The name as written in the email, or null. */
+function proofWithoutCapability(body: string, proofs: string[], products: string[]): string | null {
+  const proof = citedProof(body, proofs);
+  if (!proof || !products.length) return null;
+  const cited = normalize(proof).replace(/[.!]+$/, '').trim();
+  const named = (sentence: string) => products.some(name => new RegExp(`\\b${escapeRegex(name)}\\b`).test(sentence));
+  const sentences = statements(body).filter(named);
+  const bare = sentences.length > 0 && sentences.every(sentence => {
+    let rest = sentence.replace(cited, ' ');
+    for (const name of products) rest = rest.replace(new RegExp(`\\b${escapeRegex(name)}\\b`, 'g'), ' ');
+    return !rest.split(/[^a-zñ]+/).some(word => word.length > 3);
+  });
+  if (!bare) return null;
+  const name = products.find(item => new RegExp(`\\b${escapeRegex(item)}\\b`).test(sentences[0])) ?? products[0];
+  return body.match(new RegExp(`\\b${escapeRegex(name)}\\b`, 'i'))?.[0] ?? name;
 }
 
 /** A line between the closing question and the signature that is neither a sign-off nor part of the signature («AXIS»), or null. */
@@ -383,6 +413,9 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     const pitch = PITCH.exec(plain);
     if (pitch) issues.push({ where, problem: `Presenta el producto como un catálogo («${pitch[0]}»).`,
       fix: 'Di qué cambia para la persona con una sola capacidad, en presente.', short: 'sin frases de catálogo' });
+    const bare = index === 0 && !REOPENS.test(opening) ? proofWithoutCapability(email.body, context.proofs ?? [], context.products ?? []) : null;
+    if (bare) issues.push({ where, problem: `De ${bare} solo dice la prueba: no dice qué hace.`,
+      fix: `Di qué hace ${bare} por la persona, con una sola capacidad, y deja la prueba en esa misma frase.`, short: 'qué hace la oferta' });
     const capabilities = new Set(statements(email.body).flatMap(sentence => sentence.match(CAPABILITY) || []));
     if (capabilities.size >= 3) issues.push({ where, problem: `Enumera funciones (${[...capabilities].join(', ')}): son demasiadas para un correo.`,
       fix: 'Deja una sola capacidad, la que resuelve el momento de la primera frase.', short: 'una sola capacidad' });
@@ -400,6 +433,11 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     const itself = statements(email.body).map(sentence => SELF_REFERENCE.exec(sentence)?.[0]).find(Boolean);
     if (itself) issues.push({ where, problem: `Habla del propio correo o de la secuencia («${itself}»): la persona no sabe que hay una secuencia.`,
       fix: 'Quita esa frase y di directo lo que el correo aporta.', short: 'sin hablar del correo' });
+    // The consequence: the opening, or in a follow-up the sentence after «Te escribí…».
+    const consequence = REOPENS.test(opening) ? consequenceAfterReopen(email.body) : opening;
+    const cost = ABSTRACT_COST.exec(consequence);
+    if (cost && !CONCRETE_COST.test(consequence)) issues.push({ where, problem: `Dice un costo en abstracto («${cost[0]}»): no dice qué se atrasa en su negocio.`,
+      fix: 'Di qué pasa en su negocio por hacerlo a mano: quién queda esperando o qué se atrasa («el guardia que no puede tomar su turno», «el candidato que no llega al cliente»).', short: 'consecuencia concreta' });
     const repeated = repeatedInOpening(email.body);
     if (repeated) issues.push({ where, problem: `La primera frase repite una palabra («${repeated}»).`,
       fix: 'Dila de nuevo sin repetir: la segunda vez usa otra palabra o quítala.', short: 'apertura sin repetir' });
@@ -433,6 +471,16 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
         fix: 'Usa {{empresa}} una vez, en la apertura o en la pregunta: la campaña pone la de cada persona.', short: 'con {{empresa}}' });
     }
     if (block.type === 'sequence') {
+      const names = (context.products ?? []).map(name => new RegExp(`\\b${escapeRegex(name)}\\b`));
+      block.steps.forEach((step, index) => {
+        // What the email says between the greeting and its closing question (the signature names the seller's company).
+        const ask = step.body.lastIndexOf('¿');
+        const said = statements(ask >= 0 ? step.body.slice(0, ask) : step.body).slice(1);
+        if (block.steps.length >= 3 && index === 1 && said.some(sentence => names.some(name => name.test(sentence)))) issues.push({ where: `«${block.title}», correo 2`,
+          problem: 'El correo 2 vuelve a describir la oferta.', fix: 'Quita esa frase: el correo 2 nombra un momento concreto de su semana y pregunta cómo lo hacen hoy o quién lo hace.', short: 'correo 2 sin la oferta' });
+        if (index < block.steps.length - 1 && names.some(name => name.test(closingQuestion(step.body)))) issues.push({ where: `«${block.title}», correo ${index + 1}`,
+          problem: 'La pregunta nombra la oferta como si ya la usaran.', fix: 'Pregunta por su trabajo de hoy, sin nombrar la oferta: quién lo hace, cómo lo hacen o cuántos.', short: 'pregunta sobre su trabajo' });
+      });
       const first = block.steps.findIndex(step => citedProof(step.body, context.proofs ?? []));
       block.steps.forEach((step, index) => {
         if (first >= 0 && index > first && citedProof(step.body, context.proofs ?? [])) issues.push({ where: `«${block.title}», correo ${index + 1}`,
