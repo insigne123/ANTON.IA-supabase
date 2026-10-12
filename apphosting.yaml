@@ -287,10 +287,11 @@ env:
   - variable: LEADS_FINDER_MAX_RUN_USD
     value: "0.50"
     availability: [RUNTIME]
-  # Hybrid foundation + accounting migrations and scheduler must be verified
-  # before activation. Fixed server caps: USD1.50/run, USD20/month/workspace.
+  # Activation authorized 12 Oct. Production SQL versions 20261012142946 and
+  # 20261012143054 verified; fixed caps USD1.50/run, USD20/month/workspace.
+  # Worker microworldsSearchTick is published before this rollout receives traffic.
   - variable: MICROWORLDS_HYBRID_ENABLED
-    value: "false"
+    value: "true"
     availability: [RUNTIME]
   # Pipeline: cinco columnas, dos triggers y lectura privada de eventos verificados.
   - variable: CRM_DEAL_VALUES_ENABLED
