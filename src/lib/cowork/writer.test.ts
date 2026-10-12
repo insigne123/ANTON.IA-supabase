@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkPolishDraft, coworkReplyIssues, coworkPolishProofs, coworkReviewIssues, coworkSplitOffer, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkNextStepIssues, coworkPolishDraft, coworkReplyIssues, coworkPolishProofs, coworkReviewIssues, coworkSplitOffer, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos para {{empresa}}.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
@@ -699,4 +699,73 @@ test('the v11 reading: the hiring delayed with nobody waiting, two capabilities 
   assert.deepEqual(third('Este es mi último mensaje sobre esto.\n\nCuando alguien pregunta por un ingreso, buscar el respaldo toma horas.\n\nAXIS deja evidencia auditable de cada consulta.'),
     ['«Secuencia AXIS», correo 3 · cierre junto a la pregunta']);
   assert.deepEqual(third('Cuando alguien pregunta por un ingreso, buscar el respaldo toma horas.\n\nAXIS deja evidencia auditable de cada consulta. Este es mi último mensaje.'), []);
+});
+
+test('the v12 reading: long closing questions, the brief\'s words in the reply, and a next step for emails with an address', async () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: true, products: ['axis'] };
+  const ask = (question: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes',
+    body: `Hola,\n\nCuando entran muchas personas a la vez, revisar uno por uno los antecedentes deja a quienes esperan sin empezar.\n\nAXIS consulta por lote.\n\n${question}\n\nNicolás Y.` }], checks)
+    .map(issue => issue.short);
+  for (const long of ['¿Qué día de esta semana les acomoda una conversación breve para ver cómo lo harían con sus postulantes?',
+    '¿Te acomoda una llamada de 15 minutos el martes o el miércoles para ver cómo lo harías con tus postulantes?'])
+    assert.deepEqual(ask(long), ['pregunta corta'], long);
+  assert.deepEqual(ask('¿Qué día de esta semana te acomoda una reunión breve para verlo?'), []);
+  // The words of the brief and the reads are not the person's: «observados», «este encargo».
+  for (const reply of ['Mantuve el saludo al grupo; como no hay nombres observados, queda «Hola,».', 'No lo asigné a destinatarios porque no hay contactos en este encargo.'])
+    assert.deepEqual(coworkReplyIssues(reply).map(issue => issue.short), ['respuesta sin jerga'], reply);
+  assert.deepEqual(coworkReplyIssues('Mantuve el saludo al grupo y la invitación a la demo.'), []);
+  // Emails with an address offer the next step: the paused campaign, or in an open conversation, sending the first reply.
+  const to = (subject: string, address: string[] | null) => [{ type: 'email_draft' as const, title: 'Correo para Felipe', to: address, subject, body: 'Hola Felipe,' }];
+  assert.deepEqual(coworkNextStepIssues({ blocks: to('Antecedentes en Securitas', ['fmunoz@securitas.cl']), question: null }).map(issue => issue.short), ['paso siguiente']);
+  assert.match(coworkNextStepIssues({ blocks: to('Re: Antecedentes', ['fmunoz@securitas.cl']), question: null })[0].fix, /¿Propongo enviar primero/);
+  assert.deepEqual(coworkNextStepIssues({ blocks: to('Antecedentes en Securitas', ['fmunoz@securitas.cl']), question: '¿Creo la campaña pausada para Felipe?' }), []);
+  assert.deepEqual(coworkNextStepIssues({ blocks: to('Antecedentes', null), question: null }), []);
+  // In a turn, the Writer is asked for it, unless the person asked for the campaign in the request (the coordinator proposes it next).
+  const felipe = 'Hola Felipe,\n\nEn seguridad privada, cuando entra un grupo de guardias, revisar uno por uno sus antecedentes deja turnos sin cubrir.\n\nAXIS consulta por lote.\n\n¿Cuántos ingresos revisan al mes en Securitas?\n\nNicolás Yarur\nGerente Comercial, Yago';
+  const lone: CoworkWriterOutput = { reply: 'Escribí el correo para Felipe.', question: null, suggestions: [{ label: 'Hazlo más corto', message: 'Hazlo más corto' }],
+    blocks: [{ type: 'email_draft', title: 'Correo para Felipe', to: ['fmunoz@securitas.cl'], subject: 'Antecedentes en Securitas', body: felipe }] };
+  const asked = { ...lone, question: '¿Creo la campaña pausada para Felipe?' };
+  const email: CoworkWriteBrief = { ...brief, kind: 'email', recipients: ['Felipe Muñoz'], steps: null };
+  const h = harness([lone, asked]);
+  assert.deepEqual(await h.run({ brief: email }), asked);
+  assert.match(h.calls[1].prompt, /no propone el paso siguiente/);
+  const campaign = harness([lone, { verdict: 'ok', issues: [] }]);
+  assert.deepEqual(await campaign.run({ brief: { ...email, campaign: true } }), lone);
+  assert.deepEqual(campaign.calls.map(call => call.role), ['writer', 'reviewer']);
+  // An email the person pasted to improve is sent by them: no campaign to offer.
+  const pasted = harness([lone, { verdict: 'ok', issues: [] }]);
+  assert.deepEqual(await pasted.run({ brief: email, request: 'mejora este correo: "Hola Felipe, te escribo de Yago para contarte de AXIS, que revisa antecedentes. Saludos."' }), lone);
+  assert.deepEqual(pasted.calls.map(call => call.role), ['writer', 'reviewer']);
+});
+
+test('the v12 reading: the Reviewer\'s «sin respaldo» on a trade\'s consequence goes, and a correction that narrates keeps the first reply', async () => {
+  const recipients = [{ name: 'Felipe Muñoz', email: 'fmunoz@securitas.cl', company: 'Securitas Chile' }, { name: 'Camila Fuentes', email: 'cfuentes@adecco.cl', company: 'Adecco' }];
+  const checks = { ...context, recipients, meeting: false, products: ['axis'] };
+  const body = (name: string, opening: string) => `Hola ${name},\n\n${opening}\n\nAXIS consulta por lote toda la nómina.\n\n¿Quién revisa hoy los antecedentes?\n\nNicolás`;
+  const blocks = (camila: string) => [
+    { type: 'email_draft' as const, title: 'Correo para Felipe', to: ['fmunoz@securitas.cl'], subject: 'Antecedentes en Securitas', body: body('Felipe', 'En seguridad privada, cuando entra un grupo de guardias, revisarlos uno por uno deja turnos sin cubrir.') },
+    { type: 'email_draft' as const, title: 'Correo para Camila', to: ['cfuentes@adecco.cl'], subject: 'Antecedentes en Adecco', body: body('Camila', camila) }];
+  const trade = 'En servicios transitorios, cuando un cliente pide personal para pronto, cada antecedente pendiente es un candidato que no llega a tiempo.';
+  // Named by the person and her first paragraph, or by a quote of the opening: the premise of the trade goes.
+  const byPlace = { where: 'Primer correo a Camila Fuentes, Adecco — primer párrafo', problem: 'Afirmas como hecho que cada antecedente pendiente hará que un candidato no llegue a tiempo, sin respaldo.', fix: 'Suavízalo.', short: 'sin afirmaciones' };
+  const byQuote = { where: 'Primer correo a Camila Fuentes', problem: 'La frase «cada antecedente pendiente es un candidato que no llega a tiempo» atribuye una consecuencia concreta a Adecco sin respaldo.', fix: 'Quítala.', short: 'sin consecuencia inventada' };
+  assert.deepEqual(coworkReviewIssues([byPlace, byQuote], blocks(trade), checks), []);
+  // Said of their company it stays, and so does a claim about the offer («toda la nómina»).
+  assert.deepEqual(coworkReviewIssues([byPlace], blocks(trade.replace('En servicios transitorios', 'En Adecco')), checks), [byPlace]);
+  const offer = { where: 'Correo para Camila — cuerpo', problem: '«Toda la nómina» no está respaldado y puede leerse como una garantía.', fix: 'Quítalo.', short: 'sin garantías' };
+  assert.deepEqual(coworkReviewIssues([offer], blocks(trade), checks), [offer]);
+  // A figure in the opening is not the trade's premise: it stays for the Writer to fix.
+  const figure = { ...byQuote, problem: 'La frase «cada mes llegan 200 candidatos» inventa una cifra sin respaldo.' };
+  assert.deepEqual(coworkReviewIssues([figure], blocks('En servicios transitorios, cada mes llegan 200 candidatos y cada antecedente pendiente es uno que no llega a tiempo.'), checks), [figure]);
+  // A follow-up's premise is the sentence after «Te escribí…».
+  const followUp = [{ type: 'email_draft' as const, title: 'Seguimiento a Marcela', to: ['mrojas@sodexo.cl'], subject: 'Re: Antecedentes',
+    body: 'Hola Marcela,\n\nTe escribí el 19 de septiembre sobre antecedentes laborales. En alimentación, revisar la nómina uno por uno atrasa que lleguen a sus puestos.\n\nAXIS recibe la nómina por archivo.\n\n¿Quién prepara hoy la nómina en Sodexo?\n\nNicolás' }];
+  const reopened = { where: 'Seguimiento a Marcela Rojas, correo', problem: '«atrasa que lleguen a sus puestos» atribuye a Sodexo un efecto concreto no respaldado.', fix: 'Quítalo.', short: 'sin efecto inventado' };
+  assert.deepEqual(coworkReviewIssues([reopened], followUp, { ...checks, recipients: [{ name: 'Marcela Rojas', email: 'mrojas@sodexo.cl', company: 'Sodexo Chile' }] }), []);
+  // A correction that says what it adjusted («Ajusté la consecuencia…») keeps the first draft's reply.
+  const first = output([signed.replace('en minutos', 'gratis'), signed, signed]);
+  const fixed = { ...output([signed, signed, signed]), reply: 'Ajusté la consecuencia para mostrar qué pasa con los postulantes cuando la revisión se demora.' };
+  assert.equal((await harness([first, fixed]).run()).reply, first.reply);
+  assert.match(COWORK_REVIEWER_RULES.join('\n'), /«cada antecedente pendiente es un conductor que no sale a ruta», «el puesto sigue vacío»\) es el planteamiento del correo/);
+  assert.match(COWORK_WRITER_RULES.join('\n'), /fácil de responder en una línea y de menos de 15 palabras/);
 });
