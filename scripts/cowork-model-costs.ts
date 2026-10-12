@@ -5,7 +5,8 @@
 //   node --loader ./scripts/ts-test-loader.mjs scripts/cowork-model-costs.ts [--pricing=prices.json] a.json [b.json …]
 //
 // Per file: calls, tokens and US$ by role and model; the answers that showed an email and what one cost on average, in total and
-// counting only the Writer and the Reviewer (the part a model change for writing moves); seconds per call of each role.
+// counting only the Writer and the Reviewer (the part a model change for writing moves); seconds per call of each role, the median
+// and the 90th percentile (what a production timeout has to allow).
 import { readFileSync } from 'node:fs';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 
@@ -31,9 +32,10 @@ function priced(call: Call) {
 
 const usd = (value: number) => `US$${value.toFixed(5)}`;
 const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-const median = (values: number[]) => {
+/** The value below which a share of the values falls (0.5 the median, 0.9 the slow end a production timeout has to allow). */
+const quantile = (values: number[], share: number) => {
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] : 0;
+  return sorted.length ? sorted[Math.ceil(share * sorted.length) - 1] ?? sorted[sorted.length - 1] : 0;
 };
 
 for (const file of files) {
@@ -63,7 +65,7 @@ for (const file of files) {
   console.log(`\n${file}`);
   for (const [key, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     console.log(`  ${key}: ${group.calls} llamadas · ${group.input} entrada (${group.cached} en caché) · ${group.output} salida · ${usd(group.usd)}`
-      + `${group.unpriced ? ` · ${group.unpriced} sin precio` : ''} · mediana ${(median(group.ms) / 1000).toFixed(1)} s`);
+      + `${group.unpriced ? ` · ${group.unpriced} sin precio` : ''} · mediana ${(quantile(group.ms, 0.5) / 1000).toFixed(1)} s · p90 ${(quantile(group.ms, 0.9) / 1000).toFixed(1)} s`);
   }
   const withEmail = report.outcomes.filter(outcome => outcome.result?.blocks?.some(block => block.type === 'email_draft' || block.type === 'sequence'))
     .map(outcome => perAnswer.get(`${outcome.id}#${outcome.attempt ?? 1}`)).filter((sum): sum is { total: number; writing: number } => Boolean(sum));

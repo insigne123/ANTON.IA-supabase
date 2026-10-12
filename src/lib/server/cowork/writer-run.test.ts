@@ -4,7 +4,8 @@ import { coworkLiveDraft } from '@/lib/cowork/partial-json';
 import type { CoworkWriteBrief } from '@/lib/cowork/writer';
 import { coworkWriterEfforts, coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
 
-const signed = 'Hola,\nEn Yago revisamos antecedentes laborales con AXIS en minutos.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur';
+// A clean first email: it asks nothing of a meeting the request did not ask for («escríbele a Felipe»).
+const signed = 'Hola,\nEn Yago revisamos antecedentes laborales con AXIS en minutos.\n¿Cuántos ingresos revisan al mes?\nNicolás Yarur';
 const draft = {
   reply: 'Te dejo el correo para Felipe.',
   blocks: [{ type: 'email_draft', title: 'Correo a Felipe', to: ['Felipe'], subject: 'Antecedentes en minutos', body: signed }],

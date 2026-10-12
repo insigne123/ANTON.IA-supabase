@@ -80,13 +80,14 @@ export type ClaudeStructuredOptions<T extends z.ZodTypeAny> = {
 };
 
 /** The request: the JSON format, the effort and room for thinking. Thinking stays as the model has it by default
- * (adaptive on the current models); no sampling parameters, which they reject. */
+ * (adaptive on the current models); no sampling parameters, which they reject. The system prompt (a role's fixed rules) is
+ * cached: the correction and the next turns read it at a tenth of the price. */
 export function claudeRequest<T extends z.ZodTypeAny>(opts: ClaudeStructuredOptions<T>) {
   const effort = claudeEffort(opts.reasoningEffort);
   return {
     model: opts.model,
     max_tokens: (opts.maxOutputTokens ?? 6000) + THINKING_ROOM[effort],
-    ...(opts.systemPrompt ? { system: opts.systemPrompt } : {}),
+    ...(opts.systemPrompt ? { system: [{ type: 'text' as const, text: opts.systemPrompt, cache_control: { type: 'ephemeral' as const } }] } : {}),
     messages: [{ role: 'user' as const, content: opts.prompt }],
     output_config: { effort, format: { type: 'json_schema' as const, schema: claudeJsonSchema(opts.schema) } },
   };

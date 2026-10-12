@@ -76,7 +76,7 @@ test('the request carries the format, the effort and room for thinking', () => {
   assert.equal(low.output_config.effort, 'low');
   assert.equal(low.output_config.format.type, 'json_schema');
   assert.equal(low.max_tokens, 10000);
-  assert.equal(low.system, 's');
+  assert.deepEqual(low.system, [{ type: 'text', text: 's', cache_control: { type: 'ephemeral' } }], 'the fixed rules are cached');
   assert.deepEqual(low.messages, [{ role: 'user', content: 'p' }]);
   assert.ok(!('temperature' in low) && !('thinking' in low), 'no sampling and the model\'s own adaptive thinking');
   const max = claudeRequest({ model: 'claude-haiku-5-5', prompt: 'p', schema, maxOutputTokens: 1500, reasoningEffort: 'max' });
