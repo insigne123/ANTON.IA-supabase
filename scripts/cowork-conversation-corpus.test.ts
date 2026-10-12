@@ -352,8 +352,8 @@ test('with the Writer on, a drafting turn hands the emails over and still passes
   const signed = (body: string, index: number) => `Hola {{nombre}},\n${body}\n${questions[index]}\nNicolás Y.\nGerente Comercial, Yago SpA`;
   // The real pipeline with scripted models: the first draft offers something «gratis», the checks catch it and the Writer fixes it.
   const opening = 'Cuando entran muchas personas a la vez, revisar uno por uno sus antecedentes en el PJUD atrasa el ingreso.';
-  const drafts = [[`${opening} AXIS es gratis el primer mes.`, 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.'],
-    [`${opening} AXIS revisa antecedentes en el Poder Judicial.`, 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.']];
+  const drafts = [[`${opening} AXIS es gratis el primer mes.`, 'Cuando coinciden varios ingresos, esa revisión compite con los contratos y la coordinación del equipo.', 'Te muestro AXIS con un caso real.'],
+    [`${opening} AXIS revisa antecedentes en el Poder Judicial.`, 'Cuando coinciden varios ingresos, esa revisión compite con los contratos y la coordinación del equipo.', 'Te muestro AXIS con un caso real.']];
   const write: CorpusWriter = (writeBrief, observations, meta) => runCoworkWriter({
     request: meta.request, brief: writeBrief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step,
     generate: async ({ schema }) => schema.parse({

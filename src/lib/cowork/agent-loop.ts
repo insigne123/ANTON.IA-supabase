@@ -7,7 +7,7 @@ import { coworkSearchCriteriaSchema, coworkSearchStrategy, type CoworkSearchCrit
 import { coworkExplainsSearchScope, coworkMentionsPlaces, coworkSearchScope, coworkSearchScopeNotice, type CoworkSearchDefaults } from './search-scope';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows, collectCoworkRecommendedLeadIds } from './lead-export';
-import { coworkCampaignEmails, coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
+import { coworkCampaignEmails, coworkEditedEmails, coworkOnlyUsesVersion, coworkPersonalEmails, type CoworkEditedEmail, type CoworkPersonalEmail } from './blocks';
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { coworkRequestedMetricQuery } from './metric-period';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
@@ -414,7 +414,9 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
 }
 
 /** Run a previous completed (or the current paused) work whose events hold observations. */
-export type CoworkHistoryTurn = { runId: string; observations: unknown[] };
+export type CoworkHistoryTurn = { runId: string; observations: unknown[];
+  /** The cards of that answer (emails, sequences, tables): a campaign asked for next carries the first email it wrote for each person. */
+  blocks?: ReadonlyArray<{ type: string }> };
 
 /** A decision the loop refuses but the model can correct on its next decision.
  * The run only fails if the last decision is still invalid. */
@@ -592,6 +594,11 @@ const offeredReadFeedback = (question: string) => `Tu respuesta termina ofrecien
 const LEAVES_FOR_LATER = /(?<!\p{L})(?:despu[ée]s|luego|m[áa]s tarde|en otro momento|voy a|te aviso|te indicar[ée])(?!\p{L})/iu;
 // «Sí, créala»: a quick reply that answers a question, which then has to be there.
 const SAYS_YES = /^\s*s[íi](?!\p{L})/iu;
+const WRITER_FIRST = 'Los correos los escribe la Redactora, no tú: no los pongas en answer.blocks. Elige draft.write con write {kind, recipients, objective, angle, tone, steps, notes, findings}: ella los escribe y la Revisora los revisa antes de mostrarlos.';
+// A yes to the campaign the previous answer offered («Sí, crea la campaña pausada», «dale», «créala»)…
+const TAKES_OFFER = /^\s*(?:s[íi]|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|cr[ée]ala|cr[ée]a la campa[ñn]a|arma la campa[ñn]a)(?!\p{L})/iu;
+// …that does not ask to change its emails («sí, pero con un solo texto para todos»).
+const CHANGES_OFFER = /(?<!\p{L})(?:pero|aunque|cambia\w*|mismo texto|un solo (?:texto|correo)|sin personalizar)(?!\p{L})/iu;
 
 /** read: the turn consulted something. A chat answer (nothing read) that already offers its quick replies closes on them, as in
  * any AI chat (Plan 13): asking for a question too cost another call and mostly repeated a chip. Leaving something for later,
@@ -667,6 +674,17 @@ export function coworkCampaignWithExactEmails(campaign: z.infer<typeof coworkCam
     return { subject: email.subject, body: email.body, delayDays };
   });
   return { ...campaign, messages, firstEmails: [] };
+}
+
+/** A campaign to people the Writer wrote one email each for: that email, word for word, is their first one (firstEmails); whatever the
+ * model wrote for them is replaced, and people without one keep the common first email. */
+export function coworkCampaignWithPersonalEmails(campaign: z.infer<typeof coworkCampaignDraftSchema>, personal: CoworkPersonalEmail[]) {
+  const recipients = new Set(campaign.emails.map(email => email.trim().toLowerCase()));
+  const own = personal.filter(item => recipients.has(item.email));
+  if (!own.length) return campaign;
+  const others = campaign.firstEmails.filter(item => !own.some(mine => mine.email === item.email.trim().toLowerCase()));
+  const next = { ...campaign, firstEmails: [...others, ...own] };
+  return coworkCampaignDraftSchema.safeParse(next).success ? next : campaign;
 }
 
 /** What a proposed campaign does, when the model left no explanation of its own. */
@@ -1005,11 +1023,14 @@ async function runCoworkLoop(input: {
   let offeredText: string | null = null;
   // A search that dropped or changed the place asked for goes back once (Plan 14, 1); after that, the card shows its criteria.
   let scopeCorrected = false;
+  // An answer that carried emails the coordinator wrote itself, sent back once to the Writer; it stands if the Writer fails.
+  let coordinatorEmails: CoworkAnswer | null = null;
+  let writerFailed = false;
   // The turn's last word when it would fail (Plan 14, 2): an answer already given stands first; then, once, the rescue.
   let rescued = false;
   const rescueOr = async (error: unknown): Promise<CoworkAnswer> => {
     if (input.signal.aborted) throw error;
-    const standing = closingFallback ?? judgedFallback ?? written?.answer ?? null;
+    const standing = closingFallback ?? judgedFallback ?? written?.answer ?? coordinatorEmails ?? null;
     if (standing && (error instanceof CoworkDecisionRejected || coworkTurnFailure(error))) return standing;
     const failure = input.rescue && !rescued ? coworkTurnFailure(error) : null;
     if (!failure) throw error;
@@ -1050,7 +1071,7 @@ async function runCoworkLoop(input: {
   }
   // Emails the Writer wrote when the person asked for the campaign in the same request (Plan 12, 4a-2): the next
   // decision proposes it with them, word for word. Whatever happens after, the Writer's answer is never lost.
-  let written: { emails: CoworkEditedEmail[]; answer: CoworkAnswer } | null = null;
+  let written: { emails: CoworkEditedEmail[] | null; personal: CoworkPersonalEmail[] | null; answer: CoworkAnswer } | null = null;
   for (let turn = 0; turn <= last; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
@@ -1088,7 +1109,7 @@ async function runCoworkLoop(input: {
         }
         // On the last decision nobody is left to write it: the answer that got the closing
         // correction, or a line that offers to try again, instead of a failed turn.
-        const lastResort = () => closingFallback ?? judgedFallback ?? writerFallback(input.message);
+        const lastResort = () => closingFallback ?? judgedFallback ?? coordinatorEmails ?? writerFallback(input.message);
         if (!input.write) {
           if (turn === last) return lastResort();
           throw rejected('Writer unavailable', 'La redacción delegada no está disponible: entrega tú el texto en answer.blocks (regla 11).');
@@ -1106,16 +1127,23 @@ async function runCoworkLoop(input: {
           await input.onWriteDelivery?.(answer);
         } catch (error) {
           if (input.signal.aborted) throw error;
+          writerFailed = true;
           if (turn === last) return lastResort();
           // A failed Writer does not end the turn: the coordinator writes it, as before.
           throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11).');
         }
-        const emails: CoworkEditedEmail[] | null = decision.write.campaign && !written && turn < last && input.proposeEffect ? coworkCampaignEmails(answer.blocks) : null;
-        if (!emails) return withRememberSuggestion(answer);
-        written = { emails, answer };
-        observations.push({ action: COWORK_WRITTEN_ACTION, input: '', result: {
+        const asked: boolean = Boolean(decision.write.campaign && !written && turn < last && input.proposeEffect);
+        const emails: CoworkEditedEmail[] | null = asked ? coworkCampaignEmails(answer.blocks) : null;
+        // One email per person (Plan 15): each becomes that person's first email in the campaign.
+        const personal: CoworkPersonalEmail[] | null = asked && !emails ? coworkPersonalEmails(answer.blocks) : null;
+        if (!emails && !personal) return withRememberSuggestion(answer);
+        written = { emails, personal, answer };
+        observations.push({ action: COWORK_WRITTEN_ACTION, input: '', result: emails ? {
           scope: 'writer_output', emails,
           next: 'La Redactora ya escribió estos correos y el usuario pidió la campaña: propón ahora campaign.create con ellos (la app copia su texto) a los contactos guardados con correo que leíste. En answer.reply di a quiénes va, cuántos correos lleva y que queda pausada hasta otra aprobación; no hables de versiones anteriores ni nombres el remitente si no lo leíste en app.context. Si nadie puede recibirla, responde con answer y di por qué; los correos se muestran igual.',
+        } : {
+          scope: 'writer_output', firstEmails: personal,
+          next: 'La Redactora ya escribió el primer correo de cada persona y el usuario pidió la campaña: propón ahora campaign.create con emails sus correos (la app copia el texto de cada una como su primer correo) y, en messages, un primer correo común con «Hola {{nombre}},» para quien quede sin el suyo. En answer.reply di a quiénes va, que cada una recibe su propio primer correo y que queda pausada hasta otra aprobación; no hables de versiones anteriores ni nombres el remitente si no lo leíste en app.context. Si nadie puede recibirla, responde con answer y di por qué; los correos se muestran igual.',
         } });
         continue;
       }
@@ -1166,6 +1194,15 @@ async function runCoworkLoop(input: {
         // The campaign was not proposed after all: the Writer's emails are the answer, as without 4a-2.
         if (written) return written.answer;
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
+        // Emails go through the Writer (its checks, the Reviewer and one correction) while it can still write: an answer that
+        // carries them itself goes back once as a draft.write, and stands if the Writer then fails (v7 reading: one written this
+        // way had every defect the checks catch). A version the person sent, or a Writer that already failed, is not sent back.
+        if (input.write && !coordinatorEmails && !writerFailed && !keepsVersionOnly && !coworkEditedEmails(input.message) && turn < last && !late()
+          && !closingFallback && !judgedFallback && coworkBlocks(decision.answer.blocks).some(block => block.type === 'email_draft' || block.type === 'sequence')) {
+          coordinatorEmails = decision.answer;
+          rejections.push({ action: 'answer', reason: WRITER_FIRST });
+          continue;
+        }
         // The reports it names go complete in document, written by the app from what this turn read (report-document.ts).
         decision.answer = withCoworkReports(decision.answer, observations);
         if (closingFallback) return completeFrom(closingFallback, decision.answer);
@@ -1358,10 +1395,15 @@ async function runCoworkLoop(input: {
           : decision.action === 'email.reply_thread' ? decision.replyThread?.contactedId ?? null
           : decision.leadId;
         const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) ?? written?.emails ?? null : null;
+        // The first email the Writer wrote for each person, in this turn or in the answer this one continues, goes word for word.
+        const personalEmails = decision.action === 'campaign.create' && !exactEmails
+          ? written?.personal ?? (TAKES_OFFER.test(input.message) && !CHANGES_OFFER.test(input.message)
+            ? coworkPersonalEmails(input.history?.[input.history.length - 1]?.blocks) : null) : null;
         const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
         if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));
         const campaign = decision.action === 'campaign.create' && decision.campaign
-          ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails) : decision.campaign) : undefined;
+          ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails)
+            : personalEmails ? coworkCampaignWithPersonalEmails(decision.campaign, personalEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
         // Only what changes: a field sent as null keeps its value.
         const profile = decision.action === 'profile.update' ? coworkProfilePatchFromDecision(decision.profile) ?? undefined : undefined;

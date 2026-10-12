@@ -8,6 +8,8 @@ banco de siempre: 7 pedidos que terminan en un correo o una secuencia, 3 repetic
 
 - **La nota pasó de 2,54 a 3,62 con el mismo modelo (`gpt-6-luna`, esfuerzo `low`) y a 3,86 combinando modelos.** La escala es
   «¿lo enviarías tal cual?», de 1 a 5. Con la combinación, 71 % de los correos sacan 4 o más y ninguno queda en 3 o menos.
+- **Con las reglas v7 (un primer correo propio por persona), Sol 6.1 → Luna llega a 3,98 y las campañas a 4,5.** Los únicos 5
+  de todas las lecturas son correos por persona que abren con lo propio del negocio de cada una. Ver «Rondas 4 y 5».
 - **Mejor relación calidad/precio para producción:** Sol 6.1 escribe y Luna corrige (`COWORK_WRITER_MODEL=gpt-6.1-sol`,
   `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=gpt-6-luna`). Cuesta US$0,0091 por respuesta con correo, unas 4 veces Luna
   sola, y deja la Redactora en 7,2 s de mediana y 9,2 s de p90.
@@ -88,6 +90,43 @@ la corrección, y no al revés.
 
 En las tres configuraciones ninguna llamada pasó los 30 s y la Redactora no falló ninguna vez. El costo por respuesta incluye al
 coordinador (unos US$0,001), que no cambia entre filas.
+
+## Rondas 4 y 5 (reglas v6 y v7)
+
+Mismo banco, mismo lector y una versión anterior como ancla en cada lectura. Las anclas se movieron 0,05 (3,86 → 3,81 y
+3,93 → 3,88), dentro del ruido.
+
+**Ronda 4 (v6: sin anunciar la pregunta, sin fórmulas como «ver si calza», respuesta sin jerga)**
+
+| Redactora → corrección | Nota | US$/respuesta | Redactora p50 / p90 |
+|---|---|---|---|
+| Luna → Luna | 3,74 ± 0,07 | 0,0025 | 6,9 / 8,6 s |
+| Sol 6.1 low → Luna | 3,93 ± 0,05 | 0,0096 | 7,5 / 10,5 s |
+| Sol 6.1 medium → Luna | 3,83 ± 0,07 | 0,0113 | 9,0 / 13,6 s |
+
+Subir a Sol `medium` no mejora y cuesta más: queda descartado.
+
+**Ronda 5 (v7: primer correo por persona)**
+
+Para 2 o 3 personas, la Redactora escribe un correo para cada una, con su nombre, su empresa y lo propio de su rubro. Al aceptar la
+campaña, cada uno va tal cual como el primer correo de esa persona (`firstEmails`); los seguimientos siguen siendo comunes.
+
+| Redactora → corrección | Nota | Campañas (2 casos) | US$/respuesta | Redactora p50 / p90 |
+|---|---|---|---|---|
+| Luna → Luna | 3,76 ± 0,07 | 3,92 | 0,0025 | 6,5 / 8,4 s |
+| **Sol 6.1 low → Luna** | **3,98 ± 0,12** | **4,50** | **0,0102** | **7,5 / 13,7 s** |
+| Ancla: v6 Sol 6.1 → Luna | 3,88 ± 0,06 | 3,83 | 0,0096 | 7,5 / 10,5 s |
+
+- Con Sol, los correos por persona suben las campañas de 3,8 a 4,5. Con Luna suelen salir genéricos: la misma
+  frase con otro rubro.
+- La nota de Sol cae por una respuesta de 2,5 que no escribió la Redactora: el coordinador escribió el correo él mismo (1 de 98
+  respuestas medidas). Desde v7, un correo que el coordinador escribe vuelve una vez a la Redactora.
+- Lo que sigue bajando a 3,5: aperturas vagas en los seguimientos de una secuencia («ayuda a revisar…»), la misma capacidad
+  repetida en dos correos y, en Luna, aperturas genéricas.
+
+**Por qué no llega a 5:** un 5 pide algo propio de esa persona. En este banco no hay investigación ni señales de las empresas
+(`research.get_existing` vacío), así que el techo es lo propio del rubro. Con investigación (`research.start`) el primer correo
+puede abrir con un hecho observado de su empresa.
 
 ## Recomendación
 
@@ -174,6 +213,15 @@ node --loader ./scripts/ts-test-loader.mjs scripts/cowork-blind-read.ts mix /tmp
 - tampoco puede tratar como dato inventado la frase general de la apertura, ni exigir {{nombre}} en un correo pegado sin nombres.
 
 Antes, esas peticiones empeoraban el correo o lo dejaban «por revisar».
+
+**Reglas y chequeos de v6 y v7:**
+- la pregunta no se anuncia («Para situar AXIS…, quiero entender…»);
+- el correo no habla de sí mismo ni de la secuencia («Con este correo cierro…»);
+- la primera frase no repite una palabra («revisar… alarga la revisión»);
+- la respuesta no usa jerga («cobertura del buzón») ni cuenta lo que corrigió la Revisora;
+- un primer correo propio por persona para 2 o 3 personas, y la campaña los copia tal cual (`coworkPersonalEmails`,
+  `coworkCampaignWithPersonalEmails`);
+- un correo que escribe el coordinador vuelve una vez a la Redactora.
 
 **Pulido determinista** (`coworkPolishDraft`): la prueba citada dentro de una frase queda en minúscula y sin comillas. Era el
 defecto típico de Sol («: Procesa 1.000…»).
