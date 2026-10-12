@@ -10,11 +10,9 @@ banco de siempre: 7 pedidos que terminan en un correo o una secuencia, 3 repetic
   «¿lo enviarías tal cual?», de 1 a 5. Con la combinación, 71 % de los correos sacan 4 o más y ninguno queda en 3 o menos.
 - **Con las reglas v7 (un primer correo propio por persona), Sol 6.1 → Luna llega a 3,98 y las campañas a 4,5.** Los únicos 5
   de todas las lecturas son correos por persona que abren con lo propio del negocio de cada una. Ver «Rondas 4 y 5».
-- **Mejor relación calidad/precio para producción:** Sol 6.1 escribe y Luna corrige (`COWORK_WRITER_MODEL=gpt-6.1-sol`,
-  `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=gpt-6-luna`). Cuesta US$0,0091 por respuesta con correo, unas 4 veces Luna
-  sola, y deja la Redactora en 7,2 s de mediana y 9,2 s de p90.
-- **Lo más barato:** Luna low sola, a US$0,0022 por respuesta y 3,62 de nota. Es la configuración actual de producción, así que
-  basta con desplegar estas reglas para obtener esa nota.
+- **Con las reglas v8, Luna low sola llega a 4,00 y Sol 6.1 → Luna a 4,02: la misma nota.** Luna cuesta US$0,0022 por respuesta
+  con correo y Sol → Luna US$0,0103, 4,7 veces más. Para una app con muchos usuarios, la mejor relación calidad/precio es Luna low,
+  que es la configuración actual de producción: basta con desplegar las reglas. Ver «Ronda 6».
 - **No conviene subir el esfuerzo de Luna:**
   - `medium`, `high` y `xhigh` mejoraron la nota en 0,05 a 0,12 (dentro del ruido).
   - Entre 15 % y 32 % de las llamadas de `high` y `xhigh` pasan los 30 s que la Redactora tiene en producción.
@@ -128,13 +126,32 @@ campaña, cada uno va tal cual como el primer correo de esa persona (`firstEmail
 (`research.get_existing` vacío), así que el techo es lo propio del rubro. Con investigación (`research.start`) el primer correo
 puede abrir con un hecho observado de su empresa.
 
+## Ronda 6 (reglas v8)
+
+v8 pide que la consecuencia de la primera frase sea la del negocio de cada persona («el guardia que no puede tomar su turno», «el
+conductor que no sale a ruta», «el candidato que no llega al cliente»). También marca los beneficios dichos en abstracto («tener los
+resultados a mano ayuda a…»), las fórmulas como «¿es relevante?» o «si calza», «es una alternativa» y las respuestas que se excusan
+(«el correo queda genérico porque…»). El ancla (v7 Sol 6.1 → Luna) sacó lo mismo que en la ronda 5: 3,98.
+
+| Redactora → corrección | Nota | Campañas (2 casos) | US$/respuesta | Redactora p50 / p90 |
+|---|---|---|---|---|
+| **Luna → Luna** | **4,00 ± 0,10** | **4,42** | **0,0022** | **5,6 / 8,6 s** |
+| Sol 6.1 low → Luna | 4,02 ± 0,10 | 4,50 | 0,0103 | 6,9 / 12,6 s |
+| Ancla: v7 Sol 6.1 → Luna | 3,98 ± 0,12 | 4,50 | 0,0102 | 7,5 / 13,7 s |
+
+- Luna sube de 3,76 a 4,00: con la consecuencia del negocio pedida en las reglas, sus correos por persona dejan de ser la misma
+  frase con otro rubro.
+- Los 5 son campañas con un correo por persona que dejan fuera a quien ya recibió uno (Marcela) y dicen su motivo.
+- En 3 de 63 respuestas, al mejorar un correo pegado se perdió la reunión que pedía («Agendemos»). Desde v8 eso se marca y se
+  corrige, y una fórmula como «ver si calza» se corrige con una pregunta por el día cuando el usuario pidió la reunión.
+
 ## Recomendación
 
-1. **Desplegar estas reglas con la configuración actual** (Luna low): sube la nota de 2,54 a 3,62 sin costo extra.
-2. **Para los correos que salen a prospectos, Sol 6.1 escribe y Luna corrige.** Cuesta +US$0,007 por correo (unos US$7 por cada
-   1.000) y pasa de 33 % a 71 % de correos que se envían tal cual o casi. Son tres variables de entorno, sin cambios de código:
-   `COWORK_WRITER_MODEL=gpt-6.1-sol`, `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=gpt-6-luna`. `COWORK_WRITER_FIX_EFFORT`
-   queda sin valor o en `low`. El precio de `gpt-6.1-sol` ya está en `COWORK_MODEL_PRICING_JSON`.
+1. **Desplegar las reglas v8 con la configuración actual (Luna low).** La nota sube de 2,54 a 4,00 sin costo extra: US$0,0022
+   por respuesta con correo, unos US$2,2 por cada 1.000.
+2. **Sol 6.1 → Luna ya no se justifica para todos los usuarios.** Con v8 saca la misma nota (4,02) por 4,7 veces el costo. Queda
+   como opción con solo variables de entorno, sin cambios de código: `COWORK_WRITER_MODEL=gpt-6.1-sol`,
+   `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=gpt-6-luna`.
    - Ojo: `COWORK_DESIGNER_MODEL` toma `COWORK_WRITER_MODEL` si no tiene valor propio. Para que la Diseñadora siga en Luna, fijar
      `COWORK_DESIGNER_MODEL=gpt-6-luna`.
 3. **No subir `COWORK_WRITER_EFFORT` de Luna:** no mejora la nota y produce cortes por tiempo.
@@ -214,14 +231,16 @@ node --loader ./scripts/ts-test-loader.mjs scripts/cowork-blind-read.ts mix /tmp
 
 Antes, esas peticiones empeoraban el correo o lo dejaban «por revisar».
 
-**Reglas y chequeos de v6 y v7:**
+**Reglas y chequeos de v6 a v8:**
 - la pregunta no se anuncia («Para situar AXIS…, quiero entender…»);
 - el correo no habla de sí mismo ni de la secuencia («Con este correo cierro…»);
 - la primera frase no repite una palabra («revisar… alarga la revisión»);
 - la respuesta no usa jerga («cobertura del buzón») ni cuenta lo que corrigió la Revisora;
 - un primer correo propio por persona para 2 o 3 personas, y la campaña los copia tal cual (`coworkPersonalEmails`,
   `coworkCampaignWithPersonalEmails`);
-- un correo que escribe el coordinador vuelve una vez a la Redactora.
+- un correo que escribe el coordinador vuelve una vez a la Redactora;
+- v8: la consecuencia en el negocio de la persona; sin beneficios en abstracto, «es una alternativa», «¿es relevante?» ni «si calza»;
+  la respuesta no se excusa; un correo pegado conserva la reunión que pide; la Revisora no pide `{{nombre}}` en correos por persona.
 
 **Pulido determinista** (`coworkPolishDraft`): la prueba citada dentro de una frase queda en minúscula y sin comillas. Era el
 defecto típico de Sol («: Procesa 1.000…»).
@@ -249,4 +268,7 @@ defecto típico de Sol («: Procesa 1.000…»).
   - ningún correo con defectos detectables;
   - «por revisar» bajó de 6 de 21 a 0 de 14;
   - US$0,0020 por respuesta, con la Redactora en 6,9 / 9,1 s.
+- **v8 en dos pasos:** la lectura de la ronda 6 es de v8 sin el último ajuste (la reunión del correo pegado, la pregunta por día
+  y el filtro de la Revisora para correos por persona). Ese ajuste tiene pruebas y una corrida corta de los dos casos de «mejorar
+  correo», pero no lectura ciega propia.
 - **Costos:** las cifras usan los precios configurados. La cuenta real de cada proveedor manda.
