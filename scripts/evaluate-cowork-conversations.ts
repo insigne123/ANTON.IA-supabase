@@ -53,7 +53,7 @@ import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { coworkAnswerChanged } from '../src/lib/cowork/presentation';
 import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
-import { coworkWriterEfforts, coworkWriterModels } from '../src/lib/server/cowork/writer-run';
+import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '../src/lib/server/cowork/writer-run';
 import { coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
@@ -215,10 +215,11 @@ async function main() {
           if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
           calls++;
           writerCalls[role]++;
-          const as = fix ? 'fix' : role;
-          const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: writerModels[as],
+          // A sequence may have its own model (COWORK_WRITER_SEQUENCE_MODEL), as in the worker (coworkWriterCallModel).
+          const chosen = coworkWriterCallModel(brief.kind, role, fix, writerModels, writerEfforts);
+          const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: chosen.model,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: 90000,
-            reasoningEffort: writerEfforts[as] });
+            reasoningEffort: chosen.effort });
           // The correction is priced apart («corrector»), so a model that only fixes shows its own cost.
           recordUsage(fix ? 'corrector' : role, response.telemetry);
           decisions.push({ agent: role, output: response.data });

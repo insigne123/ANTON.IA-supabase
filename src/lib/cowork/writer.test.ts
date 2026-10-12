@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkPolishDraft, coworkReplyIssues, coworkPolishProofs, coworkReviewIssues, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkPolishDraft, coworkReplyIssues, coworkPolishProofs, coworkReviewIssues, coworkSplitOffer, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos para {{empresa}}.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
 const context = { signer: 'Nicolás Yarur', prohibited: ['barato'], trialOffer: false };
 
 test('the checks catch what the text alone shows, once per kind and place', () => {
-  assert.deepEqual(coworkDraftIssues([sequence([signed, signed, signed])], context).map(issue => issue.short), ['pregunta distinta', 'pregunta distinta']);
+  assert.deepEqual(coworkDraftIssues([sequence([signed, signed, signed])], context).map(issue => issue.short), ['momento distinto', 'momento distinto', 'pregunta distinta', 'pregunta distinta']);
   const shorts = (bodies: string[]) => coworkDraftIssues([sequence(bodies)], context).map(issue => `${issue.where} · ${issue.short}`)
-    .filter(line => !line.endsWith('pregunta distinta'));
+    .filter(line => !line.endsWith('pregunta distinta') && !line.endsWith('momento distinto'));
   assert.deepEqual(shorts([`${signed}\n[Nombre del cliente]`, signed, signed]), ['«Secuencia AXIS», correo 1 · sin relleno']);
   assert.deepEqual(shorts([signed.replace('en minutos', 'barato y gratis'), signed, signed]),
     ['«Secuencia AXIS», correo 1 · sin «barato»', '«Secuencia AXIS», correo 1 · sin «gratis»']);
@@ -50,7 +50,8 @@ test('a Reviewer issue about a fixed name goes when the email is for one person'
 
 test('a block keeps one way of addressing the reader, and each email of a sequence its own closing question', () => {
   const ask = (question: string) => signed.replace('¿Te sirve verlo 15 minutos esta semana?', question);
-  const shorts = (bodies: string[]) => coworkDraftIssues([sequence(bodies)], context).map(issue => `${issue.where} · ${issue.short}`);
+  const shorts = (bodies: string[]) => coworkDraftIssues([sequence(bodies)], context).map(issue => `${issue.where} · ${issue.short}`)
+    .filter(line => !line.endsWith('momento distinto'));
   const own = [ask('¿Cómo revisan hoy los antecedentes de un candidato?'), ask('¿Quién lo hace en tu equipo y cuánto le toma?'), ask('¿Te sirve verlo 15 minutos esta semana?')];
   assert.deepEqual(shorts(own), []);
   // Usted in one email of a sequence that tutea in the others.
@@ -77,7 +78,11 @@ test('the checks read who signs, the prohibited terms and the trial offer from t
 const brief: CoworkWriteBrief = { kind: 'sequence', recipients: ['Felipe Muñoz', 'Camila Fuentes'], objective: 'Una conversación sobre AXIS', angle: null, tone: 'cercano', steps: 3, notes: null, findings: null };
 // Each email of the sequence closes with its own question, as the checks ask; the first two ask nothing of a meeting.
 const closings = ['¿Cuántos ingresos revisan al mes?', '¿Cómo revisan hoy los antecedentes de un candidato?', '¿Te sirve verlo 15 minutos esta semana?'];
-const own = (bodies: string[]) => bodies.map((body, index) => body.replace('¿Te sirve verlo 15 minutos esta semana?', closings[index % closings.length]));
+// …and opens with its own moment.
+const openings = ['En Yago revisamos antecedentes laborales con AXIS', 'Cuando la nómina llega encima de la fecha, Yago deja el resultado de AXIS listo',
+  'Si una jefatura pide un respaldo, Yago lo tiene guardado con AXIS'];
+const own = (bodies: string[]) => bodies.map((body, index) => body.replace('¿Te sirve verlo 15 minutos esta semana?', closings[index % closings.length])
+  .replace(openings[0], openings[index % openings.length]));
 const output = (bodies: string[]): CoworkWriterOutput => ({
   reply: 'Te dejo la secuencia para Felipe y Camila.', blocks: [sequence(own(bodies))], question: '¿Creo la campaña pausada?',
   suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }],
@@ -262,7 +267,8 @@ test('the checks catch what made the measured emails generic or wrong (12 oct re
   // A sequence cites its proof once.
   const step = (body: string) => body.replace('Hola Felipe,', 'Hola {{nombre}},').replace('en Securitas', 'en {{empresa}}');
   const twice = sequence([step(good), step(good).replace('¿Cuántos ingresos revisan en una semana normal?', '¿Quién revisa hoy esos antecedentes?')]);
-  assert.deepEqual(coworkDraftIssues([twice], withProofs).map(issue => `${issue.where} · ${issue.short}`), ['«Secuencia AXIS», correo 2 · prueba una vez']);
+  assert.deepEqual(coworkDraftIssues([twice], withProofs).map(issue => `${issue.where} · ${issue.short}`).filter(line => !line.endsWith('momento distinto')),
+    ['«Secuencia AXIS», correo 2 · prueba una vez']);
 });
 
 test('the context reads the proofs of the profile and the people the turn read, with their company', () => {
@@ -315,7 +321,7 @@ test('the checks catch what kept the 12 oct candidate from a 4: hedges, meetings
   // A meeting is fine from the third email of a sequence on, and in a reply inside an open conversation.
   const step = (question: string) => good.replace('Hola Felipe,', 'Hola {{nombre}},').replace('en Securitas', 'en {{empresa}}').replace('¿Cuántos ingresos revisan en una semana normal?', question);
   const meetingLast = sequence([step('¿Cuántos ingresos revisan en una semana normal?'), step('¿Quién revisa hoy esos antecedentes?').replace(/ AXIS consulta[^.]+\./, ''), step('¿Te sirve verlo 15 minutos esta semana?').replace(/ AXIS consulta[^.]+\./, '')]);
-  assert.deepEqual(coworkDraftIssues([meetingLast], checks).map(issue => `${issue.where} · ${issue.short}`), []);
+  assert.deepEqual(coworkDraftIssues([meetingLast], checks).map(issue => `${issue.where} · ${issue.short}`).filter(line => !line.endsWith('momento distinto')), []);
   assert.deepEqual(shorts(good.replace('¿Cuántos ingresos revisan en una semana normal?', '¿Te acomoda una llamada el jueves?'), 'Re: Antecedentes de guardias'), []);
 });
 
@@ -463,7 +469,7 @@ test('the v6 reading: no announcing in other words, no talking about the email i
   // The last email may still say it is the last one.
   assert.deepEqual(shorts(`${opening}\n\nAXIS consulta por lote. Este es mi último mensaje sobre esto.\n\n${question}`), []);
   for (const [said, words] of [['Cuando entran muchas personas a la vez, revisar uno por uno los antecedentes alarga la revisión.', 'revisar… revision'],
-    ['Cuando entran muchas personas a la vez, revisar uno por uno los antecedentes ocupa al equipo de personas.', 'personas… personas'],
+    ['Cuando entran muchas personas a la vez, revisar uno por uno los antecedentes deja esperando al equipo de personas.', 'personas… personas'],
     ['Cuando coinciden varios ingresos en {{empresa}}, revisarlos uno por uno atrasa el ingreso.', 'ingresos… ingreso']]) {
     assert.deepEqual(shorts(`${said}\n\nAXIS consulta por lote.\n\n${question}`), ['apertura sin repetir'], said);
     assert.match(issues(`${said}\n\nAXIS consulta por lote.\n\n${question}`)[0].problem, new RegExp(words));
@@ -531,7 +537,7 @@ test('the v8 reading: the second email of a sequence does not describe the offer
   const step = (middle: string, question: string) => `Hola {{nombre}},\n\nCuando la nómina llega encima de la fecha de ingreso en {{empresa}}, revisarla uno por uno deja turnos sin cubrir.${middle}\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA`;
   const three = (second: string, secondQuestion = '¿Quién prepara hoy la nómina?') => coworkDraftIssues([sequence([
     step(' AXIS consulta por lote.', '¿Cuántos ingresos revisan al mes en {{empresa}}?'), step(second, secondQuestion), step(' AXIS deja evidencia de cada consulta.', '¿Te sirve verlo con un caso de AXIS?')])], checks)
-    .map(issue => `${issue.where} · ${issue.short}`).filter(line => !line.endsWith('pregunta distinta') && !line.endsWith('apertura sin repetir'));
+    .map(issue => `${issue.where} · ${issue.short}`).filter(line => !line.endsWith('pregunta distinta') && !line.endsWith('apertura sin repetir') && !line.endsWith('momento distinto'));
   assert.deepEqual(three(''), []);
   assert.deepEqual(three(' AXIS permite cargar la nómina por archivo.'), ['«Secuencia AXIS», correo 2 · correo 2 sin la oferta']);
   assert.deepEqual(three('', '¿Quién en tu equipo prepara el archivo para cargar los nombres en AXIS?'), ['«Secuencia AXIS», correo 2 · pregunta sobre su trabajo']);
@@ -576,4 +582,88 @@ test('the consequence is what is delayed in their business, not a cost in the ab
   assert.deepEqual(issues('Te escribí el 19 de septiembre sobre los antecedentes. Cuando se agrupan postulantes, procesar cada caso por separado suma pasos antes de tener los resultados.'),
     ['consecuencia concreta']);
   assert.deepEqual(issues('Cuando entra un grupo de guardias, revisarlos uno a uno retrasa que tomen turno.', '¿Están evaluando ese proceso en Securitas?'), ['pregunta concreta']);
+});
+
+test('the v10 reading: delays said of «the process», a question that repeats the opening, a sequence that never presents the offer, and replies in jargon', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  const email = (opening: string, question = '¿Cuántos ingresos revisan al mes en Securitas?') => coworkDraftIssues([{ type: 'email_draft' as const,
+    title: 'Correo para Felipe', to: null, subject: 'Guardias en Securitas',
+    body: `Hola Felipe,\n\n${opening}\n\nAXIS consulta por lote en el PJUD.\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA` }], checks).map(issue => issue.short);
+  for (const vague of ['En seguridad privada, cuando se incorporan guardias, revisar sus antecedentes uno por uno retrasa el proceso de ingreso.',
+    'Cuando llegan varias personas a la vez, revisarlas una por una atrasa el avance de los postulantes en el proceso.',
+    'Cuando ingresan varios guardias a la vez, revisar uno por uno sus antecedentes en el PJUD requiere trabajo manual.'])
+    assert.deepEqual(email(vague), ['consecuencia concreta'], vague);
+  // Said with who waits, it is concrete.
+  assert.deepEqual(email('En seguridad privada, revisarlos uno por uno alarga el proceso y deja turnos sin cubrir.'), []);
+  // The question says the opening again, phrase and all.
+  assert.deepEqual(email('En seguridad privada, consultar uno por uno los antecedentes laborales en el PJUD deja al guardia esperando su turno.',
+    '¿Cuánto tiempo les toma hoy consultar antecedentes laborales en el PJUD en tu equipo?'), ['pregunta sin repetir']);
+  assert.deepEqual(email('En seguridad privada, cuando entran guardias nuevos todas las semanas, revisarlos uno por uno atrasa el ingreso.',
+    '¿Cuántos ingresos revisan en una semana normal?'), []);
+  // The first email of a sequence presents the offer.
+  const step = (middle: string, question: string) => `Hola {{nombre}},\n\nCuando entran muchas personas a la vez en {{empresa}}, revisarlas una por una deja a quienes esperan sin empezar.${middle}\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA`;
+  const sequenceIssues = (first: string) => coworkDraftIssues([sequence([step(first, '¿Cuánto les toma hoy esa revisión en {{empresa}}?'),
+    step('', '¿Quién prepara hoy la nómina?'), step('\n\nAXIS deja evidencia de cada consulta.', '¿Te sirve verlo con un caso tuyo?')])], checks)
+    .map(issue => `${issue.where} · ${issue.short}`).filter(line => !line.endsWith('pregunta distinta') && !line.endsWith('apertura sin repetir') && !line.endsWith('momento distinto'));
+  assert.deepEqual(sequenceIssues(''), ['«Secuencia AXIS», correo 1 · qué hace la oferta']);
+  assert.deepEqual(sequenceIssues('\n\nAXIS consulta por lote en el PJUD.'), []);
+  // A reply that hides behind the brief.
+  assert.deepEqual(coworkReplyIssues('Como no hay destinatarios observados, el correo queda dirigido de forma general.').map(issue => issue.short), ['respuesta sin excusas']);
+});
+
+test('the v10 reading of Claude: a pasted meeting asked by the day, one subject in the offer, a question of their own for each person, and the offer in its own paragraph', () => {
+  const pasted = 'Mejora este correo para que sea más claro y fácil de responder: "Hola, les escribo de Yago. Tenemos AXIS, una solución para RRHH que ayuda mucho. Nos encantaría mostrarles una demo cuando puedan. Saludos."';
+  const checks = { ...coworkWriterContext({ fullName: 'Nicolás Y.' }, [], null, pasted), products: ['axis', 'yago'] };
+  const email = (question: string, offer = 'AXIS consulta por lote.') => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes',
+    body: `Hola,\n\nCuando entran muchas personas a la vez, revisar uno por uno los antecedentes deja a gente esperando para empezar.\n\n${offer}\n\n${question}\n\nNicolás Y.` }], checks).map(issue => issue.short);
+  for (const yesNo of ['¿Les interesa que les muestre una demo?', '¿Te acomoda agendar una conversación breve?', '¿Les acomoda una demo breve esta semana?'])
+    assert.deepEqual(email(yesNo), ['pregunta por el día'], yesNo);
+  for (const byDay of ['¿Qué día les acomoda una demo?', '¿Les acomoda una demo el martes?', '¿Qué día les acomoda una demo, o quién en su equipo ve este tema?'])
+    assert.deepEqual(email(byDay), [], byDay);
+  // Without a pasted email that asks for it, a yes-or-no meeting is not this check's business.
+  assert.deepEqual(coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes',
+    body: 'Hola,\n\nCuando entran muchas personas a la vez, revisarlas una por una deja a gente esperando para empezar.\n\nAXIS consulta por lote.\n\n¿Les interesa una demo?\n\nNicolás Y.' }],
+  { ...checks, keepsAsk: false, meeting: true }).map(issue => issue.short), []);
+  // «Con AXIS cargas… y procesa…» changes subject halfway.
+  assert.deepEqual(email('¿Qué día les acomoda una demo?', 'Con AXIS cargas la nómina completa y procesa 1.000 personas en unos 30 minutos.'), ['un solo sujeto']);
+  for (const one of ['Con AXIS cargas la nómina y recibes los resultados consolidados.', 'AXIS consulta por lote y procesa 1.000 personas en unos 30 minutos.',
+    'Con AXIS, tu equipo sube la nómina en un archivo y recibe los resultados consolidados.'])
+    assert.deepEqual(email('¿Qué día les acomoda una demo?', one), [], one);
+  // One email per person: each asks its own question, told apart without the names of their companies.
+  const personal = (title: string, question: string) => ({ type: 'email_draft' as const, title, to: [`${title.toLowerCase()}@empresa.cl`], subject: 'Antecedentes',
+    body: `Hola ${title},\n\nCuando entra un grupo grande, revisar uno por uno los antecedentes deja turnos sin cubrir.\n\nAXIS consulta por lote.\n\n${question}\n\nNicolás Y.` });
+  const own = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  assert.deepEqual(coworkDraftIssues([personal('Felipe', '¿Cuánto les toma hoy revisar los antecedentes de un grupo en Securitas Chile?'),
+    personal('Rodrigo', '¿Cuánto les toma hoy revisar los antecedentes de un grupo en Transportes Andes?'),
+    personal('Camila', '¿Cuántos postulantes revisan por semana en Adecco?')], own).map(issue => `${issue.where} · ${issue.short}`), ['«Rodrigo» · pregunta propia']);
+  assert.deepEqual(coworkDraftIssues([personal('Felipe', '¿Cuántos ingresos revisan al mes en Securitas?'),
+    personal('Rodrigo', '¿Cuántos conductores nuevos incorporan al mes en Transportes Andes?')], own), []);
+  // A reply that hides behind the brief's words.
+  for (const excuse of ['No tengo su correo observado, así que el borrador queda sin destinatario.', 'El encargo no trae destinatarios, así que queda lista para tus contactos con correo.'])
+    assert.deepEqual(coworkReplyIssues(excuse).map(issue => issue.short), ['respuesta sin excusas'], excuse);
+  // The offer named after the opening in the same paragraph starts a paragraph of its own; nothing else moves.
+  assert.equal(coworkSplitOffer('Hola,\n\nCuando entran muchas personas a la vez, revisarlas una por una atrasa el ingreso. AXIS consulta por lote y procesa 1.000 personas en unos 30 minutos.\n\n¿Qué día les acomoda una demo?\n\nNicolás Y.', ['axis', 'yago']),
+    'Hola,\n\nCuando entran muchas personas a la vez, revisarlas una por una atrasa el ingreso.\n\nAXIS consulta por lote y procesa 1.000 personas en unos 30 minutos.\n\n¿Qué día les acomoda una demo?\n\nNicolás Y.');
+  assert.equal(coworkSplitOffer('Hola Marcela,\n\nTe escribí el 19 de septiembre sobre AXIS. Cuando llega un grupo grande, cada revisión a mano retrasa a quienes ya están aprobados. AXIS consulta el lote completo en el PJUD.\n\n¿Quién lleva hoy esa revisión en Sodexo?\n\nNicolás Y.', ['axis']),
+    'Hola Marcela,\n\nTe escribí el 19 de septiembre sobre AXIS. Cuando llega un grupo grande, cada revisión a mano retrasa a quienes ya están aprobados.\n\nAXIS consulta el lote completo en el PJUD.\n\n¿Quién lleva hoy esa revisión en Sodexo?\n\nNicolás Y.');
+  for (const kept of ['Hola,\n\nCuando entran muchas personas a la vez, revisarlas una por una atrasa el ingreso.\n\nAXIS consulta por lote.\n\n¿Qué día les acomoda una demo?',
+    'Hola,\n\nEn Yago desarrollamos AXIS. Cuando entran muchas personas, revisarlas atrasa el ingreso.\n\n¿Qué día les acomoda una demo?', signed])
+    assert.equal(coworkSplitOffer(kept, ['axis', 'yago']), kept);
+  const output = { reply: 'Listo.', question: null, suggestions: [], blocks: [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes',
+    body: 'Hola,\n\nCuando entran muchas personas a la vez, revisarlas una por una atrasa el ingreso. AXIS consulta por lote.\n\n¿Qué día les acomoda una demo?\n\nNicolás Y.' }] } as unknown as CoworkWriterOutput;
+  assert.match((coworkPolishDraft(output, [], ['axis']).blocks[0] as { body: string }).body, /el ingreso\.\n\nAXIS consulta por lote\./);
+});
+
+test('each email of a sequence opens with its own moment (v10 reading: the same «nómina encima de la fecha» in the second and the third)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  const step = (opening: string, middle: string, question: string) => `Hola {{nombre}},\n\n${opening}${middle}\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA`;
+  const issues = (second: string, third: string) => coworkDraftIssues([sequence([
+    step('Cuando se incorporan muchas personas a la vez en {{empresa}}, revisarlas una por una retrasa el ingreso de quienes esperan para comenzar.', '\n\nAXIS consulta por lote.', '¿Cuánto les toma hoy revisar una nómina grande?'),
+    step(second, '', '¿Quién se encarga hoy de revisar los antecedentes en tu equipo?'),
+    step(third, '\n\nAXIS tiene los resultados de todos juntos.', '¿Te sirve verlo con un caso de tu equipo?')])], checks)
+    .map(issue => `${issue.where} · ${issue.short}`);
+  assert.deepEqual(issues('Cuando la nómina de postulantes llega cerca de la fecha de ingreso, el equipo corre para tener los antecedentes listos.',
+    'Cuando la nómina llega encima de la fecha de ingreso, buscar a cada persona por separado retrasa al grupo que espera empezar.'), ['«Secuencia AXIS», correo 3 · momento distinto']);
+  assert.deepEqual(issues('Cuando la nómina de postulantes llega cerca de la fecha de ingreso, el equipo corre para tener los antecedentes listos.',
+    'Cuando alguien pregunta meses después si se revisó a una persona, armar ese respaldo a mano se lleva una tarde entera.'), []);
 });

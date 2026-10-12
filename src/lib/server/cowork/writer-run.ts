@@ -13,18 +13,34 @@ export function coworkWriterEnabled(env: Record<string, string | undefined> = pr
 /** COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick their models; COWORK_MODEL by default. COWORK_WRITER_FIX_MODEL is the
  * model of the Writer's correction, the Writer's by default: one model drafts and another fixes. A «claude-» model answers
  * through Anthropic (anthropic-json.ts), any other through OpenAI. */
-export function coworkWriterModels(env: Record<string, string | undefined> = process.env) {
+export function coworkWriterModels(env: Record<string, string | undefined> = process.env): CoworkWriterModels {
   const writer = env.COWORK_WRITER_MODEL || env.COWORK_MODEL;
-  return { writer, reviewer: env.COWORK_REVIEWER_MODEL || env.COWORK_MODEL, fix: env.COWORK_WRITER_FIX_MODEL || writer };
+  return { writer, reviewer: env.COWORK_REVIEWER_MODEL || env.COWORK_MODEL, fix: env.COWORK_WRITER_FIX_MODEL || writer,
+    ...(env.COWORK_WRITER_SEQUENCE_MODEL ? { sequence: env.COWORK_WRITER_SEQUENCE_MODEL, sequenceFix: env.COWORK_WRITER_SEQUENCE_FIX_MODEL || undefined } : {}) };
+}
+
+export type CoworkWriterModels = { writer?: string; reviewer?: string; fix?: string; sequence?: string; sequenceFix?: string };
+export type CoworkWriterEfforts = { writer?: StructuredEffort; reviewer?: StructuredEffort; fix?: StructuredEffort; sequence?: StructuredEffort };
+
+/** The model and effort of one call. A sequence may be drafted by its own model (COWORK_WRITER_SEQUENCE_MODEL and
+ * COWORK_WRITER_SEQUENCE_EFFORT), the kind of text where a stronger model pays off (12 oct reading: 4,5 against 3,25), while its
+ * correction stays on the Writer's correction model unless COWORK_WRITER_SEQUENCE_FIX_MODEL says otherwise. */
+export function coworkWriterCallModel(kind: 'email' | 'sequence', role: 'writer' | 'reviewer', fix: boolean | undefined,
+  models: CoworkWriterModels, efforts?: CoworkWriterEfforts) {
+  if (role === 'writer' && kind === 'sequence' && models.sequence) return fix
+    ? { model: models.sequenceFix || models.fix || models.writer, effort: efforts?.fix }
+    : { model: models.sequence, effort: efforts?.sequence ?? efforts?.writer };
+  return { model: (fix && models.fix) || models[role], effort: (fix && efforts?.fix) || efforts?.[role] };
 }
 
 const EFFORTS: readonly StructuredEffort[] = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
 /** COWORK_WRITER_EFFORT, COWORK_REVIEWER_EFFORT and COWORK_WRITER_FIX_EFFORT (the Writer's by default): how hard each role
  * thinks. Unset or unknown, the model's usual level (low for gpt-6 and Claude), as before. */
-export function coworkWriterEfforts(env: Record<string, string | undefined> = process.env): { writer?: StructuredEffort; reviewer?: StructuredEffort; fix?: StructuredEffort } {
+export function coworkWriterEfforts(env: Record<string, string | undefined> = process.env): CoworkWriterEfforts {
   const pick = (value: string | undefined) => EFFORTS.find(effort => effort === String(value || '').trim().toLowerCase());
   const writer = pick(env.COWORK_WRITER_EFFORT);
-  return { writer, reviewer: pick(env.COWORK_REVIEWER_EFFORT), fix: pick(env.COWORK_WRITER_FIX_EFFORT) ?? writer };
+  const sequence = pick(env.COWORK_WRITER_SEQUENCE_EFFORT);
+  return { writer, reviewer: pick(env.COWORK_REVIEWER_EFFORT), fix: pick(env.COWORK_WRITER_FIX_EFFORT) ?? writer, ...(sequence ? { sequence } : {}) };
 }
 
 /** Each call's limits: what the ledger reserves for the role (20260928030000) and how long it may take. */
@@ -61,8 +77,8 @@ export function coworkWriterTurn(deps: {
   record: (event: { action: typeof COWORK_AGENT_ACTION; input: ''; result: CoworkAgentStep }) => Promise<void>;
   liveDraft: { push: (text: string) => void; review: () => void; adjust?: () => void; flush: () => Promise<void> } | null;
   timeLeft: () => number;
-  models: { writer?: string; reviewer?: string; fix?: string };
-  efforts?: { writer?: StructuredEffort; reviewer?: StructuredEffort; fix?: StructuredEffort };
+  models: CoworkWriterModels;
+  efforts?: CoworkWriterEfforts;
   onCall?: (call: { model: string; durationMs: number }) => void;
 }) {
   return async (brief: CoworkWriteBrief, observations: CoworkObservation[]): Promise<CoworkAnswer> => {
@@ -78,10 +94,11 @@ export function coworkWriterTurn(deps: {
         const live = stream ? deps.liveDraft : null;
         // A review or a correction starts once the page knows the draft on screen is being reviewed.
         if (!stream) await deps.liveDraft?.flush();
+        const chosen = coworkWriterCallModel(brief.kind, role, fix, deps.models, deps.efforts);
         const call = await deps.generate({
-          schema, systemPrompt, prompt, provider: 'openai', openAiModel: (fix && deps.models.fix) || deps.models[role], allowDefaultModelFallback: false,
+          schema, systemPrompt, prompt, provider: 'openai', openAiModel: chosen.model, allowDefaultModelFallback: false,
           maxAttempts: 1, timeoutMs: Math.min(limits.timeoutMs, left), maxOutputTokens: limits.maxOutputTokens, signal: deps.signal,
-          reasoningEffort: (fix && deps.efforts?.fix) || deps.efforts?.[role],
+          reasoningEffort: chosen.effort,
           onPartial: live ? text => live.push(`${LIVE_PREFIX}${text}`) : undefined,
         });
         await live?.flush();

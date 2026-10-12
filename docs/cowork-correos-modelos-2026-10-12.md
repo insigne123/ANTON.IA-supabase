@@ -236,6 +236,40 @@ corrida. Son 14 respuestas por configuración (7 casos × 2) y el coordinador es
 - **«Revisora pendiente»** cuenta las respuestas en que la Revisora no alcanzó a terminar: el correo se entrega marcado para
   revisar. Con Sol 6.1 → Luna pasa en 9 de 21.
 
+## Ronda 10: Claude con las reglas v10
+
+Las mismas reglas v10 de la ronda 9, ahora con Claude. Corrió en una sesión aparte con la clave de Anthropic del usuario: 7 casos,
+2 repeticiones, 14 respuestas por configuración. Las 84 respuestas pasan los checks del banco. En todas, Luna coordina y revisa.
+La lectura ciega puso a Luna como control dentro de la misma lectura.
+
+| Redactora → corrección | Nota | ≥ 4,5 | US$/respuesta | Por cada 1.000 | Redactora p50 / p90 |
+|---|---|---|---|---|---|
+| Luna → Luna (control) | 4,04 ± 0,11 | 36 % | 0,0024 | US$2,4 | 6,6 / 8,1 s |
+| Luna → Haiku 5.5 low | 4,18 ± 0,10 | 50 % | 0,0026 | US$2,6 | 6,7 / 7,8 s |
+| **Haiku 5.5 low → Haiku 5.5** | **4,32 ± 0,13** | **57 %** | **0,0041** | **US$4,1** | **10,7 / 18,9 s** |
+| Luna → Sonnet 5.5 low | 4,39 ± 0,09 | 64 % | 0,0150 | US$15,0 | 7,2 / 8,2 s |
+| Opus 5.5 low → Luna | 4,39 ± 0,12 | 64 % | 0,0343 | US$34,3 | 8,6 / 12,0 s |
+| **Sonnet 5.5 low → Luna** | **4,46 ± 0,15** | **64 %** | **0,0173** | **US$17,3** | **5,3 / 7,2 s** |
+
+- **El control sacó lo mismo que Luna en la ronda 9** (4,04 contra 4,12, dentro del ruido): el lector no cambió de vara.
+- **Con las reglas v10, Claude sí mejora la nota:**
+  - Haiku 5.5 escribiendo y corrigiendo sube +0,28 sobre Luna por US$1,7 más cada 1.000 respuestas. Es la mejor relación
+    calidad/precio medida.
+  - Sonnet 5.5 → Luna sube +0,42 a 7 veces el costo de Luna. Opus 5.5 no le gana a Sonnet y cuesta el doble.
+- **Dónde gana Haiku:** secuencias (de 3,50 a 4,50), «escribir a mis contactos» (de 4,50 a 5,00) y mejorar un correo (de 3,75 a 4,25).
+  Pierde un poco en seguimientos (4,00 contra 4,25).
+- **Latencia:** Haiku piensa más que Sonnet aun en `low` (unos 2.600 tokens de salida por correo contra 750), así que tarda más:
+  10,7 s de mediana y 18,9 s en el p90, contra 6,6 y 8,1 s de Luna. Ninguna llamada pasó los 30 s.
+- **Lo que quedó bajo 4,5 en todas** son problemas de reglas, no del modelo:
+  - la cautela «no veo si respondió porque tu correo no está conectado» cuando el usuario ya dijo que no le respondieron;
+  - la apertura y la oferta en el mismo párrafo;
+  - la misma pregunta en los correos a cada persona;
+  - la invitación de sí o no al mejorar un correo que pedía una demo;
+  - «Con AXIS cargas la nómina y procesa…», que cambia de sujeto a la mitad;
+  - excusas en jerga en la respuesta («No tengo su correo observado», «el encargo no trae destinatarios»).
+
+  La v11 corrige cada uno (ver «Qué cambió en el código»).
+
 ## Recomendación
 
 1. **Desplegar v10 con la configuración actual (Luna low) para todos.** Saca 4,17 por US$0,0022 por respuesta con correo (unos
@@ -333,6 +367,13 @@ Antes, esas peticiones empeoraban el correo o lo dejaban «por revisar».
   preguntas antes del último no la nombran;
 - v10: la oferta no se nombra solo con su prueba («qué hace la oferta»); la apertura no dice un costo en abstracto sin lo que se
   atrasa («consecuencia concreta»); «¿Están evaluando…?» es una fórmula.
+- v11:
+  - el atraso dicho del «proceso» sin quién espera también es una consecuencia en abstracto («retrasa el proceso de ingreso»,
+    «requiere trabajo manual», «suma otra tarea»);
+  - la pregunta no repite una frase de la apertura («…antecedentes laborales en el PJUD… ¿Cuánto les toma consultar antecedentes
+    laborales en el PJUD?»);
+  - el primer correo de una secuencia presenta la oferta;
+  - la respuesta no se excusa con «no hay destinatarios observados».
 
 **Coordinador** (`src/lib/cowork/agent-instructions.ts`, v10): cuando el usuario pide escribirles a sus contactos, lee quién tiene
 correo y a quién ya se le escribió (`contacted.search` con la consulta vacía), deja fuera a quien ya recibió un primer correo y le
@@ -342,6 +383,8 @@ ofrece su seguimiento aparte. Un correo o una secuencia para un cargo o un rubro
 defecto típico de Sol («: Procesa 1.000…»).
 
 **Modelos:**
+- v11: `COWORK_WRITER_SEQUENCE_MODEL` y `COWORK_WRITER_SEQUENCE_EFFORT` para redactar solo las secuencias con otro modelo (su
+  corrección usa `COWORK_WRITER_SEQUENCE_FIX_MODEL` o, si no hay, el de la corrección general);
 - `COWORK_WRITER_FIX_MODEL` y `COWORK_WRITER_FIX_EFFORT` para la corrección;
 - `COWORK_WRITER_EFFORT` y `COWORK_REVIEWER_EFFORT` para el razonamiento;
 - Claude como proveedor (`src/ai/anthropic-json.ts`).
