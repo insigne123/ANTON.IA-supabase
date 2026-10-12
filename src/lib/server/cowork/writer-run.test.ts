@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { coworkLiveDraft } from '@/lib/cowork/partial-json';
 import type { CoworkWriteBrief } from '@/lib/cowork/writer';
-import { coworkWriterEfforts, coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
+import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
 
 // A clean first email: it asks nothing of a meeting the request did not ask for («escríbele a Felipe»).
 const signed = 'Hola,\nEn Yago revisamos antecedentes laborales con AXIS en minutos.\n¿Cuántos ingresos revisan al mes?\nNicolás Yarur';
@@ -124,4 +124,20 @@ test('the correction may run on its own model and effort: one model drafts and a
   // The checks found «gratis»: no Reviewer, and the correction goes to its own model, with the budget and limits of the Writer.
   assert.deepEqual(h.options.map(option => `${option.openAiModel}:${option.effort}:${option.maxOutputTokens}:${option.timeoutMs}`),
     ['draft-model:low:6000:30000', 'fix-model:medium:6000:30000']);
+});
+
+test('a sequence may be drafted by its own model, while its correction stays on the correction model', () => {
+  const models = coworkWriterModels({ COWORK_MODEL: 'base', COWORK_WRITER_SEQUENCE_MODEL: 'strong' });
+  assert.deepEqual(models, { writer: 'base', reviewer: 'base', fix: 'base', sequence: 'strong', sequenceFix: undefined });
+  const efforts = coworkWriterEfforts({ COWORK_WRITER_EFFORT: 'low', COWORK_WRITER_SEQUENCE_EFFORT: 'medium' });
+  assert.deepEqual(coworkWriterCallModel('sequence', 'writer', false, models, efforts), { model: 'strong', effort: 'medium' });
+  assert.deepEqual(coworkWriterCallModel('sequence', 'writer', true, models, efforts), { model: 'base', effort: 'low' });
+  assert.deepEqual(coworkWriterCallModel('sequence', 'writer', true, { ...models, sequenceFix: 'fixer' }, efforts), { model: 'fixer', effort: 'low' });
+  // Emails and the Reviewer keep their models.
+  assert.deepEqual(coworkWriterCallModel('email', 'writer', false, models, efforts), { model: 'base', effort: 'low' });
+  assert.deepEqual(coworkWriterCallModel('sequence', 'reviewer', false, models, efforts), { model: 'base', effort: undefined });
+  // Without a sequence model nothing changes.
+  const plain = coworkWriterModels({ COWORK_MODEL: 'base', COWORK_WRITER_FIX_MODEL: 'fixer' });
+  assert.deepEqual(coworkWriterCallModel('sequence', 'writer', false, plain), { model: 'base', effort: undefined });
+  assert.deepEqual(coworkWriterCallModel('sequence', 'writer', true, plain), { model: 'fixer', effort: undefined });
 });
