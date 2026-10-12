@@ -57,6 +57,7 @@
     "verify:linkedin-profile": "node scripts/verify-linkedin-profile-search.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@azure/msal-browser": "^3.17.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

@@ -347,17 +347,20 @@ test('with the Writer on, a drafting turn hands the emails over and still passes
   const decide: CorpusDecider = async context => context.observations.length === 0
     ? read('message.context')
     : coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
-  const signed = (body: string) => `Hola {{nombre}},\n${body}\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Y.\nGerente Comercial, Yago SpA`;
+  // Each email closes with its own question; the first two ask nothing of a meeting and the first names {{empresa}}.
+  const questions = ['¿Cuántos ingresos revisan al mes en {{empresa}}?', '¿Quién los revisa hoy en tu equipo?', '¿Te sirve verlo 15 minutos esta semana?'];
+  const signed = (body: string, index: number) => `Hola {{nombre}},\n${body}\n${questions[index]}\nNicolás Y.\nGerente Comercial, Yago SpA`;
   // The real pipeline with scripted models: the first draft offers something «gratis», the checks catch it and the Writer fixes it.
-  const drafts = [['AXIS es gratis el primer mes.', 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.'],
-    ['AXIS revisa antecedentes en el Poder Judicial.', 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.']];
+  const opening = 'Cuando entran muchas personas a la vez, revisar uno por uno sus antecedentes en el PJUD atrasa el ingreso.';
+  const drafts = [[`${opening} AXIS es gratis el primer mes.`, 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.'],
+    [`${opening} AXIS revisa antecedentes en el Poder Judicial.`, 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.']];
   const write: CorpusWriter = (writeBrief, observations, meta) => runCoworkWriter({
     request: meta.request, brief: writeBrief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step,
     generate: async ({ schema }) => schema.parse({
       reply: 'Te dejé tres correos en tono cercano, cada uno con un ángulo distinto.', question: '¿La convierto en una campaña pausada para tus contactos de RR. HH. con correo?',
       suggestions: [{ label: 'Sí, crea la campaña', message: 'Sí, crea una campaña pausada con esta secuencia' }],
       blocks: [{ type: 'sequence', title: 'Secuencia AXIS para gerentes de personas',
-        steps: drafts.shift()!.map((body, index) => ({ day: [1, 3, 7][index], subject: `Asunto ${index + 1}`, body: signed(body) })) }],
+        steps: drafts.shift()!.map((body, index) => ({ day: [1, 3, 7][index], subject: `Asunto ${index + 1}`, body: signed(body, index) })) }],
     }),
   });
   const outcome = await runCorpusCase(entry, decide, write);

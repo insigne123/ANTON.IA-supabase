@@ -262,7 +262,7 @@ const NEVER_CONTACTED_EMAILS = ['fmunoz@securitas.cl', 'rpino@tandes.cl', 'cfuen
 const SAMPLE_EMAIL = 'Hola, les escribo de Yago. Tenemos AXIS, una solución para RRHH que ayuda mucho. Nos encantaría mostrarles una demo cuando puedan. Saludos.';
 /** Marcela may be named only as someone who already got an email. */
 const leavesMarcelaOut = (reply: string) => !/Marcela/.test(reply)
-  || /(?:exclu\w*|dej[ée] fuera|queda fuera|no incluy\w*)[^.\n]{0,20}Marcela|Marcela(?: Rojas)?[^.\n,]{0,40}(?:ya (?:le |recibi|tiene un)|contactad|envío registrado|enviad|queda fuera)/i.test(reply);
+  || /(?:exclu\w*|dej[oée] fuera|queda fuera|no incluy\w*)[^.\n]{0,20}Marcela|Marcela(?: Rojas)?(?:,[^.\n,]{0,30},)?[^.\n,]{0,40}(?:ya (?:le |recibi|tiene un|registra)|contactad|envío registrado|enviad|queda fuera)/i.test(reply);
 
 /** Every button on the Cowork home (src/lib/cowork/starters.ts), sent as is: each must lead to a good first turn. */
 export const STARTER_CORPUS: CorpusCase[] = [
