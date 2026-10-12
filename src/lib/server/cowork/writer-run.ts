@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { StructuredResult, StructuredTelemetry } from '@/ai/openai-json';
+import type { StructuredEffort } from '@/ai/anthropic-json';
 import { COWORK_AGENT_ACTION } from '@/lib/cowork/contracts';
 import type { CoworkAnswer, CoworkObservation } from '@/lib/cowork/agent-loop';
 import { coworkWriterBlocks, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief } from '@/lib/cowork/writer';
@@ -9,9 +10,18 @@ export function coworkWriterEnabled(env: Record<string, string | undefined> = pr
   return env.COWORK_WRITER_ENABLED === 'true';
 }
 
-/** COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick their models; COWORK_MODEL by default. */
+/** COWORK_WRITER_MODEL and COWORK_REVIEWER_MODEL pick their models; COWORK_MODEL by default. A «claude-» model answers
+ * through Anthropic (anthropic-json.ts), any other through OpenAI. */
 export function coworkWriterModels(env: Record<string, string | undefined> = process.env) {
   return { writer: env.COWORK_WRITER_MODEL || env.COWORK_MODEL, reviewer: env.COWORK_REVIEWER_MODEL || env.COWORK_MODEL };
+}
+
+const EFFORTS: readonly StructuredEffort[] = ['none', 'low', 'medium', 'high', 'xhigh', 'max'];
+/** COWORK_WRITER_EFFORT and COWORK_REVIEWER_EFFORT: how hard each role thinks. Unset or unknown, the model's usual
+ * level (low for gpt-6 and Claude), as before. */
+export function coworkWriterEfforts(env: Record<string, string | undefined> = process.env): { writer?: StructuredEffort; reviewer?: StructuredEffort } {
+  const pick = (value: string | undefined) => EFFORTS.find(effort => effort === String(value || '').trim().toLowerCase());
+  return { writer: pick(env.COWORK_WRITER_EFFORT), reviewer: pick(env.COWORK_REVIEWER_EFFORT) };
 }
 
 /** Each call's limits: what the ledger reserves for the role (20260928030000) and how long it may take. */
@@ -27,6 +37,7 @@ const LIVE_PREFIX = '{"action":"answer","answer":';
 type Generate = <T extends z.ZodTypeAny>(options: {
   schema: T; systemPrompt: string; prompt: string; provider: 'openai'; openAiModel?: string; allowDefaultModelFallback: false;
   maxAttempts: number; timeoutMs: number; maxOutputTokens: number; signal: AbortSignal; onPartial?: (content: string) => void;
+  reasoningEffort?: StructuredEffort;
 }) => Promise<StructuredResult<T>>;
 
 /**
@@ -48,6 +59,7 @@ export function coworkWriterTurn(deps: {
   liveDraft: { push: (text: string) => void; review: () => void; adjust?: () => void; flush: () => Promise<void> } | null;
   timeLeft: () => number;
   models: { writer?: string; reviewer?: string };
+  efforts?: { writer?: StructuredEffort; reviewer?: StructuredEffort };
   onCall?: (call: { model: string; durationMs: number }) => void;
 }) {
   return async (brief: CoworkWriteBrief, observations: CoworkObservation[]): Promise<CoworkAnswer> => {
@@ -66,6 +78,7 @@ export function coworkWriterTurn(deps: {
         const call = await deps.generate({
           schema, systemPrompt, prompt, provider: 'openai', openAiModel: deps.models[role], allowDefaultModelFallback: false,
           maxAttempts: 1, timeoutMs: Math.min(limits.timeoutMs, left), maxOutputTokens: limits.maxOutputTokens, signal: deps.signal,
+          reasoningEffort: deps.efforts?.[role],
           onPartial: live ? text => live.push(`${LIVE_PREFIX}${text}`) : undefined,
         });
         await live?.flush();

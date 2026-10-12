@@ -1,6 +1,7 @@
 import timers from 'node:timers/promises';
 import { z } from 'genkit';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { generateClaudeStructured, isClaudeModel, type StructuredEffort } from '@/ai/anthropic-json';
 
 type StructuredOptions<T extends z.ZodTypeAny> = {
   prompt: string;
@@ -12,7 +13,8 @@ type StructuredOptions<T extends z.ZodTypeAny> = {
   allowDefaultModelFallback?: boolean;
   timeoutMs?: number;
   maxOutputTokens?: number;
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  /** OpenAI takes none to xhigh («max» goes as xhigh); Claude, low to max («none» goes as low). */
+  reasoningEffort?: StructuredEffort;
   maxAttempts?: number;
   provider?: StructuredProvider;
   signal?: AbortSignal;
@@ -83,6 +85,12 @@ function chatCompletionsUrl(baseUrl: string) {
 
 function isReasoningModel(model: string) {
   return /^gpt-[56](?:[.-]|$)/i.test(model);
+}
+
+/** OpenAI's top level is «xhigh» (gpt-6 rejects «max»); without one, gpt-6 models think at «low», as before. */
+export function openAiReasoningEffort(model: string, effort?: StructuredEffort) {
+  if (effort === 'max') return 'xhigh';
+  return effort ?? (model.toLowerCase().startsWith('gpt-6-') ? 'low' : undefined);
 }
 
 function deterministicSchemaName(schema: object) {
@@ -164,7 +172,10 @@ function isRetryableError(error: any) {
     text.includes('429') ||
     text.includes('resource exhausted') ||
     text.includes('rate limit') ||
-    text.includes('temporarily unavailable')
+    text.includes('temporarily unavailable') ||
+    // Anthropic answers 529 when it is overloaded: a retry may find room.
+    text.includes('overloaded') ||
+    text.includes('_http_529')
   );
 }
 
@@ -279,7 +290,7 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
     ...(config.provider === 'openai' && opts.maxOutputTokens !== undefined
       ? { max_completion_tokens: opts.maxOutputTokens } : {}),
     ...(config.provider === 'openai' && isReasoningModel(model)
-      ? { reasoning_effort: opts.reasoningEffort ?? (model.toLowerCase().startsWith('gpt-6-') ? 'low' : undefined) } : {}),
+      ? { reasoning_effort: openAiReasoningEffort(model, opts.reasoningEffort) } : {}),
     response_format: responseFormat(opts.schema, config.provider),
     messages: [
       {
@@ -367,11 +378,6 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
   opts.signal?.throwIfAborted();
   const config = getStructuredProviderConfig(opts.provider);
 
-  if (!config.apiKey) {
-    const keyName = config.provider === 'glm' ? 'GLM_API_KEY' : 'OPENAI_API_KEY';
-    throw new Error(`Missing AI provider credentials. Set ${keyName} to use ${config.displayName}.`);
-  }
-
   const models = Array.from(new Set([
     ...(opts.openAiModels || []),
     opts.openAiModel,
@@ -388,16 +394,27 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
   if (!models.length) {
     throw new Error('Specify openAiModel or openAiModels when default model fallback is disabled.');
   }
+  // Claude models answer through Anthropic (anthropic-json.ts); the provider's key is needed only when one of its models may answer.
+  if (!config.apiKey && models.some(model => !isClaudeModel(model))) {
+    const keyName = config.provider === 'glm' ? 'GLM_API_KEY' : 'OPENAI_API_KEY';
+    throw new Error(`Missing AI provider credentials. Set ${keyName} to use ${config.displayName}.`);
+  }
 
   let lastError: any;
+  const attempts = Math.max(1, Math.min(3, opts.maxAttempts ?? 3));
   for (const model of models) {
     try {
-      return await withRetries(() => tryChatCompletions({ ...opts, openAiModel: model }, config), opts.signal, Math.max(1, Math.min(3, opts.maxAttempts ?? 3)));
+      if (isClaudeModel(model)) {
+        return await withRetries(() => generateClaudeStructured({ model, prompt: opts.prompt, systemPrompt: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+          schema: opts.schema, maxOutputTokens: opts.maxOutputTokens, reasoningEffort: opts.reasoningEffort, timeoutMs: opts.timeoutMs,
+          signal: opts.signal, onPartial: opts.onPartial }), opts.signal, attempts);
+      }
+      return await withRetries(() => tryChatCompletions({ ...opts, openAiModel: model }, config), opts.signal, attempts);
     } catch (error) {
       opts.signal?.throwIfAborted();
       if (isCancellationError(error) || isProviderQuotaExhausted(error)) throw error;
       lastError = error;
-      console.warn(`[${config.displayName}] Structured generation failed with ${model}:`, error);
+      console.warn(`[${isClaudeModel(model) ? 'Claude' : config.displayName}] Structured generation failed with ${model}:`, error);
     }
   }
 

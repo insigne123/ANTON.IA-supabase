@@ -37,7 +37,7 @@ import { coworkWorkspaceEnabled, loadCoworkWorkspace } from './workspace';
 import { loadCoworkPreviousVersions } from './previous-versions';
 import { reserveCoworkModelCall } from './model-budget';
 import { coworkAnswerHoldEnabled, coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
-import { coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
+import { coworkWriterEfforts, coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
 import { COWORK_JUDGE_HELD_TIMEOUT_MS, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
 import { coworkJevShadow, coworkReviewEngine } from '@/lib/cowork/review-engine';
 import { coworkSearchDefaults } from '@/lib/cowork/search-scope';
@@ -373,6 +373,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // Five seconds before the worker's deadline, for the terminal write.
         timeLeft: () => 100000 - (Date.now() - claimedAt),
         models: coworkWriterModels(),
+        efforts: coworkWriterEfforts(),
         onCall: call => telemetry.push(call),
       }) : undefined,
       // The Designer writes a code artifact when the coordinator hands it a brief (artifact.create).

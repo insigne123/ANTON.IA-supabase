@@ -53,6 +53,7 @@ import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { coworkAnswerChanged } from '../src/lib/cowork/presentation';
 import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
+import { coworkWriterEfforts } from '../src/lib/server/cowork/writer-run';
 import { coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
@@ -178,6 +179,8 @@ async function main() {
   const analystModel = process.env.COWORK_ANALYST_MODEL || process.env.COWORK_MODEL;
   let analystCalls = 0;
   const writerModels = { writer: process.env.COWORK_WRITER_MODEL || process.env.COWORK_MODEL, reviewer: process.env.COWORK_REVIEWER_MODEL || process.env.COWORK_MODEL };
+  // COWORK_WRITER_EFFORT and COWORK_REVIEWER_EFFORT, as the worker reads them (writer-run.ts).
+  const writerEfforts = coworkWriterEfforts();
   const writerCalls = { writer: 0, reviewer: 0 };
   const reviewEngine = arg('review-engine') ?? 'llm';
   if (!['llm', 'jev', 'jev-llm'].includes(reviewEngine)) throw new Error('--review-engine must be llm, jev or jev-llm');
@@ -194,6 +197,9 @@ async function main() {
   const answerTimings: Array<{ firstTextMs: number | null; totalMs: number }> = [];
   let calls = 0;
   const usage: unknown[] = [];
+  // Each call with who made it and for which case, so the report prices every answer and every role.
+  const recordUsage = (role: string, telemetry: Parameters<typeof coworkModelUsage>[0]) =>
+    usage.push({ ...coworkModelUsage(telemetry), role, case: activeCase?.id ?? null, attempt: activeCase?.attempt ?? null });
   const outcomes: Array<CorpusOutcome & { request: string; attempt: number; seconds: number; decisions: unknown[]; issues: string[]; contactsImport: boolean; replyThread: boolean; linkedinBatch: boolean }> = [];
   for (let attempt = 1; attempt <= repeat; attempt++) {
     for (const id of selected) {
@@ -210,8 +216,9 @@ async function main() {
           calls++;
           writerCalls[role]++;
           const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: writerModels[role],
-            allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: 45000 });
-          usage.push(coworkModelUsage(response.telemetry));
+            allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: 90000,
+            reasoningEffort: writerEfforts[role] });
+          recordUsage(role, response.telemetry);
           decisions.push({ agent: role, output: response.data });
           return response.data;
         },
@@ -241,7 +248,7 @@ async function main() {
           const response = await generateStructuredWithTelemetry({ schema: coworkJudgeSchema, systemPrompt: coworkJudgeInstructions({ contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), inTurn: true }),
             prompt,
             provider: 'openai', openAiModel: judgeModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 1500, timeoutMs: 45000 });
-          usage.push(coworkModelUsage(response.telemetry));
+          recordUsage('judge', response.telemetry);
           decisions.push({ agent: 'judge', output: response.data });
           return response.data;
         } catch (error) {
@@ -258,7 +265,7 @@ async function main() {
           designerCalls++;
           const response = await generateStructuredWithTelemetry({ schema: coworkDesignerOutputSchema, systemPrompt, prompt, provider: 'openai', openAiModel: designerModel,
             allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 6000, timeoutMs: 60000 });
-          usage.push(coworkModelUsage(response.telemetry));
+          recordUsage('designer', response.telemetry);
           decisions.push({ agent: 'designer', attempt, title: response.data.title, reply: response.data.reply, suggestions: response.data.suggestions,
             bytes: response.data.js.length + response.data.html.length + response.data.css.length });
           return response.data;
@@ -272,7 +279,7 @@ async function main() {
         const response = await generateStructuredWithTelemetry({ schema: coworkAnalystOutputSchema, systemPrompt: COWORK_ANALYST_RULES.join('\n'),
           prompt: coworkAnalystPrompt({ request: meta.request, brief, userContext: meta.userContext, observations, history: meta.history, now: CORPUS_NOW, timeZone: coworkTimeZone() }),
           provider: 'openai', openAiModel: analystModel, allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: 4000, timeoutMs: 45000 });
-        usage.push(coworkModelUsage(response.telemetry));
+        recordUsage('analyst', response.telemetry);
         decisions.push({ agent: 'analyst', brief, output: response.data });
         return response.data;
       } : undefined;
@@ -319,7 +326,7 @@ async function main() {
           if (Array.isArray(issues)) decisions.push({ rejected: issues.map(issue => `${(issue.path || []).join('.')}: ${issue.message}`), raw });
           throw error;
         }
-        usage.push(coworkModelUsage(response.telemetry));
+        recordUsage(meta?.model ? 'rescue' : 'coordinator', response.telemetry);
         if (stream && response.data.action === 'answer') answerTimings.push({ firstTextMs, totalMs: Date.now() - callStarted });
         decisions.push({ action: response.data.action, reads: response.data.reads ?? null, query: response.data.query,
           leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
@@ -340,7 +347,7 @@ async function main() {
               provider: 'openai', openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
               maxAttempts: 1, timeoutMs: 20000, maxOutputTokens: 1800 });
             if (response.data.findings.some(finding => finding.evidence.some(index => !evidence.some(item => item.index === index)))) throw new Error('Unobserved specialist evidence');
-            usage.push(coworkModelUsage(response.telemetry));
+            recordUsage(task.role, response.telemetry);
             specialistUsage.push({ role: task.role, seconds: (Date.now() - started) / 1000, status: 'completed' });
             results.push({ role: task.role, result: response.data });
           } catch (error) {
