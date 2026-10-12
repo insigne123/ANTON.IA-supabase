@@ -525,3 +525,55 @@ test('an email the person pasted keeps the meeting it asks for, and a formula cl
   // Without a meeting asked, the formula's fix asks for something answered in a line, and nothing else is required.
   assert.doesNotMatch(coworkDraftIssues(email('¿Te sirve ver si calza con tu proceso?'), { ...checks, meeting: false, keepsAsk: false })[0].fix, /qué día/i);
 });
+
+test('the v8 reading: the second email of a sequence does not describe the offer, and questions before the last ask about their work', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  const step = (middle: string, question: string) => `Hola {{nombre}},\n\nCuando la nómina llega encima de la fecha de ingreso en {{empresa}}, revisarla uno por uno deja turnos sin cubrir.${middle}\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA`;
+  const three = (second: string, secondQuestion = '¿Quién prepara hoy la nómina?') => coworkDraftIssues([sequence([
+    step(' AXIS consulta por lote.', '¿Cuántos ingresos revisan al mes en {{empresa}}?'), step(second, secondQuestion), step(' AXIS deja evidencia de cada consulta.', '¿Te sirve verlo con un caso de AXIS?')])], checks)
+    .map(issue => `${issue.where} · ${issue.short}`).filter(line => !line.endsWith('pregunta distinta') && !line.endsWith('apertura sin repetir'));
+  assert.deepEqual(three(''), []);
+  assert.deepEqual(three(' AXIS permite cargar la nómina por archivo.'), ['«Secuencia AXIS», correo 2 · correo 2 sin la oferta']);
+  assert.deepEqual(three('', '¿Quién en tu equipo prepara el archivo para cargar los nombres en AXIS?'), ['«Secuencia AXIS», correo 2 · pregunta sobre su trabajo']);
+  // «¿es un tema relevante?» is a formula; «dejar claro… ayuda al» a vague benefit.
+  const one = (middle: string, question: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Antecedentes',
+    body: `Hola,\n\nCuando entran muchas personas a la vez, revisar uno por uno los antecedentes atrasa el ingreso.\n\n${middle}\n\n${question}\n\nNicolás Y.` }], checks).map(issue => issue.short);
+  assert.deepEqual(one('AXIS consulta por lote.', '¿Revisar antecedentes es un tema relevante para ti?'), ['pregunta concreta']);
+  assert.deepEqual(one('Dejar claro qué consulta se hizo ayuda al revisar el ingreso.', '¿Quién guarda hoy esos respaldos?'), ['sin beneficios vagos']);
+});
+
+test('a first email says what the offer does, not only its proof (v9 reading: «AXIS procesa 1.000 personas en unos 30 minutos.»)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: ['Procesa 1.000 personas en unos 30 minutos'], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  const issues = (middle: string, opening = 'Cuando entra un grupo de guardias, revisar sus antecedentes uno a uno retrasa que tomen turno.') =>
+    coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo para Felipe', to: null, subject: 'Guardias en Securitas',
+      body: `Hola Felipe,\n\n${opening}\n\n${middle}\n\n¿Cuántos guardias incorporan al mes en Securitas?\n\nNicolás Y.\nGerente Comercial\nYago SpA` }], checks)
+      .map(issue => issue.short);
+  assert.deepEqual(issues('AXIS procesa 1.000 personas en unos 30 minutos.'), ['qué hace la oferta']);
+  assert.deepEqual(issues('AXIS, de Yago, procesa 1.000 personas en unos 30 minutos.'), ['qué hace la oferta']);
+  assert.match(coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Guardias',
+    body: 'Hola Felipe,\n\nCuando entra un grupo de guardias, revisarlos uno a uno retrasa que tomen turno.\n\nAXIS procesa 1.000 personas en unos 30 minutos.\n\n¿Cuántos guardias incorporan al mes?\n\nNicolás Y.' }], checks)
+    .find(issue => issue.short === 'qué hace la oferta')?.fix ?? '', /^Di qué hace AXIS/);
+  assert.deepEqual(issues('AXIS consulta por lote en el PJUD y procesa 1.000 personas en unos 30 minutos.'), []);
+  assert.deepEqual(issues('AXIS automatiza esas consultas. Procesa 1.000 personas en unos 30 minutos.'), []);
+  assert.deepEqual(issues('En Yago desarrollamos AXIS, que consulta por lote y procesa 1.000 personas en unos 30 minutos.'), []);
+  // A follow-up does not cite the proof again, and an email without the proof has nothing to check here.
+  assert.deepEqual(issues('AXIS deja evidencia de cada consulta.'), []);
+});
+
+test('the consequence is what is delayed in their business, not a cost in the abstract, and «¿Están evaluando…?» is a formula (v8 reading)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  const issues = (opening: string, question = '¿Cuántos guardias incorporan al mes en Securitas?') =>
+    coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo para Felipe', to: null, subject: 'Guardias en Securitas',
+      body: `Hola Felipe,\n\n${opening}\n\nAXIS consulta por lote en el PJUD.\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA` }], checks)
+      .map(issue => issue.short);
+  assert.deepEqual(issues('Cuando entra un grupo de guardias, revisar sus antecedentes uno a uno suma trabajo manual al equipo.'), ['consecuencia concreta']);
+  assert.deepEqual(issues('En seguridad privada, revisar antecedentes uno por uno ocupa tiempo que el equipo necesita para otros ingresos.'), ['consecuencia concreta']);
+  assert.deepEqual(issues('Cuando se juntan postulantes, revisarlos uno por uno concentra el trabajo manual en cada ingreso.'), ['consecuencia concreta']);
+  // Said with what is delayed, the same cost is fine.
+  assert.deepEqual(issues('Cuando entra un grupo de guardias, revisar sus antecedentes uno a uno suma horas y retrasa que tomen turno.'), []);
+  assert.deepEqual(issues('Cuando entra un grupo de guardias, revisarlos uno a uno los deja esperando para tomar su turno.'), []);
+  // A follow-up: the consequence is the sentence after «Te escribí…».
+  assert.deepEqual(issues('Te escribí el 19 de septiembre sobre los antecedentes. Cuando se agrupan postulantes, procesar cada caso por separado suma pasos antes de tener los resultados.'),
+    ['consecuencia concreta']);
+  assert.deepEqual(issues('Cuando entra un grupo de guardias, revisarlos uno a uno retrasa que tomen turno.', '¿Están evaluando ese proceso en Securitas?'), ['pregunta concreta']);
+});

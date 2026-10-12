@@ -166,6 +166,10 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'propone la campaña o muestra el correo', test: r => r.proposal?.kind === 'campaign_create' || /asunto/i.test(text(r)) },
       { label: 'la campaña solo incluye contactos de RR. HH. con correo', test: r => !campaign(r)
         || Boolean(campaign(r)?.emails?.length && campaign(r)!.emails!.every(email => PEOPLE_EMAILS.includes(email))) },
+      { label: 'no le repite el primer correo a quien ya lo recibió', test: r => campaign(r)
+        ? !(campaign(r)?.emails ?? []).includes('mrojas@sodexo.cl')
+        : leavesMarcelaOut(r.reply) && !(r.blocks || []).some(block => block.type === 'email_draft'
+          && (block.to ?? []).includes('mrojas@sodexo.cl') && !/te escrib|septiembre|correo anterior/i.test(block.body)) },
       { label: 'sin datos de relleno entre corchetes', test: r => !PLACEHOLDER.test(text(r)) && !(campaign(r)?.messages || []).some(message => PLACEHOLDER.test(message.body)) },
       { label: 'el correo que muestra va firmado con el nombre del perfil', test: r => Boolean(r.proposal) || !/asunto/i.test(text(r)) || /Nicol[aá]s/.test(text(r)) }] },
   { id: 'mkt-secuencia', title: 'Secuencia de 3 correos', request: 'armame una secuencia de 3 correos para ofrecer axis a gerentes de personas, tono cercano', world,
@@ -262,7 +266,7 @@ const NEVER_CONTACTED_EMAILS = ['fmunoz@securitas.cl', 'rpino@tandes.cl', 'cfuen
 const SAMPLE_EMAIL = 'Hola, les escribo de Yago. Tenemos AXIS, una solución para RRHH que ayuda mucho. Nos encantaría mostrarles una demo cuando puedan. Saludos.';
 /** Marcela may be named only as someone who already got an email. */
 const leavesMarcelaOut = (reply: string) => !/Marcela/.test(reply)
-  || /(?:exclu\w*|dej[oée] fuera|queda fuera|no incluy\w*)[^.\n]{0,20}Marcela|Marcela(?: Rojas)?(?:,[^.\n,]{0,30},)?[^.\n,]{0,40}(?:ya (?:le |recibi|tiene un|registra)|contactad|envío registrado|enviad|queda fuera)/i.test(reply);
+  || /(?:exclu\w*|dej[oée] fuera|quedan? fuera|no incluy\w*)[^.\n]{0,20}Marcela|Marcela(?: Rojas)?(?:,[^.\n,]{0,30},)?[^.\n,]{0,40}(?:ya (?:le |recibi|tiene un|registra)|(?<!no )recibi|contactad|envío registrado|correo previo|enviad|queda fuera)/i.test(reply);
 
 /** Every button on the Cowork home (src/lib/cowork/starters.ts), sent as is: each must lead to a good first turn. */
 export const STARTER_CORPUS: CorpusCase[] = [
