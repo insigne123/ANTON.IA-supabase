@@ -1,6 +1,6 @@
 // src/app/api/leads/search/route.ts
 import { randomUUID } from 'node:crypto';
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { normalizeDomainList } from "@/lib/domain";
 import {
   CompanyFilterSearchRequestSchema,
@@ -25,7 +25,9 @@ import { executeProviderLeadSearch } from '@/lib/server/apollo-provider/lead-pro
 import { validateLeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { buildBatchLeadSearchPayload } from '@/lib/server/lead-search-payload';
 import {hasLeadsFinderUserAccess} from '@/lib/server/leads-finder/access';
-import {issueCompanyScope} from '@/lib/server/leads-finder/company-scope';
+import {issueCompanyScope,readCompanyScope} from '@/lib/server/leads-finder/company-scope';
+import { hybridEnabled, mirrorCriteria } from '@/lib/server/microworlds/contracts';
+import { enqueueMirror, runMirrorWorker } from '@/lib/server/microworlds/search';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -501,7 +503,7 @@ export async function POST(req: NextRequest) {
         const response = NextResponse.json({
           count: Number(payload.count ?? (Array.isArray(payload.organizations) ? payload.organizations.length : 0)) || 0,
           organizations: Array.isArray(payload.organizations) ? payload.organizations.map((company:any)=>({ ...company,
-            ...(ctx.source==='session'&&hasLeadsFinderUserAccess(ctx.user)?{contact_scope:issueCompanyScope(company,{userId,organizationId:organizationId!})}:{}) })) : [],
+            ...(ctx.source==='session'&&(hybridEnabled()||hasLeadsFinderUserAccess(ctx.user))?{contact_scope:issueCompanyScope(company,{userId,organizationId:organizationId!})}:{}) })) : [],
           search_mode: 'companies',
           search_strategy: 'organizations_then_people',
           page: Number(payload.page ?? page) || page,
@@ -529,6 +531,16 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: 'INVALID_REQUEST_BODY', details: peopleParsed.error.flatten() }, { status: 400 });
         }
         const peopleReq = peopleParsed.data as any;
+        const organizationIdValue = String(peopleReq.organization_id || peopleReq.organizationId || peopleReq.selected_organization_id || '').trim();
+        // Validate the signed selection before reserving app quota.
+        let mirrorDomain: string | null = null;
+        if (ctx.source === 'session' && hybridEnabled() && peopleReq.company_scope) {
+          try {
+            const selected=readCompanyScope(peopleReq.company_scope,{userId,organizationId:organizationId!});
+            if(selected.id!==organizationIdValue)throw Error('COMPANY_SCOPE_MISMATCH');
+            mirrorDomain=selected.domain;
+          } catch { return NextResponse.json({error:'COMPANY_SCOPE_UNAVAILABLE',message:'Busca las empresas de nuevo antes de continuar.'},{status:409}); }
+        }
         const providerDecision = resolveLeadProvider({ organizationId });
         await recordSearchRequest({
           searchMode: 'company_people',
@@ -543,7 +555,6 @@ export async function POST(req: NextRequest) {
             providerRequested: providerDecision.requestedProvider, providerUsed: providerDecision.provider,
           });
         }
-        const organizationIdValue = String(peopleReq.organization_id || peopleReq.organizationId || peopleReq.selected_organization_id || '').trim();
         const titles = [...new Set([
           ...asBackendStringList(peopleReq.titles),
           ...(peopleReq.title ? asBackendStringList(peopleReq.title) : []),
@@ -583,6 +594,23 @@ export async function POST(req: NextRequest) {
           fallbackApplied: false,
         });
         response = await excludeSavedSearchResults(response, organizationId!);
+        if (mirrorDomain && response.ok) {
+          try {
+            const observed=await response.clone().json();
+            const rows=(Array.isArray(observed.leads)?observed.leads:[]).filter((person:any)=>{
+              const domain=normalizeDomainList([person.organization_domain||person.organization?.domain||''])[0];
+              const id=String(person.organization?.id||person.organization_id||'');
+              return (!domain||domain===mirrorDomain)&&(!id||id===organizationIdValue);
+            });
+            if(rows.length){
+              const jobId=await enqueueMirror({organizationId:organizationId!,userId,
+                criteria:mirrorCriteria({domain:mirrorDomain,titles,personLocations,seniorities}),
+                identities:rows.map((person:any)=>({id:String(person.source_provider_id||person.apollo_id||person.id||''),
+                  domain:mirrorDomain!,fullName:person.name||'',title:person.title||'',linkedinUrl:person.linkedin_url||null}))});
+              if(jobId)after(async()=>{await runMirrorWorker({id:jobId}).catch(()=>undefined);});
+            }
+          } catch { console.warn('[mirror] search continues',{code:'MIRROR_ENQUEUE_UNAVAILABLE'}); }
+        }
         response.headers.set('x-search-mode', 'company_people');
         response.headers.set('x-provider-used', providerDecision.provider);
         response.headers.set('x-quota-count', String(quotaReservation.quota.count));

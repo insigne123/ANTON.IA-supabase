@@ -77,6 +77,7 @@ export function revealedLead(row: ReturnType<typeof enrichedLeadRow>, input: { c
   return {
     id: row.id,
     clientRef: input.clientRef,
+    serverPersisted: true,
     sourceProvider: LEADS_FINDER_PROVIDER,
     sourceProviderId: row.source_provider_id,
     fullName: row.full_name || '',

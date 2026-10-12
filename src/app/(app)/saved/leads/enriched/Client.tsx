@@ -58,6 +58,8 @@ import * as Quota from '@/lib/quota-client';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 import { enrichWithLeadsFinder } from '@/lib/leads-finder-client';
 import { enrichmentCreditReceipt, partitionEnrichmentLeads } from '@/lib/leads-workspace/enrichment-provider';
+import { enrichmentAttempt } from '@/lib/enrichment-attempt';
+import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { createCoalescedRunner } from '@/lib/leads-workspace/coalesced-runner';
 import {
   ENRICHED_EXPORT_HEADERS,
@@ -155,15 +157,15 @@ export default function EnrichedLeadsClient() {
         sourceProvider: l.sourceProvider,
         sourceProviderId: l.sourceProviderId,
       }));
-      const operationId = uuid();
+      const attempt=await enrichmentAttempt('apollo',apollo,opts);
+      const operationId = attempt.id;
 
       if (apollo.length) {
         try {
-          const res = await fetch('/api/opportunities/enrich-apollo', {
+          const res = await authenticatedApiFetch('/api/opportunities/enrich-apollo', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              'Idempotency-Key': operationId,
+              ...attempt.headers,
               'x-quota-ticket': getQuotaTicket() || '',
             },
             body: JSON.stringify({
@@ -188,12 +190,13 @@ export default function EnrichedLeadsClient() {
 
           const ticket = data?.ticket || res.headers.get('x-quota-ticket');
           if (ticket) setQuotaTicket(ticket);
-          consumed += Number(data?.usage?.consumed ?? 0);
+          if(!data?.usage?.reused)consumed += Number(data?.usage?.consumed ?? 0);
           if (typeof data?.note === 'string' && data.note.includes('Quota')) {
             toast({ variant: 'destructive', title: 'Llegaste al límite de hoy', description: data.note });
           }
 
           if (Array.isArray(data.enriched)) results.push(...data.enriched);
+          if(data.operationStatus==='completed')attempt.complete();
         } catch (error) {
           failures.push(error instanceof Error ? error.message : 'No pudimos completar parte de los contactos.');
         }
@@ -210,7 +213,7 @@ export default function EnrichedLeadsClient() {
         newEnriched.forEach((incoming: EnrichedLead & { clientRef?: string }) => {
           const incomingEnrichmentStatus = (incoming as any).enrichmentStatus as EnrichedLead['enrichmentStatus'];
           if (incomingEnrichmentStatus === 'suppressed') return; // Reload canonical rows below; never reapply withdrawn identity.
-          if (leadsFinder.some(lead => lead.id === incoming.clientRef)) {
+          if ((incoming as EnrichedLead & {serverPersisted?:boolean}).serverPersisted || leadsFinder.some(lead => lead.id === incoming.clientRef)) {
             // LF already committed this exact row server-side. A replay contains
             // outcome metadata only: never overwrite canonical contacts from a stale browser copy.
             if (incomingEnrichmentStatus === 'completed') cachedProcessed++;

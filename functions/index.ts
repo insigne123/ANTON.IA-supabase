@@ -196,6 +196,14 @@ export const apolloReconciliationTick = functions.scheduler.onSchedule({
     });
 });
 
+// Persistent parallel search is independent of browser tabs and Cowork/model work.
+export const microworldsSearchTick = functions.scheduler.onSchedule({
+    schedule: 'every 1 minutes', timeoutSeconds: 150, memory: '256MiB',
+    maxInstances: 1, retryCount: 0, secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    await invokeFirebaseSchedulerBridge({ name: 'microworlds-search', path: '/api/cron/microworlds-search', method: 'POST' });
+});
+
 export const apolloUsageTick = functions.scheduler.onSchedule({
     schedule: 'every 1 hours',
     timeoutSeconds: 540,

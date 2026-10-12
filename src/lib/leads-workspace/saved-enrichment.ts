@@ -68,7 +68,7 @@ export function classifyEnrichmentResults(chosen: Lead[], results: ProviderResul
       fullName: result.fullName || source.name,
       title: result.title || source.title,
       email: email || undefined,
-      emailStatus: email ? (result.emailStatus || 'verified') : 'unknown',
+       emailStatus: email ? (result.emailStatus || 'unknown') : 'unknown',
       linkedinUrl: result.linkedinUrl || source.linkedinUrl || undefined,
       companyName: result.companyName ?? source.company,
       companyDomain: result.companyDomain ?? domainOf(source),

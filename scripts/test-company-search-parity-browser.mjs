@@ -36,10 +36,11 @@ const company={id:'apollo-company',name:'Empresa Seleccionada',primary_domain:'s
 const leads=Array.from({length:75},(_,i)=>({id:'lf_'+String(i).padStart(24,'0'),name:'Persona '+i+' Pé***z',title:'Gerente',source_provider:'leads_finder',source_provider_id:'lf_'+String(i).padStart(24,'0'),has_email:true,organization_domain:'selected.example.test'}));
 const browser=await chromium.launch({headless:true}),evidence=[];
 try{
-  for(const scenario of [{owner:false,source:'apollo',mode:'filters',width:390,theme:'light'},
+   const cases=[{owner:false,source:'apollo',mode:'filters',width:390,theme:'light'},
     {owner:false,source:'apollo',mode:'company',width:1440,theme:'dark'},
     {owner:true,source:'leads_finder',mode:'filters',width:390,theme:'dark'},
-    {owner:true,source:'leads_finder',mode:'company',width:1440,theme:'light'}]){
+     {owner:true,source:'leads_finder',mode:'company',width:1440,theme:'light'}];
+   for(const scenario of process.env.HYBRID_VISUAL_TEST==='1'?cases.map(s=>({...s,owner:false,source:'apollo'})):cases){
     const context=await browser.newContext({viewport:{width:scenario.width,height:1000},ignoreHTTPSErrors:true,reducedMotion:'reduce'}),page=await context.newPage();
     const errors=[],calls=[];let checkpoint=null,revision=0,ownerAvailability=scenario.owner;page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(()=>{window.saved=[];window.notices=[];});

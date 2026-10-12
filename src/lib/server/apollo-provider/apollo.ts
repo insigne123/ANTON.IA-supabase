@@ -647,7 +647,8 @@ export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: st
   if (input.lead.fullName && !input.lead.firstName) query.set('name', input.lead.fullName);
   if (input.lead.organizationName) query.set('organization_name', input.lead.organizationName);
   if (input.lead.organizationDomain) query.set('domain', input.lead.organizationDomain);
-  query.set('reveal_personal_emails', String(input.revealEmail));
+  // Product requests work email, never the optional personal-mail add-on.
+  query.set('reveal_personal_emails', 'false');
   query.set('reveal_phone_number', String(input.revealPhone));
   query.set('run_waterfall_email', 'false');
   query.set('run_waterfall_phone', 'false');
