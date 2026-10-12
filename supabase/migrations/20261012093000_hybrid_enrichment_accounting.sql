@@ -106,6 +106,8 @@ begin
     then raise exception 'hybrid identity mismatch'; end if;
   select * into v_row from public.enriched_leads where id=p_target and organization_id=p_org and user_id=p_user for update;
   if not found or v_row.enrichment_status='suppressed' then return to_jsonb(v_row); end if;
+  if v_row.source_provider is distinct from 'apollo' or v_row.source_provider_id is distinct from v_item.apollo_person_id
+    then raise exception 'hybrid identity mismatch'; end if;
   v_email:=case when v_item.requested_email then nullif(lower(trim(p_candidate->>'email')),'') end;
   v_phone:=case when v_item.requested_phone and nullif(trim(v_row.primary_phone),'') is null
     and coalesce(jsonb_array_length(v_row.phone_numbers),0)=0 then nullif(trim(p_candidate->>'primary_phone'),'') end;
@@ -199,6 +201,10 @@ begin
     select * into v_target from public.enriched_leads where id::text=v_callback.target_lead_id
       and organization_id=v_callback.organization_id and user_id=v_callback.user_id for update;
     if found then
+      if v_target.source_provider is distinct from 'apollo' or v_target.source_provider_id is distinct from v_callback.apollo_person_id then
+        perform public.settle_apollo_enrichment_callback_v1(v_callback.id,'failed','hybrid_target_identity_changed');
+        return jsonb_build_object('outcome','apollo_person_mismatch');
+      end if;
       if nullif(trim(v_target.email),'') is not null then
         if lower(trim(v_target.email))=lower(trim(p_candidate->>'email')) then p_candidate:=p_candidate-'email';
         else p_candidate:=p_candidate-'email'-'email_status'; end if;

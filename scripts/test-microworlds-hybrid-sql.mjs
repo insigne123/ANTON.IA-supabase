@@ -21,7 +21,7 @@ try{
       consumed_count integer,quota_count_after integer,quota_day date default current_date,quota_scope text default 'user',credit_mode text,credit_group_id uuid,updated_at timestamptz,
       primary key(organization_id,user_id,resource,operation_id));
     create table apollo_enrichment_callbacks(id uuid,organization_id uuid,user_id uuid,quota_resource text,operation_id text,target_lead_id text,
-      target_table text,token_hash text,status text,provider_queued_at timestamptz);
+      target_table text,token_hash text,status text,provider_queued_at timestamptz,apollo_person_id text);
     create table antonia_user_daily_credits(user_id uuid primary key,usage_count integer);
     create table antonia_daily_usage(organization_id uuid,date date,leads_enriched integer,leads_investigated integer,updated_at timestamptz);
     create function release_antonia_user_daily_credits_v1(uuid,date,text,integer) returns boolean language plpgsql as $$begin update antonia_user_daily_credits set usage_count=usage_count-$4 where user_id=$1;return found;end;$$;
@@ -72,7 +72,7 @@ try{
   const repeat=(await query('select apply_hybrid_cached_fields_v1($1,$2,$3,$4,$5,$6,$7) value',[...scope,target,{email:'changed@demo.test'}]))[0].value;
   assert.equal(repeat.outcome,'replay');
   const callback='01000000-0000-4000-8000-000000000010';
-  await query("insert into apollo_enrichment_callbacks values($1,$2,$3,'investigate','mixed',$4,'enriched_leads',$5,'terminal',now())",[callback,org,user,target,'d'.repeat(64)]);
+  await query("insert into apollo_enrichment_callbacks values($1,$2,$3,'investigate','mixed',$4,'enriched_leads',$5,'terminal',now(),'apollo-ana')",[callback,org,user,target,'d'.repeat(64)]);
   assert.equal((await query('select settle_apollo_enrichment_quota_if_ready_v1($1) value',[callback]))[0].value,true);
   assert.equal((await query('select usage_count from antonia_user_daily_credits'))[0].usage_count,1,'same target cache+Apollo charged once; unprocessed reservation refunded');
   assert.equal((await query('select consumed_count,status from antonia_quota_operations'))[0].consumed_count,1);
