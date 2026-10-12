@@ -40,6 +40,10 @@ import {
   requireSessionOrTrustedInternalRequest,
 } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { hybridEnabled } from '@/lib/server/microworlds/contracts';
+import { observeConfirmedApolloIdentity } from '@/lib/server/microworlds/search';
+import { findHybridHint, frozenHybridItems, registerHybridItem, applyHybridCache, hybridFieldPlan, cancelHybridItems, settleHybrid,
+  type HybridHint, type HybridScope } from '@/lib/server/microworlds/fulfillment';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -92,6 +96,8 @@ type PreparedTarget = {
   sourceProviderId?: string;
   boundPersonId?: string;
   lead: EnrichmentLead;
+  hybridHint?: HybridHint;
+  fieldPlan?: {apolloEmail:boolean;apolloPhone:boolean;verifyEmail:boolean};
 };
 
 type CallbackHandle = Awaited<ReturnType<typeof createApolloEnrichmentCallback>> & {
@@ -285,9 +291,23 @@ async function operationStateResponse(claim: EnrichmentQuotaOperationClaim, cont
   organizationId: string;
   resource: QuotaResource;
   tableName: ApolloTargetTable;
+  requested?: {email:boolean;phone:boolean};
+  leads?: EnrichmentLead[];
 }) {
   const enriched = await operationTargets({ operationId: claim.operationId, ...context });
-  const replayEnriched = enriched.map((item) => ({ id: item.id }));
+  const references=new Map<string,string>();
+  if(context.tableName==='enriched_leads'){
+    const {data}=await (getSupabaseAdminClient() as any).from('hybrid_enrichment_items').select('target_id,client_ref,requested_phone')
+      .eq('organization_id',context.organizationId).eq('user_id',context.userId).eq('resource',context.resource).eq('operation_id',claim.operationId);
+    for(const row of data||[]){references.set(row.target_id,row.client_ref||'');
+      if(!enriched.some(item=>item.id===row.target_id))enriched.push({id:row.target_id,requestedPhone:row.requested_phone===true});}
+  }
+  const replayEnriched = context.requested ? await Promise.all(enriched.map(async item=>{
+    const row=await loadPersistedTarget({tableName:context.tableName,targetId:item.id,userId:context.userId,organizationId:context.organizationId});
+    const lead=context.leads?.find(l=>l.existingRecordId===item.id||sourceProviderId(l)===String(row.source_provider_id||''));
+    return canonicalTargetResponse({row,target:{id:item.id,lead:lead||{},clientRef:references.get(item.id)||lead?.clientRef},
+      revealEmail:context.requested!.email,revealPhone:context.requested!.phone});
+  })) : enriched.map((item) => ({ id: item.id }));
   const pendingEnriched = enriched.map((item) => ({
     id: item.id,
     enrichmentStatus: item.requestedPhone ? 'pending_phone' : 'pending',
@@ -359,7 +379,7 @@ async function prepareTargets(input: {
       ? profileTargetId(input.userId, input.organizationId, linkedinUrl)
       : randomUUID());
     let boundPersonId: string | undefined;
-    const providerId = sourceProviderId(lead) || undefined;
+    let providerId = sourceProviderId(lead) || undefined;
     const inputEmail = text(lead.email, 320).toLowerCase() || undefined;
     const name = splitFullName(lead.fullName);
     const status = input.revealPhone ? 'pending_phone' : 'pending';
@@ -427,6 +447,9 @@ async function prepareTargets(input: {
       if (!existing) throw new Error('ENRICHMENT_TARGET_NOT_FOUND');
       if (existing.source_provider === 'leads_finder' || text(existing.source_provider_id, 255).startsWith('lf_')
         || object(existing.data)?.sourceProvider === 'leads_finder') throw new Error('ENRICHMENT_PROVIDER_MISMATCH');
+      boundPersonId=text(existing.source_provider_id||object(existing.data)?.sourceProviderId,255)||undefined;
+      if(providerId&&boundPersonId&&providerId!==boundPersonId)throw Error('APOLLO_PERSON_IDENTITY_MISMATCH');
+      providerId=providerId||boundPersonId;
       if (text(existing.enrichment_status, 64) === 'suppressed') throw new Error('ENRICHMENT_TARGET_SUPPRESSED');
       existingData = object(existing.data) || {};
       const { data: prepared, error: updateError } = await admin.from(input.tableName).update({
@@ -483,7 +506,7 @@ async function prepareTargets(input: {
       id,
       lead,
       sourceProviderId: providerId,
-      boundPersonId: input.tableName === 'people_search_leads' ? boundPersonId : undefined,
+      boundPersonId,
       clientRef: text(lead.clientRef, 200) || undefined,
     });
   }
@@ -618,6 +641,7 @@ function canonicalTargetResponse(input: {
     departments: Array.isArray(input.row.departments) ? input.row.departments.slice(0, 20) : undefined,
     phoneNumbers,
     primaryPhone: input.revealPhone ? text(input.row.primary_phone, 64) : undefined,
+    serverPersisted: true,
     enrichmentStatus,
     creditsConsumed: input.creditsConsumed,
   };
@@ -680,9 +704,21 @@ async function persistImmediateResult(input: {
   revealPhone: boolean;
   pendingPhone: boolean;
   matchOnly: boolean;
+  hybridScope?: HybridScope;
 }) {
   const admin: any = getSupabaseAdminClient();
   const now = new Date().toISOString();
+  if(input.hybridScope && input.target.hybridHint){
+    const scope=input.hybridScope;
+    const {data,error}=await admin.rpc('apply_hybrid_apollo_fields_v1',{p_org:scope.organizationId,p_user:scope.userId,p_resource:scope.resource,
+      p_operation:scope.operationId,p_target:input.target.id,p_candidate:input.extracted,p_pending_phone:input.pendingPhone});
+    if(error||!data)throw Error('HYBRID_RESULT_UNAVAILABLE');
+    if(data.enrichment_status!=='suppressed'&&isUuid(text(input.target.clientRef,64)))await applyEnrichedIdentity(admin,{
+      userId:scope.userId,organizationId:scope.organizationId,savedLeadId:input.target.clientRef,providerId:input.target.sourceProviderId,
+      identity:identityFromProvider({full_name:data.full_name,linkedin_url:data.linkedin_url,title:data.title}),
+    }).catch(()=>undefined);
+    return object(data)||{};
+  }
   const phoneNumbers = input.revealPhone && Array.isArray(input.extracted.phone_numbers)
     ? input.extracted.phone_numbers.slice(0, 20)
     : [];
@@ -802,6 +838,7 @@ async function audit(input: {
   outcome: string;
   resource: QuotaResource;
   severity?: 'info' | 'warning' | 'error';
+  providers?: {apolloLookups:number;cacheContacts:number};
 }) {
   await safeAppendAntoniaEvent({
     eventType: input.eventType,
@@ -812,7 +849,7 @@ async function audit(input: {
     entityId: input.operationId,
     sourceSystem: 'apollo',
     sourceRoute: '/api/opportunities/enrich-apollo',
-    provider: 'apollo',
+    provider: input.providers?.cacheContacts ? 'hybrid' : 'apollo',
     requestId: input.operationId,
     correlationId: input.operationId,
     operationId: input.operationId,
@@ -820,7 +857,7 @@ async function audit(input: {
     status: input.status,
     outcome: input.outcome,
     severity: input.severity || 'info',
-    metrics: { leadCount: input.leadCount, quotaResource: input.resource },
+    metrics: { leadCount: input.leadCount, quotaResource: input.resource, ...input.providers },
   });
 }
 
@@ -837,7 +874,12 @@ export async function POST(request: NextRequest) {
   const submittedCallbacks = new Set<string>();
   let targets: PreparedTarget[] = [];
   let requestedRevealPhone = false;
+  let requestedRevealEmail = false;
   let busyTargetId: string | null = null;
+  let hybridScope: HybridScope | undefined;
+  let hybridCacheStarted = false;
+  let apolloLookups = 0;
+  let cacheContacts = 0;
 
   try {
     try {
@@ -864,6 +906,7 @@ export async function POST(request: NextRequest) {
     const revealPhone = parseFlag(body.revealPhone, false);
     if (!revealEmail.ok || !revealPhone.ok) return NextResponse.json({ error: 'INVALID_REVEAL_FLAGS' }, { status: 400 });
     requestedRevealPhone = revealPhone.value;
+    requestedRevealEmail = revealEmail.value;
     const mode = resolveMode(body.mode, trustedInternal, revealPhone.value);
     if (!mode.ok) return NextResponse.json({ error: mode.error }, { status: 400 });
     resource = quotaResource(mode.mode);
@@ -911,7 +954,8 @@ export async function POST(request: NextRequest) {
       operationId: operation.operationId,
       requestFingerprint: fingerprint,
     });
-    if (existing) return await operationStateResponse(existing, { userId, organizationId, resource, tableName });
+    if (existing) return await operationStateResponse(existing, { userId, organizationId, resource, tableName,
+      requested:{email:revealEmail.value,phone:revealPhone.value},leads });
 
     const hasCreditAccess = trustedInternal
       ? await hasUserEnrichmentSearchCreditAccess(userId)
@@ -920,7 +964,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(enrichmentSearchCreditsUnavailablePayload(), { status: 429 });
     }
 
-    assertApolloEnrichmentConfigured();
+    const frozen=tableName==='enriched_leads'&&!trustedInternal&&hybridEnabled()
+      ? await frozenHybridItems({organizationId,userId,resource,operationId:operation.operationId}) : [];
+    const hints: Array<HybridHint|null> = tableName==='enriched_leads'&&!trustedInternal&&hybridEnabled()
+      ? await Promise.all(leads.map(lead=>findHybridHint({organizationId,userId},lead).catch(error=>{
+        if(error instanceof Error&&['APOLLO_PERSON_IDENTITY_MISMATCH','ENRICHMENT_TARGET_SUPPRESSED','HYBRID_PRIVACY_UNAVAILABLE'].includes(error.message))throw error;
+        return null;
+      }))) : leads.map(()=>null);
+    for(const [index,lead] of leads.entries()){
+      const prior=frozen.find(item=>item.clientRef===lead.clientRef||item.targetId===lead.existingRecordId);
+      if(prior)hints[index]=prior.hint;
+    }
+    const hasHybrid=hints.some(hint=>Boolean(hint && (revealEmail.value&&hint.contact.email||revealPhone.value&&hint.contact.mobile)));
+    let setupFailure: string | undefined;
+    try { assertApolloEnrichmentConfigured(); }
+    catch(error){if(!hasHybrid)throw error;setupFailure='APOLLO_PROVIDER_NOT_CONFIGURED';}
 
     const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });
     claim = await claimEnrichmentQuotaOperation({
@@ -933,7 +991,8 @@ export async function POST(request: NextRequest) {
       count: leads.length,
     });
     if (!claim.claimed || !claim.allowed || !claim.claimToken) {
-      return await operationStateResponse(claim, { userId, organizationId, resource, tableName });
+      return await operationStateResponse(claim, { userId, organizationId, resource, tableName,
+        requested:{email:revealEmail.value,phone:revealPhone.value},leads });
     }
 
     await audit({
@@ -949,15 +1008,31 @@ export async function POST(request: NextRequest) {
     });
 
     targets = await prepareTargets({
-      leads,
+      leads:leads.map(lead=>{
+        const prior=frozen.find(item=>item.clientRef===lead.clientRef||item.targetId===lead.existingRecordId);
+        return prior?{...lead,existingRecordId:prior.targetId}:lead;
+      }),
       tableName,
       userId,
       organizationId,
       revealPhone: revealPhone.value,
     });
 
+    if(hasHybrid){
+      hybridScope={userId,organizationId,resource,operationId:operation.operationId,claimToken:claim.claimToken};
+      for(const [index,target] of targets.entries()){
+        const hint=hints[index];if(!hint||!(revealEmail.value&&hint.contact.email||revealPhone.value&&hint.contact.mobile))continue;
+        target.hybridHint=hint;
+        await registerHybridItem(hybridScope,target,hint,{email:revealEmail.value,phone:revealPhone.value});
+        const row=await loadPersistedTarget({tableName,targetId:target.id,userId,organizationId});
+        target.fieldPlan=hybridFieldPlan({email:revealEmail.value,phone:revealPhone.value},row,hint);
+      }
+    }
+
     if (!matchOnly) {
       for (const target of targets) {
+        const fields=target.fieldPlan||{apolloEmail:revealEmail.value,apolloPhone:revealPhone.value};
+        if(!fields.apolloEmail&&!fields.apolloPhone||setupFailure)continue;
         try {
           const callback = await createApolloEnrichmentCallback({
             operationId: operation.operationId,
@@ -968,7 +1043,7 @@ export async function POST(request: NextRequest) {
             targetTable: tableName,
             targetId: target.id,
             apolloPersonId: target.sourceProviderId,
-            requestedFields: requestedFields(revealEmail.value, revealPhone.value),
+            requestedFields: requestedFields(fields.apolloEmail, fields.apolloPhone),
           });
           callbacks.push({ ...callback, targetId: target.id });
         } catch (error) {
@@ -989,13 +1064,31 @@ export async function POST(request: NextRequest) {
     };
     const enriched: Array<Record<string, unknown>> = [];
 
-    for (const [index, target] of targets.entries()) {
+    if(hybridScope){
+      // Durable submission before committing cached contacts also prevents a
+      // stale HTTP retry reacquiring and billing the same operation.
+      await markEnrichmentQuotaOperationSubmitted(mutationIdentity);
+      hybridCacheStarted=true;
+      for(const target of targets)if(target.hybridHint){
+        if(await applyHybridCache(hybridScope,target.id,target.hybridHint))cacheContacts++;
+      }
+    }
+
+    for (const target of targets) {
       const callback = callbacks.find((item) => item.targetId === target.id);
+      const fields=target.fieldPlan||{apolloEmail:revealEmail.value,apolloPhone:revealPhone.value,verifyEmail:false};
+      if(target.hybridHint && (!fields.apolloEmail&&!fields.apolloPhone||setupFailure)){
+        const persisted=await loadPersistedTarget({tableName,targetId:target.id,userId,organizationId});
+        enriched.push(canonicalTargetResponse({row:persisted,target,revealEmail:revealEmail.value,revealPhone:revealPhone.value}));
+        continue;
+      }
+      if(setupFailure){await markTargetsFailed({targets:[target],tableName,userId,organizationId});
+        enriched.push({id:target.id,clientRef:target.clientRef,enrichmentStatus:'failed',errorCode:setupFailure});continue;}
       if (callback) {
         await markApolloEnrichmentCallbackSubmitted(callback);
         submittedCallbacks.add(callback.callbackId);
         providerBoundaryCrossed = true;
-      } else if (!providerBoundaryCrossed) {
+      } else if (!providerBoundaryCrossed && !hybridCacheStarted) {
         if (matchOnly) {
           await markApolloMatchOnlySubmitted({
             target,
@@ -1014,6 +1107,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const name = splitFullName(target.lead.fullName);
+        apolloLookups++;
         const result = await submitApolloEnrichment({
           lead: {
             id: target.sourceProviderId,
@@ -1025,9 +1119,11 @@ export async function POST(request: NextRequest) {
             organizationName: text(target.lead.companyName, 200) || undefined,
             organizationDomain: cleanDomain(target.lead.companyDomain) || undefined,
           },
-          revealEmail: revealEmail.value,
-          revealPhone: revealPhone.value,
-          webhookUrl: revealPhone.value ? callback?.webhookUrl : undefined,
+          // A cached email is observed on the phone fallback, but it is not a
+          // writable callback field and is only verified on address equality.
+          revealEmail: fields.apolloEmail || fields.verifyEmail,
+          revealPhone: fields.apolloPhone,
+          webhookUrl: fields.apolloPhone ? callback?.webhookUrl : undefined,
           matchOnly,
         });
 
@@ -1054,24 +1150,25 @@ export async function POST(request: NextRequest) {
         }
 
         if (result.success && result.extractedData) {
-          const hasImmediatePhone = revealPhone.value && (
+          const hasImmediatePhone = fields.apolloPhone && (
             text(result.extractedData.primary_phone, 64)
             || (Array.isArray(result.extractedData.phone_numbers) && result.extractedData.phone_numbers.length > 0)
           );
-          const pendingPhone = revealPhone.value && !hasImmediatePhone && Boolean(result.providerRequestId);
+          const pendingPhone = fields.apolloPhone && !hasImmediatePhone && Boolean(result.providerRequestId);
           let persisted = await persistImmediateResult({
             target,
             tableName,
             userId,
             organizationId,
             extracted: result.extractedData,
-            revealEmail: revealEmail.value,
-            revealPhone: revealPhone.value,
+            revealEmail: fields.apolloEmail,
+            revealPhone: fields.apolloPhone,
             pendingPhone,
             matchOnly,
+            hybridScope,
           });
 
-          if (callback && (!revealPhone.value || hasImmediatePhone)) {
+          if (callback && (!fields.apolloPhone || hasImmediatePhone)) {
             const providerRequestId = result.providerRequestId || `sync:${callback.callbackId}`;
             await applyApolloEnrichmentCandidate({
               tokenHash: callback.tokenHash,
@@ -1080,8 +1177,8 @@ export async function POST(request: NextRequest) {
               payloadHash: createHash('sha256').update(JSON.stringify(result.extractedData)).digest('hex'),
               candidate: {
                 apollo_person_id: resultPersonId || target.sourceProviderId,
-                email: revealEmail.value ? text(result.extractedData.email, 320) || undefined : undefined,
-                email_status: revealEmail.value ? text(result.extractedData.email_status, 64) || undefined : undefined,
+                email: fields.apolloEmail ? text(result.extractedData.email, 320) || undefined : undefined,
+                email_status: fields.apolloEmail ? text(result.extractedData.email_status, 64) || undefined : undefined,
                 phone_numbers: Array.isArray(result.extractedData.phone_numbers)
                   ? result.extractedData.phone_numbers.slice(0, 20) as any
                   : undefined,
@@ -1110,6 +1207,12 @@ export async function POST(request: NextRequest) {
             revealPhone: revealPhone.value,
             creditsConsumed: result.creditsConsumed,
           }));
+          if(tableName==='enriched_leads'&&!trustedInternal&&persisted.enrichment_status!=='suppressed'){
+            await observeConfirmedApolloIdentity({organizationId,userId},{id:resultPersonId||target.sourceProviderId||'',
+              domain:cleanDomain(result.extractedData.organization_domain)||cleanDomain(target.lead.companyDomain),
+              fullName:text(result.extractedData.full_name,200),linkedinUrl:normalizeLinkedin(result.extractedData.linkedin_url),title:text(result.extractedData.title,160),
+            }).catch(()=>undefined);
+          }
         } else {
           if (callback) {
             await settleApolloEnrichmentCallback({
@@ -1129,8 +1232,8 @@ export async function POST(request: NextRequest) {
           enriched.push(canonicalTargetResponse({
             row: persisted,
             target,
-            revealEmail: false,
-            revealPhone: false,
+            revealEmail: Boolean(target.hybridHint)&&revealEmail.value,
+            revealPhone: Boolean(target.hybridHint)&&revealPhone.value,
           }));
         }
       } catch (error) {
@@ -1138,7 +1241,9 @@ export async function POST(request: NextRequest) {
           (error instanceof ApolloEnrichmentError && error.providerOutcomeUnknown)
           || (!(error instanceof ApolloEnrichmentError) && providerBoundaryCrossed)
         ) {
-          for (const pending of callbacks.slice(index + 1)) {
+          // Cache-only targets do not have a callback, so target indices are
+          // not callback indices in a hybrid batch. Cancel all unsubmitted work.
+          for (const pending of callbacks) {
             if (!submittedCallbacks.has(pending.callbackId)) {
               await settleApolloEnrichmentCallback({
                 callbackId: pending.callbackId,
@@ -1165,7 +1270,10 @@ export async function POST(request: NextRequest) {
             operationStatus: 'submitted',
             providerState: 'unknown',
             queued: true,
-            enriched: targets.map((item) => ({ id: item.id })),
+            enriched: await Promise.all(targets.map(async item=>canonicalTargetResponse({
+              row:await loadPersistedTarget({tableName,targetId:item.id,userId,organizationId}),target:item,
+              revealEmail:revealEmail.value,revealPhone:revealPhone.value,
+            }))),
             usage: usage(claim),
           }, { status: 409 });
           response.headers.set('x-operation-id', operation.operationId);
@@ -1181,6 +1289,8 @@ export async function POST(request: NextRequest) {
         } else {
           await markTargetsFailed({ targets: [target], tableName, userId, organizationId }).catch(() => undefined);
         }
+        const partial=target.hybridHint?canonicalTargetResponse({row:await loadPersistedTarget({tableName,targetId:target.id,userId,organizationId}),
+          target,revealEmail:revealEmail.value,revealPhone:revealPhone.value}):{};
         enriched.push({
           id: target.id,
           clientRef: target.clientRef,
@@ -1188,14 +1298,19 @@ export async function POST(request: NextRequest) {
           sourceProviderId: target.sourceProviderId,
           enrichmentStatus: 'failed',
           errorCode: error instanceof ApolloEnrichmentError ? error.code : 'APOLLO_ENRICHMENT_FAILED',
+          ...partial,
         });
       }
     }
 
+    const actuallyPending = hybridScope ? enriched.some(item=>String(item.enrichmentStatus||'').startsWith('pending')) : revealPhone.value;
+    if(hybridScope)await settleHybrid(hybridScope);
+    if(hybridScope){const current=await getEnrichmentQuotaOperation({userId,organizationId,resource,operationId:operation.operationId,requestFingerprint:fingerprint});
+      if(current)claim={...claim,consumed:current.consumed,count:current.count,limit:current.limit};}
     const responsePayload = {
-      queued: revealPhone.value,
+      queued: actuallyPending,
       operationId: operation.operationId,
-      operationStatus: revealPhone.value ? 'submitted' : 'completed',
+      operationStatus: actuallyPending ? 'submitted' : 'completed',
       providerRequested: providerDecision.requestedProvider,
       providerUsed: 'apollo',
       providerDefault: providerDecision.defaultProvider,
@@ -1209,7 +1324,7 @@ export async function POST(request: NextRequest) {
       }),
     };
 
-    if (!revealPhone.value && callbacks.length === 0) {
+    if (!hybridScope && !revealPhone.value && callbacks.length === 0) {
       const replayPayload = {
         ...responsePayload,
         enriched: enriched.map((item) => ({
@@ -1234,16 +1349,27 @@ export async function POST(request: NextRequest) {
       status: revealPhone.value ? 'submitted' : 'completed',
       outcome: revealPhone.value ? 'provider_accepted' : 'provider_completed',
       resource,
+      providers:{apolloLookups,cacheContacts},
     });
 
-    const response = NextResponse.json(responsePayload, { status: revealPhone.value ? 202 : 200 });
+    const response = NextResponse.json(responsePayload, { status: actuallyPending ? 202 : 200 });
     response.headers.set('x-operation-id', operation.operationId);
     response.headers.set('x-provider-used', 'apollo');
-    if (revealPhone.value) response.headers.set('retry-after', '5');
+    if (actuallyPending) response.headers.set('retry-after', '5');
     return response;
   } catch (error) {
     const code = String((error as { message?: string } | null)?.message || 'ENRICHMENT_REQUEST_FAILED');
     const targetBusy = code === 'APOLLO_ENRICHMENT_TARGET_BUSY';
+    if(hybridScope&&hybridCacheStarted&&!providerBoundaryCrossed){
+      await cancelHybridItems(hybridScope).catch(()=>undefined);
+      for(const callback of callbacks)await settleApolloEnrichmentCallback({callbackId:callback.callbackId,terminalState:'cancelled',errorCode:'pre_provider_failure'}).catch(()=>undefined);
+      await settleHybrid(hybridScope).catch(()=>undefined);
+      const partial=await Promise.all(targets.map(async target=>canonicalTargetResponse({
+        row:await loadPersistedTarget({tableName,targetId:target.id,userId,organizationId}),target,
+        revealEmail:requestedRevealEmail,revealPhone:requestedRevealPhone,
+      })));
+      return NextResponse.json({operationId:claim?.operationId,operationStatus:'completed',enriched:partial,usage:claim?usage(claim):undefined},{status:200});
+    }
     if (!providerBoundaryCrossed && claim?.claimToken && organizationId) {
       const targetsToFail = targetBusy && busyTargetId
         ? targets.filter((target) => target.id !== busyTargetId)

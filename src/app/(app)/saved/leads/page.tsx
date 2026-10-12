@@ -41,6 +41,8 @@ import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
 import { formatDate } from '@/lib/dates';
 import { ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT, enrichmentCreditReceipt, partitionEnrichmentLeads } from '@/lib/leads-workspace/enrichment-provider';
+import { enrichmentAttempt } from '@/lib/enrichment-attempt';
+import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import {
   SAVED_LOOKUP_LABELS,
   classifyEnrichmentResults,
@@ -316,13 +318,13 @@ export default function SavedLeadsPage() {
             id: l.id,
             sourceProviderId: l.sourceProvider === 'apollo' ? l.sourceProviderId : undefined,
           }));
-          const operationId = uuid();
+          const attempt=await enrichmentAttempt('apollo',forApollo,opts);
+          const operationId = attempt.id;
 
-          const r = await fetch('/api/opportunities/enrich-apollo', {
+          const r = await authenticatedApiFetch('/api/opportunities/enrich-apollo', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              'Idempotency-Key': operationId,
+              ...attempt.headers,
               'x-quota-ticket': getQuotaTicket() || '',
             },
             body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),
@@ -347,8 +349,9 @@ export default function SavedLeadsPage() {
           const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
           if (ticket) setQuotaTicket(ticket);
 
-          consumed += Number(j?.usage?.consumed ?? 0);
+          if(!j?.usage?.reused)consumed += Number(j?.usage?.consumed ?? 0);
           results.push(...(Array.isArray(j.enriched) ? j.enriched : []));
+          if(j.operationStatus==='completed')attempt.complete();
         } catch (error) {
           failures.push(error instanceof Error ? error.message : 'No pudimos completar parte de los contactos.');
         }
@@ -358,7 +361,8 @@ export default function SavedLeadsPage() {
 
       // Who got an email or a phone (or is still being looked up) moves; a search that found nothing stays here, marked.
       const outcome = classifyEnrichmentResults(chosen, results, { revealPhone });
-      if (outcome.toEnriched.length > 0) await enrichedLeadsStorage.addDedup(outcome.toEnriched);
+      const unpersisted=outcome.toEnriched.filter(lead=>!results.some(row=>row.id===lead.id&&row.serverPersisted===true));
+      if (unpersisted.length > 0) await enrichedLeadsStorage.addDedup(unpersisted);
       const moved = new Set(outcome.removeFromSaved);
       if (moved.size > 0) await supabaseService.removeWhere(l => moved.has(l.id));
       const attemptedAt = new Date().toISOString();

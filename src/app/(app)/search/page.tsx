@@ -340,6 +340,7 @@ export default function SearchPage() {
     }
     const result = await searchCompanyPeople({
       organization_id: organization.id,
+      company_scope: organization.contact_scope,
       titles,
       seniorities,
       person_locations: personLocations,

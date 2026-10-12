@@ -234,6 +234,7 @@ export const CompanyPeopleSearchRequestSchema = z.object({
   organization_id: z.string().trim().min(1).optional(),
   organizationId: z.string().trim().min(1).optional(),
   selected_organization_id: z.string().trim().min(1).optional(),
+  company_scope: z.string().max(2000).optional(),
   titles: stringListField,
   title: z.string().trim().optional(),
   seniorities: z.array(z.string()).optional().default([]),

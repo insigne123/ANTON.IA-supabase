@@ -32,6 +32,8 @@ function fixture(selected: any[], options: {replay?: boolean; failApollo?: boole
       return Response.json(options.failApollo ? {error: 'Provider unavailable'} : {enriched: [{...apollo, clientRef: apollo.id, email: 'other@demo.test'}], usage: {consumed: 1}}, {status: options.failApollo ? 503 : 200});
     },
     getQuotaTicket: () => '', setQuotaTicket: () => {},
+    enrichmentAttempt: async () => ({id:'operation',headers:{'Content-Type':'application/json'},complete:()=>{}}),
+    authenticatedApiFetch: async (endpoint:string,init:any) => deps.fetch(endpoint,init),
     Quota: {incClientQuota: (_resource: string, count: number) => {calls.credits += count;}},
     enrichedLeadsStorage: {update: async (rows: any[]) => {calls.updates.push(...rows);}, addDedup: async (rows: any[]) => {calls.added.push(...rows);}},
     enrichedLeadsStorageGet: async () => [canonical], setEnriched: (rows: any[]) => {calls.fresh = rows;},
