@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkNextStepIssues, coworkPolishDraft, coworkReplyIssues, coworkPolishProofs, coworkReviewIssues, coworkSplitOffer, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkNextStepIssues, coworkPolishDraft, coworkReplyIssues, coworkReplyMatchesDraft, coworkPolishProofs, coworkReviewIssues, coworkSplitOffer, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos para {{empresa}}.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
@@ -990,4 +990,17 @@ test('an email pasted after a colon is the person\'s own email: its meeting is k
   const colon = 'mejora este correo: Hola, somos Yago y tenemos una plataforma llamada AXIS que revisa causas judiciales. ¿Tienes 30 minutos esta semana para una demo?';
   assert.equal(coworkWriterContext(null, [], null, colon).keepsAsk, true);
   assert.equal(coworkWriterContext(null, [], null, 'mejora el correo para que sea más corto').keepsAsk, false, 'no pasted email, nothing to keep');
+});
+
+test('the reply never promises a meeting the final email does not ask for', () => {
+  const email = 'Hola Daniela,\n\nCuando entra un grupo grande de postulantes, revisar uno por uno sus antecedentes deja puestos vacíos.\n\n¿Cuántos postulantes revisan al mes en Manpower?\n\nNicolás';
+  const reply = 'Escribí una presentación de AXIS para Daniela Rojas. Abro con la revisión manual de antecedentes y propongo una conversación de 15 minutos. La campaña queda para tu aprobación.';
+  assert.equal(coworkReplyMatchesDraft(reply, [email]), 'Escribí una presentación de AXIS para Daniela Rojas. La campaña queda para tu aprobación.');
+  assert.equal(coworkReplyMatchesDraft('Mantuve la invitación a una demo de 30 minutos esta semana. El correo es más corto.', [email]), 'El correo es más corto.');
+  // Why there is no meeting is worth saying; and an email that asks for one keeps the reply as it is.
+  const explains = 'Saqué la demo: queda para cuando respondan. El correo pregunta por su volumen.';
+  assert.equal(coworkReplyMatchesDraft(explains, [email]), explains);
+  assert.equal(coworkReplyMatchesDraft(reply, [`${email}\n\n¿Te acomoda una conversación de 15 minutos el jueves?`]), reply);
+  assert.equal(coworkPolishDraft({ reply, question: null, suggestions: [], blocks: [{ type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Manpower', body: email }] }, []).reply,
+    'Escribí una presentación de AXIS para Daniela Rojas. La campaña queda para tu aprobación.', 'the polish step applies it');
 });
