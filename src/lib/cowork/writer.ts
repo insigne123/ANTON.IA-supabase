@@ -253,12 +253,27 @@ function messageWords(body: string) {
 
 /** What an edit changed, in the reply: «más corto» says how much (round 7 readings asked for it), and the note about a recipient the
  * email never had goes, because the person already knows. */
+// A count of words the reply makes up («Lo dejé en menos de 42 palabras»: round 9), and a claim that the greeting or the signature
+// stayed when they changed («Conservé el saludo y la firma»).
+const WORD_COUNT = /\b\d+\s+palabras\b/;
+const KEPT_PARTS = /\b(?:conserve|mantuve|deje igual)\b[^.]*\b(saludo|firma)\b/;
+const greetingOf = (body: string) => normalize(body.trim().split('\n')[0] || '');
+const signatureOf = (body: string) => normalize(body.trim().split(/\n\s*\n/).pop() || '');
+
 function editedReply(reply: string, previous: EarlierEmail, next: { to?: string[] | null; body: string }, shorter: boolean) {
   const sentences = reply.split(/(?<=[.!?])\s+/).filter(Boolean);
-  const kept = next.to?.length ? sentences : sentences.filter(sentence => !NO_RECIPIENT_NOTE.test(normalize(sentence)));
+  const changed = { saludo: greetingOf(previous.body) !== greetingOf(next.body), firma: signatureOf(previous.body) !== signatureOf(next.body) };
+  const kept = sentences.filter(sentence => {
+    const plain = normalize(sentence);
+    if (!next.to?.length && NO_RECIPIENT_NOTE.test(plain)) return false;
+    if (WORD_COUNT.test(plain)) return false;
+    const claim = KEPT_PARTS.exec(plain);
+    return !(claim && ((/saludo/.test(plain) && changed.saludo) || (/firma/.test(plain) && changed.firma)));
+  });
   const before = messageWords(previous.body);
   const after = messageWords(next.body);
-  const length = shorter && after < before && !/\bpalabras\b/i.test(reply) ? `Lo dejé en ${after} palabras; antes tenía ${before}.` : '';
+  // The exact count, always ours: the one the reply said goes.
+  const length = shorter && after < before ? `Lo dejé en ${after} palabras; antes tenía ${before}.` : '';
   const text = [length, ...kept].filter(Boolean).join(' ').trim();
   return text || reply;
 }
