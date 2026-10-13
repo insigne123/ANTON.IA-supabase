@@ -333,7 +333,9 @@ export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<Wr
   // A meeting that gave way to a lighter question on «menos vendedor» is said, with a way back.
   const softened = Boolean(context.edit && SOFTER.test(context.request ?? '') && MEETING_ASK.test(normalize(previous.body)) && !MEETING_ASK.test(normalize(next.body)));
   const edited = context.edit ? editedReply(said || output.reply, previous, next, Boolean(context.shorter)) : output.reply;
-  const reply = softened && !/\b(?:demo|reunion\w*|llamada)\b/.test(normalize(edited)) ? `${edited} Cambié la demo por una pregunta más liviana.`.trim() : edited;
+  // Worded so the meeting filter of the polish keeps it (coworkReplyMatchesDraft drops a sentence that claims a meeting the email
+  // does not ask for: round 12, the swap went unsaid).
+  const reply = softened && !/\b(?:demo|reunion\w*|llamada)\b/.test(normalize(edited)) ? `${edited} La demo queda para más adelante: cerré con una pregunta más liviana.`.trim() : edited;
   if (softened && !output.suggestions.some(item => /demo/i.test(item.label))) output = { ...output, suggestions: [{ label: 'Mantener la demo', message: 'Mantén la invitación a la demo' }, ...output.suggestions].slice(0, 4) };
   // An email the person sends: no campaign for it, and the replies offer changes Cowork makes.
   if (context.edit && !next.to?.length && (output.question || output.suggestions.some(item => CAMPAIGN_WORD.test(item.label + item.message)))) {
@@ -1233,9 +1235,19 @@ export function coworkWithSignOff(body: string, signer: string | null | undefine
   return paragraphs.join('\n\n');
 }
 
+// One email for several people, filled in with each one's data, is a template, not a personal email (round 12: «Personalicé el correo
+// para los cuatro contactos» over «Hola {{nombre}}»).
+const TEMPLATE_FIELDS = /\{\{\s*(?:nombre|empresa|cargo)\s*\}\}/i;
+const PERSONALIZED = /\b([Pp])ersonalic[ée](?!\p{L})/gu;
+function withoutPersonalClaim(reply: string, blocks: CoworkWriterOutput['blocks']) {
+  const template = blocks.some(block => block.type === 'email_draft' ? (block.to?.length ?? 0) > 1 || TEMPLATE_FIELDS.test(block.body)
+    : block.type === 'sequence' && block.steps.some(step => TEMPLATE_FIELDS.test(step.body)));
+  return template ? reply.replace(PERSONALIZED, (_, initial: string) => initial === 'P' ? 'Escribí' : 'escribí') : reply;
+}
+
 export function coworkPolishDraft(output: CoworkWriterOutput, proofs: string[], products: string[] = [], signer: string | null = null): CoworkWriterOutput {
   const bodies = output.blocks.flatMap(block => block.type === 'email_draft' ? [block.body] : block.type === 'sequence' ? block.steps.map(step => step.body) : []);
-  const reply = coworkReplyMatchesDraft(coworkPlainReply(output.reply), bodies);
+  const reply = withoutPersonalClaim(coworkReplyMatchesDraft(coworkPlainReply(output.reply), bodies), output.blocks);
   if (reply !== output.reply) output = { ...output, reply };
   const signs = Boolean(signer) && bodies.some(body => coworkWithSignOff(body, signer) !== body);
   if (!signs && !proofs.length && !products.length && !bodies.some(body => LOWER_QUESTION.test(body))) return output;

@@ -399,6 +399,12 @@ test('a proof cited inside a sentence reads as part of it: lowercase after a col
   // A question on its own line starts with a capital (v15), with or without proofs.
   const lower = { ...output, blocks: [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'Demo', body: 'Hola,\n\nAXIS consulta antecedentes.\n\n¿qué día les acomoda una demo?\n\nNicolás Y.' }] };
   assert.match((coworkPolishDraft(lower, []).blocks[0] as { body: string }).body, /\n¿Qué día les acomoda una demo\?\n/);
+  // One email for four people is a template: the reply does not call it personalized (round 12).
+  const template = { ...output, reply: 'Personalicé el correo para los cuatro contactos con una apertura compartida.', blocks: [{ type: 'email_draft' as const,
+    title: 'Correo', to: ['a@x.test', 'b@x.test'], subject: 'Revisión en {{empresa}}', body: 'Hola {{nombre}},\n\nAXIS consulta antecedentes.\n\nSaludos,\nNicolás' }] };
+  assert.equal(coworkPolishDraft(template, []).reply, 'Escribí el correo para los cuatro contactos con una apertura compartida.');
+  const personal = { ...template, blocks: [{ ...template.blocks[0], to: ['a@x.test'], subject: 'Revisión en Manpower', body: 'Hola Daniela,\n\nAXIS consulta antecedentes.\n\nSaludos,\nNicolás' }] };
+  assert.equal(coworkPolishDraft(personal, []).reply, template.reply);
 });
 
 test('telling the reader where a figure came from is an internal reference in any wording', () => {
@@ -1132,7 +1138,9 @@ test('an edit that drops the demo it was not asked to drop gets its closing ques
   // «Menos vendedor» may trade it for a lighter question: said in the reply, with a chip to keep it.
   const softer = coworkEarlierThread({ ...output, reply: 'Quité los adjetivos de venta.' }, { earlier, edit: true, shorter: true, request: 'más corto y menos vendedor' });
   assert.match((softer.blocks[0] as { body: string }).body, /Cuántos postulantes/);
-  assert.match(softer.reply, /Cambié la demo por una pregunta más liviana\.$/);
+  assert.match(softer.reply, /La demo queda para más adelante: cerré con una pregunta más liviana\.$/);
+  // The polish keeps it: it says why there is no meeting.
+  assert.match(coworkReplyMatchesDraft(softer.reply, [(softer.blocks[0] as { body: string }).body]), /La demo queda para más adelante/);
   assert.equal(softer.suggestions[0].label, 'Mantener la demo');
 });
 

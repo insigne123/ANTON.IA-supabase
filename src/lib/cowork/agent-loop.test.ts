@@ -2220,6 +2220,39 @@ test('an email lookup offered before anyone was read reads who lacks an email an
   assert.equal(proposals[0]?.prepareBatch?.people.length, 2);
 });
 
+test('asked whom to invite on LinkedIn with no saved profile, the profile lookup is proposed instead of a search or a sync', async () => {
+  const { coworkAsksLinkedinInvite, coworkNoSavedProfiles } = await import('./agent-loop');
+  assert.equal(coworkAsksLinkedinInvite('¿A quién de mis contactos debería invitar por LinkedIn esta semana?'), true);
+  assert.equal(coworkAsksLinkedinInvite('¿Cuántos tienen LinkedIn?'), false);
+  const id = (n: number) => `00000000-0000-4000-8000-00000000004${n}`;
+  const none = { action: 'leads.search' as const, input: 'con linkedin', result: { scope: 'own_saved_contacts', withLinkedinOnly: true, returned: 0, items: [] } };
+  assert.equal(coworkNoSavedProfiles([none]), true);
+  assert.equal(coworkNoSavedProfiles([{ ...none, result: { ...none.result, withLinkedinOnly: false } }]), false);
+  const saved = { scope: 'own_saved_contacts', items: [{ id: id(1), name: 'Rodrigo Pérez', title: 'Gerente de Personas', company: 'Securitas', email: 'rodrigo@securitas.test' },
+    { id: id(2), name: 'Nehal Patil', title: 'Recruitment Manager', company: 'Adecco', email: null }] };
+  const run = async (second: unknown) => {
+    const executed: string[] = [];
+    const proposals: Array<{ kind: string; prepareBatch?: { goal: string; people: unknown[] }; reply?: string }> = [];
+    let turn = 0;
+    await runCoworkReadLoop({ message: '¿A quién de mis contactos debería invitar por LinkedIn esta semana?', runId: '00000000-0000-4000-8000-0000000000cc',
+      signal: new AbortController().signal, authorize: async () => {}, record: async () => {}, prepareBatch: true, proposeSearch: async () => { executed.push('search'); },
+      execute: async (action, value) => { executed.push(`${action}:${value}`); return value ? none.result : saved; },
+      proposeEffect: async proposal => { proposals.push(proposal as never); },
+      decide: async () => (turn++ === 0 ? { action: 'leads.search', query: 'con linkedin', leadId: null, answer: null } : second) as never });
+    return { executed, proposals };
+  };
+  // The coordinator went for new prospects: the saved contacts' profiles come first.
+  const searched = await run({ action: 'prospecting.propose_search', query: null, leadId: null, answer: null,
+    searchCriteria: { titles: ['Gerente de Personas'], industries: [], locations: ['Santiago, Chile'], limit: 25 } });
+  assert.deepEqual(searched.executed, ['leads.search:con linkedin', 'leads.search:']);
+  assert.equal(searched.proposals[0]?.kind, 'lead_prepare_batch');
+  assert.equal(searched.proposals[0]?.prepareBatch?.goal, 'linkedin');
+  // It asked to sync the network and stopped there.
+  const synced = await run({ action: 'answer', query: null, leadId: null,
+    answer: { reply: 'Ninguno de tus contactos tiene perfil guardado.', document: null, question: '¿Quieres sincronizar tu red de LinkedIn?' } });
+  assert.equal(synced.proposals[0]?.prepareBatch?.goal, 'linkedin');
+});
+
 test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
   const { coworkCampaignForListedPeople } = await import('./agent-loop');
   const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],

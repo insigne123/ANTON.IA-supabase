@@ -371,7 +371,7 @@ export const COWORK_YES_CHIP: CoworkSuggestion = { label: 'Sí, adelante', messa
 // A yes that says what it does (round 9: a bare «Sí» under «¿Creo la campaña pausada con los dos correos?» did not say what it creates).
 const BARE_YES = /^\s*(?:s[íi]|s[íi],?\s+adelante|ok|dale)[.!]?\s*$/iu;
 // A quick reply that already says yes to the closing question, in words or by doing it.
-const SAYS_YES_CHIP = /^\s*(?:s[íi]|dale|ok|cr[ée]a|crear|escr[íi]bel|prep[áa]ral|busca|buscar)/iu;
+const SAYS_YES_CHIP = /^\s*(?:s[íi]|dale|ok|cr[ée]a|crear|escr[íi]b|redact|prep[áa]r|busca|buscar)/iu;
 /** The closing question offers a campaign or an email and no quick reply takes it: its yes goes first (round 11: «pregunta si lo usa
  * en una campaña y no ofrece botón para eso»). Other questions (either/or, open) keep their replies as they are. */
 function withOfferChip(chips: CoworkSuggestion[], question: string | null): CoworkSuggestion[] {
@@ -380,12 +380,37 @@ function withOfferChip(chips: CoworkSuggestion[], question: string | null): Cowo
   return yes === COWORK_YES_CHIP ? chips : [yes, ...chips].slice(0, 4);
 }
 
+// A yes with nothing asked reads as the action itself (round 12: «Sí, prepara el correo» under no question).
+const LEADING_YES = /^\s*s[íi],?\s+/iu;
+const capital = (text: string) => text.charAt(0).toLocaleUpperCase('es') + text.slice(1);
+
+/** The quick replies as the person reads them: a yes needs a question to answer, and one offer takes one reply. */
+function quickReplies(chips: CoworkSuggestion[], question: string | null, reply: string): CoworkSuggestion[] {
+  if (!question && !/\?\s*$/.test(reply)) {
+    return chips.filter(chip => !BARE_YES.test(chip.label)).map(chip => LEADING_YES.test(chip.label)
+      ? { label: capital(chip.label.replace(LEADING_YES, '')), message: capital(chip.message.replace(LEADING_YES, '')) } : chip);
+  }
+  // Two replies that take the same offer (round 12: «Sí, escríbelo» next to «Preparar primer correo»): the one that says what it
+  // does stays.
+  const asked = question ?? reply.split('\n').at(-1) ?? '';
+  const offersCampaign = /campa[ñn]a/i.test(asked);
+  const offersEmail = !offersCampaign && /\b(?:escrib|redact|prepar)\w*\b[^?]*\bcorreos?\b/i.test(asked);
+  const takes = (label: string) => offersCampaign ? /^\s*cr[ée]a(?:r|la)?\b/iu.test(label) && /campa[ñn]a/i.test(label)
+    : offersEmail && /^\s*(?:escr[íi]b|redact|prep[áa]r)/iu.test(label);
+  const kept = chips.some(chip => takes(chip.label)) ? chips.filter(chip => !BARE_YES.test(chip.label)) : chips;
+  return withOfferChip(kept.map(chip => namedYes(chip, question)), question);
+}
+
 function namedYes(chip: CoworkSuggestion, question: string | null): CoworkSuggestion {
   if (!question || !BARE_YES.test(chip.label)) return chip;
+  // With its follow-up, the yes says both emails go in (round 12: «¿Creo la campaña pausada para Daniela?» did not say it).
+  if (/campa[ñn]a/i.test(question) && /\b(?:dos correos|seguimiento)\b/i.test(question)) return { ...chip, label: 'Sí, crear la campaña con los dos correos' };
   if (/campa[ñn]a/i.test(question)) return { ...chip, label: 'Sí, crear la campaña' };
   if (/\b(?:escrib|redact|prepar)\w*\b[^?]*\bcorreos?\b/i.test(question)) return { ...chip, label: 'Sí, escríbelo' };
   return chip;
 }
+
+const nullIfEmpty = <T,>(items: T[]) => items.length ? items : null;
 
 /** The reply as it is kept and read back (history, copies, exports): it ends
  * with the closing question, which also travels apart so the chat can show it
@@ -421,7 +446,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     document: answer.document ? { ...answer.document, content: withoutScopeNote(polishCoworkText(answer.document.content)) } : null,
     question,
     blocks: blocks.length ? blocks : null,
-    suggestions: choices ? null : suggestions.length ? withOfferChip(suggestions.map(chip => namedYes(chip, question)), question)
+    suggestions: choices ? null : suggestions.length ? nullIfEmpty(quickReplies(suggestions, question, reply))
       : question ? [namedYes(COWORK_YES_CHIP, question)] : null,
     choices,
   };

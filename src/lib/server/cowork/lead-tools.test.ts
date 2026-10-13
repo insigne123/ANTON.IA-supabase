@@ -474,7 +474,7 @@ test('«con correo» puts who decides the purchase first and junior roles last; 
     return { from: () => chain } as unknown as SupabaseClient;
   };
   const ordered = await queryCoworkLeads(withNot(rows), { userId: 'owner', organizationId: 'org' }, 'leads.search', 'con correo');
-  assert.deepEqual((ordered.items as Array<{ id: string }>).map(item => item.id), ['2', '4', '3', '1']);
+  assert.deepEqual((ordered.items as Array<{ id: string }>).map(item => item.id), ['4', '2', '3', '1'], 'who runs the area, then who leads a team');
   const plain = await queryCoworkLeads(withNot(rows), { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
   assert.deepEqual((plain.items as Array<{ id: string }>).map(item => item.id), ['1', '2', '3', '4']);
 });

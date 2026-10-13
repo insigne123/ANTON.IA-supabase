@@ -28,7 +28,7 @@ import { coworkContactsImportSchema, type CoworkContactsImportInput } from './co
 import { coworkReplyThreadSchema, type CoworkReplyThreadInput } from './reply-proposal';
 import { coworkLinkedinBatchLeads, coworkLinkedinBatchSchema, type CoworkLinkedinBatchInput } from './linkedin-batch';
 import { coworkPrepareBatchPeople, coworkPrepareBatchSchema, type CoworkPrepareBatchInput } from './prepare-batch';
-import { coworkBuyingRoleRank } from './buying-role';
+import { coworkBuyingRoleRank, coworkDecidesPurchase } from './buying-role';
 import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memory';
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 import { withCoworkReports } from './report-document';
@@ -797,10 +797,23 @@ export function coworkProfileLookupProposal(answer: { reply: string; question?: 
   const named = missing.filter(row => { const first = plain(String(row.name || '')).split(/\s+/)[0]; return first.length > 2 && plain(offer).includes(first); });
   // Without names, only who decides the purchase when there are two or more (round 11: «propone pagar 7 perfiles sin priorizar»);
   // the card still lets the person take anyone off.
-  const deciders = missing.filter(row => coworkBuyingRoleRank(row.title) === 0);
+  const deciders = missing.filter(row => coworkDecidesPurchase(row.title));
   const people = (named.length ? named : deciders.length >= 2 ? deciders : missing).slice(0, max);
   return people.length ? { goal: 'linkedin', people: people.map(row => ({ leadId: row.id })) } : null;
 }
+
+/** Whom to invite on LinkedIn, asked in the person's words. */
+export function coworkAsksLinkedinInvite(message: string) {
+  return /linked\s?in/i.test(message) && /\binvit/i.test(message);
+}
+
+/** The read of the saved contacts with a LinkedIn profile came back empty: nobody to invite until their profiles are found. */
+export function coworkNoSavedProfiles(observations: CoworkObservation[]) {
+  return observations.some(item => item.action === 'leads.search' && (item.result as { withLinkedinOnly?: unknown; returned?: unknown } | null)?.withLinkedinOnly === true
+    && (item.result as { returned?: unknown }).returned === 0);
+}
+
+const PROFILES_FIRST = 'Ninguno de tus contactos guardados tiene su perfil de LinkedIn todavía, así que aún no hay a quién invitar. Primero busco sus perfiles; después te digo a quién invitar.';
 
 // A stand-in read with one saved contact without a profile: whether an answer offers the profile lookup, before reading who.
 const MISSING_PROFILE_PROBE: CoworkObservation = { action: 'leads.search', input: '', result: { scope: 'own_saved_contacts',
@@ -1381,6 +1394,18 @@ async function runCoworkLoop(input: {
         observations.push(probe);
         lookup = coworkLookupProposal(decision.answer!, input.message, input.history, observations);
       }
+      // «¿A quién invito por LinkedIn?» with no saved profile: finding them is the step, offered or not, before any search for new
+      // people (round 12: Luna asked to sync the network and stopped there; the Haiku coordinator proposed a prospect search).
+      const searchesInstead = decision.action === 'prospecting.propose_search' && input.proposeEffect && input.prepareBatch && !input.clarification && !informationOnly;
+      if ((offersLookup || searchesInstead) && !lookup && coworkAsksLinkedinInvite(input.message) && coworkNoSavedProfiles(observations)) {
+        const offer = { reply: '', question: '¿Busco el perfil de LinkedIn de tus contactos guardados?' };
+        if (!coworkProfileLookupProposal(offer, input.message, input.history, observations)) {
+          const probe: CoworkObservation = { action: 'leads.search', input: '', result: await input.execute('leads.search', '') };
+          await input.record(probe);
+          observations.push(probe);
+        }
+        lookup = coworkProfileLookupProposal(offer, input.message, input.history, observations);
+      }
       // A LinkedIn profile lookup offered in words is its card too; with nobody read yet, the saved contacts are read first.
       if (offersLookup && !lookup) lookup = coworkProfileLookupProposal(decision.answer!, input.message, input.history, observations);
       if (offersLookup && !lookup && coworkProfileLookupProposal(decision.answer!, input.message, input.history, [MISSING_PROFILE_PROBE])) {
@@ -1393,6 +1418,10 @@ async function runCoworkLoop(input: {
       // las 3 y pide escribir para quitar a Carlos»).
       if (decision.action === 'lead.enrich_batch' && decision.leadIds?.length && input.prepareBatch) {
         decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: { goal: 'email', people: decision.leadIds.map(leadId => ({ leadId })) } } as Decision;
+      }
+      if (lookup && decision.action === 'prospecting.propose_search') {
+        decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup, searchCriteria: undefined,
+          answer: { reply: PROFILES_FIRST, document: null } } as Decision;
       }
       if (lookup && decision.answer) {
         const reply = decision.answer.reply.split('\n').filter(line => !/^\s*¿/.test(line) && !/a continuaci[óo]n\.?\s*$/i.test(line)).join('\n').trim();

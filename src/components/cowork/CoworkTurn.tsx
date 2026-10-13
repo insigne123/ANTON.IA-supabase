@@ -206,7 +206,7 @@ function NextStep({ question, live }: { question: string; live: boolean }) {
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, decidable = false, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
-  liveAnswer = null, streamed = false, cardStatuses = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null }: {
+  liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** Its card still waits for a decision after a question about it, asked in the next turn: it keeps its buttons. */
@@ -227,6 +227,8 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   budgetExhausted: boolean;
   /** What later turns did with this turn's email and sequence cards, by artifact id. */
   cardStatuses?: ReadonlyMap<string, CoworkCardStatus> | null;
+  /** The people read in earlier turns, for a template's preview (coworkEarlierRows). */
+  earlierRows?: Parameters<typeof coworkTurnArtifacts>[2] | null;
   /** The other versions of this message (another version, an edit), and how to open one; null when there is one. */
   versions?: CoworkTurnVersions | null;
   onVersion?: ((id: string) => void) | null;
@@ -244,7 +246,7 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   const active = isCoworkActive(run.status);
   const output = coworkTurnOutput(events);
   const proposal = coworkProposalView(run, events);
-  const artifacts = coworkTurnArtifacts(run, events);
+  const artifacts = coworkTurnArtifacts(run, events, earlierRows ?? []);
   // Emails, sequences, tables and charts read as compact cards that open on the canvas; figures stay inline.
   const blockCards = artifacts.flatMap(artifact => artifact.kind === 'block' ? [artifact] : []);
   const otherArtifacts = artifacts.filter(artifact => artifact.kind !== 'block');

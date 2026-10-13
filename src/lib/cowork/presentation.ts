@@ -631,7 +631,22 @@ export function coworkThreadResults(artifacts: CoworkArtifact[]): CoworkArtifact
   });
 }
 
-export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, events: CoworkEvent[]): CoworkArtifact[] {
+type CoworkPreviewRow = Parameters<typeof coworkMergePreview>[1][number];
+
+/** The people read before each turn of a thread, by run id: a template written in a later turn still previews with its first
+ * recipient (round 12: «Hola nombre» and «en empresa» when the contacts were read the turn before). */
+export function coworkEarlierRows(turns: Array<{ run: Pick<CoworkRun, 'id'>; events: CoworkEvent[] }>) {
+  const byRun = new Map<string, CoworkPreviewRow[]>();
+  let seen: CoworkPreviewRow[] = [];
+  for (const { run, events } of turns) {
+    byRun.set(run.id, seen);
+    const rows = collectCoworkLeadRows(events.filter(event => event.kind === 'tool.completed').map(event => event.payload));
+    if (rows.length) seen = [...rows, ...seen];
+  }
+  return byRun;
+}
+
+export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, events: CoworkEvent[], earlier: CoworkPreviewRow[] = []): CoworkArtifact[] {
   const artifacts: CoworkArtifact[] = [];
   const completedAt = events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || run.created_at;
   const output = coworkTurnOutput(events);
@@ -640,7 +655,7 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
   coworkTurnBlocks(events).forEach((block, index) => {
     // Figures read inline; a chart is drawn on the canvas, with a compact card in the chat (Plan 12, 2).
     if (block.type === 'metrics') return;
-    const preview = coworkMergePreview(block, rows);
+    const preview = coworkMergePreview(block, earlier.length ? [...rows, ...earlier] : rows);
     artifacts.push({ kind: 'block', id: `${run.id}:block:${index}`, runId: run.id, title: block.title, block, createdAt: completedAt, ...(preview ? { preview } : {}) });
   });
   if (output?.document) {
