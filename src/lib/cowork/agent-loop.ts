@@ -890,7 +890,7 @@ export function coworkWithoutCadence(reply: string) {
  * any AI chat (Plan 13): asking for a question too cost another call and mostly repeated a chip. Leaving something for later,
  * or a chip that says yes to a question the answer does not ask, still gets the correction. */
 function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown },
-  context: { read: boolean } = { read: true }): string | null {
+  context: { read: boolean; metrics?: boolean } = { read: true }): string | null {
   const replies = coworkSuggestions(answer.suggestions);
   const chips = replies.length;
   const blocks = coworkBlocks(answer.blocks);
@@ -907,6 +907,9 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
       ? 'pon los correos en un bloque sequence (regla 11) y deja en reply qué escribiste y por qué, sin repetir los correos' : null,
     // A card is copied as is: a [placeholder] would reach the recipient.
     filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
+    // The figures read go in their card, also when they are 0 (round 14: Luna gave them in the text only, «sin tarjeta»).
+    context.metrics && !blocks.some(block => block.type === 'metrics') && !answer.document
+      ? 'pon las cifras que leíste con metrics.rates en un bloque metrics con su período y sobre cuántos se calculan, también si son 0, y deja en reply la conclusión sin repetirlas todas' : null,
     PROMISES.test(answer.reply) ? `no prometas lo que puedes hacer ahora («${PROMISES.exec(answer.reply)?.[0]}»): dilo hecho con lo que ya consultaste, o ofrécelo en la pregunta final` : null,
   ].filter(Boolean);
   if (!missing.length) return null;
@@ -1603,7 +1606,8 @@ async function runCoworkLoop(input: {
         }
         // A correction needs one more decision, and time for it.
         const closing = turn < last && !late()
-          ? closingFeedback(decision.answer, { read: observations.some(item => !ASSISTANT_ACTIONS.has(item.action)) }) : null;
+          ? closingFeedback(decision.answer, { read: observations.some(item => !ASSISTANT_ACTIONS.has(item.action)),
+            metrics: observations.some(item => item.action === 'metrics.rates') }) : null;
         if (closing) {
           // Asked directly, not thrown: the catch below returns closingFallback once it is set.
           closingFallback = decision.answer;

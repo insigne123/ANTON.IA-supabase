@@ -1142,6 +1142,22 @@ test('an edit that drops the demo it was not asked to drop gets its closing ques
   // The polish keeps it: it says why there is no meeting.
   assert.match(coworkReplyMatchesDraft(softer.reply, [(softer.blocks[0] as { body: string }).body]), /La demo queda para más adelante/);
   assert.equal(softer.suggestions[0].label, 'Mantener la demo');
+  // Its own sentence about the demo gives way to ours (round 14: it was dropped and only the word count was left).
+  const told = coworkEarlierThread(output, { earlier, edit: true, shorter: true, request: 'más corto y menos vendedor' });
+  assert.doesNotMatch(told.reply, /Cambié la demo/);
+  assert.match(told.reply, /Quité los adjetivos de venta\. La demo queda para más adelante: cerré con una pregunta más liviana\.$/);
+});
+
+test('emails with recipients and no closing question get the campaign offer', async () => {
+  const { coworkWithNextStep } = await import('./writer');
+  const draft = { reply: 'Escribí el correo.', question: null, suggestions: [{ label: 'Más cercano', message: 'Hazlo más cercano' }],
+    blocks: [{ type: 'email_draft' as const, title: 'Correo', to: ['r@x.test', 'd@x.test', 'f@x.test', 'j@x.test'], subject: 'Antecedentes',
+      body: 'Hola {{nombre}},\n\nAXIS consulta el PJUD.\n\n¿Cuánto les toma?\n\nSaludos,\nNicolás' }] };
+  assert.equal(coworkWithNextStep(draft).question, '¿Creo la campaña pausada para estos 4 contactos?');
+  const one = { ...draft, blocks: [{ ...draft.blocks[0], to: ['d@x.test'], body: 'Hola Daniela,\n\nAXIS.\n\nSaludos,\nNicolás' }] };
+  assert.equal(coworkWithNextStep(one).question, '¿Creo la campaña pausada para Daniela?');
+  const asked = { ...one, question: '¿Lo ajusto?' };
+  assert.equal(coworkWithNextStep(asked), asked);
 });
 
 test('an email that ends with the signature and no closing word gets «Saludos,»; one that has it, or another signer, does not', async () => {

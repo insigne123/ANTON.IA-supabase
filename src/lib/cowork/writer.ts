@@ -335,7 +335,10 @@ export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<Wr
   const edited = context.edit ? editedReply(said || output.reply, previous, next, Boolean(context.shorter)) : output.reply;
   // Worded so the meeting filter of the polish keeps it (coworkReplyMatchesDraft drops a sentence that claims a meeting the email
   // does not ask for: round 12, the swap went unsaid).
-  const reply = softened && !/\b(?:demo|reunion\w*|llamada)\b/.test(normalize(edited)) ? `${edited} La demo queda para más adelante: cerré con una pregunta más liviana.`.trim() : edited;
+  // The model's own sentence about the meeting goes first: the polish would drop it for a meeting the email no longer asks (round 14:
+  // «Quité la demo…» was dropped and only the word count was left).
+  const unsaid = softened ? edited.split(/(?<=[.!?])\s+/).filter(sentence => !/\b(?:demo|reunion\w*|llamada)\b/.test(normalize(sentence))).join(' ') : edited;
+  const reply = softened ? `${unsaid} La demo queda para más adelante: cerré con una pregunta más liviana.`.trim() : edited;
   if (softened && !output.suggestions.some(item => /demo/i.test(item.label))) output = { ...output, suggestions: [{ label: 'Mantener la demo', message: 'Mantén la invitación a la demo' }, ...output.suggestions].slice(0, 4) };
   // An email the person sends: no campaign for it, and the replies offer changes Cowork makes.
   if (context.edit && !next.to?.length && (output.question || output.suggestions.some(item => CAMPAIGN_WORD.test(item.label + item.message)))) {
@@ -726,6 +729,23 @@ export function coworkNextStepIssues(output: Pick<CoworkWriterOutput, 'blocks' |
     fix: replies ? (addressed.length === 1 ? 'En question propone enviarlo, con su nombre de pila: «¿Propongo enviárselo a <nombre>?».'
       : 'En question propone enviar la primera respuesta: «¿Propongo enviar primero la de <nombre>?».')
       : 'En question propone crear la campaña pausada con ellos, con su nombre de pila: «¿Creo la campaña pausada para Felipe?».', short: 'paso siguiente' }];
+}
+
+/** The step after emails with recipients, when neither the Writer nor its correction asked it (round 14: Luna wrote the email for the
+ * 4 contacts and closed with tone chips only, «no deja botón para crear la campaña»). The draft as it was when nothing is missing. */
+export function coworkWithNextStep(draft: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'followUp'> = {}): CoworkWriterOutput {
+  const blocks = coworkWriterBlocks(draft);
+  const [issue] = coworkNextStepIssues({ blocks, question: draft.question }, context);
+  if (!issue) return draft;
+  const addressed = blocks.flatMap(block => block.type === 'email_draft' && block.to?.length ? [block] : []);
+  const names = [...new Set(addressed.map(block => GREETING_NAME.exec(block.body)?.[1]).filter((name): name is string => Boolean(name)))];
+  const people = addressed.reduce((total, block) => total + (block.to?.length ?? 0), 0);
+  const who = names.length && names.length === people ? (names.length > 1 ? `${names.slice(0, -1).join(', ')} y ${names.at(-1)}` : names[0])
+    : `estos ${people} contactos`;
+  const replies = addressed.some(block => /^\s*re:/i.test(block.subject));
+  const question = issue.short === 'campaña con los dos' ? `¿Creo la campaña pausada para ${who} con los dos correos, el seguimiento al día 8?`
+    : replies ? `¿Propongo enviárselo a ${who}?` : `¿Creo la campaña pausada para ${who}?`;
+  return { ...draft, question };
 }
 
 /** Deterministic checks, before any model: what can be told from the text alone. */
@@ -1338,7 +1358,11 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
 
   const checked = (draft: CoworkWriterOutput) => [...coworkDraftIssues(coworkWriterBlocks(draft), context), ...coworkReplyIssues(draft.reply),
     ...(input.brief.campaign || PASTED_EDIT.test(input.request) ? [] : coworkNextStepIssues({ blocks: coworkWriterBlocks(draft), question: draft.question }, context))];
-  const polish = (draft: CoworkWriterOutput) => coworkPolishDraft(draft, context.proofs ?? [], context.products ?? [], context.signer);
+  const offersNext = !(input.brief.campaign || PASTED_EDIT.test(input.request));
+  const polish = (draft: CoworkWriterOutput) => {
+    const polished = coworkPolishDraft(draft, context.proofs ?? [], context.products ?? [], context.signer);
+    return offersNext ? coworkWithNextStep(polished, context) : polished;
+  };
   let issues = checked(first);
   if (!hasTime()) {
     if (issues.length) await input.step({ agent: 'reviewer', state: 'done', label: plural(issues.length, 'punto por revisar', 'puntos por revisar'), outcome: 'pending', changes: problemList(issues) });
