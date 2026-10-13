@@ -7,23 +7,24 @@ o una secuencia y 3 pedidos de informes o cifras, con 2 o 3 repeticiones cada un
 
 ## Resumen
 
-- **Con lectores independientes, lo mejor medido es 4,25 en correos y 4,58 en informes** (de 1 a 5: «¿lo enviarías tal cual?»).
+- **Con lectores independientes, lo mejor medido es 4,50 en correos y 4,58 en informes** (de 1 a 5: «¿lo enviarías tal cual?»).
   Desde la ronda 14 ponen las notas sesiones de Claude que no vieron el código ni las reglas, y son más exigentes: las
   respuestas de Sonnet → Luna v13 que la sesión que hacía los cambios puntuó con 4,86 sacan 4,38 con ellos. Las rondas 1 a 13
   (de 2,54 a 4,86) siguen abajo, con la nota de esa sesión.
-- **Correos con la v15** (ronda 15, lectores C y D). El costo incluye al coordinador:
+- **Correos con la v16** (ronda 16, lectores E y F). El costo incluye al coordinador; el paso completo es la Redactora con su
+  revisión y sus correcciones:
 
-  | Redactora → corrección | Nota | ≥ 4,5 | US$ por 1.000 respuestas | Redactora p90 |
+  | Redactora → corrección | Nota | ≥ 4,5 | US$ por 1.000 respuestas | Paso completo p50 / p90 |
   |---|---|---|---|---|
-  | Luna → Luna (producción hoy) | 3,96 | 14 % | 2,2 | 8,8 s |
-  | Luna, con las secuencias en Sonnet 5.5 | 4,07 | 14 % | 4,4 | 7,9 s |
-  | Haiku 5.5 low → Luna | 4,11 | 29 % | 3,6 | 18,8 s |
-  | Sonnet 5.5 low → Luna | 4,12 | 21 % | 17,5 | 7,3 s |
-  | **Sol 6.1 → Luna** | **4,25** | **50 %** | **12,1** | 18,1 s |
+  | Luna → Luna (producción hoy) | 4,14 | 29 % | 2,4 | 18 / 25 s |
+  | Haiku 5.5 low → Luna | 4,14 | 29 % | 3,6 | 19 / 34 s |
+  | Sol 6.1 → Luna | 4,27 | 57 % | 12,1 | 21 / 31 s |
+  | **Luna, con las secuencias en Sonnet 5.5** | **4,30** | 50 % | **4,4** | 14 / 24 s |
+  | **Sonnet 5.5 low → Luna** | **4,50** | **79 %** | 17,6 | 15 / 22 s |
 
-  Con la v14 y otros dos lectores (ronda 14), el orden de las dos primeras se invirtió: Sonnet → Luna 4,39 y Sol 6.1 → Luna
-  4,20. Las dos son las mejores, con diferencias que dependen del lector; Sol → Luna cuesta un 30 % menos y no necesita otra clave.
-- **Informes y cifras con la v15:**
+  E y F ponen unos 0,1 más que los lectores de la ronda 15 a las mismas respuestas. Con la v15 y los lectores C y D, Sol 6.1 →
+  Luna había quedado primera (4,25) y Sonnet → Luna segunda (4,12); la v16 subió a Sonnet → Luna 0,27 en la misma lectura.
+- **Informes y cifras con la v15** (ronda 15, lectores C y D):
 
   | Quién responde | Nota | ≥ 4,5 | US$ por 1.000 respuestas | p90 |
   |---|---|---|---|---|
@@ -37,11 +38,12 @@ o una secuencia y 3 pedidos de informes o cifras, con 2 o 3 repeticiones cada un
   - Informes: encender la Analista. Con Luna, la nota sube 0,44 sobre el coordinador y cuesta menos; con Sonnet es lo mejor
     medido (7 notas de 5 de 18 lecturas) por US$13 cada 1.000 informes. Sol 6.1 no se justifica: cuesta casi lo mismo que Sonnet
     y saca 0,8 menos.
-  - Correos: Haiku → Luna da el paso más barato sobre Luna (+0,15 por US$1,4 más cada 1.000). Sol 6.1 → Luna da la mejor nota
-    de la ronda 15 por US$12,1. Sonnet → Luna rinde parecido y es la opción más cara.
-- **Lo que sigue bajando la nota:** en correos, «por persona o por lote» en la oferta, el tercer correo de una secuencia que
-  vuelve a la consecuencia del primero y seguimientos con una consecuencia plana; en informes del coordinador, períodos mal
-  nombrados (en parte por el fixture: ver «Límites») y respuestas que no nombran a quién se le escribió.
+  - Correos: Luna con las secuencias en Sonnet es la mejor compra (+0,16 sobre Luna por US$2 más cada 1.000). Sonnet → Luna
+    es la mejor nota (4,50) por US$17,6. Sol 6.1 → Luna saca lo mismo que Luna con secuencias en Sonnet y cuesta casi el triple,
+    y Haiku → Luna ya no le gana a Luna.
+- **Lo que sigue bajando la nota:** en correos de Luna y Haiku, consecuencias planas («alarga el proceso», «suma trabajo») y
+  frases raras; en seguimientos, ofrecer el respaldo y preguntar otra cosa. En informes del coordinador, períodos mal nombrados
+  (en parte por el fixture: ver «Límites») y respuestas que no nombran a quién se le escribió.
 - **Más razonamiento o un modelo más caro no se justifican** (rondas 1 a 13): Luna `xhigh` y Haiku `max` se cortan por tiempo,
   Haiku `medium` no mejora y Opus 5.5 → Luna no le ganó a Sonnet → Luna, al doble del costo.
 
@@ -520,10 +522,45 @@ v15 se les aplicó el mismo pulido final, que solo cambió una (Sonnet).
   7 y 30 días; en producción, `metrics.rates` devuelve el período pedido (ver «Límites»).
 - En 1 de los 36 informes con Analista, el coordinador respondió solo, sin pasárselo (Sonnet, informe para la jefatura).
 
+## Ronda 16: la v16, con dos lectores nuevos
+
+Lectores E y F, nuevos, con las mismas instrucciones (solo correos) y su propio orden al azar. Leyeron las 5 configuraciones de
+la v16 y dos anclas de la v15 (Sonnet → Luna y Sol 6.1 → Luna): 98 respuestas. Coinciden más que los lectores anteriores: r =
+0,83, la misma nota en el 79 % y nunca más de 0,5 de diferencia. Son un poco más generosos que C y D: a las dos anclas les
+ponen 0,11 más.
+
+El «paso completo» es la Redactora con su revisión y sus correcciones, el tiempo que espera el usuario por el correo.
+
+| Redactora → corrección | Lector E | Lector F | Media | ≥ 4,5 | US$ por 1.000 | Paso completo p50 / p90 |
+|---|---|---|---|---|---|---|
+| Ancla v15: Sonnet 5.5 low → Luna | 4,18 | 4,29 | 4,23 ± 0,09 | 43 % | 17,5 | 9,7 / 24,2 s |
+| Ancla v15: Sol 6.1 → Luna | 4,36 | 4,36 | 4,36 ± 0,11 | 79 % | 12,1 | 20,2 / 26,2 s |
+| Luna → Luna | 4,11 | 4,18 | 4,14 ± 0,08 | 29 % | 2,4 | 18,4 / 24,6 s |
+| Haiku 5.5 low → Luna | 4,14 | 4,14 | 4,14 ± 0,11 | 29 % | 3,6 | 19,1 / 33,8 s |
+| Sol 6.1 → Luna | 4,25 | 4,29 | 4,27 ± 0,12 | 57 % | 12,1 | 21,4 / 31,2 s |
+| Luna, con las secuencias en Sonnet 5.5 | 4,32 | 4,29 | 4,30 ± 0,09 | 50 % | 4,4 | 14,1 / 23,7 s |
+| **Sonnet 5.5 low → Luna** | 4,43 | 4,57 | **4,50 ± 0,06** | **79 %** | 17,6 | 14,6 / 22,3 s |
+
+- **Sonnet → Luna v16 es la mejor nota independiente en correos:** 4,50, con 4 notas de 5 en 28 lecturas y 11 de 14 respuestas en
+  4,5 o más. Sube 0,27 sobre su ancla v15 en la misma lectura. Lo que más subió son la secuencia (de 3,75 a 4,50) y el seguimiento
+  (de 4,00 a 4,50): ya no ofrece «por persona o por lote» ni repite la consecuencia del primer correo.
+- **Sol 6.1 → Luna no cambia:** 4,27 contra 4,36 de su ancla, dentro del error.
+- **Luna, Haiku → Luna y Luna con secuencias en Sonnet** no tienen ancla en esta lectura. Descontando los 0,11 de escala,
+  Luna sube unos 0,07 sobre la ronda 15, Luna con secuencias en Sonnet unos 0,12 y Haiku → Luna queda igual. Son diferencias
+  dentro del error.
+- **Defectos detectables al final:** después de las correcciones, los chequeos marcan 1 de 14 respuestas de Luna (la v15, 6),
+  0 de 14 de Sonnet → Luna (la v15, 13), 1 de Haiku → Luna (6), 1 de Luna con secuencias en Sonnet (5) y 2 de Sol 6.1 → Luna (7).
+  En la app, esos puntos se le muestran al usuario como «por revisar».
+- **El costo de la segunda corrección es tiempo:** la tuvieron 2 a 6 de cada 14 respuestas. La mediana del paso completo sube
+  de 11,7 a 18,4 s con Luna y de 9,7 a 14,6 s con Sonnet → Luna; en el resto, cerca de 1 s. En producción solo corre si queda
+  tiempo en el turno. En dinero son US$0,2 cada 1.000 respuestas con Luna.
+- Lo que más baja la nota ahora: consecuencias planas en Luna y Haiku («alarga el proceso», «suma trabajo»), frases raras, y
+  seguimientos que ofrecen el respaldo pero preguntan otra cosa.
+
 ## Recomendación
 
-Combinar los dos proveedores: OpenAI coordina, revisa y corrige, y quien escribe se elige por tarea. Con la v15 y las notas de
-los lectores independientes:
+Combinar los dos proveedores: OpenAI coordina, revisa y corrige, y quien escribe se elige por tarea. Con las notas de los
+lectores independientes:
 
 1. **Informes y cifras: encender la Analista.**
    - **Ahora, sin otra clave:** `COWORK_ANALYST_ENABLED=true` y `COWORK_ANALYST_MODEL=gpt-6-luna`. La nota sube de 3,67 a 4,11
@@ -532,18 +569,18 @@ los lectores independientes:
      cada 1.000. La Analista con Claude usa esfuerzo `low`.
    - La evaluación entrega el pedido a la Analista en el mismo proceso (`synchronous fixture handoff`) y no prueba la cola
      durable de producción. Conviene encenderla primero en una organización y revisar unos informes reales.
-2. **Correos, según el plan:**
-   - **Mucho volumen: Luna para todo**, como hoy. Nota 3,96 por US$2,2 cada 1.000.
-   - **El paso más barato: Haiku 5.5 escribe y Luna corrige** (`COWORK_WRITER_MODEL=claude-haiku-5-5`,
-     `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=gpt-6-luna`). Nota 4,11 por US$3,6. Su p90 es de 19 s, dentro del corte
-     de 30 s.
-   - **La mejor nota sin otra clave: Sol 6.1 escribe y Luna corrige** (`COWORK_WRITER_MODEL=gpt-6.1-sol`,
-     `COWORK_WRITER_FIX_MODEL=gpt-6-luna`). Nota 4,25 por US$12,1, con un p90 de 18 s.
-   - **Sonnet 5.5 escribe y Luna corrige** (`COWORK_WRITER_MODEL=claude-sonnet-5-5`, `COWORK_WRITER_EFFORT=low`,
-     `COWORK_WRITER_FIX_MODEL=gpt-6-luna`) rinde parecido a Sol → Luna (4,12 a 4,39, según el lector), es la Redactora más rápida
-     (p90 7 s) y la opción más cara (US$17,5).
+2. **Correos, según el plan** (v16, ronda 16):
+   - **Mucho volumen, sin otra clave: Luna para todo**, como hoy. Nota 4,14 por US$2,4 cada 1.000.
+   - **La mejor compra: Luna, con las secuencias en Sonnet 5.5** (`COWORK_WRITER_SEQUENCE_MODEL=claude-sonnet-5-5` y
+     `COWORK_WRITER_SEQUENCE_EFFORT=low`; lo demás sigue en Luna). Nota 4,30 por US$4,4: sube sobre todo las secuencias (4,75).
+     El costo depende de cuántas secuencias se pidan; cada una escrita por Sonnet cuesta US$0,016.
+   - **La mejor nota: Sonnet 5.5 escribe y Luna corrige** (`COWORK_WRITER_MODEL=claude-sonnet-5-5`,
+     `COWORK_WRITER_EFFORT=low`, `COWORK_WRITER_FIX_MODEL=gpt-6-luna`). Nota 4,50, con 79 % de las respuestas en 4,5 o más, por
+     US$17,6. Es también la más rápida: 15 s de mediana para el paso completo.
    - En todas, `COWORK_DESIGNER_MODEL=gpt-6-luna`: si no tiene valor propio, toma el de `COWORK_WRITER_MODEL`.
 3. **No conviene:**
+   - en correos con la v16, Sol 6.1 → Luna (4,27 por US$12,1: lo mismo que Luna con secuencias en Sonnet, al triple del costo;
+     en la ronda 15, con la v15, había sacado la mejor nota) y Haiku → Luna (4,14 por US$3,6, igual que Luna, con un p90 de 34 s);
    - la Analista Sol 6.1: 3,81 por US$11,4;
    - que Sonnet se corrija a sí mismo, o que Haiku corrija a Sonnet;
    - subir el razonamiento (Haiku `medium` y `max`, Luna `high` y `xhigh`);
@@ -557,11 +594,11 @@ los lectores independientes:
 **Ejemplo de escala:** 100 usuarios que piden al día 50 respuestas con correo y 2 informes, durante 22 días, son 110.000
 respuestas con correo y 4.400 informes al mes.
 
-- **Correos, al mes:** Luna US$240 · Haiku → Luna US$400 · Sol 6.1 → Luna US$1.330 · Sonnet → Luna US$1.925.
+- **Correos, al mes:** Luna US$265 · Luna con secuencias en Sonnet US$485 (si 1 de cada 7 pedidos es una secuencia, como en el
+  banco) · Sol 6.1 → Luna US$1.330 · Sonnet → Luna US$1.935.
 - **Informes, al mes:** coordinador Luna (hoy) US$11 · Analista Luna US$6 · Analista Sonnet US$56.
 
-Los informes pesan poco en la cuenta: la Analista Sonnet, la mejor nota medida, cuesta US$56 al mes, menos que los US$160 que
-suma pasar los correos de Luna a Haiku.
+Los informes pesan poco en la cuenta: la Analista Sonnet, la mejor nota medida en informes, cuesta US$56 al mes.
 
 ## Claude: cómo medirlo
 
@@ -722,6 +759,22 @@ Antes, esas peticiones empeoraban el correo o lo dejaban «por revisar».
       un último párrafo «Alcance: …» o una última sección «## Alcance» (`withoutScopeNote`). Con solo la regla, Luna seguía
       cerrando los 3 informes para la jefatura con esa nota.
 
+- v16 (de la lectura independiente de la ronda 15):
+  - «qué hace la oferta» también marca «AXIS consulta en el PJUD por lote»: nombra la fuente, no el objeto. Los lectores C y D
+    le pusieron 3,5 o 4; los A y B le habían puesto hasta 5 a esas mismas respuestas, pero la corrección que pide el chequeo
+    («consulta antecedentes laborales en el PJUD y procesa…») la aceptan los cuatro;
+  - «una sola capacidad» marca los modos de trabajo en la oferta («por persona o por lote», «por archivo o correo») y
+    «…y queda evidencia» después de la prueba; la regla de la oferta los nombra;
+  - «consecuencia distinta» reconoce la misma pérdida dicha con otras palabras en una secuencia («deja turnos sin cubrir» y
+    «deja el puesto sin cubrir»; «esperan la confirmación» y «esperando la confirmación de ingreso»);
+  - la respuesta no usa «la búsqueda consultada», «lo registrado muestra» ni «como capacidad», y una corrección que dice
+    «ahora cierra con…» deja la respuesta del primer borrador;
+  - **una segunda corrección:** si la primera se queda y los chequeos todavía ven puntos, con tiempo en el turno, la Redactora
+    corrige otra vez; la segunda se queda solo si deja menos puntos.
+
+  Los chequeos nuevos se probaron contra las 392 lecturas ya puntuadas de las rondas 14 y 15: en la ronda 15 marcan respuestas
+  de 3,4 a 4,1 de media y ninguna de 5.
+
 **Coordinador** (`src/lib/cowork/agent-instructions.ts`, v10): cuando el usuario pide escribirles a sus contactos, lee quién tiene
 correo y a quién ya se le escribió (`contacted.search` con la consulta vacía), deja fuera a quien ya recibió un primer correo y le
 ofrece su seguimiento aparte. Un correo o una secuencia para un cargo o un rubro sigue siendo genérico. v11: al mejorar un correo
@@ -748,9 +801,10 @@ párrafo (`coworkSplitOffer`); no cambia ninguna palabra.
 
 ## Límites
 
-- **Lectores:** hasta la ronda 13 leyó Claude en la sesión que hizo los cambios, a ciegas y con anclas. Las rondas 14 y 15 las
-  leyeron lectores independientes (A y B, luego C y D): sesiones nuevas que no vieron el código ni las reglas. Son más exigentes
-  (unos 0,4 menos) y el orden entre configuraciones se mantuvo. Falta una lectura del equipo comercial.
+- **Lectores:** hasta la ronda 13 leyó Claude en la sesión que hizo los cambios, a ciegas y con anclas. Las rondas 14 a 16 las
+  leyeron lectores independientes (A y B, C y D, E y F): sesiones nuevas que no vieron el código ni las reglas. Son más
+  exigentes (unos 0,4 menos) y cada par tiene su escala, así que las versiones se comparan con las anclas de la misma lectura.
+  Falta una lectura del equipo comercial.
 - **Un solo producto (AXIS) y un perfil.** Los ejemplos de las reglas hablan de su rubro. Con otra oferta conviene repetir la
   ronda 3.
 - **Los últimos ajustes no tienen lectura ciega propia:** la pregunta anunciada, el asunto con la empresa de quien escribe y los
