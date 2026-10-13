@@ -30,19 +30,21 @@ export function EnrichBatchReview({ runId, onApprove, onReject, resolving }: {
     return () => { disposed = true; };
   }, [runId]);
   if (error) return <ReviewError message={error} />;
-  if (!preview) return <ReviewLoading label="Cargando lote exacto…" />;
+  if (!preview) return <ReviewLoading label="Cargando a quiénes se les busca el correo…" />;
   const ready = preview.matches && preview.contactsComplete;
+  // The button says what it does and what it costs, like «Preparar contactos» (round 2 readings).
+  const lookups = preview.contacts.filter(contact => !contact.hasEmail).length || preview.contacts.length;
   return <div className="space-y-4">
-    <p className="text-[13.5px]">Costo estimado: <span className="font-semibold">{preview.costEstimate} crédito{preview.costEstimate === 1 ? '' : 's'}</span> de enriquecimiento <span className="text-cw-muted">(máximo 1 por contacto)</span></p>
+    <p className="text-[13.5px]">Costo estimado: <span className="font-semibold">{preview.costEstimate} crédito{preview.costEstimate === 1 ? '' : 's'}</span> <span className="text-cw-muted">(máximo 1 por contacto)</span></p>
     <ul className="divide-y divide-cw-border overflow-hidden rounded-xl border border-cw-border bg-cw-panel text-[13.5px]">
       {preview.contacts.map(contact => <li key={contact.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
         <span className="min-w-0 truncate"><span className="font-medium">{contact.name || 'Contacto'}</span><span className="text-cw-muted">{contact.company ? ` · ${contact.company}` : ''}</span></span>
         {contact.hasEmail && <span className="shrink-0 rounded-md bg-cw-success-soft px-1.5 py-0.5 text-[11.5px] font-medium text-cw-success">Ya tiene correo</span>}
       </li>)}
     </ul>
-    <ReviewNote ok={ready}>{!ready
-      ? 'El lote cambió desde la revisión o falta un contacto. Descártala y pide una nueva.'
-      : 'Coincide con la propuesta. Al aprobar se consultará el correo de cada contacto; cada resultado queda con su estado individual y nada se inventa.'}</ReviewNote>
-    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Aprobar y buscar correos" disabled={!ready} resolving={resolving} />
+    {/* «Qué va a pasar» already says what approving does: the note speaks only when something is off. */}
+    {!ready && <ReviewNote ok={false}>La lista cambió desde la revisión o falta un contacto. Descártala y pide una nueva.</ReviewNote>}
+    <ReviewActions onReject={onReject} onApprove={onApprove} disabled={!ready} resolving={resolving}
+      approveLabel={`Buscar ${lookups} ${lookups === 1 ? 'correo' : 'correos'} · ${preview.costEstimate} ${preview.costEstimate === 1 ? 'crédito' : 'créditos'}`} />
   </div>;
 }

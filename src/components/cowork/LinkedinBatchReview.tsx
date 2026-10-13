@@ -92,7 +92,7 @@ export function LinkedinBatchReview({ runId, onApprove, onReject, resolving }: {
         <span className="text-cw-muted"> saldrían hoy, una persona por empresa.</span></p>
       {preview.quota && <p className="text-[12.5px] text-cw-muted">Cupo semanal de invitaciones: {preview.quota.used} de {preview.quota.limit} usadas entre pendientes y enviadas.</p>}
     </div>
-    <ul aria-label={`Personas del lote de ${noun}`} className="cw-scroll max-h-96 divide-y divide-cw-border overflow-y-auto rounded-xl border border-cw-border bg-cw-panel">
+    <ul aria-label={`Personas de ${noun}`} className="cw-scroll max-h-96 divide-y divide-cw-border overflow-y-auto rounded-xl border border-cw-border bg-cw-panel">
       {preview.items.map(item => <PersonRow key={item.id} item={item} kind={preview.kind} included={!removed.has(item.id)} disabled={locked} onToggle={() => toggle(item.id)} />)}
     </ul>
     {!!preview.deferred.length && <details className="rounded-xl border border-cw-border bg-cw-panel px-3 py-2.5 text-[13px]">

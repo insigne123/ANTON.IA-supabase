@@ -61,7 +61,8 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
         <WorkspaceSwitcher />
       </SidebarHeader>
 
-      <SidebarContent className="px-2 pb-3 pt-2">
+      {/* The menu scrolls on short screens: its lower edge fades, so an item under it reads as «more below», not as cut off. */}
+      <SidebarContent className="px-2 pb-8 pt-2 [mask-image:linear-gradient(to_bottom,#000_calc(100%-2rem),transparent)]">
         <nav aria-label="Navegación principal" className="contents">
           {visibleSections.map((section, index) => (
           <React.Fragment key={section.label}>

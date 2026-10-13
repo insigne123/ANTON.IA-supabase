@@ -77,7 +77,14 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
   const total = (preview.emails || []).length;
   const unavailable = people ? people.filter(person => !person.available || !person.first).length : total - (preview.matched ?? total);
   const own = (people || []).filter(person => person.personal).length;
-  let day = 1;
+  // When everyone has their own first email, the common one never goes out: the card shows the follow-ups only, and nothing when
+  // there are none (round 2 readings: the same email twice, and «el de la secuencia no se usa»).
+  const messages = preview.messages || [];
+  const days = messages.reduce<number[]>((all, message, index) => [...all, index === 0 ? 1 : all[index - 1] + message.delayDays], []);
+  // One person: the preview above already shows the first email exactly as it goes out (round 3: the same email twice on the card).
+  const allOwn = Boolean(people?.length) && (own === people!.length || people!.length === 1);
+  const listed = messages.map((message, index) => ({ message, index })).filter(item => !(allOwn && item.index === 0));
+  const merged = messages.some(message => /\{\{\s*(?:nombre|empresa|cargo)\s*\}\}/.test(`${message.subject}\n${message.body}`));
   return <div className="space-y-4">
     <div>
       <p className="text-[15px] font-semibold tracking-tight">{preview.name}</p>
@@ -106,34 +113,31 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
             <CwButton size="sm" variant="primary" disabled={saving || !complete} onClick={() => void save()}>{saving ? 'Guardando…' : 'Guardar cambios'}</CwButton>
           </div>
         </div>
-        : <>
+        : listed.length > 0 && <>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[12.5px] font-medium text-cw-muted">{people
-            ? `Secuencia para todos · ${(preview.messages || []).length === 1 ? '1 correo' : `${(preview.messages || []).length} correos`}`
-            : (preview.messages || []).length === 1 ? 'Correo' : `${(preview.messages || []).length} correos`}{preview.edits ? ' · editada por ti' : ''}</h3>
-          <CwButton variant="secondary" size="xs" disabled={editingPerson} onClick={() => { setSaved(false); setDraft((preview.messages || []).map(message => ({ subject: message.subject, body: message.body }))); }}>
-            <Pencil aria-hidden="true" />{people ? 'Editar secuencia' : 'Editar correos'}
+          <h3 className="text-[12.5px] font-medium text-cw-muted">{allOwn
+            ? `${people!.length === 1 ? 'Seguimientos' : 'Seguimientos para todos'} · ${listed.length === 1 ? '1 correo' : `${listed.length} correos`}`
+            : people ? `Secuencia para todos · ${messages.length === 1 ? '1 correo' : `${messages.length} correos`}`
+              : messages.length === 1 ? 'Correo' : `${messages.length} correos`}{preview.edits ? ' · editada por ti' : ''}</h3>
+          <CwButton variant="secondary" size="xs" disabled={editingPerson} onClick={() => { setSaved(false); setDraft(messages.map(message => ({ subject: message.subject, body: message.body }))); }}>
+            <Pencil aria-hidden="true" />{people ? (allOwn ? 'Editar seguimientos' : 'Editar secuencia') : 'Editar correos'}
           </CwButton>
         </div>
-        {people && <p className="text-[12.5px] leading-5 text-cw-muted">
-          {'{{nombre}}, {{empresa}} y {{cargo}} se completan con los datos de cada persona.'}
-          {own === 0 ? '' : own === people.length ? ' Cada persona tiene su propio correo 1, así que el de la secuencia no se usa.'
-            : ' El correo 1 de la secuencia va solo a quienes no tienen uno propio.'}
+        {people && (merged || (own > 0 && !allOwn)) && <p className="text-[12.5px] leading-5 text-cw-muted">
+          {merged ? 'El nombre, la empresa y el cargo se completan con los datos de cada persona.' : ''}
+          {own > 0 && !allOwn ? `${merged ? ' ' : ''}El primer correo de la secuencia va solo a quienes no tienen uno propio.` : ''}
         </p>}
       <ol className="space-y-2">
-        {(preview.messages || []).map((message, index) => {
-          if (index > 0) day += message.delayDays;
-          return <li key={index}>
-            <details className="group rounded-xl border border-cw-border bg-cw-panel" open={index === 0}>
+        {listed.map(({ message, index }) => <li key={index}>
+            <details className="group rounded-xl border border-cw-border bg-cw-panel" open={index === listed[0].index}>
               <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-3.5 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cw-elevated text-[12px] font-semibold text-cw-muted ring-1 ring-cw-border">{index + 1}</span>
                 <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">{message.subject}</span>
-                <span className="shrink-0 text-[12px] text-cw-muted">{index === 0 ? 'Día 1' : `Día ${day} · +${message.delayDays}d`}</span>
+                <span className="shrink-0 text-[12px] text-cw-muted">{index === 0 ? 'Día 1' : `Día ${days[index]} · +${message.delayDays}d`}</span>
               </summary>
               <p className="whitespace-pre-wrap break-words border-t border-cw-border px-4 py-3 text-[14px] leading-6">{message.body}</p>
             </details>
-          </li>;
-        })}
+          </li>)}
       </ol>
       {saved && <p role="status" className="text-[12.5px] text-cw-muted">Guardaste tus cambios: la campaña se crea con esta versión.</p>}
       </>}

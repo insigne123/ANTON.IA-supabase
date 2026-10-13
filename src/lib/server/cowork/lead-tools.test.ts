@@ -446,3 +446,20 @@ test('«con LinkedIn» keeps only contacts with a saved LinkedIn profile, across
   assert.ok(!calls.some(call => call[0] === 'not' && call[1] === 'linkedin_url'));
   assert.equal((exact as { match?: string }).match, 'linkedin_url');
 });
+
+test('«sin correo» keeps only saved contacts still without an email (round 2 of the Cowork evaluation)', async () => {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const chain: Record<string, unknown> = {};
+  for (const name of ['select', 'eq', 'order', 'limit', 'or', 'not', 'neq', 'is']) {
+    chain[name] = (...args: unknown[]) => { calls.push([name, ...args]); return chain; };
+  }
+  chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: [], error: null }));
+  const db = { from: (table: string) => { calls.push(['from', table]); return chain; } } as unknown as SupabaseClient;
+  const found = await queryCoworkLeads(db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'sin correo');
+  assert.ok(calls.some(call => call[0] === 'or' && call[1] === 'email.is.null,email.eq.'));
+  // «Por escribir» always has an email: it adds nobody.
+  assert.ok(calls.some(call => call[0] === 'is' && call[1] === 'id' && call[2] === null));
+  assert.ok(!calls.some(call => call[0] === 'or' && /correo/.test(String(call[1]))), 'the words «sin correo» are a filter, not search terms');
+  assert.equal(found.limit, 25);
+  assert.equal((found as { withoutEmailOnly?: boolean }).withoutEmailOnly, true);
+});

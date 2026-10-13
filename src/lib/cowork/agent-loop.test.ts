@@ -78,7 +78,7 @@ test('lead-scoped effect labels use the observed contact name, never raw IDs', a
     decide: async observations => observations.length === 0 ? found : enrich,
   });
   assert.deepEqual(proposals, [{ kind: 'enrich_contact', targetId: leadId,
-    label: 'Enriquecer contacto José C. (GrupoExpro)', originRunId: runId }]);
+    label: 'Buscar el correo de José C. (GrupoExpro)', originRunId: runId }]);
 });
 
 test('a campaign card names the campaign campaigns.list showed, never its ID', async () => {
@@ -536,12 +536,12 @@ test('a LinkedIn batch is proposed only when it is on, for saved contacts seen i
   await runCoworkReadLoop({ ...base, linkedinBatch: true, ...flow(inviteBatch(three)) });
   assert.deepEqual(proposals[0], { kind: 'linkedin_invite_batch', targetId: 'new-linkedin-batch', label: 'Proponer invitaciones en LinkedIn para varias personas',
     originRunId: runId, linkedinBatch: { leads: three } });
-  assert.match(notes[0], /Preparé un lote de invitaciones de LinkedIn\. En la tarjeta ves a quién va y puedes quitar a quien no quieras/);
+  assert.match(notes[0], /Preparé las invitaciones de LinkedIn\. En la tarjeta ves a quién va cada una y puedes quitar a quien no quieras/);
   const texts = [1, 2].map(n => ({ leadId: lead(n), message: `Hola Persona ${n}, gracias por aceptar.` }));
   await runCoworkReadLoop({ ...base, linkedinBatch: true, ...flow(messageBatch(texts)) });
   assert.equal(proposals[1].kind, 'linkedin_message_batch');
   assert.deepEqual(proposals[1].linkedinBatch, { leads: texts });
-  assert.match(notes[1], /Preparé un lote de mensajes de LinkedIn, cada uno con su texto/);
+  assert.match(notes[1], /Preparé los mensajes de LinkedIn, cada uno con su texto/);
   // Read in the previous turn: that turn is the origin.
   const history = [{ runId: parentId, observations: [{ action: 'leads.search', input: 'lista', result: found }] }];
   await runCoworkReadLoop({ ...base, linkedinBatch: true, history, execute: async () => found, decide: async () => inviteBatch(three) as never });
@@ -586,7 +586,7 @@ test('preparing several people is one proposal: search results and saved contact
   assert.equal(proposals.length, 0);
   await runCoworkReadLoop({ ...base, prepareBatch: true, history, execute: async () => found, decide: async () => prepare(people) as never });
   assert.deepEqual(proposals[0], { kind: 'lead_prepare_batch', targetId: 'new-prepare-batch', label: 'Preparar contactos', originRunId: parentId, prepareBatch: people });
-  assert.match(notes[0], /Preparé un lote para dejar listas a estas personas con una sola aprobación/);
+  assert.match(notes[0], /Preparé la tarjeta para dejar listas a estas personas con una sola aprobación/);
   // What the batch cannot take is refused with the reason, before it reaches a card.
   for (const [decision, pattern] of [
     [prepare({ goal: 'save', people: [{ providerId: 'apollo:p1' }, { providerId: 'apollo:p1' }] }), /repetidas/],
@@ -1436,8 +1436,8 @@ test('a sequence asked with its campaign: the Writer writes it and the same turn
   const proposed: Array<{ kind: string; campaign?: { messages: Array<{ subject: string; body: string; delayDays: number }> } }> = [];
   const result = await runCoworkReadLoop({ ...base, write: async () => written, proposeEffect: async proposal => { proposed.push(proposal); },
     decide: async observations => { seen.push(observations.map(item => item.action)); return seen.length === 1 ? write : create; } });
-  // The coordinator reads the emails (the loop checks the campaigns before proposing, as always).
-  assert.deepEqual(seen[1], ['assistant.written']);
+  // The coordinator reads the emails (the loop checks the campaigns before proposing, as always); «Jose», whom nobody read, was looked up for the Writer.
+  assert.deepEqual(seen[1], ['leads.search', 'assistant.written']);
   assert.equal(proposed[0].kind, 'campaign_create');
   // The Writer's text goes word for word, spaced by its days.
   assert.deepEqual(proposed[0].campaign?.messages, [
@@ -2102,4 +2102,65 @@ test('emails the coordinator writes itself go back once to the Writer, and stand
   assert.equal(failed.reply, own.answer.reply);
   assert.equal((await runCoworkReadLoop({ ...base, decide: async () => own })).reply, own.answer.reply);
   assert.equal((await runCoworkReadLoop({ ...base, write: async () => written, decide: async () => own, ceiling: { decisions: 1, reads: 3, softDeadlineMs: 50_000 } })).reply, own.answer.reply);
+});
+
+test('a «sí» to the previous answer\'s offer goes back to be done, not answered again (round 2 readings)', async () => {
+  const { coworkAcceptedOfferFeedback, coworkOfferedLookupFeedback, coworkShownCampaignEmails, coworkWithoutCadence } = await import('./agent-loop');
+  const turn = (reply: string, blocks?: Array<{ type: string } & Record<string, unknown>>) => [{ runId: 'r1', observations: [], reply, ...(blocks ? { blocks } : {}) }];
+  const lookup = turn('Tienes 3 contactos sin correo.\n\n¿Busco el correo de los 3 contactos que no lo tienen?');
+  assert.match(coworkAcceptedOfferFeedback('dale, ¿por dónde parto?', lookup) || '', /tarjeta de aprobación/);
+  assert.equal(coworkAcceptedOfferFeedback('¿y qué es eso?', lookup), null);
+  assert.equal(coworkAcceptedOfferFeedback('sí, pero solo a Carlos', lookup), null);
+  assert.match(coworkAcceptedOfferFeedback('sí', turn('Cifras.\n\n¿Creo la campaña pausada con tus 4 contactos?')) || '', /draft\.write con campaign true/);
+  const email = { type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Antecedentes en Manpower', body: 'Hola Daniela,\n\nTexto.' };
+  const offered = turn('Escribí el correo.\n\n¿Creo la campaña pausada para Daniela Rojas?', [email]);
+  assert.match(coworkAcceptedOfferFeedback('sí', offered) || '', /campaign\.create/);
+  assert.match(coworkAcceptedOfferFeedback('ok, escríbele al primero', turn('Tabla.\n\n¿Te preparo el primer correo para Francisca Muñoz?')) || '', /draft\.write/);
+  // The campaign the person accepts carries the email they saw, and only that one.
+  assert.deepEqual(coworkShownCampaignEmails('sí, crea la campaña pausada', offered), [{ subject: 'Antecedentes en Manpower', body: 'Hola Daniela,\n\nTexto.', day: null }]);
+  assert.equal(coworkShownCampaignEmails('sí, con sus seguimientos', offered), null);
+  assert.equal(coworkWithoutCadence('Dejo lista la campaña. Los seguimientos siguen la cadencia de 7 toques en unas cinco semanas.'),
+    'Dejo lista la campaña. Va solo con este correo; si quieres, después te escribo los seguimientos.');
+  assert.match(coworkOfferedLookupFeedback({ reply: 'Tienes 3 sin correo.', question: '¿Busco el correo de los 3 contactos que no lo tienen?' }) || '', /lead\.enrich_batch/);
+  assert.equal(coworkOfferedLookupFeedback({ reply: 'Listo.', question: '¿Creo la campaña pausada?' }), null);
+});
+
+test('the Writer reads the contacts and the emails the conversation already has, and looks up who nobody read', async () => {
+  const { coworkWriterObservations } = await import('./agent-loop');
+  const read = { action: 'leads.search', input: 'con correo', result: { scope: 'own_saved_contacts', items: [
+    { id: '11111111-1111-4111-8111-111111111111', name: 'Francisca Muñoz', company: 'Falabella', email: 'francisca.munoz@falabella.test' }] } };
+  const history = [{ runId: 'r1', observations: [read], reply: 'Tabla.', blocks: [{ type: 'email_draft', title: 'Correo', to: [], subject: 'Asunto', body: 'Hola,\n\nTexto.' }] }];
+  const looked: string[] = [];
+  const lookup = async (name: string) => { looked.push(name); return null; };
+  const seen = await coworkWriterObservations({ kind: 'email', recipients: ['Francisca Muñoz', 'Daniela Rojas'], objective: 'Primer correo', angle: null, tone: null, steps: null, notes: null, findings: null },
+    [], history, lookup);
+  assert.deepEqual(looked, ['Daniela Rojas']);
+  assert.equal(seen[0], read);
+  assert.deepEqual((seen.at(-1)?.result as { scope: string }).scope, 'earlier_answer');
+});
+
+test('a question about a card waiting for approval does not close asking for that approval', async () => {
+  const { coworkClarificationAnswer } = await import('./agent-loop');
+  const answer = { reply: 'Parte por Nehal y Katherine.', document: null, question: '¿Apruebas la búsqueda de correo de Nehal y Katherine?',
+    suggestions: [{ label: 'Sí, busca sus correos', message: 'Sí, busca sus correos' }, { label: 'Escribir a los 4', message: 'Escríbeles a mis 4 contactos con correo' }] };
+  const kept = coworkClarificationAnswer(answer);
+  assert.equal(kept.question, null);
+  assert.deepEqual(kept.suggestions, [{ label: 'Escribir a los 4', message: 'Escríbeles a mis 4 contactos con correo' }]);
+  const other = { ...answer, question: '¿Te escribo después el correo para Nehal?', suggestions: [{ label: 'Escribir a los 4', message: 'Escríbeles' }] };
+  assert.equal(coworkClarificationAnswer(other), other);
+});
+
+test('the same offer again after «¿qué hago?» is done, and a follow-up accepted as a campaign goes after its first email', async () => {
+  const { coworkRepeatedOfferFeedback, coworkShownCampaignEmails } = await import('./agent-loop');
+  const history = [{ runId: 'r1', observations: [], reply: 'Cifras en cero.\n\n¿Dejo lista la campaña pausada para tus 4 contactos con correo?' }];
+  const again = { reply: 'Lo que más mueve tus números es partir.', question: '¿Dejo lista la campaña pausada para tus 4 contactos con correo?' };
+  assert.match(coworkRepeatedOfferFeedback(again, history) || '', /draft\.write con campaign true/);
+  assert.equal(coworkRepeatedOfferFeedback({ reply: 'Listo.', question: '¿Te muestro cómo van tus campañas de la semana pasada?' }, history), null);
+  const first = { type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nPrimero.' };
+  const follow = { type: 'email_draft', title: 'Seguimiento', to: ['daniela.rojas@manpower.test'], subject: 'Re: Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nSeguimiento.' };
+  const thread = [{ runId: 'r1', observations: [], reply: 'Escribí el correo.\n\n¿Creo la campaña pausada para Daniela?', blocks: [first] },
+    { runId: 'r2', observations: [], reply: 'Escribí el seguimiento.\n\n¿Creo la campaña pausada para Daniela con los dos correos, el seguimiento al día 8?', blocks: [follow] }];
+  assert.deepEqual(coworkShownCampaignEmails('sí', thread), [
+    { subject: 'Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nPrimero.', day: 1 },
+    { subject: 'Re: Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nSeguimiento.', day: 8 }]);
 });
