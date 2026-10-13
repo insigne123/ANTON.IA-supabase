@@ -51,7 +51,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'compliance.law': { label: 'Consultó el marco legal chileno', source: 'Cumplimiento', icon: 'scale' },
   'compliance.obligation': { label: 'Identificó la regulación del sector', source: 'Cumplimiento', icon: 'scale' },
   'privacy.contactability': { label: 'Revisó restricciones de contacto', source: 'Privacidad', icon: 'lock' },
-  'privacy.contactability_batch': { label: 'Revisó restricciones de un lote', source: 'Privacidad', icon: 'lock' },
+  'privacy.contactability_batch': { label: 'Revisó restricciones de varios contactos', source: 'Privacidad', icon: 'lock' },
   'app.context': { label: 'Revisó conexiones y volúmenes de la cuenta', source: 'Cuenta ANTON.IA', icon: 'app' },
   'draft.get': { label: 'Abrió un borrador', source: 'Borradores', icon: 'draft' },
   'message.context': { label: 'Consultó el contexto de redacción', source: 'Redacción', icon: 'pen' },
@@ -61,7 +61,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'campaigns.inbox': { label: 'Revisó pendientes de campañas', source: 'Campañas', icon: 'campaign' },
   'campaigns.plan': { label: 'Revisó el plan de seguimiento', source: 'Campañas', icon: 'campaign' },
   'campaigns.step_context': { label: 'Revisó un paso de campaña', source: 'Campañas', icon: 'campaign' },
-  'campaigns.batch_report': { label: 'Revisó el reporte del lote', source: 'Campañas', icon: 'campaign' },
+  'campaigns.batch_report': { label: 'Revisó el reporte de envíos', source: 'Campañas', icon: 'campaign' },
   'campaigns.next_touch': { label: 'Calculó el siguiente toque', source: 'Campañas', icon: 'campaign' },
   'campaigns.retry_review': { label: 'Revisó envíos reintentables', source: 'Campañas', icon: 'campaign' },
   'campaigns.company_plan': { label: 'Revisó el plan por empresa', source: 'Campañas', icon: 'campaign' },
@@ -70,7 +70,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'saved_searches.list': { label: 'Revisó tus búsquedas guardadas', source: 'Búsquedas guardadas', icon: 'bookmark' },
   'profile.get': { label: 'Consultó tu perfil comercial', source: 'Perfil', icon: 'profile' },
   'lists.review_contact': { label: 'Revisó un contacto para la lista', source: 'Listas', icon: 'list' },
-  'lists.review_batch': { label: 'Revisó un lote de contactos para la lista', source: 'Listas', icon: 'list' },
+  'lists.review_batch': { label: 'Revisó contactos para la lista', source: 'Listas', icon: 'list' },
   'linkedin.network': { label: 'Revisó tu red de LinkedIn', source: 'LinkedIn', icon: 'linkedin' },
   'linkedin.inbox': { label: 'Revisó tu bandeja de LinkedIn', source: 'LinkedIn', icon: 'linkedin' },
   'linkedin.quota': { label: 'Revisó tu cupo de invitaciones', source: 'LinkedIn', icon: 'linkedin' },
@@ -210,7 +210,7 @@ export type CoworkEffectCopy = { title: string; help: string; icon: CoworkIconKe
 const EFFECTS: Record<string, CoworkEffectCopy> = {
   save_contact: { title: 'Guardar contacto', icon: 'user-plus', help: 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' },
   start_research: { title: 'Investigar contacto', icon: 'research', help: 'Se encolará la investigación con tu cuota disponible. Suele tardar unos minutos; cuando termine te aviso en esta conversación con lo útil para escribirle.' },
-  enrich_contact: { title: 'Enriquecer contacto', icon: 'sparkles', help: 'Se consultará el correo al proveedor (solo email, sin teléfono). Consume 1 crédito de enriquecimiento y no inventa datos.' },
+  enrich_contact: { title: 'Buscar su correo', icon: 'sparkles', help: 'Se consultará su correo al proveedor (sin teléfono). Usa 1 crédito y no inventa datos.' },
   request_draft: { title: 'Preparar borrador', icon: 'draft', help: 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.' },
   send_email: { title: 'Enviar correo', icon: 'send', help: 'Se enviará exactamente la versión mostrada.' },
   campaign_create: { title: 'Crear campaña', icon: 'campaign', help: 'Queda guardada sin enviar: nada sale hasta que la actives, y activarla pide otra aprobación.' },
@@ -322,7 +322,7 @@ const OUTCOMES: Record<string, CoworkOutcome> = {
   exception_resolve: { happens: 'Se registra el resultado revisado de la incidencia.', not: 'No se envía nada.' },
   mission_control: { happens: 'Se pausa o reactiva la misión, como dice la propuesta.', not: 'No se envía nada en este paso.' },
   message_context_update: { happens: 'Se actualiza el contexto de redacción de tu organización.', not: 'No se reescriben los borradores que ya existen.' },
-  enrich_batch: { happens: 'Se busca el correo de cada contacto del lote.', not: 'No se les escribe; los ya enriquecidos no gastan de nuevo.' },
+  enrich_batch: { happens: 'Se busca el correo de cada contacto de la lista.', not: 'No se les escribe, y a quien ya se le buscó no se le cobra de nuevo.' },
   campaign_schedule_batch: { happens: 'Se reserva un día por empresa y un espaciado entre envíos.', not: 'No se crea ni se activa la campaña, ni se envía nada.' },
   linkedin_invite: { happens: 'Se deja en cola una invitación sin nota.', not: 'No sale hasta que la ejecutes desde la extensión.' },
   linkedin_message: { happens: 'Se deja en cola el mensaje aprobado.', not: 'No sale hasta que lo ejecutes desde la extensión.' },
@@ -354,6 +354,11 @@ export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' 
   }
   if (proposal.type === 'note') {
     return { happens: `Se reemplaza la nota de ${String(proposal.payload.leadName || 'este contacto')} en el CRM.`, not: 'No cambia nada más del contacto.' };
+  }
+  // Only emails to look for: the card says just that, not the three steps a batch may take (round 2 readings).
+  if (proposal.payload.kind === 'lead_prepare_batch' && /^buscar el correo/i.test(String(proposal.payload.label || ''))) {
+    return { happens: 'Se busca el correo de cada persona que dejes en la lista, con el proveedor (1 crédito por persona).',
+      not: 'No se le escribe a nadie, y a quien quites no se le toca.' };
   }
   return OUTCOMES[String(proposal.payload.kind || '')] || { happens: 'Se ejecuta la acción propuesta.', not: 'No se hace nada más sin tu aprobación.' };
 }

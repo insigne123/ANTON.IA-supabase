@@ -257,7 +257,8 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
     {/* What approving does and the details leave at once when you decide: a button that is
         folding away must never take a second click. The timeline stays and moves on. */}
     {deciding && <div className="px-4 pt-4"><Outcome outcome={coworkProposalOutcome(proposal)} /></div>}
-    <CwCollapse show={!folded} animateIn={false}>
+    {/* While you decide, «Necesita tu aprobación» already says where it is: the timeline joins once you approve (round 2 readings). */}
+    <CwCollapse show={!folded && !deciding} animateIn={false}>
       <div className="space-y-3 px-4 py-4">
         <ApprovalTimeline state={state} live={live} />
         {state === 'done' && (kind === 'linkedin_invite_batch' || kind === 'linkedin_message_batch') && <LinkedinBatchResults runId={run.id} />}
@@ -268,6 +269,6 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
         </p>}
       </div>
     </CwCollapse>
-    {deciding && <div className="px-4 pb-4">{body}</div>}
+    {deciding && <div className="px-4 py-4">{body}</div>}
   </section>;
 }

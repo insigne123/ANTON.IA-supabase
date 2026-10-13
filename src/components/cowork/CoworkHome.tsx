@@ -73,15 +73,18 @@ function TodayList({ items, onAsk }: { items: CoworkTodayItem[]; onAsk: (prompt:
   return <section aria-labelledby={id} className="cw-rise mt-6 [animation-delay:90ms]">
     <h2 id={id} className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">Para hoy</h2>
     <ul className="divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated shadow-[var(--cw-shadow-sm)]">
-      {items.map(item => <li key={item.id}>
+      {items.map((item, index) => <li key={item.id}>
         <button type="button" onClick={() => onAsk(item.prompt)}
           className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]">
           <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cw-accent-soft text-cw-accent">
             <CoworkIcon name={TODAY_ICON[item.id]} className="h-4 w-4" />
           </span>
           <span className="min-w-0 flex-1 text-[14px] leading-5 text-cw-text">{item.text}</span>
-          <span className="hidden shrink-0 text-[12.5px] font-medium text-cw-accent sm:inline">{item.action}</span>
-          <ArrowRight className="h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          {/* The first row is the day's main action (round 3 readings: both rows weighed the same); the label shows on phones too. */}
+          <span className={cn('shrink-0 text-[12.5px] font-medium', index === 0
+            ? 'rounded-full bg-cw-accent px-3 py-1 text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-colors group-hover:bg-cw-accent-hover'
+            : 'text-cw-accent')}>{item.action}</span>
+          <ArrowRight className={cn('hidden h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5', index > 0 && 'sm:block')} aria-hidden="true" />
         </button>
       </li>)}
     </ul>
@@ -176,8 +179,9 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
   const name = overview?.firstName;
   const askOffer = Boolean(onSaveOffer) && overview?.hasOffer === false && !offerHidden;
   const today = coworkTodayItems(overview);
-  // A starting point «Para hoy» already offers with the account's own numbers is not repeated below it.
-  const starters = ready && today.some(item => item.id === 'write') ? COWORK_STARTERS.filter(item => item.id !== 'escribir') : COWORK_STARTERS;
+  // A starting point «Para hoy» already offers with the account's own numbers is not repeated below it, nor is «¿A quién le escribo
+  // hoy?», which its «Escribirles» answers (round 2 readings: the chips repeated those rows).
+  const starters = ready && today.some(item => item.id === 'write') ? COWORK_STARTERS.filter(item => item.id !== 'escribir' && item.id !== 'a-quien') : COWORK_STARTERS;
 
   return <div className="cw-scroll flex h-full min-h-0 flex-col overflow-y-auto">
     <div className="mx-auto flex w-full max-w-[46rem] flex-1 flex-col justify-center px-4 py-10 sm:px-6 md:py-16">
@@ -188,17 +192,19 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
       </div>
       <div className="cw-rise [animation-delay:60ms]">{composer}</div>
       {!ready && !loading && !listFailed && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes revisar tus conversaciones guardadas.</p>}
-      <HomeFigures overview={overview} loading={overviewLoading} />
+      {/* «Para hoy» already says it with the same figures: one quiet line or the other, never both (round 2 readings). */}
+      {!(ready && today.length > 0) && <HomeFigures overview={overview} loading={overviewLoading} />}
       {overview?.since?.items.length ? <SinceLastVisit since={overview.since} onAsk={onSuggestion} /> : null}
       {ready && today.length > 0 && <TodayList items={today} onAsk={onSuggestion} />}
       <CwCollapse show={askOffer}>
         {onSaveOffer && <div className="pt-6"><OfferCard draft={offerDraft} onDraftChange={onOfferDraftChange} onSave={onSaveOffer} onHide={hideOffer} /></div>}
       </CwCollapse>
       {/* The starting points come in one after another, a beat apart; with less motion they are simply there. */}
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
+      {/* On a phone, one row that scrolls sideways instead of a tall column of chips. */}
+      <div className="-mx-4 mt-5 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden">
         {starters.map((item, index) => <button key={item.id} type="button" onClick={() => onSuggestion(item.prompt)}
           style={{ animationDelay: `${120 + index * 45}ms` }}
-          className="cw-rise inline-flex items-center gap-2 rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+          className="cw-rise inline-flex shrink-0 snap-start items-center gap-2 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
           <CoworkIcon name={item.icon} className="h-4 w-4 text-cw-accent" />{item.title}
         </button>)}
       </div>

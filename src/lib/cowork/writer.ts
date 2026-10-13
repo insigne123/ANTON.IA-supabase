@@ -65,8 +65,9 @@ export const COWORK_WRITER_RULES = [
   'El correo es el texto que se envía: nunca lleva notas para el usuario ni lo que no sabes («no tengo más antecedentes de la empresa»); eso va en reply.',
   'Si observations trae opportunities.list con la empresa del destinatario, su signal es un hecho público con fuente y fecha: puedes abrir con él («Vi que publicaron 14 avisos para operarios en septiembre») sin cambiar sus cifras ni deducir necesidades que no dice.',
   'Seguimiento de un correo ya enviado (lo dicen objective, notes u observations): abre retomándolo en media frase («Te escribí el 19 de septiembre sobre…») y aporta lo que el primero no tenía: otro ángulo de la misma oferta (un uso concreto en su día a día, otro servicio de userContext.services o una consecuencia distinta de hacerlo a mano). Sigue con el momento de su rubro que ese ángulo resuelve y lo que se pierde ahí, y después la capacidad que responde a ese momento: si el ángulo es la evidencia de cada consulta, el momento es cuando alguien pide ese respaldo («en alimentación, cuando un cliente pide cómo se revisó a alguien que ya entró a cocina, reunir ese respaldo a mano obliga a buscar consulta por consulta» y «AXIS deja evidencia auditable de cada consulta»); un atraso se responde con lo que lo acorta, nunca con la evidencia. Nombra su rubro en esa frase y di qué queda detenido ahí, no solo que «suma trabajo» o que «lo deja esperando una respuesta». Cierra con una pregunta más fácil que la del primero y sobre ese mismo ángulo («¿Quién reúne hoy ese respaldo?», no «¿Cuántos ingresos revisan al mes?»), con un asunto del mismo ángulo o «Re: » y el del primero; no repitas su presentación ni su prueba. De 40 a 70 palabras.',
+  'Si observations trae assistant.written con scope earlier_answer, son los correos de tu respuesta anterior en esta conversación. Un seguimiento a esa persona va en su mismo hilo: asunto «Re: » y el asunto de ese correo tal cual, y una pregunta distinta de la suya. Si el pedido cambia ese correo («más corto», «menos vendedor», «tono más cercano»), es una edición del mismo correo: conserva su saludo, sus destinatarios (to) y lo que pide; «más corto» deja menos palabras y menos frases que el anterior, sin agregar invitaciones ni frases nuevas; si no tenía destinatarios, question va null (lo envía el usuario), sin explicarlo en reply: reply dice en una o dos frases qué cambió («Lo dejé en tres frases y sin adjetivos de venta»).',
   'Secuencia (kind sequence): steps correos (3 si no se indica), cada uno con day (el primero es 1; luego 3, 7, 11, 16, 23, 38 según la cantidad), asunto y cuerpo. Cada correo tiene su papel y no repite el planteamiento de los otros: el 1 nombra el momento en que la tarea le pesa en su rubro, presenta la oferta en una frase con su prueba y pregunta cuánto les toma hoy; el 2 abre con un momento concreto de su semana («cuando la nómina llega encima de la fecha de ingreso») y pregunta cómo lo hacen hoy o quién lo hace, sin describir la oferta y sin pedir una reunión; el 3 abre con otro momento de su día a día (no con el producto ni diciendo que es el último) y muestra cómo se usa la oferta ahí, y pregunta si le sirve verlo con un caso suyo; los siguientes, un criterio de decisión o una pregunta más fácil; el último cierra en dos frases. Ninguno dice en abstracto lo que ya se sabe («coordinar esa tarea se vuelve parte del día a día», «tener los resultados a mano ayuda a revisar…», «AXIS es una alternativa»): cada uno dice algo concreto. Las preguntas de los correos que no son el último son sobre su trabajo de hoy y no nombran la oferta («¿Quién prepara hoy la nómina?», no «¿Quién carga los nombres en AXIS?»). Cada correo tiene de 40 a 80 palabras y cierra con una sola pregunta, y ninguna repite la de otro correo con otras palabras. La prueba va solo en el primero. Desde el segundo, la oferta se nombra solo por su nombre. Solo el último puede decir que es el último mensaje, y lo dice junto a su pregunta; ninguno dice «retomo», «vuelvo a escribirte» ni «no respondiste».',
-  'Salida: reply en 2 a 5 frases que expliquen lo que escribiste, sin repetir el texto de los correos: si brief.findings no es null, parte por lo que ahí le sirve al usuario (cifras, a quiénes va, quiénes quedan fuera y por qué, lo que no se puede hacer) sin agregar datos; después di a quién va, qué ángulo usaste y por qué (de qué dato de la persona, de su empresa o de la oferta sale), nombrando solo a quienes están en los bloques. No menciones reglas internas (contexto de redacción, términos prohibidos, ofertas o afirmaciones aprobadas, la revisión) ni uses sus palabras: nada de «dato aprobado», «afirmación aprobada», «sincronización del buzón», «cobertura del buzón» o «según el dato de tu perfil»; di «el resultado que cargaste en tu Perfil». No le expliques al usuario qué hace su propia oferta ni lo que evitaste suponer («sin asumir…», «sin atribuirles…», «sin dar por hecho…»): lo que no consta simplemente no se afirma. Si el usuario ya te dice que no le respondieron, créele: no expliques lo que no ves. Si una respuesta recibida fuera de ANTON.IA cambiaría lo que propones (a quien dejaste fuera por un envío previo, por ejemplo), dilo una vez y en simple: «si te respondió por fuera de ANTON.IA, avísame y lo ajusto»; de quien nunca recibió un correo no hay respuesta que dudar. blocks lleva el email_draft (kind email; uno por persona si son 2 o 3) o un sequence (kind sequence), cada uno con title específico; si escribiste uno por persona, reply lo dice en una frase («Escribí un correo para cada uno, con lo propio de su rubro») y que la campaña usa cada uno como su primer correo. question propone el paso siguiente que Cowork hace con aprobación: si hay destinatarios con correo, crear la campaña pausada con ellos («¿Creo la campaña pausada para Felipe y Camila?»); si el encargo no trae destinatarios, usarla en una campaña pausada con los contactos que calzan («¿La uso en una campaña pausada para tus contactos de RR. HH. con correo?»), sin decir que falta algo: lo que entregas está completo; un correo escrito para una persona no se ofrece a otros contactos. Si mejoraste un correo que el usuario pegó y enviará él (a un grupo o a alguien que no está en sus contactos), question no ofrece una campaña, ni para ellos ni para otros contactos: va null, y suggestions ofrece ajustes que Cowork hace («Hazlo más corto», «Tono más cercano»). Nunca preguntes si lo dejas como borrador, listo para enviar o para copiar: ya está a la vista. Si request pide el correo como archivo (Word o PDF), reply lo dice en una frase: la tarjeta se baja con su botón «Descargar», en Word o PDF; nunca digas que no puedes entregar o adjuntar un archivo. suggestions trae 1 a 3 respuestas que el usuario tocaría; si hay question, la primera le dice que sí.',
+  'Salida: reply en 2 a 5 frases que expliquen lo que escribiste, sin repetir el texto de los correos: si brief.findings no es null, parte por lo que ahí le sirve al usuario (cifras, a quiénes va, quiénes quedan fuera y por qué, lo que no se puede hacer) sin agregar datos; después di a quién va, qué ángulo usaste y por qué (de qué dato de la persona, de su empresa o de la oferta sale), nombrando solo a quienes están en los bloques. No menciones reglas internas (contexto de redacción, términos prohibidos, ofertas o afirmaciones aprobadas, la revisión) ni uses sus palabras: nada de «dato aprobado», «afirmación aprobada», «sincronización del buzón», «cobertura del buzón» o «según el dato de tu perfil»; di «el resultado que cargaste en tu Perfil». No agregues avisos legales, de cumplimiento o de protección de datos que el usuario no pidió. No le expliques al usuario qué hace su propia oferta ni lo que evitaste suponer («sin asumir…», «sin atribuirles…», «sin dar por hecho…»): lo que no consta simplemente no se afirma. Si el usuario ya te dice que no le respondieron, créele: no expliques lo que no ves. Si una respuesta recibida fuera de ANTON.IA cambiaría lo que propones (a quien dejaste fuera por un envío previo, por ejemplo), dilo una vez y en simple: «si te respondió por fuera de ANTON.IA, avísame y lo ajusto»; de quien nunca recibió un correo no hay respuesta que dudar. blocks lleva el email_draft (kind email; uno por persona si son 2 o 3) o un sequence (kind sequence), cada uno con title específico; si escribiste uno por persona, reply lo dice en una frase («Escribí un correo para cada uno, con lo propio de su rubro») y que la campaña usa cada uno como su primer correo. question propone el paso siguiente que Cowork hace con aprobación: si hay destinatarios con correo, crear la campaña pausada con ellos («¿Creo la campaña pausada para Felipe y Camila?»); si el encargo no trae destinatarios, usarla en una campaña pausada con los contactos que calzan («¿La uso en una campaña pausada para tus contactos de RR. HH. con correo?»), sin decir que falta algo: lo que entregas está completo; un correo escrito para una persona no se ofrece a otros contactos. Si mejoraste un correo que el usuario pegó y enviará él (a un grupo o a alguien que no está en sus contactos), question no ofrece una campaña, ni para ellos ni para otros contactos: va null, y suggestions ofrece ajustes que Cowork hace («Hazlo más corto», «Tono más cercano»). Nunca preguntes si lo dejas como borrador, listo para enviar o para copiar: ya está a la vista. Si request pide el correo como archivo (Word o PDF), reply lo dice en una frase: la tarjeta se baja con su botón «Descargar», en Word o PDF; nunca digas que no puedes entregar o adjuntar un archivo. suggestions trae 1 a 3 respuestas que el usuario tocaría; si hay question, la primera le dice que sí.',
   'Si recibes issues, corrige exactamente eso y conserva todo lo demás igual. reply no menciona la corrección: el usuario no vio la versión anterior.',
   'referenceClock fija la fecha de este trabajo. Para fechas relativas usa solo esa referencia y la fecha observada del envío; seis días nunca son «hace unas semanas». Sin una referencia temporal suficiente, escribe «Te escribí sobre…» o conserva la fecha exacta observada, sin inventar antigüedad. Al editar el correo original conserva el contexto temporal que el usuario declaró salvo que pida cambiarlo.',
   'La oferta que el usuario declara expresamente para este encargo en request manda sobre la oferta por defecto de otro producto. Puedes usar una prueba que declara expresamente como autorizada para este encargo, conservando sus condiciones y tiempo verbal; no es verificación externa ni una garantía. No transfieras cifras, servicios ni pruebas de AXIS a un servicio nuevo. Pegar un correo para mejorarlo no autoriza sus cifras ni superlativos: las afirmaciones nuevas siguen exigiendo una fuente válida.',
@@ -88,7 +89,10 @@ type Recipient = { name: string; email: string | null; company: string };
 /** meeting: whether the person asked for a meeting, a call or a demo (undefined when the request is not known: nothing is flagged).
  * products: the names the offer goes by (its all-caps names and the seller's company), lowercase and accent-free. */
 type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: boolean; proofs?: string[]; recipients?: Recipient[];
-  meeting?: boolean; products?: string[]; keepsAsk?: boolean; followUp?: boolean };
+  meeting?: boolean; products?: string[]; keepsAsk?: boolean; followUp?: boolean;
+  /** The emails of the previous answer in the conversation (assistant.written, scope earlier_answer), and whether the request edits them. */
+  earlier?: EarlierEmail[]; edit?: boolean; shorter?: boolean };
+type EarlierEmail = { to: string[]; subject: string; body: string };
 
 // «firmo como Nico», «Firma exactamente como «Nico»», «firmar siempre como Nicolás Y.»: the name that follows, as written.
 const SIGNS_AS = /\b[Ff]irm(?:o|a|ar|ame|amos|as|e)?\s+(?:siempre\s+|exactamente\s+|solo\s+)?(?:como|con)\s+[«"“']?(\p{Lu}[\p{L}.'-]*(?:\s+\p{Lu}[\p{L}.'-]*)?)/u;
@@ -150,11 +154,116 @@ export function coworkWriterContext(userContext: { fullName?: string | null; pro
   const proofs = Array.isArray(userContext?.proofPoints)
     ? userContext.proofPoints.filter((proof): proof is string => typeof proof === 'string' && proof.trim().length > 3).map(proof => proof.trim())
     : [];
+  const earlier = earlierEmails(observations);
+  const edit = Boolean(earlier.length && typeof request === 'string' && !PASTED_EDIT.test(request) && request.length <= 160 && EDITS_EARLIER.test(request));
   return { signer: signer || userContext?.fullName?.trim() || null, prohibited, trialOffer: Boolean(context?.context?.trialOffer),
     proofs, recipients: observedRecipients(observations), products: offerNames(userContext as Parameters<typeof offerNames>[0]),
     ...(typeof request === 'string' ? { meeting: MEETING_ASKED.test(request),
-      keepsAsk: MEETING_ASKED.test(request) && PASTED_EDIT.test(request) && !DROPS_MEETING.test(request) } : {}) };
+      keepsAsk: MEETING_ASKED.test(request) && PASTED_EDIT.test(request) && !DROPS_MEETING.test(request) } : {}),
+    ...(earlier.length ? { earlier, edit, shorter: edit && SHORTER.test(String(request)) } : {}) };
 }
+
+// A short request that changes the email of the previous answer («más corto y menos vendedor», «hazlo más cercano», «sin la demo»).
+const EDITS_EARLIER = /^\s*(?:hazl[oa]|d[ée]jal[oa]|ponl[oa]|m[áa]s\s|menos\s|otra versi[óo]n|tono\s|sin\s|qu[íi]ta|acort|ac[óo]rtal|cambia|c[áa]mbial|agr[ée]ga|mej[óo]ral|reescr[íi]bel|corr[íi]gel|simplif)/i;
+const SHORTER = /\bm[áa]s\s+(?:cort|breve|direct)|\bacort|\bac[óo]rtal|\bresum|\bmenos\s+largo/i;
+
+/** The emails of the previous answer the loop handed over (assistant.written with scope earlier_answer). */
+function earlierEmails(observations: Observation[]): EarlierEmail[] {
+  const found = observations.find(item => item.action === 'assistant.written'
+    && (item.result as { scope?: unknown } | null)?.scope === 'earlier_answer')?.result as { emails?: unknown } | undefined;
+  return (Array.isArray(found?.emails) ? found.emails : []).flatMap(item => {
+    const email = item as { to?: unknown; subject?: unknown; body?: unknown };
+    return typeof email.subject === 'string' && typeof email.body === 'string'
+      ? [{ to: Array.isArray(email.to) ? email.to.filter((entry): entry is string => typeof entry === 'string') : [], subject: email.subject, body: email.body }] : [];
+  });
+}
+
+/** A person's name as written in a brief or a read («Francisca Muñoz (Falabella)», «Daniela Rojas de Manpower»): its words, plain. */
+function nameWords(text: string): string[] {
+  return normalize(text).split(/\s*[(,·|–—]\s*|\s+-\s+|\s+(?:de|en|del)\s+/)[0].match(/[a-z]+/g) || [];
+}
+
+/** Two ways of writing the same person: every word of the shorter one is in the longer one («Francisca» and «Francisca Muñoz»). */
+export function coworkSameName(left: string, right: string) {
+  const a = nameWords(left);
+  const b = nameWords(right);
+  if (!a.length || !b.length) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.every(word => long.includes(word));
+}
+
+const ADDRESS = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+
+/**
+ * The emails go to the people the brief names, at the address the turn read (round 2 reading: «no tenemos su correo observado, to
+ * queda vacío» for a saved contact with an address, and email cards without «para»). An email without recipients gets them when the
+ * people of the brief are read people with an address (one card for all, or one card per person by the name it greets); a name in
+ * to becomes that person's address. Deterministic: it changes no text.
+ */
+export function coworkAddressDrafts(output: CoworkWriterOutput, brief: Pick<CoworkWriteBrief, 'recipients'>, recipients: Recipient[] = []): CoworkWriterOutput {
+  const find = (entry: string) => {
+    const plain = entry.trim().toLowerCase();
+    if (plain.includes('@')) return ADDRESS.test(plain) ? plain : null;
+    const emails = [...new Set(recipients.filter(person => person.email && coworkSameName(person.name, entry)).map(person => person.email!))];
+    return emails.length === 1 ? emails[0] : null;
+  };
+  const named = (brief.recipients ?? []).map(entry => ({ entry, email: find(entry) }));
+  const drafts = output.blocks.filter(block => block.type === 'email_draft').length;
+  let changed = false;
+  const blocks = output.blocks.map(block => {
+    if (block.type !== 'email_draft') return block;
+    if (block.to?.length) {
+      const to = [...new Set(block.to.map(entry => (entry.includes('@') ? entry.trim().toLowerCase() : find(entry)) ?? entry))];
+      if (to.length === block.to.length && to.every((entry, index) => entry === block.to![index])) return block;
+      changed = true;
+      return { ...block, to };
+    }
+    if (drafts === 1) {
+      const emails = [...new Set(named.flatMap(item => item.email ? [item.email] : []))];
+      if (!emails.length) return block;
+      changed = true;
+      return { ...block, to: emails };
+    }
+    const greeted = GREETING_NAME.exec(block.body)?.[1];
+    const person = greeted ? named.find(item => item.email && nameWords(item.entry)[0] === normalize(greeted)) : null;
+    if (!person?.email) return block;
+    changed = true;
+    return { ...block, to: [person.email] };
+  });
+  return changed ? { ...output, blocks } : output;
+}
+
+/**
+ * What the previous answer settles (round 2 readings): a follow-up to its email answers in the same thread («Re: » and the first
+ * subject, which the Writer changed: «Re: revisión de antecedentes en Manpower» for «Manpower y la revisión de antecedentes»), and an
+ * edit of that email keeps its recipients and, when it had none, its «Hola,» and no campaign offer: the person sends it.
+ */
+export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'edit' | 'followUp'>): CoworkWriterOutput {
+  const earlier = context.earlier ?? [];
+  const drafts = output.blocks.filter(block => block.type === 'email_draft');
+  if (!earlier.length || drafts.length !== 1 || (!context.followUp && !context.edit)) return output;
+  const block = drafts[0] as Extract<CoworkBlock, { type: 'email_draft' }>;
+  const own = (block.to ?? []).map(entry => entry.toLowerCase());
+  const previous = earlier.length === 1 ? earlier[0] : earlier.find(item => item.to.some(entry => own.includes(entry.toLowerCase())));
+  if (!previous) return output;
+  let next = block;
+  if (context.followUp && !context.edit) {
+    const subject = `Re: ${previous.subject.replace(/^\s*re:\s*/i, '').trim()}`;
+    if (normalize(block.subject.trim()) !== normalize(subject)) next = { ...next, subject };
+  } else {
+    if (!next.to?.length && previous.to.length) next = { ...next, to: previous.to };
+    if (!next.to?.length && /^\s*hola,/i.test(previous.body)) next = { ...next, body: next.body.replace(/^(\s*Hola)\s*\{\{\s*nombre\s*\}\}\s*,/, '$1,') };
+  }
+  const blocks = next === block ? output.blocks : output.blocks.map(item => item === block ? next : item);
+  // An email the person sends: no campaign for it, and the replies offer changes Cowork makes.
+  if (context.edit && !next.to?.length && (output.question || output.suggestions.some(item => CAMPAIGN_WORD.test(item.label + item.message)))) {
+    const suggestions = output.suggestions.filter(item => !CAMPAIGN_WORD.test(item.label + item.message));
+    return { ...output, blocks, question: null, suggestions: suggestions.length ? suggestions : [{ label: 'Tono más cercano', message: 'Hazlo con un tono más cercano' }] };
+  }
+  return next === block ? output : { ...output, blocks };
+}
+const CAMPAIGN_WORD = /campa[ñn]a/i;
+
 
 type Email = { subject: string; body: string };
 const draftEmails = (blocks: CoworkBlock[]) => blocks.flatMap(block => block.type === 'email_draft'
@@ -180,6 +289,8 @@ const USTED = /\b(?:usted|cuenteme|digame|aviseme|escribame|respondame|indiqueme
 const STOP = new Set(['como', 'cuanto', 'cuantos', 'cuanta', 'quien', 'quienes', 'donde', 'cual', 'cuales', 'para', 'esta', 'este', 'estos', 'estas', 'esto', 'tienen', 'tiene', 'tienes', 'hacen', 'haces', 'hace', 'equipo', 'ustedes', 'usted', 'ahora', 'algo', 'sobre', 'entre', 'desde', 'cuando', 'porque', 'tambien', 'seria', 'sirve']);
 const stems = (question: string) => new Set((question.match(/[a-zñ]{4,}/g) || []).filter(word => !STOP.has(word)).map(word => word.slice(0, 5)));
 const closingQuestion = (body: string) => (normalize(body).match(/¿[^?]+\?/g) || []).pop() || '';
+// The words of an email between its greeting and its signature are what «más corto» is about: the whole body is close enough.
+const bodyWords = (body: string) => body.split(/\s+/).filter(Boolean).length;
 const alike = (a: Set<string>, b: Set<string>) => {
   const shared = [...a].filter(stem => b.has(stem)).length;
   return shared >= 2 && shared / Math.min(a.size, b.size) >= 0.6;
@@ -518,8 +629,15 @@ export function coworkReplyIssues(reply: string): CoworkDraftIssue[] {
  * asked for the campaign in the request (the coordinator proposes it next), nor for an email the person pasted to improve, which
  * they send themselves (the runner leaves those out).
  */
-export function coworkNextStepIssues(output: Pick<CoworkWriterOutput, 'blocks' | 'question'>): CoworkDraftIssue[] {
+export function coworkNextStepIssues(output: Pick<CoworkWriterOutput, 'blocks' | 'question'>, context: Pick<WriterContext, 'earlier' | 'followUp'> = {}): CoworkDraftIssue[] {
   const addressed = output.blocks.filter(block => block.type === 'email_draft' && block.to?.length);
+  // A follow-up of the email written just before in this conversation, which nobody sent yet: the step is the campaign with both, not
+  // sending it on its own (round 3: «¿Propongo enviárselo a Daniela?» for a follow-up of an unsent email).
+  if (context.followUp && context.earlier?.length === 1 && addressed.length === 1 && !/campa[ñn]a/i.test(output.question || '')) {
+    const name = GREETING_NAME.exec((addressed[0] as { body: string }).body)?.[1] || '<nombre>';
+    return [{ where: 'Pregunta final', problem: 'El seguimiento es de un correo que aún no sale: el paso siguiente es la campaña con los dos.',
+      fix: `En question propone crear la campaña pausada con los dos correos: «¿Creo la campaña pausada para ${name} con los dos correos, el seguimiento al día 8?».`, short: 'campaña con los dos' }];
+  }
   if (!addressed.length || output.question?.trim()) return [];
   const replies = addressed.some(block => block.type === 'email_draft' && /^\s*re:/i.test(block.subject));
   return [{ where: 'Pregunta final', problem: 'Los correos tienen destinatario y la respuesta no propone el paso siguiente.',
@@ -695,6 +813,17 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
       fix: MEETING_ASK.test(question) ? 'Déjala en menos de 15 palabras, sin el para qué: «¿Qué día de esta semana te acomoda conversar 20 minutos?».'
         : 'Déjala en menos de 15 palabras, con un solo dato de su operación: cuántos, quién lo hace o cuánto les toma.', short: 'pregunta corta' });
     // A follow-up reopens the first email (v15 run: 2 of 8 Luna and Sol 6.1 follow-ups opened without it, one with a question).
+    // Round 2 readings: a follow-up that asks the first email's question again («¿Cuántos postulantes revisan al mes en Manpower?» twice).
+    const first = context.followUp && !context.edit && total === 1 && context.earlier?.length === 1 ? closingQuestion(context.earlier[0].body) : '';
+    if (first && question && alike(stems(question), stems(first))) issues.push({ where, problem: 'El seguimiento repite la pregunta del primer correo.',
+      fix: 'Pregunta otra cosa, sobre el ángulo nuevo: quién lo hace hoy o cómo lo resuelven cuando pasa.', short: 'pregunta nueva' });
+    // «Más corto» that came out as long or longer, with a new invitation (round 2 readings: four sentences became five).
+    if (context.shorter && total === 1 && context.earlier?.length === 1) {
+      const before = context.earlier[0].body;
+      const longer = bodyWords(email.body) >= bodyWords(before) || statements(email.body).length > statements(before).length;
+      if (longer) issues.push({ where, problem: `Se pidió más corto y quedó igual o más largo (${bodyWords(email.body)} palabras; antes ${bodyWords(before)}).`,
+        fix: 'Quita una frase completa y conserva el saludo, la oferta y la pregunta; no agregues invitaciones ni frases nuevas.', short: 'más corto' });
+    }
     if (context.followUp && total === 1 && !REOPENS.test(opening)) issues.push({ where, problem: 'El seguimiento no retoma el primer correo.',
       fix: 'Ábrelo retomándolo en media frase, con la fecha observada del envío («Te escribí el 19 de septiembre sobre…»), y sigue con el momento de su rubro.', short: 'retoma el primero' });
     if (REOPENS.test(opening) && citedProof(email.body, context.proofs ?? [])) issues.push({ where, problem: 'El seguimiento repite la prueba del primer correo.',
@@ -979,9 +1108,25 @@ export function coworkReplyMatchesDraft(reply: string, bodies: string[]) {
   return kept.length && kept.length < sentences.length ? kept.join(' ') : reply;
 }
 
+// What a reply may still carry after the checks (round 2 readings): the brief's field names and words («to queda vacío», «su correo
+// observado»), an excuse, and the campaign's variables, which the person reads as code («el asunto usa {{empresa}}»).
+const FIELD_WORDS = /\bto\b (?:queda|va|esta)\b|\b(?:campo|brief)\b|\bobservad[oa]s?\b|\b(?:el|este|del) encargo\b/;
+const VARIABLE_WORDS: Array<[RegExp, string]> = [[/\{\{\s*nombre\s*\}\}/g, 'el nombre de cada persona'],
+  [/\{\{\s*empresa\s*\}\}/g, 'el nombre de su empresa'], [/\{\{\s*cargo\s*\}\}/g, 'su cargo']];
+
+/** The reply in the person's words: a sentence in the brief's words, excusing itself or explaining the campaign's variables goes when
+ * others are left (the card already marks what each person's data fills in); a variable left is said in plain words. Deterministic,
+ * after the checks. */
+export function coworkPlainReply(reply: string) {
+  const sentences = reply.split(/(?<=[.!?])(?=\s)/);
+  const kept = sentences.filter(sentence => { const text = normalize(sentence); return !FIELD_WORDS.test(text) && !EXCUSES.test(text) && !/\{\{/.test(sentence); });
+  const text = kept.length && kept.length < sentences.length ? kept.join('').trim() : reply;
+  return VARIABLE_WORDS.reduce((plain, [pattern, words]) => plain.replace(pattern, words), text);
+}
+
 export function coworkPolishDraft(output: CoworkWriterOutput, proofs: string[], products: string[] = []): CoworkWriterOutput {
   const bodies = output.blocks.flatMap(block => block.type === 'email_draft' ? [block.body] : block.type === 'sequence' ? block.steps.map(step => step.body) : []);
-  const reply = coworkReplyMatchesDraft(output.reply, bodies);
+  const reply = coworkReplyMatchesDraft(coworkPlainReply(output.reply), bodies);
   if (reply !== output.reply) output = { ...output, reply };
   if (!proofs.length && !products.length && !bodies.some(body => LOWER_QUESTION.test(body))) return output;
   const polish = (body: string) => capitalQuestions(proofs.length || products.length ? coworkSplitOffer(coworkPolishProofs(body, proofs), products) : body);
@@ -1050,10 +1195,17 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   const hasTime = () => input.canReview?.() ?? true;
   await input.step({ agent: 'writer', state: 'working', label: `Escribiendo ${what}` });
   const systemPrompt = COWORK_WRITER_RULES.join('\n');
+  const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
+  const context = { ...coworkWriterContext(input.userContext as { fullName?: string | null } | null, input.observations,
+    coworkSignerPreference([input.request, input.brief.notes, ...(Array.isArray(memories) ? memories.map(String) : [])]), input.request),
+    // One email to one person whose objective is a follow-up: it must reopen the first one.
+    followUp: input.brief.kind === 'email' && input.brief.recipients?.length === 1 && /seguimiento/i.test(input.brief.objective) && !PASTED_EDIT.test(input.request) };
+  // Every draft goes to the people it names and stays in the thread it continues, before the checks read it.
+  const settle = (draft: CoworkWriterOutput) => coworkEarlierThread(coworkAddressDrafts(draft, input.brief, context.recipients), context);
   let first: CoworkWriterOutput;
   try {
-    first = await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt, stream: true,
-      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, now: input.now }) });
+    first = settle(await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt, stream: true,
+      prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, now: input.now }) }));
     if (!coworkWriterBlocks(first).length) throw new Error('Writer returned no email');
   } catch (error) {
     // The row never stays «writing» after the Writer gave up: the coordinator takes over and says so.
@@ -1062,13 +1214,8 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   }
   await input.step({ agent: 'writer', state: 'done', label: `Escribió ${what}` });
 
-  const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
-  const context = { ...coworkWriterContext(input.userContext as { fullName?: string | null } | null, input.observations,
-    coworkSignerPreference([input.request, input.brief.notes, ...(Array.isArray(memories) ? memories.map(String) : [])]), input.request),
-    // One email to one person whose objective is a follow-up: it must reopen the first one.
-    followUp: input.brief.kind === 'email' && input.brief.recipients?.length === 1 && /seguimiento/i.test(input.brief.objective) && !PASTED_EDIT.test(input.request) };
   const checked = (draft: CoworkWriterOutput) => [...coworkDraftIssues(coworkWriterBlocks(draft), context), ...coworkReplyIssues(draft.reply),
-    ...(input.brief.campaign || PASTED_EDIT.test(input.request) ? [] : coworkNextStepIssues({ blocks: coworkWriterBlocks(draft), question: draft.question }))];
+    ...(input.brief.campaign || PASTED_EDIT.test(input.request) ? [] : coworkNextStepIssues({ blocks: coworkWriterBlocks(draft), question: draft.question }, context))];
   const polish = (draft: CoworkWriterOutput) => coworkPolishDraft(draft, context.proofs ?? [], context.products ?? []);
   let issues = checked(first);
   if (!hasTime()) {
@@ -1101,7 +1248,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   try {
     const output = await input.generate({ role: 'writer', fix: true, schema: coworkWriterOutputSchema, systemPrompt,
       prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, issues, previous: first, now: input.now }) });
-    if (coworkWriterBlocks(output).length) corrected = output;
+    if (coworkWriterBlocks(output).length) corrected = settle(output);
   } catch {
     // The first draft stands: a failed correction never loses the answer.
   }
@@ -1129,8 +1276,9 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
       const output = await input.generate({ role: 'writer', fix: true, schema: coworkWriterOutputSchema, systemPrompt,
         prompt: coworkWriterPrompt({ request: input.request, brief: input.brief, userContext: input.userContext, observations: input.observations, issues: remaining, previous: kept, now: input.now }) });
       if (coworkWriterBlocks(output).length) {
-        const again = checkedCorrection(output);
-        if (again.length < remaining.length) { kept = output; remaining = again; }
+        const settled = settle(output);
+        const again = checkedCorrection(settled);
+        if (again.length < remaining.length) { kept = settled; remaining = again; }
       }
     } catch {
       // The first correction stands.

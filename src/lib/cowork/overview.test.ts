@@ -15,7 +15,7 @@ test('the home greets by the first name, and only by a name', () => {
 
 test('the figures read in order, in singular or plural, and a figure that could not be read is left out', () => {
   assert.deepEqual(coworkOverviewFigures(overview()).map(figure => [figure.value, figure.label, figure.total ?? null]), [
-    [128, 'contactos guardados', null], [96, 'con correo', null], [3, 'campañas', null], [12, 'invitaciones de LinkedIn esta semana', 20],
+    [128, 'contactos guardados', null], [96, 'con correo', null], [3, 'campañas', null], [8, 'invitaciones de LinkedIn libres esta semana', null],
   ]);
   assert.deepEqual(coworkOverviewFigures(overview({ contacts: 1, withEmail: 1, campaigns: 1, linkedin: null })).map(figure => figure.label),
     ['contacto guardado', 'con correo', 'campaña']);

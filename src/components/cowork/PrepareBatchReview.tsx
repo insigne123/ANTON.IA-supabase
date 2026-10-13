@@ -51,7 +51,7 @@ function StepChips({ item, included }: { item: Item; included: boolean }) {
   </span>;
 }
 
-function PersonRow({ item, included, disabled, onToggle }: { item: Item; included: boolean; disabled: boolean; onToggle: () => void }) {
+function PersonRow({ item, included, disabled, onToggle, steps = true }: { item: Item; included: boolean; disabled: boolean; onToggle: () => void; steps?: boolean }) {
   const shown = displayLeadName(item.name).text || 'Sin nombre';
   return <li>
     <label className={cn('flex cursor-pointer items-start gap-3 px-3 py-2.5', disabled && 'cursor-default', !included && 'bg-cw-hover')}>
@@ -61,7 +61,7 @@ function PersonRow({ item, included, disabled, onToggle }: { item: Item; include
       <span className="min-w-0 flex-1">
         <PersonName name={item.name} struck={!included} />
         <span className="block break-words text-[12.5px] text-cw-muted">{[item.title, item.company].filter(Boolean).join(' · ') || 'Sin cargo ni empresa'}</span>
-        <StepChips item={item} included={included} />
+        {steps && <StepChips item={item} included={included} />}
       </span>
       {!included && <span className="shrink-0 pt-0.5 text-[12px] font-medium text-cw-muted">Fuera</span>}
     </label>
@@ -75,6 +75,16 @@ function costLine(kept: Item[]) {
   const parts = [lookups ? `hasta ${lookups} ${lookups === 1 ? 'crédito' : 'créditos'} para buscar correos (1 por persona)` : '',
     research ? `${research} ${research === 1 ? 'investigación' : 'investigaciones'} de tu cupo diario` : ''].filter(Boolean);
   return parts.length ? `Usa ${parts.join(' y ')}.` : 'Solo guarda contactos: no gasta créditos.';
+}
+
+/** The button says what it does and what it costs: «Buscar 3 correos · 3 créditos» when only emails are missing (round 2 readings:
+ * «Preparar» read as vague), «Preparar a 2 personas · 1 crédito» when more is. */
+function approveLabel(kept: Item[]) {
+  if (!kept.length) return 'Aprobar';
+  const lookups = kept.filter(item => item.steps.includes('enrich')).length;
+  const credits = lookups ? ` · ${lookups} ${lookups === 1 ? 'crédito' : 'créditos'}` : '';
+  return kept.every(item => item.steps.length === 1 && item.steps[0] === 'enrich')
+    ? `Buscar ${lookups} ${lookups === 1 ? 'correo' : 'correos'}${credits}` : `Preparar a ${people(kept.length)}${credits}`;
 }
 
 /**
@@ -123,15 +133,18 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
       setSaving(false);
     }
   }
+  // Only emails to look for: the button and the outcome say it, so each row is just the person (round 2 readings: a dense card with
+  // «Ya guardado» and «Buscar correo» on every row).
+  const emailsOnly = preview.items.every(item => item.steps.length === 1 && item.steps[0] === 'enrich');
   return <div className="space-y-4">
     <div className="space-y-1">
-      <p className="text-[14px]"><span className="font-semibold">{kept.length} de {people(preview.items.length)}</span>
-        <span className="text-cw-muted"> quedan listas con esta aprobación, cada una solo con lo que le falta.</span></p>
+      {!emailsOnly && <p className="text-[14px]"><span className="font-semibold">{kept.length} de {people(preview.items.length)}</span>
+        <span className="text-cw-muted"> quedan listas con esta aprobación, cada una solo con lo que le falta.</span></p>}
       <p className="text-[12.5px] text-cw-muted">{costLine(kept)}{preview.balance
         ? ` Te quedan ${preview.balance.remaining} créditos${preview.balance.stale ? ' (dato de hace un rato)' : ''}.` : ''}</p>
     </div>
-    <ul aria-label="Personas del lote" className="cw-scroll max-h-96 divide-y divide-cw-border overflow-y-auto rounded-xl border border-cw-border bg-cw-panel">
-      {preview.items.map(item => <PersonRow key={item.id} item={item} included={!removed.has(item.id)} disabled={locked} onToggle={() => toggle(item.id)} />)}
+    <ul aria-label="Personas de la lista" className="cw-scroll max-h-96 divide-y divide-cw-border overflow-y-auto rounded-xl border border-cw-border bg-cw-panel">
+      {preview.items.map(item => <PersonRow key={item.id} item={item} included={!removed.has(item.id)} disabled={locked} onToggle={() => toggle(item.id)} steps={!emailsOnly} />)}
     </ul>
     {!!preview.ready.length && <details className="rounded-xl border border-cw-border bg-cw-panel px-3 py-2.5 text-[13px]">
       <summary className="cursor-pointer text-cw-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
@@ -145,11 +158,10 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
     </details>}
     {short && <ReviewNote ok={false}>Los créditos que quedan no alcanzan para buscar todos los correos: los que no alcancen quedan sin buscar y se avisa en cada persona.</ReviewNote>}
     {error && <ReviewError message={error} />}
-    <ReviewNote ok={preview.matches && preview.open}>{!preview.matches
-      ? 'La lista cambió desde la propuesta. Descártala y pide una nueva.'
-      : !preview.open ? 'Esta propuesta ya se decidió.'
-        : 'Coincide con la propuesta. Al aprobar se hace, persona por persona, solo lo marcado; no se le escribe a nadie y a quien quites no se le toca.'}</ReviewNote>
-    <ReviewActions onReject={onReject} onApprove={() => void approve()} approveLabel={kept.length ? `Preparar a ${people(kept.length)}` : 'Aprobar'}
+    {/* «Qué va a pasar» already says what approving does: the note speaks only when something is off. */}
+    {(!preview.matches || !preview.open) && <ReviewNote ok={false}>{!preview.matches
+      ? 'La lista cambió desde la propuesta. Descártala y pide una nueva.' : 'Esta propuesta ya se decidió.'}</ReviewNote>}
+    <ReviewActions onReject={onReject} onApprove={() => void approve()} approveLabel={approveLabel(kept)}
       disabled={!preview.matches || !preview.open || !kept.length || saving} resolving={resolving} />
   </div>;
 }

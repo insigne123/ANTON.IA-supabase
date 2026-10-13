@@ -37,7 +37,11 @@ export function coworkOverviewFigures(overview: CoworkOverview | null): CoworkOv
   if (overview.contacts !== null) figures.push({ id: 'contacts', value: overview.contacts, label: plural(overview.contacts, 'contacto guardado', 'contactos guardados') });
   if (overview.withEmail !== null && overview.contacts) figures.push({ id: 'withEmail', value: overview.withEmail, label: 'con correo' });
   if (overview.campaigns !== null) figures.push({ id: 'campaigns', value: overview.campaigns, label: plural(overview.campaigns, 'campaña', 'campañas') });
-  if (overview.linkedin) figures.push({ id: 'linkedin', value: overview.linkedin.used, total: overview.linkedin.limit, label: 'invitaciones de LinkedIn esta semana' });
+  // What is left, said as such: «0 de 100» did not tell used from available (round 2 readings).
+  if (overview.linkedin) {
+    const left = Math.max(0, overview.linkedin.limit - overview.linkedin.used);
+    figures.push({ id: 'linkedin', value: left, label: `${left === 1 ? 'invitación' : 'invitaciones'} de LinkedIn libres esta semana` });
+  }
   return figures;
 }
 

@@ -1,5 +1,5 @@
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
-import { coworkDecisionSchema, coworkRescueNote, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from '@/lib/cowork/agent-loop';
+import { coworkClarificationAnswer, coworkDecisionSchema, coworkRescueNote, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from '@/lib/cowork/agent-loop';
 import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_REASONING_EFFORT, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
 import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling, type CoworkTurnBudget } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
@@ -292,6 +292,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
       metricPeriods: !clarificationOnly,
+      clarification: clarificationOnly,
       // Where a search looks when nobody said where (Plan 14, 1): «Perfil», or COWORK_DEFAULT_SEARCH_LOCATION (Chile).
       searchDefaults: coworkSearchDefaults(userContext),
       // Inside a long task the search keeps what the approved plan says («…de retail en Santiago»), not the automatic message.
@@ -313,7 +314,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         }
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
-          systemPrompt: decisionSystemPrompt + (clarificationOnly ? '\nEsta es una pregunta sobre una propuesta que sigue esperando aprobación en el hilo. Aclara su alcance, costo o consecuencia usando lo observado. No crees, reemplaces, apruebes ni ejecutes efectos ni búsquedas externas; la propuesta original se conserva.' : ''),
+          systemPrompt: decisionSystemPrompt + (clarificationOnly ? '\nEsta es una pregunta sobre una propuesta que sigue esperando aprobación en el hilo. Aclara su alcance, costo o consecuencia usando lo observado, en 2 a 4 frases. No crees, reemplaces, apruebes ni ejecutes efectos ni búsquedas externas; la propuesta original se conserva y se aprueba con el botón de su tarjeta: no cierres preguntando si la apruebas ni con una respuesta sugerida que diga que sí; si hay un paso siguiente distinto que sirva, ofrécelo.' : ''),
           prompt: decisionPrompt(observations, mustAnswer, rejections, turnBudget),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',
@@ -677,7 +678,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'completed',
-      p_payload: { ...polishCoworkAnswer(result), telemetry },
+      p_payload: { ...polishCoworkAnswer(clarificationOnly ? coworkClarificationAnswer(result) : result), telemetry },
     });
     if (finished.error) throw finished.error;
     if (finished.data === true && pendingMemory) await saveCoworkThreadMemory(client, scope, run, pendingMemory);

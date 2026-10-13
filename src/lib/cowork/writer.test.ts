@@ -1004,3 +1004,76 @@ test('the reply never promises a meeting the final email does not ask for', () =
   assert.equal(coworkPolishDraft({ reply, question: null, suggestions: [], blocks: [{ type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Manpower', body: email }] }, []).reply,
     'Escribí una presentación de AXIS para Daniela Rojas. La campaña queda para tu aprobación.', 'the polish step applies it');
 });
+
+test('a draft goes to the people the brief names, at the address the turn read (round 2 readings)', async () => {
+  const { coworkAddressDrafts, coworkSameName } = await import('./writer');
+  assert.equal(coworkSameName('Francisca Muñoz (Falabella)', 'Francisca Muñoz'), true);
+  assert.equal(coworkSameName('Daniela Rojas de Manpower', 'Daniela Rojas'), true);
+  assert.equal(coworkSameName('Francisca', 'Francisca Muñoz'), true);
+  assert.equal(coworkSameName('Rodrigo Pérez', 'Francisca Muñoz'), false);
+  const people = [
+    { name: 'Francisca Muñoz', email: 'francisca.munoz@falabella.test', company: 'Falabella' },
+    { name: 'Rodrigo Pérez', email: 'rodrigo.perez@securitas.test', company: 'Securitas Chile' },
+    { name: 'Carlos Soto', email: null, company: 'Adecco' },
+  ];
+  const draft = (to: string[] | null, body = 'Hola Francisca,\n\nTexto.\n\n¿Cuántos postulantes revisan?\n\nNicolás') => ({ reply: 'Listo.', question: null,
+    suggestions: [{ label: 'Más corto', message: 'Hazlo más corto' }],
+    blocks: [{ type: 'email_draft' as const, title: 'Correo a Francisca', to, subject: 'Antecedentes en Falabella', body }] });
+  const one = coworkAddressDrafts(draft(null), { recipients: ['Francisca Muñoz (Falabella)'] }, people);
+  assert.deepEqual((one.blocks[0] as { to: string[] }).to, ['francisca.munoz@falabella.test']);
+  const named = coworkAddressDrafts(draft(['Francisca Muñoz']), { recipients: ['Francisca Muñoz'] }, people);
+  assert.deepEqual((named.blocks[0] as { to: string[] }).to, ['francisca.munoz@falabella.test']);
+  const group = coworkAddressDrafts(draft(null, 'Hola {{nombre}},\n\nTexto.'), { recipients: ['Francisca Muñoz', 'Rodrigo Pérez', 'Carlos Soto'] }, people);
+  assert.deepEqual((group.blocks[0] as { to: string[] }).to, ['francisca.munoz@falabella.test', 'rodrigo.perez@securitas.test']);
+  // Nobody named, or nobody read with an address: nothing changes.
+  const plain = draft(null);
+  assert.equal(coworkAddressDrafts(plain, { recipients: null }, people), plain);
+  const unknown = draft(null);
+  assert.equal(coworkAddressDrafts(unknown, { recipients: ['Carlos Soto'] }, people), unknown);
+});
+
+test('a follow-up stays in the thread of the first email and an edit keeps what the first one had', async () => {
+  const { coworkEarlierThread } = await import('./writer');
+  const earlier = [{ to: ['daniela.rojas@manpower.test'], subject: 'Manpower y la revisión de antecedentes', body: 'Hola Daniela,\n\nTexto.\n\n¿Cuántos postulantes revisan al mes en Manpower?' }];
+  const followUp = { reply: 'Listo.', question: null, suggestions: [{ label: 'Más corto', message: 'Hazlo más corto' }],
+    blocks: [{ type: 'email_draft' as const, title: 'Seguimiento', to: ['daniela.rojas@manpower.test'], subject: 'Re: revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nTe escribí sobre…' }] };
+  const threaded = coworkEarlierThread(followUp, { earlier, followUp: true });
+  assert.equal((threaded.blocks[0] as { subject: string }).subject, 'Re: Manpower y la revisión de antecedentes');
+  // An edit of a pasted email without recipients: «Hola,» stays, and no campaign is offered for it.
+  const pasted = [{ to: [], subject: 'Revisión de antecedentes', body: 'Hola,\n\nCuando llegan muchos postulantes…' }];
+  const shorter = { reply: 'Listo.', question: '¿Creo la campaña pausada para tus contactos de RR. HH.?',
+    suggestions: [{ label: 'Sí, crear campaña', message: 'Sí, crea la campaña pausada' }, { label: 'Sin demo', message: 'Quítale la demo' }],
+    blocks: [{ type: 'email_draft' as const, title: 'Correo corto', to: null, subject: 'Antecedentes', body: 'Hola {{nombre}},\n\nTexto corto.' }] };
+  const edited = coworkEarlierThread(shorter, { earlier: pasted, edit: true });
+  assert.match((edited.blocks[0] as { body: string }).body, /^Hola,\n/);
+  assert.equal(edited.question, null);
+  assert.deepEqual(edited.suggestions.map(item => item.label), ['Sin demo']);
+});
+
+test('a follow-up that asks the first question again, and a «más corto» that is not, are caught', () => {
+  const earlier = [{ to: ['daniela.rojas@manpower.test'], subject: 'Manpower', body: 'Hola Daniela,\n\nCuando entra un grupo grande de postulantes, revisar uno por uno deja puestos vacíos.\n\nAXIS consulta el PJUD.\n\n¿Cuántos postulantes revisan al mes en Manpower?\n\nNicolás Yarur' }];
+  const followUp = { type: 'email_draft' as const, title: 'Seguimiento', to: ['daniela.rojas@manpower.test'], subject: 'Re: Manpower',
+    body: 'Hola Daniela,\n\nTe escribí sobre la revisión de antecedentes. En servicios transitorios, cada antecedente pendiente deja a un cliente esperando.\n\n¿Cuántos postulantes revisan al mes en Manpower?\n\nNicolás Yarur' };
+  const shorts = coworkDraftIssues([followUp], { ...context, earlier, followUp: true }).map(issue => issue.short);
+  assert.ok(shorts.includes('pregunta nueva'));
+  const longer = { ...followUp, body: `${earlier[0].body}\n\nSi te interesa, te muestro cómo funciona en una demo.` };
+  assert.ok(coworkDraftIssues([longer], { ...context, earlier, edit: true, shorter: true }).some(issue => issue.short === 'más corto'));
+});
+
+test('the reply says the variables in plain words and drops the brief\'s words', async () => {
+  const { coworkPlainReply } = await import('./writer');
+  assert.equal(coworkPlainReply('Escribí el correo para Francisca. Como no tenemos su correo observado, to queda vacío.'), 'Escribí el correo para Francisca.');
+  assert.equal(coworkPlainReply('El asunto usa {{empresa}} en vez de nombrar un rubro.'), 'El asunto usa el nombre de su empresa en vez de nombrar un rubro.');
+  assert.equal(coworkPlainReply('Hice un solo correo para los cuatro. La campaña reemplaza {{nombre}} y {{empresa}} con sus datos. Abre con el momento de su rubro.'),
+    'Hice un solo correo para los cuatro. Abre con el momento de su rubro.');
+  assert.equal(coworkPlainReply('Un correo para Ana.\n\nVa con su nombre.'), 'Un correo para Ana.\n\nVa con su nombre.');
+});
+
+test('a follow-up of an email nobody sent yet offers the campaign with both', () => {
+  const block = { type: 'email_draft' as const, title: 'Seguimiento', to: ['daniela.rojas@manpower.test'], subject: 'Re: Manpower', body: 'Hola Daniela,\n\nTe escribí…' };
+  const earlier = [{ to: ['daniela.rojas@manpower.test'], subject: 'Manpower', body: 'Hola Daniela,\n\nPrimero.' }];
+  const issues = coworkNextStepIssues({ blocks: [block], question: '¿Propongo enviárselo a Daniela?' }, { earlier, followUp: true });
+  assert.deepEqual(issues.map(issue => issue.short), ['campaña con los dos']);
+  assert.match(issues[0].fix, /para Daniela con los dos correos/);
+  assert.deepEqual(coworkNextStepIssues({ blocks: [block], question: '¿Creo la campaña pausada para Daniela con los dos correos?' }, { earlier, followUp: true }), []);
+});

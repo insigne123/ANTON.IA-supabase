@@ -66,6 +66,11 @@ function profileFilter(profile: string) {
  * people Cowork saw: «una campaña para mis contactos con correo» left most of them out.
  */
 export const COWORK_WITH_EMAIL_QUERY = /(?:^|\s)con\s+(?:correo|email|e-mail|mail)(?=\s|$)/i;
+/**
+ * «sin correo» keeps only the contacts still without one (round 2 of the Cowork evaluation): «tengo contactos sin correo, ¿qué hago
+ * con ellos?» searched for the words «sin correo», found nobody, and asked the person for their names instead of proposing the lookup.
+ */
+export const COWORK_WITHOUT_EMAIL_QUERY = /(?:^|\s)sin\s+(?:correo|email|e-mail|mail)(?=\s|$)/i;
 /** As many as a campaign Cowork proposes can take (campaign.create, 25 observed emails). */
 export const COWORK_WITH_EMAIL_MAX = 25;
 /**
@@ -83,8 +88,9 @@ export async function queryCoworkLeads(
   options: { max?: number } = {},
 ) {
   const withEmail = action === 'leads.search' && COWORK_WITH_EMAIL_QUERY.test(String(value || ''));
+  const withoutEmail = action === 'leads.search' && !withEmail && COWORK_WITHOUT_EMAIL_QUERY.test(String(value || ''));
   const withLinkedin = action === 'leads.search' && COWORK_WITH_LINKEDIN_QUERY.test(String(value || ''));
-  const max = Math.min(COWORK_FULL_LIST_MAX, Math.max(1, Math.floor(options.max ?? (withEmail || withLinkedin ? COWORK_WITH_EMAIL_MAX : 20))));
+  const max = Math.min(COWORK_FULL_LIST_MAX, Math.max(1, Math.floor(options.max ?? (withEmail || withoutEmail || withLinkedin ? COWORK_WITH_EMAIL_MAX : 20))));
   const fetchLimit = Math.max(60, max);
   let query = client.from('leads')
     .select('id,name,title,company,email,status,industry,linkedin_url,location,city,country,created_at')
@@ -105,7 +111,7 @@ export async function queryCoworkLeads(
     // GrupoExpro Santiago» still finds a recruiter even when the city is
     // unknown. PostgREST OR grammar must never receive raw model-supplied
     // punctuation.
-    const raw = z.string().max(500).parse(value).replace(COWORK_WITH_EMAIL_QUERY, ' ').replace(COWORK_WITH_LINKEDIN_QUERY, ' ').trim();
+    const raw = z.string().max(500).parse(value).replace(COWORK_WITH_EMAIL_QUERY, ' ').replace(COWORK_WITHOUT_EMAIL_QUERY, ' ').replace(COWORK_WITH_LINKEDIN_QUERY, ' ').trim();
     profile = normalizeLinkedinProfileUrl(raw);
     if (!profile) z.string().max(120).parse(raw);
     if (/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*linkedin\.com(?:\/|$)/i.test(raw) && !profile) {
@@ -124,6 +130,11 @@ export async function queryCoworkLeads(
     if (withEmail) {
       query = query.not('email', 'is', null).neq('email', '');
       enriched = enriched.not('email', 'is', null);
+    }
+    if (withoutEmail) {
+      // Everyone in «Por escribir» already has an email: only saved contacts can lack one.
+      query = query.or('email.is.null,email.eq.');
+      enriched = enriched.is('id', null);
     }
     if (withLinkedin) {
       query = query.not('linkedin_url', 'is', null).neq('linkedin_url', '');
@@ -170,6 +181,7 @@ export async function queryCoworkLeads(
     partial: terms.length > 0 && items.length > 0 && best < terms.length,
     terms: terms.length,
     withEmailOnly: withEmail || undefined,
+    withoutEmailOnly: withoutEmail || undefined,
     withLinkedinOnly: withLinkedin || undefined,
   };
 }

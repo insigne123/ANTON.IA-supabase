@@ -46,16 +46,16 @@ export function EnrichContact({ runId, leadId, displayName, company, onAccessDen
 
   if (!confirm) {
     return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
-      <CwButton size="xs" variant="secondary" onClick={() => setConfirm(true)}><Sparkles aria-hidden="true" />Enriquecer contacto primero</CwButton>
+      <CwButton size="xs" variant="secondary" onClick={() => setConfirm(true)}><Sparkles aria-hidden="true" />Buscar su correo primero</CwButton>
       <span className="text-cw-muted">Sin correo, la investigación rinde menos.</span>
     </div>;
   }
 
   return <div className="space-y-2 rounded-xl border border-cw-border bg-cw-panel p-3 text-[12.5px]">
     <p><span className="font-medium">{displayName}</span>{company ? <span className="text-cw-muted"> · {company}</span> : ''}</p>
-    <p className="leading-5 text-cw-muted">Busca el correo (solo email, 1 crédito de enriquecimiento). Sin teléfono en esta versión y sin datos inventados.</p>
+    <p className="leading-5 text-cw-muted">Busca su correo con el proveedor (1 crédito). Sin teléfono y sin datos inventados.</p>
     <div className="flex flex-wrap gap-2">
-      <CwButton size="xs" variant="primary" disabled={running} onClick={() => void run()}>{running ? 'Enriqueciendo…' : 'Confirmar enriquecimiento'}</CwButton>
+      <CwButton size="xs" variant="primary" disabled={running} onClick={() => void run()}>{running ? 'Buscando…' : 'Buscar su correo'}</CwButton>
       <CwButton size="xs" variant="ghost" disabled={running} onClick={() => setConfirm(false)}>Volver</CwButton>
     </div>
     {running && <p role="status" className="text-cw-muted">Consultando al proveedor; tarda unos segundos.</p>}

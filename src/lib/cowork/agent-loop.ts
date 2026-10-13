@@ -20,7 +20,7 @@ import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionContr
   type CoworkCrmAssign, type CoworkExceptionResolve, type CoworkMissionControl } from './team-proposals';
 import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
 import { COWORK_MAX_COORDINATOR_CALLS, COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
-import { coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
+import { coworkSameName, coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
 import { coworkDesignBriefSchema, type CoworkDesignBrief } from './design-brief';
 import { coworkAnalysisBriefSchema, coworkAnalystFallback, type CoworkAnalysisBrief } from './analyst';
 import { coworkWithCharts } from './charts';
@@ -379,7 +379,7 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   const named = (verb: string) => targetName ? `${verb} ${targetName}` : `${verb} ${targetId.slice(0, 120)}`;
   if (action === 'leads.save_contact') return named('Guardar contacto');
   if (action === 'research.start') return named('Investigar contacto');
-  if (action === 'lead.enrich') return named('Enriquecer contacto');
+  if (action === 'lead.enrich') return named('Buscar el correo de');
   if (action === 'email.send') return `Enviar correo del borrador ${targetId.slice(0, 120)}`;
   if (action === 'campaign.create') return 'Crear borrador de campaña';
   // A campaign by its name, never its ID («Aprobar y activar campaña 00000000-…»), as the worker labels it when staging.
@@ -416,7 +416,40 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
 /** Run a previous completed (or the current paused) work whose events hold observations. */
 export type CoworkHistoryTurn = { runId: string; observations: unknown[];
   /** The cards of that answer (emails, sequences, tables): a campaign asked for next carries the first email it wrote for each person. */
-  blocks?: ReadonlyArray<{ type: string }> };
+  blocks?: ReadonlyArray<{ type: string }>;
+  /** What that answer said, with its closing question last: a «dale» answers it. */
+  reply?: string };
+
+/**
+ * What the Writer reads besides this turn's reads (round 2 readings): the saved contacts this conversation already read, so «escríbele
+ * al primero» of the previous answer goes to that person's address, and the emails of the previous answer, which a follow-up continues
+ * and an edit changes. People the brief names that nobody read are looked up first (`lookup`, one search per name, up to three):
+ * «no tenemos su correo observado» was said of a saved contact with an address.
+ */
+export async function coworkWriterObservations(brief: CoworkWriteBrief, observations: CoworkObservation[], history: CoworkHistoryTurn[],
+  lookup?: (name: string) => Promise<CoworkObservation | null>): Promise<CoworkObservation[]> {
+  const isRead = (item: unknown): item is CoworkObservation => {
+    const action = (item as { action?: unknown } | null)?.action;
+    return action === 'leads.search' || action === 'leads.get';
+  };
+  const earlierReads = history.flatMap(turn => turn.observations || []).filter(isRead);
+  const known = collectCoworkLeadRows([...observations, ...earlierReads]);
+  const missing = (brief.recipients ?? []).filter(entry => !entry.includes('@')
+    && !known.some(row => typeof row.email === 'string' && row.email.includes('@') && coworkSameName(String(row.name ?? ''), entry)));
+  if (lookup && missing.length && missing.length <= 3) {
+    for (const name of missing) {
+      const found = await lookup(name).catch(() => null);
+      if (found) observations.push(found);
+    }
+  }
+  const emails = (history.at(-1)?.blocks || []).flatMap(block => {
+    const draft = block as { type: string; to?: unknown; subject?: unknown; body?: unknown };
+    return draft.type === 'email_draft' && typeof draft.subject === 'string' && typeof draft.body === 'string'
+      ? [{ to: Array.isArray(draft.to) ? draft.to : [], subject: draft.subject, body: draft.body }] : [];
+  });
+  const earlier: CoworkObservation[] = emails.length ? [{ action: COWORK_WRITTEN_ACTION, input: '', result: { scope: 'earlier_answer', emails } }] : [];
+  return [...earlierReads, ...observations, ...earlier];
+}
 
 /** A decision the loop refuses but the model can correct on its next decision.
  * The run only fails if the last decision is still invalid. */
@@ -599,6 +632,134 @@ const WRITER_FIRST = 'Los correos los escribe la Redactora, no tú: no los ponga
 const TAKES_OFFER = /^\s*(?:s[íi]|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|cr[ée]ala|cr[ée]a la campa[ñn]a|arma la campa[ñn]a)(?!\p{L})/iu;
 // …that does not ask to change its emails («sí, pero con un solo texto para todos»).
 const CHANGES_OFFER = /(?<!\p{L})(?:pero|aunque|cambia\w*|mismo texto|un solo (?:texto|correo)|sin personalizar)(?!\p{L})/iu;
+// …nor asks for the follow-ups too («sí, con sus seguimientos»).
+const ASKS_FOLLOW_UPS = /(?<!\p{L})(?:seguimientos?|secuencia|toques|cadencia)(?!\p{L})/iu;
+
+// A question that asks to approve, or to do, what a card on screen already asks (round 3 smoke test: «¿Apruebas la búsqueda de correo
+// de Nehal y Katherine?» with a «Sí, busca sus correos» chip, under a card waiting for approval: the chip only sent another question).
+const ASKS_APPROVAL = /^¿\s*(?:(?:te|la|lo|las|los)\s+)?(?:apruebas|apruebo|confirmas|confirmo|seguimos|avanzo|avanzamos|busco|buscamos|hago|lanzo|ejecuto)(?!\p{L})/iu;
+
+/** A clarification about a proposal that waits for approval closes without asking for that approval: the card has its buttons. Other
+ * next steps stay. */
+export function coworkClarificationAnswer<T extends { question?: unknown; suggestions?: unknown }>(answer: T): T {
+  const question = coworkQuestion(answer.question);
+  const asks = Boolean(question && ASKS_APPROVAL.test(question));
+  const all = coworkSuggestions(answer.suggestions);
+  const chips = all.filter(chip => !SAYS_YES.test(chip.label) && !SAYS_YES.test(chip.message));
+  if (!asks && chips.length === all.length) return answer;
+  return { ...answer, ...(asks ? { question: null } : {}), suggestions: chips.length ? chips : null };
+}
+
+const CAPABILITIES_FEEDBACK = 'El usuario preguntó qué puedes hacer: responde eso primero, en una lista corta de 5 a 7 líneas («- Buscar prospectos: …»): buscar prospectos nuevos, tus contactos y sus correos, investigar a una persona, correos y campañas, LinkedIn, seguimiento y respuestas, cifras e informes, cada una con un ejemplo de su cuenta y lo que pide aprobación. Después, en una frase, el paso que más le sirve hoy, y la pregunta para darlo.';
+
+/** Whether an answer lists what Cowork does: four or more list lines, or as many capabilities named. */
+export function coworkListsCapabilities(reply: string) {
+  const lines = reply.split('\n').filter(line => /^\s*(?:[-*•]|\d+[.)])\s/.test(line)).length;
+  const plain = reply.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const named = [/prospect/, /correo/, /investig/, /campan/, /linkedin/, /seguimiento|respuesta/, /cifra|metrica|informe/].filter(item => item.test(plain)).length;
+  return lines >= 4 || named >= 5;
+}
+
+/** The closing question of an answer (its last paragraph, when it asks), or null. */
+export function coworkClosingQuestionOf(reply: string | undefined): string | null {
+  const last = String(reply || '').trim().split(/\n\s*\n/).pop()?.trim() || '';
+  return /^¿[^?]+\?$/u.test(last) ? last : null;
+}
+
+// What the closing question offered: something approved on a card (look for emails, invite, save, research, schedule, activate), a
+// campaign, or writing (which needs no approval).
+const OFFERS_APPROVAL = /^¿\s*(?:te\s+|les\s+|lo\s+|la\s+)?(?:busco|buscamos|invito|invitamos|guardo|guardamos|investigo|investigamos|programo|activo|pauso|detengo|completo|completamos)(?!\p{L})/iu;
+const OFFERS_CAMPAIGN = /campa[ñn]a/iu;
+const OFFERS_WRITING = /^¿\s*(?:te\s+|les\s+|le\s+)?(?:preparo|escribo|redacto|armo|dejo listo)\s+(?:el|un|los|unos|la|una|su|sus)\s+(?:primer\w*\s+)?(?:correo|borrador|mensaje|seguimiento|secuencia)/iu;
+
+/**
+ * A «sí» to what the previous answer offered, which this decision answers with words instead of doing (round 2 readings: «dale, ¿por
+ * dónde parto?» to «¿Busco el correo de los 3?» got the same explanation and the same question back, without the card). The feedback
+ * that sends it back to do it, or null.
+ */
+export function coworkAcceptedOfferFeedback(message: string, history: CoworkHistoryTurn[] | undefined): string | null {
+  const previous = history?.at(-1);
+  const offer = coworkClosingQuestionOf(previous?.reply);
+  if (!offer || !TAKES_OFFER.test(message) || CHANGES_OFFER.test(message)) return null;
+  return offerDone(`El usuario respondió que sí («${message.slice(0, 120)}») a lo que ofreciste en tu respuesta anterior («${offer.slice(0, 200)}»).`, offer, previous);
+}
+
+/**
+ * The same offer again, after the person asked what to do next (round 3: «¿y qué debería hacer para mejorar?» got three paragraphs and
+ * «¿Dejo lista la campaña pausada para tus 4 contactos con correo?» word for word): the turn does it instead. The feedback, or null.
+ */
+export function coworkRepeatedOfferFeedback(answer: { reply: string; question?: unknown }, history: CoworkHistoryTurn[] | undefined): string | null {
+  const previous = history?.at(-1);
+  const before = coworkClosingQuestionOf(previous?.reply);
+  const now = closingQuestion(answer);
+  if (!before || !now) return null;
+  const words = (text: string) => new Set(text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-zñ]{3,}/g) || []);
+  const a = words(before);
+  const b = words(now);
+  const shared = [...a].filter(word => b.has(word)).length;
+  if (shared < 3 || shared / Math.min(a.size, b.size) < 0.7) return null;
+  return offerDone(`Ya ofreciste esto en tu respuesta anterior («${before.slice(0, 200)}») y el usuario volvió a preguntar qué hacer: no lo ofrezcas de nuevo.`, before, previous);
+}
+
+/** What doing the offer means, by what it offered: writing, a campaign (with its email in view) or a card to approve. */
+function offerDone(said: string, offer: string, previous: CoworkHistoryTurn | undefined): string | null {
+  const extra = 'Si además pregunta algo, respóndelo en esa misma answer.reply, en una o dos frases, sin repetir tu respuesta anterior.';
+  const drafted = (previous?.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence');
+  if (OFFERS_WRITING.test(offer)) return `${said} Escríbelo ahora con draft.write. ${extra}`;
+  if (OFFERS_CAMPAIGN.test(offer)) return drafted
+    ? `${said} Propón ahora campaign.create con los correos de esa respuesta (la app copia su texto tal cual), a quienes iban. ${extra}`
+    : `${said} La campaña necesita su primer correo a la vista: usa draft.write con campaign true para esos contactos; cuando la Redactora termine, propones la campaña con ese correo. ${extra}`;
+  if (OFFERS_APPROVAL.test(offer)) return `${said} Hazlo ahora: propón ese efecto con su tarjeta de aprobación, con los contactos que ya leíste en la conversación (si te faltan sus identificadores, consúltalos primero). ${extra}`;
+  return null;
+}
+
+// An answer that closes asking whether to look for emails («¿Busco el correo de los 3 contactos que no lo tienen?»).
+const OFFERS_EMAIL_LOOKUP = /^¿\s*(?:te\s+|les\s+|lo\s+)?(?:busco|buscamos|completo|completamos)\s+(?:el|los|sus|su)\s+correos?(?!\p{L})/iu;
+
+/**
+ * Looking for emails is approved on its card, which names the people and the cost: an answer that asks first leaves the person one
+ * more message to send and no card (round 2 readings: «No nombra a los 3 ni muestra tarjeta», for «tengo contactos sin correo, ¿qué
+ * hago con ellos?»). The feedback that has it proposed now, or null.
+ */
+export function coworkOfferedLookupFeedback(answer: { reply: string; question?: unknown; blocks?: unknown }): string | null {
+  const question = closingQuestion(answer);
+  if (!question || !OFFERS_EMAIL_LOOKUP.test(question) || coworkBlocks(answer.blocks).length) return null;
+  return `Tu respuesta termina preguntando si buscas correos («${question.slice(0, 160)}»), y esa búsqueda se aprueba en su tarjeta, que muestra a quiénes y cuánto cuesta. Propónla ahora: lead.enrich_batch con los contactos sin correo que leíste (lead.enrich si es una persona); si te faltan sus identificadores, consúltalos primero. En answer.reply nombra a esas personas y di en una o dos frases qué pasa al aprobar.`;
+}
+
+/**
+ * The email the person saw in the previous answer, when they accept the campaign it offered (round 2 readings: a «sí, crea la
+ * campaña» after one email for Daniela became seven emails, six of them never shown). A sequence card, or an answer with one card per
+ * person (coworkPersonalEmails), or a request for the follow-ups too, are left to the rest of the loop.
+ */
+export function coworkShownCampaignEmails(message: string, history: CoworkHistoryTurn[] | undefined): CoworkEditedEmail[] | null {
+  const previous = history?.at(-1);
+  const offer = coworkClosingQuestionOf(previous?.reply);
+  if (!offer || !OFFERS_CAMPAIGN.test(offer) || !TAKES_OFFER.test(message) || CHANGES_OFFER.test(message) || ASKS_FOLLOW_UPS.test(message)) return null;
+  const cards = (previous?.blocks || []).filter(block => block.type === 'email_draft' || block.type === 'sequence');
+  if (cards.length !== 1 || cards[0].type !== 'email_draft') return null;
+  const shown = coworkCampaignEmails(cards);
+  // A follow-up («Re: …») to the email of the answer before goes after it, a week later (round 3: the campaign offered after «si no me
+  // responde en una semana, ¿qué le mando?»).
+  const follow = cards[0] as { subject?: unknown; to?: unknown };
+  const earlier = (history?.at(-2)?.blocks || []).filter(block => block.type === 'email_draft') as Array<{ type: string; subject?: unknown; body?: unknown; to?: unknown }>;
+  const first = shown && /^\s*re:/i.test(String(follow.subject || '')) && earlier.length === 1 ? earlier[0] : null;
+  const same = (value: unknown) => String(value || '').replace(/^\s*re:\s*/i, '').trim().toLocaleLowerCase('es');
+  if (shown && first && typeof first.body === 'string' && same(first.subject) === same(follow.subject)) {
+    return [{ subject: String(first.subject), body: first.body, day: 1 }, { ...shown[0], day: 8 }];
+  }
+  return shown;
+}
+
+// A sentence about the follow-ups or the cadence a campaign no longer carries.
+const CADENCE = /[^.!?\n]*(?<!\p{L})(?:cadencia|toques|seguimientos)(?!\p{L})[^.!?\n]*[.!?]?[ \t]*/giu;
+
+/** A campaign note without its follow-ups, and saying what comes next instead. */
+export function coworkWithoutCadence(reply: string) {
+  if (!/(?<!\p{L})(?:cadencia|toques|seguimientos)(?!\p{L})/iu.test(reply)) return reply;
+  const rest = reply.replace(CADENCE, '').replace(/[ \t]+\n/g, '\n').trim();
+  return `${rest}${rest ? ' ' : ''}Va solo con este correo; si quieres, después te escribo los seguimientos.`;
+}
 
 /** read: the turn consulted something. A chat answer (nothing read) that already offers its quick replies closes on them, as in
  * any AI chat (Plan 13): asking for a question too cost another call and mostly repeated a chip. Leaving something for later,
@@ -647,9 +808,9 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   const who = person || 'este contacto';
   if (action === 'linkedin.message') return `Preparé un mensaje de LinkedIn para ${who}. Revisa el texto en la tarjeta antes de aprobarlo.`;
   if (action === 'linkedin.invite') return `Propongo invitar a ${who} en LinkedIn. Revisa la invitación en la tarjeta antes de aprobarla.`;
-  if (action === 'linkedin.invite_batch') return 'Preparé un lote de invitaciones de LinkedIn. En la tarjeta ves a quién va y puedes quitar a quien no quieras antes de aprobarlo.';
-  if (action === 'linkedin.message_batch') return 'Preparé un lote de mensajes de LinkedIn, cada uno con su texto. En la tarjeta los lees, puedes quitar a quien no quieras y recién ahí los apruebas.';
-  if (action === 'contacts.prepare_batch') return 'Preparé un lote para dejar listas a estas personas con una sola aprobación. En la tarjeta ves qué se hace con cada una (solo lo que le falta) y cuánto cuesta, y puedes quitar a quien no quieras antes de aprobarlo.';
+  if (action === 'linkedin.invite_batch') return 'Preparé las invitaciones de LinkedIn. En la tarjeta ves a quién va cada una y puedes quitar a quien no quieras antes de aprobarlas.';
+  if (action === 'linkedin.message_batch') return 'Preparé los mensajes de LinkedIn, cada uno con su texto. En la tarjeta los lees, puedes quitar a quien no quieras y recién ahí los apruebas.';
+  if (action === 'contacts.prepare_batch') return 'Preparé la tarjeta para dejar listas a estas personas con una sola aprobación. En la tarjeta ves qué se hace con cada una (solo lo que le falta) y cuánto cuesta, y puedes quitar a quien no quieras antes de aprobarlo.';
   if (action === 'lead.enrich') return `Propongo buscar el correo de ${who} con el proveedor; usa un crédito. Revísalo antes de aprobar.`;
   if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
   if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
@@ -760,8 +921,10 @@ function completeFrom(first: CoworkAnswer, retry: CoworkAnswer, offered: string 
 /** The same email lookup already ran in this thread (history.actions): it would
  * spend another credit for the same provider answer. */
 function repeatedEnrichment(label: string, history: CoworkHistoryTurn[], kind: 'enrich_contact' | 'enrich_phone' = 'enrich_contact') {
+  // Earlier turns named the same lookup «Enriquecer contacto …».
+  const earlier = label.replace(/^Buscar el correo de /, 'Enriquecer contacto ');
   return history.some(turn => ((turn as { actions?: Array<{ kind?: unknown; label?: unknown }> }).actions || [])
-    .some(action => action.kind === kind && action.label === label));
+    .some(action => action.kind === kind && (action.label === label || action.label === earlier)));
 }
 
 function issueSummary(error: unknown): string | null {
@@ -909,6 +1072,8 @@ async function runCoworkLoop(input: {
   design?: (brief: CoworkDesignBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
   /** The Analyst: answers the question of an `analysis.write` decision with what the turn read (COWORK_ANALYST_ENABLED). */
   analyze?: (brief: CoworkAnalysisBrief, observations: CoworkObservation[]) => Promise<CoworkAnswer>;
+  /** A question about a proposal that waits for approval: it is answered, never turned into a new proposal or the same one. */
+  clarification?: boolean;
   /** contacts.import may be proposed (COWORK_CONTACTS_IMPORT_ENABLED, once its migration is applied). */
   contactsImport?: boolean;
   /** email.reply_thread may be proposed (COWORK_REPLY_THREAD_ENABLED; its reply_thread migration is applied in production). */
@@ -965,7 +1130,9 @@ async function runCoworkLoop(input: {
     const decision = coworkDecisionSchema.parse(await input.decide(observations, true));
     await remember(decision);
     input.signal.throwIfAborted(); await input.authorize();
-    if (decision.action === 'draft.write' && decision.write && input.write) return withRememberSuggestion(await input.write(decision.write, observations));
+    if (decision.action === 'draft.write' && decision.write && input.write) {
+      return withRememberSuggestion(await input.write(decision.write, await coworkWriterObservations(decision.write, observations, input.history ?? [])));
+    }
     if (decision.action === 'artifact.create' && decision.design && input.design) return input.design(decision.design, observations);
     if (decision.action === 'analysis.write' && decision.analysis && input.analyze) return input.analyze(decision.analysis, observations);
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
@@ -1026,6 +1193,8 @@ async function runCoworkLoop(input: {
   // An answer that carried emails the coordinator wrote itself, sent back once to the Writer; it stands if the Writer fails.
   let coordinatorEmails: CoworkAnswer | null = null;
   let writerFailed = false;
+  // The «sí» to the previous answer's offer went back once (coworkAcceptedOfferFeedback).
+  let offerTaken = false;
   // The turn's last word when it would fail (Plan 14, 2): an answer already given stands first; then, once, the rescue.
   let rescued = false;
   const rescueOr = async (error: unknown): Promise<CoworkAnswer> => {
@@ -1053,6 +1222,9 @@ async function runCoworkLoop(input: {
   const requestedMetrics = coworkRequestedMetricQuery(input.message);
   const smallTalk = input.message.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
   const informationOnly = /^(?:hola(?: anton(?: ia)?| cowork)?|buen(?:os dias|as tardes|as noches)|(?:hola )?(?:que haces|que puedes hacer(?: tu| por mi)?|dime (?:todo )?(?:lo )?que puedes hacer|como me puedes ayudar|para que sirves))$/.test(smallTalk);
+  // «¿Qué puedes hacer por mí?» asks for what Cowork does, not only for the next step (round 3: two lines that only offered a campaign).
+  const capabilitiesAsked = informationOnly && /(?:que haces|que puedes hacer|como me puedes ayudar|para que sirves)/.test(smallTalk);
+  let capabilitiesChecked = false;
   if (requestedMetrics && input.metricPeriods && !observations.some(item => item.action === 'metrics.rates') && readsUsed < readLimit()) {
     await input.authorize(); input.signal.throwIfAborted();
     const query = JSON.stringify(requestedMetrics);
@@ -1121,7 +1293,13 @@ async function runCoworkLoop(input: {
         }
         let answer: CoworkAnswer;
         try {
-          answer = await input.write(decision.write, observations);
+          const brief = decision.write;
+          const lookup = async (name: string): Promise<CoworkObservation | null> => {
+            const observation: CoworkObservation = { action: 'leads.search', input: name, result: await input.execute('leads.search', name) };
+            await input.record(observation);
+            return observation;
+          };
+          answer = await input.write(brief, await coworkWriterObservations(brief, observations, input.history ?? [], lookup));
           const normalized = coworkBlocks(answer.blocks);
           if (answer.blocks?.length && JSON.stringify(normalized) !== JSON.stringify(answer.blocks)) answer = { ...answer, blocks: normalized.length ? normalized : null };
           await input.onWriteDelivery?.(answer);
@@ -1201,6 +1379,22 @@ async function runCoworkLoop(input: {
           && !closingFallback && !judgedFallback && coworkBlocks(decision.answer.blocks).some(block => block.type === 'email_draft' || block.type === 'sequence')) {
           coordinatorEmails = decision.answer;
           rejections.push({ action: 'answer', reason: WRITER_FIRST });
+          continue;
+        }
+        if (capabilitiesAsked && !capabilitiesChecked && !closingFallback && turn < last && !late() && !coworkListsCapabilities(decision.answer.reply)) {
+          capabilitiesChecked = true;
+          closingFallback = decision.answer;
+          rejections.push({ action: 'answer', reason: CAPABILITIES_FEEDBACK, previous: decision.answer });
+          continue;
+        }
+        // A «sí» to what the previous answer offered is done, not answered again: once per turn, with a decision to spare.
+        const accepted = !offerTaken && !input.clarification && !closingFallback && !judgedFallback && !written && !informationOnly && turn < last && !late()
+          ? coworkAcceptedOfferFeedback(input.message, input.history) ?? coworkRepeatedOfferFeedback(decision.answer, input.history)
+            ?? (input.proposeEffect ? coworkOfferedLookupFeedback(decision.answer) : null) : null;
+        if (accepted) {
+          offerTaken = true;
+          closingFallback = decision.answer;
+          rejections.push({ action: 'answer', reason: accepted, previous: decision.answer });
           continue;
         }
         // The reports it names go complete in document, written by the app from what this turn read (report-document.ts).
@@ -1394,7 +1588,8 @@ async function runCoworkLoop(input: {
           : decision.action === 'task.plan' ? 'new-task'
           : decision.action === 'email.reply_thread' ? decision.replyThread?.contactedId ?? null
           : decision.leadId;
-        const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) ?? written?.emails ?? null : null;
+        const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) ?? written?.emails
+          ?? coworkShownCampaignEmails(input.message, input.history) : null;
         // The first email the Writer wrote for each person, in this turn or in the answer this one continues, goes word for word.
         const personalEmails = decision.action === 'campaign.create' && !exactEmails
           ? written?.personal ?? (TAKES_OFFER.test(input.message) && !CHANGES_OFFER.test(input.message)
@@ -1550,6 +1745,8 @@ async function runCoworkLoop(input: {
         if (kind === 'enrich_contact' && turn < last && repeatedEnrichment(label, input.history || [])) {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
         }
+        // A campaign trimmed to the email the person saw does not announce follow-ups it no longer carries.
+        if (campaign && decision.answer?.reply && campaign.messages.length === 1) decision.answer = { ...decision.answer, reply: coworkWithoutCadence(decision.answer.reply) };
         const fallback = proposalNote(decision.action, campaign, targetName
           ?? (decision.leadId ? observedLeadName(decision.leadId, observations, input.history || []) : null), code);
         const note = await explain(decision) ?? (fallback ? await recordNote(fallback) : null);
@@ -1684,7 +1881,10 @@ async function runCoworkLoop(input: {
       if (standing && error instanceof CoworkDecisionRejected && !input.signal.aborted) return standing;
       if (input.signal.aborted) throw error;
       if (!(error instanceof CoworkDecisionRejected) || turn === last) return rescueOr(error);
-      rejections.push({ action: decision.action, reason: error.feedback });
+      // A proposal that could not be prepared is fixed without telling the person about the attempt (round 3: «Lo intenté de nuevo:
+      // la propuesta anterior no pudo prepararse porque el sistema no dejó usar a Daniela con los filtros»).
+      rejections.push({ action: decision.action, reason: error.userFacing
+        ? `${error.feedback} Corrígela en esta decisión. Tu nota habla solo de la propuesta que queda, sin contar este intento ni su motivo.` : error.feedback });
     }
   }
   if (written) return written.answer;
