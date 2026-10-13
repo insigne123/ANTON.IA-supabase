@@ -12,7 +12,7 @@ import { COWORK_KEY_HANDLERS, coworkIsMac, coworkShortcut, coworkTypesIntoCompos
 import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkDisplayMessage, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
-  coworkCardStatuses, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, coworkTurnSuggestions, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+  coworkCardStatuses, coworkEarlierRows, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, coworkTurnSuggestions, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
   type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -445,7 +445,9 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const latest = turns[turns.length - 1] || null;
   const shownTurns = useMemo(() => optimistic && replacing ? turns.filter(turn => turn.run.id !== replacing) : turns, [turns, optimistic, replacing]);
   const latestIsCurrent = Boolean(latest && latest.run.id === selected);
-  const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events)), [turns]);
+  // A template written after its people were read still previews with the first of them.
+  const earlierRows = useMemo(() => coworkEarlierRows(turns), [turns]);
+  const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events, earlierRows.get(turn.run.id))), [turns, earlierRows]);
   // What later turns did with each email or sequence card («Campaña creada · guardada sin enviar»…).
   const cardStatuses = useMemo(() => coworkCardStatuses(turns), [turns]);
   const openArtifact = artifactId ? artifacts.find(item => item.id === artifactId) || null : null;
@@ -1008,7 +1010,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 onResolve={approve => void resolve(approve, index === shownTurns.length - 1 ? latest : turn)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
                 liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)}
-                cardStatuses={cardStatuses} versions={coworkTurnVersions(runs, turn.run)} onVersion={busy || sending ? null : openVersion}
+                cardStatuses={cardStatuses} earlierRows={earlierRows.get(turn.run.id)} versions={coworkTurnVersions(runs, turn.run)} onVersion={busy || sending ? null : openVersion}
                 onEdit={index === shownTurns.length - 1 && canEdit ? editLatest : null}
                 onRegenerate={index === shownTurns.length - 1 && canRegenerate ? regenerate : null}
                 onFeedback={feedback => sendFeedback(turn.run.id, feedback)} />)}

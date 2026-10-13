@@ -7,7 +7,7 @@ import {
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
-  coworkThreadResults, coworkMergePreview,
+  coworkThreadResults, coworkMergePreview, coworkEarlierRows,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -455,4 +455,11 @@ test('a template for several people previews with the first recipient the conver
   ];
   const [card] = coworkTurnArtifacts({ id: 'r1', created_at: '2026-10-13T10:00:00Z' }, events as never);
   assert.equal(card.kind === 'block' ? card.preview?.nombre : null, 'José');
+  // Written in the next turn, after the people were read in this one (round 12: «Hola nombre»).
+  const next = { id: 'r2', created_at: '2026-10-13T10:01:00Z' };
+  const written = [{ id: 'e3', run_id: 'r2', sequence: 1, kind: 'run.completed', created_at: '2026-10-13T10:01:05Z', payload: { blocks: [template] } }];
+  const earlier = coworkEarlierRows([{ run: { id: 'r1' }, events: events as never }, { run: next, events: written as never }]);
+  assert.deepEqual(earlier.get('r1'), []);
+  const [later] = coworkTurnArtifacts(next, written as never, earlier.get('r2'));
+  assert.equal(later.kind === 'block' ? later.preview?.empresa : null, 'GrupoExpro');
 });

@@ -142,6 +142,8 @@ test('the closing question is one plain sentence that ends the reply exactly onc
   assert.equal(polish('Listo.', null).question, null);
   // A closed question without quick replies still gets a one-tap yes; without a question, none.
   assert.deepEqual(polish('Te dejé la secuencia.', '¿Creo la campaña?').suggestions, [{ label: 'Sí, crear la campaña', message: 'Sí, adelante.' }]);
+  assert.deepEqual(polish('Te dejé los dos correos.', '¿Creo la campaña pausada con el correo y su seguimiento?').suggestions,
+    [{ label: 'Sí, crear la campaña con los dos correos', message: 'Sí, adelante.' }]);
   assert.deepEqual(polish('Te dejé la lista.', '¿La reviso?').suggestions, [{ label: 'Sí, adelante', message: 'Sí, adelante.' }]);
   assert.equal(polish('Listo.', null).suggestions, null);
   assert.deepEqual(polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña?',
@@ -350,7 +352,7 @@ test('a tool name copied into a reply is said in the person\'s words', async () 
 test('a bare yes under a campaign or an email offer says what it does, and the sender is called Gmail', () => {
   const campaign = polishCoworkAnswer({ reply: 'Listo el seguimiento.', document: null, question: '¿Creo la campaña pausada para Daniela con los dos correos, el seguimiento al día 8?',
     suggestions: [{ label: 'Sí', message: 'Sí, créala' }, { label: 'Hazlo más corto', message: 'Hazlo más corto' }] });
-  assert.deepEqual(campaign.suggestions?.map(chip => chip.label), ['Sí, crear la campaña', 'Hazlo más corto']);
+  assert.deepEqual(campaign.suggestions?.map(chip => chip.label), ['Sí, crear la campaña con los dos correos', 'Hazlo más corto']);
   assert.equal(campaign.suggestions?.[0].message, 'Sí, créala');
   const writing = polishCoworkAnswer({ reply: 'Tienes 4 contactos.', document: null, question: '¿Les escribo el primer correo a los 4?' });
   assert.deepEqual(writing.suggestions?.map(chip => chip.label), ['Sí, escríbelo']);
@@ -368,4 +370,19 @@ test('a campaign or email offer with no quick reply that takes it gets its yes f
   const taken = polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña pausada?',
     suggestions: [{ label: 'Crear campaña pausada', message: 'Crea la campaña' }] });
   assert.deepEqual(taken.suggestions?.map(chip => chip.label), ['Crear campaña pausada']);
+  const drafted = polishCoworkAnswer({ reply: 'Tienes 4 contactos.', document: null, question: '¿Les escribo el primer correo?',
+    suggestions: [{ label: 'Redactar los 4 correos', message: 'Redacta los 4 correos' }] });
+  assert.deepEqual(drafted.suggestions?.map(chip => chip.label), ['Redactar los 4 correos']);
+  // A yes under no question reads as the action; a bare one goes (round 12).
+  const unasked = polishCoworkAnswer({ reply: 'Te ayudo con correos y campañas.', document: null,
+    suggestions: [{ label: 'Sí, prepara el correo', message: 'Sí, prepara el correo' }, { label: 'Sí', message: 'Sí' }, { label: 'Buscar prospectos', message: 'Busca prospectos' }] });
+  assert.deepEqual(unasked.suggestions, [{ label: 'Prepara el correo', message: 'Prepara el correo' }, { label: 'Buscar prospectos', message: 'Busca prospectos' }]);
+  // Two replies that take the same offer: the one that says what it does stays.
+  const twice = polishCoworkAnswer({ reply: 'Parte por la tarjeta pendiente.', document: null, question: '¿Te preparo el primer correo para tus 4 contactos?',
+    suggestions: [{ label: 'Sí', message: 'Sí' }, { label: 'Preparar primer correo', message: 'Prepara el primer correo' }, { label: 'Ver otra opción', message: 'Otra opción' }] });
+  assert.deepEqual(twice.suggestions?.map(chip => chip.label), ['Preparar primer correo', 'Ver otra opción']);
+  // A reply about something else keeps the yes.
+  const other = polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña pausada?',
+    suggestions: [{ label: 'Sí', message: 'Sí' }, { label: 'Buscar más prospectos', message: 'Busca más' }] });
+  assert.deepEqual(other.suggestions?.map(chip => chip.label), ['Sí, crear la campaña', 'Buscar más prospectos']);
 });
