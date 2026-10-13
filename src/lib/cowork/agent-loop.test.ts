@@ -2153,6 +2153,11 @@ test('a question about a card waiting for approval does not close asking for tha
   assert.deepEqual(kept.suggestions, [{ label: 'Escribir a los 4', message: 'Escríbeles a mis 4 contactos con correo' }]);
   const other = { ...answer, question: '¿Te escribo después el correo para Nehal?', suggestions: [{ label: 'Escribir a los 4', message: 'Escríbeles' }] };
   assert.equal(coworkClarificationAnswer(other), other);
+  // Whether it was approved is known: neither the question nor a «Ya la aprobé» chip (round 8, t11).
+  const known = coworkClarificationAnswer({ ...answer, question: '¿Ya aprobaste la tarjeta para seguir con los correos?',
+    suggestions: [{ label: 'Ya la aprobé', message: 'Ya la aprobé' }, { label: 'Escribir a los 4', message: 'Escríbeles' }] });
+  assert.equal(known.question, null);
+  assert.deepEqual(known.suggestions, [{ label: 'Escribir a los 4', message: 'Escríbeles' }]);
 });
 
 test('the same offer again after «¿qué hago?» is done, and a follow-up accepted as a campaign goes after its first email', async () => {

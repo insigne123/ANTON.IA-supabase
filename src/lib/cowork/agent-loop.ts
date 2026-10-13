@@ -647,11 +647,14 @@ const ASKS_APPROVAL = /^¿\s*(?:(?:te|la|lo|las|los)\s+)?(?:apruebas|apruebo|con
 
 /** A clarification about a proposal that waits for approval closes without asking for that approval: the card has its buttons. Other
  * next steps stay. */
+// Whether the person already approved it is known (round 8: «¿Ya aprobaste la tarjeta para seguir?», with a «Ya la aprobé» chip).
+const ASKED_IF_APPROVED = /(?<!\p{L})aprob(?:aste|é)(?!\p{L})/iu;
 export function coworkClarificationAnswer<T extends { question?: unknown; suggestions?: unknown }>(answer: T): T {
   const question = coworkQuestion(answer.question);
-  const asks = Boolean(question && ASKS_APPROVAL.test(question));
+  const asks = Boolean(question && (ASKS_APPROVAL.test(question) || ASKED_IF_APPROVED.test(question)));
   const all = coworkSuggestions(answer.suggestions);
-  const chips = all.filter(chip => !SAYS_YES.test(chip.label) && !SAYS_YES.test(chip.message));
+  const chips = all.filter(chip => !SAYS_YES.test(chip.label) && !SAYS_YES.test(chip.message)
+    && !ASKED_IF_APPROVED.test(chip.label) && !ASKED_IF_APPROVED.test(chip.message));
   if (!asks && chips.length === all.length) return answer;
   return { ...answer, ...(asks ? { question: null } : {}), suggestions: chips.length ? chips : null };
 }
