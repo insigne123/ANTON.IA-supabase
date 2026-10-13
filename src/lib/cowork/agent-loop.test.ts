@@ -2283,6 +2283,23 @@ test('asked what to do with contacts without email, the email lookup is proposed
   assert.doesNotMatch(reply, /sincroniz/i);
 });
 
+test('figures read with metrics.rates and given only in the text are asked for their card', async () => {
+  const seen: string[] = [];
+  let turn = 0;
+  const metrics = { type: 'metrics', title: 'Tus correos', period: 'Esta semana', items: [{ label: 'Envíos', value: '0', detail: '0 registrados' }] };
+  const answer = await runCoworkReadLoop({ message: '¿Cómo voy esta semana?', signal: new AbortController().signal, authorize: async () => {},
+    record: async () => {}, execute: async () => ({ sent: 0 }),
+    decide: async (_observations, _final, rejections) => {
+      seen.push(...(rejections ?? []).map(item => item.reason));
+      turn++;
+      if (turn === 1) return { action: 'metrics.rates', query: '{}', leadId: null, answer: null } as never;
+      return { action: 'answer', query: null, leadId: null, answer: { reply: 'Esta semana registras 0 envíos.', document: null,
+        question: '¿Les escribo a tus 4 contactos?', suggestions: [{ label: 'Sí', message: 'Sí' }], ...(turn > 2 ? { blocks: [metrics] } : {}) } } as never;
+    } });
+  assert.ok(seen.some(reason => /bloque metrics/.test(reason)));
+  assert.equal((answer as { blocks?: Array<{ type: string }> }).blocks?.[0]?.type, 'metrics');
+});
+
 test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
   const { coworkCampaignForListedPeople } = await import('./agent-loop');
   const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],
