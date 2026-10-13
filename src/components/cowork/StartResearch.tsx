@@ -21,7 +21,8 @@ export function StartResearch({ runId, leadId, onAccessDenied, onUseReport }: {
         if (controller.signal.aborted) return;
         setStatus(data.status); setError('');
         if (['queued', 'running'].includes(data.status)) timer = setTimeout(poll, 5000);
-      } catch { if (!controller.signal.aborted) { setStatus('error'); setError('No se pudo consultar la investigación.'); } }
+      // A convenience next to the contact: when its state cannot be read, it simply stays out of the way.
+      } catch { if (!controller.signal.aborted) { setStatus('hidden'); setError(''); } }
     }
     void poll(); return () => { controller.abort(); clearTimeout(timer); };
     // Parent handlers are intentionally not polling dependencies.
@@ -37,13 +38,14 @@ export function StartResearch({ runId, leadId, onAccessDenied, onUseReport }: {
     } catch { setError('No se pudo confirmar la solicitud. Reintentar usa la misma investigación.'); }
     finally { setBusy(false); }
   }
+  // Nothing to say yet (still reading) or nothing it could read: the row stays quiet instead of a loading line that may not end.
+  if (status === 'loading' || status === 'hidden') return null;
   return <div className="space-y-2 text-[12.5px]">
     {['completed', 'partial', 'insufficient_data'].includes(status)
       ? <CwButton size="xs" variant="secondary" onClick={onUseReport}><BookOpen aria-hidden="true" />Consultar informe en el chat</CwButton>
       : ['queued', 'running'].includes(status)
         ? <p role="status" className="inline-flex items-center gap-1.5 text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Investigación {status === 'queued' ? 'en cola' : 'en curso'}. Puedes volver después.</p>
-        : status === 'loading' ? <p className="text-cw-muted">Consultando investigación…</p>
-          : status === 'not_started' ? <CwButton size="xs" variant="ghost" aria-expanded={confirm} onClick={() => setConfirm(!confirm)}><BookOpen aria-hidden="true" />Investigar contacto</CwButton>
+        : status === 'not_started' ? <CwButton size="xs" variant="ghost" aria-expanded={confirm} onClick={() => setConfirm(!confirm)}><BookOpen aria-hidden="true" />Investigar contacto</CwButton>
             : <CwButton size="xs" variant="ghost" onClick={() => setRefresh(value => value + 1)}><RotateCcw aria-hidden="true" />Actualizar estado de investigación</CwButton>}
     {confirm && <div className="space-y-2 rounded-xl border border-cw-border bg-cw-panel p-3">
       <p className="leading-5">Solicitar investigación estándar. El servicio aplicará tus cuotas y puede consultar proveedores externos. No enviará mensajes.</p>

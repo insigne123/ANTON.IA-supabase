@@ -562,13 +562,13 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           const staged = await stageCoworkEnrichBatch(scope, run.id, proposal.enrichBatch);
           targetId = `enrichbatch:${staged.hash}`;
           taskCredits = staged.costEstimate;
-          label = `Enriquecer ${proposal.enrichBatch.length} contactos (máx. ${staged.costEstimate} crédito${staged.costEstimate === 1 ? '' : 's'})`;
+          label = `Buscar el correo de ${proposal.enrichBatch.length} contactos (máx. ${staged.costEstimate} crédito${staged.costEstimate === 1 ? '' : 's'})`;
         }
         if (proposal.kind === 'campaign_schedule_batch') {
           if (!proposal.scheduleBatch) throw new Error('Missing batch schedule');
           const staged = await stageCoworkSendBatch(scope, run.id, proposal.scheduleBatch);
           targetId = `sendbatch:${staged.hash}`;
-          label = `Programar lote · ${staged.recipients} destinatarios · ${staged.touches} toques · ${staged.spacingMinutes} min entre envíos · desde ${staged.startDay}`;
+          label = `Programar envíos · ${staged.recipients} destinatarios · ${staged.touches} pasos · ${staged.spacingMinutes} min entre envíos · desde ${staged.startDay}`;
         }
         if (proposal.kind === 'linkedin_invite') {
           if (!proposal.linkedinJob) throw new Error('Missing invite target');

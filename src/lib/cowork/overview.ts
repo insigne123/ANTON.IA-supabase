@@ -1,4 +1,5 @@
 import type { CoworkSince } from './since-visit';
+import { coworkStarter } from './starters';
 
 /**
  * The account at a glance on the Cowork home (plan 2, V7): real figures of your own work, the
@@ -14,6 +15,8 @@ export type CoworkOverview = {
   campaigns: number | null;
   /** LinkedIn invitations this week (pending and confirmed) against the weekly limit. */
   linkedin: { used: number; limit: number } | null;
+  /** Saved contacts with an email nobody in the organization has written to yet: who «Escribir a mis contactos» reaches. */
+  toWrite?: number | null;
   /** What changed since the person's last own turn (since-visit.ts); null without a previous visit or when it could not be read. */
   since?: CoworkSince | null;
 };
@@ -36,6 +39,29 @@ export function coworkOverviewFigures(overview: CoworkOverview | null): CoworkOv
   if (overview.campaigns !== null) figures.push({ id: 'campaigns', value: overview.campaigns, label: plural(overview.campaigns, 'campaña', 'campañas') });
   if (overview.linkedin) figures.push({ id: 'linkedin', value: overview.linkedin.used, total: overview.linkedin.limit, label: 'invitaciones de LinkedIn esta semana' });
   return figures;
+}
+
+export type CoworkTodayItem = { id: 'write' | 'emails'; text: string; action: string; prompt: string };
+
+/** Writing starts as the starter «Escribir a mis contactos» does, so it shares its corpus case. */
+export const COWORK_TODAY_PROMPTS = {
+  write: coworkStarter('escribir').prompt,
+  emails: 'Busca el correo de mis contactos guardados que todavía no lo tienen.',
+} as const;
+
+/** «Para hoy» on the home: what is ready to move without being asked, from the account's own figures. Who has an email and
+ * never got one comes first; then who still lacks an email. Nothing when the figures are unknown or there is nobody. */
+export function coworkTodayItems(overview: CoworkOverview | null): CoworkTodayItem[] {
+  if (!overview) return [];
+  const items: CoworkTodayItem[] = [];
+  const plural = (value: number, one: string, many: string) => (value === 1 ? one : many);
+  const toWrite = overview.toWrite ?? null;
+  if (toWrite !== null && toWrite > 0) items.push({ id: 'write', action: 'Escribirles',
+    text: `${toWrite} ${plural(toWrite, 'contacto con correo aún no recibe', 'contactos con correo aún no reciben')} nada de ti`, prompt: COWORK_TODAY_PROMPTS.write });
+  const missing = overview.contacts !== null && overview.withEmail !== null ? overview.contacts - overview.withEmail : 0;
+  if (missing > 0) items.push({ id: 'emails', action: 'Buscar sus correos',
+    text: `${missing} ${plural(missing, 'contacto guardado no tiene', 'contactos guardados no tienen')} correo`, prompt: COWORK_TODAY_PROMPTS.emails });
+  return items;
 }
 
 /** The message the «Cuéntame qué vendes» card sends: what you wrote, and your site if you gave it. With only the site, Cowork reads

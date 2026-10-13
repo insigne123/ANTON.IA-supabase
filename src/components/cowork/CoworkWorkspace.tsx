@@ -12,7 +12,7 @@ import { COWORK_KEY_HANDLERS, coworkIsMac, coworkShortcut, coworkTypesIntoCompos
 import type { CoworkOverview } from '@/lib/cowork/overview';
 import {
   coworkCleanTitle, coworkDisplayMessage, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
-  coworkCardStatuses, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+  coworkCardStatuses, coworkThreadResults, coworkTurnArtifacts, coworkTurnProgress, coworkTurnSuggestions, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
   type CoworkThreadSummary,
 } from '@/lib/cowork/presentation';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -167,7 +167,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
 
   const isDesktop = useMedia('(min-width: 1024px)');
   const isWide = useMedia('(min-width: 1280px)');
-  useEffect(() => { if (isWide) setSummaryOpen(false); }, [isWide]);
+  const isWider = useMedia('(min-width: 1536px)');
   const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode; clarificationOf?: string } | null>(null);
   const composer = useRef<CoworkComposerHandle>(null);
   const listOpener = useRef<HTMLButtonElement>(null);
@@ -553,7 +553,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
 
   useEffect(() => { if (artifactId && !openArtifact && state) setArtifactId(null); }, [artifactId, openArtifact, state]);
 
-  // Open the main result of a turn that finished while you were watching, as Claude does.
+  // Open the main result of a turn that finished while you were watching, as Claude does. New prospects from a search are a
+  // result; your own contacts a turn read are its evidence: their card stays in the conversation, one click away.
   useEffect(() => {
     if (!latest || !isDesktop || isCoworkActive(latest.run.status) || !liveRuns.current.has(latest.run.id)) return;
     if (autoOpened.current.has(latest.run.id)) return;
@@ -564,7 +565,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       || produced.find(item => item.kind === 'block' && item.block.type === 'chart')
       || produced.find(item => item.kind === 'block' && item.block.type === 'sequence')
       || produced.find(item => item.kind === 'block' && item.block.type === 'table' && item.block.rows.length >= 6)
-      || produced.find(item => item.kind === 'contacts' && item.count >= 3)
+      || produced.find(item => item.kind === 'contacts' && item.external && item.count >= 3)
       || produced.find(item => item.kind === 'file');
     if (best) openArtifactPanel(best, null, false);
   }, [latest, isDesktop, openArtifactPanel]);
@@ -831,8 +832,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     requestAnimationFrame(() => composer.current?.focus());
   }
 
+  // A starting point is one click: ready to send as it is, it goes; one with a [placeholder] waits in the composer for it.
   function applySuggestion(prompt: string) {
     if (!isDesktop) { setArtifactId(null); setMaximized(false); }
+    if (!/\[[^\]]+\]/.test(prompt) && ready && !sending && !message.trim() && attach.files.length === 0) { void post(prompt, null); return; }
     setMessage(prompt);
     requestAnimationFrame(() => {
       composer.current?.focus();
@@ -892,6 +895,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const inConversation = Boolean(selected || optimistic);
   const artifactOpen = Boolean(openArtifact);
   const railVisible = !railCollapsed && !artifactOpen;
+  // The summary sits beside the chat from xl, or from 2xl while the list of conversations is open: four columns do not fit
+  // below that. A sheet left open does not linger once the panel fits.
+  const summaryFits = railVisible ? isWider : isWide;
+  useEffect(() => { if (summaryFits) setSummaryOpen(false); }, [summaryFits]);
   const composerPlaceholder = !latest ? 'Escribe tu mensaje…'
     : pendingDecision ? 'Pide un cambio o aprueba la propuesta'
       : busy ? 'Escribe; lo envío al terminar este paso'
@@ -938,9 +945,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         </CwButton>
         <h1 className="min-w-0 flex-1 truncate px-1 text-[14px] font-medium text-cw-text">{inConversation ? title : 'Cowork'}</h1>
         {inConversation && status && <CwStatusPill tone={status.tone} pulse={busy} className="hidden sm:inline-flex">{status.label}</CwStatusPill>}
-        {inConversation && !artifactOpen && !panelOpen && <CwButton variant="ghost" size="icon-sm" className="hidden xl:inline-flex" onClick={() => setPanelOpen(true)} aria-label="Mostrar resumen" title="Resumen"><PanelRight aria-hidden="true" /></CwButton>}
-        {inConversation && latest && !artifactOpen && <CwButton ref={summaryOpener} variant="ghost" size="icon-sm" className="xl:hidden" onClick={() => setSummaryOpen(true)} aria-label="Ver resumen de la conversación" title="Resumen" aria-haspopup="dialog"><PanelRight aria-hidden="true" /></CwButton>}
-        <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden')} title="Nueva conversación">
+        {inConversation && !artifactOpen && !panelOpen && <CwButton variant="ghost" size="icon-sm" className={cn('hidden', railVisible ? '2xl:inline-flex' : 'xl:inline-flex')} onClick={() => setPanelOpen(true)} aria-label="Mostrar resumen" title="Resumen"><PanelRight aria-hidden="true" /></CwButton>}
+        {inConversation && latest && !artifactOpen && <CwButton ref={summaryOpener} variant="ghost" size="icon-sm" className={railVisible ? '2xl:hidden' : 'xl:hidden'} onClick={() => setSummaryOpen(true)} aria-label="Ver resumen de la conversación" title="Resumen" aria-haspopup="dialog"><PanelRight aria-hidden="true" /></CwButton>}
+        {/* With the list of conversations open, its own «Nueva conversación» is right there. */}
+        <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden', railVisible && 'lg:hidden')} title="Nueva conversación">
           <SquarePen aria-hidden="true" /><span className="hidden sm:inline">Nueva conversación</span>
         </CwButton>
       </header>
@@ -1021,7 +1029,9 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
             </AnimatePresence>
             <div className="mx-auto w-full max-w-[46rem]">
               {latest && state?.canResearch && <ResearchProgress runId={latest.run.id} onAccessDenied={clearPrivateResults} />}
-              {canFollowUp && !message.trim() && attach.files.length === 0 && <CoworkQuickActions id="cowork-quick-actions" onPick={followUp} />}
+              {/* The fixed shortcuts give way to the answer's own suggested replies: one row of next steps, not two. */}
+              {canFollowUp && !message.trim() && attach.files.length === 0 && !(latest && coworkTurnSuggestions(latest.events).length)
+                && <CoworkQuickActions id="cowork-quick-actions" onPick={followUp} />}
               <CoworkComposer ref={composer} id="cowork-followup" value={message} onChange={setMessage} onSubmit={() => void submit()}
                 placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"
                 searchContacts={ready ? searchContacts : null} onMention={addMention} templates
@@ -1074,7 +1084,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       </SheetContent>
     </Sheet>
     {!openArtifact && inConversation && latest && panelOpen && <m.div key="summary" initial={summaryReturns ? 'hidden' : false} animate="shown" variants={cwPanel}
-      className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">
+      className={cn('hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail', railVisible ? '2xl:block' : 'xl:block')}>
       <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)}
         artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
         sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}

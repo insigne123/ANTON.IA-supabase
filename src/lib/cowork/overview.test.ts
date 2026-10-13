@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkFirstName, coworkOfferMessage, coworkOverviewFigures, type CoworkOverview } from './overview';
+import { COWORK_TODAY_PROMPTS, coworkFirstName, coworkOfferMessage, coworkOverviewFigures, coworkTodayItems, type CoworkOverview } from './overview';
 
 const overview = (patch: Partial<CoworkOverview> = {}): CoworkOverview => ({
   firstName: 'Nicolás', hasOffer: true, contacts: 128, withEmail: 96, campaigns: 3, linkedin: { used: 12, limit: 20 }, ...patch,
@@ -32,4 +32,18 @@ test('the «Cuéntame qué vendes» message carries what was written and the sit
     'Guarda en mi perfil lo que vendo: software de RR. HH. Mi sitio web es https://yago.cl.');
   // Only the site: Cowork reads it and proposes who to aim at, instead of asking to save an offer that was never written.
   assert.equal(coworkOfferMessage('  ', ' https://contafacil.cl '), 'Mi web es https://contafacil.cl, ayúdame a partir');
+});
+
+test('«Para hoy» brings who is ready to write and who still lacks an email, from the real figures only', () => {
+  assert.deepEqual(coworkTodayItems(overview({ contacts: 7, withEmail: 4, toWrite: 4 })).map(item => [item.text, item.action]), [
+    ['4 contactos con correo aún no reciben nada de ti', 'Escribirles'],
+    ['3 contactos guardados no tienen correo', 'Buscar sus correos'],
+  ]);
+  assert.deepEqual(coworkTodayItems(overview({ contacts: 2, withEmail: 1, toWrite: 1 })).map(item => item.text),
+    ['1 contacto con correo aún no recibe nada de ti', '1 contacto guardado no tiene correo']);
+  assert.equal(coworkTodayItems(overview({ contacts: 5, withEmail: 5, toWrite: 0 })).length, 0, 'everyone written and with an email: nothing to push');
+  assert.deepEqual(coworkTodayItems(overview({ contacts: 5, withEmail: 3, toWrite: null })).map(item => item.id), ['emails'], 'an unknown count is left out');
+  assert.equal(coworkTodayItems(overview({ contacts: null, withEmail: null, toWrite: null })).length, 0);
+  assert.equal(coworkTodayItems(null).length, 0);
+  assert.equal(coworkTodayItems(overview({ contacts: 7, withEmail: 4, toWrite: 4 }))[0].prompt, COWORK_TODAY_PROMPTS.write);
 });
