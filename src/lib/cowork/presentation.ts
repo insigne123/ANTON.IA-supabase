@@ -760,8 +760,16 @@ export function coworkDisplayMessage(message: string) {
 /** A thread's title: the text of its first message, or its files when it only carried files. */
 export function coworkCleanTitle(message: string, max = 90) {
   const { text: written, files } = coworkMessageAttachments(message);
-  const text = coworkDisplayMessage(written || (files.length ? `Archivos: ${files.join(', ')}` : '')).replace(/\s+/g, ' ').trim();
-  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+  const full = coworkDisplayMessage(written || (files.length ? `Archivos: ${files.join(', ')}` : '')).replace(/\s+/g, ' ').trim();
+  // A name, not the whole request: its first sentence, without the question marks, cut at a word (round 13: «el título de la
+  // conversación es el prompt crudo truncado»).
+  const first = full.match(/^.{12,}?[.?!](?=\s|$)/u)?.[0] ?? full;
+  const named = first.replace(/^[¿¡]\s*/u, '').replace(/[?!.]+$/u, '').trim();
+  const text = named ? named.charAt(0).toLocaleUpperCase('es') + named.slice(1) : full;
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[,;:]$/u, '').trimEnd()}…`;
 }
 
 /**

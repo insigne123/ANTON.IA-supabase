@@ -7,7 +7,7 @@ import {
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
-  coworkThreadResults, coworkMergePreview, coworkEarlierRows,
+  coworkThreadResults, coworkMergePreview, coworkEarlierRows, coworkCleanTitle,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -28,6 +28,13 @@ test('groups follow-ups and automatic continuations into one conversation', () =
   assert.equal(threads.length, 2);
   assert.deepEqual(threads[0], { id: 'c', rootId: 'a', title: 'Revisa mis pendientes de hoy', status: 'running', updatedAt: at(5), turns: 2 });
   assert.equal(threads[1].id, 'x');
+});
+
+test('a conversation is named by the first sentence of its request, cut at a word', () => {
+  assert.equal(coworkCleanTitle('¿A quién le escribo hoy? Prioriza a mis contactos con correo que aún no contacto.'), 'A quién le escribo hoy');
+  assert.equal(coworkCleanTitle('Revisa mis pendientes de hoy'), 'Revisa mis pendientes de hoy');
+  assert.equal(coworkCleanTitle('Escríbele a Daniela Rojas de Manpower un primer correo corto sobre la revisión de antecedentes de sus postulantes', 60),
+    'Escríbele a Daniela Rojas de Manpower un primer correo…');
 });
 
 test('a continuation whose root fell out of the list never shows the synthetic prompt', () => {
