@@ -11,6 +11,7 @@ import { downloadOpportunitySource, opportunityAttachmentLinks } from './workspa
 import { resolveTicketForOrganization } from './tickets';
 import { MERCADO_PUBLICO_BASE } from './mercado-publico';
 import {gatherOpportunityBuyerContext} from './workspace-public-research';
+import {readPublicMercadoDocuments} from './mercado-publico-documents';
 
 export async function enqueueOpportunityResearch(client: SupabaseClient, scope: WorkScope, id: string) {
   await assertOpportunityRead(client, scope, id);
@@ -43,6 +44,17 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', job.organization_id).single());
   if (context.revision !== job.payload.profileRevision) throw new AuthError('La oferta cambió. Solicita un análisis con el contexto actualizado.', 409);
   const warnings: string[] = [];
+  if(item.kind==='tender'&&item.url&&!job.payload.publicDocumentsChecked){
+    try{
+      const result=await readPublicMercadoDocuments(item.url,async file=>{await saveOpportunityDocument(client,scope,id,{name:file.name,bytes:file.bytes,sourceKind:'official',sourceUrl:file.sourceUrl});},{deadline:started+90000});
+      warnings.push(...result.warnings);
+    }catch{warnings.push('No se pudieron obtener los formularios y el foro desde la ficha pública.');}
+    job.payload.publicDocumentsChecked=true;job.payload.publicDocumentWarnings=warnings.slice();
+    opportunityDb(await client.from('opportunity_jobs').update({payload:job.payload}).eq('id',job.id).eq('lease_token',job.lease_token));
+    // Persist sources first; extraction resumes in its next tick with all remaining time available.
+    return {waiting:true as const};
+  }
+  warnings.push(...job.payload.publicDocumentWarnings||[]);
   if (item.kind === 'tender' && item.data?.observed?.code && !job.payload.officialChecked) {
     const ticket = await resolveTicketForOrganization(client, { organizationId: job.organization_id, creatorId: job.requested_by });
     if (ticket) {
