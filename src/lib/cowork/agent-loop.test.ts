@@ -2111,7 +2111,7 @@ test('a «sí» to the previous answer\'s offer goes back to be done, not answer
   assert.match(coworkAcceptedOfferFeedback('dale, ¿por dónde parto?', lookup) || '', /tarjeta de aprobación/);
   assert.equal(coworkAcceptedOfferFeedback('¿y qué es eso?', lookup), null);
   assert.equal(coworkAcceptedOfferFeedback('sí, pero solo a Carlos', lookup), null);
-  assert.match(coworkAcceptedOfferFeedback('sí', turn('Cifras.\n\n¿Creo la campaña pausada con tus 4 contactos?')) || '', /draft\.write con campaign true/);
+  assert.match(coworkAcceptedOfferFeedback('sí', turn('Cifras.\n\n¿Creo la campaña pausada con tus 4 contactos?')) || '', /draft\.write con kind email y campaign true/);
   const email = { type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Antecedentes en Manpower', body: 'Hola Daniela,\n\nTexto.' };
   const offered = turn('Escribí el correo.\n\n¿Creo la campaña pausada para Daniela Rojas?', [email]);
   assert.match(coworkAcceptedOfferFeedback('sí', offered) || '', /campaign\.create/);
@@ -2154,7 +2154,7 @@ test('the same offer again after «¿qué hago?» is done, and a follow-up accep
   const { coworkRepeatedOfferFeedback, coworkShownCampaignEmails } = await import('./agent-loop');
   const history = [{ runId: 'r1', observations: [], reply: 'Cifras en cero.\n\n¿Dejo lista la campaña pausada para tus 4 contactos con correo?' }];
   const again = { reply: 'Lo que más mueve tus números es partir.', question: '¿Dejo lista la campaña pausada para tus 4 contactos con correo?' };
-  assert.match(coworkRepeatedOfferFeedback(again, history) || '', /draft\.write con campaign true/);
+  assert.match(coworkRepeatedOfferFeedback(again, history) || '', /draft\.write con kind email y campaign true/);
   assert.equal(coworkRepeatedOfferFeedback({ reply: 'Listo.', question: '¿Te muestro cómo van tus campañas de la semana pasada?' }, history), null);
   const first = { type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nPrimero.' };
   const follow = { type: 'email_draft', title: 'Seguimiento', to: ['daniela.rojas@manpower.test'], subject: 'Re: Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nSeguimiento.' };

@@ -1077,3 +1077,11 @@ test('a follow-up of an email nobody sent yet offers the campaign with both', ()
   assert.match(issues[0].fix, /para Daniela con los dos correos/);
   assert.deepEqual(coworkNextStepIssues({ blocks: [block], question: '¿Creo la campaña pausada para Daniela con los dos correos?' }, { earlier, followUp: true }), []);
 });
+
+test('an edit keeps the demo the email asked for unless the person asked to drop it', () => {
+  const earlier = [{ to: [], subject: 'Antecedentes', body: 'Hola,\n\nTexto.\n\n¿Qué día te acomoda una demo de 30 minutos esta semana?\n\nNicolás Yarur' }];
+  const shorter = { type: 'email_draft' as const, title: 'Corto', to: null, subject: 'Antecedentes', body: 'Hola,\n\nTexto.\n\n¿Cuántos postulantes revisan al mes?\n\nNicolás Yarur' };
+  const shorts = (request: string) => coworkDraftIssues([shorter], { ...context, earlier, edit: true, shorter: true, request }).map(issue => issue.short);
+  assert.ok(shorts('más corto y menos vendedor').includes('conserva la demo'));
+  assert.ok(!shorts('más corto y sin la demo').includes('conserva la demo'));
+});

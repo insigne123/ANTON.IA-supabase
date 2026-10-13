@@ -91,7 +91,7 @@ type Recipient = { name: string; email: string | null; company: string };
 type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: boolean; proofs?: string[]; recipients?: Recipient[];
   meeting?: boolean; products?: string[]; keepsAsk?: boolean; followUp?: boolean;
   /** The emails of the previous answer in the conversation (assistant.written, scope earlier_answer), and whether the request edits them. */
-  earlier?: EarlierEmail[]; edit?: boolean; shorter?: boolean };
+  earlier?: EarlierEmail[]; edit?: boolean; shorter?: boolean; request?: string };
 type EarlierEmail = { to: string[]; subject: string; body: string };
 
 // «firmo como Nico», «Firma exactamente como «Nico»», «firmar siempre como Nicolás Y.»: the name that follows, as written.
@@ -160,7 +160,7 @@ export function coworkWriterContext(userContext: { fullName?: string | null; pro
     proofs, recipients: observedRecipients(observations), products: offerNames(userContext as Parameters<typeof offerNames>[0]),
     ...(typeof request === 'string' ? { meeting: MEETING_ASKED.test(request),
       keepsAsk: MEETING_ASKED.test(request) && PASTED_EDIT.test(request) && !DROPS_MEETING.test(request) } : {}),
-    ...(earlier.length ? { earlier, edit, shorter: edit && SHORTER.test(String(request)) } : {}) };
+    ...(earlier.length ? { earlier, edit, shorter: edit && SHORTER.test(String(request)), request: String(request ?? '') } : {}) };
 }
 
 // A short request that changes the email of the previous answer («más corto y menos vendedor», «hazlo más cercano», «sin la demo»).
@@ -817,6 +817,10 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     const first = context.followUp && !context.edit && total === 1 && context.earlier?.length === 1 ? closingQuestion(context.earlier[0].body) : '';
     if (first && question && alike(stems(question), stems(first))) issues.push({ where, problem: 'El seguimiento repite la pregunta del primer correo.',
       fix: 'Pregunta otra cosa, sobre el ángulo nuevo: quién lo hace hoy o cómo lo resuelven cuando pasa.', short: 'pregunta nueva' });
+    // An edit that drops the meeting the email asked for, without being asked to (round 6: «quita la petición de demo sin avisar»).
+    if (context.edit && total === 1 && context.earlier?.length === 1 && MEETING_ASK.test(normalize(context.earlier[0].body)) && !MEETING_ASK.test(plain)
+      && !DROPS_MEETING.test(context.request ?? '')) issues.push({ where, problem: 'La edición quitó la invitación a la demo o la reunión que tenía el correo.',
+      fix: 'Consérvala, dicha fácil de responder («¿Qué día te acomoda una demo de 30 minutos?»), y acorta o cambia lo demás.', short: 'conserva la demo' });
     // «Más corto» that came out as long or longer, with a new invitation (round 2 readings: four sentences became five).
     if (context.shorter && total === 1 && context.earlier?.length === 1) {
       const before = context.earlier[0].body;
