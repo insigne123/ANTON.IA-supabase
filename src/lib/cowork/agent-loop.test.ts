@@ -2111,6 +2111,11 @@ test('a «sí» to the previous answer\'s offer goes back to be done, not answer
   assert.match(coworkAcceptedOfferFeedback('dale, ¿por dónde parto?', lookup) || '', /tarjeta de aprobación/);
   assert.equal(coworkAcceptedOfferFeedback('¿y qué es eso?', lookup), null);
   assert.equal(coworkAcceptedOfferFeedback('sí, pero solo a Carlos', lookup), null);
+  // «si» without the accent: a yes when nothing conditional follows, a condition when it does (round 8, t10).
+  const campaign = turn('Te escribí el correo.\n\n¿Creo la campaña pausada para Daniela Rojas?');
+  assert.equal(coworkAcceptedOfferFeedback('si no me responde en una semana, ¿qué le mando?', campaign), null);
+  assert.ok(coworkAcceptedOfferFeedback('si, dale', campaign));
+  assert.ok(coworkAcceptedOfferFeedback('si porfa', campaign));
   assert.match(coworkAcceptedOfferFeedback('sí', turn('Cifras.\n\n¿Creo la campaña pausada con tus 4 contactos?')) || '', /draft\.write con kind email y campaign true/);
   const email = { type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Antecedentes en Manpower', body: 'Hola Daniela,\n\nTexto.' };
   const offered = turn('Escribí el correo.\n\n¿Creo la campaña pausada para Daniela Rojas?', [email]);

@@ -628,11 +628,14 @@ const LEAVES_FOR_LATER = /(?<!\p{L})(?:despu[ée]s|luego|m[áa]s tarde|en otro m
 // A promise in the future tense of what the turn could do now («Revisaré tus contactos», «te prepararé el correo»): round 6, «promete
 // «revisaré» y no lo hace».
 const PROMISES = /(?<!\p{L})(?:revisar[ée]|preparar[ée]|buscar[ée]|escribir[ée]|redactar[ée]|armar[ée]|consultar[ée]|analizar[ée]|te mostrar[ée]|te dejar[ée])(?!\p{L})/iu;
+// A yes: «sí», or «si» typed without the accent when what follows is not a condition («si, dale», «si porfa»). «si no me responde en
+// una semana, ¿qué le mando?» is a condition (round 8: it was taken as a yes to the campaign and the follow-up was never written).
+const YES = String.raw`(?:sí|si(?=\s*(?:$|[,.!;:]|(?:dale|h[áa]zlo|cr[ée]a\w*|crear|arma\w*|claro|porfa\w*|por favor|adelante|ok|perfecto|listo|me parece|gracias|bueno|quiero)(?!\p{L}))))`;
 // «Sí, créala»: a quick reply that answers a question, which then has to be there.
-const SAYS_YES = /^\s*s[íi](?!\p{L})/iu;
+const SAYS_YES = new RegExp(String.raw`^\s*${YES}(?!\p{L})`, 'iu');
 const WRITER_FIRST = 'Los correos los escribe la Redactora, no tú: no los pongas en answer.blocks. Elige draft.write con write {kind, recipients, objective, angle, tone, steps, notes, findings}: ella los escribe y la Revisora los revisa antes de mostrarlos.';
 // A yes to the campaign the previous answer offered («Sí, crea la campaña pausada», «dale», «créala»)…
-const TAKES_OFFER = /^\s*(?:s[íi]|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|cr[ée]ala|cr[ée]a la campa[ñn]a|arma la campa[ñn]a)(?!\p{L})/iu;
+const TAKES_OFFER = new RegExp(String.raw`^\s*(?:${YES}|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|cr[ée]ala|cr[ée]a la campa[ñn]a|arma la campa[ñn]a)(?!\p{L})`, 'iu');
 // …that does not ask to change its emails («sí, pero con un solo texto para todos»).
 const CHANGES_OFFER = /(?<!\p{L})(?:pero|aunque|cambia\w*|mismo texto|un solo (?:texto|correo)|sin personalizar)(?!\p{L})/iu;
 // …nor asks for the follow-ups too («sí, con sus seguimientos»).
