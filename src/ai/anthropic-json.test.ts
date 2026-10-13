@@ -173,3 +173,25 @@ test('a Claude model never needs the OpenAI key and asks for its own', async () 
     if (saved.anthropic === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = saved.anthropic;
   }
 });
+
+test('an answer without the format that misses the schema gets one correction, told what was wrong', async () => {
+  const wide = z.object({ ...Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`f${index}`, z.string().nullable().optional()])),
+    action: z.enum(['answer', 'leads.search']), query: z.string().nullable() }).strict();
+  const instruction = claudeRequest({ model: 'claude-haiku-5-5', prompt: 'p', schema: wide }).system?.[0].text || '';
+  assert.ok(instruction.includes('nunca null: action.') && instruction.includes('aunque sea en null: query.'), 'the fields that always carry a value are named');
+  const requests: Array<ReturnType<typeof claudeRequest>> = [];
+  const answers = ['{"action":null,"query":null}', '{"action":"answer","query":null}'];
+  const client: ClaudeClient = { messages: { stream: params => { requests.push(params); const text = answers[requests.length - 1];
+    return { on: () => undefined, finalMessage: async () => ({ model: 'claude-haiku-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text }], usage: { input_tokens: 100, output_tokens: 10 } }) }; } } };
+  const result = await generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema: wide }, client);
+  assert.deepEqual(result.data, { action: 'answer', query: null });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].messages.map(message => message.role), ['user', 'assistant', 'user']);
+  assert.ok(String(requests[1].messages[2].content).includes('action'), 'the correction names the field');
+  assert.equal((result.telemetry.usage as { prompt_tokens: number }).prompt_tokens, 200, 'both calls are paid');
+  // A second miss is the caller's failure, with its usage.
+  const twice: ClaudeClient = { messages: { stream: () => ({ on: () => undefined,
+    finalMessage: async () => ({ model: 'claude-haiku-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: '{"action":null,"query":null}' }], usage: { input_tokens: 100, output_tokens: 10 } }) }) } };
+  await assert.rejects(generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema: wide }, twice),
+    (error: unknown) => (error as { structuredTelemetry?: { usage: { prompt_tokens: number } } }).structuredTelemetry?.usage.prompt_tokens === 200);
+});

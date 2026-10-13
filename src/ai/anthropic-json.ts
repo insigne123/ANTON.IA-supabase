@@ -85,7 +85,18 @@ export function claudeFormatFits(json: Record<string, unknown>) {
 
 /** The instruction that carries a schema too large for the format. */
 export function claudeSchemaInstruction(json: Record<string, unknown>) {
-  return `Responde solo con un objeto JSON válido, sin texto ni bloques de código alrededor, que cumpla este JSON Schema. Un campo opcional puede omitirse o ir en null cuando el esquema lo permite.\n${JSON.stringify(json)}`;
+  const properties = (json.properties && typeof json.properties === 'object' ? json.properties : {}) as Record<string, { type?: unknown; anyOf?: Array<{ type?: unknown }> }>;
+  const required = Array.isArray(json.required) ? json.required as string[] : [];
+  const nullable = (name: string) => { const property = properties[name] || {};
+    return property.type === 'null' || (Array.isArray(property.type) && property.type.includes('null')) || Boolean(property.anyOf?.some(option => option.type === 'null')); };
+  const valued = required.filter(name => !nullable(name));
+  const present = required.filter(nullable);
+  return [
+    'Responde solo con un objeto JSON válido, sin texto ni bloques de código alrededor, que cumpla este JSON Schema. Un campo opcional puede omitirse o ir en null cuando el esquema lo permite.',
+    valued.length ? `Siempre llevan un valor del esquema, nunca null: ${valued.join(', ')}.` : '',
+    present.length ? `Siempre van, aunque sea en null: ${present.join(', ')}.` : '',
+    JSON.stringify(json),
+  ].filter(Boolean).join('\n');
 }
 
 /** The JSON object of an answer written without the format: without a code fence or words around it. */
@@ -154,17 +165,22 @@ export type ClaudeStructuredOptions<T extends z.ZodTypeAny> = {
 /** The request: the JSON format, the effort and room for thinking. Thinking stays as the model has it by default
  * (adaptive on the current models); no sampling parameters, which they reject. The system prompt (a role's fixed rules) is
  * cached: the correction and the next turns read it at a tenth of the price. */
-export function claudeRequest<T extends z.ZodTypeAny>(opts: ClaudeStructuredOptions<T>) {
+/** A correction of an answer that did not fit the schema: what it wrote and what was wrong. */
+export type ClaudeRepair = { previous: string; problem: string };
+
+export function claudeRequest<T extends z.ZodTypeAny>(opts: ClaudeStructuredOptions<T>, repair?: ClaudeRepair) {
   const effort = claudeEffort(opts.reasoningEffort);
   const schema = claudeJsonSchema(opts.schema);
   const fits = claudeFormatFits(schema);
   // A schema too large for the format goes after the role's rules, in the same cached system prompt.
   const system = [opts.systemPrompt, fits ? '' : claudeSchemaInstruction(schema)].filter(Boolean).join('\n\n');
+  const correction = repair ? [{ role: 'assistant' as const, content: repair.previous || '{}' },
+    { role: 'user' as const, content: `Tu respuesta no cumple el JSON Schema:\n${repair.problem}\nResponde de nuevo solo con el objeto JSON completo y corregido.` }] : [];
   return {
     model: opts.model,
     max_tokens: (opts.maxOutputTokens ?? 6000) + THINKING_ROOM[effort],
     ...(system ? { system: [{ type: 'text' as const, text: system, cache_control: { type: 'ephemeral' as const } }] } : {}),
-    messages: [{ role: 'user' as const, content: opts.prompt }],
+    messages: [{ role: 'user' as const, content: opts.prompt }, ...correction],
     output_config: fits ? { effort, format: { type: 'json_schema' as const, schema } } : { effort },
   };
 }
@@ -200,6 +216,20 @@ function providerError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+/** Two calls' usage as one: a repaired answer is paid twice. */
+function addUsage(a: ReturnType<typeof claudeUsage>, b: ReturnType<typeof claudeUsage>) {
+  return { ...a, prompt_tokens: a.prompt_tokens + b.prompt_tokens, completion_tokens: a.completion_tokens + b.completion_tokens,
+    total_tokens: a.total_tokens + b.total_tokens, prompt_tokens_details: { cached_tokens: a.prompt_tokens_details.cached_tokens + b.prompt_tokens_details.cached_tokens },
+    cache_creation_input_tokens: a.cache_creation_input_tokens + b.cache_creation_input_tokens };
+}
+
+/** What was wrong with an answer written without the format, in a few lines the model can fix. */
+export function claudeProblem(error: unknown) {
+  const issues = (error as { issues?: Array<{ path?: Array<string | number>; message?: string }> } | null)?.issues;
+  if (Array.isArray(issues) && issues.length) return issues.slice(0, 5).map(issue => `${(issue.path || []).join('.') || '(raíz)'}: ${issue.message || 'no cumple'}`).join('\n');
+  return error instanceof SyntaxError ? 'No es un objeto JSON válido.' : String((error as Error)?.message || error).slice(0, 300);
+}
+
 export async function generateClaudeStructured<T extends z.ZodTypeAny>(
   opts: ClaudeStructuredOptions<T>,
   client: ClaudeClient = claudeClient(),
@@ -211,12 +241,18 @@ export async function generateClaudeStructured<T extends z.ZodTypeAny>(
     : opts.signal;
   const timeout = timeoutController && setTimeout(
     () => timeoutController.abort(new DOMException('Structured generation timed out.', 'TimeoutError')), opts.timeoutMs);
-  try {
-    signal?.throwIfAborted();
+  const plan = claudeSchemaPlan(opts.schema);
+  const fits = claudeFormatFits(plan.json);
+  let usage: ReturnType<typeof claudeUsage> | null = null;
+  let modelName = opts.model;
+  const telemetry = () => ({ modelName, requestedModel: opts.model, usage: usage ?? claudeUsage(null), durationMs: Date.now() - startedAt });
+  const withTelemetry = (error: unknown) =>
+    Object.defineProperty(error instanceof Error ? error : new Error(String(error)), 'structuredTelemetry', { value: telemetry(), enumerable: false });
+  const ask = async (repair?: ClaudeRepair) => {
     let message: ClaudeMessage;
     try {
-      const stream = client.messages.stream(claudeRequest(opts), { signal });
-      if (opts.onPartial) {
+      const stream = client.messages.stream(claudeRequest(opts, repair), { signal });
+      if (opts.onPartial && !repair) {
         const onPartial = opts.onPartial;
         // A live preview never breaks the answer.
         stream.on('text', (_delta, snapshot) => { try { onPartial(snapshot.replace(/^\s*```(?:json)?\s*/i, '')); } catch { /* ignored */ } });
@@ -226,27 +262,24 @@ export async function generateClaudeStructured<T extends z.ZodTypeAny>(
       signal?.throwIfAborted();
       throw providerError(error);
     }
-    const telemetry = {
-      modelName: typeof message.model === 'string' && message.model.trim() ? message.model : opts.model,
-      requestedModel: opts.model,
-      usage: claudeUsage(message.usage),
-      durationMs: Date.now() - startedAt,
-    };
-    const fail = (reason: string) => {
-      const error = new Error(reason);
-      // A paid response keeps its usage even when it cannot be used.
-      Object.defineProperty(error, 'structuredTelemetry', { value: telemetry, enumerable: false });
-      return error;
-    };
-    if (message.stop_reason === 'refusal') throw fail('CLAUDE_REFUSAL: the model declined this request.');
-    if (message.stop_reason === 'max_tokens') throw fail('CLAUDE_MAX_TOKENS: the answer did not fit in max_tokens.');
-    const text = message.content.filter(block => block.type === 'text').map(block => block.text || '').join('').trim();
+    // A paid response keeps its usage even when it cannot be used.
+    usage = usage ? addUsage(usage, claudeUsage(message.usage)) : claudeUsage(message.usage);
+    if (typeof message.model === 'string' && message.model.trim()) modelName = message.model;
+    if (message.stop_reason === 'refusal') throw withTelemetry(new Error('CLAUDE_REFUSAL: the model declined this request.'));
+    if (message.stop_reason === 'max_tokens') throw withTelemetry(new Error('CLAUDE_MAX_TOKENS: the answer did not fit in max_tokens.'));
+    return message.content.filter(block => block.type === 'text').map(block => block.text || '').join('').trim();
+  };
+  const read = (text: string) => opts.schema.parse(fits ? claudeReadJsonText(JSON.parse(text), plan.jsonText) : claudeKnownKeys(JSON.parse(claudeJsonText(text)), plan.json));
+  try {
+    signal?.throwIfAborted();
+    const text = await ask();
     try {
-      const plan = claudeSchemaPlan(opts.schema);
-      const json = claudeFormatFits(plan.json) ? claudeReadJsonText(JSON.parse(text), plan.jsonText) : claudeKnownKeys(JSON.parse(claudeJsonText(text)), plan.json);
-      return { data: opts.schema.parse(json), telemetry };
+      return { data: read(text), telemetry: telemetry() };
     } catch (error) {
-      throw Object.defineProperty(error instanceof Error ? error : new Error(String(error)), 'structuredTelemetry', { value: telemetry, enumerable: false });
+      // Without the format nothing holds the answer to the schema: one correction, told what was wrong, before giving up.
+      if (fits || signal?.aborted) throw withTelemetry(error);
+      const repaired = await ask({ previous: text, problem: claudeProblem(error) });
+      try { return { data: read(repaired), telemetry: telemetry() }; } catch (again) { throw withTelemetry(again); }
     }
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
