@@ -678,16 +678,17 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     }
   }
 
-  const resolve = useCallback(async (approve: boolean): Promise<boolean> => {
-    if (!latest || resolving) return false;
-    const view = coworkProposalView(latest.run, latest.events);
+  // The card decided is the latest turn's or, after a question about it (a clarification), the one that still waits above it.
+  const resolve = useCallback(async (approve: boolean, target: typeof latest = latest): Promise<boolean> => {
+    if (!target || resolving) return false;
+    const view = coworkProposalView(target.run, target.events);
     const endpoint = view?.type === 'search' ? 'search-approval' : view?.type === 'effect' ? 'effect-approval' : 'approval';
     setResolving(true);
     try {
-      await request(`/api/cowork/runs/${latest.run.id}/${endpoint}`, {
+      await request(`/api/cowork/runs/${target.run.id}/${endpoint}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }),
       });
-      if (approve) { liveRuns.current.add(latest.run.id); wake(true); }
+      if (approve) { liveRuns.current.add(target.run.id); wake(true); }
       setThreadVersion(value => value + 1);
       return true;
     } catch (problem) {
@@ -891,7 +892,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   }, [mac, shortcutsOpen, choose, isDesktop, openArtifact]);
 
   const executing = Boolean(latest && latest.run.status === 'waiting_approval' && proposal && (proposal.state === 'approved' || proposal.state === 'running'));
-  const status = latest ? coworkStatusCopy(latest.run.status, { executing }) : null;
+  // After a question about a card that still waits, the conversation still needs the decision (round 5 readings: «Listo» with a
+  // proposal pending above).
+  const waitingAbove = Boolean(latest?.run.clarificationOf && turns.some(turn => turn.run.id === latest.run.clarificationOf && turn.run.status === 'waiting_approval'));
+  const status = latest ? coworkStatusCopy(waitingAbove && latest.run.status === 'completed' ? 'waiting_approval' : latest.run.status, { executing }) : null;
   const inConversation = Boolean(selected || optimistic);
   const artifactOpen = Boolean(openArtifact);
   const railVisible = !railCollapsed && !artifactOpen;
@@ -989,8 +993,9 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 {history.error && <p role="alert" className="text-[12.5px] text-cw-danger">{history.error}</p>}
               </div>}
               {shownTurns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === shownTurns.length - 1}
+                decidable={latest?.run.clarificationOf === turn.run.id && turn.run.status === 'waiting_approval'}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
-                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
+                onResolve={approve => void resolve(approve, index === shownTurns.length - 1 ? latest : turn)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
                 liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)}
                 cardStatuses={cardStatuses} versions={coworkTurnVersions(runs, turn.run)} onVersion={busy || sending ? null : openVersion}

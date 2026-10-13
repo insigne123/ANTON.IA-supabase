@@ -2170,3 +2170,53 @@ test('«¿qué puedes hacer?» is answered with what Cowork does', async () => {
   assert.equal(coworkListsCapabilities('Hoy tienes 7 contactos. Lo más rápido es escribirle a tus 4 contactos con correo.'), false);
   assert.equal(coworkListsCapabilities('Puedo ayudarte así:\n- Buscar prospectos\n- Tus contactos y sus correos\n- Correos y campañas\n- LinkedIn'), true);
 });
+
+test('a campaign note without its follow-ups keeps its sentences apart', async () => {
+  const { coworkWithoutCadence } = await import('./agent-loop');
+  assert.equal(coworkWithoutCadence('Queda pausada hasta que la actives. Los seguimientos siguen la cadencia de 7 toques. Sale desde tu Gmail.'),
+    'Queda pausada hasta que la actives. Sale desde tu Gmail. Va solo con este correo; si quieres, después te escribo los seguimientos.');
+});
+
+test('an email lookup offered in words becomes its card with the people read without an email', async () => {
+  const { coworkLookupProposal } = await import('./agent-loop');
+  const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+  const read = { action: 'leads.search' as const, input: 'sin correo', result: { scope: 'own_saved_contacts', items: [
+    { id: id(1), name: 'Nehal Patil', company: 'Adecco', email: null }, { id: id(2), name: 'Katherine Salinas', company: 'Adecco', email: null },
+    { id: id(3), name: 'Carlos Ahumada', company: 'Minera Centinela', email: null }, { id: id(4), name: 'Daniela Rojas', company: 'Manpower', email: 'daniela@manpower.test' }] } };
+  const all = coworkLookupProposal({ reply: 'Tienes 3 sin correo.', question: '¿Busco el correo de los 3 que no lo tienen?' }, 'tengo contactos sin correo', [], [read]);
+  assert.deepEqual(all, { goal: 'email', people: [{ leadId: id(1) }, { leadId: id(2) }, { leadId: id(3) }] });
+  const two = coworkLookupProposal({ reply: 'Parte por Adecco.', question: '¿Busco el correo de Nehal y Katherine?' }, 'hola', [], [read]);
+  assert.deepEqual(two?.people, [{ leadId: id(1) }, { leadId: id(2) }]);
+  // A «dale» to the previous answer's offer, with the people read in that turn.
+  const history = [{ runId: 'r1', observations: [read], reply: 'Tienes 3 sin correo.\n\n¿Busco el correo de los 3 que no lo tienen?' }];
+  assert.equal(coworkLookupProposal({ reply: 'Lo primero es buscar sus correos. Te muestro la propuesta a continuación.' }, 'dale, ¿por dónde parto?', history, [])?.people.length, 3);
+  assert.equal(coworkLookupProposal({ reply: 'Listo.', question: '¿Creo la campaña pausada?' }, 'hola', [], [read]), null);
+});
+
+test('an email lookup offered before anyone was read reads who lacks an email and goes out as the card', async () => {
+  const id = (n: number) => `00000000-0000-4000-8000-00000000001${n}`;
+  const executed: string[] = [];
+  const proposals: Array<{ kind: string; prepareBatch?: { people: unknown[] } }> = [];
+  const answer = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 3 contactos sin correo.', document: null, question: '¿Busco el correo de los 3 contactos que no lo tienen?' } };
+  await runCoworkReadLoop({ message: 'tengo contactos sin correo, ¿qué hago con ellos?', runId: '00000000-0000-4000-8000-0000000000bb', signal: new AbortController().signal, authorize: async () => {},
+    record: async () => {}, prepareBatch: true,
+    execute: async (action, value) => { executed.push(`${action}:${value}`); return { scope: 'own_saved_contacts', items: [
+      { id: id(1), name: 'Nehal Patil', company: 'Adecco', email: null }, { id: id(2), name: 'Carlos Ahumada', company: 'Minera', email: null }] }; },
+    proposeEffect: async proposal => { proposals.push(proposal as never); },
+    decide: async () => answer as never });
+  assert.deepEqual(executed, ['leads.search:sin correo']);
+  assert.equal(proposals[0]?.kind, 'lead_prepare_batch');
+  assert.equal(proposals[0]?.prepareBatch?.people.length, 2);
+});
+
+test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
+  const { coworkCampaignForListedPeople } = await import('./agent-loop');
+  const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],
+    criteria: { relationship: 'never_contacted', titles: ['Jefa de Selección'], industries: ['staffing'], countries: ['Chile'], sizes: [], seniorities: ['manager'],
+      minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: true },
+    messages: [{ subject: 'Asunto', body: 'Hola Daniela,\n\nTexto.', delayDays: 0 }] });
+  const listed = coworkCampaignForListedPeople(campaign);
+  assert.deepEqual(listed.criteria, { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [],
+    minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false });
+});
