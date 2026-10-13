@@ -1128,3 +1128,15 @@ test('an edit that drops the demo it was not asked to drop gets its closing ques
   const dropped = coworkEarlierThread(output, { earlier, edit: true, request: 'sin la demo' });
   assert.match((dropped.blocks[0] as { body: string }).body, /Cuántos postulantes/);
 });
+
+test('an edit\'s reply carries the real word count and never claims a greeting or signature it changed', async () => {
+  const { coworkEarlierThread } = await import('./writer');
+  const earlier = [{ to: [], subject: 'A', body: 'Hola,\n\nRevisar uno por uno deja vacantes abiertas un día más en temporada alta.\n\n¿Qué día te acomoda una demo de 30 minutos?\n\nSaludos,\nNicolás Yarur' }];
+  const output = { reply: 'Lo dejé en menos de 42 palabras. Conservé el saludo y la firma. Quité los adjetivos de venta.', question: null, suggestions: [],
+    blocks: [{ type: 'email_draft' as const, title: 'Corto', to: null, subject: 'A', body: 'Hola,\n\nRevisar uno por uno deja vacantes abiertas.\n\n¿Qué día te acomoda una demo de 30 minutos?\n\nNicolás Yarur\nGerente Comercial' }] };
+  const edited = coworkEarlierThread(output, { earlier, edit: true, shorter: true, request: 'más corto' });
+  assert.equal(edited.reply, 'Lo dejé en 16 palabras; antes tenía 22. Quité los adjetivos de venta.');
+  // A greeting and a signature that did stay may be said.
+  const same = { ...output, reply: 'Conservé el saludo. Quité los adjetivos de venta.', blocks: [{ ...output.blocks[0], body: `${output.blocks[0].body.split('\n\nNicolás')[0]}\n\nSaludos,\nNicolás Yarur` }] };
+  assert.match(coworkEarlierThread(same, { earlier, edit: true, request: 'menos vendedor' }).reply, /^Conservé el saludo\./);
+});

@@ -236,7 +236,7 @@ export function CoworkApproval({ run, proposal, resolving, interactive, onResolv
 
   return <section id={deciding ? 'cowork-decision' : undefined} tabIndex={deciding ? -1 : undefined}
     aria-label={search ? 'Revisar búsqueda externa' : proposal.type === 'note' ? 'Revisar cambio de nota' : 'Revisar acción propuesta'}
-    className={cn('overflow-hidden rounded-2xl border bg-cw-elevated transition-[border-color,box-shadow] duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
+    className={cn('overflow-clip rounded-2xl border bg-cw-elevated transition-[border-color,box-shadow] duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
       deciding ? 'border-cw-border-strong shadow-[var(--cw-shadow)]' : 'border-cw-border shadow-[var(--cw-shadow-sm)]',
       live && deciding && 'cw-rise-attention')}>
     <header className={cn('flex items-start gap-3 px-4 py-3 transition-colors duration-300', !folded && 'border-b border-cw-border', deciding && 'bg-cw-panel')}>
