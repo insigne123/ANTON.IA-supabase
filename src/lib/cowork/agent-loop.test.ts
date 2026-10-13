@@ -2192,3 +2192,20 @@ test('an email lookup offered in words becomes its card with the people read wit
   assert.equal(coworkLookupProposal({ reply: 'Lo primero es buscar sus correos. Te muestro la propuesta a continuación.' }, 'dale, ¿por dónde parto?', history, [])?.people.length, 3);
   assert.equal(coworkLookupProposal({ reply: 'Listo.', question: '¿Creo la campaña pausada?' }, 'hola', [], [read]), null);
 });
+
+test('an email lookup offered before anyone was read reads who lacks an email and goes out as the card', async () => {
+  const id = (n: number) => `00000000-0000-4000-8000-00000000001${n}`;
+  const executed: string[] = [];
+  const proposals: Array<{ kind: string; prepareBatch?: { people: unknown[] } }> = [];
+  const answer = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Tienes 3 contactos sin correo.', document: null, question: '¿Busco el correo de los 3 contactos que no lo tienen?' } };
+  await runCoworkReadLoop({ message: 'tengo contactos sin correo, ¿qué hago con ellos?', runId: '00000000-0000-4000-8000-0000000000bb', signal: new AbortController().signal, authorize: async () => {},
+    record: async () => {}, prepareBatch: true,
+    execute: async (action, value) => { executed.push(`${action}:${value}`); return { scope: 'own_saved_contacts', items: [
+      { id: id(1), name: 'Nehal Patil', company: 'Adecco', email: null }, { id: id(2), name: 'Carlos Ahumada', company: 'Minera', email: null }] }; },
+    proposeEffect: async proposal => { proposals.push(proposal as never); },
+    decide: async () => answer as never });
+  assert.deepEqual(executed, ['leads.search:sin correo']);
+  assert.equal(proposals[0]?.kind, 'lead_prepare_batch');
+  assert.equal(proposals[0]?.prepareBatch?.people.length, 2);
+});

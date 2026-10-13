@@ -714,7 +714,7 @@ function offerDone(said: string, offer: string, previous: CoworkHistoryTurn | un
 }
 
 // An answer that closes asking whether to look for emails («¿Busco el correo de los 3 contactos que no lo tienen?»).
-const OFFERS_EMAIL_LOOKUP = /^¿\s*(?:te\s+|les\s+|lo\s+)?(?:busco|buscamos|completo|completamos)\s+(?:el|los|sus|su)\s+correos?(?!\p{L})/iu;
+const OFFERS_EMAIL_LOOKUP = /^¿\s*(?:(?:te\s+|les\s+|lo\s+)?(?:busco|buscamos|completo|completamos)|(?:quieres|te parece) que (?:busque|busquemos)|partimos buscando)\s+(?:el|los|sus|su)\s+correos?(?!\p{L})/iu;
 
 /**
  * Looking for emails is approved on its card, which names the people and the cost: an answer that asks first leaves the person one
@@ -747,6 +747,10 @@ export function coworkLookupProposal(answer: { reply: string; question?: unknown
   const people = (named.length ? named : missing).slice(0, max);
   return people.length ? { goal: 'email', people: people.map(row => ({ leadId: row.id })) } : null;
 }
+
+// A stand-in read with one person without an email: whether an answer offers the lookup at all, before reading who.
+const MISSING_EMAIL_PROBE: CoworkObservation = { action: 'leads.search', input: '', result: { scope: 'own_saved_contacts',
+  items: [{ id: '00000000-0000-4000-8000-000000000000', name: 'Contacto', company: 'Empresa', email: null }] } };
 
 /**
  * The email the person saw in the previous answer, when they accept the campaign it offered (round 2 readings: a «sí, crea la
@@ -1296,8 +1300,16 @@ async function runCoworkLoop(input: {
     await remember(decision);
     try {
       // An email lookup offered or accepted in words goes out as its card, with no other decision.
-      const lookup = decision.action === 'answer' && decision.answer && input.proposeEffect && input.prepareBatch && !input.clarification && !informationOnly
-        ? coworkLookupProposal(decision.answer, input.message, input.history, observations) : null;
+      const offersLookup = decision.action === 'answer' && decision.answer && input.proposeEffect && input.prepareBatch && !input.clarification && !informationOnly;
+      let lookup = offersLookup ? coworkLookupProposal(decision.answer!, input.message, input.history, observations) : null;
+      // Offered from the account's figures, before anyone was read (round 5: «¿Busco el correo de los 3…?» with no card): who still
+      // lacks an email is read first, the read the card needs.
+      if (offersLookup && !lookup && coworkLookupProposal(decision.answer!, input.message, input.history, [MISSING_EMAIL_PROBE])) {
+        const probe: CoworkObservation = { action: 'leads.search', input: 'sin correo', result: await input.execute('leads.search', 'sin correo') };
+        await input.record(probe);
+        observations.push(probe);
+        lookup = coworkLookupProposal(decision.answer!, input.message, input.history, observations);
+      }
       if (lookup && decision.answer) {
         const reply = decision.answer.reply.split('\n').filter(line => !/^\s*¿/.test(line) && !/a continuaci[óo]n\.?\s*$/i.test(line)).join('\n').trim();
         decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup,
@@ -1349,10 +1361,10 @@ async function runCoworkLoop(input: {
         written = { emails, personal, answer };
         observations.push({ action: COWORK_WRITTEN_ACTION, input: '', result: emails ? {
           scope: 'writer_output', emails,
-          next: 'La Redactora ya escribió estos correos y el usuario pidió la campaña: propón ahora campaign.create con ellos (la app copia su texto) a los contactos guardados con correo que leíste. En answer.reply di a quiénes va, cuántos correos lleva y que queda pausada hasta otra aprobación; no hables de versiones anteriores ni nombres el remitente si no lo leíste en app.context. Si nadie puede recibirla, responde con answer y di por qué; los correos se muestran igual.',
+          next: 'La Redactora ya escribió estos correos y el usuario pidió la campaña: propón ahora campaign.create con ellos (la app copia su texto) a los contactos guardados con correo que leíste. En answer.reply di a quiénes va, cuántos correos lleva y que queda pausada hasta otra aprobación; habla en primera persona («los correos que te escribí»), sin nombrar a la Redactora ni a la Revisora; no hables de versiones anteriores ni nombres el remitente si no lo leíste en app.context. Si nadie puede recibirla, responde con answer y di por qué; los correos se muestran igual.',
         } : {
           scope: 'writer_output', firstEmails: personal,
-          next: 'La Redactora ya escribió el primer correo de cada persona y el usuario pidió la campaña: propón ahora campaign.create con emails sus correos (la app copia el texto de cada una como su primer correo) y, en messages, un primer correo común con «Hola {{nombre}},» para quien quede sin el suyo. En answer.reply di a quiénes va, que cada una recibe su propio primer correo y que queda pausada hasta otra aprobación; no hables de versiones anteriores ni nombres el remitente si no lo leíste en app.context. Si nadie puede recibirla, responde con answer y di por qué; los correos se muestran igual.',
+          next: 'La Redactora ya escribió el primer correo de cada persona y el usuario pidió la campaña: propón ahora campaign.create con emails sus correos (la app copia el texto de cada una como su primer correo) y, en messages, un primer correo común con «Hola {{nombre}},» para quien quede sin el suyo. En answer.reply di a quiénes va, que cada una recibe su propio primer correo y que queda pausada hasta otra aprobación; habla en primera persona («los correos que te escribí»), sin nombrar a la Redactora ni a la Revisora; no hables de versiones anteriores ni nombres el remitente si no lo leíste en app.context. Si nadie puede recibirla, responde con answer y di por qué; los correos se muestran igual.',
         } });
         continue;
       }

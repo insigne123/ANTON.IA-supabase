@@ -205,10 +205,12 @@ function NextStep({ question, live }: { question: string; live: boolean }) {
 }
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
-export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
+export function CoworkTurn({ turn, latest, decidable = false, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
   liveAnswer = null, streamed = false, cardStatuses = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null }: {
   turn: CoworkTurnData;
   latest: boolean;
+  /** Its card still waits for a decision after a question about it, asked in the next turn: it keeps its buttons. */
+  decidable?: boolean;
   /** The turn finished while you were watching: reveal the answer gently. */
   live?: boolean;
   /** The answer while it is being written (null when the page gets no live draft). */
@@ -319,7 +321,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
           {choices && onSuggestion && <CoworkChoicesCard key="choices" choices={choices} live={live} onSelect={onSuggestion} />}
           {suggestions.length > 0 && onSuggestion && <SuggestedReplies key="suggestions" suggestions={suggestions} live={live} onSelect={onSuggestion} />}
         </AnimatePresence>
-        {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} live={live} />}
+        {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest || decidable} onResolve={onResolve} live={live} />}
         {proposal && replyBlock}
         {run.status === 'failed' && <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl bg-cw-danger-soft px-4 py-3 text-[13.5px] text-cw-danger">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
