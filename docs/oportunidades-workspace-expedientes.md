@@ -54,6 +54,8 @@ Caso autorizado `1057049-332-LR26`, sin escrituras productivas, contacto o postu
 
 El foro aporta dotación9 (3 analistas/implementadores,2backend,2frontend,2DevOps), turnosT8/T6/T4/T2 con precio unitario por turno, equipamiento provisto por el hospital y ausencia de proceso anterior según la respuesta publicada. Los formularios incluyen una inconsistencia de título en N°5 que debe conservarse y aclararse. Al corte del piloto la licitación está cerrada; la ficha muestra426reclamos de los últimos12meses, distinto del snapshot histórico del PDF. La exportación API muestra otra cifra sin período equivalente: no mezclar esas métricas ni inferir probabilidad de atraso. Estos datos son del caso, no reglas universales del módulo.
 
+La [evaluación pagada y revisión de calidad](oportunidades-piloto-2026-10-13.md) registra costos, reserva incierta y brechas semánticas. La versión2 de síntesis transporta una cadena JSON externa y valida el contrato completo localmente, dentro de las reservas/replay existentes. No regenera reportes automáticamente ni cambia modelos globales. Las citas literales válidas no certifican la exactitud de una afirmación.
+
 ## Validación
 
 Pruebas sin `.env.local`, proveedores o escrituras productivas: unitarias de permisos puros, identidad/citas, calendarios DST, precios/cache, finanzas; SQL real PGlite de asignación/aislamiento/notificaciones/revocación, leases/reservas/replay/caps, RLS/Storage; pgTAP en CI sobre el stack aislado. Revisión DOM/renderizada adicional con APIs sintéticas en claro/oscuro y móvil/escritorio. El piloto pagado necesita muestra, presupuesto y esquema aprobados antes de activación remota.

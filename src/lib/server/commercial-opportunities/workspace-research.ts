@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
-import { answerSchema, extractionSchema, reportSchema, REPORT_OUTLINE, REPORT_VERSION, validOpportunityCitation, validateOpportunityFacts, type DocumentChunk, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
+import { answerSchema, extractionSchema, REPORT_VERSION, validOpportunityCitation, validateOpportunityFacts, type DocumentChunk, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
+import { opportunityReportPrompt } from '@/lib/commercial-opportunities/report-generation';
 import { opportunityFinancialScenario, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
-import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { opportunityGenerate, opportunityGenerateReport, type OpportunityJob } from './workspace-ai';
 import { saveOpportunityDocument } from './workspace-documents';
 import { downloadOpportunitySource, opportunityAttachmentLinks } from './workspace-download';
 import { resolveTicketForOrganization } from './tickets';
@@ -110,15 +111,12 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
     if (Date.now() - started > 120_000) return { waiting: true as const };
     const block = chunks.slice(offset, offset + 4);
     const extracted = await opportunityGenerate(client, job, { step: `extract:${createHash('sha256').update(block.map(c => c.id).join('|')).digest('hex')}`, category: 'research', role: 'extract', schema: extractionSchema, output: 4500,
-      prompt: `Extrae TODOS los requisitos, fechas, cifras, criterios, garantías y obligaciones de estos fragmentos. Conserva contradicciones. No interpretes una licitación privada con normas públicas. Las páginas de contexto público no son bases ni requisitos; sus hechos solo se atribuyen al cliente con identidad suficiente. Cada hecho documentado lleva chunkId y cita literal. Lo desconocido queda desconocido. Oferta del workspace: ${context.offer}\n${JSON.stringify(block)}` });
+      prompt: `Extrae TODOS los requisitos, fechas, cifras, criterios, garantías y obligaciones de estos fragmentos. Conserva contradicciones y títulos que no correspondan al objeto. No interpretes una licitación privada con normas públicas. Las páginas de contexto público no son bases ni requisitos; sus hechos solo se atribuyen al cliente con identidad suficiente. En foros distingue preguntas de participantes y respuestas oficiales: una pregunta no acredita un requisito ni un error de las bases. Cita juntos pregunta y respuesta cuando esta sea breve. Cada hecho documentado lleva chunkId y cita literal con el dato, cifra, unidad y período que respalda, no solo una etiqueta. missing se refiere solo a estos bloques; no declares ausente una respuesta o dato de un bloque vecino. Lo desconocido queda desconocido. Oferta del workspace: ${context.offer}\n${JSON.stringify(block)}` });
     facts.push(...validateOpportunityFacts(extracted.facts, block)); missing.push(...extracted.missing);
   }
-  const raw = await opportunityGenerate(client, job, { step: `synthesis:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, category: 'research', role: 'report', schema: reportSchema, output: 16_000,
-    prompt: `Genera un expediente MUY completo, proactivo y accionable en español para la empresa del workspace. No lo reduzcas a resumen. Fecha de corte ${job.payload.cutoff}.\n` +
-      `Incluye estas secciones adaptadas al tipo de oportunidad: ${REPORT_OUTLINE.join('; ')}. Cada hallazgo importante debe decir consecuencia, acción, responsable sugerido, plazo y evidencia esperada.\n` +
-      `Distingue hechos documentados, cálculos, propuestas y datos pendientes. No inventes salarios, experiencia propia, requisitos, ponderaciones, probabilidad de adjudicación, normativa o competencia. No conviertas referencial en máximo ni garantía en fecha de inicio. No produzcas cálculos financieros sin inputs respaldados o explícitamente propuestos; sus escenarios son para recalcular con código. No inventes fechas ISO ni plazos cerrados.\n` +
-      `Las citas deben repetir EXACTAMENTE una cita válida de los hechos. Todo criterio/requisito confirmado necesita evidencia. Si no hay bases, el análisis es parcial y condicional. El plan de ejecución es una propuesta, no compromiso.\n` +
-      JSON.stringify({ item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing, warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }) });
+  const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v1:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
+    prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
+      warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }) });
   const check = (citations: any[]) => citations.filter(c => validOpportunityCitation(c, chunks));
   raw.sections = raw.sections.map(section => ({ ...section, facts: validateOpportunityFacts(section.facts, chunks) }));
   raw.requirements = raw.requirements.map(r => { const evidence = check(r.evidence); return { ...r, evidence, status: r.status === 'supported' && !evidence.length ? 'unknown' : r.status }; });

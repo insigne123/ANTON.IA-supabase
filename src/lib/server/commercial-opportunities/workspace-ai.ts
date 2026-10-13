@@ -6,6 +6,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { AuthError } from '@/lib/server/auth-utils';
 import { opportunityDb } from './workspace-store';
 import { opportunityModel, opportunityUsageCost } from '@/lib/commercial-opportunities/model-policy';
+import { readOpportunityReportEnvelope, reportEnvelopeSchema } from '@/lib/commercial-opportunities/report-generation';
 
 export type OpportunityJob = { id: string; organization_id: string; opportunity_id: string | null; requested_by: string; dedupe_key: string;
   kind: string; payload: Record<string, any>; state: string; lease_token: string; attempts: number };
@@ -60,5 +61,18 @@ export async function opportunityGenerate<T extends z.ZodTypeAny>(client: Supaba
     opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admitted.id, p_cost: telemetry ? opportunityUsageCost(telemetry, price) : null,
       p_receipt: { model, price, status: telemetry ? 'invalid_output' : 'uncertain' }, p_data: null }));
     throw new AuthError('La evaluación no terminó. Conservamos los datos y el consumo observado.', 503);
+  }
+}
+
+/** A single reserved call with a small grammar; invalid inner JSON remains paid and replayable, never retried here. */
+export async function opportunityGenerateReport(client: SupabaseClient, job: OpportunityJob, input: {
+  step: string; prompt: string; output?: number;
+}, generate = generateStructuredWithTelemetry) {
+  const envelope = await opportunityGenerate(client, job, { ...input, schema: reportEnvelopeSchema, category: 'research', role: 'report' }, generate);
+  try {
+    return readOpportunityReportEnvelope(envelope);
+  } catch {
+    // The paid envelope and its usage are already durable. Do not expose source text in a parser error.
+    throw new AuthError('El informe recibido no cumple el formato requerido. Conservamos el resultado y el consumo observado.', 503);
   }
 }
