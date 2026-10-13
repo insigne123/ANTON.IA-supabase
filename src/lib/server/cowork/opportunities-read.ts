@@ -6,6 +6,8 @@ import {
 import { hiringSyncEnvironment } from '@/lib/server/commercial-opportunities/sync';
 import { resolveTicketForUser } from '@/lib/server/commercial-opportunities/tickets';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { readWorkspaceOverview } from '@/lib/server/commercial-opportunities/workspace-store';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -36,6 +38,16 @@ async function coworkOpportunitiesUser(client: SupabaseClient, scope: Scope, con
 export async function readCoworkOpportunities(client: SupabaseClient, scope: Scope, value: string) {
   const user = await coworkOpportunitiesUser(client, scope);
   if (!user) throw new Error('Esta consulta no está disponible para esta cuenta.');
+  if (opportunityWorkspaceEnabled()) {
+    const member = await client.from('organization_members').select('role').eq('organization_id', scope.organizationId).eq('user_id', scope.userId).maybeSingle();
+    if (member.error || !member.data) throw new Error('Esta consulta no está disponible para esta cuenta.');
+    const overview = await readWorkspaceOverview(client, { ...scope, role: member.data.role });
+    const query = value.trim().toLocaleLowerCase('es');
+    return { scope: overview.mode === 'assigned' ? 'assigned_opportunities' : 'workspace_opportunities', page: '/opportunities',
+      opportunities: overview.items.filter(item => !query || `${item.title} ${item.company_name || ''}`.toLocaleLowerCase('es').includes(query)).slice(0, 20)
+        .map(item => ({ id: item.id, title: item.title, company: item.company_name, kind: item.kind, reasons: item.reasons, deadline: item.deadline_at,
+          source: item.url, state: overview.work.find(w => w.opportunity_id === item.id)?.state || 'unassigned' })) };
+  }
   const now = new Date().toISOString();
   const profile = await findHiringProfile(client, scope);
   const [hiring, tenders, projects, runs] = profile ? await Promise.all([

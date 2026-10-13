@@ -32,7 +32,7 @@ export class ApolloOrganizationEnrichmentClientError extends Error {
 }
 
 type SearchPayload = LeadsSearchParams | LinkedInProfileSearchRequest | CompanyNameSearchRequest;
-const searchHeaders=()=>{const scope=readCachedAuthScope();return {'Content-Type':'application/json',...(scope?.organizationId?{'x-organization-id':scope.organizationId}:{})};};
+const searchHeaders=(opportunityId?:string)=>{const scope=readCachedAuthScope();return {'Content-Type':'application/json',...(scope?.organizationId?{'x-organization-id':scope.organizationId}:{}),...(opportunityId?{'x-opportunity-id':opportunityId}:{})};};
 
 function extractSearchErrorMessage(json: any, status: number): string {
   if (status === 401) return 'Tu sesión necesita renovarse. Vuelve a iniciar sesión y repite la búsqueda.';
@@ -72,10 +72,10 @@ function extractSearchErrorMessage(json: any, status: number): string {
   return raw;
 }
 
-async function postSearch(body: SearchPayload, signal?: AbortSignal): Promise<LeadSearchResponse> {
+async function postSearch(body: SearchPayload, signal?: AbortSignal, opportunityId?: string): Promise<LeadSearchResponse> {
   const res = await authenticatedApiFetch(PATH, {
     method: 'POST',
-    headers: searchHeaders(),
+    headers: searchHeaders(opportunityId),
     body: JSON.stringify(body),
     cache: 'no-store',
     signal,
@@ -106,10 +106,11 @@ export async function searchLeads(body: LeadsSearchParams, signal?: AbortSignal)
 export async function searchCompanies(
   body: CompanyFilterSearchRequest,
   signal?: AbortSignal,
+  opportunityId?: string,
 ): Promise<CompanySearchResponse> {
   const res = await authenticatedApiFetch(PATH, {
     method: 'POST',
-    headers: searchHeaders(),
+    headers: searchHeaders(opportunityId),
     body: JSON.stringify({ ...body, search_mode: 'companies' }),
     cache: 'no-store',
     signal,
@@ -133,8 +134,9 @@ export async function searchCompanies(
 export async function searchCompanyPeople(
   body: CompanyPeopleSearchRequest,
   signal?: AbortSignal,
+  opportunityId?: string,
 ): Promise<CompanyPeopleSearchResponse> {
-  const result = await postSearch({ ...body, search_mode: 'company_people' } as any, signal);
+  const result = await postSearch({ ...body, search_mode: 'company_people' } as any, signal, opportunityId);
   const raw = result as any;
   return {
     ...result,

@@ -181,6 +181,18 @@ export async function loadCoworkArtifactData(client: SupabaseClient, scope: Scop
       out.campaigns = coworkArtifactCampaigns((data || []) as Array<Record<string, unknown>>);
     } else if (name === 'opportunities') {
       if (!options.opportunities) throw new Error('Esta cuenta no tiene «Oportunidades»: el artefacto no puede usar esa tabla.');
+      const { opportunityWorkspaceEnabled } = await import('@/lib/commercial-opportunities/workspace');
+      if (opportunityWorkspaceEnabled()) {
+        const { readWorkspaceOverview } = await import('@/lib/server/commercial-opportunities/workspace-store');
+        const member = await client.from('organization_members').select('role').eq('organization_id', scope.organizationId).eq('user_id', scope.userId).maybeSingle();
+        if (member.error || !member.data) throw new Error('No se pudo verificar el acceso a Oportunidades.');
+        const overview = await readWorkspaceOverview(client, { ...scope, role: member.data.role });
+        out.opportunities = table('Oportunidades', 'Trabajo de oportunidades permitido para esta cuenta', [
+          { key: 'title', label: 'Oportunidad', type: 'text' }, { key: 'company', label: 'Empresa', type: 'text' },
+          { key: 'kind', label: 'Tipo', type: 'text' }, { key: 'state', label: 'Estado', type: 'text' },
+        ], overview.items.map(item => ({ title: item.title, company: item.company_name || item.buyer_name || '', kind: item.kind, state: overview.work.find(w => w.opportunity_id === item.id)?.state || 'unassigned' })));
+        continue;
+      }
       const { findHiringProfile, listHiringOpportunities, listProjectOpportunities, listTenderOpportunities } = await import('@/lib/server/commercial-opportunities/store');
       const profile = await findHiringProfile(client, scope);
       const [hiring, tenders, projects] = await Promise.all([

@@ -7,6 +7,9 @@ import {
 import { MANUAL_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
 import { hiringSyncEnvironment, hiringSyncPlan, monthStart, monthlyCapUsd } from '@/lib/server/commercial-opportunities/sync';
 import { resolveTicketForUser } from '@/lib/server/commercial-opportunities/tickets';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { readWorkspaceOverview } from '@/lib/server/commercial-opportunities/workspace-store';
+import { opportunityScope } from '@/lib/server/commercial-opportunities/workspace-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +21,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) return opportunitiesJson(await readWorkspaceOverview(auth.admin, opportunityScope(auth)));
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const [profile, perfil] = await Promise.all([findHiringProfile(auth.admin, scope), readPerfilForOpportunities(auth.admin, scope)]);
     const now = new Date().toISOString();

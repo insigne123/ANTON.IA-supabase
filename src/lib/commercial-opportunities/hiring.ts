@@ -25,6 +25,8 @@ export type JobAd = {
 };
 export type HiringProfile = {
   roles: string[]; regions: string[]; minAds: number; clients: string[]; contactsCompanies: string[];
+  /** Default preserved. Some workspaces sell services to recruiters/agencies. */
+  excludeAgencies?: boolean;
   /** Other ways companies write each role (Plan 15, search-terms.ts): an ad for one of them counts for its role. */
   variants?: Record<string, string[]>;
 };
@@ -180,7 +182,7 @@ export function groupHiring(ads: JobAd[], profile: HiringProfile, options: { now
     const posted = ad.postedAt ? Date.parse(ad.postedAt) : now;
     if (posted < since) { skipped.old++; continue; }
     const kind = employerKind(ad.company);
-    if (kind !== 'company') { skipped[kind]++; continue; }
+    if (kind !== 'company' && !(kind === 'agency' && profile.excludeAgencies === false)) { skipped[kind]++; continue; }
     const key = companyKey(ad);
     if (!key) { skipped.noCompany++; continue; }
     const entry = byCompany.get(key) || { ads: [], all: [], seen: new Set<string>() };

@@ -1,4 +1,5 @@
 import { chileanRegion } from './hiring';
+import {opportunitySourceDate} from './source-date';
 
 /**
  * Public tenders (plan 8, phase 3, PR-3d): Mercado Público tenders (API v1) and Compra Ágil quotes (API v2) in one shape,
@@ -33,9 +34,7 @@ const number = (value: unknown) => {
 const iso = (value: unknown) => {
   const raw = text(value, 40);
   if (!raw) return null;
-  const withZone = /[zZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : `${raw}-03:00`;
-  const time = Date.parse(withZone);
-  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+  return opportunitySourceDate(raw);
 };
 
 /** Compra Ágil region codes (1 to 16) to the names of the rest of the app. */

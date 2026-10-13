@@ -3,6 +3,8 @@ import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-o
 import { findHiringProfile, supabaseProjectStore } from '@/lib/server/commercial-opportunities/store';
 import { importSeiaFile, PROJECT_FILE_LIMITS } from '@/lib/server/commercial-opportunities/project-import';
 import { HiringSyncError } from '@/lib/server/commercial-opportunities/sync';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { assertOpportunityAdmin, opportunityScope } from '@/lib/server/commercial-opportunities/workspace-access';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -11,6 +13,7 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) assertOpportunityAdmin(opportunityScope(auth));
     const form = await request.formData().catch(() => null);
     const file = form?.get('file');
     if (!file || typeof file === 'string') throw new HiringSyncError('Adjunta el archivo del mapa del SEIA.', 400);

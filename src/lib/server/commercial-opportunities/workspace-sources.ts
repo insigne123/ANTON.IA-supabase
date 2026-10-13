@@ -1,0 +1,154 @@
+import { createHash } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
+import { AuthError } from '@/lib/server/auth-utils';
+import { canonicalLinkedInPost } from '@/lib/commercial-opportunities/workspace';
+import { groupHiring, jobAdFromFantastic } from '@/lib/commercial-opportunities/hiring';
+import { tenderUrl, type Tender } from '@/lib/commercial-opportunities/tenders';
+import { listOpenLicitaciones } from './mercado-publico';
+import { resolveTicketForOrganization } from './tickets';
+import { searchCompraAgil, compraAgilQuery } from './compra-agil';
+import { opportunityDb } from './workspace-store';
+import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+
+export const criteriaSchema = z.object({ roles: z.array(z.string().max(80)).max(30), keywords: z.array(z.string().max(120)).max(30),
+  postQueries: z.array(z.string().max(400)).min(1).max(12), decisionMakerTitles: z.array(z.string().max(80)).max(12) });
+const verdictSchema = z.object({ evaluations: z.array(z.object({ id: z.string().uuid(), verdict: z.enum(['recommended', 'review', 'excluded']),
+  reason: z.string().max(1000), service: z.string().max(500), score: z.number().int().min(0).max(100) })).max(40) });
+type Candidate = { kind: string; key: string; title: string; company?: string | null; domain?: string | null; description: string;
+  deadline?: string | null; amount?: number | null; currency?: string | null; url?: string | null; raw?: Record<string, unknown> };
+export const candidateFingerprint = (candidate: Candidate) => createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
+export function postCandidates(items: Record<string, any>[]): Candidate[] {
+  return items.filter(item => item.type === 'post' || item.content && item.linkedinUrl).flatMap(item => {
+    const link = canonicalLinkedInPost(String(item.linkedinUrl || ''));
+    const content = String(item.content || '').trim();
+    if (!link || !content) return [];
+    return [{ kind: 'linkedin_post', key: `post:${link.id}`, title: content.replace(/\s+/g, ' ').slice(0, 300), company: String(item.author?.name || '').slice(0, 300) || null,
+      description: content.slice(0, 6000), url: link.url, raw: { authorUrl: item.author?.linkedinUrl || null,
+        authorType: item.author?.type || null, postedAt: item.postedAt?.date || null, truncated: content.length > 6000,
+        signalType: item.repostedPost ? 'repost' : 'post', authorshipVerified: false } }];
+  });
+}
+export async function persistOpportunityCandidates(client: SupabaseClient, job: OpportunityJob, candidates: Candidate[], revision: number) {
+  let changed = 0;
+  const cursor = Number(job.payload.cursor || 0);
+  for (let offset = cursor; offset < Math.min(cursor + 400, candidates.length); offset += 100) {
+    const batch = [...new Map(candidates.slice(offset, offset + 100).map(c => [c.key,c])).values()];
+    const toEvaluate = opportunityDb(await client.rpc('opportunity_persist_candidates',{p_job:job.id,p_lease:job.lease_token,p_revision:revision,
+      p_rows:batch.map(c=>({...c,hash:candidateFingerprint(c)}))})) as string[] || [];
+    changed+=toEvaluate.length;
+    for (let i = 0; i < toEvaluate.length; i += 40) {
+      const ids = toEvaluate.slice(i, i + 40);
+      opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: job.organization_id, requested_by: job.requested_by, kind: 'evaluate',
+        dedupe_key: `evaluate:${job.id}:${offset}:${i}:${revision}`, payload: { ids, revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
+    }
+    job.payload.cursor = offset + 100;
+    const checkpoint = opportunityDb(await client.from('opportunity_jobs').update({payload:job.payload}).eq('id',job.id).eq('lease_token',job.lease_token).select('id').maybeSingle());
+    if (!checkpoint) throw new AuthError('El trabajo se retomó en otro proceso.',409);
+  }
+  return {changed, waiting:Number(job.payload.cursor || 0)<candidates.length};
+}
+const tenderCandidate = (t: Tender): Candidate => ({ kind: t.source === 'compra_agil' ? 'compra_agil' : 'tender', key: `${t.source}:${t.code}`, title: t.name,
+  company: t.buyer, description: t.description || t.name, deadline: t.closesAt, amount: t.amount, currency: t.currency, url: tenderUrl(t), raw: { code: t.code, status: t.status, items: t.items, region: t.region } });
+
+export async function captureOpportunityTenders(client: SupabaseClient, job: OpportunityJob, context: any) {
+  const snapshot = opportunityDb(await client.from('opportunity_source_snapshots').select('candidates').eq('job_id',job.id).eq('organization_id',job.organization_id).maybeSingle());
+  if (snapshot) return persistOpportunityCandidates(client,job,snapshot.candidates as Candidate[],context.revision);
+  const ticket = await resolveTicketForOrganization(client, { organizationId: job.organization_id, creatorId: job.requested_by });
+  if (!ticket) throw new AuthError('Conecta el ticket de Mercado Público desde la cuenta administradora.', 409);
+  // One ticket cannot run concurrent MP calls. Listing first; each Compra Ágil query gets its own checkpointed job.
+  if (job.payload.keyword) {
+    const response = await searchCompraAgil({ keyword: compraAgilQuery(job.payload.keyword), publishedFrom: new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10), pages: 4 }, { fetch: globalThis.fetch, ticket: ticket.ticket, canWait: () => false });
+    const candidates=response.tenders.map(tenderCandidate);
+    opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
+    return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), coverage: response.error ? 'partial' : 'up_to_four_pages' };
+  }
+  const tenders = await listOpenLicitaciones({ fetch: globalThis.fetch, ticket: ticket.ticket });
+  const candidates=tenders.map(tenderCandidate);
+  opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
+  for (const keyword of (context.criteria?.keywords || []).slice(0, 6)) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: job.organization_id, requested_by: job.requested_by,
+    kind: 'tenders', dedupe_key: `${job.dedupe_key}:agil:${createHash('sha256').update(keyword).digest('hex')}`, payload: { keyword, revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
+  return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), listed: tenders.length, coverage: 'active_listing' };
+}
+
+/** External paid starts have a reservation/receipt checkpoint BEFORE POST; never replay an ambiguous start. */
+async function apifyOpportunityItems(client: SupabaseClient, job: OpportunityJob, actor: string, body: Record<string, unknown>, cap: number) {
+  if (!process.env.APIFY_TOKEN) throw new AuthError('LinkedIn no está conectado.', 503);
+  const admission = opportunityDb(await client.rpc('opportunity_budget_reserve', { p_org: job.organization_id, p_job: job.id, p_step: 'provider', p_category: 'sources', p_micro: Math.ceil(cap * 1e6), p_lease:job.lease_token }));
+  if (!admission?.admitted) throw new AuthError('Se alcanzó el presupuesto de captación del workspace.', 402);
+  const saved = opportunityDb(await client.from('opportunity_ai_results').select('data').eq('organization_id', job.organization_id).eq('reservation_id', admission.id).maybeSingle());
+  if (saved) return { waiting: false as const, items: saved.data.items as Record<string, any>[] };
+  const headers = { authorization: `Bearer ${process.env.APIFY_TOKEN}`, 'content-type': 'application/json' };
+  let receipt = opportunityDb(await client.from('opportunity_budget_reservations').select('receipt').eq('organization_id', job.organization_id).eq('id', admission.id).single())?.receipt;
+  if (admission.fresh) {
+    opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: null, p_receipt: { stage: 'submitting', actor }, p_data: null }));
+    const response = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?${new URLSearchParams({ maxTotalChargeUsd: String(cap), timeout: '180', memory: '1024', restartOnError: 'false' })}`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new AuthError('La fuente no pudo iniciar la consulta. La reserva queda pendiente de comprobación.', 503);
+    const payload = await response.json();
+    if (!payload.data?.id) throw new AuthError('No se recibió el comprobante de la consulta.', 503);
+    receipt = { actor, runId: payload.data.id };
+    opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: null, p_receipt: receipt, p_data: null }));
+  }
+  if (!receipt?.runId) throw new AuthError('La consulta anterior no tiene comprobante; evitamos iniciar otra.', 409);
+  const runResponse = await fetch(`https://api.apify.com/v2/actor-runs/${encodeURIComponent(receipt.runId)}`, { headers, signal: AbortSignal.timeout(20_000) });
+  if (!runResponse.ok) throw new AuthError('No se pudo comprobar el estado de la fuente.', 503);
+  const run = (await runResponse.json()).data;
+  if (!['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'].includes(run?.status)) return { waiting: true as const, items: [] };
+  const cost = typeof run.usageTotalUsd === 'number' && run.usageTotalUsd >= 0 ? Math.ceil(run.usageTotalUsd * 1e6) : null;
+  if (run.status !== 'SUCCEEDED') {
+    opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: cost, p_receipt: { ...receipt, status: run.status }, p_data: null }));
+    throw new AuthError('La consulta de la fuente terminó sin resultados confirmados.', 503);
+  }
+  const response = await fetch(`https://api.apify.com/v2/datasets/${encodeURIComponent(run.defaultDatasetId)}/items?format=json&limit=300`, { headers, signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new AuthError('La fuente terminó; falta recuperar sus resultados.', 503);
+  const items = await response.json();
+  if (!Array.isArray(items)) throw new AuthError('Los resultados de la fuente no se pudieron leer.', 503);
+  opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: cost, p_receipt: { ...receipt, status: run.status, fetched: items.length, cap }, p_data: { items } }));
+  return { waiting: false as const, items };
+}
+export async function captureOpportunityLinkedIn(client: SupabaseClient, job: OpportunityJob, context: any) {
+  const primary = context.priority === job.kind || context.priority === 'balanced';
+  const cap = context.priority === 'balanced' ? .11 : primary ? .14 : .06;
+  if (job.kind === 'posts') {
+    const price = Number(process.env.OPPORTUNITIES_POST_USD_PER_ITEM);
+    if (!Number.isFinite(price) || price <= 0) throw new AuthError('Falta confirmar la tarifa del conector de publicaciones.', 503);
+    const queries = (context.criteria?.postQueries || []).slice(0, 3);
+    if (!queries.length) throw new AuthError('Los criterios de publicaciones se están preparando.', 409);
+    const perQuery = Math.min(30, Math.floor(cap / price / queries.length));
+    if (perQuery < 1) throw new AuthError('El saldo por corrida no alcanza para consultar publicaciones.', 402);
+    const data = await apifyOpportunityItems(client, job, 'harvestapi~linkedin-post-search', { searchQueries: queries, maxPosts: perQuery,
+      postedLimit: 'week', sortBy: 'date', profileScraperMode: 'short', scrapeReactions: false, scrapeComments: false }, cap);
+    return data.waiting ? { waiting: true as const } : { ...await persistOpportunityCandidates(client, job, postCandidates(data.items), context.revision), coverage: 'bounded_queries' };
+  }
+  const price = Number(process.env.APIFY_FANTASTIC_USD_PER_JOB || .005);
+  const start = Number(process.env.APIFY_FANTASTIC_START_USD || .01);
+  if(!Number.isFinite(price)||price<=0||!Number.isFinite(start)||start<0)throw new AuthError('La tarifa de avisos laborales no está configurada correctamente.',503);
+  const limit = Math.min(100, Math.floor((cap - start) / price));
+  const roles = context.criteria?.roles || [];
+  if (limit < 10 || !roles.length) throw new AuthError('Faltan criterios o presupuesto para consultar avisos laborales.', 409);
+  const data = await apifyOpportunityItems(client, job, 'fantastic-jobs~advanced-linkedin-job-search-api', { titleSearch: roles.slice(0, 20), locationSearch: context.territories.length ? context.territories : ['Chile'],
+    timeRange: '24h', limit, removeAgency: false, descriptionType: 'text', recruiterOnly: false }, cap);
+  if (data.waiting) return { waiting: true as const };
+  const ads = data.items.flatMap(item => { const ad = jobAdFromFantastic(item); return ad ? [ad] : []; });
+  const grouped = groupHiring(ads, { roles, regions: [], minAds: 1, clients: [], contactsCompanies: [], excludeAgencies: false }, { now: new Date().toISOString(), windowDays: 30 });
+  const candidates = grouped.opportunities.map(c => ({ kind: 'hiring', key: `hiring:${c.key}`, title: `Actividad de contratación: ${c.company}`, company: c.company,
+    domain: c.domain, description: c.signals.map(s => `${s.title} · ${s.location || ''} · ${s.url || ''}`).join('\n').slice(0, 6000), url: c.signals[0]?.url || null, raw: { ads: c.ads } }));
+  return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), coverage: 'bounded_daily_ads' };
+}
+export async function evaluateOpportunityBatch(client: SupabaseClient, job: OpportunityJob, context: any) {
+  const rows = opportunityDb(await client.from('commercial_opportunities').select('id,kind,title,company_name,data,deadline_at').eq('organization_id', job.organization_id).in('id', job.payload.ids || [])) || [];
+  const evaluated = await opportunityGenerate(client, job, { step: 'evaluate', category: 'evaluation', role: 'screen', schema: verdictSchema, output: 5000,
+    prompt: `Evalúa TODOS los candidatos contra la oferta del workspace, no solo palabras. Devuelve exactamente un veredicto por id: recommended, review o excluded, razón breve, servicio al que encaja y score de prioridad (no probabilidad).\n` +
+      `Ante ambigüedad o información incompleta usa review. Contrataciones no prueban compra externa. Distingue publicaciones de proveedores, candidatos y compradores. Un repost no prueba necesidad de quien comparte. Considera exclusiones de ESTA oferta; no descartes todas las agencias. La elegibilidad de licitaciones no está certificada leyendo su nombre.\n` + JSON.stringify({ offer: context.offer, services: context.services, exclusions: context.exclusions, priority: context.priority, candidates: rows }) });
+  let count = 0;
+  for (const row of rows) {
+    const answer = evaluated.evaluations.find(v => v.id === row.id);
+    if (!answer || row.data?.profileRevision !== context.revision) continue;
+    opportunityDb(await client.from('opportunity_evaluations').upsert({ organization_id: job.organization_id, opportunity_id: row.id, profile_revision: context.revision,
+      content_hash: row.data.contentHash, verdict: answer.verdict, reason: answer.reason, service: answer.service, model: 'opportunity/screen', evidence: [{ source: row.data.source, description: row.data.description }] }, { onConflict: 'opportunity_id,profile_revision,content_hash' }));
+    opportunityDb(await client.from('commercial_opportunities').update({ score: answer.verdict === 'excluded' ? Math.min(10, answer.score) : answer.score, reasons: [answer.reason], data: { ...row.data, evaluation: answer.verdict, matchedService: answer.service } })
+      .eq('organization_id', job.organization_id).eq('id', row.id).eq('data->>contentHash', row.data.contentHash).eq('data->>profileRevision', String(context.revision)));
+    count++;
+  }
+  return { evaluated: count, pending: rows.length - count };
+}
