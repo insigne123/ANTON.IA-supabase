@@ -54,8 +54,8 @@ export type AgendaInput = {
   campaignSteps: { count: number; examples: string[] };
   followups: AgendaFollowupCampaign[];
   linkedinAccepted: Array<{ name: string | null; daysSince: number }>;
-  /** Saved contacts with an email who never got one: the first email is today's work when nothing else waits (the home's «Para hoy»
-   * says so too). null when it could not be read: nothing is said about them then. */
+  /** Saved contacts with an email who never got one (up to 8 named): the first email is today's work when nothing else waits (the
+   * home's «Para hoy» says so too). null when it could not be read: nothing is said about them then. */
   neverWritten?: { count: number; examples: string[] } | null;
   sources: Record<AgendaSourceKey, AgendaSourceStatus>;
   /** Whether every connected mailbox has been swept completely; null when it is unknown. */
@@ -199,7 +199,7 @@ export function buildCoworkAgenda(input: AgendaInput): CoworkAgenda {
   }
   if (input.neverWritten && input.neverWritten.count > 0) {
     unranked.push({ kind: 'never_written', action: 'write_first', who: null, company: null, count: input.neverWritten.count,
-      examples: input.neverWritten.examples.slice(0, 3), sort: 0 });
+      examples: input.neverWritten.examples.slice(0, 8), sort: 0 });
   }
   for (const campaign of input.followups) {
     const held = campaign.heldCompanyReplied + campaign.heldNegotiation + campaign.historyIncomplete;
