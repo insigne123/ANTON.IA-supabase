@@ -38,7 +38,7 @@ export function validateOpportunityFacts(facts: z.infer<typeof evidenceFactSchem
 export function opportunityReportCoverage(documents: Array<{ extraction_status: string }>) {
   return documents.length > 0 && documents.every(doc => doc.extraction_status === 'read') ? 'complete' : 'partial';
 }
-export const REPORT_VERSION = 'opportunity-expedient/1';
+export const REPORT_VERSION = 'opportunity-expedient/2';
 export const REPORT_OUTLINE = [
   'Decisión ejecutiva y condiciones para avanzar', 'Contexto del cliente y encaje con la empresa del workspace',
   'Alcance, prestaciones y requisitos documentados', 'Elegibilidad, evidencia disponible y brechas',
