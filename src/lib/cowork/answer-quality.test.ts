@@ -141,7 +141,8 @@ test('the closing question is one plain sentence that ends the reply exactly onc
     'Preguntas para la reunión:\n- ¿Cuántos postulantes revisan?\n\n¿La agendo?');
   assert.equal(polish('Listo.', null).question, null);
   // A closed question without quick replies still gets a one-tap yes; without a question, none.
-  assert.deepEqual(polish('Te dejé la secuencia.', '¿Creo la campaña?').suggestions, [{ label: 'Sí, adelante', message: 'Sí, adelante.' }]);
+  assert.deepEqual(polish('Te dejé la secuencia.', '¿Creo la campaña?').suggestions, [{ label: 'Sí, crear la campaña', message: 'Sí, adelante.' }]);
+  assert.deepEqual(polish('Te dejé la lista.', '¿La reviso?').suggestions, [{ label: 'Sí, adelante', message: 'Sí, adelante.' }]);
   assert.equal(polish('Listo.', null).suggestions, null);
   assert.deepEqual(polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña?',
     suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] }).suggestions, [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }]);
@@ -344,4 +345,15 @@ test('a tool name copied into a reply is said in the person\'s words', async () 
   const { polishCoworkText } = await import('./answer-quality');
   assert.equal(polishCoworkText('Después puedo usar lead.enrich para traer su perfil.'), 'Después puedo usar la búsqueda de su correo para traer su perfil.');
   assert.equal(polishCoworkText('Escríbele a francisca.munoz@falabella.test.'), 'Escríbele a francisca.munoz@falabella.test.');
+});
+
+test('a bare yes under a campaign or an email offer says what it does, and the sender is called Gmail', () => {
+  const campaign = polishCoworkAnswer({ reply: 'Listo el seguimiento.', document: null, question: '¿Creo la campaña pausada para Daniela con los dos correos, el seguimiento al día 8?',
+    suggestions: [{ label: 'Sí', message: 'Sí, créala' }, { label: 'Hazlo más corto', message: 'Hazlo más corto' }] });
+  assert.deepEqual(campaign.suggestions?.map(chip => chip.label), ['Sí, crear la campaña', 'Hazlo más corto']);
+  assert.equal(campaign.suggestions?.[0].message, 'Sí, créala');
+  const writing = polishCoworkAnswer({ reply: 'Tienes 4 contactos.', document: null, question: '¿Les escribo el primer correo a los 4?' });
+  assert.deepEqual(writing.suggestions?.map(chip => chip.label), ['Sí, escríbelo']);
+  assert.equal(polishCoworkText('Usé Google como remitente; saldría desde Google. Exporta a Google Sheets.'),
+    'Usé Gmail como remitente; saldría desde Gmail. Exporta a Google Sheets.');
 });

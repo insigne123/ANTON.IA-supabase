@@ -27,12 +27,17 @@ const TOOL_WORDS: Array<[RegExp, string]> = [
 ];
 const toolWords = (name: string) => TOOL_WORDS.find(([pattern]) => pattern.test(name))?.[1] ?? 'esa acción';
 
+// The sender is named as the person knows it: Gmail, not the provider code «google» (round 9: «Usé Google como remitente» next to a
+// card that said Gmail).
+const GOOGLE_SENDER = /\bGoogle\b(?=\s+(?:como|de)\s+remitente)|(?<=\b(?:desde|remitente:?|v[ií]a|con tu cuenta de|tu cuenta de)\s+)Google\b(?!\s+(?:Sheets|Drive|Calendar|Meet|Workspace|Ads|Maps|Analytics|Docs))/g;
+
 export function polishCoworkText(text: string): string {
   return outsideCode(String(text || ''), chunk => chunk
     .replace(CODE_PATTERN, (_match, _wrap, code: string) => COWORK_GLOSSARY[code] || code)
     .replace(TOOL_NAME, (_match, _wrap, name: string) => toolWords(name))
     .replace(CODE_EMAIL, '$1')
-    .replace(ID_IN_PARENS, ''));
+    .replace(ID_IN_PARENS, '')
+    .replace(GOOGLE_SENDER, 'Gmail'));
 }
 
 /** A quick reply that leaves something for later («Sí, cuando lo guarde…»,
@@ -363,6 +368,15 @@ export function withTablesAsBlocks(reply: string, blocks: CoworkBlock[]): { repl
  * replies, this one answers answer.question as a person would type it. */
 export const COWORK_YES_CHIP: CoworkSuggestion = { label: 'Sí, adelante', message: 'Sí, adelante.' };
 
+// A yes that says what it does (round 9: a bare «Sí» under «¿Creo la campaña pausada con los dos correos?» did not say what it creates).
+const BARE_YES = /^\s*(?:s[íi]|s[íi],?\s+adelante|ok|dale)[.!]?\s*$/iu;
+function namedYes(chip: CoworkSuggestion, question: string | null): CoworkSuggestion {
+  if (!question || !BARE_YES.test(chip.label)) return chip;
+  if (/campa[ñn]a/i.test(question)) return { ...chip, label: 'Sí, crear la campaña' };
+  if (/\b(?:escrib|redact|prepar)\w*\b[^?]*\bcorreos?\b/i.test(question)) return { ...chip, label: 'Sí, escríbelo' };
+  return chip;
+}
+
 /** The reply as it is kept and read back (history, copies, exports): it ends
  * with the closing question, which also travels apart so the chat can show it
  * next to the quick replies. */
@@ -397,7 +411,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     document: answer.document ? { ...answer.document, content: withoutScopeNote(polishCoworkText(answer.document.content)) } : null,
     question,
     blocks: blocks.length ? blocks : null,
-    suggestions: choices ? null : suggestions.length ? suggestions : question ? [COWORK_YES_CHIP] : null,
+    suggestions: choices ? null : suggestions.length ? suggestions.map(chip => namedYes(chip, question)) : question ? [namedYes(COWORK_YES_CHIP, question)] : null,
     choices,
   };
 }
