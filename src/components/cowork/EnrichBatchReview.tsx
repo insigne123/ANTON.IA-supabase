@@ -43,6 +43,6 @@ export function EnrichBatchReview({ runId, onApprove, onReject, resolving }: {
     <ReviewNote ok={ready}>{!ready
       ? 'El lote cambió desde la revisión o falta un contacto. Descártala y pide una nueva.'
       : 'Coincide con la propuesta. Al aprobar se consultará el correo de cada contacto; cada resultado queda con su estado individual y nada se inventa.'}</ReviewNote>
-    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Aprobar y enriquecer" disabled={!ready} resolving={resolving} />
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Aprobar y buscar correos" disabled={!ready} resolving={resolving} />
   </div>;
 }

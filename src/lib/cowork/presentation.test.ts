@@ -266,8 +266,14 @@ test('a turn names what its reads found, once each and in order', () => {
     event('tool.completed', { action: 'leads.search', input: 'Otra', result: { items: [{ lead_id: 'x' }, { lead_id: 'y' }, { lead_id: 'z' }] } }),
     event('tool.completed', { action: 'metrics.overview', input: '', result: { sent: 4 } }),
   ];
-  assert.deepEqual(coworkTurnFindings(events).map(coworkFindingText), ['3 contactos', 'sin envíos']);
+  assert.deepEqual(coworkTurnFindings(events).map(coworkFindingText), ['sin envíos', '3 contactos']);
   assert.deepEqual(coworkTurnFindings([]), []);
+  // A narrow search that found nobody and then the whole list: only what the list found.
+  const narrowThenAll = [
+    event('tool.completed', { action: 'leads.search', input: 'sin correo', result: { items: [] } }),
+    event('tool.completed', { action: 'leads.search', input: '', result: { items: [{ lead_id: 'a' }, { lead_id: 'b' }] } }),
+  ];
+  assert.deepEqual(coworkTurnFindings(narrowThenAll).map(coworkFindingText), ['2 contactos']);
 });
 
 test('each email or sequence card knows what happened to it later in the thread', () => {

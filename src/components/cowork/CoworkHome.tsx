@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowRight, ChevronDown, X } from 'lucide-react';
-import { coworkOfferMessage, coworkOverviewFigures, type CoworkOverview } from '@/lib/cowork/overview';
+import { coworkOfferMessage, coworkOverviewFigures, coworkTodayItems, type CoworkOverview, type CoworkTodayItem } from '@/lib/cowork/overview';
 import { coworkSinceWhen, type CoworkSince, type CoworkSinceKind } from '@/lib/cowork/since-visit';
 import { coworkShortTime, coworkStatusCopy, type CoworkIconKey, type CoworkThreadSummary } from '@/lib/cowork/presentation';
 import { COWORK_STARTERS } from '@/lib/cowork/starters';
@@ -58,6 +58,29 @@ function SinceLastVisit({ since, onAsk }: { since: CoworkSince; onAsk: (prompt: 
           </span>
           <span className="min-w-0 flex-1 text-[14px] leading-5 text-cw-text">{item.text}</span>
           <span className="hidden shrink-0 text-[12.5px] font-medium text-cw-accent sm:inline">{SINCE_ACTION[item.kind]}</span>
+          <ArrowRight className="h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+        </button>
+      </li>)}
+    </ul>
+  </section>;
+}
+
+const TODAY_ICON: Record<CoworkTodayItem['id'], CoworkIconKey> = { write: 'send', emails: 'search' };
+
+/** «Para hoy»: what is ready to move from your own figures, each row one click that starts the work. */
+function TodayList({ items, onAsk }: { items: CoworkTodayItem[]; onAsk: (prompt: string) => void }) {
+  const id = useId();
+  return <section aria-labelledby={id} className="cw-rise mt-6 [animation-delay:90ms]">
+    <h2 id={id} className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">Para hoy</h2>
+    <ul className="divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated shadow-[var(--cw-shadow-sm)]">
+      {items.map(item => <li key={item.id}>
+        <button type="button" onClick={() => onAsk(item.prompt)}
+          className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]">
+          <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cw-accent-soft text-cw-accent">
+            <CoworkIcon name={TODAY_ICON[item.id]} className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1 text-[14px] leading-5 text-cw-text">{item.text}</span>
+          <span className="hidden shrink-0 text-[12.5px] font-medium text-cw-accent sm:inline">{item.action}</span>
           <ArrowRight className="h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
         </button>
       </li>)}
@@ -152,6 +175,9 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
   const recent = threads.filter(thread => !pending.includes(thread)).slice(0, 4);
   const name = overview?.firstName;
   const askOffer = Boolean(onSaveOffer) && overview?.hasOffer === false && !offerHidden;
+  const today = coworkTodayItems(overview);
+  // A starting point «Para hoy» already offers with the account's own numbers is not repeated below it.
+  const starters = ready && today.some(item => item.id === 'write') ? COWORK_STARTERS.filter(item => item.id !== 'escribir') : COWORK_STARTERS;
 
   return <div className="cw-scroll flex h-full min-h-0 flex-col overflow-y-auto">
     <div className="mx-auto flex w-full max-w-[46rem] flex-1 flex-col justify-center px-4 py-10 sm:px-6 md:py-16">
@@ -164,12 +190,13 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
       {!ready && !loading && !listFailed && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes revisar tus conversaciones guardadas.</p>}
       <HomeFigures overview={overview} loading={overviewLoading} />
       {overview?.since?.items.length ? <SinceLastVisit since={overview.since} onAsk={onSuggestion} /> : null}
+      {ready && today.length > 0 && <TodayList items={today} onAsk={onSuggestion} />}
       <CwCollapse show={askOffer}>
         {onSaveOffer && <div className="pt-6"><OfferCard draft={offerDraft} onDraftChange={onOfferDraftChange} onSave={onSaveOffer} onHide={hideOffer} /></div>}
       </CwCollapse>
       {/* The starting points come in one after another, a beat apart; with less motion they are simply there. */}
       <div className="mt-5 flex flex-wrap justify-center gap-2">
-        {COWORK_STARTERS.map((item, index) => <button key={item.id} type="button" onClick={() => onSuggestion(item.prompt)}
+        {starters.map((item, index) => <button key={item.id} type="button" onClick={() => onSuggestion(item.prompt)}
           style={{ animationDelay: `${120 + index * 45}ms` }}
           className="cw-rise inline-flex items-center gap-2 rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
           <CoworkIcon name={item.icon} className="h-4 w-4 text-cw-accent" />{item.title}
