@@ -2164,3 +2164,9 @@ test('the same offer again after «¿qué hago?» is done, and a follow-up accep
     { subject: 'Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nPrimero.', day: 1 },
     { subject: 'Re: Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nSeguimiento.', day: 8 }]);
 });
+
+test('«¿qué puedes hacer?» is answered with what Cowork does', async () => {
+  const { coworkListsCapabilities } = await import('./agent-loop');
+  assert.equal(coworkListsCapabilities('Hoy tienes 7 contactos. Lo más rápido es escribirle a tus 4 contactos con correo.'), false);
+  assert.equal(coworkListsCapabilities('Puedo ayudarte así:\n- Buscar prospectos\n- Tus contactos y sus correos\n- Correos y campañas\n- LinkedIn'), true);
+});

@@ -73,15 +73,18 @@ function TodayList({ items, onAsk }: { items: CoworkTodayItem[]; onAsk: (prompt:
   return <section aria-labelledby={id} className="cw-rise mt-6 [animation-delay:90ms]">
     <h2 id={id} className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">Para hoy</h2>
     <ul className="divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated shadow-[var(--cw-shadow-sm)]">
-      {items.map(item => <li key={item.id}>
+      {items.map((item, index) => <li key={item.id}>
         <button type="button" onClick={() => onAsk(item.prompt)}
           className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]">
           <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cw-accent-soft text-cw-accent">
             <CoworkIcon name={TODAY_ICON[item.id]} className="h-4 w-4" />
           </span>
           <span className="min-w-0 flex-1 text-[14px] leading-5 text-cw-text">{item.text}</span>
-          <span className="hidden shrink-0 text-[12.5px] font-medium text-cw-accent sm:inline">{item.action}</span>
-          <ArrowRight className="h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          {/* The first row is the day's main action (round 3 readings: both rows weighed the same); the label shows on phones too. */}
+          <span className={cn('shrink-0 text-[12.5px] font-medium', index === 0
+            ? 'rounded-full bg-cw-accent px-3 py-1 text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-colors group-hover:bg-cw-accent-hover'
+            : 'text-cw-accent')}>{item.action}</span>
+          <ArrowRight className={cn('hidden h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5', index > 0 && 'sm:block')} aria-hidden="true" />
         </button>
       </li>)}
     </ul>

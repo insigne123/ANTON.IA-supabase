@@ -650,6 +650,16 @@ export function coworkClarificationAnswer<T extends { question?: unknown; sugges
   return { ...answer, ...(asks ? { question: null } : {}), suggestions: chips.length ? chips : null };
 }
 
+const CAPABILITIES_FEEDBACK = 'El usuario preguntó qué puedes hacer: responde eso primero, en una lista corta de 5 a 7 líneas («- Buscar prospectos: …»): buscar prospectos nuevos, tus contactos y sus correos, investigar a una persona, correos y campañas, LinkedIn, seguimiento y respuestas, cifras e informes, cada una con un ejemplo de su cuenta y lo que pide aprobación. Después, en una frase, el paso que más le sirve hoy, y la pregunta para darlo.';
+
+/** Whether an answer lists what Cowork does: four or more list lines, or as many capabilities named. */
+export function coworkListsCapabilities(reply: string) {
+  const lines = reply.split('\n').filter(line => /^\s*(?:[-*•]|\d+[.)])\s/.test(line)).length;
+  const plain = reply.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const named = [/prospect/, /correo/, /investig/, /campan/, /linkedin/, /seguimiento|respuesta/, /cifra|metrica|informe/].filter(item => item.test(plain)).length;
+  return lines >= 4 || named >= 5;
+}
+
 /** The closing question of an answer (its last paragraph, when it asks), or null. */
 export function coworkClosingQuestionOf(reply: string | undefined): string | null {
   const last = String(reply || '').trim().split(/\n\s*\n/).pop()?.trim() || '';
@@ -1212,6 +1222,9 @@ async function runCoworkLoop(input: {
   const requestedMetrics = coworkRequestedMetricQuery(input.message);
   const smallTalk = input.message.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
   const informationOnly = /^(?:hola(?: anton(?: ia)?| cowork)?|buen(?:os dias|as tardes|as noches)|(?:hola )?(?:que haces|que puedes hacer(?: tu| por mi)?|dime (?:todo )?(?:lo )?que puedes hacer|como me puedes ayudar|para que sirves))$/.test(smallTalk);
+  // «¿Qué puedes hacer por mí?» asks for what Cowork does, not only for the next step (round 3: two lines that only offered a campaign).
+  const capabilitiesAsked = informationOnly && /(?:que haces|que puedes hacer|como me puedes ayudar|para que sirves)/.test(smallTalk);
+  let capabilitiesChecked = false;
   if (requestedMetrics && input.metricPeriods && !observations.some(item => item.action === 'metrics.rates') && readsUsed < readLimit()) {
     await input.authorize(); input.signal.throwIfAborted();
     const query = JSON.stringify(requestedMetrics);
@@ -1366,6 +1379,12 @@ async function runCoworkLoop(input: {
           && !closingFallback && !judgedFallback && coworkBlocks(decision.answer.blocks).some(block => block.type === 'email_draft' || block.type === 'sequence')) {
           coordinatorEmails = decision.answer;
           rejections.push({ action: 'answer', reason: WRITER_FIRST });
+          continue;
+        }
+        if (capabilitiesAsked && !capabilitiesChecked && !closingFallback && turn < last && !late() && !coworkListsCapabilities(decision.answer.reply)) {
+          capabilitiesChecked = true;
+          closingFallback = decision.answer;
+          rejections.push({ action: 'answer', reason: CAPABILITIES_FEEDBACK, previous: decision.answer });
           continue;
         }
         // A «sí» to what the previous answer offered is done, not answered again: once per turn, with a decision to spare.
@@ -1862,7 +1881,10 @@ async function runCoworkLoop(input: {
       if (standing && error instanceof CoworkDecisionRejected && !input.signal.aborted) return standing;
       if (input.signal.aborted) throw error;
       if (!(error instanceof CoworkDecisionRejected) || turn === last) return rescueOr(error);
-      rejections.push({ action: decision.action, reason: error.feedback });
+      // A proposal that could not be prepared is fixed without telling the person about the attempt (round 3: «Lo intenté de nuevo:
+      // la propuesta anterior no pudo prepararse porque el sistema no dejó usar a Daniela con los filtros»).
+      rejections.push({ action: decision.action, reason: error.userFacing
+        ? `${error.feedback} Corrígela en esta decisión. Tu nota habla solo de la propuesta que queda, sin contar este intento ni su motivo.` : error.feedback });
     }
   }
   if (written) return written.answer;
