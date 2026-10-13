@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { coworkBuyingRoleRank } from '@/lib/cowork/buying-role';
 import { coworkLeadsSummary, type CoworkLeadsSummaryInput } from '@/lib/cowork/leads-summary';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { linkedinProfilesMatch, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
@@ -170,7 +171,10 @@ export async function queryCoworkLeads(
     const haystack = SEARCH_FIELDS.map(field => String((row as Record<string, unknown>)[field] || '')).join(' ').toLocaleLowerCase('es');
     const matched = terms.filter(term => haystack.includes(term.toLocaleLowerCase('es'))).length;
     return { row, matched };
-  }).sort((left, right) => right.matched - left.matched || created(right.row).localeCompare(created(left.row)));
+  // «Con correo» is who to write to: who decides the purchase comes first, then the most recent.
+  }).sort((left, right) => right.matched - left.matched
+    || (withEmail ? coworkBuyingRoleRank((left.row as Record<string, unknown>).title) - coworkBuyingRoleRank((right.row as Record<string, unknown>).title) : 0)
+    || created(right.row).localeCompare(created(left.row)));
   const best = ranked[0]?.matched || 0;
   const items = await withTeamLocks(client, scope, ranked.slice(0, max).map(entry => withProfile(entry.row)));
   // Either list cut at the fetch limit may hold more matches than the ones ranked here.

@@ -754,7 +754,7 @@ test('the v12 reading: long closing questions, the brief\'s words in the reply, 
   assert.deepEqual(coworkNextStepIssues({ blocks: to('Antecedentes en Securitas', ['fmunoz@securitas.cl']), question: '¿Creo la campaña pausada para Felipe?' }), []);
   assert.deepEqual(coworkNextStepIssues({ blocks: to('Antecedentes', null), question: null }), []);
   // In a turn, the Writer is asked for it, unless the person asked for the campaign in the request (the coordinator proposes it next).
-  const felipe = 'Hola Felipe,\n\nEn seguridad privada, cuando entra un grupo de guardias, revisar uno por uno sus antecedentes deja turnos sin cubrir.\n\nAXIS consulta antecedentes por lote.\n\n¿Cuántos ingresos revisan al mes en Securitas?\n\nNicolás Yarur\nGerente Comercial, Yago';
+  const felipe = 'Hola Felipe,\n\nEn seguridad privada, cuando entra un grupo de guardias, revisar uno por uno sus antecedentes deja turnos sin cubrir.\n\nAXIS consulta antecedentes por lote.\n\n¿Cuántos ingresos revisan al mes en Securitas?\n\nSaludos,\nNicolás Yarur\nGerente Comercial, Yago';
   const lone: CoworkWriterOutput = { reply: 'Escribí el correo para Felipe.', question: null, suggestions: [{ label: 'Hazlo más corto', message: 'Hazlo más corto' }],
     blocks: [{ type: 'email_draft', title: 'Correo para Felipe', to: ['fmunoz@securitas.cl'], subject: 'Antecedentes en Securitas', body: felipe }] };
   const asked = { ...lone, question: '¿Creo la campaña pausada para Felipe?' };
@@ -1091,8 +1091,10 @@ test('an edit keeps the demo the email asked for unless the person asked to drop
   const earlier = [{ to: [], subject: 'Antecedentes', body: 'Hola,\n\nTexto.\n\n¿Qué día te acomoda una demo de 30 minutos esta semana?\n\nNicolás Yarur' }];
   const shorter = { type: 'email_draft' as const, title: 'Corto', to: null, subject: 'Antecedentes', body: 'Hola,\n\nTexto.\n\n¿Cuántos postulantes revisan al mes?\n\nNicolás Yarur' };
   const shorts = (request: string) => coworkDraftIssues([shorter], { ...context, earlier, edit: true, shorter: true, request }).map(issue => issue.short);
-  assert.ok(shorts('más corto y menos vendedor').includes('conserva la demo'));
+  assert.ok(shorts('más corto').includes('conserva la demo'));
   assert.ok(!shorts('más corto y sin la demo').includes('conserva la demo'));
+  // «Menos vendedor» may trade it for a lighter question (said in the reply by coworkEarlierThread).
+  assert.ok(!shorts('más corto y menos vendedor').includes('conserva la demo'));
 });
 
 test('a reply does not describe a meeting the email does not ask for, whatever the verb', () => {
@@ -1119,7 +1121,7 @@ test('an edit that drops the demo it was not asked to drop gets its closing ques
   const earlier = [{ to: [], subject: 'Antecedentes', body: 'Hola,\n\nRevisar uno por uno deja vacantes abiertas.\n\nAXIS consulta el PJUD. Te propongo una demo.\n\n¿Qué día de esta semana te acomoda una demo de 30 minutos?\n\nNicolás Yarur' }];
   const output = { reply: 'Cambié la demo por una pregunta más liviana. Quité los adjetivos de venta.', question: null, suggestions: [],
     blocks: [{ type: 'email_draft' as const, title: 'Corto', to: null, subject: 'Antecedentes', body: 'Hola,\n\nRevisar uno por uno deja vacantes abiertas.\n\n¿Cuántos postulantes revisan al mes?\n\nNicolás Yarur' }] };
-  const kept = coworkEarlierThread(output, { earlier, edit: true, shorter: true, request: 'más corto y menos vendedor' });
+  const kept = coworkEarlierThread(output, { earlier, edit: true, shorter: true, request: 'más corto' });
   assert.match((kept.blocks[0] as { body: string }).body, /\n¿Qué día de esta semana te acomoda una demo de 30 minutos\?\n/);
   assert.doesNotMatch((kept.blocks[0] as { body: string }).body, /Cuántos postulantes/);
   assert.doesNotMatch(kept.reply, /Cambié la demo/);
@@ -1127,6 +1129,22 @@ test('an edit that drops the demo it was not asked to drop gets its closing ques
   // Asked to drop it, it stays out.
   const dropped = coworkEarlierThread(output, { earlier, edit: true, request: 'sin la demo' });
   assert.match((dropped.blocks[0] as { body: string }).body, /Cuántos postulantes/);
+  // «Menos vendedor» may trade it for a lighter question: said in the reply, with a chip to keep it.
+  const softer = coworkEarlierThread({ ...output, reply: 'Quité los adjetivos de venta.' }, { earlier, edit: true, shorter: true, request: 'más corto y menos vendedor' });
+  assert.match((softer.blocks[0] as { body: string }).body, /Cuántos postulantes/);
+  assert.match(softer.reply, /Cambié la demo por una pregunta más liviana\.$/);
+  assert.equal(softer.suggestions[0].label, 'Mantener la demo');
+});
+
+test('an email that ends with the signature and no closing word gets «Saludos,»; one that has it, or another signer, does not', async () => {
+  const { coworkWithSignOff } = await import('./writer');
+  const body = 'Hola José,\n\nTexto.\n\n¿Cuántos postulantes revisan al mes?\n\nNicolás Yarur\nGerente Comercial\nYago SpA';
+  assert.equal(coworkWithSignOff(body, 'Nicolás Yarur'), 'Hola José,\n\nTexto.\n\n¿Cuántos postulantes revisan al mes?\n\nSaludos,\nNicolás Yarur\nGerente Comercial\nYago SpA');
+  const signed = body.replace('\n\nNicolás', '\n\nSaludos,\nNicolás');
+  assert.equal(coworkWithSignOff(signed, 'Nicolás Yarur'), signed);
+  assert.equal(coworkWithSignOff(body.replace('¿Cuántos postulantes revisan al mes?', 'Gracias.'), 'Nicolás Yarur'), body.replace('¿Cuántos postulantes revisan al mes?', 'Gracias.'));
+  assert.equal(coworkWithSignOff(body, 'Carla Soto'), body);
+  assert.equal(coworkWithSignOff(body, null), body);
 });
 
 test('an edit\'s reply carries the real word count and never claims a greeting or signature it changed', async () => {

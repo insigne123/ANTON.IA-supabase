@@ -28,6 +28,7 @@ import { coworkContactsImportSchema, type CoworkContactsImportInput } from './co
 import { coworkReplyThreadSchema, type CoworkReplyThreadInput } from './reply-proposal';
 import { coworkLinkedinBatchLeads, coworkLinkedinBatchSchema, type CoworkLinkedinBatchInput } from './linkedin-batch';
 import { coworkPrepareBatchPeople, coworkPrepareBatchSchema, type CoworkPrepareBatchInput } from './prepare-batch';
+import { coworkBuyingRoleRank } from './buying-role';
 import { coworkThreadMemorySchema, type CoworkThreadMemory } from './thread-memory';
 import { coworkCorrectionVerdict, type CoworkCorrectionVerdict } from './correction-guard';
 import { withCoworkReports } from './report-document';
@@ -763,10 +764,6 @@ export function coworkLookupProposal(answer: { reply: string; question?: unknown
 // Looking for LinkedIn profiles offered in words (round 10: «¿Busco el perfil de LinkedIn de tus 7 contactos guardados?», a «sí» and
 // only then the card).
 const OFFERS_PROFILE_LOOKUP = /\b(?:busc\w*|encontr\w*|complet\w*)\b[^?]{0,80}\bperfil(?:es)?\b[^?]{0,40}\blinked\s?in\b/i;
-// Who decides or influences the purchase goes first; junior and support roles last.
-const BUYING_ROLE = /\b(?:gerente|jef[ea]|director\w*|head|manager|l[ií]der|lead|vp|chief|subgerente)\b/i;
-const SUPPORT_ROLE = /\b(?:junior|jr|analista|asistente|practicante|becari[oa]|trainee)\b/i;
-const roleRank = (title: unknown) => { const text = String(title || ''); return SUPPORT_ROLE.test(text) ? 2 : BUYING_ROLE.test(text) ? 0 : 1; };
 
 /**
  * Looking for LinkedIn profiles offered (or accepted) in words becomes the «Preparar contactos» card with goal linkedin, built from the
@@ -783,7 +780,7 @@ export function coworkProfileLookupProposal(answer: { reply: string; question?: 
   const read = [...(history || []).flatMap(turn => turn.observations || []), ...observations];
   const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
   const missing = collectCoworkLeadRows(read).filter(row => uuid.test(row.id) && !row.linkedin_url)
-    .map((row, index) => ({ row, index })).sort((a, b) => roleRank(a.row.title) - roleRank(b.row.title) || a.index - b.index).map(item => item.row);
+    .map((row, index) => ({ row, index })).sort((a, b) => coworkBuyingRoleRank(a.row.title) - coworkBuyingRoleRank(b.row.title) || a.index - b.index).map(item => item.row);
   const plain = (text: string) => text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const named = missing.filter(row => { const first = plain(String(row.name || '')).split(/\s+/)[0]; return first.length > 2 && plain(offer).includes(first); });
   const people = (named.length ? named : missing).slice(0, max);

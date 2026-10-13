@@ -463,3 +463,18 @@ test('«sin correo» keeps only saved contacts still without an email (round 2 o
   assert.equal(found.limit, 25);
   assert.equal((found as { withoutEmailOnly?: boolean }).withoutEmailOnly, true);
 });
+
+test('«con correo» puts who decides the purchase first and junior roles last; a plain search keeps the newest first', async () => {
+  const row = (id: string, title: string, created: string) => ({ id, name: `Persona ${id}`, title, company: 'Empresa', email: `p${id}@x.cl`, city: null, country: null, created_at: created });
+  const rows = [row('1', 'Reclutador Junior', '2026-01-04'), row('2', 'Jefa de Selección', '2026-01-03'), row('3', 'Coordinadora', '2026-01-02'), row('4', 'Gerente de Personas', '2026-01-01')];
+  const withNot = (data: unknown[]) => {
+    const chain: Record<string, unknown> = {};
+    for (const name of ['select', 'eq', 'order', 'limit', 'or', 'not', 'neq', 'is', 'in']) chain[name] = () => chain;
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data, error: null }));
+    return { from: () => chain } as unknown as SupabaseClient;
+  };
+  const ordered = await queryCoworkLeads(withNot(rows), { userId: 'owner', organizationId: 'org' }, 'leads.search', 'con correo');
+  assert.deepEqual((ordered.items as Array<{ id: string }>).map(item => item.id), ['2', '4', '3', '1']);
+  const plain = await queryCoworkLeads(withNot(rows), { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
+  assert.deepEqual((plain.items as Array<{ id: string }>).map(item => item.id), ['1', '2', '3', '4']);
+});

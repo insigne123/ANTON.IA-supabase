@@ -177,6 +177,14 @@ export function coworkReadFinding(payload: Record<string, unknown> | null | unde
     if (thread.available === false) return { count: null, label: 'no es tuya' };
     return thread.reply ? { count: null, label: 'con su respuesta' } : { count: null, label: 'sin respuesta aún' };
   }
+  // A day whose only work is writing to contacts who never got an email counts them (round 10: «1 pendiente de hoy» next to «4 contactos»).
+  if (action === 'agenda.today') {
+    const items = ((result && typeof result === 'object' ? (result as { items?: unknown }).items : null) || []) as Array<{ kind?: unknown; count?: unknown }>;
+    if (Array.isArray(items) && items.length === 1 && items[0]?.kind === 'never_written' && typeof items[0].count === 'number' && items[0].count > 0) {
+      const people = items[0].count;
+      return { count: people, label: people === 1 ? 'contacto por escribir' : 'contactos por escribir' };
+    }
+  }
   const count = countOf(result);
   if (count === null) return null;
   const [one, many] = FINDING_NOUNS[action] || ['resultado', 'resultados'];
