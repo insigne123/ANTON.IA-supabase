@@ -966,8 +966,23 @@ export function coworkSplitOffer(body: string, products: string[]): string {
 }
 
 /** The Writer's answer with its proofs polished (coworkPolishProofs) and the offer in its own paragraph (coworkSplitOffer) in every email. */
+// The reply says it asks for a meeting, a call or a demo («propongo una conversación de 15 minutos», «mantuve la invitación a una demo»).
+const CLAIMS_MEETING = /\b(?:propongo|propone|pido|pide|invito|invita|ofrezco|ofrece|cierro con|cierra con|termino con|termina con|incluye|incluyo|mantuve|mantengo|mantiene|conserve|conservo|conserva|deje|dejo)\b/;
+
+/** A reply never promises what the card does not have: a sentence saying the email asks for a meeting, a call or a demo goes when no
+ * final email asks for one (the Writer described a first draft the correction changed, or a meeting it never wrote). A sentence that
+ * explains why there is none («la demo queda para cuando respondan») stays. */
+export function coworkReplyMatchesDraft(reply: string, bodies: string[]) {
+  if (!bodies.length || bodies.some(body => MEETING_ASK.test(normalize(body)))) return reply;
+  const sentences = reply.split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter(sentence => { const plain = normalize(sentence); return !(MEETING_ASK.test(plain) && CLAIMS_MEETING.test(plain)); });
+  return kept.length && kept.length < sentences.length ? kept.join(' ') : reply;
+}
+
 export function coworkPolishDraft(output: CoworkWriterOutput, proofs: string[], products: string[] = []): CoworkWriterOutput {
   const bodies = output.blocks.flatMap(block => block.type === 'email_draft' ? [block.body] : block.type === 'sequence' ? block.steps.map(step => step.body) : []);
+  const reply = coworkReplyMatchesDraft(output.reply, bodies);
+  if (reply !== output.reply) output = { ...output, reply };
   if (!proofs.length && !products.length && !bodies.some(body => LOWER_QUESTION.test(body))) return output;
   const polish = (body: string) => capitalQuestions(proofs.length || products.length ? coworkSplitOffer(coworkPolishProofs(body, proofs), products) : body);
   const blocks = output.blocks.map(block => block.type === 'email_draft' ? { ...block, body: polish(block.body) }

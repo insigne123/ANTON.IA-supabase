@@ -315,7 +315,7 @@ function Merged({ text }: { text: string }) {
   return <>{text.split(MERGE_FIELD).map((part, index) => {
     const field = part.match(/^\{\{\s*(nombre|empresa|cargo)\s*\}\}$/)?.[1];
     return field ? <span key={index} title="Se completa con el dato de cada persona"
-      className="rounded-md bg-cw-accent-soft px-1 py-px font-medium text-cw-accent"><span className="sr-only">dato de cada persona: </span>{field}</span> : part;
+      className="rounded-md bg-cw-accent-soft px-1 py-px font-medium text-cw-accent">{field}</span> : part;
   })}</>;
 }
 
