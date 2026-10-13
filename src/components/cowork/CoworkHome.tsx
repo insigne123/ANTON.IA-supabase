@@ -200,11 +200,11 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
         {onSaveOffer && <div className="pt-6"><OfferCard draft={offerDraft} onDraftChange={onOfferDraftChange} onSave={onSaveOffer} onHide={hideOffer} /></div>}
       </CwCollapse>
       {/* The starting points come in one after another, a beat apart; with less motion they are simply there. */}
-      {/* On a phone, one row that scrolls sideways instead of a tall column of chips. */}
-      <div className="-mx-4 mt-5 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden">
+      {/* On a phone they wrap into centered rows: a row that scrolled sideways read as cut at the edge (round 8 readings). */}
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
         {starters.map((item, index) => <button key={item.id} type="button" onClick={() => onSuggestion(item.prompt)}
           style={{ animationDelay: `${120 + index * 45}ms` }}
-          className="cw-rise inline-flex shrink-0 snap-start items-center gap-2 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+          className="cw-rise inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
           <CoworkIcon name={item.icon} className="h-4 w-4 text-cw-accent" />{item.title}
         </button>)}
       </div>

@@ -133,7 +133,8 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
     </m.div>}
     {artifact.kind !== 'code' && <m.div key={artifact.id} initial="hidden" animate="shown" variants={cwSwap} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
       {artifact.kind === 'block' && <div className="mx-auto w-full max-w-[46rem] px-4 py-6 sm:px-8">
-        <CoworkBlockView key={artifact.id} block={artifact.block} draftKey={`cowork:draft:${artifact.id}`} onSend={onSend} sendHint={sendHint} />
+        <CoworkBlockView key={artifact.id} block={artifact.block} draftKey={`cowork:draft:${artifact.id}`} onSend={onSend} sendHint={sendHint}
+          preview={artifact.preview ?? null} />
       </div>}
       {artifact.kind === 'document' && <article className="mx-auto w-full max-w-[46rem] px-5 py-8 sm:px-10 sm:py-10">
         <CoworkMarkdown text={artifact.content} variant="document" />

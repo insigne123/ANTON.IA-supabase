@@ -214,7 +214,7 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
               {stopping ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />}
             </button> : null}
           {(!showStop || value.trim() || hasAttachments) && <button type="submit" disabled={!canSend} aria-label={submitLabel} title={submitLabel}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-cw-accent text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-[background-color,opacity] hover:bg-cw-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35">
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-cw-accent text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-[background-color,color,opacity] hover:bg-cw-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-cw-hover disabled:text-cw-muted disabled:shadow-none">
               {sending ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.25} aria-hidden="true" />}
             </button>}
         </div>

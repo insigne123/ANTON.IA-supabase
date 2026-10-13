@@ -93,6 +93,33 @@ export async function readLinkedinAccepted(client: SupabaseClient, scope: Scope,
   return { status: 'ok', accepted };
 }
 
+type NeverWritten = { count: number; examples: string[] };
+
+/** Saved contacts with an email who never got one from the organization: the home's «Para hoy» counts them, and «¿qué tengo
+ * pendiente?» said «nada» while they waited (round 7 readings). Only names and companies leave here, never addresses. */
+export async function readNeverWritten(client: SupabaseClient, scope: Scope): Promise<NeverWritten> {
+  const leads = await client.from('leads').select('name,company,email').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+    .not('email', 'is', null).neq('email', '').order('created_at', { ascending: false }).limit(500);
+  if (leads.error) throw new Error('No se pudieron leer los contactos con correo.');
+  const rows = ((leads.data || []) as Array<{ name: string | null; company: string | null; email: string | null }>)
+    .map(row => ({ ...row, email: String(row.email || '').trim() })).filter(row => row.email);
+  const emails = Array.from(new Set(rows.map(row => row.email)));
+  const written = new Set<string>();
+  for (let start = 0; start < emails.length; start += 100) {
+    const sent = await client.from('contacted_leads').select('email').eq('organization_id', scope.organizationId).in('email', emails.slice(start, start + 100));
+    if (sent.error) throw new Error('No se pudieron leer los envíos.');
+    for (const row of (sent.data || []) as Array<{ email: string | null }>) written.add(String(row.email || '').trim().toLowerCase());
+  }
+  const waiting = new Map<string, { name: string | null; company: string | null }>();
+  for (const row of rows) {
+    const key = row.email.toLowerCase();
+    if (!written.has(key) && !waiting.has(key)) waiting.set(key, row);
+  }
+  const label = (row: { name: string | null; company: string | null }) =>
+    [String(row.name || '').trim(), row.company ? `(${String(row.company).trim()})` : ''].filter(Boolean).join(' ');
+  return { count: waiting.size, examples: [...waiting.values()].map(label).filter(Boolean).slice(0, 3) };
+}
+
 type Dependencies = {
   interested: typeof readInterestedWaiting;
   attention: typeof readRepliesAttention;
@@ -100,11 +127,12 @@ type Dependencies = {
   linkedin: typeof readLinkedinAccepted;
   approvals: typeof readPendingApprovals;
   steps: typeof readCampaignSteps;
+  neverWritten: typeof readNeverWritten;
 };
 const defaults: Dependencies = {
   interested: readInterestedWaiting, attention: (client, scope) => readRepliesAttention(client, scope, { own: true }),
   followups: readCoworkFollowupsToday,
-  linkedin: readLinkedinAccepted, approvals: readPendingApprovals, steps: readCampaignSteps,
+  linkedin: readLinkedinAccepted, approvals: readPendingApprovals, steps: readCampaignSteps, neverWritten: readNeverWritten,
 };
 
 /** One source of the list: if it fails the list says so, and the log keeps the reason (never the rows). */
@@ -125,13 +153,14 @@ export async function readCoworkAgenda(
   client: SupabaseClient, scope: Scope, dependencies: Partial<Dependencies> = {}, nowMs = Date.now(),
 ): Promise<CoworkAgenda> {
   const deps = { ...defaults, ...dependencies };
-  const [interested, attention, followups, linkedin, approvals, steps] = await Promise.all([
+  const [interested, attention, followups, linkedin, approvals, steps, neverWritten] = await Promise.all([
     attempt('interested', () => deps.interested(client, scope, nowMs)),
     attempt('attention', () => deps.attention(client, scope)),
     attempt('followups', () => deps.followups(client, scope, nowMs)),
     attempt('linkedin', () => deps.linkedin(client, scope, nowMs)),
     attempt('approvals', () => deps.approvals(client, scope, nowMs)),
     attempt('steps', () => deps.steps(client, scope)),
+    attempt('neverWritten', () => deps.neverWritten(client, scope)),
   ]);
 
   const sources = {} as Record<AgendaSourceKey, AgendaSourceStatus>;
@@ -186,6 +215,7 @@ export async function readCoworkAgenda(
     campaignSteps: steps.ok ? { count: steps.value.count, examples: steps.value.examples } : { count: 0, examples: [] },
     followups: campaigns,
     linkedinAccepted: linkedin.ok ? linkedin.value.accepted : [],
+    neverWritten: neverWritten.ok ? neverWritten.value : null,
     sources, mailboxSynced,
     timing: {
       timeZone: 'America/Santiago', day: santiagoDayBounds(now).day,

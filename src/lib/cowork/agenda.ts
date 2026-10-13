@@ -14,9 +14,9 @@ export const AGENDA_BOUNCE_DAYS = 14;
 
 export type AgendaKind =
   | 'meeting_request' | 'interested_reply' | 'approval' | 'unclassified_reply' | 'campaign_step'
-  | 'cooled_lead' | 'linkedin_accepted' | 'followups_due' | 'bounce';
+  | 'cooled_lead' | 'linkedin_accepted' | 'never_written' | 'followups_due' | 'bounce';
 
-export type AgendaAction = 'reply' | 'decide' | 'review_reply' | 'review_step' | 'revive' | 'message_linkedin' | 'let_run' | 'fix_email';
+export type AgendaAction = 'reply' | 'decide' | 'review_reply' | 'review_step' | 'revive' | 'message_linkedin' | 'write_first' | 'let_run' | 'fix_email';
 
 /** ok: read in full. none: nothing to read (no active campaign, campaigns v2 off). partial: read, but rows beyond the limit were
  * left out. sync_incomplete: LinkedIn is not fully synced, so acceptances cannot be told. unavailable: the read failed. */
@@ -54,6 +54,9 @@ export type AgendaInput = {
   campaignSteps: { count: number; examples: string[] };
   followups: AgendaFollowupCampaign[];
   linkedinAccepted: Array<{ name: string | null; daysSince: number }>;
+  /** Saved contacts with an email who never got one: the first email is today's work when nothing else waits (the home's «Para hoy»
+   * says so too). null when it could not be read: nothing is said about them then. */
+  neverWritten?: { count: number; examples: string[] } | null;
   sources: Record<AgendaSourceKey, AgendaSourceStatus>;
   /** Whether every connected mailbox has been swept completely; null when it is unknown. */
   mailboxSynced: boolean | null;
@@ -91,6 +94,8 @@ export type CoworkAgenda = {
     campaignSteps: number | null;
     followupsReady: number | null; followupsLater: number | null; followupsHeld: number | null;
     linkedinAccepted: number | null;
+    /** Saved contacts with an email who never got one. */
+    neverWritten: number | null;
     bounces: number | null; softBounces: number | null;
   };
   items: AgendaItem[];
@@ -113,7 +118,7 @@ export const AGENDA_WHEN_EMPTY = 'No hay nada pendiente: dilo en una línea y le
  * prepares a conversation, then what runs by itself, then hygiene. */
 const ORDER: Record<AgendaKind, number> = {
   meeting_request: 1, interested_reply: 2, approval: 3, unclassified_reply: 4, campaign_step: 5,
-  cooled_lead: 6, linkedin_accepted: 7, followups_due: 8, bounce: 9,
+  cooled_lead: 6, linkedin_accepted: 7, never_written: 8, followups_due: 9, bounce: 10,
 };
 
 /** contactedId is the conversation that has waited longest, the one replies.thread reads to answer this person; it is left out when the row had none. */
@@ -192,6 +197,10 @@ export function buildCoworkAgenda(input: AgendaInput): CoworkAgenda {
       examples: input.linkedinAccepted.map(person => person.name).filter((name): name is string => Boolean(name)).slice(0, 3),
       daysWaiting: Math.max(...input.linkedinAccepted.map(person => person.daysSince)), sort: 0 });
   }
+  if (input.neverWritten && input.neverWritten.count > 0) {
+    unranked.push({ kind: 'never_written', action: 'write_first', who: null, company: null, count: input.neverWritten.count,
+      examples: input.neverWritten.examples.slice(0, 3), sort: 0 });
+  }
   for (const campaign of input.followups) {
     const held = campaign.heldCompanyReplied + campaign.heldNegotiation + campaign.historyIncomplete;
     if (!campaign.ready && !campaign.scheduledLater && !held) continue;
@@ -228,6 +237,7 @@ export function buildCoworkAgenda(input: AgendaInput): CoworkAgenda {
       followupsLater: known('followups', input.followups.reduce((sum, campaign) => sum + campaign.scheduledLater, 0)),
       followupsHeld: known('followups', input.followups.reduce((sum, campaign) => sum + campaign.heldCompanyReplied + campaign.heldNegotiation + campaign.historyIncomplete, 0)),
       linkedinAccepted: input.sources.linkedin === 'ok' ? input.linkedinAccepted.length : null,
+      neverWritten: input.neverWritten ? input.neverWritten.count : null,
       bounces: known('attention', actionable.length),
       softBounces: known('attention', input.bounces.length - actionable.length),
     },

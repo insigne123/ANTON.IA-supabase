@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { BadgeCheck, ChartColumn, Check, ChevronRight, Copy, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2 } from 'lucide-react';
 import type { CoworkBlock } from '@/lib/cowork/contracts';
-import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkPanelBlock } from '@/lib/cowork/presentation';
+import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkMergePreview, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
   coworkBlockMeta, coworkBlockWithSteps, coworkDraftSteps, coworkEffectiveDraft, coworkEmailText, coworkSequenceText, coworkTableTsv, coworkVersionMessage,
   coworkFigureNumber, coworkWordDiff, coworkChartHeadline, coworkChartRows, coworkChartSummary, coworkChartValue, type CoworkEditedEmail,
@@ -232,8 +232,9 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
     {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
       actions={<><CopyButton text={coworkEmailText(block)} label="Copiar correo" />
         <ExportMenu kind="email_draft" block={() => savedDraft(block, artifact.id)} size="xs" variant="ghost" />{openButton}</>}>
-      <p className="text-[13.5px] font-semibold text-cw-text"><Merged text={block.subject} /></p>
-      <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted"><Merged text={block.body} /></p>
+      <p className="text-[13.5px] font-semibold text-cw-text"><Merged text={block.subject} values={artifact.preview} /></p>
+      <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted"><Merged text={block.body} values={artifact.preview} /></p>
+      {artifact.preview && <div className="mt-2"><PreviewNote preview={artifact.preview} /></div>}
     </CardShell>}
     {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
       actions={<><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia" />
@@ -311,16 +312,29 @@ function Marked({ text, before }: { text: string; before: string | null }) {
 const MERGE_FIELD = /(\{\{\s*(?:nombre|empresa|cargo)\s*\}\})/g;
 /** {{nombre}}, {{empresa}} and {{cargo}} in a card's preview read as what they are: each person's own value, filled in when the
  * campaign sends. Copying and editing keep the variables. */
-function Merged({ text }: { text: string }) {
+function Merged({ text, values = null }: { text: string; values?: CoworkMergePreview | null }) {
   return <>{text.split(MERGE_FIELD).map((part, index) => {
-    const field = part.match(/^\{\{\s*(nombre|empresa|cargo)\s*\}\}$/)?.[1];
+    const field = part.match(/^\{\{\s*(nombre|empresa|cargo)\s*\}\}$/)?.[1] as 'nombre' | 'empresa' | 'cargo' | undefined;
+    // With a first recipient, the preview reads as that person's email; the mark still says the word changes per person.
+    const value = field && values ? values[field] : null;
     return field ? <span key={index} title="Se completa con el dato de cada persona"
-      className="rounded-md bg-cw-accent-soft px-1 py-px font-medium text-cw-accent">{field}</span> : part;
+      className="rounded-md bg-cw-accent-soft px-1 py-px font-medium text-cw-accent">{value || field}</span> : part;
   })}</>;
 }
 
+/** Under a template previewed with its first recipient: whose data it shows, and that each person gets their own. */
+function PreviewNote({ preview }: { preview: CoworkMergePreview }) {
+  return <p className="text-[12px] text-cw-muted">Vista previa con los datos de {preview.person}. Cada persona recibe los suyos.</p>;
+}
+
 /** One email to read and copy. `before`: the original, whose changed words get marked for a moment. */
-function EmailBody({ subject, body, to, before = null }: { subject: string; body: string; to?: string[] | null; before?: { subject: string; body: string } | null }) {
+function EmailBody({ subject, body, to, before = null, preview = null }: {
+  subject: string; body: string; to?: string[] | null; before?: { subject: string; body: string } | null;
+  /** The first recipient's data for a template: shown in place of its variables while nothing marks an edit. */
+  preview?: CoworkMergePreview | null;
+}) {
+  // The variables read as marks (and as the first recipient's data when there is one); right after an edit, the changed words do.
+  const merged = !before;
   return <div className="space-y-4">
     {to && to.length > 0 && <div>
       <p className="mb-1.5 text-[12px] font-medium text-cw-muted">Para</p>
@@ -331,14 +345,17 @@ function EmailBody({ subject, body, to, before = null }: { subject: string; body
         <p className="text-[12px] font-medium text-cw-muted">Asunto</p>
         <CopyButton text={subject} label="Copiar asunto" />
       </div>
-      <p className="text-[15px] font-semibold text-cw-text"><Marked text={subject || 'Sin asunto · agrégalo al editar'} before={before?.subject ?? null} /></p>
+      <p className="text-[15px] font-semibold text-cw-text">{merged && subject ? <Merged text={subject} values={preview} />
+        : <Marked text={subject || 'Sin asunto · agrégalo al editar'} before={before?.subject ?? null} />}</p>
     </div>
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
         <p className="text-[12px] font-medium text-cw-muted">Cuerpo</p>
         <CopyButton text={body} label="Copiar cuerpo" />
       </div>
-      <p className="whitespace-pre-line rounded-xl border border-cw-border bg-cw-panel px-4 py-3.5 text-[14.5px] leading-[1.65] text-cw-text"><Marked text={body} before={before?.body ?? null} /></p>
+      <p className="whitespace-pre-line rounded-xl border border-cw-border bg-cw-panel px-4 py-3.5 text-[14.5px] leading-[1.65] text-cw-text">{merged
+        ? <Merged text={body} values={preview} /> : <Marked text={body} before={before?.body ?? null} />}</p>
+      {merged && preview && <div className="mt-1.5"><PreviewNote preview={preview} /></div>}
     </div>
   </div>;
 }
@@ -405,8 +422,8 @@ export function CoworkEmailFields<T extends { subject: string; body: string }>({
 
 /** An email or a sequence you can edit before using it: the exact text you leave
  * is what gets sent to Cowork, and what a campaign created from it will carry. */
-function DraftView({ block, draftKey, onSend, sendHint }: {
-  block: Draftable; draftKey: string; onSend: ((message: string) => void) | null; sendHint: string;
+function DraftView({ block, draftKey, onSend, sendHint, preview }: {
+  block: Draftable; draftKey: string; onSend: ((message: string) => void) | null; sendHint: string; preview: CoworkMergePreview | null;
 }) {
   // Polling hands over a new object with the same content: keep the edit.
   const originalText = JSON.stringify(coworkDraftSteps(block));
@@ -457,7 +474,7 @@ function DraftView({ block, draftKey, onSend, sendHint }: {
         })}
       </ol>
       : editing ? <CoworkEmailFields step={steps[0]} index={0} total={1} idPrefix="cw-draft" onChange={next => update(0, next)} />
-        : <EmailBody subject={steps[0].subject} body={steps[0].body} before={marking ? original[0] : null} />}
+        : <EmailBody subject={steps[0].subject} body={steps[0].body} before={marking ? original[0] : null} preview={preview} />}
     {!complete && <p role="alert" className="text-[12.5px] text-cw-danger">Cada correo necesita asunto y cuerpo.</p>}
     <section aria-label="Qué hago con esta versión" className="rounded-2xl border border-cw-border bg-cw-panel p-4">
       <p className="text-[13.5px] font-semibold text-cw-text">¿Qué hago con {edited ? 'tu versión' : sequence ? 'esta secuencia' : 'este correo'}?</p>
@@ -473,10 +490,12 @@ function DraftView({ block, draftKey, onSend, sendHint }: {
 
 /** The whole card in the side panel: everything visible, each part copyable;
  * emails and sequences can be edited and used as they are. */
-export function CoworkBlockView({ block, draftKey, onSend = null, sendHint = 'Disponible cuando Cowork termine el paso actual.' }: {
+export function CoworkBlockView({ block, draftKey, onSend = null, sendHint = 'Disponible cuando Cowork termine el paso actual.', preview = null }: {
   block: CoworkPanelBlock; draftKey: string; onSend?: ((message: string) => void) | null; sendHint?: string;
+  /** The first recipient of an email template (coworkMergePreview). */
+  preview?: CoworkMergePreview | null;
 }) {
-  if (block.type === 'email_draft' || block.type === 'sequence') return <DraftView block={block} draftKey={draftKey} onSend={onSend} sendHint={sendHint} />;
+  if (block.type === 'email_draft' || block.type === 'sequence') return <DraftView block={block} draftKey={draftKey} onSend={onSend} sendHint={sendHint} preview={preview} />;
   if (block.type === 'chart') return <ChartBlock block={block} tall />;
   return <div className="space-y-4">
     <div className="flex flex-wrap gap-2">

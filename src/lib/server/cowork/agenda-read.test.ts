@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readCoworkAgenda, readLinkedinAccepted, readPendingApprovals, waitingCampaignSteps } from './agenda-read';
+import { readCoworkAgenda, readLinkedinAccepted, readNeverWritten, readPendingApprovals, waitingCampaignSteps } from './agenda-read';
 
 const scope = { userId: 'user-1', organizationId: 'org-1' };
 const NOW = Date.parse('2026-09-25T13:10:00Z');
@@ -14,6 +14,8 @@ function tables(data: Record<string, unknown[]>, failing: string[] = []) {
       eq(key: string, value: unknown) { filters.push(row => !(key in row) || row[key] === value); return chain; },
       in(key: string, values: unknown[]) { filters.push(row => values.includes(row[key])); return chain; },
       gte(key: string, value: string) { filters.push(row => !(key in row) || String(row[key]) >= value); return chain; },
+      not(key: string, _op: string, value: unknown) { filters.push(row => row[key] !== value); return chain; },
+      neq(key: string, value: unknown) { filters.push(row => row[key] !== value); return chain; },
       async maybeSingle() {
         if (failing.includes(table)) return { data: null, error: { message: 'down' } };
         return { data: (data[table] || []).filter(row => filters.every(filter => filter(row)))[0] ?? null, error: null };
@@ -298,4 +300,26 @@ test('by default the agenda asks for the replies and bounces of this person only
   assert.equal(mine.length, 3, 'unclassified replies, bounces and automatic replies');
   assert.ok(mine.every(call => call.value === scope.userId));
   assert.equal(agenda.scope, 'own_agenda_today');
+});
+
+test('contacts with an email nobody wrote to are counted once, by name and company, never by address', async () => {
+  const lead = (name: string, company: string | null, email: string | null, user = scope.userId) =>
+    ({ organization_id: scope.organizationId, user_id: user, name, company, email });
+  const client = tables({
+    leads: [
+      lead('Daniela Rojas', 'Adecco', 'drojas@adecco.cl'),
+      lead('José Pérez', 'GrupoExpro', 'jperez@grupoexpro.cl'),
+      lead('José Pérez', 'GrupoExpro', 'JPerez@grupoexpro.cl'),
+      lead('Ana Ruiz', 'Retail Sur', 'aruiz@retailsur.cl'),
+      lead('Sin Correo', 'Minera', null),
+      lead('Correo Vacío', 'Minera', ''),
+      lead('De Otra Persona', 'Otra', 'otra@otra.cl', 'user-2'),
+    ],
+    contacted_leads: [{ organization_id: scope.organizationId, email: 'aruiz@retailsur.cl' }],
+  });
+  const waiting = await readNeverWritten(client, scope);
+  assert.equal(waiting.count, 2);
+  assert.deepEqual(waiting.examples, ['Daniela Rojas (Adecco)', 'José Pérez (GrupoExpro)']);
+  assert.doesNotMatch(JSON.stringify(waiting), /@/);
+  await assert.rejects(readNeverWritten(tables({}, ['leads']), scope));
 });

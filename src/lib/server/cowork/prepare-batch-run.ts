@@ -95,6 +95,26 @@ export async function executeCoworkPrepareBatch(auth: AuthContext, runId: string
         }
       }
     }
+    if (item.steps.includes('linkedin')) {
+      // The same provider lookup as the email's: it brings the profile (and fills only the contact's gaps).
+      if (!leadId) steps.push({ step: 'linkedin', status: 'skipped', detail: 'No se buscó su LinkedIn porque no se pudo guardar.' });
+      else if (lookupsStopped) steps.push({ step: 'linkedin', status: 'skipped', detail: lookupsStopped });
+      else if (late()) steps.push({ step: 'linkedin', status: 'skipped', detail: LATE });
+      else {
+        try {
+          const found = await enrichCoworkSavedLead(auth, runId, leadId);
+          if (found.fullName) result.name = found.fullName;
+          Object.assign(result, { email: found.email, emailStatus: found.emailStatus, linkedinUrl: found.linkedinUrl ?? null, emailWarning: found.emailWarning ?? null });
+          steps.push({ step: 'linkedin', status: found.reused ? 'reused' : 'done', ...(found.linkedinUrl ? {} : { detail: 'El proveedor no encontró su perfil de LinkedIn.' }) });
+        } catch (error) {
+          const message = reasonOf(error, 'No se pudo buscar su LinkedIn.');
+          if (/cupo diario/i.test(message)) lookupsStopped = 'Se alcanzó el cupo diario de búsquedas; se renueva mañana.';
+          steps.push(/Ya existe una solicitud/.test(message)
+            ? { step: 'linkedin', status: 'skipped', detail: 'Ya había una búsqueda de esta persona en curso: llega sola, sin pagar dos veces.' }
+            : { step: 'linkedin', status: 'failed', detail: lookupsStopped || message });
+        }
+      }
+    }
     if (item.steps.includes('research')) {
       const lookupMissing = steps.some(step => step.step === 'enrich' && (step.status === 'failed' || step.status === 'skipped'));
       if (!leadId) steps.push({ step: 'research', status: 'skipped', detail: 'No se investigó porque no se pudo guardar.' });

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
   coworkPrepareBatchLabel, coworkPrepareBatchPeople, coworkPrepareBatchSummary, coworkPrepareCost, coworkPrepareStatus, coworkPrepareSteps,
-  hashCoworkPrepareBatch, planCoworkPrepareBatch, type CoworkPrepareCandidate,
+  hashCoworkPrepareBatch, planCoworkPrepareBatch, type CoworkPrepareCandidate, type CoworkPrepareState,
 } from './prepare-batch';
 
 const LEAD = (n: number) => `00000000-0000-4000-8000-0000000000a${n}`;
@@ -78,4 +78,29 @@ test('the result reads person by person, with what was missing and why', () => {
   ]);
   assert.equal(summary, 'Listo con 2 de 2 personas: 2 quedaron guardadas, 1 de 2 con correo y 2 investigaciones en curso o listas.'
     + ' Susana Cáceres: El proveedor no encontró su correo. Quitaste a 1 persona de la lista.');
+});
+
+test('a LinkedIn lookup runs for whoever lacks a profile, also with an email, and costs a credit like an email lookup', () => {
+  const state = (over: Partial<CoworkPrepareState> = {}): CoworkPrepareState => ({ saved: true, emailChecked: true, researched: false, ...over });
+  assert.deepEqual(coworkPrepareSteps('linkedin', state()), ['linkedin']);
+  assert.deepEqual(coworkPrepareSteps('linkedin', state({ linkedinChecked: true })), []);
+  assert.deepEqual(coworkPrepareSteps('linkedin', state({ saved: false, emailChecked: false })), ['save', 'linkedin']);
+  // An email lookup never asks for the profile, and a LinkedIn lookup never for the email.
+  assert.deepEqual(coworkPrepareSteps('email', state({ emailChecked: false })), ['enrich']);
+  const items = [{ steps: ['linkedin' as const] }, { steps: ['linkedin' as const] }];
+  assert.deepEqual(coworkPrepareCost(items), { saves: 0, lookups: 2, research: 0, profiles: 2 });
+  assert.equal(coworkPrepareBatchLabel(items), 'Buscar el perfil de LinkedIn de 2 personas');
+  assert.equal(coworkPrepareBatchLabel([{ steps: ['save', 'linkedin'] }]), 'Preparar a 1 persona: guardar y buscar su perfil de LinkedIn');
+  const plan = planCoworkPrepareBatch('linkedin', [
+    { id: 'a', name: 'Ana', company: 'X', title: null, state: state() },
+    { id: 'b', name: 'Beto', company: 'Y', title: null, state: state({ linkedinChecked: true }) },
+  ]);
+  assert.deepEqual(plan.items.map(item => item.id), ['a']);
+  assert.match(plan.ready[0].reason, /LinkedIn/);
+  const summary = coworkPrepareBatchSummary([
+    { id: 'a', name: 'Ana', company: 'X', status: 'ready', steps: [{ step: 'linkedin', status: 'done' }], linkedinUrl: 'https://www.linkedin.com/in/ana' },
+    { id: 'c', name: 'Carla', company: 'Z', status: 'ready', steps: [{ step: 'linkedin', status: 'done', detail: 'El proveedor no encontró su perfil de LinkedIn.' }] },
+  ]);
+  assert.match(summary, /1 de 2 con perfil de LinkedIn/);
+  assert.match(summary, /Carla: El proveedor no encontró su perfil de LinkedIn/);
 });

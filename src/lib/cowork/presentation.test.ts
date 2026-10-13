@@ -7,7 +7,7 @@ import {
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
-  coworkThreadResults,
+  coworkThreadResults, coworkMergePreview,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -435,4 +435,24 @@ test('the canvas lists the conversation\'s results newest first, a code artifact
   const results = coworkThreadResults([doc, code(1), code(2), code(1, 'campanas')] as never);
   assert.deepEqual(results.map(item => item.id), ['r1:code:campanas-v1', 'r2:code:pipeline-v2', 'r0:document']);
   assert.deepEqual(coworkThreadResults([]), []);
+});
+
+test('a template for several people previews with the first recipient the conversation read; plain emails and unknown addresses do not', () => {
+  const rows = [
+    { id: 'a', name: 'Sin Correo', email: null, company: 'Minera', title: null },
+    { id: 'b', name: 'José Castro', email: 'jose.castro@grupoexpro.test', company: 'GrupoExpro', title: 'Reclutador Junior' },
+  ];
+  const template = { type: 'email_draft' as const, title: 'Primer correo', to: ['desconocido@x.test', 'Jose.Castro@grupoexpro.test'],
+    subject: 'Antecedentes en {{empresa}}', body: 'Hola {{nombre}},\n\n¿Cuántos postulantes revisan al mes en {{ empresa }}?' };
+  assert.deepEqual(coworkMergePreview(template, rows), { person: 'José Castro', nombre: 'José', empresa: 'GrupoExpro', cargo: 'Reclutador Junior' });
+  assert.equal(coworkMergePreview({ ...template, body: 'Hola José,', subject: 'Antecedentes' }, rows), null);
+  assert.equal(coworkMergePreview({ ...template, to: ['otra@x.test'] }, rows), null);
+  assert.equal(coworkMergePreview({ ...template, to: null }, rows), null);
+  const events = [
+    { id: 'e1', run_id: 'r1', sequence: 1, kind: 'tool.completed', created_at: '2026-10-13T10:00:00Z',
+      payload: { action: 'leads.search', result: { scope: 'own_saved_contacts', items: [{ ...rows[1], id: '00000000-0000-4000-8000-000000000001' }] } } },
+    { id: 'e2', run_id: 'r1', sequence: 2, kind: 'run.completed', created_at: '2026-10-13T10:00:05Z', payload: { blocks: [template] } },
+  ];
+  const [card] = coworkTurnArtifacts({ id: 'r1', created_at: '2026-10-13T10:00:00Z' }, events as never);
+  assert.equal(card.kind === 'block' ? card.preview?.nombre : null, 'José');
 });

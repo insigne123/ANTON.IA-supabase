@@ -455,6 +455,14 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const busy = (active && !pendingDecision) || awaitingContinuation;
   const threads = useMemo(() => groupCoworkThreads(runs, { ...autoTitles, ...threadNames.titles }).filter(thread => !hiddenRoots.has(thread.rootId)),
     [runs, autoTitles, threadNames.titles, hiddenRoots]);
+  // Nobody has a conversation yet: an empty list took a whole column of the home (round 8). It starts closed, once, and its button
+  // in the header opens it; a list that failed to load stays open, so its retry is in sight.
+  const railDecided = useRef(false);
+  useEffect(() => {
+    if (railDecided.current || loading) return;
+    railDecided.current = true;
+    if (!listError && threads.length === 0) setRailCollapsed(true);
+  }, [loading, listError, threads.length]);
 
   const selectedRoot = useMemo(() => {
     if (!selected) return null;
@@ -928,7 +936,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     searchContacts={ready ? searchContacts : null} onMention={addMention} templates
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
-  return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
+  return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] max-md:-mx-4 max-md:-my-4 max-md:h-[calc(100dvh-3rem)] max-md:rounded-none max-md:border-0 max-md:shadow-none md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
       <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} onShortcuts={() => setShortcutsOpen(true)} {...threadActions} />
     </div>
@@ -947,7 +955,9 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
           onClick={() => { if (isDesktop && !artifactOpen) setRailCollapsed(false); else setDrawerOpen(true); }}>
           <History aria-hidden="true" />
         </CwButton>
-        <h1 className="min-w-0 flex-1 truncate px-1 text-[14px] font-medium text-cw-text">{inConversation ? title : 'Cowork'}</h1>
+        {/* On a phone the app's own bar already says «Cowork»: the home does not repeat it. */}
+        <h1 className={cn('min-w-0 flex-1 truncate px-1 text-[14px] font-medium text-cw-text', !inConversation && 'max-md:sr-only')}>{inConversation ? title : 'Cowork'}</h1>
+        {!inConversation && <span className="flex-1 md:hidden" aria-hidden="true" />}
         {inConversation && status && <CwStatusPill tone={status.tone} pulse={busy} className="hidden sm:inline-flex">{status.label}</CwStatusPill>}
         {inConversation && !artifactOpen && !panelOpen && <CwButton variant="ghost" size="icon-sm" className={cn('hidden', railVisible ? '2xl:inline-flex' : 'xl:inline-flex')} onClick={() => setPanelOpen(true)} aria-label="Mostrar resumen" title="Resumen"><PanelRight aria-hidden="true" /></CwButton>}
         {inConversation && latest && !artifactOpen && <CwButton ref={summaryOpener} variant="ghost" size="icon-sm" className={railVisible ? '2xl:hidden' : 'xl:hidden'} onClick={() => setSummaryOpen(true)} aria-label="Ver resumen de la conversación" title="Resumen" aria-haspopup="dialog"><PanelRight aria-hidden="true" /></CwButton>}

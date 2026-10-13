@@ -625,11 +625,17 @@ const offeredReadFeedback = (question: string) => `Tu respuesta termina ofrecien
 
 // «Después los reviso», «más tarde lo veo», «voy a…»: the answer leaves for later something it could do now.
 const LEAVES_FOR_LATER = /(?<!\p{L})(?:despu[ée]s|luego|m[áa]s tarde|en otro momento|voy a|te aviso|te indicar[ée])(?!\p{L})/iu;
+// A promise in the future tense of what the turn could do now («Revisaré tus contactos», «te prepararé el correo»): round 6, «promete
+// «revisaré» y no lo hace».
+const PROMISES = /(?<!\p{L})(?:revisar[ée]|preparar[ée]|buscar[ée]|escribir[ée]|redactar[ée]|armar[ée]|consultar[ée]|analizar[ée]|te mostrar[ée]|te dejar[ée])(?!\p{L})/iu;
+// A yes: «sí», or «si» typed without the accent when what follows is not a condition («si, dale», «si porfa»). «si no me responde en
+// una semana, ¿qué le mando?» is a condition (round 8: it was taken as a yes to the campaign and the follow-up was never written).
+const YES = String.raw`(?:sí|si(?=\s*(?:$|[,.!;:]|(?:dale|h[áa]zlo|cr[ée]a\w*|crear|arma\w*|claro|porfa\w*|por favor|adelante|ok|perfecto|listo|me parece|gracias|bueno|quiero)(?!\p{L}))))`;
 // «Sí, créala»: a quick reply that answers a question, which then has to be there.
-const SAYS_YES = /^\s*s[íi](?!\p{L})/iu;
+const SAYS_YES = new RegExp(String.raw`^\s*${YES}(?!\p{L})`, 'iu');
 const WRITER_FIRST = 'Los correos los escribe la Redactora, no tú: no los pongas en answer.blocks. Elige draft.write con write {kind, recipients, objective, angle, tone, steps, notes, findings}: ella los escribe y la Revisora los revisa antes de mostrarlos.';
 // A yes to the campaign the previous answer offered («Sí, crea la campaña pausada», «dale», «créala»)…
-const TAKES_OFFER = /^\s*(?:s[íi]|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|cr[ée]ala|cr[ée]a la campa[ñn]a|arma la campa[ñn]a)(?!\p{L})/iu;
+const TAKES_OFFER = new RegExp(String.raw`^\s*(?:${YES}|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|cr[ée]ala|cr[ée]a la campa[ñn]a|arma la campa[ñn]a)(?!\p{L})`, 'iu');
 // …that does not ask to change its emails («sí, pero con un solo texto para todos»).
 const CHANGES_OFFER = /(?<!\p{L})(?:pero|aunque|cambia\w*|mismo texto|un solo (?:texto|correo)|sin personalizar)(?!\p{L})/iu;
 // …nor asks for the follow-ups too («sí, con sus seguimientos»).
@@ -641,11 +647,14 @@ const ASKS_APPROVAL = /^¿\s*(?:(?:te|la|lo|las|los)\s+)?(?:apruebas|apruebo|con
 
 /** A clarification about a proposal that waits for approval closes without asking for that approval: the card has its buttons. Other
  * next steps stay. */
+// Whether the person already approved it is known (round 8: «¿Ya aprobaste la tarjeta para seguir?», with a «Ya la aprobé» chip).
+const ASKED_IF_APPROVED = /(?<!\p{L})aprob(?:aste|é)(?!\p{L})/iu;
 export function coworkClarificationAnswer<T extends { question?: unknown; suggestions?: unknown }>(answer: T): T {
   const question = coworkQuestion(answer.question);
-  const asks = Boolean(question && ASKS_APPROVAL.test(question));
+  const asks = Boolean(question && (ASKS_APPROVAL.test(question) || ASKED_IF_APPROVED.test(question)));
   const all = coworkSuggestions(answer.suggestions);
-  const chips = all.filter(chip => !SAYS_YES.test(chip.label) && !SAYS_YES.test(chip.message));
+  const chips = all.filter(chip => !SAYS_YES.test(chip.label) && !SAYS_YES.test(chip.message)
+    && !ASKED_IF_APPROVED.test(chip.label) && !ASKED_IF_APPROVED.test(chip.message));
   if (!asks && chips.length === all.length) return answer;
   return { ...answer, ...(asks ? { question: null } : {}), suggestions: chips.length ? chips : null };
 }
@@ -705,10 +714,12 @@ export function coworkRepeatedOfferFeedback(answer: { reply: string; question?: 
 function offerDone(said: string, offer: string, previous: CoworkHistoryTurn | undefined): string | null {
   const extra = 'Si además pregunta algo, respóndelo en esa misma answer.reply, en una o dos frases, sin repetir tu respuesta anterior.';
   const drafted = (previous?.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence');
-  if (OFFERS_WRITING.test(offer)) return `${said} Escríbelo ahora con draft.write. ${extra}`;
+  // The Writer answers that turn, so a question that came with the «sí» goes in its brief (round 8: «¿y qué debería hacer para
+  // mejorar?» got a reply about a signature it had «added»).
+  if (OFFERS_WRITING.test(offer)) return `${said} Escríbelo ahora con draft.write. Si además pregunta algo, responde en write.findings, en una o dos frases con su dato (por ejemplo, las 2 o 3 acciones que más mueven sus cifras, la primera este correo), porque la respuesta de ese turno la escribe la Redactora y parte por ahí; answer.reply no se muestra.`;
   if (OFFERS_CAMPAIGN.test(offer)) return drafted
     ? `${said} Propón ahora campaign.create con los correos de esa respuesta (la app copia su texto tal cual), a quienes iban. ${extra}`
-    : `${said} La campaña necesita su primer correo a la vista: usa draft.write con campaign true para esos contactos; cuando la Redactora termine, propones la campaña con ese correo. ${extra}`;
+    : `${said} La campaña necesita su primer correo a la vista: usa draft.write con kind email y campaign true para esos contactos (un primer correo; los seguimientos, después y si los pide); cuando la Redactora termine, propones la campaña con ese correo. ${extra}`;
   if (OFFERS_APPROVAL.test(offer)) return `${said} Hazlo ahora: propón ese efecto con su tarjeta de aprobación, con los contactos que ya leíste en la conversación (si te faltan sus identificadores, consúltalos primero). ${extra}`;
   return null;
 }
@@ -738,7 +749,8 @@ export function coworkLookupProposal(answer: { reply: string; question?: unknown
   const before = coworkClosingQuestionOf(history?.at(-1)?.reply);
   const accepted = Boolean(before && OFFERS_EMAIL_LOOKUP.test(before) && TAKES_OFFER.test(message) && !CHANGES_OFFER.test(message));
   const offer = own && OFFERS_EMAIL_LOOKUP.test(own) ? own : accepted ? before! : null;
-  if (!offer) return null;
+  // About LinkedIn, the lookup is for profiles, not this card (round 7: «la tarjeta solo busca correos, así que LinkedIn no avanza»).
+  if (!offer || /linked\s?in|perfil/i.test(`${message} ${offer}`)) return null;
   const read = [...(history || []).flatMap(turn => turn.observations || []), ...observations];
   const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
   const missing = collectCoworkLeadRows(read).filter(row => uuid.test(row.id) && !(typeof row.email === 'string' && row.email.includes('@')));
@@ -807,6 +819,7 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
       ? 'pon los correos en un bloque sequence (regla 11) y deja en reply qué escribiste y por qué, sin repetir los correos' : null,
     // A card is copied as is: a [placeholder] would reach the recipient.
     filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
+    PROMISES.test(answer.reply) ? `no prometas lo que puedes hacer ahora («${PROMISES.exec(answer.reply)?.[0]}»): dilo hecho con lo que ya consultaste, o ofrécelo en la pregunta final` : null,
   ].filter(Boolean);
   if (!missing.length) return null;
   // The model edits its previous answer (answerToCorrect): name what already worked so it keeps it.
@@ -1321,6 +1334,11 @@ async function runCoworkLoop(input: {
         observations.push(probe);
         lookup = coworkLookupProposal(decision.answer!, input.message, input.history, observations);
       }
+      // Looking for several emails is always the «Preparar contactos» card, with a box to take anyone off (round 6: «la tarjeta incluye a
+      // las 3 y pide escribir para quitar a Carlos»).
+      if (decision.action === 'lead.enrich_batch' && decision.leadIds?.length && input.prepareBatch) {
+        decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: { goal: 'email', people: decision.leadIds.map(leadId => ({ leadId })) } } as Decision;
+      }
       if (lookup && decision.answer) {
         const reply = decision.answer.reply.split('\n').filter(line => !/^\s*¿/.test(line) && !/a continuaci[óo]n\.?\s*$/i.test(line)).join('\n').trim();
         decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup,
@@ -1654,7 +1672,7 @@ async function runCoworkLoop(input: {
           && /campa[ñn]a/i.test(coworkClosingQuestionOf(input.history?.at(-1)?.reply) || '') && TAKES_OFFER.test(input.message) && !CHANGES_OFFER.test(input.message)
           && !(input.history?.at(-1)?.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence')) {
           campaignRedirected = true;
-          throw rejected('Campaign without its email', 'La campaña necesita su primer correo a la vista: usa draft.write con campaign true para los contactos con correo que leíste (recipients con sus nombres); cuando la Redactora termine, propones campaign.create con ese correo.');
+          throw rejected('Campaign without its email', 'La campaña necesita su primer correo a la vista: usa draft.write con kind email y campaign true para los contactos con correo que leíste (recipients con sus nombres; un primer correo, los seguimientos después y si los pide); cuando la Redactora termine, propones campaign.create con ese correo.');
         }
         const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
         if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));

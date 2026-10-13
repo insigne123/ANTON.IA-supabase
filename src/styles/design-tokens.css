@@ -154,7 +154,10 @@ html.dark {
   --cw-active: hsl(217 33% 20%);
   --cw-border-strong: hsl(217 25% 27%);
   --cw-faint: hsl(215 16% 50%);
-  --cw-accent-hover: hsl(217.2 91.2% 67%);
+  /* A lighter blue than the app's in the dark, so the dark label of a filled button and the accent text stay clear (round 8 readings:
+     «el botón azul queda algo bajo de contraste»): about 7.9:1 against the label. */
+  --cw-accent: hsl(213 94% 68%);
+  --cw-accent-hover: hsl(213 94% 74%);
   --cw-accent-soft: hsl(var(--primary) / 0.14);
   --cw-success: #34d399;
   --cw-success-soft: rgba(16, 185, 129, 0.12);

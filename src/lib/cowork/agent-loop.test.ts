@@ -2111,7 +2111,12 @@ test('a «sí» to the previous answer\'s offer goes back to be done, not answer
   assert.match(coworkAcceptedOfferFeedback('dale, ¿por dónde parto?', lookup) || '', /tarjeta de aprobación/);
   assert.equal(coworkAcceptedOfferFeedback('¿y qué es eso?', lookup), null);
   assert.equal(coworkAcceptedOfferFeedback('sí, pero solo a Carlos', lookup), null);
-  assert.match(coworkAcceptedOfferFeedback('sí', turn('Cifras.\n\n¿Creo la campaña pausada con tus 4 contactos?')) || '', /draft\.write con campaign true/);
+  // «si» without the accent: a yes when nothing conditional follows, a condition when it does (round 8, t10).
+  const campaign = turn('Te escribí el correo.\n\n¿Creo la campaña pausada para Daniela Rojas?');
+  assert.equal(coworkAcceptedOfferFeedback('si no me responde en una semana, ¿qué le mando?', campaign), null);
+  assert.ok(coworkAcceptedOfferFeedback('si, dale', campaign));
+  assert.ok(coworkAcceptedOfferFeedback('si porfa', campaign));
+  assert.match(coworkAcceptedOfferFeedback('sí', turn('Cifras.\n\n¿Creo la campaña pausada con tus 4 contactos?')) || '', /draft\.write con kind email y campaign true/);
   const email = { type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Antecedentes en Manpower', body: 'Hola Daniela,\n\nTexto.' };
   const offered = turn('Escribí el correo.\n\n¿Creo la campaña pausada para Daniela Rojas?', [email]);
   assert.match(coworkAcceptedOfferFeedback('sí', offered) || '', /campaign\.create/);
@@ -2148,13 +2153,18 @@ test('a question about a card waiting for approval does not close asking for tha
   assert.deepEqual(kept.suggestions, [{ label: 'Escribir a los 4', message: 'Escríbeles a mis 4 contactos con correo' }]);
   const other = { ...answer, question: '¿Te escribo después el correo para Nehal?', suggestions: [{ label: 'Escribir a los 4', message: 'Escríbeles' }] };
   assert.equal(coworkClarificationAnswer(other), other);
+  // Whether it was approved is known: neither the question nor a «Ya la aprobé» chip (round 8, t11).
+  const known = coworkClarificationAnswer({ ...answer, question: '¿Ya aprobaste la tarjeta para seguir con los correos?',
+    suggestions: [{ label: 'Ya la aprobé', message: 'Ya la aprobé' }, { label: 'Escribir a los 4', message: 'Escríbeles' }] });
+  assert.equal(known.question, null);
+  assert.deepEqual(known.suggestions, [{ label: 'Escribir a los 4', message: 'Escríbeles' }]);
 });
 
 test('the same offer again after «¿qué hago?» is done, and a follow-up accepted as a campaign goes after its first email', async () => {
   const { coworkRepeatedOfferFeedback, coworkShownCampaignEmails } = await import('./agent-loop');
   const history = [{ runId: 'r1', observations: [], reply: 'Cifras en cero.\n\n¿Dejo lista la campaña pausada para tus 4 contactos con correo?' }];
   const again = { reply: 'Lo que más mueve tus números es partir.', question: '¿Dejo lista la campaña pausada para tus 4 contactos con correo?' };
-  assert.match(coworkRepeatedOfferFeedback(again, history) || '', /draft\.write con campaign true/);
+  assert.match(coworkRepeatedOfferFeedback(again, history) || '', /draft\.write con kind email y campaign true/);
   assert.equal(coworkRepeatedOfferFeedback({ reply: 'Listo.', question: '¿Te muestro cómo van tus campañas de la semana pasada?' }, history), null);
   const first = { type: 'email_draft', title: 'Correo', to: ['daniela.rojas@manpower.test'], subject: 'Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nPrimero.' };
   const follow = { type: 'email_draft', title: 'Seguimiento', to: ['daniela.rojas@manpower.test'], subject: 'Re: Revisión de antecedentes en Manpower', body: 'Hola Daniela,\n\nSeguimiento.' };
@@ -2219,4 +2229,12 @@ test('a campaign to listed people is not narrowed by filters the person never as
   const listed = coworkCampaignForListedPeople(campaign);
   assert.deepEqual(listed.criteria, { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [],
     minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false });
+});
+
+test('a lookup offered about LinkedIn profiles is not turned into the email card', async () => {
+  const { coworkLookupProposal } = await import('./agent-loop');
+  const read = { action: 'leads.search' as const, input: 'sin correo', result: { scope: 'own_saved_contacts', items: [
+    { id: '00000000-0000-4000-8000-000000000021', name: 'Nehal Patil', company: 'Adecco', email: null }] } };
+  assert.equal(coworkLookupProposal({ reply: 'Nadie tiene perfil.', question: '¿Busco el correo y el perfil de LinkedIn de tus 3 contactos sin correo?' },
+    '¿A quién invito por LinkedIn?', [], [read]), null);
 });

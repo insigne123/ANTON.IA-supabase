@@ -11,9 +11,10 @@
 1. **Un lote para varias personas: `contacts.prepare_batch`** (efecto `lead_prepare_batch`). Lleva un objetivo:
    - **save:** guardarlas;
    - **email:** guardarlas si falta y buscar su correo (1 crédito por persona);
-   - **research:** además, investigarlas. Sin correo buscado no se investiga, así que el lote lo busca antes.
+   - **research:** además, investigarlas. Sin correo buscado no se investiga, así que el lote lo busca antes;
+   - **linkedin:** guardarlas si falta y buscar su perfil de LinkedIn (1 crédito por persona), aunque ya tengan correo. Es la misma consulta al proveedor que la del correo y solo completa lo que le falta al contacto. Se salta a quien ya tiene perfil o ya pasó por esa consulta. Sirve para invitar por LinkedIn cuando ningún contacto tiene perfil guardado.
 
-   Las personas son resultados de búsqueda (`providerId`) o contactos guardados (`leadId`) que la conversación ya vio. Admite hasta 50 para guardar y 10 para correo o investigación.
+   Las personas son resultados de búsqueda (`providerId`) o contactos guardados (`leadId`) que la conversación ya vio. Admite hasta 50 para guardar y 10 para correo, perfil o investigación.
 2. **Solo lo que falta:** antes de proponer, el servidor lee el estado real de cada persona y salta lo hecho. Revisa si ya está guardada, si su correo ya está o ya se buscó (por cualquier camino) y si tiene una investigación hecha o en curso.
    - Nada se cobra dos veces.
    - Si a nadie le falta nada, no hay tarjeta: Cowork sigue con el paso siguiente sin pedir aprobación.
