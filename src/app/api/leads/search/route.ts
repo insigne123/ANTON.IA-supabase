@@ -28,6 +28,11 @@ import {hasLeadsFinderUserAccess} from '@/lib/server/leads-finder/access';
 import {issueCompanyScope,readCompanyScope} from '@/lib/server/leads-finder/company-scope';
 import { hybridEnabled, mirrorCriteria } from '@/lib/server/microworlds/contracts';
 import { enqueueMirror, runMirrorWorker } from '@/lib/server/microworlds/search';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { assertOpportunityRead } from '@/lib/server/commercial-opportunities/workspace-access';
+import { addOpportunityActivity, opportunityDb } from '@/lib/server/commercial-opportunities/workspace-store';
+import { opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
+import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -385,7 +390,7 @@ export async function GET() {
   );
 }
 
-export async function POST(req: NextRequest) {
+async function executeSearchPOST(req: NextRequest) {
   try {
     let ctx: Awaited<ReturnType<typeof requireSessionOrTrustedInternalRequest>>;
     try {
@@ -805,6 +810,35 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+/** Optional opportunity context never goes to Apollo and never authorizes quota or identity. */
+export async function POST(req: NextRequest) {
+  const id = req.headers.get('x-opportunity-id');
+  if (!id || !opportunityWorkspaceEnabled()) return executeSearchPOST(req);
+  try {
+    if (!/^[a-f0-9-]{36}$/i.test(id)) throw new AuthError('La oportunidad no es válida.', 400);
+    const auth = await requireSessionOrTrustedInternalRequest(req);
+    if (auth.source !== 'session' || !auth.organizationId) throw new AuthError('La asignación requiere una sesión personal.', 403);
+    const scope = { organizationId: auth.organizationId, userId: auth.user.id };
+    const client = getSupabaseAdminClient();
+    await assertOpportunityRead(client, scope, id);
+    const response = await executeSearchPOST(req);
+    if (response.ok) {
+      const data = await response.clone().json().catch(() => null);
+      const leads = Array.isArray(data?.leads) ? data.leads : [];
+      try {
+        const observations = leads.slice(0, 100).flatMap((lead: any) => {
+          const provider = String(lead.source_provider || response.headers.get('x-provider-used') || 'apollo');
+          const providerId = String(lead.source_provider_id || lead.apollo_id || lead.id || '');
+          return providerId ? [{ organization_id: scope.organizationId, opportunity_id: id, user_id: scope.userId, provider, provider_id: providerId }] : [];
+        });
+        if (observations.length) opportunityDb(await client.from('opportunity_search_observations').upsert(observations, { onConflict: 'opportunity_id,user_id,provider,provider_id', ignoreDuplicates: true }));
+        await addOpportunityActivity(client, scope, id, 'search_completed', leads.length ? `Búsqueda completada: ${leads.length} contactos encontrados` : 'Consulta de empresas completada', { contacts: leads.length, stage: response.headers.get('x-search-mode') }, `opportunity-search:${randomUUID()}`);
+      } catch { response.headers.set('x-opportunity-trace', 'pending'); }
+    }
+    return response;
+  } catch (error) { return requestAuthErrorResponse(error) || opportunitiesError(error); }
 }
 
 async function excludeSavedSearchResults(response: NextResponse, organizationId: string) {

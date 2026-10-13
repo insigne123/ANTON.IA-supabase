@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { isOpportunitiesUserAllowed } from '@/lib/commercial-opportunities/access';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
 import { adminDashboardAuthErrorResponse, requireAdminDashboardAccess } from '@/lib/server/admin-dashboard-auth';
 import {
   opportunitiesGrantedUserIds, opportunitiesGrantsAvailable, setOpportunitiesGrant,
@@ -28,6 +29,7 @@ async function memberIds(supabase: Supabase, organizationId: string) {
 export async function GET() {
   try {
     const auth = await requireAdminDashboardAccess();
+    if(opportunityWorkspaceEnabled())return NextResponse.json({available:false,granted:[],listed:[],assignmentBased:true},{headers:noStore});
     if (!(await opportunitiesGrantsAvailable(auth.supabase))) return NextResponse.json({ available: false, granted: [], listed: [] }, { headers: noStore });
     const [ids, granted] = await Promise.all([memberIds(auth.supabase, auth.organizationId), opportunitiesGrantedUserIds(auth.supabase, auth.organizationId)]);
     const listed: string[] = [];
@@ -49,6 +51,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const auth = await requireAdminDashboardAccess();
+    if(opportunityWorkspaceEnabled())return NextResponse.json({error:'El acceso ahora se administra asignando participantes a cada oportunidad.'},{status:409,headers:noStore});
     const body = await request.json().catch(() => ({}));
     const userId = String(body?.userId || '').trim();
     if (!UUID_RE.test(userId) || typeof body?.enabled !== 'boolean') {

@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunities/access';
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import { HiringSyncError } from '@/lib/server/commercial-opportunities/sync';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { assertOpportunityAdmin, opportunityScope } from '@/lib/server/commercial-opportunities/workspace-access';
 import {
   checkMercadoPublicoTicket, deleteTicket, normalizeTicket, resolveTicketForUser, saveTicket,
 } from '@/lib/server/commercial-opportunities/tickets';
@@ -20,6 +22,7 @@ const bodySchema = z.object({
 export async function GET() {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) assertOpportunityAdmin(opportunityScope(auth));
     const { status } = await resolveTicketForUser(auth.admin, auth.user);
     return opportunitiesJson({ ticket: status });
   } catch (error) {
@@ -30,6 +33,7 @@ export async function GET() {
 export async function PUT(request: Request) {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) assertOpportunityAdmin(opportunityScope(auth));
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     const ticket = normalizeTicket(body.ticket);
     if (!ticket) throw new HiringSyncError('Eso no parece un ticket de Mercado Público: son 36 letras y números separados por guiones, como XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX.', 400);
@@ -48,6 +52,7 @@ export async function PUT(request: Request) {
 export async function DELETE() {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) assertOpportunityAdmin(opportunityScope(auth));
     await deleteTicket(auth.admin, auth.user.id);
     const { status } = await resolveTicketForUser(auth.admin, auth.user);
     return opportunitiesJson({ ticket: status });

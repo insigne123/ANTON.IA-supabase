@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation';
 import { AuthError } from '@/lib/server/auth-utils';
 import { requireOpportunitiesUser } from '@/lib/server/commercial-opportunities/access';
 import { OpportunitiesWorkspace } from '@/components/commercial-opportunities/OpportunitiesWorkspace';
+import { OpportunityWorkWorkspace } from '@/components/commercial-opportunities/OpportunityWorkWorkspace';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export default async function OpportunitiesPage() {
   try {
     const auth = await requireOpportunitiesUser();
-    return <OpportunitiesWorkspace key={`${auth.user.id}:${auth.organizationId}`} />;
+    return opportunityWorkspaceEnabled() ? <OpportunityWorkWorkspace key={`${auth.user.id}:${auth.organizationId}`} /> : <OpportunitiesWorkspace key={`${auth.user.id}:${auth.organizationId}`} />;
   } catch (error) {
     if (error instanceof AuthError) notFound();
     throw error;

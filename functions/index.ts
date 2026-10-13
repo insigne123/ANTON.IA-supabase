@@ -262,6 +262,13 @@ export const commercialOpportunitiesTick = functions.scheduler.onSchedule({
     });
 });
 
+export const opportunityWorkspaceTick = functions.scheduler.onSchedule({
+    schedule: 'every 1 minutes', timeoutSeconds: 540, memory: '512MiB', retryCount: 0,
+    secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    await invokeFirebaseSchedulerBridge({ name: 'opportunity-workspace', path: '/api/cron/opportunity-workspace', method: 'POST' });
+});
+
 export const antoniaRollupsTick = functions.scheduler.onSchedule({
     schedule: '10 0 * * *',
     timeZone: 'Etc/UTC',
