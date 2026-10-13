@@ -131,6 +131,9 @@ const MEETING_ASKED = /\b(?:reuni[oó]n|reunirnos|llamada|videollamada|demo|demo
 // The person's own email to improve: in quotes, or after a colon («mejora este correo: Hola, somos…»).
 const PASTED_EDIT = /\b(?:mejor\w*|reescrib\w*|corrig\w*|edit\w*|arregl\w*)\b(?:[^"«“]{0,80}["«“][^"»”]{40,}|[^"«“:]{0,80}:\s*\S[^]{40,})/i;
 const DROPS_MEETING = /\b(?:sin|quit\w*|sac\w*|elimin\w*)\b[^.]{0,30}\b(?:reuni[oó]n|demo|llamada|agenda\w*)/i;
+// «Menos vendedor», «más suave»: the meeting may give way to a lighter question, said in the reply (round 10 readings: «sigue pidiendo
+// la demo, así que casi no cumple menos vendedor»).
+const SOFTER = /\bmenos\s+(?:vendedor\w*|comercial\w*|insistente|agresiv\w*|formal)|\bm[aá]s\s+(?:suave|sutil|liviano|ligero)|\bsin\s+presi[oó]n/i;
 
 /** The names the offer goes by: its all-caps names («AXIS») and the first word of the seller's company («Yago»). */
 function offerNames(userContext: { companyName?: unknown; offer?: unknown; offerInPlay?: unknown; services?: unknown } | null | undefined) {
@@ -320,14 +323,18 @@ export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<Wr
   } else {
     if (!next.to?.length && previous.to.length) next = { ...next, to: previous.to };
     if (!next.to?.length && /^\s*hola,/i.test(previous.body)) next = { ...next, body: next.body.replace(/^(\s*Hola)\s*\{\{\s*nombre\s*\}\}\s*,/, '$1,') };
-    const meeting = context.edit && !DROPS_MEETING.test(context.request ?? '') ? keptMeeting(next.body, previous) : null;
+    const meeting = context.edit && !DROPS_MEETING.test(context.request ?? '') && !SOFTER.test(context.request ?? '') ? keptMeeting(next.body, previous) : null;
     if (meeting) next = { ...next, body: meeting };
   }
   const blocks = next === block ? output.blocks : output.blocks.map(item => item === block ? next : item);
   // With the meeting put back, what the reply said about the closing question no longer holds.
   const restored = next.body !== block.body && MEETING_ASK.test(normalize(next.body)) && !MEETING_ASK.test(normalize(block.body));
   const said = restored ? output.reply.split(/(?<=[.!?])\s+/).filter(sentence => !/\b(?:pregunt\w*|demo|reunion\w*|llamada)\b/.test(normalize(sentence))).join(' ') : output.reply;
-  const reply = context.edit ? editedReply(said || output.reply, previous, next, Boolean(context.shorter)) : output.reply;
+  // A meeting that gave way to a lighter question on «menos vendedor» is said, with a way back.
+  const softened = Boolean(context.edit && SOFTER.test(context.request ?? '') && MEETING_ASK.test(normalize(previous.body)) && !MEETING_ASK.test(normalize(next.body)));
+  const edited = context.edit ? editedReply(said || output.reply, previous, next, Boolean(context.shorter)) : output.reply;
+  const reply = softened && !/\b(?:demo|reunion\w*|llamada)\b/.test(normalize(edited)) ? `${edited} Cambié la demo por una pregunta más liviana.`.trim() : edited;
+  if (softened && !output.suggestions.some(item => /demo/i.test(item.label))) output = { ...output, suggestions: [{ label: 'Mantener la demo', message: 'Mantén la invitación a la demo' }, ...output.suggestions].slice(0, 4) };
   // An email the person sends: no campaign for it, and the replies offer changes Cowork makes.
   if (context.edit && !next.to?.length && (output.question || output.suggestions.some(item => CAMPAIGN_WORD.test(item.label + item.message)))) {
     const suggestions = output.suggestions.filter(item => !CAMPAIGN_WORD.test(item.label + item.message));
@@ -892,13 +899,14 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
       fix: 'Pregunta otra cosa, sobre el ángulo nuevo: quién lo hace hoy o cómo lo resuelven cuando pasa.', short: 'pregunta nueva' });
     // An edit that drops the meeting the email asked for, without being asked to (round 6: «quita la petición de demo sin avisar»).
     if (context.edit && total === 1 && context.earlier?.length === 1 && MEETING_ASK.test(normalize(context.earlier[0].body)) && !MEETING_ASK.test(plain)
-      && !DROPS_MEETING.test(context.request ?? '')) issues.push({ where, problem: 'La edición quitó la invitación a la demo o la reunión que tenía el correo.',
+      && !DROPS_MEETING.test(context.request ?? '') && !SOFTER.test(context.request ?? '')) issues.push({ where, problem: 'La edición quitó la invitación a la demo o la reunión que tenía el correo.',
       fix: 'Consérvala como la única pregunta de cierre, fácil de responder («¿Qué día te acomoda una demo de 30 minutos?»), y acorta o cambia lo demás.', short: 'conserva la demo' });
     // «Más corto» that came out as long or longer, with a new invitation (round 2 readings: four sentences became five).
     if (context.shorter && total === 1 && context.earlier?.length === 1) {
       const before = context.earlier[0].body;
-      const longer = bodyWords(email.body) >= bodyWords(before) || statements(email.body).length > statements(before).length;
-      if (longer) issues.push({ where, problem: `Se pidió más corto y quedó igual o más largo (${bodyWords(email.body)} palabras; antes ${bodyWords(before)}).`,
+      // At least a fifth shorter, counted on what the person reads (round 10: «46 palabras; antes 47» read as not done).
+      const longer = messageWords(email.body) > Math.floor(messageWords(before) * 0.8) || statements(email.body).length > statements(before).length;
+      if (longer) issues.push({ where, problem: `Se pidió más corto y quedó casi igual (${messageWords(email.body)} palabras; antes ${messageWords(before)}): debe quedar al menos un 20 % más corto.`,
         fix: 'Quita una frase completa y conserva el saludo, la oferta y la pregunta; no agregues invitaciones ni frases nuevas.', short: 'más corto' });
     }
     if (context.followUp && total === 1 && !REOPENS.test(opening)) issues.push({ where, problem: 'El seguimiento no retoma el primer correo.',
@@ -1209,12 +1217,29 @@ export function coworkPlainReply(reply: string) {
   return VARIABLE_WORDS.reduce((plain, [pattern, words]) => plain.replace(pattern, words), text);
 }
 
-export function coworkPolishDraft(output: CoworkWriterOutput, proofs: string[], products: string[] = []): CoworkWriterOutput {
+// A closing word before the signature (round 10 readings: «el correo va sin despedida», four times with Luna).
+const SIGN_OFF = /^(?:saludos|un saludo|atentamente|cordialmente|gracias|muchas gracias|quedo atent[oa]|un abrazo|abrazo)\b/i;
+
+/** «Saludos,» before the signature when the email ends with the signer's name and no closing word. */
+export function coworkWithSignOff(body: string, signer: string | null | undefined): string {
+  const name = signer ? normalize(signer).split(/\s+/)[0] : '';
+  const paragraphs = body.trimEnd().split(/\n\s*\n/);
+  if (!name || paragraphs.length < 2) return body;
+  const last = paragraphs[paragraphs.length - 1];
+  const first = last.split('\n')[0].trim();
+  const previous = (paragraphs[paragraphs.length - 2].trim().split('\n').pop() || '').trim();
+  if (SIGN_OFF.test(first) || SIGN_OFF.test(previous) || !normalize(first).startsWith(name)) return body;
+  paragraphs[paragraphs.length - 1] = `Saludos,\n${last}`;
+  return paragraphs.join('\n\n');
+}
+
+export function coworkPolishDraft(output: CoworkWriterOutput, proofs: string[], products: string[] = [], signer: string | null = null): CoworkWriterOutput {
   const bodies = output.blocks.flatMap(block => block.type === 'email_draft' ? [block.body] : block.type === 'sequence' ? block.steps.map(step => step.body) : []);
   const reply = coworkReplyMatchesDraft(coworkPlainReply(output.reply), bodies);
   if (reply !== output.reply) output = { ...output, reply };
-  if (!proofs.length && !products.length && !bodies.some(body => LOWER_QUESTION.test(body))) return output;
-  const polish = (body: string) => capitalQuestions(proofs.length || products.length ? coworkSplitOffer(coworkPolishProofs(body, proofs), products) : body);
+  const signs = Boolean(signer) && bodies.some(body => coworkWithSignOff(body, signer) !== body);
+  if (!signs && !proofs.length && !products.length && !bodies.some(body => LOWER_QUESTION.test(body))) return output;
+  const polish = (body: string) => coworkWithSignOff(capitalQuestions(proofs.length || products.length ? coworkSplitOffer(coworkPolishProofs(body, proofs), products) : body), signer);
   const blocks = output.blocks.map(block => block.type === 'email_draft' ? { ...block, body: polish(block.body) }
     : block.type === 'sequence' ? { ...block, steps: block.steps.map(step => ({ ...step, body: polish(step.body) })) } : block);
   return { ...output, blocks };
@@ -1301,7 +1326,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
 
   const checked = (draft: CoworkWriterOutput) => [...coworkDraftIssues(coworkWriterBlocks(draft), context), ...coworkReplyIssues(draft.reply),
     ...(input.brief.campaign || PASTED_EDIT.test(input.request) ? [] : coworkNextStepIssues({ blocks: coworkWriterBlocks(draft), question: draft.question }, context))];
-  const polish = (draft: CoworkWriterOutput) => coworkPolishDraft(draft, context.proofs ?? [], context.products ?? []);
+  const polish = (draft: CoworkWriterOutput) => coworkPolishDraft(draft, context.proofs ?? [], context.products ?? [], context.signer);
   let issues = checked(first);
   if (!hasTime()) {
     if (issues.length) await input.step({ agent: 'reviewer', state: 'done', label: plural(issues.length, 'punto por revisar', 'puntos por revisar'), outcome: 'pending', changes: problemList(issues) });

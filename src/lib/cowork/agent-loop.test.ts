@@ -2238,3 +2238,21 @@ test('a lookup offered about LinkedIn profiles is not turned into the email card
   assert.equal(coworkLookupProposal({ reply: 'Nadie tiene perfil.', question: '¿Busco el correo y el perfil de LinkedIn de tus 3 contactos sin correo?' },
     '¿A quién invito por LinkedIn?', [], [read]), null);
 });
+
+test('a LinkedIn profile lookup offered in words becomes its card, deciders first, and never the email card', async () => {
+  const { coworkProfileLookupProposal, coworkLookupProposal } = await import('./agent-loop');
+  const id = (n: number) => `00000000-0000-4000-8000-00000000002${n}`;
+  const read = { action: 'leads.search' as const, input: '', result: { scope: 'own_saved_contacts', items: [
+    { id: id(1), name: 'José Castro', title: 'Reclutador Junior', company: 'GrupoExpro', email: 'jose@grupoexpro.test' },
+    { id: id(2), name: 'Rodrigo Pérez', title: 'Gerente de Personas', company: 'Securitas', email: 'rodrigo@securitas.test' },
+    { id: id(3), name: 'Nehal Patil', title: 'Recruitment Manager', company: 'Adecco', email: null },
+    { id: id(4), name: 'Ana Ruiz', title: 'Jefa de Selección', company: 'Retail Sur', email: null, linkedin_url: 'https://www.linkedin.com/in/ana-ruiz' }] } };
+  const answer = { reply: 'Ninguno tiene perfil guardado.', question: '¿Busco el perfil de LinkedIn de tus contactos guardados?' };
+  const message = '¿A quién de mis contactos con perfil de LinkedIn debería invitar esta semana?';
+  assert.deepEqual(coworkProfileLookupProposal(answer, message, [], [read]), { goal: 'linkedin', people: [{ leadId: id(2) }, { leadId: id(3) }, { leadId: id(1) }] });
+  assert.equal(coworkLookupProposal(answer, message, [], [read]), null, 'about LinkedIn, never the email card');
+  // A «sí» to the previous answer's offer.
+  const history = [{ runId: 'r1', observations: [read], reply: `Ninguno tiene perfil.\n\n${answer.question}` }];
+  assert.equal(coworkProfileLookupProposal({ reply: 'Listo, busco sus perfiles.' }, 'sí, busca sus perfiles', history, [])?.people.length, 3);
+  assert.equal(coworkProfileLookupProposal({ reply: 'Listo.', question: '¿Creo la campaña pausada?' }, 'hola', [], [read]), null);
+});

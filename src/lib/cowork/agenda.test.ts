@@ -355,3 +355,10 @@ test('contacts with an email who never got one are today\'s work, after replies 
   assert.deepEqual(buildCoworkAgenda({ ...empty(), neverWritten: { count: 0, examples: [] } }).items, []);
   assert.equal(buildCoworkAgenda({ ...empty(), neverWritten: null }).counts.neverWritten, null);
 });
+
+test('a day whose only work is writing first emails counts the people in its finding', () => {
+  const agenda = buildCoworkAgenda({ ...empty(), neverWritten: { count: 4, examples: ['A (B)'] } });
+  assert.deepEqual(coworkReadFinding({ action: 'agenda.today', result: agenda }), { count: 4, label: 'contactos por escribir' });
+  const mixed = buildCoworkAgenda({ ...empty(), neverWritten: { count: 4, examples: [] }, followups: [campaign({ ready: 3 })] });
+  assert.deepEqual(coworkReadFinding({ action: 'agenda.today', result: mixed }), { count: 2, label: 'pendientes de hoy' });
+});

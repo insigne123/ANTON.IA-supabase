@@ -75,9 +75,10 @@ export function ReviewActions({ onReject, onApprove, approveLabel, rejectLabel =
   onReject: () => void; onApprove: () => void; approveLabel: string; rejectLabel?: string;
   disabled?: boolean; resolving: boolean; resolvingLabel?: string;
 }) {
-  // The decision stays in view while a long card scrolls (round 9: on a phone the button sat below the fold). The card clips instead
-  // of hiding its overflow, so this sticks to the conversation's scroll.
-  return <div className="sticky bottom-0 z-[1] flex flex-wrap items-center justify-end gap-2 bg-cw-elevated pb-1 pt-2">
+  // On a phone the decision stays in view while a long card scrolls (round 9: the button sat below the fold). The card clips instead
+  // of hiding its overflow, so this sticks to the conversation's scroll. On wider screens it stays in place (round 10: a bar over the
+  // list read as covering it).
+  return <div className="flex flex-wrap items-center justify-end gap-2 bg-cw-elevated pb-1 pt-2 max-md:sticky max-md:bottom-0 max-md:z-[1]">
     <CwButton variant="ghost" disabled={resolving} onClick={onReject}>{rejectLabel}</CwButton>
     <CwButton variant="primary" disabled={resolving || disabled} onClick={onApprove}>
       {resolving && <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" />}{resolving ? resolvingLabel : approveLabel}
