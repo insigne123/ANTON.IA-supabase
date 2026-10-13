@@ -2253,6 +2253,36 @@ test('asked whom to invite on LinkedIn with no saved profile, the profile lookup
   assert.equal(synced.proposals[0]?.prepareBatch?.goal, 'linkedin');
 });
 
+test('asked what to do with contacts without email, the email lookup is proposed and the reply says who and why', async () => {
+  const { coworkAsksMissingEmail, coworkLookupReply } = await import('./agent-loop');
+  assert.equal(coworkAsksMissingEmail('tengo contactos sin correo, ¿qué hago con ellos?'), true);
+  assert.equal(coworkAsksMissingEmail('escríbele a los que tienen correo, no a los sin correo'), false);
+  const id = (n: number) => `00000000-0000-4000-8000-00000000005${n}`;
+  const missing = { scope: 'own_saved_contacts', items: [{ id: id(1), name: 'Nehal Patil', title: 'Recruitment Manager', company: 'Adecco', email: null },
+    { id: id(2), name: 'Carlos Ahumada', title: 'Operations Manager', company: 'Minera Centinela', email: null }] };
+  const proposals: Array<{ kind: string; prepareBatch?: { goal: string; people: unknown[] } }> = [];
+  const notes: string[] = [];
+  let turn = 0;
+  await runCoworkReadLoop({ message: 'tengo contactos sin correo, ¿qué hago con ellos?', runId: '00000000-0000-4000-8000-0000000000dd',
+    signal: new AbortController().signal, authorize: async () => {}, prepareBatch: true, execute: async () => missing,
+    record: async observation => { if (observation.action === 'assistant.note') notes.push(String((observation.result as { reply?: string }).reply)); },
+    proposeEffect: async proposal => { proposals.push(proposal as never); },
+    decide: async () => (turn++ === 0 ? { action: 'leads.search', query: 'sin correo', leadId: null, answer: null }
+      : { action: 'answer', query: null, leadId: null, answer: { reply: 'Primero escríbeles a los 4 con correo.', document: null,
+        question: '¿Preparo el primer correo para tus 4 contactos con correo?' } }) as never });
+  assert.equal(proposals[0]?.prepareBatch?.goal, 'email');
+  assert.equal(proposals[0]?.prepareBatch?.people.length, 2);
+  assert.match(notes.join(' '), /Tienes 2 contactos guardados sin correo: Nehal Patil, de Adecco y Carlos Ahumada, de Minera Centinela\./);
+  // LinkedIn: who goes in the card, and who waits by title.
+  const saved = [{ action: 'leads.search', input: '', result: { scope: 'own_saved_contacts', items: [
+    { id: id(3), name: 'Rodrigo Pérez', title: 'Gerente de Personas', company: 'Securitas', email: 'r@x.test' },
+    { id: id(4), name: 'José Castro', title: 'Reclutador Junior', company: 'GrupoExpro', email: 'j@x.test' }] } }];
+  const reply = coworkLookupReply({ goal: 'linkedin', people: [{ leadId: id(3) }] }, saved);
+  assert.match(reply, /el perfil de quien dirige o lidera un área, porque decide o influye en la compra: Rodrigo Pérez, de Securitas\./);
+  assert.match(reply, /José \(Reclutador Junior\) queda para después por su cargo\./);
+  assert.doesNotMatch(reply, /sincroniz/i);
+});
+
 test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
   const { coworkCampaignForListedPeople } = await import('./agent-loop');
   const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],

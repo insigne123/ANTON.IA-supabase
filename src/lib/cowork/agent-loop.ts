@@ -813,7 +813,36 @@ export function coworkNoSavedProfiles(observations: CoworkObservation[]) {
     && (item.result as { returned?: unknown }).returned === 0);
 }
 
-const PROFILES_FIRST = 'Ninguno de tus contactos guardados tiene su perfil de LinkedIn todavía, así que aún no hay a quién invitar. Primero busco sus perfiles; después te digo a quién invitar.';
+type LookupPeople = { goal: 'email' | 'linkedin'; people: Array<{ leadId: string }> };
+const listed = (items: string[]) => items.length > 1 ? `${items.slice(0, -1).join(', ')} y ${items.at(-1)}` : items[0] ?? '';
+
+/** «Tengo contactos sin correo, ¿qué hago?»: the person asks about the contacts without an email, not about writing to others. */
+export function coworkAsksMissingEmail(message: string) {
+  const plain = message.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /\bsin (?:correo|email|mail)s?\b/.test(plain) && !/linked\s?in|perfil|\b(?:escrib|redact|campan)/.test(plain);
+}
+
+/** What a lookup the loop proposed on its own says: who goes in the card and why, and who waits (rounds 12 and 13: «elige 5 de 7
+ * sin explicar por qué»; «el texto pide sincronizar y la tarjeta aparece debajo»). */
+export function coworkLookupReply(lookup: LookupPeople, read: unknown[]) {
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  const rows = collectCoworkLeadRows(read).filter(row => uuid.test(row.id));
+  const chosen = lookup.people.map(person => rows.find(row => row.id === person.leadId)).filter(row => row !== undefined);
+  const who = (row: (typeof rows)[number]) => `${row.name}${row.company ? `, de ${row.company}` : ''}`;
+  if (lookup.goal === 'email') {
+    const ready = rows.filter(row => typeof row.email === 'string' && row.email.includes('@')).length;
+    return `Tienes ${chosen.length === 1 ? '1 contacto guardado' : `${chosen.length} contactos guardados`} sin correo: ${listed(chosen.map(who))}. `
+      + 'Sin correo no puedes escribirles, así que el paso es buscarlo: 1 crédito por persona, solo con tu aprobación y sin enviar nada. '
+      + `En la tarjeta puedes quitar a quien no quieras.${ready ? ` Después, tus ${ready} contactos con correo siguen esperando su primer correo.` : ''}`;
+  }
+  const waiting = rows.filter(row => !row.linkedin_url && !chosen.includes(row));
+  const firsts = waiting.map(row => `${String(row.name || '').split(/\s+/)[0]}${row.title ? ` (${row.title})` : ''}`);
+  return 'Ninguno de tus contactos guardados tiene su perfil de LinkedIn todavía, así que aún no hay a quién invitar. '
+    + (waiting.length
+      ? `Propongo buscar primero el perfil ${chosen.length === 1 ? 'de quien dirige o lidera un área, porque decide o influye' : `de los ${chosen.length} que dirigen o lideran un área, porque deciden o influyen`} en la compra: ${listed(chosen.map(who))}. ${listed(firsts)} ${waiting.length === 1 ? 'queda' : 'quedan'} para después por su cargo.`
+      : `Propongo buscar el perfil de ${chosen.length === 1 ? 'tu contacto' : `tus ${chosen.length} contactos`}: ${listed(chosen.map(who))}.`)
+    + ' Con su perfil guardado te preparo las invitaciones, dentro de tu cupo semanal; nada se envía sin tu aprobación.';
+}
 
 // A stand-in read with one saved contact without a profile: whether an answer offers the profile lookup, before reading who.
 const MISSING_PROFILE_PROBE: CoworkObservation = { action: 'leads.search', input: '', result: { scope: 'own_saved_contacts',
@@ -1384,7 +1413,8 @@ async function runCoworkLoop(input: {
     try {
       // An email lookup offered or accepted in words goes out as its card, with no other decision.
       const offersLookup = decision.action === 'answer' && decision.answer && input.proposeEffect && input.prepareBatch && !input.clarification && !informationOnly;
-      let lookup: { goal: 'email' | 'linkedin'; people: Array<{ leadId: string }> } | null = offersLookup
+      let forcedReply: string | null = null;
+      let lookup: LookupPeople | null = offersLookup
         ? coworkLookupProposal(decision.answer!, input.message, input.history, observations) : null;
       // Offered from the account's figures, before anyone was read (round 5: «¿Busco el correo de los 3…?» with no card): who still
       // lacks an email is read first, the read the card needs.
@@ -1405,6 +1435,13 @@ async function runCoworkLoop(input: {
           observations.push(probe);
         }
         lookup = coworkProfileLookupProposal(offer, input.message, input.history, observations);
+        if (lookup) forcedReply = coworkLookupReply(lookup, [...(input.history || []).flatMap(item => item.observations || []), ...observations]);
+      }
+      // «Tengo contactos sin correo, ¿qué hago?»: looking for their email is the step (round 13: Luna sent the person to write to the
+      // others first and offered no card).
+      if (offersLookup && !lookup && coworkAsksMissingEmail(input.message)) {
+        lookup = coworkLookupProposal({ reply: '', question: '¿Busco el correo de los contactos que no lo tienen?' }, input.message, input.history, observations);
+        if (lookup) forcedReply = coworkLookupReply(lookup, [...(input.history || []).flatMap(item => item.observations || []), ...observations]);
       }
       // A LinkedIn profile lookup offered in words is its card too; with nobody read yet, the saved contacts are read first.
       if (offersLookup && !lookup) lookup = coworkProfileLookupProposal(decision.answer!, input.message, input.history, observations);
@@ -1421,12 +1458,12 @@ async function runCoworkLoop(input: {
       }
       if (lookup && decision.action === 'prospecting.propose_search') {
         decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup, searchCriteria: undefined,
-          answer: { reply: PROFILES_FIRST, document: null } } as Decision;
+          answer: { reply: forcedReply ?? '', document: null } } as Decision;
       }
       if (lookup && decision.answer) {
         const reply = decision.answer.reply.split('\n').filter(line => !/^\s*¿/.test(line) && !/a continuaci[óo]n\.?\s*$/i.test(line)).join('\n').trim();
         decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup,
-          answer: { ...decision.answer, reply: reply || decision.answer.reply, question: null, suggestions: null } } as Decision;
+          answer: { ...decision.answer, reply: forcedReply ?? (reply || decision.answer.reply), question: null, suggestions: null } } as Decision;
       }
       if (informationOnly && decision.action !== 'answer') throw rejected('Orientation needs no tools', 'El usuario solo saluda o pregunta qué haces. Responde con las capacidades disponibles y el contexto ya recibido, sin consultas ni propuestas de ejecución.');
       if (decision.action === 'draft.write') {
