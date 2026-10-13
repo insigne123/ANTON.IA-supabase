@@ -339,3 +339,9 @@ test('the reply does not offer again what the closing question offers', () => {
   assert.equal(withoutRepeatedOffer('Marcela abrió tu correo. Puedo buscar su teléfono.', question), 'Marcela abrió tu correo. Puedo buscar su teléfono.');
   assert.equal(withoutRepeatedOffer('Puedo crear la campaña pausada para estos tres contactos.', question), 'Puedo crear la campaña pausada para estos tres contactos.');
 });
+
+test('a tool name copied into a reply is said in the person\'s words', async () => {
+  const { polishCoworkText } = await import('./answer-quality');
+  assert.equal(polishCoworkText('Después puedo usar lead.enrich para traer su perfil.'), 'Después puedo usar la búsqueda de su correo para traer su perfil.');
+  assert.equal(polishCoworkText('Escríbele a francisca.munoz@falabella.test.'), 'Escríbele a francisca.munoz@falabella.test.');
+});

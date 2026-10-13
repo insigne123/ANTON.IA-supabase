@@ -27,7 +27,7 @@ import { useProductTour } from '@/components/onboarding/ProductTour';
 import type { NavAccess } from '@/hooks/use-nav-access';
 import { NAV_SECTIONS, isNavItemActive } from '@/lib/navigation';
 
-const itemClass = 'h-10 rounded-2xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/80 transition-colors duration-200 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground';
+const itemClass = 'h-9 rounded-xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/80 transition-colors duration-200 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground';
 const activeItemClass = 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]';
 
 /** `access` comes from the shell, which also uses it for the help: one request for both. */
@@ -67,11 +67,11 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
           {visibleSections.map((section, index) => (
           <React.Fragment key={section.label}>
             <SidebarGroup className="p-0">
-              <SidebarGroupLabel className="px-3 pb-2 pt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/70">
+              <SidebarGroupLabel className="px-3 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/70">
                 {section.label}
               </SidebarGroupLabel>
               <SidebarGroupContent>
-                <SidebarMenu className="gap-1.5">
+                <SidebarMenu className="gap-0.5">
                   {section.items.map((item) => {
                     const isActive = isNavItemActive(item, pathname);
 
@@ -94,14 +94,14 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
-            {index < visibleSections.length - 1 && <SidebarSeparator className="mx-3 my-2 bg-sidebar-border/65" />}
+            {index < visibleSections.length - 1 && <SidebarSeparator className="mx-3 my-1.5 bg-sidebar-border/65" />}
           </React.Fragment>
           ))}
         </nav>
       </SidebarContent>
 
-      <SidebarFooter className="gap-3 border-t border-sidebar-border/70 px-3 py-3">
-        <SidebarMenu>
+      <SidebarFooter className="gap-3 border-t border-sidebar-border/70 px-3 py-2">
+        <SidebarMenu className="gap-0.5">
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={helpActive} className={cn(itemClass, helpActive && activeItemClass)}>
               <Link href="/ayuda" onClick={closeOnPhone} data-tour="help-center" aria-current={pathname === '/ayuda' ? 'page' : undefined}>

@@ -2170,3 +2170,25 @@ test('«¿qué puedes hacer?» is answered with what Cowork does', async () => {
   assert.equal(coworkListsCapabilities('Hoy tienes 7 contactos. Lo más rápido es escribirle a tus 4 contactos con correo.'), false);
   assert.equal(coworkListsCapabilities('Puedo ayudarte así:\n- Buscar prospectos\n- Tus contactos y sus correos\n- Correos y campañas\n- LinkedIn'), true);
 });
+
+test('a campaign note without its follow-ups keeps its sentences apart', async () => {
+  const { coworkWithoutCadence } = await import('./agent-loop');
+  assert.equal(coworkWithoutCadence('Queda pausada hasta que la actives. Los seguimientos siguen la cadencia de 7 toques. Sale desde tu Gmail.'),
+    'Queda pausada hasta que la actives. Sale desde tu Gmail. Va solo con este correo; si quieres, después te escribo los seguimientos.');
+});
+
+test('an email lookup offered in words becomes its card with the people read without an email', async () => {
+  const { coworkLookupProposal } = await import('./agent-loop');
+  const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+  const read = { action: 'leads.search' as const, input: 'sin correo', result: { scope: 'own_saved_contacts', items: [
+    { id: id(1), name: 'Nehal Patil', company: 'Adecco', email: null }, { id: id(2), name: 'Katherine Salinas', company: 'Adecco', email: null },
+    { id: id(3), name: 'Carlos Ahumada', company: 'Minera Centinela', email: null }, { id: id(4), name: 'Daniela Rojas', company: 'Manpower', email: 'daniela@manpower.test' }] } };
+  const all = coworkLookupProposal({ reply: 'Tienes 3 sin correo.', question: '¿Busco el correo de los 3 que no lo tienen?' }, 'tengo contactos sin correo', [], [read]);
+  assert.deepEqual(all, { goal: 'email', people: [{ leadId: id(1) }, { leadId: id(2) }, { leadId: id(3) }] });
+  const two = coworkLookupProposal({ reply: 'Parte por Adecco.', question: '¿Busco el correo de Nehal y Katherine?' }, 'hola', [], [read]);
+  assert.deepEqual(two?.people, [{ leadId: id(1) }, { leadId: id(2) }]);
+  // A «dale» to the previous answer's offer, with the people read in that turn.
+  const history = [{ runId: 'r1', observations: [read], reply: 'Tienes 3 sin correo.\n\n¿Busco el correo de los 3 que no lo tienen?' }];
+  assert.equal(coworkLookupProposal({ reply: 'Lo primero es buscar sus correos. Te muestro la propuesta a continuación.' }, 'dale, ¿por dónde parto?', history, [])?.people.length, 3);
+  assert.equal(coworkLookupProposal({ reply: 'Listo.', question: '¿Creo la campaña pausada?' }, 'hola', [], [read]), null);
+});

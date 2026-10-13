@@ -728,6 +728,27 @@ export function coworkOfferedLookupFeedback(answer: { reply: string; question?: 
 }
 
 /**
+ * Looking for emails offered in words becomes its card, built from the saved contacts without an email that the conversation read
+ * (round 4: «Te muestro la propuesta de búsqueda a continuación» and no card; before, the turn asked «¿Busco el correo…?» and waited
+ * for a «dale»). When the question names some of them, only those. Null when nothing offers it or nobody without an email was read.
+ */
+export function coworkLookupProposal(answer: { reply: string; question?: unknown }, message: string, history: CoworkHistoryTurn[] | undefined,
+  observations: CoworkObservation[], max = 5): { goal: 'email'; people: Array<{ leadId: string }> } | null {
+  const own = closingQuestion(answer);
+  const before = coworkClosingQuestionOf(history?.at(-1)?.reply);
+  const accepted = Boolean(before && OFFERS_EMAIL_LOOKUP.test(before) && TAKES_OFFER.test(message) && !CHANGES_OFFER.test(message));
+  const offer = own && OFFERS_EMAIL_LOOKUP.test(own) ? own : accepted ? before! : null;
+  if (!offer) return null;
+  const read = [...(history || []).flatMap(turn => turn.observations || []), ...observations];
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  const missing = collectCoworkLeadRows(read).filter(row => uuid.test(row.id) && !(typeof row.email === 'string' && row.email.includes('@')));
+  const plain = (text: string) => text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const named = missing.filter(row => { const first = plain(String(row.name || '')).split(/\s+/)[0]; return first.length > 2 && plain(offer).includes(first); });
+  const people = (named.length ? named : missing).slice(0, max);
+  return people.length ? { goal: 'email', people: people.map(row => ({ leadId: row.id })) } : null;
+}
+
+/**
  * The email the person saw in the previous answer, when they accept the campaign it offered (round 2 readings: a «sí, crea la
  * campaña» after one email for Daniela became seven emails, six of them never shown). A sequence card, or an answer with one card per
  * person (coworkPersonalEmails), or a request for the follow-ups too, are left to the rest of the loop.
@@ -757,7 +778,7 @@ const CADENCE = /[^.!?\n]*(?<!\p{L})(?:cadencia|toques|seguimientos)(?!\p{L})[^.
 /** A campaign note without its follow-ups, and saying what comes next instead. */
 export function coworkWithoutCadence(reply: string) {
   if (!/(?<!\p{L})(?:cadencia|toques|seguimientos)(?!\p{L})/iu.test(reply)) return reply;
-  const rest = reply.replace(CADENCE, '').replace(/[ \t]+\n/g, '\n').trim();
+  const rest = reply.replace(CADENCE, ' ').replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/([.!?])(?=\p{Lu})/gu, '$1 ').trim();
   return `${rest}${rest ? ' ' : ''}Va solo con este correo; si quieres, después te escribo los seguimientos.`;
 }
 
@@ -1195,6 +1216,8 @@ async function runCoworkLoop(input: {
   let writerFailed = false;
   // The «sí» to the previous answer's offer went back once (coworkAcceptedOfferFeedback).
   let offerTaken = false;
+  // A campaign accepted without its email went back once to be written first.
+  let campaignRedirected = false;
   // The turn's last word when it would fail (Plan 14, 2): an answer already given stands first; then, once, the rescue.
   let rescued = false;
   const rescueOr = async (error: unknown): Promise<CoworkAnswer> => {
@@ -1272,6 +1295,14 @@ async function runCoworkLoop(input: {
     }
     await remember(decision);
     try {
+      // An email lookup offered or accepted in words goes out as its card, with no other decision.
+      const lookup = decision.action === 'answer' && decision.answer && input.proposeEffect && input.prepareBatch && !input.clarification && !informationOnly
+        ? coworkLookupProposal(decision.answer, input.message, input.history, observations) : null;
+      if (lookup && decision.answer) {
+        const reply = decision.answer.reply.split('\n').filter(line => !/^\s*¿/.test(line) && !/a continuaci[óo]n\.?\s*$/i.test(line)).join('\n').trim();
+        decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup,
+          answer: { ...decision.answer, reply: reply || decision.answer.reply, question: null, suggestions: null } } as Decision;
+      }
       if (informationOnly && decision.action !== 'answer') throw rejected('Orientation needs no tools', 'El usuario solo saluda o pregunta qué haces. Responde con las capacidades disponibles y el contexto ya recibido, sin consultas ni propuestas de ejecución.');
       if (decision.action === 'draft.write') {
         // «Usar esta versión» keeps the person's text as it is: nobody rewrites it.
@@ -1594,6 +1625,14 @@ async function runCoworkLoop(input: {
         const personalEmails = decision.action === 'campaign.create' && !exactEmails
           ? written?.personal ?? (TAKES_OFFER.test(input.message) && !CHANGES_OFFER.test(input.message)
             ? coworkPersonalEmails(input.history?.[input.history.length - 1]?.blocks) : null) : null;
+        // A «sí» to a campaign the previous answer offered without an email in view: the Writer writes it first, and the campaign
+        // goes with it (round 4: the coordinator's own three emails, unseen, after «Me equivoqué antes»).
+        if (decision.action === 'campaign.create' && !exactEmails && !personalEmails && !written && !campaignRedirected && input.write && turn < last && !late()
+          && /campa[ñn]a/i.test(coworkClosingQuestionOf(input.history?.at(-1)?.reply) || '') && TAKES_OFFER.test(input.message) && !CHANGES_OFFER.test(input.message)
+          && !(input.history?.at(-1)?.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence')) {
+          campaignRedirected = true;
+          throw rejected('Campaign without its email', 'La campaña necesita su primer correo a la vista: usa draft.write con campaign true para los contactos con correo que leíste (recipients con sus nombres); cuando la Redactora termine, propones campaign.create con ese correo.');
+        }
         const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
         if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));
         const campaign = decision.action === 'campaign.create' && decision.campaign

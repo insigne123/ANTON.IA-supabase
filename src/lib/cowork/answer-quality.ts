@@ -18,9 +18,19 @@ function outsideCode(text: string, transform: (chunk: string) => string) {
   return text.split(/(```[\s\S]*?```)/g).map(part => part.startsWith('```') ? part : transform(part)).join('');
 }
 
+// A tool name copied into the text (round 4: «propongo lead.enrich» in a reply), said in the person's words.
+const TOOL_NAME = /([*_`]?)\b((?:lead|leads|contacts|research|draft|campaign|campaigns|contacted|linkedin|profile|crm|lists|message|prospecting|saved_search|email)\.[a-z_]+)\b\1(?![\w.@-])/g;
+const TOOL_WORDS: Array<[RegExp, string]> = [
+  [/^(?:lead\.enrich(?:_batch)?|contacts\.prepare_batch)$/, 'la búsqueda de su correo'], [/^research\./, 'la investigación'],
+  [/^linkedin\.invite/, 'la invitación de LinkedIn'], [/^linkedin\.message/, 'el mensaje de LinkedIn'], [/^campaigns?\./, 'la campaña'],
+  [/^(?:leads|contacts|lists)\./, 'tus contactos'], [/^(?:draft|email)\./, 'el correo'], [/^prospecting\./, 'la búsqueda de prospectos'],
+];
+const toolWords = (name: string) => TOOL_WORDS.find(([pattern]) => pattern.test(name))?.[1] ?? 'esa acción';
+
 export function polishCoworkText(text: string): string {
   return outsideCode(String(text || ''), chunk => chunk
     .replace(CODE_PATTERN, (_match, _wrap, code: string) => COWORK_GLOSSARY[code] || code)
+    .replace(TOOL_NAME, (_match, _wrap, name: string) => toolWords(name))
     .replace(CODE_EMAIL, '$1')
     .replace(ID_IN_PARENS, ''));
 }
