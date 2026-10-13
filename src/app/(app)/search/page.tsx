@@ -95,6 +95,7 @@ function currentCompanySignature(criteria:typeof DEFAULT_FILTERS){return criteri
 
 export default function SearchPage() {
   const router = useRouter();
+  const opportunityOrigin = useRef<string | undefined>();
   const reauthScope = useRef(readCachedAuthScope());
   const [isLoading, setIsLoading] = useState(false);
   const [leads, setLeads] = useState<UILaed[]>([]);
@@ -284,7 +285,7 @@ export default function SearchPage() {
         employee_ranges: sizeRanges,
         page,
         per_page: 25,
-      } as any, controller.signal);
+      } as any, controller.signal, opportunityOrigin.current);
       if (controller.signal.aborted) return;
       const orgs = Array.isArray(result.organizations) ? result.organizations : [];
       setCompanies((current) => page === 1 ? orgs : [...new Map([...current, ...orgs].map((org) => [org.id, org])).values()]);
@@ -348,7 +349,7 @@ export default function SearchPage() {
       page,
       per_page: perPage,
       exclude_person_ids: [],
-    }, signal);
+    }, signal, opportunityOrigin.current);
     const rawLeads = Array.isArray((result as any)?.leads) ? (result as any).leads : [];
     // Exclude already saved (by Apollo id) and already delivered in this window.
     const delivered = new Set(excludeIds.map((id) => String(id)));
@@ -674,6 +675,7 @@ export default function SearchPage() {
     companyPrefillChecked.current = true;
     const prefill = companySearchPrefill(window.location.search);
     if (!prefill) return;
+    opportunityOrigin.current = prefill.opportunityId;
     window.history.replaceState(window.history.state, '', window.location.pathname);
     companyRun.current += 1;
     companyPeopleAbortRef.current?.abort();
@@ -728,6 +730,7 @@ export default function SearchPage() {
   }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading, companySearchSignature, peopleSearchSignature, searchSource]);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
+    if (['companyName','companyDomains','searchMode'].includes(field)) opportunityOrigin.current = undefined;
     criteriaTouched.current = true;
     if (field === 'searchMode') {
       companyRun.current += 1;
@@ -831,6 +834,14 @@ export default function SearchPage() {
       const all = await supabaseService.getLeads();
       setSavedIds(new Set(all.map(l => l.id)));
       await refreshSavedApolloIds();
+      if (opportunityOrigin.current) {
+        try {
+          const response = await authenticatedApiFetch(`/api/commercial-opportunities/${opportunityOrigin.current}/contacts`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ providerIds: selectedNotContacted.map(l => String(l.sourceProviderId || l.apolloId || l.id)).slice(0, 100) }),
+          });
+          if (!response.ok) toast({ title: 'Contactos guardados', description: 'Falta vincularlos a la oportunidad. Puedes hacerlo desde su ficha.' });
+        } catch { toast({ title: 'Contactos guardados', description: 'La vinculación a la oportunidad quedó pendiente.' }); }
+      }
 
       const phonePendingNote =
         filters.searchMode === 'linkedin_profile' &&

@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunities/access';
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import { opportunityStatusSchema, setOpportunityStatus } from '@/lib/server/commercial-opportunities/store';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { assertOpportunityAdmin, opportunityScope } from '@/lib/server/commercial-opportunities/workspace-access';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
@@ -10,6 +12,7 @@ type Context = { params: Promise<{ id: string }> };
 export async function PATCH(request: Request, context: Context) {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) assertOpportunityAdmin(opportunityScope(auth));
     const id = z.string().uuid().parse((await context.params).id);
     const { status } = opportunityStatusSchema.parse(await request.json().catch(() => ({})));
     const updated = await setOpportunityStatus(auth.admin, { userId: auth.user.id, organizationId: auth.organizationId }, id, status);

@@ -20,6 +20,7 @@ const firebaseBridgeRoutes = [
     'privacy-retention',
     'antonia-rollups',
     'commercial-opportunities',
+    'opportunity-workspace',
 ].map((route) => ({
     route,
     source: readFileSync(`src/app/api/cron/${route}/route.ts`, 'utf8'),
@@ -57,6 +58,7 @@ test('Firebase owns all production scheduler bridges and Vercel schedules nothin
         ['privacyRetentionTick', '30 3 * * *', '/api/cron/privacy-retention'],
         ['antoniaRollupsTick', '10 0 * * *', '/api/cron/antonia-rollups'],
         ['commercialOpportunitiesTick', '15 * * * *', '/api/cron/commercial-opportunities'],
+        ['opportunityWorkspaceTick', 'every 1 minutes', '/api/cron/opportunity-workspace'],
     ];
     for (const [name, cadence, path] of schedules) {
         const start = functionsSource.indexOf(`export const ${name} =`);

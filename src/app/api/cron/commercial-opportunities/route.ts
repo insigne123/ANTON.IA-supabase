@@ -13,6 +13,8 @@ import {
   DAILY_BUDGET_MS, JSEARCH_MONTH_SPENT, dailyOpportunityPlan, dailyTenderSearch, jsearchQuotaSpentThisMonth,
 } from '@/lib/server/commercial-opportunities/daily';
 import { markTicketRejected, resolveTicketForOrganization } from '@/lib/server/commercial-opportunities/tickets';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { enqueueDailyOpportunityWork } from '@/lib/server/commercial-opportunities/workspace-jobs';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,6 +29,7 @@ export async function POST(request: Request) {
   const headers = firebaseSchedulerResponseHeaders();
   if (!isFirebaseSchedulerRequest(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers });
   const client = getSupabaseAdminClient();
+  if (opportunityWorkspaceEnabled()) return NextResponse.json({ enqueued: await enqueueDailyOpportunityWork(client) }, { headers });
   // Plan 15: with each organization's schedule; before its columns exist, the profiles as they were (every day at 8).
   const profiles = (columns: string) => client.from('commercial_opportunity_profiles').select(columns)
     .eq('active', true).not('created_by', 'is', null).order('created_at', { ascending: true }).limit(50);

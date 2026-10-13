@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { hasConfirmedEmail, isOpportunitiesUserAllowed, type OpportunitiesIdentity } from '@/lib/commercial-opportunities/access';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
 
 /**
  * Who may open «Oportunidades» beyond OPPORTUNITIES_ALLOWED_EMAILS (Plan 15): the members an owner or admin let in from
@@ -37,6 +38,11 @@ export async function opportunitiesGrantsAvailable(client: SupabaseClient) {
  */
 export async function canUseOpportunities(client: SupabaseClient, user: (OpportunitiesIdentity & { id?: string | null }) | null | undefined,
   organizationId: string | null | undefined, configured = process.env.OPPORTUNITIES_ALLOWED_EMAILS) {
+  if (opportunityWorkspaceEnabled()) {
+    if (!user?.id || !organizationId || !hasConfirmedEmail(user)) return false;
+    const { data, error } = await client.from('organization_members').select('user_id').eq('organization_id', organizationId).eq('user_id', user.id).maybeSingle();
+    return !error && Boolean(data);
+  }
   if (isOpportunitiesUserAllowed(user, configured)) return true;
   if (!user?.id || !organizationId || !hasConfirmedEmail(user)) return false;
   try {

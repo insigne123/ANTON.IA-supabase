@@ -10,6 +10,8 @@ import { generateRoleVariants } from '@/lib/server/commercial-opportunities/sear
 import { HiringSyncError, hiringSyncEnvironment, monthlyCapUsd, runHiringSync } from '@/lib/server/commercial-opportunities/sync';
 import { runTenderSync } from '@/lib/server/commercial-opportunities/tender-sync';
 import { markTicketRejected, resolveTicketForUser, ticketWasRejected } from '@/lib/server/commercial-opportunities/tickets';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -32,6 +34,7 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) throw new AuthError('Usa la búsqueda del workspace para mantener el presupuesto compartido.', 409);
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     const { kind } = body;
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };

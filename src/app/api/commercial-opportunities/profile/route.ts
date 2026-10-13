@@ -7,6 +7,8 @@ import {
 import { z } from 'zod';
 import { hiringSyncEnvironment, hiringSyncPlan } from '@/lib/server/commercial-opportunities/sync';
 import { MANUAL_JSEARCH_QUERIES } from '@/lib/commercial-opportunities/search-terms';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +28,7 @@ export const maxDuration = 60;
 export async function PUT(request: Request) {
   try {
     const auth = await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) throw new AuthError('La oferta compartida se administra desde Empresa del workspace.', 409);
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const body = await request.json().catch(() => ({}));
     const regenerate = Boolean(body && typeof body === 'object' && (body as { regenerate?: unknown }).regenerate === true);

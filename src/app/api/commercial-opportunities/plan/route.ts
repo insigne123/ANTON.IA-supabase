@@ -5,6 +5,8 @@ import { requireOpportunitiesAccess } from '@/lib/server/commercial-opportunitie
 import { opportunitiesError, opportunitiesJson } from '@/lib/server/commercial-opportunities/responses';
 import { generateRoleVariants } from '@/lib/server/commercial-opportunities/search-ai';
 import { hiringSyncEnvironment, hiringSyncPlan } from '@/lib/server/commercial-opportunities/sync';
+import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -21,6 +23,7 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     await requireOpportunitiesAccess();
+    if (opportunityWorkspaceEnabled()) throw new AuthError('Los criterios se generan desde la oferta compartida del workspace.', 409);
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     const roles = searchRoles(body.roles);
     const regions = CHILE_REGIONS.filter(region => body.regions.includes(region));
