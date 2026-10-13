@@ -1085,3 +1085,10 @@ test('an edit keeps the demo the email asked for unless the person asked to drop
   assert.ok(shorts('más corto y menos vendedor').includes('conserva la demo'));
   assert.ok(!shorts('más corto y sin la demo').includes('conserva la demo'));
 });
+
+test('a reply does not describe a meeting the email does not ask for, whatever the verb', () => {
+  const bodies = ['Hola {{nombre}},\n\nTexto.\n\n¿Cuánto les toma hoy revisar esos antecedentes?\n\nNicolás'];
+  assert.equal(coworkReplyMatchesDraft('Preparé un correo para los 4. La pregunta de cierre busca una respuesta fácil sobre una conversación de 15 minutos. Los otros 3 quedan fuera.', bodies),
+    'Preparé un correo para los 4. Los otros 3 quedan fuera.');
+  assert.equal(coworkReplyMatchesDraft('Preparé un correo para los 4. La demo queda para cuando respondan.', bodies), 'Preparé un correo para los 4. La demo queda para cuando respondan.');
+});

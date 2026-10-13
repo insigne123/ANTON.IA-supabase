@@ -741,7 +741,8 @@ export function coworkLookupProposal(answer: { reply: string; question?: unknown
   const before = coworkClosingQuestionOf(history?.at(-1)?.reply);
   const accepted = Boolean(before && OFFERS_EMAIL_LOOKUP.test(before) && TAKES_OFFER.test(message) && !CHANGES_OFFER.test(message));
   const offer = own && OFFERS_EMAIL_LOOKUP.test(own) ? own : accepted ? before! : null;
-  if (!offer) return null;
+  // About LinkedIn, the lookup is for profiles, not this card (round 7: «la tarjeta solo busca correos, así que LinkedIn no avanza»).
+  if (!offer || /linked\s?in|perfil/i.test(`${message} ${offer}`)) return null;
   const read = [...(history || []).flatMap(turn => turn.observations || []), ...observations];
   const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
   const missing = collectCoworkLeadRows(read).filter(row => uuid.test(row.id) && !(typeof row.email === 'string' && row.email.includes('@')));

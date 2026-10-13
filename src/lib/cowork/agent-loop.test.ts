@@ -2220,3 +2220,11 @@ test('a campaign to listed people is not narrowed by filters the person never as
   assert.deepEqual(listed.criteria, { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [],
     minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false });
 });
+
+test('a lookup offered about LinkedIn profiles is not turned into the email card', async () => {
+  const { coworkLookupProposal } = await import('./agent-loop');
+  const read = { action: 'leads.search' as const, input: 'sin correo', result: { scope: 'own_saved_contacts', items: [
+    { id: '00000000-0000-4000-8000-000000000021', name: 'Nehal Patil', company: 'Adecco', email: null }] } };
+  assert.equal(coworkLookupProposal({ reply: 'Nadie tiene perfil.', question: '¿Busco el correo y el perfil de LinkedIn de tus 3 contactos sin correo?' },
+    '¿A quién invito por LinkedIn?', [], [read]), null);
+});
