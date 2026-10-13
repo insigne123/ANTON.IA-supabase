@@ -274,7 +274,23 @@ export function coworkNewEmailReply(output: CoworkWriterOutput, context: Pick<Wr
   return kept.length && kept.length < sentences.length ? { ...output, reply: kept.join(' ') } : output;
 }
 
-export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'edit' | 'followUp' | 'shorter'>): CoworkWriterOutput {
+/** The meeting the earlier email asked for, back in an edit that dropped it without being asked (round 8: Haiku swapped the demo for
+ * another question on «más corto y menos vendedor», even after the correction asked to keep it). Its closing question takes the
+ * place of the new one; null when there is nothing to put back. */
+function keptMeeting(body: string, previous: EarlierEmail): string | null {
+  const lines = (text: string) => text.split('\n');
+  const asks = lines(previous.body).filter(line => /¿[^?]+\?/.test(line));
+  const ask = asks[asks.length - 1]?.trim();
+  if (!ask || !MEETING_ASK.test(normalize(ask)) || MEETING_ASK.test(normalize(body))) return null;
+  const own = lines(body);
+  let at = -1;
+  own.forEach((line, index) => { if (/¿[^?]+\?/.test(line)) at = index; });
+  if (at < 0) return null;
+  own[at] = ask;
+  return own.join('\n');
+}
+
+export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'edit' | 'followUp' | 'shorter' | 'request'>): CoworkWriterOutput {
   const earlier = context.earlier ?? [];
   const drafts = output.blocks.filter(block => block.type === 'email_draft');
   if (!earlier.length || drafts.length !== 1 || (!context.followUp && !context.edit)) return output;
@@ -289,9 +305,14 @@ export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<Wr
   } else {
     if (!next.to?.length && previous.to.length) next = { ...next, to: previous.to };
     if (!next.to?.length && /^\s*hola,/i.test(previous.body)) next = { ...next, body: next.body.replace(/^(\s*Hola)\s*\{\{\s*nombre\s*\}\}\s*,/, '$1,') };
+    const meeting = context.edit && !DROPS_MEETING.test(context.request ?? '') ? keptMeeting(next.body, previous) : null;
+    if (meeting) next = { ...next, body: meeting };
   }
   const blocks = next === block ? output.blocks : output.blocks.map(item => item === block ? next : item);
-  const reply = context.edit ? editedReply(output.reply, previous, next, Boolean(context.shorter)) : output.reply;
+  // With the meeting put back, what the reply said about the closing question no longer holds.
+  const restored = next.body !== block.body && MEETING_ASK.test(normalize(next.body)) && !MEETING_ASK.test(normalize(block.body));
+  const said = restored ? output.reply.split(/(?<=[.!?])\s+/).filter(sentence => !/\b(?:pregunt\w*|demo|reunion\w*|llamada)\b/.test(normalize(sentence))).join(' ') : output.reply;
+  const reply = context.edit ? editedReply(said || output.reply, previous, next, Boolean(context.shorter)) : output.reply;
   // An email the person sends: no campaign for it, and the replies offer changes Cowork makes.
   if (context.edit && !next.to?.length && (output.question || output.suggestions.some(item => CAMPAIGN_WORD.test(item.label + item.message)))) {
     const suggestions = output.suggestions.filter(item => !CAMPAIGN_WORD.test(item.label + item.message));

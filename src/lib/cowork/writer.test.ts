@@ -1113,3 +1113,18 @@ test('a new email\'s reply does not describe changes to an email nobody had; an 
   const onlyChanges = { ...output, reply: 'Agregué tu firma al final.' };
   assert.equal(coworkNewEmailReply(onlyChanges, { pasted: false }), onlyChanges, 'a reply is never left empty');
 });
+
+test('an edit that drops the demo it was not asked to drop gets its closing question back', async () => {
+  const { coworkEarlierThread } = await import('./writer');
+  const earlier = [{ to: [], subject: 'Antecedentes', body: 'Hola,\n\nRevisar uno por uno deja vacantes abiertas.\n\nAXIS consulta el PJUD. Te propongo una demo.\n\n¿Qué día de esta semana te acomoda una demo de 30 minutos?\n\nNicolás Yarur' }];
+  const output = { reply: 'Cambié la demo por una pregunta más liviana. Quité los adjetivos de venta.', question: null, suggestions: [],
+    blocks: [{ type: 'email_draft' as const, title: 'Corto', to: null, subject: 'Antecedentes', body: 'Hola,\n\nRevisar uno por uno deja vacantes abiertas.\n\n¿Cuántos postulantes revisan al mes?\n\nNicolás Yarur' }] };
+  const kept = coworkEarlierThread(output, { earlier, edit: true, shorter: true, request: 'más corto y menos vendedor' });
+  assert.match((kept.blocks[0] as { body: string }).body, /\n¿Qué día de esta semana te acomoda una demo de 30 minutos\?\n/);
+  assert.doesNotMatch((kept.blocks[0] as { body: string }).body, /Cuántos postulantes/);
+  assert.doesNotMatch(kept.reply, /Cambié la demo/);
+  assert.match(kept.reply, /Quité los adjetivos de venta\./);
+  // Asked to drop it, it stays out.
+  const dropped = coworkEarlierThread(output, { earlier, edit: true, request: 'sin la demo' });
+  assert.match((dropped.blocks[0] as { body: string }).body, /Cuántos postulantes/);
+});
