@@ -321,7 +321,7 @@ test('the checks catch what kept the 12 oct candidate from a 4: hedges, meetings
   // R33: a follow-up that repeats the proof of the first email (and hedges).
   const r33 = 'Hola Marcela,\n\nTe escribí el 19 de septiembre sobre antecedentes laborales. Si en algún proceso necesitan revisar varias personas, AXIS procesa 1.000 personas en unos 30 minutos.\n\n¿Suelen revisar esos antecedentes uno a uno o por archivo?' + signature;
   assert.deepEqual(coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento', to: null, subject: 'Antecedentes en Sodexo', body: r33 }], checks).map(issue => issue.short),
-    ['directo', 'ángulo nuevo']);
+    ['directo', 'pregunta por un dato', 'ángulo nuevo']);
   // A meeting is fine from the third email of a sequence on, and in a reply inside an open conversation.
   const step = (question: string) => good.replace('Hola Felipe,', 'Hola {{nombre}},').replace('en Securitas', 'en {{empresa}}').replace('¿Cuántos ingresos revisan en una semana normal?', question);
   const meetingLast = sequence([step('¿Cuántos ingresos revisan en una semana normal?'), step('¿Quién revisa hoy esos antecedentes?').replace(/ AXIS consulta[^.]+\./, ''), step('¿Te sirve verlo 15 minutos esta semana?').replace(/ AXIS consulta[^.]+\./, '')]);
@@ -934,3 +934,28 @@ test('the v16 independent reading: «capacidad» in the reply, and a sequence wh
   // The paragraph after it is not the opening.
   assert.deepEqual(second('Cuando la lista de ingreso llega el jueves para empezar el lunes, el equipo corre con los antecedentes.\n\nEl cliente ve el puesto vacío el lunes.'), []);
 });
+
+test('the first email says what the business loses after the task done by hand, its question asks for a fact, and the reply keeps the record out of it (v18)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: [], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  const email = (opening: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo para Felipe', to: null, subject: 'Guardias en Securitas',
+    body: `Hola Felipe,\n\n${opening}\n\nAXIS consulta antecedentes laborales en el PJUD.\n\n¿Cuántos ingresos revisan al mes en Securitas?\n\nNicolás Y.\nGerente Comercial\nYago SpA` }], checks).map(issue => issue.short);
+  // What follows «uno por uno» or «a mano» is a step of the process, not a loss.
+  for (const flat of ['En seguridad privada, cuando entra un grupo de guardias, revisarlos uno por uno deja la habilitación pendiente.',
+    'En selección, cuando avanzan muchos postulantes a la vez, revisar sus antecedentes a mano distrae al equipo.'])
+    assert.deepEqual(email(flat), ['pérdida en el negocio'], flat);
+  for (const loss of ['En seguridad privada, cuando entra un grupo de guardias, cada antecedente revisado a mano es un guardia que no toma su turno.',
+    'En transporte, cuando entran conductores nuevos, revisarlos uno por uno deja camiones sin salir a ruta.',
+    'En alimentación, cuando piden respaldar cómo se revisó a alguien, buscar cada consulta a mano obliga a ir registro por registro.'])
+    assert.deepEqual(email(loss), [], loss);
+  for (const reply of ['El registro muestra que le escribiste el 19 de septiembre.', 'Añadí el dato de capacidad de AXIS que compartiste.'])
+    assert.deepEqual(coworkReplyIssues(reply).map(issue => issue.short), ['respuesta sin jerga'], reply);
+  // A closing answered with yes or no, before the last email of its block and without a meeting asked for.
+  const ask = (question: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento a Marcela', to: ['mrojas@sodexo.cl'], subject: 'Re: Antecedentes',
+    body: `Hola Marcela,\n\nTe escribí el 19 de septiembre sobre antecedentes laborales. En alimentación, cuando piden respaldar cómo se revisó a alguien, buscar la consulta a mano se lleva una tarde.\n\nAXIS deja evidencia auditable de cada consulta.\n\n${question}\n\nNicolás Y.` }], checks).map(issue => issue.short);
+  for (const yesNo of ['¿Les piden ese respaldo en Sodexo Chile?', '¿Tu equipo revisa antecedentes para incorporaciones masivas?'])
+    assert.deepEqual(ask(yesNo), ['pregunta por un dato'], yesNo);
+  for (const fact of ['¿Quién guarda hoy ese respaldo en Sodexo Chile?', '¿Cada cuánto les piden ese respaldo?', '¿En qué momento les piden ese respaldo?'])
+    assert.deepEqual(ask(fact), [], fact);
+  assert.match(COWORK_WRITER_RULES.join('\n'), /dicha como una imagen de su rubro, con tus palabras y sin copiar estos ejemplos/);
+});
+
