@@ -847,8 +847,8 @@ test('the v13 reading: a capability added after the proof, the farewell apart fr
   assert.deepEqual(third(`${moment}\n\nAXIS deja evidencia auditable de cada consulta. Este es mi último mensaje.`), []);
   assert.deepEqual(third(`${moment}\n\nAXIS deja evidencia auditable de cada consulta.`, 'Este es el último mensaje sobre esto, así que te pregunto directo: ¿quién aprueba hoy un ingreso atrasado?'), []);
   // A follow-up that opens with a delay offers what answers it; the evidence goes with the moment someone asks for it.
-  const followUp = (consequence: string, offer: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento a Marcela', to: null, subject: 'Re: Antecedentes',
-    body: `Hola Marcela,\n\nTe escribí el 19 de septiembre sobre antecedentes laborales. ${consequence}\n\n${offer}\n\n¿Quién revisa hoy esos antecedentes en Sodexo?\n\nNicolás Y.` }], checks).map(issue => issue.short);
+  const followUp = (consequence: string, offer: string, question = '¿Quién reúne hoy esos respaldos en Sodexo?') => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento a Marcela', to: null, subject: 'Re: Antecedentes',
+    body: `Hola Marcela,\n\nTe escribí el 19 de septiembre sobre antecedentes laborales. ${consequence}\n\n${offer}\n\n${question}\n\nNicolás Y.` }], checks).map(issue => issue.short);
   assert.deepEqual(followUp('En alimentación, cuando entra un grupo grande de personal, cada revisión a mano retrasa a quienes ya tienen turno asignado.',
     'AXIS deja evidencia auditable de cada consulta.'), ['ángulo coherente']);
   assert.deepEqual(followUp('En alimentación, cuando auditoría pregunta cómo se revisó a alguien ya contratado, buscar el respaldo toma una tarde.',
@@ -857,7 +857,7 @@ test('the v13 reading: a capability added after the proof, the farewell apart fr
   assert.deepEqual(followUp('En alimentación, cuando piden respaldar la revisión de alguien que entra a cocina, buscar la consulta a mano obliga a revisar registro por registro.',
     'AXIS deja evidencia auditable de cada consulta.'), []);
   assert.deepEqual(followUp('En alimentación, cuando entra un grupo grande de personal, cada revisión a mano retrasa a quienes ya tienen turno asignado.',
-    'Con AXIS, la lista llega por correo y el equipo no la sube a mano.'), []);
+    'Con AXIS, la lista llega por correo y el equipo no la sube a mano.', '¿Quién revisa hoy esos antecedentes en Sodexo?'), []);
   // A follow-up reopens the first email (v15); an email that is not a follow-up does not need to.
   const evidence = 'En alimentación, cuando un cliente pide cómo se revisó a alguien que ya entró a cocina, reunir ese respaldo a mano obliga a buscar consulta por consulta.';
   const marcela = (body: string, followUp: boolean) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Seguimiento a Marcela', to: ['mrojas@sodexo.cl'], subject: 'Re: Antecedentes',
@@ -957,5 +957,31 @@ test('the first email says what the business loses after the task done by hand, 
   for (const fact of ['¿Quién guarda hoy ese respaldo en Sodexo Chile?', '¿Cada cuánto les piden ese respaldo?', '¿En qué momento les piden ese respaldo?'])
     assert.deepEqual(ask(fact), [], fact);
   assert.match(COWORK_WRITER_RULES.join('\n'), /dicha como una imagen de su rubro, con tus palabras y sin copiar estos ejemplos/);
+});
+
+test('a follow-up that offers the evidence says it in their trade, with what stops, and asks about that evidence; a sequence opens with a loss, not a feeling (v19)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: ['Procesa 1.000 personas en unos 30 minutos'], recipients: [], meeting: false, products: ['axis', 'yago'], followUp: true };
+  const marcela = (moment: string, question = '¿Quién reúne hoy ese respaldo en Sodexo Chile?', subject = 'Re: Antecedentes laborales') => coworkDraftIssues([{ type: 'email_draft' as const,
+    title: 'Seguimiento a Marcela', to: ['mrojas@sodexo.cl'], subject,
+    body: `Hola Marcela,\n\nTe escribí el 19 de septiembre sobre antecedentes laborales. ${moment}\n\nAXIS deja evidencia auditable de cada consulta.\n\n${question}\n\nNicolás Y.` }], checks).map(issue => issue.short);
+  const good = 'En alimentación, cuando un cliente pide cómo se revisó a alguien que entra a cocina, buscar cada consulta a mano deja su ingreso detenido mientras se reúne la evidencia.';
+  assert.deepEqual(marcela(good), []);
+  assert.deepEqual(marcela('Cuando alguien pide respaldo de una revisión, buscar cada consulta a mano deja su ingreso detenido.'), ['con su rubro']);
+  assert.deepEqual(marcela('En alimentación, cuando un cliente pide respaldo de una revisión, buscarlo consulta por consulta suma trabajo manual.'), ['consecuencia concreta']);
+  assert.deepEqual(marcela(good, '¿Cuántos ingresos revisan al mes en Sodexo Chile?'), ['pregunta del ángulo']);
+  assert.deepEqual(marcela(good, undefined, 'Ingresos masivos en Sodexo Chile'), ['asunto del correo']);
+  assert.deepEqual(marcela(good, undefined, 'Respaldo de antecedentes en Sodexo Chile'), []);
+  // A sequence: the third email opens with how the team feels, and the second comes back to the empty post of the first.
+  const step = (opening: string, middle: string, question: string) => `Hola {{nombre}},\n\n${opening}${middle}\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA`;
+  const shorts = (second: string, third: string) => coworkDraftIssues([sequence([
+    step('Cuando entra un grupo grande de postulantes en {{empresa}}, cada antecedente que se revisa a mano es un puesto que sigue vacío un día más.', '\n\nAXIS consulta antecedentes laborales en el PJUD.', '¿Cuántos ingresos revisan al mes?'),
+    step(second, '', '¿Quién prepara hoy esa nómina en tu equipo?'),
+    step(third, '\n\nAXIS deja evidencia auditable de cada consulta.', '¿Te sirve verlo con un caso tuyo?')])], { ...checks, followUp: false })
+    .map(issue => `${issue.where} · ${issue.short}`).filter(line => !line.endsWith('momento distinto') && !line.endsWith('pregunta distinta'));
+  const lateList = 'Cuando la nómina llega el jueves y el lunes ya parten, alguien se queda buscando nombre por nombre mientras el resto del equipo espera.';
+  const audit = 'Cuando un jefe de área pide cómo se revisó a alguien que ya entró, juntar ese respaldo a mano toma una tarde de buscar consulta por consulta.';
+  assert.deepEqual(shorts(lateList, audit), []);
+  assert.deepEqual(shorts(lateList, 'Para un equipo de personas, tener el respaldo de una revisión importa cuando alguien lo solicita.'), ['«Secuencia AXIS», correo 3 · consecuencia concreta']);
+  assert.deepEqual(shorts('Cuando la nómina llega cerca de la fecha de ingreso, cada revisión pendiente deja una vacante esperando.', audit), ['«Secuencia AXIS», correo 2 · consecuencia distinta']);
 });
 
