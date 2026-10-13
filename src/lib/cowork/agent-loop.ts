@@ -760,6 +760,40 @@ export function coworkLookupProposal(answer: { reply: string; question?: unknown
   return people.length ? { goal: 'email', people: people.map(row => ({ leadId: row.id })) } : null;
 }
 
+// Looking for LinkedIn profiles offered in words (round 10: «¿Busco el perfil de LinkedIn de tus 7 contactos guardados?», a «sí» and
+// only then the card).
+const OFFERS_PROFILE_LOOKUP = /\b(?:busc\w*|encontr\w*|complet\w*)\b[^?]{0,80}\bperfil(?:es)?\b[^?]{0,40}\blinked\s?in\b/i;
+// Who decides or influences the purchase goes first; junior and support roles last.
+const BUYING_ROLE = /\b(?:gerente|jef[ea]|director\w*|head|manager|l[ií]der|lead|vp|chief|subgerente)\b/i;
+const SUPPORT_ROLE = /\b(?:junior|jr|analista|asistente|practicante|becari[oa]|trainee)\b/i;
+const roleRank = (title: unknown) => { const text = String(title || ''); return SUPPORT_ROLE.test(text) ? 2 : BUYING_ROLE.test(text) ? 0 : 1; };
+
+/**
+ * Looking for LinkedIn profiles offered (or accepted) in words becomes the «Preparar contactos» card with goal linkedin, built from the
+ * saved contacts the conversation read that have no profile, the ones who decide the purchase first. Null when nothing offers it or
+ * nobody without a profile was read.
+ */
+export function coworkProfileLookupProposal(answer: { reply: string; question?: unknown }, message: string, history: CoworkHistoryTurn[] | undefined,
+  observations: CoworkObservation[], max = 10): { goal: 'linkedin'; people: Array<{ leadId: string }> } | null {
+  const own = closingQuestion(answer);
+  const before = coworkClosingQuestionOf(history?.at(-1)?.reply);
+  const accepted = Boolean(before && OFFERS_PROFILE_LOOKUP.test(before) && TAKES_OFFER.test(message) && !CHANGES_OFFER.test(message));
+  const offer = own && OFFERS_PROFILE_LOOKUP.test(own) ? own : accepted ? before! : null;
+  if (!offer) return null;
+  const read = [...(history || []).flatMap(turn => turn.observations || []), ...observations];
+  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  const missing = collectCoworkLeadRows(read).filter(row => uuid.test(row.id) && !row.linkedin_url)
+    .map((row, index) => ({ row, index })).sort((a, b) => roleRank(a.row.title) - roleRank(b.row.title) || a.index - b.index).map(item => item.row);
+  const plain = (text: string) => text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const named = missing.filter(row => { const first = plain(String(row.name || '')).split(/\s+/)[0]; return first.length > 2 && plain(offer).includes(first); });
+  const people = (named.length ? named : missing).slice(0, max);
+  return people.length ? { goal: 'linkedin', people: people.map(row => ({ leadId: row.id })) } : null;
+}
+
+// A stand-in read with one saved contact without a profile: whether an answer offers the profile lookup, before reading who.
+const MISSING_PROFILE_PROBE: CoworkObservation = { action: 'leads.search', input: '', result: { scope: 'own_saved_contacts',
+  items: [{ id: '00000000-0000-4000-8000-000000000000', name: 'Contacto', company: 'Empresa', email: null }] } };
+
 // A stand-in read with one person without an email: whether an answer offers the lookup at all, before reading who.
 const MISSING_EMAIL_PROBE: CoworkObservation = { action: 'leads.search', input: '', result: { scope: 'own_saved_contacts',
   items: [{ id: '00000000-0000-4000-8000-000000000000', name: 'Contacto', company: 'Empresa', email: null }] } };
@@ -1325,7 +1359,8 @@ async function runCoworkLoop(input: {
     try {
       // An email lookup offered or accepted in words goes out as its card, with no other decision.
       const offersLookup = decision.action === 'answer' && decision.answer && input.proposeEffect && input.prepareBatch && !input.clarification && !informationOnly;
-      let lookup = offersLookup ? coworkLookupProposal(decision.answer!, input.message, input.history, observations) : null;
+      let lookup: { goal: 'email' | 'linkedin'; people: Array<{ leadId: string }> } | null = offersLookup
+        ? coworkLookupProposal(decision.answer!, input.message, input.history, observations) : null;
       // Offered from the account's figures, before anyone was read (round 5: «¿Busco el correo de los 3…?» with no card): who still
       // lacks an email is read first, the read the card needs.
       if (offersLookup && !lookup && coworkLookupProposal(decision.answer!, input.message, input.history, [MISSING_EMAIL_PROBE])) {
@@ -1333,6 +1368,14 @@ async function runCoworkLoop(input: {
         await input.record(probe);
         observations.push(probe);
         lookup = coworkLookupProposal(decision.answer!, input.message, input.history, observations);
+      }
+      // A LinkedIn profile lookup offered in words is its card too; with nobody read yet, the saved contacts are read first.
+      if (offersLookup && !lookup) lookup = coworkProfileLookupProposal(decision.answer!, input.message, input.history, observations);
+      if (offersLookup && !lookup && coworkProfileLookupProposal(decision.answer!, input.message, input.history, [MISSING_PROFILE_PROBE])) {
+        const probe: CoworkObservation = { action: 'leads.search', input: '', result: await input.execute('leads.search', '') };
+        await input.record(probe);
+        observations.push(probe);
+        lookup = coworkProfileLookupProposal(decision.answer!, input.message, input.history, observations);
       }
       // Looking for several emails is always the «Preparar contactos» card, with a box to take anyone off (round 6: «la tarjeta incluye a
       // las 3 y pide escribir para quitar a Carlos»).
