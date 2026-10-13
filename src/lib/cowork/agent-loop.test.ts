@@ -2249,10 +2249,26 @@ test('a LinkedIn profile lookup offered in words becomes its card, deciders firs
     { id: id(4), name: 'Ana Ruiz', title: 'Jefa de Selección', company: 'Retail Sur', email: null, linkedin_url: 'https://www.linkedin.com/in/ana-ruiz' }] } };
   const answer = { reply: 'Ninguno tiene perfil guardado.', question: '¿Busco el perfil de LinkedIn de tus contactos guardados?' };
   const message = '¿A quién de mis contactos con perfil de LinkedIn debería invitar esta semana?';
-  assert.deepEqual(coworkProfileLookupProposal(answer, message, [], [read]), { goal: 'linkedin', people: [{ leadId: id(2) }, { leadId: id(3) }, { leadId: id(1) }] });
+  // Who decides the purchase, when two or more do; the junior recruiter waits.
+  assert.deepEqual(coworkProfileLookupProposal(answer, message, [], [read]), { goal: 'linkedin', people: [{ leadId: id(2) }, { leadId: id(3) }] });
   assert.equal(coworkLookupProposal(answer, message, [], [read]), null, 'about LinkedIn, never the email card');
   // A «sí» to the previous answer's offer.
   const history = [{ runId: 'r1', observations: [read], reply: `Ninguno tiene perfil.\n\n${answer.question}` }];
-  assert.equal(coworkProfileLookupProposal({ reply: 'Listo, busco sus perfiles.' }, 'sí, busca sus perfiles', history, [])?.people.length, 3);
+  assert.equal(coworkProfileLookupProposal({ reply: 'Listo, busco sus perfiles.' }, 'sí, busca sus perfiles', history, [])?.people.length, 2);
   assert.equal(coworkProfileLookupProposal({ reply: 'Listo.', question: '¿Creo la campaña pausada?' }, 'hola', [], [read]), null);
+});
+
+test('a lookup proposed in the reply itself, with no closing question, also becomes its card', async () => {
+  const { coworkLookupProposal, coworkProfileLookupProposal } = await import('./agent-loop');
+  const id = (n: number) => `00000000-0000-4000-8000-00000000003${n}`;
+  const read = { action: 'leads.search' as const, input: 'sin correo', result: { scope: 'own_saved_contacts', items: [
+    { id: id(1), name: 'Nehal Patil', title: 'Recruitment Manager', company: 'Adecco', email: null },
+    { id: id(2), name: 'Carlos Ahumada', title: 'Operations Manager', company: 'Minera', email: null }] } };
+  const reply = 'Tienes 3 contactos sin correo. Sin correo no puedo escribirles, así que lo primero es buscarlo. Propongo buscar el correo de los tres: cuesta 3 créditos. Nada se envía sin tu aprobación.';
+  assert.equal(coworkLookupProposal({ reply }, 'tengo contactos sin correo, ¿qué hago con ellos?', [], [read])?.people.length, 2);
+  // A different closing question keeps the turn as it is.
+  assert.equal(coworkLookupProposal({ reply, question: '¿Prefieres escribir antes a los 4 con correo?' }, 'tengo contactos sin correo', [], [read]), null);
+  const profiles = 'Ninguno tiene perfil guardado. Te propongo buscar el perfil de LinkedIn de tus contactos guardados, a 1 crédito por persona.';
+  assert.equal(coworkProfileLookupProposal({ reply: profiles }, '¿a quién invito por LinkedIn?', [], [read])?.goal, 'linkedin');
+  assert.equal(coworkLookupProposal({ reply: profiles }, '¿a quién invito por LinkedIn?', [], [read]), null);
 });

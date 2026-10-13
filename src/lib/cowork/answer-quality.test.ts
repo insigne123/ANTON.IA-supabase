@@ -357,3 +357,15 @@ test('a bare yes under a campaign or an email offer says what it does, and the s
   assert.equal(polishCoworkText('Usé Google como remitente; saldría desde Google. Exporta a Google Sheets.'),
     'Usé Gmail como remitente; saldría desde Gmail. Exporta a Google Sheets.');
 });
+
+test('a campaign or email offer with no quick reply that takes it gets its yes first; an either/or question does not', () => {
+  const offered = polishCoworkAnswer({ reply: 'Te dejé el correo.', document: null, question: '¿Lo uso en una campaña pausada para tus 4 contactos?',
+    suggestions: [{ label: 'Hazlo más corto', message: 'Hazlo más corto' }] });
+  assert.deepEqual(offered.suggestions?.map(chip => chip.label), ['Sí, crear la campaña', 'Hazlo más corto']);
+  const either = polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Prefieres mantener la invitación o un cierre más exploratorio?',
+    suggestions: [{ label: 'Mantener la invitación', message: 'Mantén la invitación' }] });
+  assert.deepEqual(either.suggestions?.map(chip => chip.label), ['Mantener la invitación']);
+  const taken = polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña pausada?',
+    suggestions: [{ label: 'Crear campaña pausada', message: 'Crea la campaña' }] });
+  assert.deepEqual(taken.suggestions?.map(chip => chip.label), ['Crear campaña pausada']);
+});
