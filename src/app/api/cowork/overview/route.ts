@@ -7,31 +7,13 @@ import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkFirstName, type CoworkOverview } from '@/lib/cowork/overview';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { loadCoworkSinceLastVisit } from '@/lib/server/cowork/since-visit';
+import { readNeverWritten } from '@/lib/server/cowork/agenda-read';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 const privateHeaders = { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
 
 type Count = { count?: number | null; error?: unknown };
-type Session = Awaited<ReturnType<typeof requireCoworkAccess>>['supabase'];
-
-/** Your contacts with an email that nobody in the organization has written to (the same record Cowork's contacted.search reads),
- * through your session. Up to 500 contacts are compared; a failed read leaves the figure out. */
-async function contactsToWrite(client: Session, scope: { userId: string; organizationId: string }) {
-  const leads = await client.from('leads').select('email').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
-    .not('email', 'is', null).neq('email', '').limit(500);
-  if (leads.error) throw leads.error;
-  const emails = Array.from(new Set(((leads.data || []) as Array<{ email: string | null }>).map(row => String(row.email || '').trim()).filter(Boolean)));
-  if (!emails.length) return 0;
-  const written = new Set<string>();
-  for (let start = 0; start < emails.length; start += 100) {
-    const chunk = emails.slice(start, start + 100);
-    const sent = await client.from('contacted_leads').select('email').eq('organization_id', scope.organizationId).in('email', chunk);
-    if (sent.error) throw sent.error;
-    for (const row of (sent.data || []) as Array<{ email: string | null }>) written.add(String(row.email || '').trim().toLowerCase());
-  }
-  return emails.filter(email => !written.has(email.toLowerCase())).length;
-}
 const counted = (result: PromiseSettledResult<Count>) =>
   result.status === 'fulfilled' && !result.value.error && typeof result.value.count === 'number' ? result.value.count : null;
 
@@ -58,8 +40,8 @@ export async function GET() {
       loadCoworkUserContext(auth.supabase, scope, { memories: false }),
       // «Desde tu última visita»: replies, research and opportunities through your session; LinkedIn as the quota above.
       loadCoworkSinceLastVisit({ client: auth.supabase, admin: getSupabaseAdminClient, opportunities }, scope),
-      // «Para hoy»: who has an email and never got one.
-      contactsToWrite(auth.supabase, scope),
+      // «Para hoy»: who has an email and never got one (the same count «¿qué tengo pendiente?» reads).
+      readNeverWritten(auth.supabase, scope).then(waiting => waiting.count),
     ]);
     const quota = linkedin.status === 'fulfilled' ? linkedin.value : null;
     const person = context.status === 'fulfilled' ? context.value : null;

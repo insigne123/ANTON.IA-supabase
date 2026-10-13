@@ -12,7 +12,7 @@ const okSources = (): Record<AgendaSourceKey, AgendaSourceStatus> =>
 const empty = (): AgendaInput => ({
   interested: [], unclassified: [], autoReplies: 0, bounces: [],
   approvals: { count: 0, oldestDays: null, examples: [] }, campaignSteps: { count: 0, examples: [] },
-  followups: [], linkedinAccepted: [], sources: okSources(), mailboxSynced: true,
+  followups: [], linkedinAccepted: [], neverWritten: { count: 0, examples: [] }, sources: okSources(), mailboxSynced: true,
   timing: { timeZone: 'America/Santiago', day: '2026-09-25', weekday: 'viernes' },
 });
 const person = (name: string, company: string, email: string, daysWaiting: number) => ({ name, company, email, daysWaiting });
@@ -332,4 +332,26 @@ test('a person who appears twice keeps their longest wait, asks for the meeting 
     { name: 'Carla Soto', daysWaiting: 3, askedForMeeting: false },
   ]);
   assert.equal(account.daysWaiting, 6);
+});
+
+test('contacts with an email who never got one are today\'s work, after replies and decisions and before what runs by itself', () => {
+  const agenda = buildCoworkAgenda({
+    ...empty(),
+    approvals: { count: 1, oldestDays: 0, examples: ['Crear la campaña'] },
+    followups: [campaign({ ready: 3 })],
+    neverWritten: { count: 4, examples: ['Daniela Rojas (Adecco)', 'José Pérez (GrupoExpro)', 'Ana Ruiz (Retail Sur)', 'Otra (X)'] },
+  });
+  assert.deepEqual(agenda.items.map(item => item.kind), ['approval', 'never_written', 'followups_due']);
+  const first = agenda.items.find(item => item.kind === 'never_written')!;
+  assert.equal(first.action, 'write_first');
+  assert.equal(first.count, 4);
+  assert.deepEqual(first.examples, ['Daniela Rojas (Adecco)', 'José Pérez (GrupoExpro)', 'Ana Ruiz (Retail Sur)']);
+  assert.equal(agenda.counts.neverWritten, 4);
+  // Alone, they are what is pending: the day is not «nada pendiente».
+  const alone = buildCoworkAgenda({ ...empty(), neverWritten: { count: 2, examples: ['A (B)'] } });
+  assert.equal(alone.whenEmpty, undefined);
+  assert.equal(alone.items[0].kind, 'never_written');
+  // Nobody waiting, or a read that failed: no item, and an unknown count stays unknown.
+  assert.deepEqual(buildCoworkAgenda({ ...empty(), neverWritten: { count: 0, examples: [] } }).items, []);
+  assert.equal(buildCoworkAgenda({ ...empty(), neverWritten: null }).counts.neverWritten, null);
 });

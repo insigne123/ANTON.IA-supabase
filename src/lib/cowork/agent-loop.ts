@@ -708,7 +708,9 @@ export function coworkRepeatedOfferFeedback(answer: { reply: string; question?: 
 function offerDone(said: string, offer: string, previous: CoworkHistoryTurn | undefined): string | null {
   const extra = 'Si además pregunta algo, respóndelo en esa misma answer.reply, en una o dos frases, sin repetir tu respuesta anterior.';
   const drafted = (previous?.blocks || []).some(block => block.type === 'email_draft' || block.type === 'sequence');
-  if (OFFERS_WRITING.test(offer)) return `${said} Escríbelo ahora con draft.write. ${extra}`;
+  // The Writer answers that turn, so a question that came with the «sí» goes in its brief (round 8: «¿y qué debería hacer para
+  // mejorar?» got a reply about a signature it had «added»).
+  if (OFFERS_WRITING.test(offer)) return `${said} Escríbelo ahora con draft.write. Si además pregunta algo, responde en write.findings, en una o dos frases con su dato (por ejemplo, las 2 o 3 acciones que más mueven sus cifras, la primera este correo), porque la respuesta de ese turno la escribe la Redactora y parte por ahí; answer.reply no se muestra.`;
   if (OFFERS_CAMPAIGN.test(offer)) return drafted
     ? `${said} Propón ahora campaign.create con los correos de esa respuesta (la app copia su texto tal cual), a quienes iban. ${extra}`
     : `${said} La campaña necesita su primer correo a la vista: usa draft.write con kind email y campaign true para esos contactos (un primer correo; los seguimientos, después y si los pide); cuando la Redactora termine, propones la campaña con ese correo. ${extra}`;

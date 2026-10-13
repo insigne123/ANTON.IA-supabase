@@ -44,6 +44,7 @@ function itemLine(item: AgendaItem): { who: string; what: string } | null {
     case 'approval': return item.count ? { who: 'Tus aprobaciones', what: `${plural(item.count, 'propuesta espera', 'propuestas esperan')} tu visto bueno` } : null;
     case 'followups_due': return item.ready ? { who: item.campaign ? `Campaña «${item.campaign}»` : 'Tus campañas', what: `${plural(item.ready, 'correo de seguimiento listo', 'correos de seguimiento listos')} para hoy` } : null;
     case 'campaign_step': return item.count ? { who: 'Tus campañas', what: `${plural(item.count, 'paso espera', 'pasos esperan')} tu revisión` } : null;
+    case 'never_written': return item.count ? { who: 'Tus contactos', what: `${plural(item.count, 'contacto con correo aún no recibe', 'contactos con correo aún no reciben')} nada de ti` } : null;
     case 'bounce': return item.count ? { who: 'Tus envíos', what: `${plural(item.count, 'correo rebotó', 'correos rebotaron')}` } : null;
     default: return null;
   }

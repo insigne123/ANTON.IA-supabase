@@ -562,14 +562,35 @@ export function coworkTurnChoices(events: CoworkEvent[]): CoworkChoices | null {
 /** Cards that also open in the side panel; figures and charts stay inline in the chat. */
 export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' }>;
 
+/** The first recipient of a template, so its preview reads «Hola José» instead of «Hola nombre» (round 7 readings); copying,
+ * editing and the campaign keep the variables. */
+export type CoworkMergePreview = { person: string; nombre: string; empresa: string | null; cargo: string | null };
+
 export type CoworkArtifact =
-  | { kind: 'block'; id: string; runId: string; title: string; block: CoworkPanelBlock; createdAt: string }
+  | { kind: 'block'; id: string; runId: string; title: string; block: CoworkPanelBlock; createdAt: string; preview?: CoworkMergePreview | null }
   | { kind: 'document'; id: string; runId: string; title: string; content: string; createdAt: string }
   | { kind: 'contacts'; id: string; runId: string; title: string; count: number; companies: boolean; external: boolean; createdAt: string }
   | { kind: 'file'; id: string; runId: string; title: string; name: string; extension: string; size: number | null; createdAt: string }
   | { kind: 'sources'; id: string; runId: string; title: string; count: number; sequence: number; createdAt: string }
   /** A code artifact (Plan 12): a page the Designer wrote, shown in a sandboxed frame. key and version group its versions. */
   | { kind: 'code'; id: string; runId: string; title: string; name: string; key: string; version: number; tables: Array<{ label: string; rows: number }>; createdAt: string };
+
+const MERGE_FIELDS = /\{\{\s*(?:nombre|empresa|cargo)\s*\}\}/;
+const cellText = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+
+/** Who an email template is previewed with: the first of its recipients that the conversation read, by address. Null when the
+ * text has no variables or nobody matches. */
+export function coworkMergePreview(block: CoworkBlock, rows: Array<{ email?: unknown; name?: unknown; company?: unknown; title?: unknown }>): CoworkMergePreview | null {
+  if (block.type !== 'email_draft' || !block.to?.length || !MERGE_FIELDS.test(`${block.subject}\n${block.body}`)) return null;
+  for (const entry of block.to) {
+    const address = entry.trim().toLowerCase();
+    const row = rows.find(item => cellText(item.email)?.toLowerCase() === address);
+    const name = cellText(row?.name);
+    if (!row || !name) continue;
+    return { person: name, nombre: name.split(/\s+/)[0], empresa: cellText(row.company), cargo: cellText(row.title) };
+  }
+  return null;
+}
 
 /** Title and noun for a set of observed rows (people, companies or both). */
 export function coworkContactsTitle(rows: Array<{ id: string }>) {
@@ -602,17 +623,18 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
   const artifacts: CoworkArtifact[] = [];
   const completedAt = events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || run.created_at;
   const output = coworkTurnOutput(events);
+  const observations = events.filter(event => event.kind === 'tool.completed').map(event => event.payload);
+  const rows = collectCoworkLeadRows(observations);
   coworkTurnBlocks(events).forEach((block, index) => {
     // Figures read inline; a chart is drawn on the canvas, with a compact card in the chat (Plan 12, 2).
     if (block.type === 'metrics') return;
-    artifacts.push({ kind: 'block', id: `${run.id}:block:${index}`, runId: run.id, title: block.title, block, createdAt: completedAt });
+    const preview = coworkMergePreview(block, rows);
+    artifacts.push({ kind: 'block', id: `${run.id}:block:${index}`, runId: run.id, title: block.title, block, createdAt: completedAt, ...(preview ? { preview } : {}) });
   });
   if (output?.document) {
     artifacts.push({ kind: 'document', id: `${run.id}:document`, runId: run.id, title: output.document.title,
       content: output.document.content, createdAt: completedAt });
   }
-  const observations = events.filter(event => event.kind === 'tool.completed').map(event => event.payload);
-  const rows = collectCoworkLeadRows(observations);
   if (rows.length) {
     const { title, companies, external } = coworkContactsTitle(rows);
     artifacts.push({ kind: 'contacts', id: `${run.id}:contacts`, runId: run.id, count: rows.length, companies, external, title,

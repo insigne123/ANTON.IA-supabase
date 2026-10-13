@@ -90,6 +90,8 @@ type Recipient = { name: string; email: string | null; company: string };
  * products: the names the offer goes by (its all-caps names and the seller's company), lowercase and accent-free. */
 type WriterContext = { signer: string | null; prohibited: string[]; trialOffer: boolean; proofs?: string[]; recipients?: Recipient[];
   meeting?: boolean; products?: string[]; keepsAsk?: boolean; followUp?: boolean;
+  /** The person pasted an email of their own to improve. */
+  pasted?: boolean;
   /** The emails of the previous answer in the conversation (assistant.written, scope earlier_answer), and whether the request edits them. */
   earlier?: EarlierEmail[]; edit?: boolean; shorter?: boolean; request?: string };
 type EarlierEmail = { to: string[]; subject: string; body: string };
@@ -159,7 +161,7 @@ export function coworkWriterContext(userContext: { fullName?: string | null; pro
   return { signer: signer || userContext?.fullName?.trim() || null, prohibited, trialOffer: Boolean(context?.context?.trialOffer),
     proofs, recipients: observedRecipients(observations), products: offerNames(userContext as Parameters<typeof offerNames>[0]),
     ...(typeof request === 'string' ? { meeting: MEETING_ASKED.test(request),
-      keepsAsk: MEETING_ASKED.test(request) && PASTED_EDIT.test(request) && !DROPS_MEETING.test(request) } : {}),
+      keepsAsk: MEETING_ASKED.test(request) && PASTED_EDIT.test(request) && !DROPS_MEETING.test(request), pasted: PASTED_EDIT.test(request) } : {}),
     ...(earlier.length ? { earlier, edit, shorter: edit && SHORTER.test(String(request)), request: String(request ?? '') } : {}) };
 }
 
@@ -238,7 +240,41 @@ export function coworkAddressDrafts(output: CoworkWriterOutput, brief: Pick<Cowo
  * subject, which the Writer changed: «Re: revisión de antecedentes en Manpower» for «Manpower y la revisión de antecedentes»), and an
  * edit of that email keeps its recipients and, when it had none, its «Hola,» and no campaign offer: the person sends it.
  */
-export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'edit' | 'followUp'>): CoworkWriterOutput {
+// A note about the missing recipient, which an edit of an email without one repeats (round 8: «Como todavía no tiene destinatario…»).
+const NO_RECIPIENT_NOTE = /\b(?:destinatari\w*|sin direccion|a quien va|lo dirijo)\b/;
+/** The words of what the person reads: without the greeting line and the signature. */
+function messageWords(body: string) {
+  const paragraphs = body.trim().split(/\n\s*\n/);
+  const last = paragraphs[paragraphs.length - 1] ?? '';
+  const signature = paragraphs.length > 1 && last.split('\n').length <= 5 && !/[.?!]\s*$/.test(last.trim());
+  const text = (signature ? paragraphs.slice(0, -1) : paragraphs).join('\n\n').replace(/^\s*(?:hola|estimad[oa])[^\n,]{0,40},\s*/i, '');
+  return bodyWords(text);
+}
+
+/** What an edit changed, in the reply: «más corto» says how much (round 7 readings asked for it), and the note about a recipient the
+ * email never had goes, because the person already knows. */
+function editedReply(reply: string, previous: EarlierEmail, next: { to?: string[] | null; body: string }, shorter: boolean) {
+  const sentences = reply.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const kept = next.to?.length ? sentences : sentences.filter(sentence => !NO_RECIPIENT_NOTE.test(normalize(sentence)));
+  const before = messageWords(previous.body);
+  const after = messageWords(next.body);
+  const length = shorter && after < before && !/\bpalabras\b/i.test(reply) ? `Lo dejé en ${after} palabras; antes tenía ${before}.` : '';
+  const text = [length, ...kept].filter(Boolean).join(' ').trim();
+  return text || reply;
+}
+
+// A reply that describes changes to an email nobody had (round 8: «¿y qué debería hacer para mejorar?» after the figures got «Lo que
+// más mejora ahora es que el correo lleva tu firma: agregué…»).
+const CHANGE_CLAIM = /\b(?:agregue|anadi|quite|cambie|acorte|reemplace|lo que mas mejora|el resto queda igual|queda igual)\b/;
+/** A new email (no earlier one in the conversation, none pasted): the reply does not talk about what changed. */
+export function coworkNewEmailReply(output: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'pasted'>): CoworkWriterOutput {
+  if (context.earlier?.length || context.pasted !== false) return output;
+  const sentences = output.reply.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const kept = sentences.filter(sentence => !CHANGE_CLAIM.test(normalize(sentence)));
+  return kept.length && kept.length < sentences.length ? { ...output, reply: kept.join(' ') } : output;
+}
+
+export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'edit' | 'followUp' | 'shorter'>): CoworkWriterOutput {
   const earlier = context.earlier ?? [];
   const drafts = output.blocks.filter(block => block.type === 'email_draft');
   if (!earlier.length || drafts.length !== 1 || (!context.followUp && !context.edit)) return output;
@@ -255,12 +291,13 @@ export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<Wr
     if (!next.to?.length && /^\s*hola,/i.test(previous.body)) next = { ...next, body: next.body.replace(/^(\s*Hola)\s*\{\{\s*nombre\s*\}\}\s*,/, '$1,') };
   }
   const blocks = next === block ? output.blocks : output.blocks.map(item => item === block ? next : item);
+  const reply = context.edit ? editedReply(output.reply, previous, next, Boolean(context.shorter)) : output.reply;
   // An email the person sends: no campaign for it, and the replies offer changes Cowork makes.
   if (context.edit && !next.to?.length && (output.question || output.suggestions.some(item => CAMPAIGN_WORD.test(item.label + item.message)))) {
     const suggestions = output.suggestions.filter(item => !CAMPAIGN_WORD.test(item.label + item.message));
-    return { ...output, blocks, question: null, suggestions: suggestions.length ? suggestions : [{ label: 'Tono más cercano', message: 'Hazlo con un tono más cercano' }] };
+    return { ...output, reply, blocks, question: null, suggestions: suggestions.length ? suggestions : [{ label: 'Tono más cercano', message: 'Hazlo con un tono más cercano' }] };
   }
-  return next === block ? output : { ...output, blocks };
+  return next === block && reply === output.reply ? output : { ...output, reply, blocks };
 }
 const CAMPAIGN_WORD = /campa[ñn]a/i;
 
@@ -612,7 +649,7 @@ const INTERNAL_WORDS = /\bobservad[oa]s?\b|\b(?:el|este|del) encargo\b|\buna sol
 export function coworkReplyIssues(reply: string): CoworkDraftIssue[] {
   const found = COWORK_JARGON.find(item => item.pattern.test(reply));
   const issues: CoworkDraftIssue[] = found ? [{ where: 'Respuesta', problem: `La respuesta ${found.label}.`,
-    fix: 'Dilo en simple, sin términos internos; si importa que no ves su bandeja: «si te respondió por fuera de ANTON.IA, avísame y lo ajusto».', short: 'respuesta sin jerga' }] : [];
+    fix: 'Dilo en simple, sin términos internos; si importa que no ves su bandeja, en un primer correo: «si ya le escribiste por fuera de ANTON.IA, avísame y lo ajusto»; en un seguimiento: «si te respondió por fuera de ANTON.IA, avísame y lo ajusto».', short: 'respuesta sin jerga' }] : [];
   const excuse = EXCUSES.exec(normalize(reply));
   if (excuse) issues.push({ where: 'Respuesta', problem: `La respuesta se excusa («${excuse[0]}»).`,
     fix: 'Di a quién sirve el texto y qué ángulo usaste, sin disculparte por lo que el pedido no traía.', short: 'respuesta sin excusas' });
@@ -1213,7 +1250,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
     // One email to one person whose objective is a follow-up: it must reopen the first one.
     followUp: input.brief.kind === 'email' && input.brief.recipients?.length === 1 && /seguimiento/i.test(input.brief.objective) && !PASTED_EDIT.test(input.request) };
   // Every draft goes to the people it names and stays in the thread it continues, before the checks read it.
-  const settle = (draft: CoworkWriterOutput) => coworkEarlierThread(coworkAddressDrafts(draft, input.brief, context.recipients), context);
+  const settle = (draft: CoworkWriterOutput) => coworkNewEmailReply(coworkEarlierThread(coworkAddressDrafts(draft, input.brief, context.recipients), context), context);
   let first: CoworkWriterOutput;
   try {
     first = settle(await input.generate({ role: 'writer', schema: coworkWriterOutputSchema, systemPrompt, stream: true,

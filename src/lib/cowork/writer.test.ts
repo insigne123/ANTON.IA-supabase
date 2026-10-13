@@ -1048,6 +1048,15 @@ test('a follow-up stays in the thread of the first email and an edit keeps what 
   assert.match((edited.blocks[0] as { body: string }).body, /^Hola,\n/);
   assert.equal(edited.question, null);
   assert.deepEqual(edited.suggestions.map(item => item.label), ['Sin demo']);
+  // «Más corto» says how much, counting what the person reads (no greeting, no signature), and drops the note about the recipient.
+  const long = [{ to: [], subject: 'Antecedentes', body: 'Hola,\n\nCuando llega un grupo de postulantes, revisar uno por uno sus antecedentes deja vacantes abiertas.\n\nAXIS consulta el PJUD de forma automática. Te propongo una demo.\n\n¿Qué día te acomoda una demo de 30 minutos?\n\nNicolás Yarur\nGerente Comercial\nYago SpA' }];
+  const cut = { reply: 'Como todavía no tiene destinatario, el correo va sin dirección. Quité los adjetivos de venta.', question: null, suggestions: [],
+    blocks: [{ type: 'email_draft' as const, title: 'Corto', to: null, subject: 'Antecedentes', body: 'Hola,\n\nRevisar antecedentes uno por uno deja vacantes abiertas.\n\n¿Qué día te acomoda una demo de 30 minutos?\n\nNicolás Yarur\nGerente Comercial\nYago SpA' }] };
+  assert.equal(coworkEarlierThread(cut, { earlier: long, edit: true, shorter: true }).reply, 'Lo dejé en 17 palabras; antes tenía 35. Quité los adjetivos de venta.');
+  // Not shorter, or not asked: no figure; a recipient the email has keeps its note.
+  assert.equal(coworkEarlierThread(cut, { earlier: long, edit: true }).reply, 'Quité los adjetivos de venta.');
+  const onlyNote = { ...cut, reply: 'Como todavía no tiene destinatario, el correo va sin dirección.' };
+  assert.equal(coworkEarlierThread(onlyNote, { earlier: long, edit: true }).reply, onlyNote.reply);
 });
 
 test('a follow-up that asks the first question again, and a «más corto» that is not, are caught', () => {
@@ -1091,4 +1100,16 @@ test('a reply does not describe a meeting the email does not ask for, whatever t
   assert.equal(coworkReplyMatchesDraft('Preparé un correo para los 4. La pregunta de cierre busca una respuesta fácil sobre una conversación de 15 minutos. Los otros 3 quedan fuera.', bodies),
     'Preparé un correo para los 4. Los otros 3 quedan fuera.');
   assert.equal(coworkReplyMatchesDraft('Preparé un correo para los 4. La demo queda para cuando respondan.', bodies), 'Preparé un correo para los 4. La demo queda para cuando respondan.');
+});
+
+test('a new email\'s reply does not describe changes to an email nobody had; an edit or a pasted email may', async () => {
+  const { coworkNewEmailReply } = await import('./writer');
+  const output = { reply: 'Lo que más mejora ahora es que el correo lleva tu firma: agregué Nicolás Yarur al final. El resto queda igual. Va a tus 4 contactos con correo.',
+    question: null, suggestions: [], blocks: [{ type: 'email_draft' as const, title: 'Primer correo', to: null, subject: 'A', body: 'Hola,\n\nTexto.' }] };
+  assert.equal(coworkNewEmailReply(output, { pasted: false }).reply, 'Va a tus 4 contactos con correo.');
+  assert.equal(coworkNewEmailReply(output, { pasted: true }), output);
+  assert.equal(coworkNewEmailReply(output, { pasted: false, earlier: [{ to: [], subject: 'A', body: 'Hola' }] }), output);
+  assert.equal(coworkNewEmailReply(output, {}), output, 'without the request nothing is known');
+  const onlyChanges = { ...output, reply: 'Agregué tu firma al final.' };
+  assert.equal(coworkNewEmailReply(onlyChanges, { pasted: false }), onlyChanges, 'a reply is never left empty');
 });
