@@ -638,6 +638,13 @@ const WRITER_FIRST = 'Los correos los escribe la Redactora, no tú: no los ponga
 // A yes to the campaign the previous answer offered («Sí, crea la campaña pausada», «dale», «créala»)…
 const TAKES_OFFER = new RegExp(String.raw`^\s*(?:${YES}|dale|ok(?:ey)?|perfecto|listo|bueno|adelante|h[áa]zlo|cr[ée]ala|cr[ée]a la campa[ñn]a|arma la campa[ñn]a)(?!\p{L})`, 'iu');
 // …that does not ask to change its emails («sí, pero con un solo texto para todos»).
+/** A «dale» to a closing question that offered the campaign: the emails written now go into it in this same turn (round 15: Luna
+ * wrote them after «¿…te preparo el primer correo para dejar la campaña pausada?» + «dale» and asked about the campaign again). */
+export function coworkAcceptsCampaignOffer(message: string, history: CoworkHistoryTurn[] | undefined) {
+  const before = coworkClosingQuestionOf(history?.at(-1)?.reply);
+  return Boolean(before && /campa[ñn]a/i.test(before) && TAKES_OFFER.test(message) && !CHANGES_OFFER.test(message));
+}
+
 const CHANGES_OFFER = /(?<!\p{L})(?:pero|aunque|cambia\w*|mismo texto|un solo (?:texto|correo)|sin personalizar)(?!\p{L})/iu;
 // …nor asks for the follow-ups too («sí, con sus seguimientos»).
 const ASKS_FOLLOW_UPS = /(?<!\p{L})(?:seguimientos?|secuencia|toques|cadencia)(?!\p{L})/iu;
@@ -1506,7 +1513,7 @@ async function runCoworkLoop(input: {
           // A failed Writer does not end the turn: the coordinator writes it, as before.
           throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11), sin mencionarle esto al usuario.');
         }
-        const asked: boolean = Boolean(decision.write.campaign && !written && turn < last && input.proposeEffect);
+        const asked: boolean = Boolean((decision.write.campaign || coworkAcceptsCampaignOffer(input.message, input.history)) && !written && turn < last && input.proposeEffect);
         const emails: CoworkEditedEmail[] | null = asked ? coworkCampaignEmails(answer.blocks) : null;
         // One email per person (Plan 15): each becomes that person's first email in the campaign.
         const personal: CoworkPersonalEmail[] | null = asked && !emails ? coworkPersonalEmails(answer.blocks) : null;

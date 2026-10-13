@@ -199,12 +199,12 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
       <CwCollapse show={askOffer}>
         {onSaveOffer && <div className="pt-6"><OfferCard draft={offerDraft} onDraftChange={onOfferDraftChange} onSave={onSaveOffer} onHide={hideOffer} /></div>}
       </CwCollapse>
-      {/* The starting points come in one after another, a beat apart; with less motion they are simply there. */}
+      {/* The starting points come in together, as one row: with one entrance each, a chip moved when «Para hoy» loaded played its
+          entrance again and stood blank in the row (round 15 readings: «faltan chips, la fila se ve rota»). */}
       {/* On a phone they wrap into centered rows: a row that scrolled sideways read as cut at the edge (round 8 readings). */}
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
-        {starters.map((item, index) => <button key={item.id} type="button" onClick={() => onSuggestion(item.prompt)}
-          style={{ animationDelay: `${120 + index * 45}ms` }}
-          className="cw-rise inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+      <div className="cw-rise mt-5 flex flex-wrap justify-center gap-2 [animation-delay:120ms]">
+        {starters.map(item => <button key={item.id} type="button" onClick={() => onSuggestion(item.prompt)}
+          className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
           <CoworkIcon name={item.icon} className="h-4 w-4 text-cw-accent" />{item.title}
         </button>)}
       </div>
