@@ -8,18 +8,20 @@ import { z } from 'zod';
  * reads. The server reads the real state of each person and runs it (server/cowork/prepare-batch.ts).
  */
 
-export type CoworkPrepareGoal = 'save' | 'email' | 'research';
-export type CoworkPrepareStep = 'save' | 'enrich' | 'research';
-export const COWORK_PREPARE_STEPS: readonly CoworkPrepareStep[] = ['save', 'enrich', 'research'];
+export type CoworkPrepareGoal = 'save' | 'email' | 'research' | 'linkedin';
+/** linkedin: the provider lookup of someone whose LinkedIn profile is missing, also when they already have an email (round 8: with
+ * no profile saved, «¿a quién invito por LinkedIn?» had nothing to offer but email lookups, which do not get anyone invited). */
+export type CoworkPrepareStep = 'save' | 'enrich' | 'linkedin' | 'research';
+export const COWORK_PREPARE_STEPS: readonly CoworkPrepareStep[] = ['save', 'enrich', 'linkedin', 'research'];
 export const COWORK_PREPARE_BATCH_EFFECT = 'lead_prepare_batch';
 /** Saving is a write per person; looking up an email and researching call the provider, so they go in smaller batches. */
-export const COWORK_PREPARE_MAX: Record<CoworkPrepareGoal, number> = { save: 50, email: 10, research: 10 };
+export const COWORK_PREPARE_MAX: Record<CoworkPrepareGoal, number> = { save: 50, email: 10, research: 10, linkedin: 10 };
 
 const PROVIDER_ID = /^apollo:[A-Za-z0-9_-]{1,200}$/;
 
 /** contacts.prepare_batch: the goal and the people, each a search result (providerId) or a saved contact (leadId) seen in this conversation. */
 export const coworkPrepareBatchSchema = z.object({
-  goal: z.enum(['save', 'email', 'research']),
+  goal: z.enum(['save', 'email', 'research', 'linkedin']),
   people: z.array(z.object({
     providerId: z.string().regex(PROVIDER_ID).nullable().optional(),
     leadId: z.string().uuid().nullable().optional(),
@@ -28,7 +30,7 @@ export const coworkPrepareBatchSchema = z.object({
 export type CoworkPrepareBatchInput = z.infer<typeof coworkPrepareBatchSchema>;
 export type CoworkPreparePerson = { providerId: string } | { leadId: string };
 
-const GOAL_TEXT: Record<CoworkPrepareGoal, string> = { save: 'guardar', email: 'buscar correos', research: 'investigar' };
+const GOAL_TEXT: Record<CoworkPrepareGoal, string> = { save: 'guardar', email: 'buscar correos', research: 'investigar', linkedin: 'buscar perfiles de LinkedIn' };
 
 /** The goal and the people of a proposal, each once. Throws in words the model can pass on. */
 export function coworkPrepareBatchPeople(input: unknown): { goal: CoworkPrepareGoal; people: CoworkPreparePerson[] } {
@@ -46,16 +48,20 @@ export function coworkPrepareBatchPeople(input: unknown): { goal: CoworkPrepareG
   return { goal: parsed.goal, people };
 }
 
-/** What a person already has: saved, an email or a lookup already tried, a research done or under way. */
-export type CoworkPrepareState = { saved: boolean; emailChecked: boolean; researched: boolean };
+/** What a person already has: saved, an email or a lookup already tried, a research done or under way, and a LinkedIn profile or a
+ * lookup that already brought what the provider had (linkedinChecked). */
+export type CoworkPrepareState = { saved: boolean; emailChecked: boolean; researched: boolean; linkedinChecked?: boolean };
 
 const wanted = (goal: CoworkPrepareGoal, step: CoworkPrepareStep) =>
-  step === 'save' || (step === 'enrich' && goal !== 'save') || (step === 'research' && goal === 'research');
+  step === 'save' || (step === 'enrich' && (goal === 'email' || goal === 'research')) || (step === 'research' && goal === 'research')
+  || (step === 'linkedin' && goal === 'linkedin');
+
+const has = (step: CoworkPrepareStep, state: CoworkPrepareState) =>
+  step === 'save' ? state.saved : step === 'enrich' ? state.emailChecked : step === 'linkedin' ? Boolean(state.linkedinChecked) : state.researched;
 
 /** The steps a person still needs for the goal, in order. Researching needs the email looked up first, and both need the contact saved. */
 export function coworkPrepareSteps(goal: CoworkPrepareGoal, state: CoworkPrepareState): CoworkPrepareStep[] {
-  return COWORK_PREPARE_STEPS.filter(step => wanted(goal, step)
-    && !(step === 'save' ? state.saved : step === 'enrich' ? state.emailChecked : state.researched));
+  return COWORK_PREPARE_STEPS.filter(step => wanted(goal, step) && !has(step, state));
 }
 
 /** Only what is needed to save a search result as it was seen in the conversation. */
@@ -84,6 +90,7 @@ const READY_REASON: Record<CoworkPrepareGoal, string> = {
   save: 'Ya está en tus contactos.',
   email: 'Ya está guardado y su correo ya se buscó.',
   research: 'Ya está guardado, con su correo buscado y su investigación hecha o en curso.',
+  linkedin: 'Ya tiene su perfil de LinkedIn, o ya se buscó.',
 };
 
 /** Who gets what, in the order given: each person only with the steps still missing; whoever has nothing left waits aside, with why. */
@@ -106,10 +113,12 @@ export function hashCoworkPrepareBatch(runId: string, items: Array<Pick<CoworkPr
     .update(JSON.stringify(['cowork|prepare-batch', runId, items.map(item => [item.id, item.providerId ?? null, item.steps])])).digest('hex');
 }
 
-export type CoworkPrepareCost = { saves: number; lookups: number; research: number };
+/** lookups: every provider lookup, of an email or of a LinkedIn profile (1 credit each); profiles: how many of them are for LinkedIn. */
+export type CoworkPrepareCost = { saves: number; lookups: number; research: number; profiles?: number };
 export function coworkPrepareCost(items: Array<Pick<CoworkPrepareItem, 'steps'>>): CoworkPrepareCost {
   const count = (step: CoworkPrepareStep) => items.filter(item => item.steps.includes(step)).length;
-  return { saves: count('save'), lookups: count('enrich'), research: count('research') };
+  const profiles = count('linkedin');
+  return { saves: count('save'), lookups: count('enrich') + profiles, research: count('research'), ...(profiles ? { profiles } : {}) };
 }
 
 const people = (count: number) => `${count} ${count === 1 ? 'persona' : 'personas'}`;
@@ -118,8 +127,11 @@ const joined = (parts: string[]) => (parts.length > 1 ? `${parts.slice(0, -1).jo
 /** «Guardar a 3 personas», «Buscar el correo de 2 personas», «Preparar a 2 personas: guardar, buscar su correo e investigar». */
 export function coworkPrepareBatchLabel(items: Array<Pick<CoworkPrepareItem, 'steps'>>) {
   const cost = coworkPrepareCost(items);
-  const parts = [cost.saves ? 'guardar' : '', cost.lookups ? 'buscar su correo' : '', cost.research ? 'investigar' : ''].filter(Boolean);
+  const profiles = cost.profiles ?? 0;
+  const parts = [cost.saves ? 'guardar' : '', cost.lookups - profiles ? 'buscar su correo' : '', profiles ? 'buscar su perfil de LinkedIn' : '',
+    cost.research ? 'investigar' : ''].filter(Boolean);
   if (parts.length === 1 && cost.saves) return `Guardar a ${people(items.length)}`;
+  if (parts.length === 1 && profiles) return `Buscar el perfil de LinkedIn de ${people(items.length)}`;
   if (parts.length === 1 && cost.lookups) return `Buscar el correo de ${people(items.length)}`;
   if (parts.length === 1) return `Investigar a ${people(items.length)}`;
   return `Preparar a ${people(items.length)}: ${joined(parts)}`;
@@ -149,9 +161,11 @@ export function coworkPrepareBatchSummary(results: CoworkPrepareResult[]) {
   const stepOk = (step: CoworkPrepareStep) => ran.filter(result => result.steps.some(item => item.step === step && (item.status === 'done' || item.status === 'reused'))).length;
   const asked = (step: CoworkPrepareStep) => ran.filter(result => result.steps.some(item => item.step === step)).length;
   const withEmail = ran.filter(result => result.email).length;
+  const withProfile = ran.filter(result => result.linkedinUrl && result.steps.some(item => item.step === 'linkedin')).length;
   const parts = [
     asked('save') ? `${stepOk('save')} ${stepOk('save') === 1 ? 'quedó guardada' : 'quedaron guardadas'}` : '',
     asked('enrich') ? `${withEmail} de ${asked('enrich')} con correo` : '',
+    asked('linkedin') ? `${withProfile} de ${asked('linkedin')} con perfil de LinkedIn` : '',
     asked('research') ? `${stepOk('research')} ${stepOk('research') === 1 ? 'investigación en curso o lista' : 'investigaciones en curso o listas'}` : '',
   ].filter(Boolean);
   const ready = ran.filter(result => result.status === 'ready').length;

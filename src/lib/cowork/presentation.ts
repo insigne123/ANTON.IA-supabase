@@ -360,6 +360,10 @@ export function coworkProposalOutcome(proposal: Pick<CoworkProposalView, 'type' 
     return { happens: 'Se busca el correo de cada persona que dejes en la lista, con el proveedor (1 crédito por persona).',
       not: 'No se le escribe a nadie, y a quien quites no se le toca.' };
   }
+  if (proposal.payload.kind === 'lead_prepare_batch' && /^buscar el perfil de linkedin/i.test(String(proposal.payload.label || ''))) {
+    return { happens: 'Se busca el perfil de LinkedIn de cada persona que dejes en la lista, con el proveedor (1 crédito por persona), y queda guardado en su contacto.',
+      not: 'No se envía ninguna invitación: después te propongo a quién invitar, con tu aprobación.' };
+  }
   return OUTCOMES[String(proposal.payload.kind || '')] || { happens: 'Se ejecuta la acción propuesta.', not: 'No se hace nada más sin tu aprobación.' };
 }
 

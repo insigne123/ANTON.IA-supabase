@@ -38,11 +38,11 @@ type Scope = { userId: string; organizationId: string };
 type Client = ReturnType<typeof getSupabaseAdminClient>;
 type LeadRow = {
   id: string; name: string | null; company: string | null; title: string | null; email: string | null;
-  apollo_id: string | null; source_provider_id: string | null;
+  apollo_id: string | null; source_provider_id: string | null; linkedin_url?: string | null;
 };
 export type Staged = { kind: string; items: CoworkPrepareItem[]; deferred?: CoworkPrepareReady[]; excluded: string[]; patch_hash: string };
 
-const LEAD_FIELDS = 'id,name,company,title,email,apollo_id,source_provider_id';
+const LEAD_FIELDS = 'id,name,company,title,email,apollo_id,source_provider_id,linkedin_url';
 /** How far back a batch looks for the people the conversation saw: this turn and the ones it continues. */
 const THREAD_RUNS = 12;
 /** A lookup that is done or under way: the email is not looked up again. A failed one can be tried again. */
@@ -105,24 +105,26 @@ async function loadOwnLeads(client: Client, scope: Scope, leadIds: string[], apo
   // A contact of «Por escribir» (Plan 6, PR-A) is already a contact with its email: only its research can be left to do.
   const missing = leadIds.filter(id => !byId.has(id));
   if (missing.length) {
-    const enriched = await client.from('enriched_leads').select('id,full_name,company_name,organization_name,title,email,source_provider_id')
+    const enriched = await client.from('enriched_leads').select('id,full_name,company_name,organization_name,title,email,source_provider_id,linkedin_url')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).in('id', missing);
     if (enriched.error) throw new Error('No se pudo leer a las personas del lote.');
     for (const row of (enriched.data || []) as Array<Record<string, string | null>>) {
       byId.set(String(row.id), { id: String(row.id), name: row.full_name ?? null, company: row.company_name || row.organization_name || null,
-        title: row.title ?? null, email: row.email ?? null, apollo_id: null, source_provider_id: row.source_provider_id ?? null });
+        title: row.title ?? null, email: row.email ?? null, apollo_id: null, source_provider_id: row.source_provider_id ?? null, linkedin_url: row.linkedin_url ?? null });
     }
   }
   return { byId, byProvider };
 }
 
-/** What each saved contact already has: an email or a lookup done or under way, and a research done or under way. */
+/** What each saved contact already has: an email or a lookup done or under way, a research done or under way, and a LinkedIn profile
+ * or a provider lookup that already brought what it had. */
 async function loadProgress(client: Client, scope: Scope, leads: LeadRow[]) {
   const ids = leads.map(lead => lead.id);
   const providers = [...new Set(leads.flatMap(lead => [lead.apollo_id, lead.source_provider_id].filter((key): key is string => Boolean(key))))];
   const emailChecked = new Set(leads.filter(lead => text(lead.email)).map(lead => lead.id));
+  const linkedinChecked = new Set(leads.filter(lead => text(lead.linkedin_url)).map(lead => lead.id));
   const researched = new Set<string>();
-  if (!ids.length) return { emailChecked, researched };
+  if (!ids.length) return { emailChecked, researched, linkedinChecked };
   const own = (table: string, fields: string) => client.from(table).select(fields).eq('user_id', scope.userId).eq('organization_id', scope.organizationId);
   const [bySaved, byProvider, research] = await Promise.all([
     own('enriched_leads', 'email,enrichment_status,data').filter('data->>sourceSavedLeadId', 'in', `(${ids.join(',')})`),
@@ -132,16 +134,19 @@ async function loadProgress(client: Client, scope: Scope, leads: LeadRow[]) {
   if (bySaved.error || byProvider?.error || research.error) throw new Error('No se pudo comprobar qué tiene ya cada persona.');
   const looked = (row: { email?: unknown; enrichment_status?: unknown }) => Boolean(text(row.email)) || LOOKUP_DONE.has(String(row.enrichment_status));
   for (const row of (bySaved.data || []) as Array<{ email?: unknown; enrichment_status?: unknown; data?: { sourceSavedLeadId?: unknown } | null }>) {
-    if (looked(row) && typeof row.data?.sourceSavedLeadId === 'string') emailChecked.add(row.data.sourceSavedLeadId);
+    if (looked(row) && typeof row.data?.sourceSavedLeadId === 'string') { emailChecked.add(row.data.sourceSavedLeadId); linkedinChecked.add(row.data.sourceSavedLeadId); }
   }
   for (const row of (byProvider?.data || []) as Array<{ email?: unknown; enrichment_status?: unknown; source_provider_id?: unknown }>) {
     if (!looked(row)) continue;
-    for (const lead of leads) if (row.source_provider_id && (lead.apollo_id === row.source_provider_id || lead.source_provider_id === row.source_provider_id)) emailChecked.add(lead.id);
+    for (const lead of leads) if (row.source_provider_id && (lead.apollo_id === row.source_provider_id || lead.source_provider_id === row.source_provider_id)) {
+      emailChecked.add(lead.id);
+      linkedinChecked.add(lead.id);
+    }
   }
   for (const row of (research.data || []) as Array<{ lead_id?: unknown; status?: unknown }>) {
     if (typeof row.lead_id === 'string' && !RESEARCH_RETRY.has(String(row.status))) researched.add(row.lead_id);
   }
-  return { emailChecked, researched };
+  return { emailChecked, researched, linkedinChecked };
 }
 
 /**
@@ -177,7 +182,8 @@ export async function stageCoworkPrepareBatch(scope: Scope, runId: string, input
     // The same person twice (as a search result and as a saved contact) goes once.
     if (ids.has(id)) continue;
     ids.add(id);
-    const state: CoworkPrepareState = { saved: Boolean(lead), emailChecked: Boolean(lead && progress.emailChecked.has(lead.id)), researched: Boolean(lead && progress.researched.has(lead.id)) };
+    const state: CoworkPrepareState = { saved: Boolean(lead), emailChecked: Boolean(lead && progress.emailChecked.has(lead.id)), researched: Boolean(lead && progress.researched.has(lead.id)),
+      linkedinChecked: lead ? progress.linkedinChecked.has(lead.id) : Boolean(row?.linkedin_url) };
     candidates.push({
       id, ...(lead ? {} : { providerId: (person as { providerId: string }).providerId }),
       name: text(lead?.name ?? row?.name), company: text(lead?.company ?? row?.company), title: text(lead?.title ?? row?.title), state,

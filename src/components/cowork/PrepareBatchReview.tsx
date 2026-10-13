@@ -6,7 +6,7 @@ import { displayLeadName } from '@/lib/lead-name';
 import { cn } from '@/lib/utils';
 import { ReviewActions, ReviewError, ReviewLoading, ReviewNote } from './ReviewParts';
 
-type Step = 'save' | 'enrich' | 'research';
+type Step = 'save' | 'enrich' | 'linkedin' | 'research';
 type Item = { id: string; providerId?: string; name: string | null; company: string | null; title: string | null; steps: Step[]; done: Step[] };
 type Ready = { id: string; name: string | null; company: string | null; reason: string };
 type StepResult = { step: Step; status: 'done' | 'reused' | 'failed' | 'skipped'; detail?: string };
@@ -20,8 +20,16 @@ type Preview = {
 };
 
 const endpoint = (runId: string) => `/api/cowork/runs/${runId}/preparebatch`;
-const TODO: Record<Step, string> = { save: 'Guardar', enrich: 'Buscar correo', research: 'Investigar' };
-const DONE: Record<Step, string> = { save: 'Ya guardado', enrich: 'Correo ya buscado', research: 'Ya investigado' };
+const TODO: Record<Step, string> = { save: 'Guardar', enrich: 'Buscar correo', linkedin: 'Buscar su LinkedIn', research: 'Investigar' };
+const DONE: Record<Step, string> = { save: 'Ya guardado', enrich: 'Correo ya buscado', linkedin: 'LinkedIn ya buscado', research: 'Ya investigado' };
+/** Both lookups go to the provider and cost 1 credit each. */
+const LOOKUPS: Step[] = ['enrich', 'linkedin'];
+const looksUp = (item: Item) => item.steps.some(step => LOOKUPS.includes(step));
+/** Only one lookup to run per person (emails, or LinkedIn profiles): the button and the outcome say it, so each row is just the person. */
+const onlyStep = (items: Item[]) => {
+  const step = items[0]?.steps.length === 1 ? items[0].steps[0] : null;
+  return step && LOOKUPS.includes(step) && items.every(item => item.steps.length === 1 && item.steps[0] === step) ? step : null;
+};
 const people = (count: number) => `${count} ${count === 1 ? 'persona' : 'personas'}`;
 
 async function loadPreview(runId: string): Promise<Preview> {
@@ -43,7 +51,7 @@ function PersonName({ name, struck }: { name: string | null; struck?: boolean })
 /** What will be done for a person (in order) and what was already done and is skipped. */
 function StepChips({ item, included }: { item: Item; included: boolean }) {
   return <span className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Pasos">
-    {(['save', 'enrich', 'research'] as Step[]).map(step => item.steps.includes(step)
+    {(['save', 'enrich', 'linkedin', 'research'] as Step[]).map(step => item.steps.includes(step)
       ? <span key={step} className={cn('rounded-md px-1.5 py-0.5 text-[11.5px] font-medium', included ? 'bg-cw-accent-soft text-cw-accent' : 'bg-cw-hover text-cw-muted')}>{TODO[step]}</span>
       : item.done.includes(step)
         ? <span key={step} className="inline-flex items-center gap-1 rounded-md bg-cw-hover px-1.5 py-0.5 text-[11.5px] text-cw-muted"><Check className="h-3 w-3" aria-hidden="true" />{DONE[step]}</span>
@@ -70,9 +78,12 @@ function PersonRow({ item, included, disabled, onToggle, steps = true }: { item:
 
 /** «Usa hasta 2 créditos para buscar correos y 2 investigaciones de tu cupo diario». Only what costs, counted over who stays. */
 function costLine(kept: Item[]) {
-  const lookups = kept.filter(item => item.steps.includes('enrich')).length;
+  const emails = kept.filter(item => item.steps.includes('enrich')).length;
+  const profiles = kept.filter(item => item.steps.includes('linkedin')).length;
+  const lookups = emails + profiles;
+  const what = emails && profiles ? 'buscar correos y perfiles de LinkedIn' : profiles ? 'buscar perfiles de LinkedIn' : 'buscar correos';
   const research = kept.filter(item => item.steps.includes('research')).length;
-  const parts = [lookups ? `hasta ${lookups} ${lookups === 1 ? 'crédito' : 'créditos'} para buscar correos (1 por persona)` : '',
+  const parts = [lookups ? `hasta ${lookups} ${lookups === 1 ? 'crédito' : 'créditos'} para ${what} (1 por persona)` : '',
     research ? `${research} ${research === 1 ? 'investigación' : 'investigaciones'} de tu cupo diario` : ''].filter(Boolean);
   return parts.length ? `Usa ${parts.join(' y ')}.` : 'Solo guarda contactos: no gasta créditos.';
 }
@@ -81,10 +92,11 @@ function costLine(kept: Item[]) {
  * «Preparar» read as vague), «Preparar a 2 personas · 1 crédito» when more is. */
 function approveLabel(kept: Item[]) {
   if (!kept.length) return 'Aprobar';
-  const lookups = kept.filter(item => item.steps.includes('enrich')).length;
+  const lookups = kept.filter(looksUp).length;
   const credits = lookups ? ` · ${lookups} ${lookups === 1 ? 'crédito' : 'créditos'}` : '';
-  return kept.every(item => item.steps.length === 1 && item.steps[0] === 'enrich')
-    ? `Buscar ${lookups} ${lookups === 1 ? 'correo' : 'correos'}${credits}` : `Preparar a ${people(kept.length)}${credits}`;
+  const only = onlyStep(kept);
+  if (only === 'linkedin') return `Buscar ${lookups} ${lookups === 1 ? 'perfil' : 'perfiles'}${credits}`;
+  return only === 'enrich' ? `Buscar ${lookups} ${lookups === 1 ? 'correo' : 'correos'}${credits}` : `Preparar a ${people(kept.length)}${credits}`;
 }
 
 /**
@@ -114,7 +126,7 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
   const locked = saving || resolving || !preview.open;
   const changed = removed.size !== preview.excluded.length || preview.excluded.some(id => !removed.has(id));
   const toggle = (id: string) => setRemoved(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  const lookups = kept.filter(item => item.steps.includes('enrich')).length;
+  const lookups = kept.filter(looksUp).length;
   const short = preview.balance && lookups > preview.balance.remaining;
   async function approve() {
     setError('');
@@ -133,18 +145,18 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
       setSaving(false);
     }
   }
-  // Only emails to look for: the button and the outcome say it, so each row is just the person (round 2 readings: a dense card with
+  // One lookup per person (emails, or LinkedIn profiles): the button and the outcome say it, so each row is just the person (round 2 readings: a dense card with
   // «Ya guardado» and «Buscar correo» on every row).
-  const emailsOnly = preview.items.every(item => item.steps.length === 1 && item.steps[0] === 'enrich');
+  const oneLookup = Boolean(onlyStep(preview.items));
   return <div className="space-y-4">
     <div className="space-y-1">
-      {!emailsOnly && <p className="text-[14px]"><span className="font-semibold">{kept.length} de {people(preview.items.length)}</span>
+      {!oneLookup && <p className="text-[14px]"><span className="font-semibold">{kept.length} de {people(preview.items.length)}</span>
         <span className="text-cw-muted"> quedan listas con esta aprobación, cada una solo con lo que le falta.</span></p>}
       <p className="text-[12.5px] text-cw-muted">{costLine(kept)}{preview.balance
         ? ` Te quedan ${preview.balance.remaining} créditos${preview.balance.stale ? ' (dato de hace un rato)' : ''}.` : ''}</p>
     </div>
     <ul aria-label="Personas de la lista" className="cw-scroll max-h-96 divide-y divide-cw-border overflow-y-auto rounded-xl border border-cw-border bg-cw-panel">
-      {preview.items.map(item => <PersonRow key={item.id} item={item} included={!removed.has(item.id)} disabled={locked} onToggle={() => toggle(item.id)} steps={!emailsOnly} />)}
+      {preview.items.map(item => <PersonRow key={item.id} item={item} included={!removed.has(item.id)} disabled={locked} onToggle={() => toggle(item.id)} steps={!oneLookup} />)}
     </ul>
     {!!preview.ready.length && <details className="rounded-xl border border-cw-border bg-cw-panel px-3 py-2.5 text-[13px]">
       <summary className="cursor-pointer text-cw-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
@@ -156,7 +168,7 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
           <span className="block text-[12.5px] text-cw-muted">{person.reason}</span></li>)}
       </ul>
     </details>}
-    {short && <ReviewNote ok={false}>Los créditos que quedan no alcanzan para buscar todos los correos: los que no alcancen quedan sin buscar y se avisa en cada persona.</ReviewNote>}
+    {short && <ReviewNote ok={false}>Los créditos que quedan no alcanzan para todas las búsquedas: las que no alcancen quedan sin hacer y se avisa en cada persona.</ReviewNote>}
     {error && <ReviewError message={error} />}
     {/* «Qué va a pasar» already says what approving does: the note speaks only when something is off. */}
     {(!preview.matches || !preview.open) && <ReviewNote ok={false}>{!preview.matches
