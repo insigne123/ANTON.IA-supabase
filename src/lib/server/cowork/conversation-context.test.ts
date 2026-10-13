@@ -169,3 +169,29 @@ test('each turn of the history carries what the person said about its answer', a
   const history = await loadCoworkHistory(client, { userId: 'owner', organizationId: 'org' }, 'b');
   assert.deepEqual(history.turns.map(turn => turn.feedback ?? null), [{ rating: 'down', reason: 'Demasiado largo', comment: null }, null]);
 });
+
+test('a question about a proposal still waiting for approval continues from that turn', async () => {
+  const statuses: Record<string, string> = { a: 'completed', b: 'waiting_approval', c: 'waiting_approval' };
+  const parents: Record<string, string | null> = { a: null, b: 'a', c: 'b' };
+  const client = { from(table: string) {
+    const where: Record<string, string> = {};
+    const chain = {
+      select: () => chain, order: () => chain, limit: () => chain, in: () => chain,
+      eq: (key: string, value: string) => { where[key] = value; return chain; },
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: where.kind === 'tool.completed' && where.run_id === 'b'
+        ? [{ payload: { action: 'assistant.note', result: { reply: 'Propongo buscar el correo de 3 personas.' } } }, { payload: { action: 'leads.search', result: { items: [] } } }]
+        : [], error: null })),
+      maybeSingle: async () => {
+        if (table === 'cowork_runs') return { data: { id: where.id, message: `request-${where.id}`, status: statuses[where.id], parent_run_id: parents[where.id] }, error: null };
+        if (where.kind === 'approval.requested') return { data: { payload: { kind: 'lead_prepare_batch', label: 'Buscar el correo de 3 personas' } }, error: null };
+        if (where.kind === 'run.completed' && statuses[where.run_id] === 'completed') return { data: { payload: { reply: `reply-${where.run_id}`, document: null } }, error: null };
+        return { data: null, error: null };
+      },
+    };
+    return chain;
+  } } as unknown as SupabaseClient;
+  const history = await loadCoworkHistory(client, { userId: 'owner', organizationId: 'org' }, 'b');
+  assert.deepEqual(history.turns.map(turn => turn.reply), ['reply-a', 'Propongo buscar el correo de 3 personas.'], 'its note is what it said so far');
+  assert.deepEqual(history.turns[1].actions, [{ kind: 'lead_prepare_batch', label: 'Buscar el correo de 3 personas', outcome: 'esperando tu aprobación' }]);
+  await assert.rejects(loadCoworkHistory(client, { userId: 'owner', organizationId: 'org' }, 'c'), /unavailable/, 'only the immediate parent may be waiting');
+});

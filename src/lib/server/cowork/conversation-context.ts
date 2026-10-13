@@ -48,14 +48,20 @@ export async function loadCoworkHistory(
     const { data: run, error } = await client.from('cowork_runs')
       .select('id,message,parent_run_id,status,created_at').eq('id', cursor)
       .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
-    if (error || !run || run.status !== 'completed') throw new Error('Conversation context unavailable');
-    const event = await client.from('cowork_run_events').select('payload')
+    // A question about a proposal that still waits for approval (a clarification) continues from that turn: only the
+    // immediate parent may be waiting, and what it said so far is its note.
+    const waiting = run?.status === 'waiting_approval' && history.length === 0;
+    if (error || !run || (run.status !== 'completed' && !waiting)) throw new Error('Conversation context unavailable');
+    const event = waiting ? null : await client.from('cowork_run_events').select('payload')
       .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
       .eq('kind', 'run.completed').order('sequence', { ascending: false }).limit(1).maybeSingle();
-    if (event.error || !event.data) throw new Error('Conversation result unavailable');
-    const result = coworkDocumentSchema.parse({ reply: event.data.payload.reply, document: event.data.payload.document });
+    if (event && (event.error || !event.data)) throw new Error('Conversation result unavailable');
+    const approval = waiting ? await client.from('cowork_run_events').select('payload')
+      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
+      .eq('kind', 'approval.requested').order('sequence', { ascending: false }).limit(1).maybeSingle() : null;
+    if (approval && (approval.error || !approval.data)) throw new Error('Conversation result unavailable');
     // The cards of that answer (emails, sequences, tables): «usa el segundo correo» refers to them.
-    const blocks = coworkStoredBlocks(event.data.payload.blocks);
+    const blocks = coworkStoredBlocks(event?.data?.payload.blocks);
     // Most recent observations first for the query cap, then back to
     // chronological order: a resumed run must see the latest tool result
     // (for example a completed external search), not only the oldest reads.
@@ -71,6 +77,10 @@ export async function loadCoworkHistory(
     const isNote = (payload: unknown) => (payload as { action?: unknown } | null)?.action === COWORK_NOTE_ACTION;
     const reads = newestFirst.filter(payload => !isNote(payload)).slice(0, 3);
     const observedPayloads = newestFirst.filter(payload => isNote(payload) || reads.includes(payload)).reverse();
+    const note = (newestFirst.find(isNote) as { result?: { reply?: unknown } } | undefined)?.result?.reply;
+    const result = event?.data
+      ? coworkDocumentSchema.parse({ reply: event.data.payload.reply, document: event.data.payload.document })
+      : { reply: typeof note === 'string' ? note : '', document: null };
     // Actions approved in that turn and how they ended, so the model never
     // re-proposes something that already ran (for example a failed email lookup).
     const acted = await client.from('cowork_run_events').select('kind,payload')
@@ -91,7 +101,9 @@ export async function loadCoworkHistory(
       return { kind: 'save_contact', label: `Guardaste desde el panel a ${who || 'un contacto'}`.slice(0, 200), outcome: 'ejecutada',
         result: { leadId: row.payload?.leadId ?? null, providerId: row.payload?.providerId ?? null, reused: row.payload?.reused === true } };
     });
-    const actions = [...effects, ...saved];
+    const proposal = approval?.data?.payload as Record<string, unknown> | undefined;
+    const open = proposal ? [{ kind: String(proposal.kind || ''), label: String(proposal.label || '').slice(0, 200), outcome: 'esperando tu aprobación' }] : [];
+    const actions = [...effects, ...saved, ...open];
     const made = await client.from('cowork_run_events').select('payload')
       .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
       .eq('kind', 'artifact.created').order('sequence', { ascending: true }).limit(5);
