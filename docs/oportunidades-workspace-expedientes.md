@@ -14,7 +14,7 @@ Tablas `commercial_opportunities` y `organization_reporting_groups` reutilizadas
 
 ## Activación
 
-Defaults off: `OPPORTUNITIES_WORKSPACE_ENABLED`, `OPPORTUNITIES_AUTOMATION_ENABLED`. No se aplican migraciones remotas ni se despliega por integrar esta PR. Mantener apagado hasta validar esquema, proveedor y aceptación. Las migraciones locales son forward-only, una por vez:
+El código conserva defaults off para `OPPORTUNITIES_WORKSPACE_ENABLED`, `OPPORTUNITIES_AUTOMATION_ENABLED`. Las cinco migraciones se aplicaron con autorización el13oct; las versiones remotas, verificaciones y pasos del mantenedor están en [preparación de activación](oportunidades-activacion-2026-10-13.md). `apphosting.yaml` prepara ambos flags para el próximo rollout; integrar Git no despliega ni inicia la búsqueda diaria por empresa. El contexto compartido requiere confirmación administrativa. Las migraciones son forward-only, una por vez:
 
 1. `20261012160000_opportunity_workspace_assignments.sql`: permisos por objeto, equipos, revisión de asignación, actividad/notificaciones/tareas.
 2. `20261012162000_opportunity_jobs_and_budget.sql`: contexto, jobs/claims, snapshots, reserva y liquidación.

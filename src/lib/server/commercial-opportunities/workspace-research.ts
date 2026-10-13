@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { answerSchema, extractionSchema, REPORT_VERSION, validOpportunityCitation, validateOpportunityFacts, type DocumentChunk, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
-import { opportunityReportPrompt } from '@/lib/commercial-opportunities/report-generation';
+import { opportunityReportPrompt, opportunitySynthesisSources } from '@/lib/commercial-opportunities/report-generation';
 import { opportunityFinancialScenario, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
@@ -114,9 +114,9 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
       prompt: `Extrae TODOS los requisitos, fechas, cifras, criterios, garantías y obligaciones de estos fragmentos. Conserva contradicciones y títulos que no correspondan al objeto. No interpretes una licitación privada con normas públicas. Las páginas de contexto público no son bases ni requisitos; sus hechos solo se atribuyen al cliente con identidad suficiente. En foros distingue preguntas de participantes y respuestas oficiales: una pregunta no acredita un requisito ni un error de las bases. Cita juntos pregunta y respuesta cuando esta sea breve. Cada hecho documentado lleva chunkId y cita literal con el dato, cifra, unidad y período que respalda, no solo una etiqueta. missing se refiere solo a estos bloques; no declares ausente una respuesta o dato de un bloque vecino. Lo desconocido queda desconocido. Oferta del workspace: ${context.offer}\n${JSON.stringify(block)}` });
     facts.push(...validateOpportunityFacts(extracted.facts, block)); missing.push(...extracted.missing);
   }
-  const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v1:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
+  const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
     prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
-      warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }) });
+      sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }) });
   const check = (citations: any[]) => citations.filter(c => validOpportunityCitation(c, chunks));
   raw.sections = raw.sections.map(section => ({ ...section, facts: validateOpportunityFacts(section.facts, chunks) }));
   raw.requirements = raw.requirements.map(r => { const evidence = check(r.evidence); return { ...r, evidence, status: r.status === 'supported' && !evidence.length ? 'unknown' : r.status }; });
