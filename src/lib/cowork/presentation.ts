@@ -230,13 +230,13 @@ const EFFECTS: Record<string, CoworkEffectCopy> = {
   exception_resolve: { title: 'Resolver incidencia', icon: 'alert', help: 'Solo se registrará el resultado revisado con su motivo.' },
   mission_control: { title: 'Controlar misión', icon: 'target', help: 'Pausar omite tareas pendientes; reactivar retoma el ciclo.' },
   message_context_update: { title: 'Actualizar contexto de redacción', icon: 'pen', help: 'Solo cambiará el contexto de redacción de tu organización; no reescribe borradores existentes.' },
-  enrich_batch: { title: 'Enriquecer lote', icon: 'audience', help: 'Se consultará el correo de cada contacto del lote; los ya enriquecidos se reutilizan sin gastar de más.' },
-  campaign_schedule_batch: { title: 'Programar lote', icon: 'calendar', help: 'Se reservará un día por empresa y un espaciado entre envíos. No crea ni activa la campaña ni envía nada.' },
+  enrich_batch: { title: 'Buscar correos', icon: 'audience', help: 'Se buscará el correo de cada persona de la lista; a quien ya lo tiene no se le cobra de nuevo.' },
+  campaign_schedule_batch: { title: 'Programar envíos', icon: 'calendar', help: 'Se reservará un día por empresa y un espaciado entre envíos. No crea ni activa la campaña ni envía nada.' },
   linkedin_invite: { title: 'Invitar en LinkedIn', icon: 'linkedin', help: 'Se encolará una invitación sin nota. La ejecutarás desde la extensión ante ese perfil.' },
   linkedin_message: { title: 'Mensaje de LinkedIn', icon: 'linkedin', help: 'Se encolará el mensaje aprobado. La ejecutarás desde la extensión ante ese perfil; solo lo confirmado cuenta como enviado.' },
   contacts_import: { title: 'Importar contactos', icon: 'user-plus', help: 'Se guardarán en tus contactos las personas del archivo que aún no están. Los que ya estaban no se tocan.' },
-  linkedin_invite_batch: { title: 'Invitar en LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará una invitación sin nota por cada persona que dejes en la lista. La ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
-  linkedin_message_batch: { title: 'Mensajes de LinkedIn (lote)', icon: 'linkedin', help: 'Se encolará el mensaje de cada persona que dejes en la lista, con el texto que ves. Los ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
+  linkedin_invite_batch: { title: 'Invitar en LinkedIn a varias personas', icon: 'linkedin', help: 'Se encolará una invitación sin nota por cada persona que dejes en la lista. La ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
+  linkedin_message_batch: { title: 'Mensajes de LinkedIn a varias personas', icon: 'linkedin', help: 'Se encolará el mensaje de cada persona que dejes en la lista, con el texto que ves. Los ejecutarás desde la extensión ante cada perfil; quita a quien no quieras antes de aprobar.' },
   reply_thread: { title: 'Responder en el hilo', icon: 'mail', help: 'Si la apruebas, esta respuesta sale tal cual dentro de la conversación de esa persona, desde tu correo. Revisa el texto antes.' },
   memory_save: { title: 'Recordar preferencia', icon: 'bookmark', help: 'Se guardará esta preferencia, tal como está escrita, y la tendré en cuenta en tus próximas conversaciones.' },
   lead_prepare_batch: { title: 'Preparar contactos', icon: 'audience', help: 'A cada persona de la lista se le hace solo lo que le falta: guardarla, buscar su correo (1 crédito) e investigarla. Lo ya hecho no se repite ni se cobra; quita a quien no quieras antes de aprobar.' },
@@ -458,12 +458,14 @@ export function coworkPlanStepLine(step: { label: string; agent: CoworkSpecialis
   return step.agent ? `${step.agent.name} · ${step.label.charAt(0).toLocaleLowerCase('es')}${step.label.slice(1)}` : step.label;
 }
 
-/** What a turn's reads found, in order and without repeats: the evidence behind its answer. */
+/** What a turn's reads found, in order and without repeats: the evidence behind its answer. A later read of the same kind
+ * says what that kind found: a narrow search that found nobody and then the whole list read «7 contactos», not «sin contactos, 7 contactos». */
 export function coworkTurnFindings(events: CoworkEvent[]): CoworkReadFinding[] {
+  const reads = coworkReadEvents(events).map(event => ({ action: String(event.payload?.action || ''), finding: coworkReadFinding(event.payload) }));
+  const last = new Map(reads.map((read, index) => [read.action, index]));
   const seen = new Set<string>();
-  return coworkReadEvents(events).flatMap(event => {
-    const finding = coworkReadFinding(event.payload);
-    if (!finding || seen.has(coworkFindingText(finding))) return [];
+  return reads.flatMap(({ action, finding }, index) => {
+    if (!finding || last.get(action) !== index || seen.has(coworkFindingText(finding))) return [];
     seen.add(coworkFindingText(finding));
     return [finding];
   });

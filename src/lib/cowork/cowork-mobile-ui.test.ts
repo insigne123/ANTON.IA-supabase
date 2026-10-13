@@ -18,10 +18,13 @@ test('on phones the list of work opens in the shared sheet, with its own icon', 
   assert.match(workspace, /onCloseAutoFocus=\{returnFocusTo\(summaryOpener\)\}/);
 });
 
-test('below xl the summary opens in a sheet from the header', () => {
+test('below where the panel fits, the summary opens in a sheet from the header', () => {
   assert.match(workspace, /<Sheet open=\{summaryOpen\} onOpenChange=\{setSummaryOpen\}>/);
-  assert.match(workspace, /ref=\{summaryOpener\} variant="ghost" size="icon-sm" className="xl:hidden" onClick=\{\(\) => setSummaryOpen\(true\)\} aria-label="Ver resumen de la conversación"/);
-  assert.match(workspace, /if \(isWide\) setSummaryOpen\(false\)/, 'a sheet left open does not linger once the panel fits beside the chat');
+  assert.match(workspace, /ref=\{summaryOpener\} variant="ghost" size="icon-sm" className=\{railVisible \? '2xl:hidden' : 'xl:hidden'\} onClick=\{\(\) => setSummaryOpen\(true\)\} aria-label="Ver resumen de la conversación"/);
+  // With the list of conversations open the panel waits for 2xl: four columns do not fit at xl.
+  assert.match(workspace, /const summaryFits = railVisible \? isWider : isWide;/);
+  assert.match(workspace, /railVisible \? '2xl:block' : 'xl:block'/);
+  assert.match(workspace, /if \(summaryFits\) setSummaryOpen\(false\)/, 'a sheet left open does not linger once the panel fits beside the chat');
   assert.match(workspace, /<CoworkSidePanel closeStyle="dismiss"/);
 });
 

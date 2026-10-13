@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
-import { BadgeCheck, ChartColumn, Check, ChevronRight, Copy, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2, TriangleAlert } from 'lucide-react';
+import { BadgeCheck, ChartColumn, Check, ChevronRight, Copy, ListOrdered, Mail, Megaphone, Minus, Pencil, RotateCcw, Send, Table2 } from 'lucide-react';
 import type { CoworkBlock } from '@/lib/cowork/contracts';
 import type { CoworkArtifact, CoworkCardStatus, CoworkCardTone, CoworkDraftReview, CoworkPanelBlock } from '@/lib/cowork/presentation';
 import {
@@ -179,17 +179,15 @@ function CardStatusLine({ status }: { status: CoworkCardStatus }) {
   </span>;
 }
 
-/** What the Reviewer did with the card before you saw it: reviewed with nothing to fix, what it fixed,
- * or what is still to look at (it could not fix it in time). */
+/** What the Reviewer did with the card before you saw it: reviewed with nothing to fix, or fixed before showing it (its internal
+ * labels stay out of sight). */
 function ReviewLine({ review, live }: { review: CoworkDraftReview; live: boolean }) {
-  const pending = review.outcome === 'pending';
-  return <div className={cn('mt-2.5 flex items-start gap-1.5 text-[12.5px] leading-5', pending ? 'text-cw-warning' : 'text-cw-muted', live && 'cw-fade')}>
-    {pending ? <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : <BadgeCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cw-success" aria-hidden="true" />}
-    {pending
-      ? <span className="min-w-0"><span className="font-medium">Revísalo antes de usarlo</span>
-        {review.changes.slice(0, 2).map(change => <span key={change} className="block text-cw-muted">{change}</span>)}</span>
-      : <span className="min-w-0"><span className="font-medium text-cw-text">Revisado</span>
-        {' · '}{review.outcome === 'fixed' && review.changes.length ? review.changes.join(' · ') : 'sin ajustes'}</span>}
+  // What the Reviewer could not fix in time is its own checklist, not something to read on the card: the draft says it is a draft.
+  if (review.outcome === 'pending') return null;
+  return <div className={cn('mt-2.5 flex items-start gap-1.5 text-[12.5px] leading-5 text-cw-muted', live && 'cw-fade')}>
+    <BadgeCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cw-success" aria-hidden="true" />
+    <span className="min-w-0"><span className="font-medium text-cw-text">Revisado</span>
+      {' · '}{review.outcome === 'fixed' ? 'lo ajusté antes de mostrártelo' : 'sin ajustes'}</span>
   </div>;
 }
 
@@ -234,8 +232,8 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
     {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
       actions={<><CopyButton text={coworkEmailText(block)} label="Copiar correo" />
         <ExportMenu kind="email_draft" block={() => savedDraft(block, artifact.id)} size="xs" variant="ghost" />{openButton}</>}>
-      <p className="text-[13.5px] font-semibold text-cw-text">{block.subject}</p>
-      <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted">{block.body}</p>
+      <p className="text-[13.5px] font-semibold text-cw-text"><Merged text={block.subject} /></p>
+      <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted"><Merged text={block.body} /></p>
     </CardShell>}
     {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen} status={draftStatus} review={review} live={live}
       actions={<><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia" />
@@ -243,7 +241,7 @@ export function BlockCard({ artifact, active, onOpen, live = false, status = nul
       <ol className="space-y-1.5">
         {block.steps.map((step, index) => <li key={`${step.day}-${index}`} className="flex items-center gap-2.5 text-[13.5px]">
           <span className="w-14 shrink-0 rounded-md bg-cw-panel px-1.5 py-0.5 text-center text-[12px] font-medium tabular-nums text-cw-muted">Día {step.day}</span>
-          <span className="min-w-0 truncate text-cw-text">{step.subject}</span>
+          <span className="min-w-0 truncate text-cw-text"><Merged text={step.subject} /></span>
         </li>)}
       </ol>
     </CardShell>}
@@ -308,6 +306,17 @@ function Marked({ text, before }: { text: string; before: string | null }) {
   const parts = useMemo(() => before === null || before === text ? null : coworkWordDiff(before, text), [before, text]);
   if (!parts) return <>{text}</>;
   return <>{parts.map((part, index) => part.changed ? <mark key={index} className="cw-changed">{part.text}</mark> : <Fragment key={index}>{part.text}</Fragment>)}</>;
+}
+
+const MERGE_FIELD = /(\{\{\s*(?:nombre|empresa|cargo)\s*\}\})/g;
+/** {{nombre}}, {{empresa}} and {{cargo}} in a card's preview read as what they are: each person's own value, filled in when the
+ * campaign sends. Copying and editing keep the variables. */
+function Merged({ text }: { text: string }) {
+  return <>{text.split(MERGE_FIELD).map((part, index) => {
+    const field = part.match(/^\{\{\s*(nombre|empresa|cargo)\s*\}\}$/)?.[1];
+    return field ? <span key={index} title="Se completa con el dato de cada persona"
+      className="rounded-md bg-cw-accent-soft px-1 py-px font-medium text-cw-accent"><span className="sr-only">dato de cada persona: </span>{field}</span> : part;
+  })}</>;
 }
 
 /** One email to read and copy. `before`: the original, whose changed words get marked for a moment. */

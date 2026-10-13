@@ -397,8 +397,8 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'exception.resolve') return 'Resolver incidencia';
   if (action === 'mission.control') return 'Pausar o reactivar misión';
   if (action === 'message_context.update') return 'Actualizar contexto de redacción';
-  if (action === 'lead.enrich_batch') return 'Enriquecer lote de contactos';
-  if (action === 'campaign.schedule_batch') return 'Programar lote de envíos';
+  if (action === 'lead.enrich_batch') return 'Buscar el correo de varios contactos';
+  if (action === 'campaign.schedule_batch') return 'Programar envíos';
   if (action === 'linkedin.invite') return 'Proponer invitación LinkedIn';
   if (action === 'linkedin.message') return 'Proponer mensaje LinkedIn';
   if (action === 'linkedin.invite_batch') return 'Proponer invitaciones en LinkedIn para varias personas';
@@ -1130,7 +1130,7 @@ async function runCoworkLoop(input: {
           writerFailed = true;
           if (turn === last) return lastResort();
           // A failed Writer does not end the turn: the coordinator writes it, as before.
-          throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11).');
+          throw rejected('Writer failed', 'La Redactora no pudo escribir esta vez: entrega tú el texto en answer.blocks (regla 11), sin mencionarle esto al usuario.');
         }
         const asked: boolean = Boolean(decision.write.campaign && !written && turn < last && input.proposeEffect);
         const emails: CoworkEditedEmail[] | null = asked ? coworkCampaignEmails(answer.blocks) : null;
