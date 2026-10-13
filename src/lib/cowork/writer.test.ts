@@ -698,6 +698,8 @@ test('the v11 reading: the hiring delayed with nobody waiting, two capabilities 
   const opening = 'Cuando entran muchas personas a la vez, revisar uno por uno sus antecedentes deja turnos sin cubrir.';
   assert.deepEqual(email(opening, 'AXIS consulta antecedentes por lote en el PJUD y entrega resultados consolidados; procesa 1.000 personas en unos 30 minutos.'),
     ['una sola capacidad']);
+  // v15: a second service tacked on with «y la nómina se carga…» (independent reading of a third email).
+  assert.deepEqual(email(opening, 'AXIS guarda la evidencia de cada consulta y la nómina se carga por archivo o por correo.'), ['una sola capacidad']);
   // v15: receiving the list is how it works, not what it does.
   assert.deepEqual(email(opening, 'AXIS recibe la nómina por archivo o por correo, consulta en el PJUD y procesa 1.000 personas en unos 30 minutos.'),
     ['qué hace la oferta', 'una sola capacidad']);
@@ -728,6 +730,9 @@ test('the v12 reading: long closing questions, the brief\'s words in the reply, 
   for (const reply of ['Mantuve el saludo al grupo; como no hay nombres observados, queda «Hola,».', 'No lo asigné a destinatarios porque no hay contactos en este encargo.'])
     assert.deepEqual(coworkReplyIssues(reply).map(issue => issue.short), ['respuesta sin jerga'], reply);
   assert.deepEqual(coworkReplyIssues('Mantuve el saludo al grupo y la invitación a la demo.'), []);
+  // v15 (independent reading): the rules' words in the reply.
+  for (const reply of ['Presenta AXIS con una sola capacidad y el resultado que cargaste en tu Perfil.', 'Cada correo incluye el dato de procesamiento disponible.'])
+    assert.deepEqual(coworkReplyIssues(reply).map(issue => issue.short), ['respuesta sin jerga'], reply);
   // Emails with an address offer the next step: the paused campaign, or in an open conversation, sending the first reply.
   const to = (subject: string, address: string[] | null) => [{ type: 'email_draft' as const, title: 'Correo para Felipe', to: address, subject, body: 'Hola Felipe,' }];
   assert.deepEqual(coworkNextStepIssues({ blocks: to('Antecedentes en Securitas', ['fmunoz@securitas.cl']), question: null }).map(issue => issue.short), ['paso siguiente']);

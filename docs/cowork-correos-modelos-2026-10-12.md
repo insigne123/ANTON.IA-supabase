@@ -398,6 +398,71 @@ Por caso:
 - **Lo que queda bajo 5 en Sonnet → Luna:** una secuencia cuyo tercer correo enumera la oferta («cargas… y recibes… con evidencia»)
   y un seguimiento que abre con un beneficio vago («reunir los respaldos a tiempo ayuda a que…»).
 
+## Ronda 14: lectura independiente de la v14, con correos e informes
+
+Hasta la ronda 13, las notas las puso la misma sesión que cambiaba las reglas. Desde la ronda 14 las ponen dos lectores
+independientes: dos sesiones nuevas de Claude que no vieron el código, las reglas ni las corridas. Cada una leyó todas las
+respuestas con su propio orden al azar, bajo etiquetas anónimas, con la escala de siempre y los datos que el asistente podía
+consultar en cada caso de informes. La clave quedó aparte hasta terminar (`scripts/cowork-blind-read.ts`).
+
+- **Qué leyeron:**
+  - 98 correos: 5 configuraciones v14 y 2 anclas v13, 14 respuestas cada una;
+  - 45 respuestas de informes y cifras: 5 configuraciones, 9 cada una.
+- **Los dos lectores coinciden:**
+  - en correos, r = 0,69, la misma nota en el 56 % de las respuestas y nunca más de 0,5 de diferencia (diferencia media 0,01);
+  - en informes, r = 0,86, la misma nota en el 62 % y nunca más de 0,5.
+- **Son más exigentes que la lectura anterior.** Las anclas, que antes sacaron 4,86 (Sonnet → Luna v13) y 4,36 (Luna v13), sacan
+  4,38 y 4,04. El orden entre configuraciones se mantiene, pero la escala baja unos 0,4. Las notas de las rondas 1 a 13 son de la
+  lectura anterior; para comparar con estas, réstales unos 0,4.
+
+**Correos.** El costo es por cada 1.000 respuestas con correo: la Redactora, la Revisora y la corrección, más US$1,0 del
+coordinador con su caché al día.
+
+| Redactora → corrección | Lector A | Lector B | Media | ≥ 4,5 | US$ por 1.000 | Redactora p50 / p90 |
+|---|---|---|---|---|---|---|
+| Ancla v13: Luna → Luna | 4,04 | 4,04 | 4,04 ± 0,07 | 7 % | 2,2 | 6,9 / 9,3 s |
+| Ancla v13: Sonnet 5.5 low → Luna | 4,39 | 4,36 | 4,38 ± 0,09 | 57 % | 17,4 | 4,1 / 7,1 s |
+| Luna → Luna | 4,11 | 3,89 | 4,00 ± 0,09 | 7 % | 2,1 | 6,0 / 9,0 s |
+| Haiku 5.5 low → Luna | 3,96 | 3,96 | 3,96 ± 0,12 | 21 % | 3,6 | 9,9 / 22,4 s |
+| Luna, con las secuencias en Sonnet 5.5 | 4,11 | 4,07 | 4,09 ± 0,11 | 21 % | 4,4 | 6,3 / 8,3 s |
+| Sol 6.1 → Luna | 4,11 | 4,29 | 4,20 ± 0,06 | 21 % | 10,6 | 9,7 / 15,1 s |
+| **Sonnet 5.5 low → Luna** | 4,36 | 4,43 | **4,39 ± 0,11** | **64 %** | 17,4 | 4,7 / 7,1 s |
+
+En «Luna, con las secuencias en Sonnet», 2 de las 14 respuestas son secuencias. Con otra proporción de secuencias, el costo
+cambia: cada secuencia escrita por Sonnet cuesta US$0,016.
+
+**Informes y cifras** (informe para la jefatura, «¿cómo voy?» y «dame números de la semana»). Hoy en producción los escribe el
+coordinador, porque la Analista está apagada (`COWORK_ANALYST_ENABLED=false`).
+
+| Quién responde | Lector A | Lector B | Media | ≥ 4,5 | US$ por 1.000 | p50 / p90 |
+|---|---|---|---|---|---|---|
+| Coordinador Luna (producción hoy) | 3,56 | 3,44 | 3,50 ± 0,11 | 0 % | 3,5 | 5,2 / 10,4 s |
+| Analista Luna | 3,67 | 3,72 | 3,69 ± 0,16 | 11 % | 1,4 | 3,5 / 5,8 s |
+| Analista Sol 6.1 | 3,44 | 3,56 | 3,50 ± 0,09 | 0 % | 12,2 | 16,5 / 30,9 s |
+| Analista Haiku 5.5 | 4,17 | 4,11 | 4,14 ± 0,15 | 22 % | 2,2 | 5,5 / 13,7 s |
+| **Analista Sonnet 5.5** | 4,61 | 4,44 | **4,53 ± 0,11** | **67 %** | 15,3 | 5,8 / 12,5 s |
+
+Con la v14, la Analista entrega el informe como documento, y eso arregló lo estructural: el caso del informe para la jefatura
+pasa de 2 de 9 a 8 de 9 con Luna, y de 4 de 9 a 9 de 9 con Sol 6.1. Lo que bajó la nota después:
+
+- **Correos:**
+  - la oferta dice cómo trabaja pero no qué hace: «AXIS consulta por lote» o «carga la nómina por archivo», sin «antecedentes»;
+    es lo más marcado en Sol 6.1 → Luna y en las anclas;
+  - aperturas donde solo alguien espera para empezar, sin lo que pierde el negocio: «retrasa la incorporación de quienes esperan
+    empezar a trabajar», con 4 frente a 5 de «deja turnos sin cubrir mientras el cliente espera»;
+  - seguimientos que abren con un atraso y ofrecen la evidencia, o cierran con «¿Te serviría…?»: es el caso con la nota más
+    baja en casi todas las configuraciones;
+  - frases raras, sobre todo con Haiku (12 de 28 lecturas).
+- **Informes:**
+  - advertencias técnicas sobre los datos: «la búsqueda estaba recortada», «métricas de la organización», «no corresponde
+    mostrarla como 0 %», «semana calendario» cuando son 7 días;
+  - largo, sobre todo con Sol 6.1;
+  - sin paso siguiente en «dame números»;
+  - acciones que no calzan con la cuenta: una campaña «para tus 4 contactos con correo» que incluye a quien ya recibió uno, o
+    «20 contactos» en una cuenta con 5.
+
+La v15 corrige cada punto (ver «Qué cambió en el código»).
+
 ## Recomendación
 
 Conviene combinar los dos proveedores: OpenAI coordina, revisa y corrige, y Claude escribe. Con la v13, las tres opciones que
@@ -554,6 +619,42 @@ Antes, esas peticiones empeoraban el correo o lo dejaban «por revisar».
   - el coordinador busca primero a la persona que nombra el pedido («un correo para Felipe de Securitas»).
 
   Los chequeos de v12 y v13 se probaron contra las respuestas ya puntuadas: ninguno marca una de 5.
+- v14 (de la lectura de la ronda 13):
+  - la oferta no suma otra capacidad al final («…en unos 30 minutos, con los resultados consolidados»);
+  - el «es mi último mensaje» va junto a la pregunta, no en su propia línea;
+  - un seguimiento que abre con un atraso no ofrece la evidencia de las consultas («ángulo coherente»);
+  - menos falsos positivos en «una sola capacidad» y «apertura sin repetir»;
+  - la Analista entrega el informe como documento (Markdown con resumen, Actividad, Resultados y Próximos pasos) y nunca habla de
+    la «cobertura» del correo.
+- v15 (de la lectura independiente de la ronda 14):
+  - **la oferta dice qué hace, con su objeto** («AXIS consulta antecedentes laborales en el PJUD…»), no solo cómo («consulta
+    por lote», «carga la nómina por archivo»). En un primer correo va la capacidad principal. El chequeo «qué hace la oferta»
+    marca 30 de las 98 respuestas de la ronda 14 y ninguna de 5;
+  - **la primera frase dice qué pierde el negocio** (un turno o un puesto sin cubrir, el cliente que espera, la ruta que no sale),
+    no solo que alguien espera para empezar. El chequeo «pérdida en el negocio» marca 24 y ninguna de 5;
+  - **el seguimiento se arma desde el ángulo nuevo:** el momento que ese ángulo resuelve y la capacidad que le responde. El
+    ejemplo de la regla abría con un atraso, y los modelos lo copiaban antes de ofrecer la evidencia. «Respaldar» cuenta como el
+    momento de la evidencia, y un seguimiento a una persona que no retoma el primer correo se corrige («retoma el primero»);
+  - con una sola respuesta por enviar, el paso siguiente es «¿Propongo enviárselo a <nombre>?»;
+  - una pregunta en su propia línea empieza con mayúscula (pulido determinista);
+  - «una sola capacidad» y «dato de procesamiento» cuentan como jerga en la respuesta; «…y la nómina se carga por archivo» cuenta
+    como una segunda capacidad;
+  - Analista:
+    - el informe y la respuesta no explican de dónde salen las cifras ni sus límites técnicos;
+    - con menos de 5 envíos, la cifra va sin porcentaje («0 de 1»);
+    - la tarjeta dice el período tal como viene («Últimos 7 días»);
+    - las acciones calzan con la cuenta: quien ya recibió un correo no cuenta para un primer correo, y nunca propone un grupo más
+      grande que los contactos que hay;
+    - con cifras en cero o chicas, siempre propone el paso que las mueve.
+  - coordinador, en los informes y las cifras (lo que hoy responde en producción):
+    - el informe para la jefatura va sin nota de alcance ni advertencias sobre cómo se consultaron los datos, y de los contactos
+      usa el total («256 guardados, 21 con correo») en vez de la muestra;
+    - en «¿cómo voy?», las cifras son del equipo sin aclarar que no son solo tuyas, y la acción que más las mueve va en la
+      pregunta final;
+    - en todo documento, el período y la base van junto a cada cifra («0 envíos en los últimos 30 días»), sin nota de alcance
+      aparte. La competencia «Informe comercial» y la capacidad de métricas ya no piden «mostrar el alcance», y el pulido quita
+      un último párrafo «Alcance: …» o una última sección «## Alcance» (`withoutScopeNote`). Con solo la regla, Luna seguía
+      cerrando los 3 informes para la jefatura con esa nota.
 
 **Coordinador** (`src/lib/cowork/agent-instructions.ts`, v10): cuando el usuario pide escribirles a sus contactos, lee quién tiene
 correo y a quién ya se le escribió (`contacted.search` con la consulta vacía), deja fuera a quien ya recibió un primer correo y le
@@ -581,8 +682,9 @@ párrafo (`coworkSplitOffer`); no cambia ninguna palabra.
 
 ## Límites
 
-- **Un solo lector:** Claude en la sesión que hizo los cambios, a ciegas y con anclas. Una lectura independiente (otra sesión, o
-  el equipo comercial) confirmaría las diferencias chicas; las grandes (2,54 → 3,6 → 3,9) no dependen de eso.
+- **Lectores:** hasta la ronda 13 leyó Claude en la sesión que hizo los cambios, a ciegas y con anclas. Las rondas 14 y 15 las
+  leyeron lectores independientes (A y B, luego C y D): sesiones nuevas que no vieron el código ni las reglas. Son más exigentes
+  (unos 0,4 menos) y el orden entre configuraciones se mantuvo. Falta una lectura del equipo comercial.
 - **Un solo producto (AXIS) y un perfil.** Los ejemplos de las reglas hablan de su rubro. Con otra oferta conviene repetir la
   ronda 3.
 - **Los últimos ajustes no tienen lectura ciega propia:** la pregunta anunciada, el asunto con la empresa de quien escribe y los
@@ -597,11 +699,14 @@ párrafo (`coworkSplitOffer`); no cambia ninguna palabra.
   correo», pero no lectura ciega propia.
 - **Claude se midió en una sesión aparte**, con la clave del usuario. Los JSON de cada corrida están en las páginas privadas
   «Medición Claude Redactora v10», «v11», «v12» y «v13». La lectura ciega se hizo aquí, con anclas.
-- **El lector reconoce respuestas que ya leyó:** las anclas son las mismas respuestas de la ronda anterior, así que su nota igual
-  confirma que la vara es la misma, pero no es una segunda lectura independiente.
-- **Informes:** esta medición cubre correos y secuencias. La Analista y la Diseñadora también aceptan un modelo de Claude
-  (`COWORK_ANALYST_MODEL`, `COWORK_DESIGNER_MODEL`), pero el banco no tiene casos de informes con datos suficientes para leerlos
-  a ciegas.
+- **Anclas:** hasta la ronda 13, el lector reconocía las anclas (las mismas respuestas de la ronda anterior): su nota confirmaba
+  que la vara era la misma, pero no era una segunda lectura independiente. En la ronda 15, los lectores C y D no habían visto las
+  anclas v14, así que su nota sí es una segunda lectura independiente de esas respuestas.
+- **Informes:** desde la ronda 14 hay 3 casos (el informe para la jefatura, «¿cómo voy?» y «dame números de la semana»), todos
+  de cuentas que recién empiezan, con 0 o 1 envío. Con más actividad, los informes dirán más cosas y conviene repetir la lectura.
+  El fixture de `metrics.rates` siempre devuelve ventanas de 7 y 30 días, aunque se pida el mes o la semana calendario; en
+  producción devuelve el período pedido. Cuando el coordinador dice «septiembre» o «del 21 al 27 de septiembre», nombra mal el
+  período que leyó, y los lectores lo cuentan como error.
 - **Muestras chicas en algunas filas:** las de 14 respuestas tienen un error de ± 0,1 a 0,16. Diferencias menores a 0,2 no
   distinguen configuraciones.
 - **Costos:** las cifras usan los precios configurados. La cuenta real de cada proveedor manda.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutRepeatedOffer, withoutCaveats } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutRepeatedOffer, withoutCaveats, withoutScopeNote } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -295,6 +295,21 @@ test('the reply drops what it avoided supposing, and keeps the rest of the sente
   // A line that is only the clause, and replies without one, stay as they are.
   assert.equal(withoutCaveats('Sin asumir nada.'), 'Sin asumir nada.');
   assert.equal(withoutCaveats('Le escribí a Marcela sin respuesta registrada.'), 'Le escribí a Marcela sin respuesta registrada.');
+});
+
+test('a document drops its closing scope note: the period goes next to each figure (v15 independent reading)', () => {
+  const report = '# Prospección de septiembre\n\nSin envíos todavía.\n\n## Próximos pasos\n\n1. Activar la «Campaña de prueba».';
+  assert.equal(withoutScopeNote(`${report}\n\n*Alcance: cifras al 25 sep 2026; envíos de los últimos 30 días.*`), report);
+  assert.equal(withoutScopeNote(`${report}\n\n**Alcance:** el dato de actividad corresponde a los últimos 30 días;\nno separa el mes.\n`), report);
+  assert.equal(withoutScopeNote(`${report}\n\n---\n\nAlcance: cifras de campañas y contactos en ANTON.IA.`), report);
+  assert.equal(withoutScopeNote(`${report}\n\n## Alcance\n\nCifras de campañas y contactos.\n- Envíos de 30 días.`), report);
+  // Only at the end: a note with a paragraph after it, an «## Alcance» section followed by others and a document that is only
+  // the note stay as they are.
+  assert.equal(withoutScopeNote(`${report}\n\nAlcance: algo.\n\nOtro párrafo.`), `${report}\n\nAlcance: algo.\n\nOtro párrafo.`);
+  assert.equal(withoutScopeNote('# Contactos\n\n## Alcance\n\nLos observados.\n\n## Lista\n\n- Ana'), '# Contactos\n\n## Alcance\n\nLos observados.\n\n## Lista\n\n- Ana');
+  assert.equal(withoutScopeNote('Alcance: solo esto.'), 'Alcance: solo esto.');
+  const answer = polishCoworkAnswer({ reply: 'Listo el informe.', document: { title: 'Prospección', content: `${report}\n\n_Alcance: cifras al 25 sep._` } });
+  assert.equal(answer.document?.content, report);
 });
 
 test('the reply does not offer again what the closing question offers', () => {
