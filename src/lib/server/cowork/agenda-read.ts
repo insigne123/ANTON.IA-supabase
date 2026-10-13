@@ -117,7 +117,8 @@ export async function readNeverWritten(client: SupabaseClient, scope: Scope): Pr
   }
   const label = (row: { name: string | null; company: string | null }) =>
     [String(row.name || '').trim(), row.company ? `(${String(row.company).trim()})` : ''].filter(Boolean).join(' ');
-  return { count: waiting.size, examples: [...waiting.values()].map(label).filter(Boolean).slice(0, 3) };
+  // Up to 8 names: with only three of four, the answer said «y uno más» and then could not find the fourth (round 11).
+  return { count: waiting.size, examples: [...waiting.values()].map(label).filter(Boolean).slice(0, 8) };
 }
 
 type Dependencies = {

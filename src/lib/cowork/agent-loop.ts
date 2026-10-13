@@ -744,12 +744,24 @@ export function coworkOfferedLookupFeedback(answer: { reply: string; question?: 
  * (round 4: «Te muestro la propuesta de búsqueda a continuación» and no card; before, the turn asked «¿Busco el correo…?» and waited
  * for a «dale»). When the question names some of them, only those. Null when nothing offers it or nobody without an email was read.
  */
+// The lookup proposed in the reply itself, with no closing question (round 11: «Propongo buscar el correo de los tres: cuesta 3
+// créditos…» and no card).
+const PROPOSES_LOOKUP = /\b(?:propongo|te propongo|sugiero|lo primero es|el primer paso es|conviene)\s+(?:buscar|encontrar)\b[^.?!]{0,80}\b(correos?|perfil(?:es)?)\b/i;
+/** The sentence of the reply that proposes the lookup, or null. */
+const proposedIn = (reply: string, kind: 'correo' | 'perfil') => {
+  for (const sentence of reply.split(/(?<=[.!?])\s+|\n+/)) {
+    const found = PROPOSES_LOOKUP.exec(sentence);
+    if (found && found[1].toLowerCase().startsWith(kind)) return sentence.trim();
+  }
+  return null;
+};
+
 export function coworkLookupProposal(answer: { reply: string; question?: unknown }, message: string, history: CoworkHistoryTurn[] | undefined,
   observations: CoworkObservation[], max = 5): { goal: 'email'; people: Array<{ leadId: string }> } | null {
-  const own = closingQuestion(answer);
+  const own = closingQuestion(answer) ?? (coworkQuestion(answer.question) ? null : proposedIn(answer.reply, 'correo'));
   const before = coworkClosingQuestionOf(history?.at(-1)?.reply);
   const accepted = Boolean(before && OFFERS_EMAIL_LOOKUP.test(before) && TAKES_OFFER.test(message) && !CHANGES_OFFER.test(message));
-  const offer = own && OFFERS_EMAIL_LOOKUP.test(own) ? own : accepted ? before! : null;
+  const offer = own && (OFFERS_EMAIL_LOOKUP.test(own) || PROPOSES_LOOKUP.test(own)) ? own : accepted ? before! : null;
   // About LinkedIn, the lookup is for profiles, not this card (round 7: «la tarjeta solo busca correos, así que LinkedIn no avanza»).
   if (!offer || /linked\s?in|perfil/i.test(`${message} ${offer}`)) return null;
   const read = [...(history || []).flatMap(turn => turn.observations || []), ...observations];
@@ -772,7 +784,7 @@ const OFFERS_PROFILE_LOOKUP = /\b(?:busc\w*|encontr\w*|complet\w*)\b[^?]{0,80}\b
  */
 export function coworkProfileLookupProposal(answer: { reply: string; question?: unknown }, message: string, history: CoworkHistoryTurn[] | undefined,
   observations: CoworkObservation[], max = 10): { goal: 'linkedin'; people: Array<{ leadId: string }> } | null {
-  const own = closingQuestion(answer);
+  const own = closingQuestion(answer) ?? (coworkQuestion(answer.question) ? null : proposedIn(answer.reply, 'perfil'));
   const before = coworkClosingQuestionOf(history?.at(-1)?.reply);
   const accepted = Boolean(before && OFFERS_PROFILE_LOOKUP.test(before) && TAKES_OFFER.test(message) && !CHANGES_OFFER.test(message));
   const offer = own && OFFERS_PROFILE_LOOKUP.test(own) ? own : accepted ? before! : null;
@@ -783,7 +795,10 @@ export function coworkProfileLookupProposal(answer: { reply: string; question?: 
     .map((row, index) => ({ row, index })).sort((a, b) => coworkBuyingRoleRank(a.row.title) - coworkBuyingRoleRank(b.row.title) || a.index - b.index).map(item => item.row);
   const plain = (text: string) => text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const named = missing.filter(row => { const first = plain(String(row.name || '')).split(/\s+/)[0]; return first.length > 2 && plain(offer).includes(first); });
-  const people = (named.length ? named : missing).slice(0, max);
+  // Without names, only who decides the purchase when there are two or more (round 11: «propone pagar 7 perfiles sin priorizar»);
+  // the card still lets the person take anyone off.
+  const deciders = missing.filter(row => coworkBuyingRoleRank(row.title) === 0);
+  const people = (named.length ? named : deciders.length >= 2 ? deciders : missing).slice(0, max);
   return people.length ? { goal: 'linkedin', people: people.map(row => ({ leadId: row.id })) } : null;
 }
 

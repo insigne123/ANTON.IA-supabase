@@ -370,6 +370,16 @@ export const COWORK_YES_CHIP: CoworkSuggestion = { label: 'Sí, adelante', messa
 
 // A yes that says what it does (round 9: a bare «Sí» under «¿Creo la campaña pausada con los dos correos?» did not say what it creates).
 const BARE_YES = /^\s*(?:s[íi]|s[íi],?\s+adelante|ok|dale)[.!]?\s*$/iu;
+// A quick reply that already says yes to the closing question, in words or by doing it.
+const SAYS_YES_CHIP = /^\s*(?:s[íi]|dale|ok|cr[ée]a|crear|escr[íi]bel|prep[áa]ral|busca|buscar)/iu;
+/** The closing question offers a campaign or an email and no quick reply takes it: its yes goes first (round 11: «pregunta si lo usa
+ * en una campaña y no ofrece botón para eso»). Other questions (either/or, open) keep their replies as they are. */
+function withOfferChip(chips: CoworkSuggestion[], question: string | null): CoworkSuggestion[] {
+  if (!question || chips.some(chip => SAYS_YES_CHIP.test(chip.label))) return chips;
+  const yes = namedYes(COWORK_YES_CHIP, question);
+  return yes === COWORK_YES_CHIP ? chips : [yes, ...chips].slice(0, 4);
+}
+
 function namedYes(chip: CoworkSuggestion, question: string | null): CoworkSuggestion {
   if (!question || !BARE_YES.test(chip.label)) return chip;
   if (/campa[ñn]a/i.test(question)) return { ...chip, label: 'Sí, crear la campaña' };
@@ -411,7 +421,8 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     document: answer.document ? { ...answer.document, content: withoutScopeNote(polishCoworkText(answer.document.content)) } : null,
     question,
     blocks: blocks.length ? blocks : null,
-    suggestions: choices ? null : suggestions.length ? suggestions.map(chip => namedYes(chip, question)) : question ? [namedYes(COWORK_YES_CHIP, question)] : null,
+    suggestions: choices ? null : suggestions.length ? withOfferChip(suggestions.map(chip => namedYes(chip, question)), question)
+      : question ? [namedYes(COWORK_YES_CHIP, question)] : null,
     choices,
   };
 }

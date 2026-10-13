@@ -345,7 +345,7 @@ test('contacts with an email who never got one are today\'s work, after replies 
   const first = agenda.items.find(item => item.kind === 'never_written')!;
   assert.equal(first.action, 'write_first');
   assert.equal(first.count, 4);
-  assert.deepEqual(first.examples, ['Daniela Rojas (Adecco)', 'José Pérez (GrupoExpro)', 'Ana Ruiz (Retail Sur)']);
+  assert.deepEqual(first.examples, ['Daniela Rojas (Adecco)', 'José Pérez (GrupoExpro)', 'Ana Ruiz (Retail Sur)', 'Otra (X)']);
   assert.equal(agenda.counts.neverWritten, 4);
   // Alone, they are what is pending: the day is not «nada pendiente».
   const alone = buildCoworkAgenda({ ...empty(), neverWritten: { count: 2, examples: ['A (B)'] } });
