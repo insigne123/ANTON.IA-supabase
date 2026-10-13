@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { claudeRequest } from '@/ai/anthropic-json';
 import { reportSchema } from './expedient';
-import { opportunityReportPrompt, readOpportunityReportEnvelope, reportEnvelopeSchema } from './report-generation';
+import { opportunityReportPrompt, opportunitySynthesisSources, readOpportunityReportEnvelope, reportEnvelopeSchema } from './report-generation';
 
 const report = () => ({
   title: 'Oportunidad de prueba', executive: 'Empresa por acreditar; bases parciales.', recommendation: 'insufficient', reasons: ['Faltan bases'],
@@ -48,4 +48,18 @@ test('the prompt carries the full inner schema and keeps received evidence as da
   assert.equal(schema.properties.title.maxLength, 500);
   assert.deepEqual(schema.properties.recommendation.enum, ['advance', 'conditional', 'do_not_advance', 'insufficient']);
   assert.ok(prompt.endsWith(JSON.stringify(evidence)));
+});
+
+test('original synthesis sources keep exact chunk identity and text, counted by UTF8 bytes', () => {
+  const chunks = [{ id: 'question', document_id: 'forum', ordinal: 0, locator: 'Bloque 1', content: '¿Lo proveerá el hospital?\nRespuesta: SÍ' },
+    { id: 'amount', document_id: 'ficha', ordinal: 0, locator: 'Bloque 2', content: 'Monto: $500.000' }];
+  const full = opportunitySynthesisSources(chunks);
+  assert.equal(full.omittedChunks, 0);
+  assert.equal(full.chunks[0].content, chunks[0].content);
+  assert.equal(full.chunks[0].id, 'question');
+  assert.equal(full.bytes, new TextEncoder().encode(JSON.stringify(full.chunks)).length);
+  const bounded = opportunitySynthesisSources(chunks, full.bytes - 1);
+  assert.equal(bounded.omittedChunks, 1);
+  assert.ok(bounded.bytes <= full.bytes - 1);
+  assert.equal(opportunitySynthesisSources(chunks, 2).chunks.length, 0);
 });

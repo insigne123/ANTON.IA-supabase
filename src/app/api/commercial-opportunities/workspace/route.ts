@@ -4,7 +4,6 @@ import { readWorkspaceOverview, createPrivateOpportunity, opportunityDb } from '
 import { companyContextSchema, privateOpportunitySchema } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityDiscovery } from '@/lib/server/commercial-opportunities/workspace-jobs';
-import { readPerfilForOpportunities } from '@/lib/server/commercial-opportunities/store';
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -15,8 +14,8 @@ export async function GET(request: Request) {
     const options = z.object({ view: z.enum(['all','recommended','review','excluded','pending','assigned','working','blocked','submitted','won','lost','archived']), query: z.string().max(200), page: z.coerce.number().int().min(0).max(1000) })
       .parse({ view: params.get('view') || 'all', query: params.get('query') || '', page: params.get('page') || '0' });
     const overview = await readWorkspaceOverview(auth.admin, scope, options);
-    const suggestion = overview.mode === 'management' && !overview.context ? await readPerfilForOpportunities(auth.admin, scope) : null;
-    return opportunitiesJson({ ...overview, suggestion });
+    // The company offer is confirmed by its admin, never borrowed from the operator's personal profile.
+    return opportunitiesJson({ ...overview, suggestion: null });
   } catch (error) { return opportunitiesError(error); }
 }
 export async function POST(request: Request) {
