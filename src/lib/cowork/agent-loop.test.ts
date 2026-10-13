@@ -2209,3 +2209,14 @@ test('an email lookup offered before anyone was read reads who lacks an email an
   assert.equal(proposals[0]?.kind, 'lead_prepare_batch');
   assert.equal(proposals[0]?.prepareBatch?.people.length, 2);
 });
+
+test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
+  const { coworkCampaignForListedPeople } = await import('./agent-loop');
+  const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],
+    criteria: { relationship: 'never_contacted', titles: ['Jefa de Selección'], industries: ['staffing'], countries: ['Chile'], sizes: [], seniorities: ['manager'],
+      minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: true },
+    messages: [{ subject: 'Asunto', body: 'Hola Daniela,\n\nTexto.', delayDays: 0 }] });
+  const listed = coworkCampaignForListedPeople(campaign);
+  assert.deepEqual(listed.criteria, { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [],
+    minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false });
+});

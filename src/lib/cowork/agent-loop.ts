@@ -873,6 +873,17 @@ export function coworkCampaignWithPersonalEmails(campaign: z.infer<typeof cowork
   return coworkCampaignDraftSchema.safeParse(next).success ? next : campaign;
 }
 
+/**
+ * A campaign to people named by their address goes to them: the filters by title, industry, country, size or level, and «only
+ * contacts found in Buscar», narrow an audience nobody asked to narrow (round 6 with Luna: «Daniela aparece en tus contactos, pero
+ * no está disponible para esta audiencia», a saved contact left out by the model's filters). Who was already contacted or replied
+ * still counts.
+ */
+export function coworkCampaignForListedPeople(campaign: z.infer<typeof coworkCampaignDraftSchema>) {
+  if (!campaign.emails.length) return campaign;
+  return { ...campaign, criteria: { ...campaign.criteria, titles: [], industries: [], countries: [], sizes: [], seniorities: [], enrichedOnly: false } };
+}
+
 /** What a proposed campaign does, when the model left no explanation of its own. */
 function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): string {
   const people = campaign.emails.length;
@@ -1648,7 +1659,7 @@ async function runCoworkLoop(input: {
         const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
         if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));
         const campaign = decision.action === 'campaign.create' && decision.campaign
-          ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails)
+          ? coworkCampaignForListedPeople(exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails)
             : personalEmails ? coworkCampaignWithPersonalEmails(decision.campaign, personalEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
         // Only what changes: a field sent as null keeps its value.
