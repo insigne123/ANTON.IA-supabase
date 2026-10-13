@@ -63,7 +63,7 @@ Desde `main` canónico limpio y actualizado, con CI del head exacto aprobada:
 
 ## Aportes imprescindibles del usuario
 
-- Oferta de **GrupoExpro** y de **PSOL**, por separado: servicios aprobados, territorios, exclusiones y evidencias/capacidades comerciales. Puede ser un brochure o lista escrita. Prioridades previstas: GrupoExpro contratación; PSOL publicaciones; ambas fuentes para ambos.
+- La oferta de **GrupoExpro** y de **PSOL** ya fue [investigada desde fuentes públicas y registrada](oportunidades-investigacion-empresas-2026-10-13.md) por solicitud posterior del dueño. No es necesario aportar brochures para iniciar. Catálogo e inferencias separados; experiencia certificable, costos y disponibilidad permanecen por acreditar en cada propuesta.
 - Confirmación del correo/invitación de la cuenta administradoraPSOL.
 - Bases administrativas/técnicas originales para cerrar la aceptación documental del caso1057049-332-LR26, o una oportunidad equivalente con expediente completo. Los formularios y foro ya obtenidos no las reemplazan. PDFs escaneados requieren texto legible: OCR todavía no está integrado.
 - Ejecución del rollout por el mantenedor y prueba de sesión real para verificar el circuito autenticado.
