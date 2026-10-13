@@ -305,7 +305,7 @@ test('the checks catch what kept the 12 oct candidate from a 4: hedges, meetings
   // R04: a list of functions and «¿Te viene bien coordinar una conversación breve…?».
   const r04 = good.replace('AXIS consulta el lote completo', 'AXIS consulta en el PJUD por persona o por lote y consolida los resultados; admite carga por archivo o correo y deja evidencia auditable de cada consulta. AXIS')
     .replace('¿Cuántos ingresos revisan en una semana normal?', '¿Te viene bien coordinar una conversación breve para conocer cómo revisan hoy esos antecedentes?');
-  assert.deepEqual(shorts(r04), ['una sola capacidad', 'sin pedir reunión']);
+  assert.deepEqual(shorts(r04), ['qué hace la oferta', 'una sola capacidad', 'sin pedir reunión']);
   // R15: a closing that offers «more information».
   assert.deepEqual(shorts(good.replace('¿Cuántos ingresos revisan en una semana normal?', '¿Te envío más información sobre AXIS?')), ['pregunta concreta']);
   // R09: the product first, and as if they already used it.
@@ -359,7 +359,7 @@ test('the checks catch what the matrix reading still found: the product in the f
       body: `Hola Felipe,\n\n${opening} ${rest}\n\n¿Cuántos ingresos revisan en una semana normal?${signature}` }], checks).map(issue => issue.short);
   assert.deepEqual(shorts('En seguridad privada, cuando entra un grupo de guardias, revisar uno por uno sus antecedentes en el PJUD deja turnos sin cubrir.'), []);
   // The product in the first sentence (12 oct matrix: «Para revisar antecedentes…, AXIS consulta…», «Al incorporar personal, AXIS consulta…»).
-  assert.deepEqual(shorts('Para revisar antecedentes de guardias en seguridad privada, AXIS consulta en el PJUD por lote.', 'Procesa 1.000 personas en unos 30 minutos.'), ['apertura concreta']);
+  assert.deepEqual(shorts('Para revisar antecedentes de guardias en seguridad privada, AXIS consulta en el PJUD por lote.', 'Procesa 1.000 personas en unos 30 minutos.'), ['apertura concreta', 'qué hace la oferta']);
   assert.deepEqual(shorts('En Yago revisamos antecedentes de guardias en minutos.'), ['apertura concreta']);
   // Openings that define the task wherever the verb is.
   for (const defines of ['En seguridad privada, revisar antecedentes laborales es una de las tareas que acompaña la incorporación.',
@@ -566,12 +566,13 @@ test('a first email says what the offer does, not only its proof (v9 reading: «
   assert.deepEqual(issues('AXIS consulta antecedentes por lote en el PJUD y procesa 1.000 personas en unos 30 minutos.'), []);
   assert.deepEqual(issues('AXIS automatiza esas consultas. Procesa 1.000 personas en unos 30 minutos.'), []);
   assert.deepEqual(issues('En Yago desarrollamos AXIS, que consulta antecedentes por lote y procesa 1.000 personas en unos 30 minutos.'), []);
-  // v15 (independent reading): how it works is not what it does; naming the source passes.
+  // v15 (independent reading): how it works is not what it does. v16: naming only the source is not the object either.
   for (const how of ['En Yago desarrollamos AXIS, que consulta por lote y procesa 1.000 personas en unos 30 minutos.',
     'AXIS consulta por lote y procesa 1.000 personas en unos 30 minutos.', 'AXIS, de Yago, consulta por lote y procesa 1.000 personas en unos 30 minutos.',
-    'AXIS carga la nómina por archivo y procesa 1.000 personas en unos 30 minutos.'])
+    'AXIS carga la nómina por archivo y procesa 1.000 personas en unos 30 minutos.', 'AXIS consulta en el PJUD por lote y procesa 1.000 personas en unos 30 minutos.',
+    'AXIS consulta por lote en el PJUD y procesa 1.000 personas en unos 30 minutos.'])
     assert.deepEqual(issues(how), ['qué hace la oferta'], how);
-  assert.deepEqual(issues('AXIS consulta en el PJUD por lote y procesa 1.000 personas en unos 30 minutos.'), []);
+  assert.deepEqual(issues('AXIS consulta antecedentes laborales en el PJUD y procesa 1.000 personas en unos 30 minutos.'), []);
   // A follow-up does not cite the proof again, and an email without the proof has nothing to check here.
   assert.deepEqual(issues('AXIS deja evidencia de cada consulta.'), []);
 });
@@ -854,4 +855,54 @@ test('the v13 reading: a capability added after the proof, the farewell apart fr
   assert.deepEqual(marcela(evidence, true), ['retoma el primero']);
   assert.deepEqual(marcela(`Te escribí el 19 de septiembre sobre antecedentes laborales. ${evidence}`, true), []);
   assert.deepEqual(marcela(evidence, false), []);
+});
+
+test('the v15 independent reading: an offer that lists its ways of working, the same loss twice in a sequence and the rules\' words in the reply (v16)', () => {
+  const checks = { ...context, signer: 'Nicolás Y.', proofs: ['Procesa 1.000 personas en unos 30 minutos'], recipients: [], meeting: false, products: ['axis', 'yago'] };
+  const offer = (middle: string) => coworkDraftIssues([{ type: 'email_draft' as const, title: 'Correo para Felipe', to: null, subject: 'Guardias en Securitas',
+    body: `Hola Felipe,\n\nCuando entra un grupo de guardias, revisar sus antecedentes uno a uno retrasa que tomen turno.\n\n${middle}\n\n¿Cuántos guardias incorporan al mes en Securitas?\n\nNicolás Y.\nGerente Comercial\nYago SpA` }], checks)
+    .map(issue => issue.short);
+  // «por persona o por lote», «por archivo o correo» and evidence added after the proof read as a list of functions.
+  for (const listed of ['AXIS consulta antecedentes laborales en el PJUD por persona o por lote y procesa 1.000 personas en unos 30 minutos.',
+    'AXIS consulta antecedentes laborales en el PJUD con la nómina por archivo o correo y procesa 1.000 personas en unos 30 minutos.',
+    'AXIS consulta antecedentes laborales en el PJUD y procesa 1.000 personas en unos 30 minutos, y queda evidencia de cada consulta.'])
+    assert.deepEqual(offer(listed), ['una sola capacidad'], listed);
+  assert.deepEqual(offer('AXIS consulta antecedentes laborales en el PJUD y procesa 1.000 personas en unos 30 minutos.'), []);
+  // A sequence that comes back to the loss of an earlier email with other words: «deja turnos sin cubrir» and «deja el puesto sin cubrir».
+  const step = (opening: string, middle: string, question: string) => `Hola {{nombre}},\n\n${opening}${middle}\n\n${question}\n\nNicolás Y.\nGerente Comercial\nYago SpA`;
+  const third = (opening: string) => coworkDraftIssues([sequence([
+    step('Cuando entran muchas personas a la vez en {{empresa}}, revisar uno por uno los antecedentes deja turnos sin cubrir mientras los nuevos ingresos esperan confirmación.', '\n\nAXIS consulta antecedentes laborales en el PJUD.', '¿Cuánto les toma hoy revisar una nómina grande?'),
+    step('Cuando la lista de ingreso llega el jueves para empezar el lunes, el equipo corre para tener los antecedentes listos.', '', '¿Quién prepara hoy esa lista?'),
+    step(opening, '\n\nAXIS deja evidencia auditable de cada consulta.', '¿Te sirve verlo con un caso de tu equipo?')])], checks)
+    .map(issue => `${issue.where} · ${issue.short}`);
+  assert.deepEqual(third('Cuando piden respaldo de los antecedentes de alguien que está por entrar, buscar cada registro a mano deja el puesto sin cubrir.'),
+    ['«Secuencia AXIS», correo 3 · consecuencia distinta']);
+  assert.deepEqual(third('Cuando te piden respaldo de una consulta en medio de nuevas incorporaciones, buscarla una por una deja al candidato esperando la confirmación de ingreso.'),
+    ['«Secuencia AXIS», correo 3 · consecuencia distinta']);
+  assert.deepEqual(third('Cuando alguien pregunta meses después cómo se revisó a una persona, armar ese respaldo a mano se lleva una tarde entera.'), []);
+  // The rules' and the reads' words in the reply to the seller.
+  for (const reply of ['La búsqueda consultada no muestra envíos registrados para Felipe.', 'Lo registrado muestra el correo a Marcela del 19 de septiembre.',
+    'Conservé el dato de procesamiento como capacidad, no como garantía.'])
+    assert.deepEqual(coworkReplyIssues(reply).map(issue => issue.short), ['respuesta sin jerga'], reply);
+  assert.deepEqual(coworkReplyIssues('Presenta AXIS con el resultado que cargaste en tu perfil.'), []);
+});
+
+test('a correction that still leaves points gets a second one, kept only when it leaves fewer (v16)', async () => {
+  const altered = (body: string) => body.replace('en minutos', 'gratis');
+  const first = output([altered(signed), altered(signed), signed]);
+  const once = output([signed, altered(signed), signed]);
+  const clean = output([signed, signed, signed]);
+  const h = harness([first, once, clean]);
+  assert.deepEqual(await h.run(), clean);
+  assert.deepEqual(h.calls.map(call => call.role), ['writer', 'writer', 'writer']);
+  assert.equal(h.steps.at(-1)?.outcome, 'fixed');
+  // A second correction that leaves as many points is not kept: the first one stands, with its point to review.
+  const same = harness([first, once, once]);
+  assert.deepEqual(await same.run(), once);
+  assert.equal(same.steps.at(-1)?.outcome, 'pending');
+  // Without time left after the first correction, there is no second one.
+  let turns = 2;
+  const late = harness([first, once]);
+  assert.deepEqual(await late.run({ canReview: () => turns-- > 0 }), once);
+  assert.deepEqual(late.calls.map(call => call.role), ['writer', 'writer']);
 });
