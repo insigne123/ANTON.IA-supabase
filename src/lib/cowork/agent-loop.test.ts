@@ -2300,6 +2300,14 @@ test('figures read with metrics.rates and given only in the text are asked for t
   assert.equal((answer as { blocks?: Array<{ type: string }> }).blocks?.[0]?.type, 'metrics');
 });
 
+test('a «dale» to a closing question that offered the campaign counts as asking for it', async () => {
+  const { coworkAcceptsCampaignOffer } = await import('./agent-loop');
+  const history = [{ runId: 'r1', observations: [], reply: 'Tienes 4 pendientes.\n\n¿Busco a los 4 contactos y te preparo el primer correo para dejar la campaña pausada?' }];
+  assert.equal(coworkAcceptsCampaignOffer('dale, ¿por dónde parto?', history), true);
+  assert.equal(coworkAcceptsCampaignOffer('dale, pero sin personalizar', history), false);
+  assert.equal(coworkAcceptsCampaignOffer('dale', [{ runId: 'r1', observations: [], reply: 'Listo.\n\n¿Lo hago más corto?' }]), false);
+});
+
 test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
   const { coworkCampaignForListedPeople } = await import('./agent-loop');
   const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],
