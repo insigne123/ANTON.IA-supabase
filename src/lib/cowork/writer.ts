@@ -122,7 +122,8 @@ function observedRecipients(observations: Observation[]): Recipient[] {
 // The person asking, in their own words, for a meeting, a call or a demo (or pasting an email that asks for one).
 const MEETING_ASKED = /\b(?:reuni[oó]n|reunirnos|llamada|videollamada|demo|demostraci[oó]n|agend\w*|conversar|conversemos|conversaci[oó]n|\d+ minutos)\b/i;
 // An email the person pasted to improve it («mejora este correo: "…"»), and asking to take its meeting out instead.
-const PASTED_EDIT = /\b(?:mejor\w*|reescrib\w*|corrig\w*|edit\w*|arregl\w*)\b[^"«“]{0,80}["«“][^"»”]{40,}/i;
+// The person's own email to improve: in quotes, or after a colon («mejora este correo: Hola, somos…»).
+const PASTED_EDIT = /\b(?:mejor\w*|reescrib\w*|corrig\w*|edit\w*|arregl\w*)\b(?:[^"«“]{0,80}["«“][^"»”]{40,}|[^"«“:]{0,80}:\s*\S[^]{40,})/i;
 const DROPS_MEETING = /\b(?:sin|quit\w*|sac\w*|elimin\w*)\b[^.]{0,30}\b(?:reuni[oó]n|demo|llamada|agenda\w*)/i;
 
 /** The names the offer goes by: its all-caps names («AXIS») and the first word of the seller's company («Yago»). */
