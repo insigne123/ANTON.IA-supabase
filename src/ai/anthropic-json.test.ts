@@ -3,7 +3,7 @@ import test from 'node:test';
 import { z } from 'zod';
 
 import {
-  claudeEffort, claudeJsonSchema, claudeRequest, claudeUsage, generateClaudeStructured, isClaudeModel, type ClaudeClient,
+  claudeEffort, claudeFormatFits, claudeJsonSchema, claudeJsonText, claudeReadJsonText, claudeRequest, claudeSchemaPlan, claudeUsage, generateClaudeStructured, isClaudeModel, type ClaudeClient,
 } from './anthropic-json';
 import { generateStructuredWithTelemetry, isProviderQuotaExhausted, openAiReasoningEffort } from './openai-json';
 import { coworkModelUsage } from '@/lib/server/cowork/model-usage';
@@ -71,10 +71,42 @@ test('the JSON schema is closed and keeps no constraint the structured outputs r
   assert.equal(((properties.nested.properties as Record<string, Record<string, unknown>>).email).format, 'email', 'supported formats stay');
 });
 
+test('a property that takes any value travels as JSON text and is read back', () => {
+  const anyValue = z.object({ name: z.string(), criteria: z.unknown(), nested: z.object({ criteria: z.unknown().optional() }).strict() }).strict();
+  const plan = claudeSchemaPlan(anyValue);
+  assert.ok(!JSON.stringify(plan.json).includes('{}') && !JSON.stringify(plan.json).includes('OpenAiAnyType'), 'no empty or recursive schema reaches the API');
+
+  assert.deepEqual([...plan.jsonText], ['criteria']);
+  assert.equal(((plan.json.properties as Record<string, Record<string, unknown>>).criteria).type, 'string');
+  const read = claudeReadJsonText({ name: '{"a":1}', criteria: '{"titles":["Jefe de Selección"]}', nested: { criteria: 'no es json' } }, plan.jsonText);
+  assert.deepEqual(read, { name: '{"a":1}', criteria: { titles: ['Jefe de Selección'] }, nested: { criteria: 'no es json' } }, 'only those properties, and text that is not JSON stays');
+});
+
+test('a schema too large for the format travels in the instructions and its answer is read the same way', () => {
+  const wide = z.object(Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`f${index}`, z.string().nullable().optional()]))).strict();
+  assert.equal(claudeFormatFits(claudeJsonSchema(wide)), false);
+  assert.equal(claudeFormatFits(claudeJsonSchema(z.object({ a: z.string(), b: z.string().nullable() }).strict())), true);
+  const request = claudeRequest({ model: 'claude-haiku-5-5', prompt: 'p', systemPrompt: 'reglas', schema: wide });
+  assert.ok(!('format' in request.output_config), 'no format the API would refuse');
+  assert.equal(request.output_config.effort, 'low');
+  const system = request.system?.[0].text || '';
+  assert.ok(system.startsWith('reglas\n\nResponde solo con un objeto JSON válido') && system.includes('"f19"'), 'the rules first, then the schema');
+  assert.equal(claudeJsonText('```json\n{"f0":"a"}\n```'), '{"f0":"a"}');
+  assert.equal(claudeJsonText('Aquí va: {"f0":"a"} listo'), '{"f0":"a"}');
+});
+
+test('the large schema answer is validated with the full schema', async () => {
+  const wide = z.object({ ...Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`f${index}`, z.string().nullable().optional()])), action: z.enum(['answer']) }).strict();
+  const client: ClaudeClient = { messages: { stream: () => ({ on: () => undefined,
+    finalMessage: async () => ({ model: 'claude-haiku-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: '```json\n{"action":"answer","f3":null,"reports":[]}\n```' }], usage: { input_tokens: 10, output_tokens: 5 } }) }) } };
+  const result = await generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema: wide }, client);
+  assert.deepEqual(result.data, { action: 'answer', f3: null }, 'an extra top-level key is dropped, not a retry');
+});
+
 test('the request carries the format, the effort and room for thinking', () => {
   const low = claudeRequest({ model: 'claude-haiku-5-5', prompt: 'p', systemPrompt: 's', schema, maxOutputTokens: 6000 });
   assert.equal(low.output_config.effort, 'low');
-  assert.equal(low.output_config.format.type, 'json_schema');
+  assert.equal(low.output_config.format?.type, 'json_schema');
   assert.equal(low.max_tokens, 10000);
   assert.deepEqual(low.system, [{ type: 'text', text: 's', cache_control: { type: 'ephemeral' } }], 'the fixed rules are cached');
   assert.deepEqual(low.messages, [{ role: 'user', content: 'p' }]);
