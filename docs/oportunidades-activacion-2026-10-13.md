@@ -42,6 +42,12 @@ Revisión: ahora cita el par pregunta/respuesta de equipamiento y conserva el t�
 
 Versión3 añade a la síntesis fragmentos originales completos hasta48.000bytes UTF8, con id/documento/localizador y conteo de fragmentos omitidos. Ese texto está incluido en la reserva de costo antes de la llamada. La síntesis puede recuperar citas literales desde esos fragmentos, sin debilitar la validación ni interpretar una mala cita de extracción como fuente ausente. Se explicita la fórmula de margen del calculador compartido para evitar confundir markup con margen. No se crea una reparación/fallback pagado automático.
 
+La muestra versión3 se ejecutó desde el código congelado `f0a93001db33694d8f703e077cbcebda291400e9`: cinco llamadas y **US$0,237061** adicionales. Reserva máxima de síntesisUS$0,618740 más extracción ya observadaUS$0,011107 = exposición previa a síntesisUS$0,629847, bajo el capUS$0,75 del mismo job. El informe recupera los datos de ficha con citas (ponderaciones, pagos, garantías), reconoce la continuación de la respuesta7690765, cita equipamiento con respuesta y conserva el objeto distinto delFormulario5. La recomendación vuelve a no avanzar por proceso cerrado.
+
+El primer exportPDF de versión3 falló explícitamente por la notación matemática `Σ(P x Q)`; el JSON/Markdown y recibos pagados ya estaban conservados. Se añadió transliteración local de sumatoria al export de Oportunidades, sin alterar el texto original editable ni debilitar el rechazo de idiomas/glifos no soportados. Exportar de nuevo usa el reporte guardado, sin ninguna llamada al modelo. Los escenarios vacíos muestran un mensaje de datos pendientes en vez de un encabezado vacío.
+
+Ledger total de16llamadas: conocido **US$0,688171**, reserva incierta original **US$0,421736**, exposición **US$1,109907**, dentro deUS$2. Originales y las tres versiones conservadas; no se liberó incertidumbre ni se repitió un paid start. La revisión semántica confirma las mejoras señaladas, pero no acredita precisión universal: todavía faltan bases completas, oferta real y respaldo explícito de todas las afirmaciones compuestas. El informe llama inconsistencia a bruto/neto, que puede ser una distinción de conceptos normal; debe revisarse al usarlo comercialmente.
+
 ## Rollout pendiente del mantenedor
 
 El mantenimiento del repo reserva despliegue/rollback al mantenedor. Esta preparación no inicia un rollout ni publica Functions.

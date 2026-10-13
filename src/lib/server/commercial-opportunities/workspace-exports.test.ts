@@ -22,3 +22,10 @@ test('workbook keeps scenario arithmetic as numbers, unknown taxes blank and for
 test('unsupported PDF glyphs are not silently dropped; editable Markdown preserves them',async()=>{
  await assert.rejects(opportunityReportPdf({...report,title:'日本語'}),/caracteres/);assert.match(opportunityReportMarkdown({...report,title:'日本語'}),/日本語/);
 });
+test('the real pilot summation notation exports legibly without losing its financial operands',async()=>{
+ const sample={...report,scenarios:[],sections:[{id:'finance',title:'Modelo económico',paragraphs:['Oferta neta = Σ(P x Q). Capital de trabajo ≈ costo mensual x desfase.'],facts:[]}]};
+ const {extractText}=await import('unpdf');const parsed=await extractText(await opportunityReportPdf(sample),{mergePages:true});
+ assert.match(String(parsed.text),/sumatoria\(P x Q\)/);assert.match(String(parsed.text),/Capital de trabajo/);
+ assert.match(String(parsed.text),/No hay escenarios numéricos disponibles/);
+ assert.match(opportunityReportMarkdown(sample),/Σ\(P x Q\)/,'editable source keeps the original mathematical notation');
+});
