@@ -178,6 +178,12 @@ env:
     secret: OPENAI_API_KEY
     availability: [RUNTIME]
 
+  # Platform Claude credential. Secret value is managed in Google Secret Manager;
+  # only server runtime reads it. Model routing and opportunity rollout are separate.
+  - variable: ANTHROPIC_API_KEY
+    secret: ANTHROPIC_API_KEY
+    availability: [RUNTIME]
+
   - variable: OPENAI_MODEL
     value: gpt-6-luna
     availability: [RUNTIME]
