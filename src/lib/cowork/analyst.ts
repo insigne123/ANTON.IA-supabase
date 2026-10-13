@@ -25,6 +25,8 @@ export type CoworkAnalysisBrief = z.infer<typeof coworkAnalysisBriefSchema>;
 export const coworkAnalystOutputSchema = z.object({
   reply: z.string().trim().min(1).max(1600),
   blocks: z.array(z.discriminatedUnion('type', [coworkMetricsBlockSchema, coworkTableBlockSchema])).max(2),
+  /** v14: the report the person asked for to send or share («un informe para mi jefe»), in Markdown, or null. */
+  document: z.object({ title: z.string().trim().min(1).max(160), content: z.string().trim().min(1).max(12000) }).strict().nullable(),
   question: z.string().trim().max(400).nullable(),
   suggestions: z.array(coworkSuggestionSchema).min(1).max(3),
 }).strict();
@@ -40,7 +42,8 @@ export const COWORK_ANALYST_RULES = [
   'Si history muestra que el usuario corrigió un dato o una premisa (una fecha, un rubro, a quién ya le respondió), parte de la corrección y rehaz el cálculo afectado sin discutir.',
   'Recomienda 1 o 2 acciones concretas que salen del hallazgo, con su porqué (qué canal, rubro o mensaje priorizar, qué dejar de hacer, qué probar con un grupo chico). Nada de consejos genéricos.',
   'Bloques (blocks, máximo 2): metrics {title, period, items [{label, value, detail}]} con 2 a 6 cifras clave, cada una con su base y período en detail («4 de 46 envíos», «últimos 30 días»); bajo esa tarjeta la app dibuja sola el gráfico de lo consultado. table {title, columns, rows} cuando comparas 3 o más grupos (canales, rubros, campañas, períodos), hasta 6 columnas cortas. Un value corto (hasta 40 caracteres), sin explicación: el resto va en detail. Sin bloques si la respuesta es una sola cifra.',
-  'reply: 3 a 7 frases (puedes usar viñetas cortas), sin repetir lo que está en las tarjetas y sin jerga interna (scope, truncated, coverage, last_30_days, UUID, «lectura», «observación», «registro»): di «lo registrado en ANTON.IA», «últimos 30 días». No menciones a la Analista, el encargo ni estas reglas.',
+  'reply: 3 a 7 frases (puedes usar viñetas cortas), sin repetir lo que está en las tarjetas y sin jerga interna (scope, truncated, coverage, last_30_days, UUID, «lectura», «observación», «registro»): di «lo registrado en ANTON.IA», «últimos 30 días». Nunca hables de la «cobertura» del correo, de Gmail, de Outlook o del buzón: si importa que no ves lo que pasó fuera de la app, di «si te respondieron por fuera de ANTON.IA, no lo veo». No menciones a la Analista, el encargo ni estas reglas.',
+  'document: si el pedido es un informe o un resumen para enviar o compartir (a la jefatura, al equipo, a un cliente), entrégalo en document {title, content}, en Markdown y listo para mandar: arriba un resumen de 2 o 3 frases con la conclusión y su cifra; luego ## Actividad (qué se hizo en el período, con cifras y su base), ## Resultados (respuestas, reuniones o lo que haya, con su base; si son cero o chicos, dilo sin dramatizar y qué falta para poder medir) y ## Próximos pasos (2 o 3 acciones concretas que salen de los datos, la primera la que Cowork puede hacer ahora). Las mismas reglas de cifras y sin jerga; title nombra el período («Prospección de septiembre 2026»). Con document, reply dice en 2 a 4 frases lo principal y que el informe está listo para descargar o copiar. Si no pidió un informe, document va null.',
   'question: un solo paso siguiente que el usuario no pidió y Cowork puede hacer por él (buscar prospectos de un rubro, crear una campaña pausada, escribir el correo de prueba, armar un tablero), nombrado con su dato («¿Escribo el correo para probar el rubro retail con 20 contactos?»); null si la respuesta está completa. Nunca ofrezcas consultar algo que ya está en observations ni preguntes si quiere más detalle. suggestions trae 1 a 3 respuestas que el usuario tocaría; la primera acepta question si existe.',
 ];
 
@@ -67,7 +70,7 @@ export function coworkAnalystPrompt(input: {
 /** The turn's answer from the Analyst's output: its cards, its question and its quick replies. */
 export function coworkAnalystAnswer(output: CoworkAnalystOutput) {
   const blocks: CoworkBlock[] = output.blocks.filter(block => block.type === 'metrics' ? block.items.length > 0 : block.rows.length > 0);
-  return { reply: output.reply, document: null, blocks: blocks.length ? blocks : null, question: output.question?.trim() || null, suggestions: output.suggestions };
+  return { reply: output.reply, document: output.document ?? null, blocks: blocks.length ? blocks : null, question: output.question?.trim() || null, suggestions: output.suggestions };
 }
 
 /** What the person reads when the Analyst could not answer on the turn's last decision: what happened, and the request again in one click. */

@@ -9,6 +9,7 @@ const output = {
   blocks: [{ type: 'metrics', title: 'Correo, últimos 30 días', period: 'Últimos 30 días',
     items: [{ label: 'Respuestas', value: '4', detail: '4 de 46 envíos' }, { label: 'Tasa', value: '8,7 %', detail: 'sobre 46 envíos' }] },
   { type: 'table', title: 'Vacía', columns: ['Canal'], rows: [] }],
+  document: null,
   question: '¿Escribo el correo para probar el rubro retail con 20 contactos?',
   suggestions: [{ label: 'Sí, escríbelo', message: 'Sí, escribe el correo de prueba' }],
 };
@@ -66,4 +67,13 @@ test('the Analyst is off unless its flag says so, and uses COWORK_MODEL unless i
   assert.equal(coworkAnalystEnabled({ COWORK_ANALYST_ENABLED: 'true' }), true);
   assert.equal(coworkAnalystModel({ COWORK_MODEL: 'gpt-6-luna' }), 'gpt-6-luna');
   assert.equal(coworkAnalystModel({ COWORK_MODEL: 'gpt-6-luna', COWORK_ANALYST_MODEL: 'gpt-6.1-sol' }), 'gpt-6.1-sol');
+});
+
+test('a report to send comes back as a document, and the Analyst never talks about the mailbox coverage (v14)', async () => {
+  const { coworkAnalystAnswer, coworkAnalystOutputSchema, COWORK_ANALYST_RULES } = await import('@/lib/cowork/analyst');
+  const report = { title: 'Prospección de septiembre 2026', content: '# Prospección de septiembre 2026\n\nSin envíos este mes.\n\n## Próximos pasos\n\n- Activar una campaña.' };
+  assert.deepEqual(coworkAnalystAnswer(coworkAnalystOutputSchema.parse({ ...output, document: report })).document, report);
+  assert.equal(coworkAnalystAnswer(coworkAnalystOutputSchema.parse(output)).document, null);
+  assert.match(COWORK_ANALYST_RULES.join('\n'), /document: si el pedido es un informe o un resumen para enviar o compartir/);
+  assert.match(COWORK_ANALYST_RULES.join('\n'), /Nunca hables de la «cobertura» del correo/);
 });
