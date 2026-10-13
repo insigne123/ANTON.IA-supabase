@@ -985,3 +985,9 @@ test('a follow-up that offers the evidence says it in their trade, with what sto
   assert.deepEqual(shorts('Cuando la nómina llega cerca de la fecha de ingreso, cada revisión pendiente deja una vacante esperando.', audit), ['«Secuencia AXIS», correo 2 · consecuencia distinta']);
 });
 
+
+test('an email pasted after a colon is the person\'s own email: its meeting is kept', () => {
+  const colon = 'mejora este correo: Hola, somos Yago y tenemos una plataforma llamada AXIS que revisa causas judiciales. ¿Tienes 30 minutos esta semana para una demo?';
+  assert.equal(coworkWriterContext(null, [], null, colon).keepsAsk, true);
+  assert.equal(coworkWriterContext(null, [], null, 'mejora el correo para que sea más corto').keepsAsk, false, 'no pasted email, nothing to keep');
+});
