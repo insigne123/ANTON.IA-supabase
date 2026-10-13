@@ -182,6 +182,8 @@ async function main() {
   const writerModels = coworkWriterModels();
   const writerEfforts = coworkWriterEfforts();
   const writerCalls = { writer: 0, reviewer: 0 };
+  // --writer-max-tokens: room for a Writer that reasons at xhigh (gpt-6-luna spends the worker's 6000 thinking and answers empty).
+  const writerMaxTokens = Number(arg('writer-max-tokens') ?? 6000);
   const reviewEngine = arg('review-engine') ?? 'llm';
   if (!['llm', 'jev', 'jev-llm'].includes(reviewEngine)) throw new Error('--review-engine must be llm, jev or jev-llm');
   // Jev decides with --review-engine=jev|jev-llm, which turns the judge in the turn on.
@@ -218,7 +220,7 @@ async function main() {
           // A sequence may have its own model (COWORK_WRITER_SEQUENCE_MODEL), as in the worker (coworkWriterCallModel).
           const chosen = coworkWriterCallModel(brief.kind, role, fix, writerModels, writerEfforts);
           const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: chosen.model,
-            allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: 90000,
+            allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? writerMaxTokens : 1500, timeoutMs: 90000,
             reasoningEffort: chosen.effort });
           // The correction is priced apart («corrector»), so a model that only fixes shows its own cost.
           recordUsage(fix ? 'corrector' : role, response.telemetry);

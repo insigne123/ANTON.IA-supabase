@@ -71,10 +71,9 @@ const IDEAL: Record<string, CorpusDecider> = {
   'ley-chile': async context => context.observations.length === 0
     ? read('compliance.law')
     : answer('En Chile no conviene escribir sin una base legal: la Ley 19.628 exige consentimiento o autorización, aunque admite datos de fuentes públicas y da derecho a oponerse a la publicidad. Desde el 1 dic 2026 rige la Ley 21.719, más estricta. Esto es información general, no asesoría legal.\n¿Reviso si tus contactos tienen bajas o bloqueos antes de tu próxima campaña?'),
-  'que-puedes-hacer-tu': async context => context.observations.length === 0
-    ? parallel([{ action: 'app.context', input: '' }, { action: 'leads.search', input: '' }])
-    : answer('Te ayudo a conseguir reuniones para AXIS con empresas que incorporan mucho personal, desde este chat:\n- Correos y campañas: redacto los correos sobre AXIS y te dejo la campaña pausada para aprobar. José, de GrupoExpro, ya tiene correo.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos de RR. HH. y operaciones, e informes de cómo van tus envíos.\n¿Te dejo una campaña pausada con un primer correo sobre AXIS para José?',
-      null, [{ label: 'Sí, déjala pausada', message: 'Sí, deja una campaña pausada con un primer correo sobre AXIS para José' }]),
+  // «¿Qué puedes hacer?» is answered from the context already in the prompt, without reads (agent-loop: «Orientation needs no tools»).
+  'que-puedes-hacer-tu': async () => answer('Te ayudo a conseguir reuniones para AXIS con empresas que incorporan mucho personal, desde este chat:\n- Correos y campañas: redacto los correos sobre AXIS y te dejo la campaña pausada para aprobar.\n- LinkedIn: invitaciones y mensajes que envía tu extensión.\n- Prospectos nuevos de RR. HH. y operaciones, e informes de cómo van tus envíos.\n¿Te preparo un primer correo sobre AXIS para tus contactos con correo?',
+    null, [{ label: 'Sí, prepáralo', message: 'Sí, prepara un primer correo sobre AXIS para mis contactos con correo' }]),
 };
 
 const chip = (label: string, message: string) => [{ label, message }];
@@ -93,14 +92,14 @@ Object.assign(IDEAL, {
       profile: { name: null, role: null, companyName: null, sector: null, website: 'https://yago.cl', description: null, services: null,
         valueProposition: 'Revisión de antecedentes laborales en minutos para equipos de RR. HH. en Chile.', proofPoints: null, signature: null },
       answer: { reply: 'Guardo en tu perfil lo que vendes y tu sitio. Desde ahí escribo tus correos con esa oferta.', document: null } }),
+  // Who already got a first email stays out of the campaign (v10): Marcela's next email is a follow-up of her own.
   'mkt-campana-rrhh': async context => {
-    if (context.observations.length === 0) return parallel([{ action: 'leads.search', input: 'RR. HH.' }, { action: 'message.context', input: '' }]);
-    if (!seen(context, 'campaigns.list')) return read('campaigns.list');
+    if (context.observations.length === 0) return parallel([{ action: 'leads.search', input: 'RR. HH.' }, { action: 'contacted.search', input: '' }, { action: 'message.context', input: '' }]);
     return coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null,
-      answer: { reply: 'Tus contactos de RR. HH. con correo son 3: Marcela (Sodexo), Felipe (Securitas) y Camila (Adecco). Andrea no tiene correo y queda fuera. Te dejo la campaña pausada con un correo sobre AXIS para que la revises.', document: null },
+      answer: { reply: 'Tus contactos de RR. HH. con correo que aún no reciben nada son 2: Felipe (Securitas) y Camila (Adecco). Marcela (Sodexo) ya recibió un primer correo, así que su seguimiento va aparte, y Andrea no tiene correo. Te dejo la campaña pausada con un correo sobre AXIS para que la revises.', document: null },
       campaign: { name: 'AXIS · RR. HH.', objective: 'Conseguir una conversación sobre revisión de antecedentes',
         criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true },
-        emails: ['mrojas@sodexo.cl', 'fmunoz@securitas.cl', 'cfuentes@adecco.cl'], provider: 'google',
+        emails: ['fmunoz@securitas.cl', 'cfuentes@adecco.cl'], provider: 'google',
         messages: [{ subject: 'Antecedentes laborales en minutos', body: 'Hola,\nEn Yago automatizamos la consulta de antecedentes laborales en el Poder Judicial con AXIS.\n¿Te sirve que lo revisemos 15 minutos esta semana?\nNicolás Y.\nYago SpA', delayDays: 0 }] } });
   },
   'mkt-secuencia': async context => context.observations.length === 0
@@ -310,13 +309,15 @@ test('a corpus turn keeps each read with its input and what the person saw, for 
   const entry = MARKETING_CORPUS.find(item => item.id === 'mkt-campana-rrhh')!;
   const outcome = await runCorpusCase(entry, IDEAL['mkt-campana-rrhh']);
   assert.deepEqual(outcome.result.reads, [
-    { action: 'leads.search', input: 'RR. HH.' }, { action: 'message.context', input: '' }, { action: 'campaigns.list', input: '' }]);
+    { action: 'leads.search', input: 'RR. HH.' }, { action: 'contacted.search', input: '' }, { action: 'message.context', input: '' },
+    // The loop reads the campaigns itself before a new one, so it does not repeat an existing campaign.
+    { action: 'campaigns.list', input: '' }]);
   const shown = corpusShownAnswer(outcome.result);
   assert.equal(shown.proposal?.kind, 'campaign_create');
-  assert.match(String(shown.proposal?.note), /Tus contactos de RR\. HH\. con correo son 3/);
+  assert.match(String(shown.proposal?.note), /Tus contactos de RR\. HH\. con correo que aún no reciben nada son 2/);
   // The card in words, as the review shows it: its title, who it goes to and the emails.
   const detail = String(shown.proposal?.detail);
-  assert.match(detail, /Destinatarios: mrojas@sodexo\.cl, fmunoz@securitas\.cl, cfuentes@adecco\.cl/);
+  assert.match(detail, /Destinatarios: fmunoz@securitas\.cl, cfuentes@adecco\.cl/);
   const name = (outcome.result.proposal?.campaign as { name: string }).name;
   assert.ok(name);
   assert.ok(detail.includes(`Nombre: ${name}`));
@@ -351,9 +352,9 @@ test('with the Writer on, a drafting turn hands the emails over and still passes
   const questions = ['¿Cuántos ingresos revisan al mes en {{empresa}}?', '¿Quién los revisa hoy en tu equipo?', '¿Te sirve verlo 15 minutos esta semana?'];
   const signed = (body: string, index: number) => `Hola {{nombre}},\n${body}\n${questions[index]}\nNicolás Y.\nGerente Comercial, Yago SpA`;
   // The real pipeline with scripted models: the first draft offers something «gratis», the checks catch it and the Writer fixes it.
-  const opening = 'Cuando entran muchas personas a la vez, revisar uno por uno sus antecedentes en el PJUD atrasa el ingreso.';
-  const drafts = [[`${opening} AXIS es gratis el primer mes.`, 'Cuando coinciden varios ingresos, esa revisión compite con los contratos y la coordinación del equipo.', 'Te muestro AXIS con un caso real.'],
-    [`${opening} AXIS revisa antecedentes en el Poder Judicial.`, 'Cuando coinciden varios ingresos, esa revisión compite con los contratos y la coordinación del equipo.', 'Te muestro AXIS con un caso real.']];
+  const opening = 'Cuando entran muchas personas a la vez, revisar uno por uno sus antecedentes en el PJUD deja turnos sin cubrir mientras el cliente espera.';
+  const drafts = [[`${opening} AXIS es gratis el primer mes.`, 'Cuando la nómina llega el jueves y el lunes ya parten, alguien se queda buscando nombre por nombre mientras el resto del equipo espera.', 'Cuando alguien pregunta meses después cómo se revisó a una persona, armar ese respaldo a mano se lleva una tarde entera.\nAXIS deja evidencia auditable de cada consulta.'],
+    [`${opening} AXIS revisa antecedentes en el Poder Judicial.`, 'Cuando la nómina llega el jueves y el lunes ya parten, alguien se queda buscando nombre por nombre mientras el resto del equipo espera.', 'Cuando alguien pregunta meses después cómo se revisó a una persona, armar ese respaldo a mano se lleva una tarde entera.\nAXIS deja evidencia auditable de cada consulta.']];
   const write: CorpusWriter = (writeBrief, observations, meta) => runCoworkWriter({
     request: meta.request, brief: writeBrief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step,
     generate: async ({ schema }) => schema.parse({
