@@ -77,3 +77,14 @@ test('a report to send comes back as a document, and the Analyst never talks abo
   assert.match(COWORK_ANALYST_RULES.join('\n'), /document: si el pedido es un informe o un resumen para enviar o compartir/);
   assert.match(COWORK_ANALYST_RULES.join('\n'), /Nunca hables de la «cobertura» del correo/);
 });
+
+test('the Analyst says the figures without their technical limits, fits its actions to the account and always offers the step that moves small figures (v15)', async () => {
+  const { COWORK_ANALYST_RULES } = await import('@/lib/cowork/analyst');
+  const rules = COWORK_ANALYST_RULES.join('\n');
+  assert.match(rules, /No expliques de dónde salen las cifras ni sus límites técnicos/);
+  assert.match(rules, /Con menos de 5 envíos, da la cifra sin porcentaje/);
+  assert.match(rules, /nunca «Semana calendario» si son 7 días/);
+  assert.match(rules, /descuéntalo de los contactos por escribir \(con 4 contactos con correo y uno ya contactado, son 3\)/);
+  assert.match(rules, /Si las cifras son cero o chicas, siempre hay uno: el que las mueve/);
+  assert.match(rules, /El informe no explica cómo consultaste los datos/);
+});
