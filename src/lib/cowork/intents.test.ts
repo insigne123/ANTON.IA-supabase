@@ -80,3 +80,12 @@ test('intent prompts are off unless turned on', () => {
   assert.equal(coworkIntentPromptsEnabled({}), false);
   assert.equal(coworkIntentPromptsEnabled({ COWORK_INTENT_PROMPTS_ENABLED: 'true' }), true);
 });
+
+test('a report for the boss carries no scope note and the week figures are the team\'s, with the next step as the question (v15 independent reading)', () => {
+  const report = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, intents: coworkTurnIntents('hazme un informe para mi jefe') });
+  assert.match(report.systemPrompt, /sin nota de alcance aparte: el período y la base de cada cifra van junto a ella/);
+  assert.match(report.systemPrompt, /Sin nota de alcance ni advertencias sobre cómo se consultaron los datos/);
+  const week = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false, intents: coworkTurnIntents('como me ha ido esta semana con los correos? dame numeros') });
+  assert.match(week.systemPrompt, /nómbralas como del equipo \(«tu equipo envió…»\), sin aclarar que no son solo tuyas/);
+  assert.match(week.systemPrompt, /cierra en answer\.question con la acción concreta que más mueve esas cifras/);
+});

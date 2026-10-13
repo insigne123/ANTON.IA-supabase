@@ -251,6 +251,17 @@ export function withoutCaveats(reply: string): string {
   }).join('\n');
 }
 
+// A closing scope note in a document («*Alcance: cifras al 25 sep 2026; envíos de los últimos 30 días.*», or a last «## Alcance»
+// section): the period goes next to each figure (the rule on documents), and a note apart reads as caveats in a report for the
+// boss. Only at the end: the note must be the last paragraph, and an «## Alcance» section with more sections after it stays.
+const SCOPE_NOTE = /\n{2,}(?:[*_]{0,2}Alcance[*_]{0,2}[ \t]*:[^\n]*(?:\n(?![ \t]*\n)[^\n]*)*\s*|#{2,3}[ \t]+Alcance[ \t]*\n(?:(?!\n#{1,3}[ \t])[\s\S])*)$/u;
+
+/** The document without its closing scope note (and the rule before it). A document that is only that note stays as it was. */
+export function withoutScopeNote(content: string): string {
+  const cleaned = content.replace(SCOPE_NOTE, '').replace(/\n+-{3,}[ \t]*$/, '').trimEnd();
+  return cleaned === content.trimEnd() || !/[\p{L}]{3,}/u.test(cleaned) ? content : cleaned;
+}
+
 // An offer of the next step: «puedo preparar…», «el próximo paso es…».
 // «Conviene…» is not one: it is the recommendation the person asked for («¿qué mejoro?»).
 const OFFER = /^(?:para partir,\s*)?(?:te\s+)?(?:puedo|podemos|podr[ií]a|el (?:pr[oó]ximo|siguiente) paso(?: m[aá]s concreto)? es|lo que har[ií]a (?:ahora )?es)\b/iu;
@@ -373,7 +384,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
   return {
     ...answer,
     reply,
-    document: answer.document ? { ...answer.document, content: polishCoworkText(answer.document.content) } : null,
+    document: answer.document ? { ...answer.document, content: withoutScopeNote(polishCoworkText(answer.document.content)) } : null,
     question,
     blocks: blocks.length ? blocks : null,
     suggestions: choices ? null : suggestions.length ? suggestions : question ? [COWORK_YES_CHIP] : null,
