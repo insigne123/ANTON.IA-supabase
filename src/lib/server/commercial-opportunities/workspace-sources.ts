@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { AuthError } from '@/lib/server/auth-utils';
 import { canonicalLinkedInPost } from '@/lib/commercial-opportunities/workspace';
+import { opportunitySourceItemLimit } from '@/lib/commercial-opportunities/source-budget';
 import { groupHiring, jobAdFromFantastic } from '@/lib/commercial-opportunities/hiring';
 import { tenderUrl, type Tender } from '@/lib/commercial-opportunities/tenders';
 import { listOpenLicitaciones } from './mercado-publico';
@@ -111,10 +112,13 @@ export async function captureOpportunityLinkedIn(client: SupabaseClient, job: Op
   const cap = context.priority === 'balanced' ? .11 : primary ? .14 : .06;
   if (job.kind === 'posts') {
     const price = Number(process.env.OPPORTUNITIES_POST_USD_PER_ITEM);
-    if (!Number.isFinite(price) || price <= 0) throw new AuthError('Falta confirmar la tarifa del conector de publicaciones.', 503);
+    const start = Number(process.env.OPPORTUNITIES_POST_START_USD);
+    const emptyQuery = Number(process.env.OPPORTUNITIES_POST_EMPTY_QUERY_USD);
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(start) || start < 0 || !Number.isFinite(emptyQuery) || emptyQuery < 0)
+      throw new AuthError('Falta confirmar la tarifa del conector de publicaciones.', 503);
     const queries = (context.criteria?.postQueries || []).slice(0, 3);
     if (!queries.length) throw new AuthError('Los criterios de publicaciones se están preparando.', 409);
-    const perQuery = Math.min(30, Math.floor(cap / price / queries.length));
+    const perQuery = opportunitySourceItemLimit({ cap, price, start, emptyQuery, queries: queries.length, max: 30 });
     if (perQuery < 1) throw new AuthError('El saldo por corrida no alcanza para consultar publicaciones.', 402);
     const data = await apifyOpportunityItems(client, job, 'harvestapi~linkedin-post-search', { searchQueries: queries, maxPosts: perQuery,
       postedLimit: 'week', sortBy: 'date', profileScraperMode: 'short', scrapeReactions: false, scrapeComments: false }, cap);
@@ -123,7 +127,7 @@ export async function captureOpportunityLinkedIn(client: SupabaseClient, job: Op
   const price = Number(process.env.APIFY_FANTASTIC_USD_PER_JOB || .005);
   const start = Number(process.env.APIFY_FANTASTIC_START_USD || .01);
   if(!Number.isFinite(price)||price<=0||!Number.isFinite(start)||start<0)throw new AuthError('La tarifa de avisos laborales no está configurada correctamente.',503);
-  const limit = Math.min(100, Math.floor((cap - start) / price));
+  const limit = opportunitySourceItemLimit({ cap, price, start, max: 100 });
   const roles = context.criteria?.roles || [];
   if (limit < 10 || !roles.length) throw new AuthError('Faltan criterios o presupuesto para consultar avisos laborales.', 409);
   const data = await apifyOpportunityItems(client, job, 'fantastic-jobs~advanced-linkedin-job-search-api', { titleSearch: roles.slice(0, 20), locationSearch: context.territories.length ? context.territories : ['Chile'],

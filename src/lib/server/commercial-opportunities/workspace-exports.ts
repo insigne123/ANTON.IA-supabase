@@ -4,12 +4,14 @@ import {normalizeCoworkPdfText} from '@/lib/server/cowork/file-exports';
 
 const LABELS:Record<string,string>={supported:'Respaldado',pending:'Pendiente',blocked:'Bloqueante',unknown:'Por confirmar',documented:'Documentado',calculated:'Calculado',proposed:'Propuesto',read:'Leído',partial:'Lectura parcial',scan:'Escaneado',damaged:'No legible',high:'Alto',medium:'Medio',low:'Bajo',monthlyNet:'Precio neto mensual',totalNet:'Precio neto total',totalWithTax:'Total con impuestos',workingCapital:'Capital de trabajo',guarantee:'Garantía'};
 const label=(v:string)=>LABELS[v]||v;
+const pdfText=(value:string)=>normalizeCoworkPdfText(value.replace(/[Σ∑](?=\s*\()/g,'sumatoria'));
 
 export function opportunityReportMarkdown(report: OpportunityReport) {
   const lines = [`# ${report.title}`, `Fecha de corte: ${report.generatedAt}`, '', '## Decisión ejecutiva', report.executive, ...report.reasons.map(r => `- ${r}`)];
   for (const section of report.sections) lines.push('', `## ${section.title}`, ...section.paragraphs, ...section.facts.map(f => `- [${label(f.state)}] ${f.text}${f.citations.map(c => {const source=report.sources.find(s=>s.id===c.chunkId);return ` [${source?.name||c.chunkId}, ${source?.locator||''}: «${c.quote}»]`;}).join('')}`));
   lines.push('', '## Requisitos', ...report.requirements.map(r => `- ${r.title} · ${r.status}\n  Acción: ${r.action}\n  Responsable sugerido: ${r.role} · Fecha: ${r.due}`), '', '## Hoja de ruta', ...report.tasks.map(t => `- ${t.title} · ${t.role} · ${t.due}\n  Depende de: ${t.dependency}\n  Evidencia esperada: ${t.evidence}`));
   lines.push('', '## Escenarios calculados');
+  if (!report.scenarios.length) lines.push('No hay escenarios numéricos disponibles. Consulta los datos pendientes y las fórmulas del análisis económico.');
   for (const s of report.scenarios) lines.push(`### ${s.name}`, ...s.assumptions.map(a => `- Supuesto: ${a}`), JSON.stringify(opportunityFinancialScenario(s), null, 2));
   lines.push('', '## Riesgos', ...report.risks.map(r => `- ${r.title} · ${r.impact} · ${r.basis}\n  Mitigación: ${r.mitigation}`), '', '## Preguntas pendientes', ...report.questions.map(q => `- ${q}`), '', '## Cobertura y observaciones', ...report.warnings.map(w => `- ${w}`), ...report.coverage.map(d => `- ${d.name}: ${d.status}, páginas ${d.pagesRead}/${d.pagesTotal ?? 'no aplica'}`));
   lines.push('', '## Índice de fuentes', ...report.sources.map(s => `- ${s.id}: ${s.name}, ${s.locator}`));
@@ -23,12 +25,12 @@ export async function opportunityReportPdf(report: OpportunityReport) {
   const space = (height: number) => { if (y + height > 276) page(); };
   const text = (value: string, size = 10) => {
     pdf.setFontSize(size); pdf.setTextColor(30, 41, 59);
-    const lines = pdf.splitTextToSize(normalizeCoworkPdfText(value), 176) as string[];
+    const lines = pdf.splitTextToSize(pdfText(value), 176) as string[];
     for (const line of lines) { space(size > 12 ? 8 : 5); pdf.text(line, 17, y); y += size > 12 ? 7 : 5; } y += 3;
   };
-  const heading = (value: string) => { space(22);pdf.outline?.add(null,normalizeCoworkPdfText(value),{pageNumber:pdf.getCurrentPageInfo().pageNumber}); pdf.setFont('helvetica', 'bold'); text(value, 15); pdf.setFont('helvetica', 'normal'); };
+  const heading = (value: string) => { space(22);pdf.outline?.add(null,pdfText(value),{pageNumber:pdf.getCurrentPageInfo().pageNumber}); pdf.setFont('helvetica', 'bold'); text(value, 15); pdf.setFont('helvetica', 'normal'); };
   const table = (headers: string[], body: any[][]) => {
-    space(25); autoTable(pdf, { startY: y, head: [headers], body:body.map(row=>row.map(cell=>normalizeCoworkPdfText(String(cell)))), margin: { left: 17, right: 17, top: 23, bottom: 22 },
+    space(25); autoTable(pdf, { startY: y, head: [headers], body:body.map(row=>row.map(cell=>pdfText(String(cell)))), margin: { left: 17, right: 17, top: 23, bottom: 22 },
       styles: { fontSize: 9, cellPadding: 3, overflow: 'linebreak' }, headStyles: { fillColor: [37, 99, 235] }, rowPageBreak: 'avoid', showHead: 'everyPage' });
     y = (pdf as any).lastAutoTable.finalY + 8;
   };
@@ -49,6 +51,7 @@ export async function opportunityReportPdf(report: OpportunityReport) {
   heading('Cronograma y hitos'); table(['Hito', 'Fecha', 'Evidencia'], report.milestones.map(m => [m.label, m.date, label(m.state)]));
   heading('Plan de trabajo'); table(['Tarea', 'Responsable / fecha', 'Dependencia', 'Evidencia esperada'], report.tasks.map(t => [t.title, `${t.role}\n${t.due}`, t.dependency, t.evidence]));
   heading('Escenarios económicos');
+  if (!report.scenarios.length) text('No hay escenarios numéricos disponibles. Consulta los datos pendientes y las fórmulas del análisis económico.');
   for (const s of report.scenarios) {
     const result = opportunityFinancialScenario(s); heading(s.name); s.assumptions.forEach(a => text(`Supuesto: ${a}`));
     table(['Concepto', 'Valor calculado'], Object.entries(result).map(([k, v]) => [label(k), v === null ? 'Impuesto por confirmar' : new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(v)]));
@@ -59,7 +62,7 @@ export async function opportunityReportPdf(report: OpportunityReport) {
   heading('Índice de fuentes');
   report.sources.forEach(s => text(`${s.id}: ${s.name} · ${s.locator}`, 8));
   const pages = pdf.getNumberOfPages();
-  for (let p = 1; p <= pages; p++) { pdf.setPage(p); pdf.setFontSize(8); pdf.setTextColor(100, 116, 139); pdf.text('ANTON.IA · ' + normalizeCoworkPdfText(report.title.slice(0, 100)), 17, 12); pdf.text(`Página ${p} de ${pages}`, 17, 289); }
+  for (let p = 1; p <= pages; p++) { pdf.setPage(p); pdf.setFontSize(8); pdf.setTextColor(100, 116, 139); pdf.text('ANTON.IA · ' + pdfText(report.title.slice(0, 100)), 17, 12); pdf.text(`Página ${p} de ${pages}`, 17, 289); }
   return new Uint8Array(pdf.output('arraybuffer'));
 }
 export async function opportunityReportExcel(report: OpportunityReport) {

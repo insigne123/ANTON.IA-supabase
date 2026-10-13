@@ -239,8 +239,33 @@ env:
   - variable: OPPORTUNITIES_ALLOWED_EMAILS
     value: gmeneses@grupoexpro.com,lgordo@grupoexpro.com,cortega@grupoexpro.com,ribanez@grupoexpro.com,laramirez@grupoexpro.com,kmory@grupoexpro.com,nicolas.yarur.g@yago.cl,cflores@grupoexpro.com,rperezm@grupoexpro.com,sgutierrez@grupoexpro.com,cmoya@grupoexpro.com,malvarado@grupoexpro.com,cmolina@grupoexpro.com,mcoloma@grupoexpro.com,cpizarro@grupoexpro.com,fneira@grupoexpro.com,fperalta@grupoexpro.com,dmanriquez@grupoexpro.com,ptapia@grupoexpro.com,casenjo@grupoexpro.com,drey@grupoexpro.com,kgomez@grupoexpro.com,josorio@grupoexpro.com,culloag@grupoexpro.com,kzorrilla@grupoexpro.com,jfranco@grupoexpro.com,dpinzon@grupoexpro.com,ddevia@grupoexpro.com
     availability: [RUNTIME]
+  # Five workspace migrations applied and verified on 13 Oct. The new scheduler
+  # must be published by the maintainer before this configuration receives traffic.
+  # Per-company automation stays off until an admin confirms that company's offer.
+  - variable: OPPORTUNITIES_WORKSPACE_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: OPPORTUNITIES_AUTOMATION_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   - variable: OPPORTUNITIES_MONTHLY_USD_CAP
-    value: "10"
+    value: "20"
+    availability: [RUNTIME]
+  # Verified from authenticated Apify metadata: FREE tier, short profile mode,
+  # 1 GB run, no reactions/comments or optional profile/recruiter add-ons.
+  - variable: OPPORTUNITIES_POST_USD_PER_ITEM
+    value: "0.002"
+    availability: [RUNTIME]
+  - variable: OPPORTUNITIES_POST_START_USD
+    value: "0.00005"
+    availability: [RUNTIME]
+  - variable: OPPORTUNITIES_POST_EMPTY_QUERY_USD
+    value: "0.001"
+    availability: [RUNTIME]
+  # Conservative published Serper Starter replacement price: USD1/1k successful
+  # responses. Existing prepaid balance only; this does not buy a USD50 top-up.
+  - variable: OPPORTUNITIES_SERPER_USD_PER_REQUEST
+    value: "0.001"
     availability: [RUNTIME]
   # Fantastic Jobs, cuenta nicogun123 (Free): US$0.005/aviso + US$0.01/arranque.
   # Hard cap enviado a Apify en cada corrida; solo «Buscar ahora», no el cron diario.
@@ -265,7 +290,7 @@ env:
   # Plan 10: cada persona conecta su propio ticket de Mercado Público en Oportunidades. El ticket global de arriba
   # solo lo usan las cuentas confirmadas de esta lista, para sus búsquedas y las de las organizaciones que crearon.
   - variable: MERCADO_PUBLICO_SHARED_TICKET_EMAILS
-    value: nicolas.yarur.g@yago.cl
+    value: nicolas.yarur.g@yago.cl,gmeneses@grupoexpro.com,dsalgado@grupoexpro.com
     availability: [RUNTIME]
 
   # === Lead provider ===
