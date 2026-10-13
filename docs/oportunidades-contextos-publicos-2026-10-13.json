@@ -1,0 +1,122 @@
+{
+  "version": "public-company-context/2026-10-13",
+  "researchedAt": "2026-10-13",
+  "companies": [
+    {
+      "workspace": "GrupoExpro",
+      "website": "https://grupoexpro.com/",
+      "context": {
+        "offer": "GrupoExpro ofrece externalización de procesos y soluciones de recursos humanos para empresas. Su catálogo público incluye Servicios Transitorios para reemplazos y refuerzos de dotación; outsourcing/BPO de atención al cliente, back office, digitalización, logística, inventarios, bodega, recepción, despacho, producción y maquila; reclutamiento, selección, hunting y evaluaciones psicolaborales. También publica servicios de ExproFacility (limpieza y mantención), ExproSecurity (seguridad física, monitoreo y consultoría), ExproPay (nómina) y GrupoExpro Technology: Staffing TI, Células Ágiles, Mesas de Ayuda IA y Application Management Services. Declara cobertura de estos servicios en las 16 regiones de Chile. Para prospección, priorizar señales de contratación, reemplazos, temporadas de alta demanda y externalización, además de solicitudes comerciales públicas y privadas. Una oferta laboral es una señal, no prueba de compra externa. El catálogo publicado no acredita por sí solo contratos de experiencia, disponibilidad, certificaciones vigentes o elegibilidad en una licitación. Fuentes oficiales consultadas el 13-10-2026: https://grupoexpro.com/portfolio/servicios-transitorios/ ; https://grupoexpro.com/portfolio/servicios-outsourcing/ ; https://grupoexpro.com/portfolio/seleccion-de-personal/ ; https://grupoexpro.com/portfolio/servicios-ti-soluciones-ti-que-escalan-contigo/ ; https://grupoexpro.com/portfolio/exprofacility-nos-preocupamos-de-tu-entorno/ ; https://grupoexpro.com/portfolio/exprosecurity-tu-tranquilidad-nuestra-prioridad/ ; https://grupoexpro.com/portfolio/expropay-externalizacion-de-nomina-precisa-y-sin-friccion/ .",
+        "services": [
+          "Servicios Transitorios (EST): reemplazos y refuerzos de dotación",
+          "Outsourcing/BPO de atención al cliente, back office y digitalización",
+          "Outsourcing logístico: inventario, bodega, recepción, despacho, logística reversa, packing y picking",
+          "Outsourcing de producción y maquila",
+          "Reclutamiento, selección, hunting y mapeo de mercados",
+          "Evaluaciones psicolaborales del ecosistema PSOL",
+          "Staffing TI",
+          "Células ágiles para proyectos tecnológicos",
+          "Mesas de ayuda TI con IA",
+          "Application Management Services (AMS)",
+          "ExproFacility: limpieza, mantención y gestión de instalaciones",
+          "ExproSecurity: seguridad física, monitoreo y consultoría",
+          "ExproPay: externalización de nómina"
+        ],
+        "territories": ["Chile"],
+        "exclusions": [
+          "No atribuir a GrupoExpro productos, métricas o experiencia personal de YAGO, AXIS o SADT.",
+          "No asumir cumplimiento de bases, certificados o capacidad disponible solo porque un servicio figure en la web.",
+          "Solicitudes particulares de empleo y promoción de proveedores no prueban una necesidad de compra de una empresa.",
+          "Venta aislada de bienes o equipos sin servicio relacionado: revisar encaje en vez de asumir que pertenece al catálogo."
+        ],
+        "priority": "hiring",
+        "automation": true,
+        "hour": 8
+      },
+      "criteria": {
+        "roles": ["operario de bodega", "operario de producción", "bodeguero", "reponedor", "cajero", "vendedor", "promotor", "operador de grúa", "conductor", "supervisor de operaciones", "analista de remuneraciones", "ejecutivo de call center", "administrativo", "auxiliar de aseo", "guardia de seguridad", "TENS", "enfermero", "desarrollador", "analista QA", "soporte TI"],
+        "keywords": ["servicios transitorios", "outsourcing", "selección de personal", "servicios TI", "aseo", "seguridad"],
+        "postQueries": [
+          "(\"buscamos proveedor\" OR \"recomendaciones\") AND (outsourcing OR \"servicios transitorios\")",
+          "(\"necesitamos\" OR \"buscamos\") AND (\"personal temporal\" OR \"externalizar nómina\")",
+          "(\"buscamos proveedor\" OR \"licitación\") AND (\"servicios TI\" OR limpieza OR seguridad)"
+        ],
+        "decisionMakerTitles": ["Gerente de Recursos Humanos", "Gerente de Personas", "Jefe de Selección", "Gerente de Operaciones", "Jefe de Logística", "Gerente de Administración y Finanzas", "Jefe de Compras", "Gerente de Tecnología", "Jefe de Servicios Generales", "Gerente de Seguridad"]
+      },
+      "research": {
+        "identityBasis": "Dominio corporativo grupoexpro.com, contacto comercial del mismo dominio y enlace oficial a PSOL en la página de inicio.",
+        "published": [
+          {"topic": "EST y cobertura", "url": "https://grupoexpro.com/portfolio/servicios-transitorios/", "quote": "Nuestros Servicios Transitorios están disponibles para empresas de distintas industrias y sectores, con cobertura en las 16 regiones de Chile."},
+          {"topic": "BPO", "url": "https://grupoexpro.com/portfolio/servicios-outsourcing/", "quote": "Nuestro servicio de outsourcing de procesos está diseñado para delegar funciones no centrales a un socio experto"},
+          {"topic": "Selección", "url": "https://grupoexpro.com/portfolio/seleccion-de-personal/", "quote": "Reclutamos, seleccionamos, y evaluamos"},
+          {"topic": "TI", "url": "https://grupoexpro.com/portfolio/servicios-ti-soluciones-ti-que-escalan-contigo/", "quote": "La división GrupoExpro Technology integra talento especializado, metodologías ágiles y herramientas avanzadas"},
+          {"topic": "Facility", "url": "https://grupoexpro.com/portfolio/exprofacility-nos-preocupamos-de-tu-entorno/", "quote": "En ExproFacility entregamos servicios de Facility Management para empresas, integrando soluciones de limpieza, mantención y gestión de instalaciones para múltiples industrias."},
+          {"topic": "Seguridad", "url": "https://grupoexpro.com/portfolio/exprosecurity-tu-tranquilidad-nuestra-prioridad/", "quote": "Recursos humanos especializados."},
+          {"topic": "Nómina", "url": "https://grupoexpro.com/portfolio/expropay-externalizacion-de-nomina-precisa-y-sin-friccion/", "quote": "ExproPay es un servicio completo de payroll diseñado para organizaciones de 100 a 500 colaboradores"}
+        ],
+        "inferred": [
+          "Audiencia de prospección: responsables de RR.HH., operaciones, logística, compras, finanzas, TI y servicios generales según el servicio.",
+          "Señales útiles: contratación recurrente, reemplazos, temporada alta, expansión operativa y búsqueda explícita de proveedores; el encaje debe evaluarse por caso.",
+          "Cargos, palabras y consultas son criterios operativos inferidos del catálogo publicado, no textos de una licitación ni intención de compra confirmada."
+        ],
+        "unknown": ["Precios propios", "Disponibilidad de equipos y dotación", "Contratos certificables para cada licitación", "Vigencia y alcance documental de certificaciones", "Territorios y condiciones específicos de cada propuesta"],
+        "authorization": "Solicitud explícita del dueño de usar información pública e inferir criterios."
+      }
+    },
+    {
+      "workspace": "PSOL",
+      "website": "https://psol-latam.com/",
+      "context": {
+        "offer": "PSOL ofrece una plataforma de evaluaciones psicolaborales online para procesos de selección de personas. Su sitio publica informes de competencias, personalidad, habilidades específicas, rendimiento intelectual y personalidad comercial. El flujo consiste en crear cargos y seleccionar tests, invitar candidatos mediante un código y revisar informes generados e interpretados automáticamente. Publica configuración de reportes y ranking; su artículo de selección masiva describe ingreso de datos y CV por el candidato, información centralizada y colaboración con accesos por rol. También declara captura de imágenes y análisis de expresiones durante la evaluación; estas funciones publicadas no equivalen a una validación independiente de precisión o validez clínica. Para prospección, priorizar publicaciones de empresas que buscan evaluaciones, tests o herramientas de selección, y complementar con señales de contratación y selección masiva. Retail, logística, tecnología y seguridad aparecen como áreas de aplicación en su blog. Chile es el mercado inicial propuesto a partir del contacto chileno y el contexto comercial, no una afirmación de habilitación en todos los países de LATAM. Fuentes oficiales consultadas el 13-10-2026: https://psol-latam.com/ ; https://psol-latam.com/2025/07/04/seleccion-masiva-3-desafios-clave/ ; https://psol-latam.com/2025/01/09/evaluaciones-psicologicas-en-linea-6-2-2-2-2-2-2-2/ . GrupoExpro enlaza esta plataforma desde https://grupoexpro.com/ .",
+        "services": [
+          "Evaluaciones psicolaborales online",
+          "Tests e informes de competencias, personalidad y habilidades específicas",
+          "Evaluación de rendimiento intelectual y personalidad comercial",
+          "Configuración de cargos, baterías de tests e invitación de candidatos",
+          "Generación e interpretación automática de informes y configuración de reportes",
+          "Panel para buscar, filtrar y comparar candidatos",
+          "Gestión colaborativa por roles y carga de datos/CV por el candidato",
+          "Captura de imágenes y métricas de expresiones durante la evaluación, según declaración pública del sitio"
+        ],
+        "territories": ["Chile"],
+        "exclusions": [
+          "No atribuir a PSOL servicios de provisión de personal, aseo, seguridad física, nómina o desarrollo a medida solo por pertenecer al ecosistema GrupoExpro.",
+          "No equiparar evaluaciones psicolaborales con diagnósticos clínicos, exámenes médicos o certificaciones no documentadas.",
+          "No inventar porcentajes de mejora, certificaciones, integraciones ATS o precios que no se hayan verificado.",
+          "Solicitudes individuales de empleo y publicaciones promocionales de proveedores no acreditan compra empresarial. Las consultoras de selección pueden ser clientes."
+        ],
+        "priority": "posts",
+        "automation": false,
+        "hour": 8
+      },
+      "criteria": {
+        "roles": ["analista de selección", "reclutador", "psicólogo laboral", "jefe de selección", "talent acquisition", "gerente de personas", "recruitment manager", "analista de recursos humanos"],
+        "keywords": ["evaluaciones psicolaborales", "test psicolaboral", "evaluación por competencias", "selección de personal", "evaluación psicométrica", "software de evaluación"],
+        "postQueries": [
+          "(\"buscamos proveedor\" OR \"recomendaciones\") AND (\"evaluaciones psicolaborales\" OR \"tests psicométricos\")",
+          "(\"buscamos\" OR \"necesitamos\") AND (\"plataforma de evaluación\" OR \"software de selección\")",
+          "(\"selección masiva\" OR \"evaluación por competencias\") AND (\"proveedor\" OR \"herramienta\")"
+        ],
+        "decisionMakerTitles": ["Gerente de Recursos Humanos", "Gerente de Personas", "Jefe de Selección", "Talent Acquisition Manager", "Recruitment Manager", "Director de Recursos Humanos", "Psicólogo Organizacional", "Jefe de Desarrollo Organizacional", "Socio de Consultora de Selección"]
+      },
+      "research": {
+        "identityBasis": "GrupoExpro enlaza directamente psol-latam.com; psol.cl redirige al mismo sitio, con contacto comercial@psol-latam.com y enlace corporativo LinkedIn PSOL LATAM.",
+        "published": [
+          {"topic": "Evaluaciones", "url": "https://psol-latam.com/", "quote": "Entregamos a nuestros clientes informes completos de competencias, personalidad, habilidades específicas, rendimiento intelectual, personalidad comercial y otras dimensiones de sus candidatos."},
+          {"topic": "Informes", "url": "https://psol-latam.com/", "quote": "Accede a informes detallados generados e interpretados automáticamente por PSOL."},
+          {"topic": "Selección masiva y colaboración", "url": "https://psol-latam.com/2025/07/04/seleccion-masiva-3-desafios-clave/", "quote": "puedes asignar accesos según el rol de cada integrante de tu equipo y trabajar en conjunto desde distintos puntos o áreas."},
+          {"topic": "Datos del candidato", "url": "https://psol-latam.com/2025/07/04/seleccion-masiva-3-desafios-clave/", "quote": "Nuestra plataforma delega el ingreso de datos al propio candidato, quien completa su información directamente en el sistema antes de realizar el test."},
+          {"topic": "Aplicaciones sectoriales", "url": "https://psol-latam.com/2025/01/09/evaluaciones-psicologicas-en-linea-6-2-2-2-2-2-2-2/", "quote": "La flexibilidad y adaptabilidad de PSOL permiten que sus soluciones sean útiles en una amplia variedad de sectores y áreas de una empresa."}
+        ],
+        "inferred": [
+          "Audiencia: equipos internos de selección y talento, RR.HH. y consultoras con procesos de evaluación; no excluir agencias por categoría.",
+          "Señales de oportunidad: búsqueda explícita de un proveedor/plataforma, selección masiva y necesidad de comparar candidatos; una vacante de reclutador no prueba compra de PSOL.",
+          "Chile es el foco inicial propuesto. Los cargos y consultas son criterios inferidos, no afirmaciones sobre clientes actuales o intención de compra."
+        ],
+        "unknown": ["Precios contractuales", "Alcance efectivo de cada plan", "Integraciones ATS/ERP", "Documentación de validez o certificación de los tests", "Disponibilidad y condiciones fuera de Chile"],
+        "authorization": "Solicitud explícita del dueño de usar información pública e inferir criterios.",
+        "dailyAutomationPending": "El aprobador de plataforma no pertenece al workspace PSOL y el administrador PSOL tiene email sin confirmar. Búsqueda diaria pausada hasta aprobación de un administrador del workspace con acceso confirmado."
+      }
+    }
+  ]
+}
