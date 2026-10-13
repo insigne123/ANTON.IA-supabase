@@ -48,6 +48,12 @@ El descargador automático procesa documentos y enlaces de adjuntos públicos de
 
 La búsqueda de decisores propaga un ID explícito y verificado; observaciones del BFF permiten vincular IDs proveedor a contactos realmente guardados. Historial de dispatches confirmados/respuestas se presenta como historial del contacto y puede ser anterior a la oportunidad; no se atribuye automáticamente a esta oportunidad. La atribución de todos los envíos LinkedIn/reuniones a oportunidad necesita ampliar los eventos originales antes de reportarse como exhaustiva.
 
+### Piloto documental real · 13 oct 2026
+
+Caso autorizado `1057049-332-LR26`, sin escrituras productivas, contacto o postulación. Navegación pública normal: ficha, siete formularios Word y 23 preguntas con sus 23 respuestas. El inventario general devuelve403 tras su validación reCAPTCHA; no se intenta saltarla. Se verificó también la descarga mediante los formularios WebForms públicos: siete binarios con el mismo SHA256 que la navegación normal. Se añade ese lector específico y el foro público al expediente, usando exclusivamente una sesión anónima propia y operaciones de lectura fijadas; no requiere navegador desatendido ni cookies del usuario. Bases completas/modificaciones no quedan certificadas. HTML de acceso denegado no cuenta como anexo.
+
+El foro aporta dotación9 (3 analistas/implementadores,2backend,2frontend,2DevOps), turnosT8/T6/T4/T2 con precio unitario por turno, equipamiento provisto por el hospital y ausencia de proceso anterior según la respuesta publicada. Los formularios incluyen una inconsistencia de título en N°5 que debe conservarse y aclararse. Al corte del piloto la licitación está cerrada; la ficha muestra426reclamos de los últimos12meses, distinto del snapshot histórico del PDF. La exportación API muestra otra cifra sin período equivalente: no mezclar esas métricas ni inferir probabilidad de atraso. Estos datos son del caso, no reglas universales del módulo.
+
 ## Validación
 
 Pruebas sin `.env.local`, proveedores o escrituras productivas: unitarias de permisos puros, identidad/citas, calendarios DST, precios/cache, finanzas; SQL real PGlite de asignación/aislamiento/notificaciones/revocación, leases/reservas/replay/caps, RLS/Storage; pgTAP en CI sobre el stack aislado. Revisión DOM/renderizada adicional con APIs sintéticas en claro/oscuro y móvil/escritorio. El piloto pagado necesita muestra, presupuesto y esquema aprobados antes de activación remota.
