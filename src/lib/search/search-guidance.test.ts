@@ -34,11 +34,11 @@ test('saving says where people went and offers the one next step', () => {
     href: '/saved/leads/enriched', actionLabel: 'Escribirles' });
   const mixed = savedLeadsToast({ withContact: 1, withoutContact: 2, duplicates: 1 });
   assert.equal(mixed.title, 'Guardaste 3 contactos');
-  assert.match(mixed.description, /1 contacto con correo o teléfono[\s\S]*2 contactos sin correo: complétalos en «Por completar»\. 1 ya estaba guardado\./);
+  assert.match(mixed.description, /1 contacto con correo o teléfono[\s\S]*2 contactos sin correo: búscalo desde «Por escribir»\. 1 ya estaba guardado\./);
   assert.equal(mixed.href, '/saved/leads/enriched');
   const withoutEmail = savedLeadsToast({ withContact: 0, withoutContact: 2, duplicates: 0 });
-  assert.equal(withoutEmail.href, '/saved/leads');
-  assert.equal(withoutEmail.actionLabel, 'Completar correos');
+  assert.equal(withoutEmail.href, '/saved/leads/enriched');
+  assert.equal(withoutEmail.actionLabel, 'Buscar sus correos');
   assert.equal(savedLeadsToast({ withContact: 0, withoutContact: 0, duplicates: 4 }).title, 'Ya tenías estos contactos');
 });
 

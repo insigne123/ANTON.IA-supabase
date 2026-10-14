@@ -71,7 +71,7 @@ export function AskHelp({ sectionId, onNavigate, className }: {
           value={question}
           maxLength={MAX}
           rows={3}
-          placeholder="Ej.: ¿Por qué un contacto pasó de «Por completar» a «Por escribir»?"
+          placeholder="Ej.: ¿Cómo busco el correo de un contacto guardado?"
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {

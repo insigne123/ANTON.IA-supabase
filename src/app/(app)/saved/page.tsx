@@ -1,5 +1,5 @@
 
 import { redirect } from 'next/navigation';
 export default function SavedIndex() {
-  redirect('/saved/leads');
+  redirect('/saved/leads/enriched');
 }

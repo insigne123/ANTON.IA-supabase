@@ -66,7 +66,7 @@ test('screen guides are short, unique, cover the main screens and point at ancho
     }
   }
   assert.equal(pageGuideFor('/search')?.id, 'search');
-  assert.equal(pageGuideFor('/saved/leads')?.id, 'saved');
+  assert.equal(pageGuideFor('/saved/leads'), null); // «Por completar» is gone: the address redirects to «Por escribir».
   assert.equal(pageGuideFor('/saved/leads/enriched')?.id, 'enriched');
   assert.equal(pageGuideFor('/contacted')?.id, 'conversations');
   assert.equal(pageGuideFor('/contacted/replied'), null); // Retired: the address redirects to /contacted?view=reply.
@@ -88,7 +88,7 @@ test('the tour walks every main screen, in the order of the work, and ends where
   const { onTourRoute, pageGuidesInTour } = await import('./product-tour');
   // v4: only the path to a first email; Conversaciones, Campañas and Pipeline have their own guide, offered on the first visit.
   assert.deepEqual(productTourSteps(false).map((step) => step.route || step.target), [
-    '/dashboard', '/dashboard', '/profile', '/connections', '/search', '/saved/leads',
+    '/dashboard', '/dashboard', '/profile', '/connections', '/search',
     '/saved/leads/enriched', '/saved/leads/enriched', 'page-help', 'help-center',
   ]);
   assert.ok(PRODUCT_TOUR_VERSION >= 4, 'the new tour is offered again to new accounts');
@@ -112,7 +112,7 @@ test('the tour walks every main screen, in the order of the work, and ends where
   assert.equal(onTourRoute('/search/', '/search'), true);
   assert.equal(onTourRoute('/search?mode=filters', '/search'), true);
   assert.equal(onTourRoute('/saved/leads/enriched', '/saved/leads'), false);
-  assert.deepEqual(pageGuidesInTour().sort(), ['connections', 'enriched', 'home', 'profile', 'saved', 'search']);
+  assert.deepEqual(pageGuidesInTour().sort(), ['connections', 'enriched', 'home', 'profile', 'search']);
 });
 
 test('the videos the tour offers exist, one per module of the path', async () => {

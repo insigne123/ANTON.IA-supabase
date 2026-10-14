@@ -44,8 +44,8 @@ export function appendTerm(list: string, term: string) {
   return [...items, term.trim()].join(', ');
 }
 
-/** Where to act on a recommended contact: «Por escribir» to write, «Por completar» to find what is missing. */
+/** Where to act on a recommended contact: «Por escribir», to write or to find what is missing. */
 export function recommendationLink(item: { list?: 'por_escribir' | 'por_completar'; missing: string[] }) {
   if (item.list === 'por_escribir') return { href: '/saved/leads/enriched', label: item.missing.includes('buscar su correo') ? 'Buscar correo' : 'Escribir' };
-  return { href: '/saved/leads', label: item.missing.includes('buscar su correo') ? 'Buscar correo' : 'Abrir' };
+  return { href: '/saved/leads/enriched', label: item.missing.includes('buscar su correo') ? 'Buscar correo' : 'Abrir' };
 }

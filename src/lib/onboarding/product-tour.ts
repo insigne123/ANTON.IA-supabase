@@ -48,8 +48,6 @@ export const PRODUCT_TOUR_STEPS: ProductTourStep[] = [
     body: 'Gmail u Outlook: los correos salen desde tu cuenta y las respuestas vuelven solas a la app.' },
   { id: 'search-starters', target: 'search-starters', route: '/search', section: 'Buscar prospectos', title: 'Parte de lo que vendes', video: 'buscar',
     body: 'Un punto de partida rellena cargos e industrias. Busca, marca a quienes te interesan y guárdalos.' },
-  { id: 'saved', target: 'saved-list', route: '/saved/leads', section: 'Por completar', title: 'Busca su correo', video: 'contactos',
-    body: 'Aquí llegan tus guardados sin correo. Selecciónalos y pulsa «Buscar correo»: pasan a «Por escribir».' },
   { id: 'enriched-research', target: 'enriched-research', route: '/saved/leads/enriched', section: 'Por escribir',
     title: 'Investiga antes de escribir',
     body: 'En «Por investigar», marca a quiénes y pulsa «Investigar»: la IA lee su empresa y su rol para que el correo no sea genérico.' },
@@ -119,12 +117,6 @@ export const PAGE_GUIDES: PageGuide[] = [
       body: 'Un punto de partida rellena cargos e industrias según lo que vendes. Puedes ajustarlos.' },
     { id: 'run', target: 'search-run', title: 'Busca y guarda',
       body: 'Primero eliges empresas y después personas. Marca a quienes te interesan y guárdalas.' },
-  ] },
-  { id: 'saved', title: 'Por completar', routes: /^\/saved\/leads\/?$/, steps: [
-    { id: 'list', target: 'saved-list', title: 'Contactos sin correo',
-      body: 'Selecciona a quienes quieras y busca su correo (usa créditos).' },
-    { id: 'enriched', target: 'saved-enriched-link', title: 'Los que tienen correo, aquí',
-      body: 'Al encontrar su correo pasan a «Por escribir». Desde ahí les escribes.' },
   ] },
   { id: 'enriched', title: 'Por escribir', routes: /^\/saved\/leads\/enriched\/?$/, steps: [
     { id: 'research', target: 'enriched-research', title: 'Investiga antes de escribir',

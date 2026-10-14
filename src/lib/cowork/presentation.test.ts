@@ -347,7 +347,7 @@ test('an approval says what happens and what does not, and where the proposal st
   assert.deepEqual(coworkProposalLink({ ...effect('campaign_create'), state: 'done' }), { href: '/campaigns', label: 'Ver campañas' });
   assert.equal(coworkProposalLink({ ...effect('campaign_create'), state: 'running' }), null);
   assert.equal(coworkProposalLink({ ...effect('code_execute'), state: 'done' }), null);
-  assert.deepEqual(coworkProposalLink({ ...effect('contacts_import'), state: 'done' }), { href: '/saved/leads', label: 'Ver tus contactos' });
+  assert.deepEqual(coworkProposalLink({ ...effect('contacts_import'), state: 'done' }), { href: '/saved/leads/enriched', label: 'Ver tus contactos' });
   // A reply sent in a thread is seen where the conversation lives, and the card says it goes out only once approved.
   assert.deepEqual(coworkProposalLink({ ...effect('reply_thread'), state: 'done' }), { href: '/contacted', label: 'Ver en Contactados' });
   assert.equal(coworkProposalLink({ ...effect('reply_thread'), state: 'pending' }), null);

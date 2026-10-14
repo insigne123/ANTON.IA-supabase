@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import type { EnrichedLead, LeadResearchReport } from '@/lib/types';
+import type { EnrichedLead, Lead, LeadResearchReport } from '@/lib/types';
 import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/lead-research-storage';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
@@ -19,6 +19,8 @@ import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, A
 import { EmptyState } from '@/components/ui/empty-state';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
+import { CompleteContactsDialog } from '@/components/enrichment/complete-contacts-dialog';
+import { completeSavedContacts, completionSummary, type ContactLookup } from '@/lib/leads-workspace/complete-contacts';
 import { supabase } from '@/lib/supabase';
 import { hasMeaningfulLeadResearch } from '@/lib/lead-research';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -86,6 +88,10 @@ export default function EnrichedLeadsClient() {
   const confirm = useConfirm();
 
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
+  // Saved contacts still without email (none found yet, or saved without looking): they wait here, at a click from a lookup.
+  const [withoutEmail, setWithoutEmail] = useState<Lead[]>([]);
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
@@ -411,6 +417,20 @@ export default function EnrichedLeadsClient() {
     }
   }, []);
 
+  async function handleCompleteContacts(lookups: Record<string, ContactLookup>) {
+    setCompleting(true);
+    try {
+      const completion = await completeSavedContacts(withoutEmail, lookups);
+      toast(completionSummary(completion));
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'No pudimos buscar sus datos', description: error instanceof Error ? error.message : 'Intenta de nuevo en unos minutos.' });
+    } finally {
+      setCompleting(false);
+      setCompleteOpen(false);
+      void loadDataRef.current();
+    }
+  }
+
   const loadData = useCallback(async () => {
     const requestId = ++loadDataRequestIdRef.current;
     setLoadError('');
@@ -424,6 +444,7 @@ export default function EnrichedLeadsClient() {
 
       if (loadDataRequestIdRef.current !== requestId) return;
       setEnriched(patched);
+      setWithoutEmail(saved.filter(lead => !String(lead.email || '').includes('@')));
       setReports(getLeadReports());
       await loadNativeResearchStatuses(patched);
     } catch (error) {
@@ -1167,13 +1188,21 @@ export default function EnrichedLeadsClient() {
             <Button asChild variant="ghost" className="w-full sm:w-auto">
               <Link href="/leads/import?from=por-escribir"><Upload className="h-4 w-4" aria-hidden="true" />Importar lista</Link>
             </Button>
-            <Button variant="outline" className="w-full sm:w-auto" onClick={() => router.push('/saved/leads')}>
-              Ir a «Por completar»
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Button>
           </>
         )}
       />
+
+      {withoutEmail.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/30 px-4 py-3">
+          <p className="min-w-0 text-sm">
+            <span className="font-medium">{withoutEmail.length} {withoutEmail.length === 1 ? 'contacto guardado aún no tiene' : 'contactos guardados aún no tienen'} correo.</span>{' '}
+            <span className="text-muted-foreground">Búscalo y {withoutEmail.length === 1 ? 'aparecerá' : 'aparecerán'} aquí, listos para escribirles.</span>
+          </p>
+          <Button size="sm" variant="outline" onClick={() => setCompleteOpen(true)}>
+            <Search className="h-4 w-4" aria-hidden="true" />Buscar sus datos
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtrar por etapa">
         {stageChips.map((option) => {
@@ -1374,9 +1403,9 @@ export default function EnrichedLeadsClient() {
                 icon={enriched.length === 0 ? MailCheck : Search}
                 title={enriched.length === 0 ? 'Aún no tienes contactos con correo' : 'No hay contactos con estos filtros'}
                 description={enriched.length === 0
-                  ? 'Busca el correo de tus contactos en «Por completar». Cuando lo encontremos, aparecerán aquí listos para escribirles.'
+                  ? 'Busca prospectos y guarda los que te interesen: al guardar te ofrecemos buscar su correo y llegan aquí listos para escribirles.'
                   : 'Cambia la etapa, ajusta la búsqueda o limpia los filtros para volver a ver la lista.'}
-                action={<Button size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/saved/leads') : clearFilters()}>{enriched.length === 0 ? 'Ir a «Por completar»' : 'Limpiar filtros'}</Button>}
+                action={<Button size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/search') : clearFilters()}>{enriched.length === 0 ? 'Buscar prospectos' : 'Limpiar filtros'}</Button>}
               />
             ) : !loadError ? (
               <>
@@ -1895,6 +1924,16 @@ export default function EnrichedLeadsClient() {
         onConfirm={handleConfirmEnrich}
         loading={enriching}
         leadCount={leadsToEnrich.length}
+      />
+
+      <CompleteContactsDialog
+        open={completeOpen}
+        onOpenChange={setCompleteOpen}
+        people={withoutEmail.map(lead => ({ id: lead.id, name: lead.name, title: lead.title, company: lead.company }))}
+        onConfirm={lookups => void handleCompleteContacts(lookups)}
+        onSkip={() => setCompleteOpen(false)}
+        skipLabel="Ahora no"
+        loading={completing}
       />
 
     </div>

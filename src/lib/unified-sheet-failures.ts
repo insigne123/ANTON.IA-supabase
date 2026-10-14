@@ -3,7 +3,7 @@
 export type UnifiedSource = 'saved' | 'enriched' | 'opportunities' | 'contacted' | 'custom';
 
 export const UNIFIED_SOURCE_LABEL: Record<UnifiedSource, string> = {
-  saved: '«Por completar»',
+  saved: 'los contactos sin correo',
   enriched: '«Por escribir»',
   opportunities: 'las oportunidades guardadas',
   contacted: 'las conversaciones',

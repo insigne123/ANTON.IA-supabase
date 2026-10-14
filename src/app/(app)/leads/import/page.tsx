@@ -30,7 +30,7 @@ const STEPS: Array<{ id: Exclude<Step, 'done'>; label: string }> = [
 const ORDER: Step[] = ['upload', 'map', 'review', 'done'];
 /** «Volver» goes back to where the import was opened (Plan 11): Tabla de datos unless the link says otherwise. */
 const ORIGINS: Record<string, { href: string; label: string }> = {
-    'por-completar': { href: '/saved/leads', label: 'Por completar' },
+    'por-completar': { href: '/saved/leads/enriched', label: 'Por escribir' },
     'por-escribir': { href: '/saved/leads/enriched', label: 'Por escribir' },
     buscar: { href: '/search', label: 'Buscar prospectos' },
 };
@@ -105,7 +105,7 @@ export default function ImportLeadsPage() {
         <div className="mx-auto max-w-5xl space-y-6 pb-20">
             <PageHeader
                 title="Importar contactos"
-                description="Sube tu lista en Excel o CSV: quienes traen correo o teléfono quedan en «Por escribir» y el resto en «Por completar», donde puedes buscar su correo."
+                description="Sube tu lista en Excel o CSV: todos quedan en «Por escribir», y a quienes no traen correo se lo buscas desde ahí."
                 back={back}
             />
 
@@ -178,16 +178,13 @@ export default function ImportLeadsPage() {
                                     <h2 id="import-done-title" className="text-lg font-semibold">{summary.title}</h2>
                                     <ul className="mt-2 space-y-1 text-sm leading-6 text-foreground/80">
                                         {result.porEscribir > 0 ? <li><strong>{result.porEscribir}</strong> en «Por escribir»: tienen correo o teléfono, listos para investigar y escribirles.</li> : null}
-                                        {result.porCompletar > 0 ? <li><strong>{result.porCompletar}</strong> en «Por completar»: busca su correo desde ahí.</li> : null}
+                                        {result.porCompletar > 0 ? <li><strong>{result.porCompletar}</strong> sin correo: esperan al final de «Por escribir», donde puedes buscarlo.</li> : null}
                                         {summary.notes.map((note) => <li key={note}>{note}</li>)}
                                     </ul>
                                 </div>
                             </div>
                             <div className="flex flex-col gap-2 sm:flex-row">
-                                {result.porEscribir > 0 ? <Button asChild><Link href="/saved/leads/enriched">Ir a Por escribir</Link></Button> : null}
-                                {result.porCompletar > 0 ? (
-                                    <Button asChild variant={result.porEscribir > 0 ? 'outline' : 'default'}><Link href="/saved/leads">Ir a Por completar</Link></Button>
-                                ) : null}
+                                <Button asChild><Link href="/saved/leads/enriched">Ir a Por escribir</Link></Button>
                                 <Button type="button" variant="ghost" onClick={restart}>Importar otro archivo</Button>
                             </div>
                         </section>

@@ -26,7 +26,7 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'perfil', title: 'Perfil', summary: 'Cuenta qué vendes: tu oferta y tu cliente ideal guían la búsqueda y los correos.', seconds: 48, sections: ['perfil'] },
   { id: 'buscar', title: 'Buscar prospectos', summary: 'De un punto de partida a las empresas, sus contactos y guardarlos.', seconds: 62, sections: ['buscar'] },
   { id: 'importar', title: 'Importar tu lista', summary: 'Sube tu Excel o CSV, revisa las columnas y los repetidos, e impórtala.', seconds: 42, sections: ['tabla', 'por-completar'] },
-  { id: 'contactos', title: 'Por completar y Por escribir', summary: 'Busca sus correos, investiga a quienes eliges y escríbeles.', seconds: 61, sections: ['por-completar', 'por-escribir', 'correo'] },
+  { id: 'contactos', title: 'Tus contactos', summary: 'Busca sus correos, investiga a quienes eliges y escríbeles.', seconds: 61, sections: ['por-completar', 'por-escribir', 'correo'] },
   { id: 'firmas', title: 'Firmas y estilo', summary: 'Arma tu firma y crea estilos de correo que la IA usa al escribir.', seconds: 70, sections: ['firmas', 'correo'] },
   { id: 'campanas', title: 'Campañas', summary: 'Elige a quiénes, escribe el correo y los seguimientos, revisa y aprueba.', seconds: 115, sections: ['campanas'] },
   { id: 'conversaciones', title: 'Conversaciones', summary: 'Quién te respondió primero, el hilo completo y tu respuesta en el mismo hilo.', seconds: 53, sections: ['conversaciones'] },

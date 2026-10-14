@@ -60,6 +60,8 @@ import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
 import { DuplicateSavedSearchNameError, savedSearchesService } from '@/lib/services/saved-searches-service';
 import { getLeadsFinderAvailability, LeadsFinderClientError, searchWithLeadsFinder } from '@/lib/leads-finder-client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { CompleteContactsDialog } from '@/components/enrichment/complete-contacts-dialog';
+import { completeSavedContacts, completionSummary, type ContactLookup } from '@/lib/leads-workspace/complete-contacts';
 import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
@@ -791,6 +793,9 @@ export default function SearchPage() {
   };
 
   const [isSaving, setIsSaving] = useState(false);
+  // Saved contacts without email or phone: the step that looks them up before «Por escribir».
+  const [toComplete, setToComplete] = useState<Lead[]>([]);
+  const [completing, setCompleting] = useState(false);
   const [profileSearchNotice, setProfileSearchNotice] = useState<null | {
     tone: 'info' | 'warning';
     title: string;
@@ -833,6 +838,10 @@ export default function SearchPage() {
       // Actualizar estado local de guardados
       const all = await supabaseService.getLeads();
       setSavedIds(new Set(all.map(l => l.id)));
+      // The saved rows of who still needs an email (their id may change on save): the next step looks them up.
+      const savedKey = (lead: Lead) => `${lead.name || ''}|${lead.company || ''}|${lead.title || ''}`.toLowerCase();
+      const pendingKeys = new Set(withoutDirectContactData.map(savedKey));
+      const pending = all.filter(lead => pendingKeys.has(savedKey(lead)) && !String(lead.email || '').includes('@'));
       await refreshSavedApolloIds();
       if (opportunityOrigin.current) {
         try {
@@ -849,6 +858,13 @@ export default function SearchPage() {
         withDirectContactData.length > 0
           ? ' El teléfono sigue en camino y aparecerá solo.'
           : '';
+      setSelectedLeads(new Set());
+      if (pending.length > 0) {
+        // The email lookup is the next step, not another page: the dialog opens with what to look up for each one.
+        setToComplete(pending);
+        if (enrichedAdded > 0) toast({ title: `${enrichedAdded} ${enrichedAdded === 1 ? 'contacto pasó' : 'contactos pasaron'} a «Por escribir»`, description: `${enrichedAdded === 1 ? 'Ya tenía' : 'Ya tenían'} correo o teléfono.${phonePendingNote}` });
+        return;
+      }
       const saved = savedLeadsToast({ withContact: enrichedAdded, withoutContact: resSv.addedCount, duplicates: resSv.duplicateCount });
       toast({
         title: saved.title,
@@ -858,13 +874,40 @@ export default function SearchPage() {
         ) : undefined,
       });
 
-      setSelectedLeads(new Set());
     } catch (error) {
       console.error('Error saving leads:', error);
       toast({ variant: "destructive", title: "No pudimos guardar", description: "Los contactos no se guardaron. Intenta de nuevo en unos segundos." });
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleCompleteContacts = async (lookups: Record<string, ContactLookup>) => {
+    setCompleting(true);
+    try {
+      const completion = await completeSavedContacts(toComplete, lookups);
+      const summary = completionSummary(completion);
+      toast({
+        ...summary,
+        action: <ToastAction altText="Ver «Por escribir»" onClick={() => router.push('/saved/leads/enriched')}>Ver</ToastAction>,
+      });
+      setToComplete([]);
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'No pudimos buscar sus datos', description: `${error instanceof Error ? error.message : 'Intenta de nuevo en unos minutos.'} Quedaron guardados al final de «Por escribir».` });
+      setToComplete([]);
+    } finally {
+      setCompleting(false);
+    }
+  };
+
+  const skipCompleteContacts = () => {
+    const count = toComplete.length;
+    setToComplete([]);
+    toast({
+      title: `Guardaste ${count} ${count === 1 ? 'contacto' : 'contactos'} sin correo`,
+      description: 'Esperan al final de «Por escribir»; desde ahí puedes buscar sus datos cuando quieras.',
+      action: <ToastAction altText="Ver «Por escribir»" onClick={() => router.push('/saved/leads/enriched')}>Ver</ToastAction>,
+    });
   };
 
   const applySearchResult = (result: LeadSearchResponse, mode: SearchMode, reveal?: { revealEmail: boolean; revealPhone: boolean }) => {
@@ -1763,7 +1806,7 @@ export default function SearchPage() {
     <div role="note" className="rounded-2xl border border-border/60 bg-cw-accent-soft px-4 py-3 text-sm">
       <p className="font-medium text-foreground">Buscando con Leads Finder (prueba)</p>
       <p className="mt-0.5 text-foreground/70">
-        Primero encontramos empresas con Apollo; después buscamos los contactos con Leads Finder solo en las empresas que marcas. Los datos de contacto se completan desde «Por completar».
+        Primero encontramos empresas con Apollo; después buscamos los contactos con Leads Finder solo en las empresas que marcas. Los datos de contacto los eliges al guardar.
       </p>
       <p className="mt-1 text-foreground/70">Una consulta recupera hasta 100 contactos por empresa. «Traer más» abre otra parte de ese resultado, sin repetir la consulta. No es el total de contactos de la empresa.</p>
       {leadsFinderNotice?.notApplied.length ? (
@@ -2020,7 +2063,7 @@ export default function SearchPage() {
         </div>
       </div>
       <p className="text-xs leading-relaxed text-foreground/70">
-        La búsqueda no gasta créditos en correos: los buscas después, en «Por completar».
+        La búsqueda no gasta créditos en correos: al guardar eliges a quiénes buscárselos.
       </p>
     </div>
   );
@@ -2661,7 +2704,7 @@ export default function SearchPage() {
           {showLeadsBar ? (
             <ResultsActionBar
               label={`${selectedLeads.size} ${selectedLeads.size === 1 ? 'contacto seleccionado' : 'contactos seleccionados'}`}
-              hint="Con correo o teléfono van a «Por escribir»; sin correo, a «Por completar»."
+              hint="Van a «Por escribir». A quien no tenga correo te ofrecemos buscárselo al guardar."
             >
               <Button type="button" variant="ghost" onClick={() => setSelectedLeads(new Set())} disabled={isSaving}>Quitar selección</Button>
               <Button type="button" onClick={handleSaveSelectedLeads} disabled={isSaving}>
@@ -2672,6 +2715,15 @@ export default function SearchPage() {
           ) : null}
         </section>
       </div>
+
+      <CompleteContactsDialog
+        open={toComplete.length > 0}
+        onOpenChange={open => { if (!open) skipCompleteContacts(); }}
+        people={toComplete.map(lead => ({ id: lead.id, name: lead.name, title: lead.title, company: lead.company }))}
+        onConfirm={lookups => void handleCompleteContacts(lookups)}
+        onSkip={skipCompleteContacts}
+        loading={completing}
+      />
 
       <Dialog open={saveSearchOpen} onOpenChange={setSaveSearchOpen}>
         <DialogContent>
