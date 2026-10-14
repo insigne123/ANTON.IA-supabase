@@ -6,6 +6,16 @@ Filtros y Empresa siguen empresas → selección → contactos Apollo → Guarda
 
 Confirmado: **microworlds/leads-finder**, no code_crafter. Solicitar correo + teléfono, Apollo solo para faltantes. Hasta **100 contactos / US$1,50 por corrida** y **US$20 mensuales por workspace**, contando reservas inciertas, en calendario UTC. Al agotar presupuesto, falta de dominio confirmado, cache vencida o indisponibilidad, Apollo sigue operativo. El límite es de gasto de proveedor, no un cupo adicional cobrado a la persona.
 
+## Consumo · 14 oct 2026
+
+Las corridas de 100 contactos por empresa (con un tope de US$ 1,50 que el actor no respetaba en cantidad: llegó a cobrar 196 contactos por una corrida) consumieron el plan de Apify, que es de US$ 5 al mes y compartido con Oportunidades. Ahora se compra solo lo que puede usarse, y lo que no se compra se enriquece con Apollo como antes:
+
+- **Tamaño por búsqueda:** las personas que Apollo mostró sin contacto en caché, más la mitad (mínimo 20, máximo 100). Si Apollo mostró 12, se piden 20.
+- **Techo real por corrida:** `maxItems` = ese tamaño y `maxTotalChargeUsd` = contactos × precio del plan + arranque, más 10 %, en centavos (20 → US$ 0,07; 100 → US$ 0,34). `MICROWORLDS_LEAD_USD` cambia el precio si sube el plan.
+- **Sin compras repetidas:** si 4 de cada 5 personas mostradas ya están en caché, no se compra. Tampoco si una corrida completa sin filtros de cargo ni ubicación cubre la empresa en los últimos 30 días. Mismo dominio y filtros reutilizan la corrida aunque el tamaño cambie.
+- **Tope mensual por workspace:** `MICROWORLDS_MONTH_USD` (por defecto US$ 4, nunca más que los US$ 20 de la base), contando lo gastado y el techo de las corridas abiertas. Antes de arrancar, el worker revisa lo que queda del ciclo de Apify: si la corrida no cabe, o no se puede leer, no arranca y libera su reserva (`MIRROR_PLAN_LIMIT`).
+- **Medición:** `GET /api/cron/microworlds-search` con `x-internal-api-secret` devuelve, para este mes y el anterior, corridas, US$ gastados, contactos comprados, contactos servidos desde caché (con y sin teléfono) y US$ por contacto servido. Si ese costo supera lo que vale un crédito Apollo, conviene apagar `MICROWORLDS_HYBRID_ENABLED`.
+
 ## Búsqueda y trabajo durable
 
 - `/api/leads/search` devuelve únicamente las personas de Apollo. La selección de empresa contiene una firma ligada a actor/tenant/ID/domain; se valida antes de cuota. No se confía en un dominio arbitrario ni en checkpoints del navegador para autorizar trabajo externo.
@@ -41,7 +51,7 @@ La recuperación de un HTTP perdido termina solo la persistencia local del plan 
 
 ## Archivos y activación
 
-- `src/lib/server/microworlds/{contracts,search,fulfillment}.ts`.
+- `src/lib/server/microworlds/{contracts,search,fulfillment,usage}.ts`.
 - Integración: search BFF/company schema/client, enrich-apollo BFF y las dos listas de contactos.
 - `supabase/migrations/20261012090000_microworlds_private_search_jobs.sql`: cola, budget, cache, observaciones, privacidad, leases.
 - `supabase/migrations/20261012093000_hybrid_enrichment_accounting.sql`: planes/fulfillment y wrappers de callbacks/settlement. `enriched_leads.id` es text; no se asume UUID de columna por la forma habitual de IDs.

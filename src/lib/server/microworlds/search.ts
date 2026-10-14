@@ -2,15 +2,35 @@ import { encryptStoredToken, decryptStoredToken } from '@/lib/server/token-crypt
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { createHash } from 'node:crypto';
+import { isMaskedName } from '@/lib/lead-name';
 import { cacheHash, contactFromMicroworlds, chooseCachedContact, hybridEnabled, mirrorCriteria,
-  mirrorFingerprint, microworldsInput, MICROWORLDS_ACTOR, MICROWORLDS_RUN_USD, type MirrorCriteria,
-  type CachedContact, type ApolloIdentity } from './contracts';
+  mirrorFingerprint, microworldsInput, MICROWORLDS_ACTOR, MICROWORLDS_MAX_CONTACTS, type MirrorCriteria,
+  type CachedContact, type ApolloIdentity, coversAnySearch, mirrorLimit, monthCapUsd, runChargeUsd } from './contracts';
 
 type Db = {from(table:string):any;rpc(name:string,body:Record<string,unknown>):any};
 type Job = {id:string;organization_id:string;company_domain:string;criteria:MirrorCriteria;status:string;
   claim_token:string;provider_run_id:string|null;created_at:string;expires_at:string;lease_until:string};
 const now=()=>new Date().toISOString();
-/** Bounded short RPCs only, never await an actor from the visible search. */
+const month=()=>new Date().toISOString().slice(0,7)+'-01';
+const OPEN=['queued','submitting','running','unknown'];
+/** How many of the people shown already have a fresh cached contact. An unreadable cache counts as empty. */
+async function cachedAmong(db:Db,organizationId:string,domain:string,rows:Array<{fullName:string;linkedinUrl:string|null}>) {
+  if(!rows.length)return 0;
+  const result=await db.from('microworlds_contact_cache').select('profile_hash,full_name_hash').eq('organization_id',organizationId)
+    .eq('company_domain',domain).gt('expires_at',now()).limit(500);
+  if(result.error||!Array.isArray(result.data))return 0;
+  const profiles=new Set(result.data.map((row:any)=>row.profile_hash).filter(Boolean));
+  const names=new Set(result.data.map((row:any)=>row.full_name_hash).filter(Boolean));
+  try{return rows.filter(row=>row.linkedinUrl?profiles.has(cacheHash('profile',row.linkedinUrl,organizationId))
+    :Boolean(row.fullName)&&!isMaskedName(row.fullName)&&names.has(cacheHash('name',row.fullName,organizationId))).length;}catch{return 0;}
+}
+/** Why a search buys nothing: the cache already has its people, an earlier unfiltered run covers the company, or the month is spent. */
+export type MirrorSkip='cached'|'covered'|'month_cap';
+/**
+ * Bounded short RPCs only, never await an actor from the visible search. Buys only what the cache lacks: the people shown
+ * without a cached contact (plus margin), never a company an unfiltered run already brought, and never past the month cap.
+ * Whatever is not bought is enriched with Apollo as before, so quality does not depend on the mirror.
+ */
 export async function enqueueMirror(input:{organizationId:string;userId:string;criteria:MirrorCriteria;identities:ApolloIdentity[]},db:Db=getSupabaseAdminClient() as any) {
   if(!hybridEnabled())return null;
   const criteria=mirrorCriteria(input.criteria);
@@ -19,8 +39,27 @@ export async function enqueueMirror(input:{organizationId:string;userId:string;c
   }));
   if(rows.length){const stored=await db.rpc('record_apollo_search_observations_v1',{p_org:input.organizationId,p_user:input.userId,p_domain:criteria.domain,p_rows:rows,p_confirmed:false});
     if(stored.error)throw Error('MIRROR_OBSERVATION_UNAVAILABLE');}
+  const skip=(reason:MirrorSkip)=>{console.info('[mirror] not bought',{reason,domain:criteria.domain});return null;};
+  const uncovered=rows.length-await cachedAmong(db,input.organizationId,criteria.domain,rows);
+  // Four in five of the people shown already cached: the rest go to Apollo.
+  if(rows.length&&uncovered<=rows.length*0.2)return skip('cached');
+  const earlier=await db.from('microworlds_search_jobs').select('criteria').eq('organization_id',input.organizationId)
+    .eq('company_domain',criteria.domain).gt('expires_at',now()).in('status',['completed',...OPEN]).limit(20);
+  if(earlier.error)throw Error('MIRROR_QUEUE_UNAVAILABLE');
+  if((earlier.data||[]).some((job:any)=>{try{return coversAnySearch(mirrorCriteria(job.criteria));}catch{return false;}}))return skip('covered');
+  const sized={...criteria,limit:mirrorLimit(rows.length?uncovered:MICROWORLDS_MAX_CONTACTS)};
+  const period=month();
+  const [budget,open]=await Promise.all([
+    db.from('microworlds_search_budgets').select('spent_micro_usd').eq('organization_id',input.organizationId).eq('period',period).maybeSingle(),
+    db.from('microworlds_search_jobs').select('criteria').eq('organization_id',input.organizationId).eq('period',period).in('status',OPEN).limit(200),
+  ]);
+  if(budget.error||open.error)throw Error('MIRROR_BUDGET_UNAVAILABLE');
+  // Open runs count at their own ceiling; older jobs without a size, at the old 100.
+  const pending=(open.data||[]).reduce((sum:number,job:any)=>{
+    try{return sum+runChargeUsd(mirrorCriteria(job.criteria).limit??MICROWORLDS_MAX_CONTACTS);}catch{return sum+runChargeUsd(MICROWORLDS_MAX_CONTACTS);}},0);
+  if(Number(budget.data?.spent_micro_usd||0)/1e6+pending+runChargeUsd(sized.limit)>monthCapUsd())return skip('month_cap');
   const {data,error}=await db.rpc('enqueue_microworlds_search_v1',{p_org:input.organizationId,p_user:input.userId,
-    p_fingerprint:mirrorFingerprint(criteria),p_domain:criteria.domain,p_criteria:criteria});
+    p_fingerprint:mirrorFingerprint(sized),p_domain:criteria.domain,p_criteria:sized});
   if(error)throw Error('MIRROR_QUEUE_UNAVAILABLE');return data?.id?String(data.id):null;
 }
 
@@ -49,6 +88,12 @@ async function finishJob(db:Db,job:Job,status:'completed'|'failed'|'unknown',bil
     p_billed:billed===null?null:Math.ceil(billed*1000000),p_fetched:fetched,p_error:error||null});
   if(result.error||result.data!==true)throw Error('MIRROR_LEASE_LOST');
 }
+/** Whether the account's Apify plan still has `usd` left this cycle. Unreadable limits count as no room. */
+async function planHasRoom(http:(path:string)=>Promise<any>,usd:number) {
+  try{const data=(await http('/v2/users/me/limits')).data;
+    const max=Number(data?.limits?.maxMonthlyUsageUsd),used=Number(data?.current?.monthlyUsageUsd);
+    return Number.isFinite(max)&&Number.isFinite(used)&&max-used>=usd;}catch{return false;}
+}
 /** A worker tick starts once or polls an existing run. Never waits for completion,
  * never re-POSTs a submitting/unknown job, never logs provider messages/contacts. */
 export async function runMirrorWorker(input:{id?:string;limit?:number;db?:Db;fetch?:typeof fetch;token?:string}={}) {
@@ -62,7 +107,10 @@ export async function runMirrorWorker(input:{id?:string;limit?:number;db?:Db;fet
     try {
       if(job.status==='submitting') {
         const criteria=mirrorCriteria(job.criteria);if(criteria.domain!==job.company_domain)throw new ActorError(400,true);
-        const q=new URLSearchParams({timeout:'600',memory:'512',maxItems:'100',maxTotalChargeUsd:String(MICROWORLDS_RUN_USD),
+        const limit=criteria.limit??MICROWORLDS_MAX_CONTACTS,charge=runChargeUsd(limit);
+        // The Apify plan is shared with Opportunities: a run that does not fit in what is left this cycle is not started.
+        if(!await planHasRoom(http,charge)){await finishJob(db,job,'failed',0,0,'MIRROR_PLAN_LIMIT');processed++;continue;}
+        const q=new URLSearchParams({timeout:'600',memory:'512',maxItems:String(limit),maxTotalChargeUsd:String(charge),
           restartOnError:'false',forcePermissionLevel:'LIMITED_PERMISSIONS'});
         const created=(await http('/v2/acts/'+MICROWORLDS_ACTOR+'/runs?'+q,{...microworldsInput(criteria),file_name:'ANTON-mirror-'+job.id})).data;
         if(!created?.id||created.actId!=='heLL6fUofdPgRXZie')throw Error('MIRROR_RUN_IDENTITY_MISMATCH');
