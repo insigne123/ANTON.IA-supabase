@@ -31,13 +31,17 @@ const toolWords = (name: string) => TOOL_WORDS.find(([pattern]) => pattern.test(
 // card that said Gmail).
 const GOOGLE_SENDER = /\bGoogle\b(?=\s+(?:como|de)\s+remitente)|(?<=\b(?:desde|remitente:?|v[ií]a|con tu cuenta de|tu cuenta de)\s+)Google\b(?!\s+(?:Sheets|Drive|Calendar|Meet|Workspace|Ads|Maps|Analytics|Docs))/g;
 
+const STRAY_BRAND_TAIL = /(\p{Ll}{3,})\.IA\.(?=\s|$)/gu;
+
 export function polishCoworkText(text: string): string {
   return outsideCode(String(text || ''), chunk => chunk
     .replace(CODE_PATTERN, (_match, _wrap, code: string) => COWORK_GLOSSARY[code] || code)
     .replace(TOOL_NAME, (_match, _wrap, name: string) => toolWords(name))
     .replace(CODE_EMAIL, '$1')
     .replace(ID_IN_PARENS, '')
-    .replace(GOOGLE_SENDER, 'Gmail'));
+    .replace(GOOGLE_SENDER, 'Gmail')
+    // A brand's tail left after a word («podría ser pertinente.IA.», round 24): «ANTON.IA» stays.
+    .replace(STRAY_BRAND_TAIL, '$1.'));
 }
 
 /** A quick reply that leaves something for later («Sí, cuando lo guarde…»,
@@ -418,6 +422,15 @@ function namedYes(chip: CoworkSuggestion, question: string | null): CoworkSugges
 
 const nullIfEmpty = <T,>(items: T[]) => items.length ? items : null;
 
+/** A table of one row that the reply already tells («Pendientes de hoy» with the four names in one cell, round 24): it only repeats
+ * the text. Its longest cell's first two words in the reply are the sign. */
+function restatedRow(block: CoworkBlock, reply: string): boolean {
+  if (block.type !== 'table' || block.rows.length !== 1) return false;
+  const longest = [...block.rows[0]].sort((a, b) => b.length - a.length)[0] || '';
+  const lead = longest.match(/\p{L}+/gu)?.slice(0, 2).join(' ');
+  return Boolean(lead && lead.length >= 6 && new RegExp(`(?<!\\p{L})${lead.replace(/ /g, '\\s+')}(?!\\p{L})`, 'u').test(reply));
+}
+
 /** The reply as it is kept and read back (history, copies, exports): it ends
  * with the closing question, which also travels apart so the chat can show it
  * next to the quick replies. */
@@ -426,7 +439,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
 ): T & { question: string | null; blocks: CoworkBlock[] | null; suggestions: CoworkSuggestion[] | null; choices: CoworkChoices | null } {
   const suggestions = coworkSuggestions(answer.suggestions);
   const tabled = withTablesAsBlocks(polishCoworkText(answer.reply).trimEnd(), coworkBlocks(answer.blocks));
-  const blocks = tabled.blocks;
+  const blocks = tabled.blocks.filter(block => !restatedRow(block, tabled.reply));
   const question = coworkQuestion(answer.question);
   // Options answer the closing question, so they need one; with them, the question is picked, not tapped «sí».
   const choices = question ? coworkChoices(answer.choices) : null;
@@ -440,9 +453,19 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     // One closing question (rule 4): a reply that already ends asking something
     // else gives way to answer.question instead of stacking two questions. Only
     // the asking sentences go; what the paragraph said before them stays.
-    if (coworkSameLine(closing, question)) { /* already there */ }
-    else if (/\?\W*$/.test(closing) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(closing)) {
-      lines[last] = withoutTrailingQuestions(closing);
+    // The question already asked inside the reply, followed by what it means («¿Te preparo la campaña…? Queda guardada sin
+    // enviar.», round 24): it is asked once, at the end.
+    const inside = reply.indexOf(question.trim());
+    if (!coworkSameLine(closing, question) && inside >= 0) {
+      reply = (reply.slice(0, inside) + reply.slice(inside + question.trim().length)).replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
+      lines.splice(0, lines.length, ...reply.split('\n'));
+      last = lines.length - 1;
+      while (last >= 0 && !lines[last].trim()) last--;
+    }
+    const end = last >= 0 ? lines[last] : '';
+    if (coworkSameLine(end, question)) { /* already there */ }
+    else if (/\?\W*$/.test(end) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(end)) {
+      lines[last] = withoutTrailingQuestions(end);
       reply = [lines.join('\n').trimEnd(), question].filter(Boolean).join('\n\n');
     } else reply = `${reply}\n\n${question}`;
   }

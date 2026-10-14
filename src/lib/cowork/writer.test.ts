@@ -1219,3 +1219,11 @@ test('an edit\'s reply carries the real word count and never claims a greeting o
   const same = { ...output, reply: 'Conservé el saludo. Quité los adjetivos de venta.', blocks: [{ ...output.blocks[0], body: `${output.blocks[0].body.split('\n\nNicolás')[0]}\n\nSaludos,\nNicolás Yarur` }] };
   assert.match(coworkEarlierThread(same, { earlier, edit: true, request: 'menos vendedor' }).reply, /^Conservé el saludo\./);
 });
+
+test('round 24: «qué mejorar» over a first email does not narrate a revision nobody saw', async () => {
+  const { coworkNewEmailReply } = await import('./writer');
+  const output = { reply: 'Para mejorar, usaría una apertura común que no atribuya el mismo proceso a empresas de rubros distintos y haría la pregunta en singular. Dejé una versión más directa, enfocada en el momento de revisar varios postulantes. La campaña quedaría pausada; no se enviará hasta que la actives con otra aprobación.',
+    question: null, suggestions: [], blocks: [{ type: 'email_draft' as const, title: 'Primer correo', to: ['a@x.test', 'b@x.test', 'c@x.test', 'd@x.test'], subject: 'A', body: 'Hola,\n\nTexto.' }] };
+  assert.equal(coworkNewEmailReply(output, { pasted: false }).reply,
+    'Escribí un primer correo para tus 4 contactos. La campaña quedaría pausada; no se enviará hasta que la actives con otra aprobación.');
+});
