@@ -41,7 +41,7 @@ const STATE_TEXT: Record<CoworkPlanState, string> = { done: 'hecho', current: 'e
 export function DoneMark({ live, size = 18 }: { live: boolean; size?: number }) {
   const reduce = useReducedMotion();
   const draw = live && !reduce;
-  return <span className="flex items-center justify-center rounded-full bg-cw-accent text-cw-on-accent" style={{ width: size, height: size }}>
+  return <span className="flex items-center justify-center rounded-full bg-cw-accent-fill text-cw-on-accent" style={{ width: size, height: size }}>
     <svg viewBox="0 0 12 12" style={{ width: size * 0.66, height: size * 0.66 }} fill="none" aria-hidden="true">
       <m.path d="M2.6 6.3l2.3 2.3 4.6-4.8" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"
         initial={draw ? { pathLength: 0 } : false} animate={{ pathLength: 1 }} transition={{ duration: 0.26, ease: CW_EASE, delay: 0.08 }} />

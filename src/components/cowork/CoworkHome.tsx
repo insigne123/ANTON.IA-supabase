@@ -82,7 +82,7 @@ function TodayList({ items, onAsk }: { items: CoworkTodayItem[]; onAsk: (prompt:
           <span className="min-w-0 flex-1 text-[14px] leading-5 text-cw-text">{item.text}</span>
           {/* The first row is the day's main action (round 3 readings: both rows weighed the same); the label shows on phones too. */}
           <span className={cn('shrink-0 text-[12.5px] font-medium', index === 0
-            ? 'rounded-full bg-cw-accent px-3 py-1 font-semibold text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-colors group-hover:bg-cw-accent-hover'
+            ? 'rounded-full bg-cw-accent-fill px-3 py-1 font-semibold text-cw-on-accent shadow-[var(--cw-shadow-sm)] transition-colors group-hover:bg-cw-accent-fill-hover'
             : 'text-cw-accent')}>{item.action}</span>
           <ArrowRight className={cn('hidden h-4 w-4 shrink-0 text-cw-faint transition-transform group-hover:translate-x-0.5', index > 0 && 'sm:block')} aria-hidden="true" />
         </button>

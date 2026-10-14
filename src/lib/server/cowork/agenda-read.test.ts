@@ -322,4 +322,11 @@ test('contacts with an email nobody wrote to are counted once, by name and compa
   assert.deepEqual(waiting.examples, ['Daniela Rojas (Adecco)', 'José Pérez (GrupoExpro)']);
   assert.doesNotMatch(JSON.stringify(waiting), /@/);
   await assert.rejects(readNeverWritten(tables({}, ['leads']), scope));
+  // Who decides the purchase first, the junior last (round 19).
+  const titled = tables({ leads: [
+    { ...lead('José Castro', 'GrupoExpro', 'jose@grupoexpro.test'), title: 'Reclutador Junior' },
+    { ...lead('Daniela Rojas', 'Manpower', 'daniela@manpower.test'), title: 'Jefa de Selección' },
+    { ...lead('Rodrigo Pérez', 'Securitas', 'rodrigo@securitas.test'), title: 'Gerente de Personas' },
+  ], contacted_leads: [] });
+  assert.deepEqual((await readNeverWritten(titled, scope)).examples, ['Rodrigo Pérez (Securitas)', 'Daniela Rojas (Manpower)', 'José Castro (GrupoExpro)']);
 });

@@ -1,3 +1,4 @@
+import { coworkBuyingRoleRank } from '@/lib/cowork/buying-role';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   AGENDA_AUTO_REPLY_DAYS, AGENDA_BOUNCE_DAYS, buildCoworkAgenda,
@@ -98,10 +99,10 @@ type NeverWritten = { count: number; examples: string[] };
 /** Saved contacts with an email who never got one from the organization: the home's «Para hoy» counts them, and «¿qué tengo
  * pendiente?» said «nada» while they waited (round 7 readings). Only names and companies leave here, never addresses. */
 export async function readNeverWritten(client: SupabaseClient, scope: Scope): Promise<NeverWritten> {
-  const leads = await client.from('leads').select('name,company,email').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+  const leads = await client.from('leads').select('name,company,email,title').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
     .not('email', 'is', null).neq('email', '').order('created_at', { ascending: false }).limit(500);
   if (leads.error) throw new Error('No se pudieron leer los contactos con correo.');
-  const rows = ((leads.data || []) as Array<{ name: string | null; company: string | null; email: string | null }>)
+  const rows = ((leads.data || []) as Array<{ name: string | null; company: string | null; email: string | null; title?: string | null }>)
     .map(row => ({ ...row, email: String(row.email || '').trim() })).filter(row => row.email);
   const emails = Array.from(new Set(rows.map(row => row.email)));
   const written = new Set<string>();
@@ -110,7 +111,7 @@ export async function readNeverWritten(client: SupabaseClient, scope: Scope): Pr
     if (sent.error) throw new Error('No se pudieron leer los envíos.');
     for (const row of (sent.data || []) as Array<{ email: string | null }>) written.add(String(row.email || '').trim().toLowerCase());
   }
-  const waiting = new Map<string, { name: string | null; company: string | null }>();
+  const waiting = new Map<string, { name: string | null; company: string | null; title?: string | null }>();
   for (const row of rows) {
     const key = row.email.toLowerCase();
     if (!written.has(key) && !waiting.has(key)) waiting.set(key, row);
@@ -118,7 +119,10 @@ export async function readNeverWritten(client: SupabaseClient, scope: Scope): Pr
   const label = (row: { name: string | null; company: string | null }) =>
     [String(row.name || '').trim(), row.company ? `(${String(row.company).trim()})` : ''].filter(Boolean).join(' ');
   // Up to 8 names: with only three of four, the answer said «y uno más» and then could not find the fourth (round 11).
-  return { count: waiting.size, examples: [...waiting.values()].map(label).filter(Boolean).slice(0, 8) };
+  // Who decides the purchase first, as «con correo» (round 19: «la tabla pone primero a José, junior», the newest saved).
+  const ordered = [...waiting.values()].map((row, index) => ({ row, index }))
+    .sort((a, b) => coworkBuyingRoleRank(a.row.title) - coworkBuyingRoleRank(b.row.title) || a.index - b.index).map(item => item.row);
+  return { count: waiting.size, examples: ordered.map(label).filter(Boolean).slice(0, 8) };
 }
 
 type Dependencies = {

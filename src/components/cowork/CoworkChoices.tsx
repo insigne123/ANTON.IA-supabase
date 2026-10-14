@@ -17,7 +17,7 @@ const SEND_LOCK_MS = 1500;
 function PickMark({ picked }: { picked: boolean }) {
   const reduce = useReducedMotion();
   return <span aria-hidden="true" className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border transition-colors',
-    picked ? 'border-cw-accent bg-cw-accent text-cw-on-accent' : 'border-cw-border-strong bg-cw-elevated')}>
+    picked ? 'border-cw-accent bg-cw-accent-fill text-cw-on-accent' : 'border-cw-border-strong bg-cw-elevated')}>
     {picked && <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none">
       <m.path d="M2.6 6.3l2.3 2.3 4.6-4.8" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"
         initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.18, ease: CW_EASE }} />
