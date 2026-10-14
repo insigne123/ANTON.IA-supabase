@@ -257,9 +257,15 @@ export function withoutRepeatedAside(reply: string, elsewhere = '', always = fal
 // the next verb («sin asumir que lo recibió y combina…» keeps «y combina…»).
 const CAVEAT = /,?[ \t]+sin (?:asumir|suponer|presumir|dar por (?:hecho|sentad[oa]s?|confirmad[oa]s?)|atribuir(?:le|les)?)\b[^.;,:\n?!]*?(?=[.;,:\n?!]|$| y \p{Ll}{3,}(?:a|e|é|ó)\b)/giu;
 
+// A sentence about what the history read cannot confirm («El historial consultado no confirma la bandeja completa», «La cronología
+// revisada para Rodrigo tampoco confirma envíos»): round 18 readings called it «críptica» and «ruido».
+const HISTORY_CAVEAT = /(?:^|(?<=[.!?])[ \t]+)[^.!?\n]*\b(?:historial|cronolog[íi]a)\b[^.!?\n]*\b(?:no|tampoco) (?:confirma|permite confirmar)\b[^.!?\n]*[.!?]/giu;
+
 /** The reply without the clauses that only say what it avoided supposing (rule 3). A sentence that is only that stays. */
 export function withoutCaveats(reply: string): string {
   return reply.split('\n').map(line => {
+    const unhedged = line.replace(HISTORY_CAVEAT, '').trim();
+    if (unhedged !== line.trim() && /[\p{L}]{3,}.*[\p{L}]{3,}/u.test(unhedged)) line = unhedged;
     const cleaned = line.replace(CAVEAT, '').replace(/\s+([.;,])/g, '$1').replace(/,\s*\./g, '.').replace(/[ \t]{2,}/g, ' ');
     // A clause that was the whole sentence leaves too little: keep the line as it was.
     return /[\p{L}]{3,}.*[\p{L}]{3,}/u.test(cleaned.replace(/^[\s*•-]+/, '')) ? cleaned.trimEnd() : line;

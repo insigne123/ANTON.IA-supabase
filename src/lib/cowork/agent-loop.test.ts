@@ -2346,6 +2346,18 @@ test('a campaign address copied with a slip goes back to the one the conversatio
   assert.equal(coworkCampaignWithReadAddresses(campaign, []), campaign);
 });
 
+test('round 18: searched titles stay buyers, a reply that counts other people than the card is said again, and the guide closes on a step', async () => {
+  const { coworkSearchWithAskedBuyers, coworkCountsOthers, coworkGuideWithStep } = await import('./agent-loop');
+  const criteria = { titles: ['Jefe de Selección'], rolePolicy: { decisionTerms: ['Gerente de RR. HH.'], userTerms: ['jefe de seleccion'], referralTerms: [], excludeTerms: [] } };
+  assert.deepEqual(coworkSearchWithAskedBuyers(criteria).rolePolicy, { decisionTerms: ['Gerente de RR. HH.', 'jefe de seleccion'], userTerms: [], referralTerms: [], excludeTerms: [] });
+  assert.equal(coworkCountsOthers('Partiría por Adecco: busco el correo de las tres personas.', 2), true);
+  assert.equal(coworkCountsOthers('Busco el correo de las 2 personas de Adecco.', 2), false);
+  assert.equal(coworkCountsOthers('Partiría por Adecco.', 2), false);
+  const guide = coworkGuideWithStep({ reply: 'Te ayudo con correos.\n\n¿Qué parte te gustaría conocer mejor?', question: '¿Qué parte te gustaría conocer mejor?', suggestions: null });
+  assert.equal(guide.reply, 'Te ayudo con correos.');
+  assert.match(String(guide.question), /campaña pausada/);
+});
+
 test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
   const { coworkCampaignForListedPeople } = await import('./agent-loop');
   const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],
