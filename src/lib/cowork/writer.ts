@@ -726,7 +726,8 @@ export function coworkNextStepIssues(output: Pick<CoworkWriterOutput, 'blocks' |
   if (!addressed.length || output.question?.trim()) return [];
   const replies = addressed.some(block => block.type === 'email_draft' && /^\s*re:/i.test(block.subject));
   return [{ where: 'Pregunta final', problem: 'Los correos tienen destinatario y la respuesta no propone el paso siguiente.',
-    fix: replies ? (addressed.length === 1 ? 'En question propone enviarlo, con su nombre de pila: «¿Propongo enviárselo a <nombre>?».'
+    fix: replies && context.earlier?.length ? 'Es el seguimiento de un correo de esta conversación que aún no sale: en question propone la campaña pausada con los dos correos, con su nombre de pila: «¿Creo la campaña pausada para <nombre> con los dos correos, el seguimiento al día 8?».'
+      : replies ? (addressed.length === 1 ? 'En question propone enviarlo, con su nombre de pila: «¿Propongo enviárselo a <nombre>?».'
       : 'En question propone enviar la primera respuesta: «¿Propongo enviar primero la de <nombre>?».')
       : 'En question propone crear la campaña pausada con ellos, con su nombre de pila: «¿Creo la campaña pausada para Felipe?».', short: 'paso siguiente' }];
 }
@@ -742,6 +743,12 @@ export function coworkWithNextStep(draft: CoworkWriterOutput, context: Pick<Writ
     const name = GREETING_NAME.exec((single[0] as { body: string }).body)?.[1];
     if (name) return { ...draft, question: `¿Creo la campaña pausada para ${name} con los dos correos, el seguimiento al día 8?` };
   }
+  const answered = single.length === 1 && context.earlier?.length && /^\s*re:/i.test((single[0] as { subject: string }).subject)
+    && /\benvi[áa]r(?:selo|sela|lo|la)?\b|\bpropongo envi/i.test(draft.question || '');
+  if (answered) {
+    const name = GREETING_NAME.exec((single[0] as { body: string }).body)?.[1];
+    if (name) return { ...draft, question: `¿Creo la campaña pausada para ${name} con los dos correos, el seguimiento al día 8?` };
+  }
   const [issue] = coworkNextStepIssues({ blocks, question: draft.question }, context);
   if (!issue) return draft;
   const addressed = blocks.flatMap(block => block.type === 'email_draft' && block.to?.length ? [block] : []);
@@ -750,7 +757,10 @@ export function coworkWithNextStep(draft: CoworkWriterOutput, context: Pick<Writ
   const who = names.length && names.length === people ? (names.length > 1 ? `${names.slice(0, -1).join(', ')} y ${names.at(-1)}` : names[0])
     : `estos ${people} contactos`;
   const replies = addressed.some(block => /^\s*re:/i.test(block.subject));
-  const question = issue.short === 'campaña con los dos' ? `¿Creo la campaña pausada para ${who} con los dos correos, el seguimiento al día 8?`
+  // A «Re:» to an email written in this conversation is its follow-up, not a reply in an open thread: sending it alone would go
+  // before the first email (round 22: «¿Propongo enviárselo a Daniela?» after writing the follow-up).
+  const followsDraft = replies && Boolean(context.earlier?.length);
+  const question = issue.short === 'campaña con los dos' || followsDraft ? `¿Creo la campaña pausada para ${who} con los dos correos, el seguimiento al día 8?`
     : replies ? `¿Propongo enviárselo a ${who}?` : `¿Creo la campaña pausada para ${who}?`;
   return { ...draft, question };
 }

@@ -1184,6 +1184,13 @@ test('emails with recipients and no closing question get the campaign offer', as
   assert.equal(coworkWithNextStep(one).question, '¿Creo la campaña pausada para Daniela?');
   const asked = { ...one, question: '¿Lo ajusto?' };
   assert.equal(coworkWithNextStep(asked), asked);
+  // A «Re:» to an email of this conversation is never offered alone (round 22).
+  const reply = { ...one, blocks: [{ ...one.blocks[0], subject: 'Re: Antecedentes' }] };
+  assert.equal(coworkWithNextStep(reply, { earlier: [{ to: ['d@x.test'], subject: 'Antecedentes', body: 'Hola Daniela,' }] } as never).question,
+    '¿Creo la campaña pausada para Daniela con los dos correos, el seguimiento al día 8?');
+  assert.equal(coworkWithNextStep(reply).question, '¿Propongo enviárselo a Daniela?');
+  assert.equal(coworkWithNextStep({ ...reply, question: '¿Propongo enviárselo a Daniela?' }, { earlier: [{ to: ['d@x.test'], subject: 'Antecedentes', body: 'Hola Daniela,' }] } as never).question,
+    '¿Creo la campaña pausada para Daniela con los dos correos, el seguimiento al día 8?');
   // A follow-up's campaign is the one with both emails (round 20).
   const followUp = { ...one, question: '¿Creo una campaña pausada para usarla si Daniela no responde?' };
   assert.equal(coworkWithNextStep(followUp, { followUp: true, earlier: [{ to: ['d@x.test'], subject: 'S', body: 'Hola Daniela,' }] } as never).question,
