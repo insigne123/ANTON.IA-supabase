@@ -4,11 +4,17 @@ Medición de Cowork completo, como lo usa una persona: portada, flujos, respuest
 
 ## Resumen
 
-- **Cowork pasó de 3,5–3,8 a 4,6.** La versión anterior a estas iteraciones (las mismas respuestas, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Con las iteraciones 1 a 20 (PRs #339, #341, #343 a #346, #348 y #350 a #359), la versión final se midió en dos rondas seguidas (21 y 22) con dos lectores ciegos cada una:
-  - **Luna, el modelo de producción:** 4,61 · 4,73 · 4,41 · 4,54 → **media 4,57**, tres de cuatro lecturas sobre 4,5, a **US$ 0,005 por tarea**.
-  - **Haiku 5.5 coordinador + Sonnet 5.5 Redactora:** 4,45 · 4,51 · 4,61 · 4,76 → **media 4,58**, a US$ 0,022–0,025 por tarea.
-- **Recomendación: Luna en producción.** Llega a la meta con la misma nota que Haiku + Sonnet a una quinta parte del costo. Haiku + Sonnet queda como alternativa si se prefiere un poco más de consistencia en los correos. No se tocó la configuración de modelos de producción.
-- **Variación entre corridas:** la misma versión se mueve ±0,1 a ±0,2 de una ronda a otra, porque cada escenario corre una vez y el modelo no es determinista. Por eso cada ronda tiene dos lectores, la base se vuelve a leer en cada una y la versión final se midió dos veces.
+- **Cowork pasó de 3,5–3,8 a 4,7 con Luna.** La versión anterior a estas iteraciones (las mismas respuestas, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Con las iteraciones 1 a 21 (PRs #339, #341, #343 a #346, #348, #350 a #359 y #360), la nota de cada ronda, con sus dos lectores ciegos, fue:
+  - **Luna, el modelo de producción, a US$ 0,005 por tarea:**
+    - ronda 21 (iteración 20): 4,61 y 4,73 → **4,67**;
+    - ronda 22 (iteración 20, confirmación): 4,41 y 4,54 → **4,48**, bajo la meta;
+    - ronda 23 (iteración 21, la versión final): 4,78 y 4,66 → **4,72**.
+  - **Haiku 5.5 coordinador + Sonnet 5.5 Redactora, a US$ 0,022–0,025 por tarea:**
+    - ronda 21: 4,48;
+    - ronda 22: 4,69;
+    - ronda 23: 4,60 y 4,48 → **4,54**.
+- **Recomendación: Luna en producción.** Supera la meta en la versión final (4,72) y en dos de las tres rondas, con una nota igual o mejor que Haiku + Sonnet a una quinta parte del costo. Haiku + Sonnet queda como alternativa si se prefiere un poco más de consistencia en los correos. No se tocó la configuración de modelos de producción.
+- **Variación entre corridas:** la misma versión se mueve ±0,1 a ±0,2 de una ronda a otra, porque cada escenario corre una vez y el modelo no es determinista. Por eso cada ronda tiene dos lectores, la base se vuelve a leer en cada una y la versión final se midió en tres rondas seguidas. La ronda 22 (4,48) muestra que una corrida mala puede quedar justo bajo 4,5.
 
 ## Cómo se mide
 
@@ -82,6 +88,8 @@ Medición de Cowork completo, como lo usa una persona: portada, flujos, respuest
 | 21 | **Iteración 20, Luna** | **4,61** | **4,73** | **4,67** | US$ 0,0049 |
 | 22 | Iteración 20 (confirmación), Haiku + Sonnet | 4,61 | 4,76 | 4,69 | US$ 0,025 |
 | 22 | **Iteración 20 (confirmación), Luna** | 4,41 | **4,54** | 4,48 | US$ 0,0049 |
+| 23 | Iteración 21, Haiku + Sonnet | **4,60** | 4,48 | **4,54** | US$ 0,024 |
+| 23 | **Iteración 21, Luna** | **4,78** | **4,66** | **4,72** | US$ 0,005 |
 
 La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Las rondas 1, 3 a 5 y 7 quedan en el borrador de trabajo; la tabla deja las que comparan modelos o cierran una iteración.
 
@@ -134,6 +142,7 @@ La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo
 - **Pasos sueltos del modelo:** a veces repite el diagnóstico tras un «dale» antes de avanzar, la primera versión de «mejorar este correo» cambia poco o el correo es más genérico. Pasa en una o dos de catorce tareas por ronda, y cambia de tarea entre corridas.
 - **Tarjeta de campaña:** con una sola persona repite el correo (por persona y como secuencia).
 - **Tiempos:** los turnos que escriben y proponen la campaña tardan entre 40 y 60 s.
+- **Cautela de más:** en la ronda 23, al priorizar contactos, algunas respuestas todavía agregan reservas como «no como autoridad de compra confirmada», que los lectores leen como ruido.
 
 ## Límites
 
