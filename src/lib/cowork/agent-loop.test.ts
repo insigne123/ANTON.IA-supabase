@@ -2281,6 +2281,8 @@ test('asked what to do with contacts without email, the email lookup is proposed
   assert.match(reply, /el perfil de quien dirige o lidera un área, porque decide o influye en la compra: Rodrigo Pérez, de Securitas\./);
   assert.match(reply, /José \(Reclutador Junior\) queda para después por su cargo\./);
   assert.doesNotMatch(reply, /sincroniz/i);
+  const quota = { action: 'linkedin.quota', input: '', result: { scope: 'own_linkedin_quota', remaining: 100, limit: 100 } };
+  assert.match(coworkLookupReply({ goal: 'linkedin', people: [{ leadId: id(3) }] }, [...saved, quota]), /te quedan 100 de 100 invitaciones esta semana/);
 });
 
 test('figures read with metrics.rates and given only in the text are asked for their card', async () => {

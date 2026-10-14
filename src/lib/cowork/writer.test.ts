@@ -1148,6 +1148,17 @@ test('an edit that drops the demo it was not asked to drop gets its closing ques
   assert.match(told.reply, /Quité los adjetivos de venta\. La demo queda para más adelante: cerré con una pregunta más liviana\.$/);
 });
 
+test('one email per person names everyone in the brief, and a question never opens with a space', async () => {
+  const { coworkMissingRecipients } = await import('./writer');
+  const recipients = [{ name: 'Daniela Rojas', email: 'daniela@x.test' }, { name: 'José Castro', email: 'jose@x.test' }, { name: 'Rodrigo Pérez', email: 'rodrigo@x.test' }];
+  const email = (to: string, name: string) => ({ type: 'email_draft' as const, title: name, to: [to], subject: 'S', body: `Hola ${name},\n\nTexto.\n\nSaludos,\nNicolás` });
+  const brief = { recipients: ['Daniela Rojas', 'José Castro', 'Rodrigo Pérez'] };
+  assert.deepEqual(coworkMissingRecipients({ blocks: [email('daniela@x.test', 'Daniela'), email('rodrigo@x.test', 'Rodrigo')] }, brief, recipients as never), ['José Castro']);
+  assert.deepEqual(coworkMissingRecipients({ blocks: [email('daniela@x.test', 'Daniela')] }, brief, recipients as never), [], 'one shared email covers them all');
+  const spaced = { reply: 'Listo.', question: null, suggestions: [], blocks: [{ type: 'email_draft' as const, title: 'C', to: null, subject: 'S', body: 'Hola,\n\nTexto.\n\n¿ qué día te acomoda?\n\nNicolás' }] };
+  assert.match((coworkPolishDraft(spaced, []).blocks[0] as { body: string }).body, /\n¿Qué día te acomoda\?\n/);
+});
+
 test('a pasted email improved but still self-praising gets the pitch check', () => {
   const blocks = [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'AXIS', body: 'Hola,\n\nSomos Yago y tenemos una plataforma que revisa causas.\n\nNos encantaría mostrarte una demo.\n\nSaludos,\nNicolás' }];
   const issues = coworkDraftIssues(blocks, { prohibited: [] } as never);
