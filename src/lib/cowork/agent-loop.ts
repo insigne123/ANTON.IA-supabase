@@ -823,6 +823,15 @@ export function coworkNoSavedProfiles(observations: CoworkObservation[]) {
 type LookupPeople = { goal: 'email' | 'linkedin'; people: Array<{ leadId: string }> };
 const listed = (items: string[]) => items.length > 1 ? `${items.slice(0, -1).join(', ')} y ${items.at(-1)}` : items[0] ?? '';
 
+const COUNT_WORDS: Record<string, number> = { dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
+/** The people a reply counts for a lookup («el correo de las tres personas», «los 3 contactos»), when it is not the card's number. */
+export function coworkCountsOthers(reply: string, people: number) {
+  const plain = reply.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const counts = [...plain.matchAll(/\b(?:los|las|tus|sus|de|a)\s+(\d+|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(?:personas|contactos|correos|perfiles)\b/g)]
+    .map(match => Number(match[1]) || COUNT_WORDS[match[1]]);
+  return counts.length > 0 && !counts.includes(people);
+}
+
 /** «Tengo contactos sin correo, ¿qué hago?»: the person asks about the contacts without an email, not about writing to others. */
 export function coworkAsksMissingEmail(message: string) {
   const plain = message.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1025,6 +1034,32 @@ export function coworkCampaignWithReadAddresses(campaign: z.infer<typeof coworkC
   if (emails.join() === campaign.emails.join()) return campaign;
   const next = { ...campaign, emails, firstEmails: campaign.firstEmails.map(item => ({ ...item, email: fix(item.email) })) };
   return coworkCampaignDraftSchema.safeParse(next).success ? next : campaign;
+}
+
+/** The titles searched for are the people the search is for: a role policy never files them as users or referrers (round 18: «marca
+ * los jefes de selección pedidos como "Usuarios" y pone como compradores cargos que no busca»). */
+export function coworkSearchWithAskedBuyers<T extends { titles?: string[] | null; rolePolicy?: { decisionTerms: string[]; userTerms: string[]; referralTerms: string[]; excludeTerms: string[] } | null }>(criteria: T): T {
+  const policy = criteria.rolePolicy;
+  if (!policy || !criteria.titles?.length) return criteria;
+  const plain = (text: string) => text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const asked = new Set(criteria.titles.map(plain));
+  const moved = [...policy.userTerms, ...policy.referralTerms].filter(term => asked.has(plain(term)));
+  if (!moved.length) return criteria;
+  const keep = (terms: string[]) => terms.filter(term => !asked.has(plain(term)));
+  return { ...criteria, rolePolicy: { ...policy, decisionTerms: [...new Set([...policy.decisionTerms, ...moved])].slice(0, 10),
+    userTerms: keep(policy.userTerms), referralTerms: keep(policy.referralTerms) } };
+}
+
+// A guide that closes asking what to explore («¿Qué parte te gustaría conocer mejor?»): round 18 readings wanted the useful step of today.
+const OPEN_GUIDE_QUESTION = /\b(?:qu[ée] parte|qu[ée] te gustar[íi]a (?:conocer|saber|ver|probar)|por (?:d[óo]nde|cu[áa]l) (?:quieres|te gustar[íi]a)|algo (?:m[áa]s|en particular))\b/iu;
+/** «¿Qué puedes hacer?» closes on a first step that leads somewhere, with its yes, instead of an open question. */
+export function coworkGuideWithStep<T extends { reply: string; question?: unknown; suggestions?: unknown }>(answer: T): T {
+  const question = typeof answer.question === 'string' ? answer.question : '';
+  if (!OPEN_GUIDE_QUESTION.test(question)) return answer;
+  const reply = answer.reply.split('\n').filter(line => !(/^\s*¿/.test(line) && OPEN_GUIDE_QUESTION.test(line))).join('\n').trim();
+  return { ...answer, reply: reply || answer.reply, question: '¿Te escribo el primer correo para tus contactos con correo y lo dejo como campaña pausada?',
+    suggestions: [{ label: 'Sí, escríbelo', message: 'Sí, escribe el primer correo para mis contactos con correo y déjalo como campaña pausada.' },
+      { label: 'Buscar prospectos', message: 'Busca prospectos nuevos para mi oferta.' }] };
 }
 
 /** What a proposed campaign does, when the model left no explanation of its own. */
@@ -1512,8 +1547,11 @@ async function runCoworkLoop(input: {
       }
       if (lookup && decision.answer) {
         const reply = decision.answer.reply.split('\n').filter(line => !/^\s*¿/.test(line) && !/a continuaci[óo]n\.?\s*$/i.test(line)).join('\n').trim();
+        // A reply that counts other people than the card («busco el correo de las tres» over a card with two, round 18) says it again.
+        const read = [...(input.history || []).flatMap(item => item.observations || []), ...observations];
+        const said = forcedReply ?? (coworkCountsOthers(reply || decision.answer.reply, lookup.people.length) ? coworkLookupReply(lookup, read) : (reply || decision.answer.reply));
         decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup,
-          answer: { ...decision.answer, reply: forcedReply ?? (reply || decision.answer.reply), question: null, suggestions: null } } as Decision;
+          answer: { ...decision.answer, reply: said, question: null, suggestions: null } } as Decision;
       }
       if (informationOnly && decision.action !== 'answer') throw rejected('Orientation needs no tools', 'El usuario solo saluda o pregunta qué haces. Responde con las capacidades disponibles y el contexto ya recibido, sin consultas ni propuestas de ejecución.');
       if (decision.action === 'draft.write') {
@@ -1697,7 +1735,7 @@ async function runCoworkLoop(input: {
             continue;
           }
         }
-        return decision.answer;
+        return informationOnly ? coworkGuideWithStep(decision.answer) : decision.answer;
       }
       if (decision.action === 'specialists.review' && (closingFallback ?? judgedFallback)) return (closingFallback ?? judgedFallback)!;
       if (decision.action === 'specialists.review') {
@@ -1738,7 +1776,7 @@ async function runCoworkLoop(input: {
           scopeCorrected = true;
           throw rejected('Search scope changed', scope.problem);
         }
-        const searchCriteria = scope.criteria;
+        const searchCriteria = coworkSearchWithAskedBuyers(scope.criteria);
         if (scope.added && decision.answer?.reply?.trim() && !coworkMentionsPlaces(decision.answer.reply, scope.added.places)) {
           decision.answer = { ...decision.answer, reply: `${decision.answer.reply.trim()} ${coworkSearchScopeNotice(scope.added)}` };
         }

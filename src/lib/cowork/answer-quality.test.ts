@@ -360,6 +360,12 @@ test('a bare yes under a campaign or an email offer says what it does, and the s
     'Usé Gmail como remitente; saldría desde Gmail. Exporta a Google Sheets.');
 });
 
+test('a sentence about what the history read cannot confirm goes', () => {
+  assert.equal(withoutCaveats('Te dejé el correo para los 4. El historial consultado no confirma la bandeja completa.'), 'Te dejé el correo para los 4.');
+  assert.equal(withoutCaveats('La cronología revisada para Rodrigo tampoco confirma envíos. Va primero por su cargo.'), 'Va primero por su cargo.');
+  assert.equal(withoutCaveats('El historial consultado no confirma la bandeja completa.'), 'El historial consultado no confirma la bandeja completa.');
+});
+
 test('a campaign or email offer with no quick reply that takes it gets its yes first; an either/or question does not', () => {
   const offered = polishCoworkAnswer({ reply: 'Te dejé el correo.', document: null, question: '¿Lo uso en una campaña pausada para tus 4 contactos?',
     suggestions: [{ label: 'Hazlo más corto', message: 'Hazlo más corto' }] });
