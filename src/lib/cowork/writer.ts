@@ -283,13 +283,19 @@ function editedReply(reply: string, previous: EarlierEmail, next: { to?: string[
 
 // A reply that describes changes to an email nobody had (round 8: «¿y qué debería hacer para mejorar?» after the figures got «Lo que
 // más mejora ahora es que el correo lleva tu firma: agregué…»).
-const CHANGE_CLAIM = /\b(?:agregue|anadi|quite|cambie|acorte|reemplace|lo que mas mejora|el resto queda igual|queda igual)\b/;
+// Round 24: «Para mejorar, usaría una apertura común que no atribuya…» and «Dejé una versión más directa…» over the first email.
+const CHANGE_CLAIM = /\b(?:agregue|anadi|quite|cambie|acorte|reemplace|lo que mas mejora|el resto queda igual|queda igual|deje una version mas|una version mas (?:directa|corta|clara|simple)|(?:usaria|haria|pondria|cambiaria) (?:una|un|la|el)\b[^.]{0,40}\b(?:apertura|pregunta|cierre|asunto|saludo|frase))\b/;
 /** A new email (no earlier one in the conversation, none pasted): the reply does not talk about what changed. */
 export function coworkNewEmailReply(output: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'pasted'>): CoworkWriterOutput {
   if (context.earlier?.length || context.pasted !== false) return output;
   const sentences = output.reply.split(/(?<=[.!?])\s+/).filter(Boolean);
   const kept = sentences.filter(sentence => !CHANGE_CLAIM.test(normalize(sentence)));
-  return kept.length && kept.length < sentences.length ? { ...output, reply: kept.join(' ') } : output;
+  if (!kept.length || kept.length === sentences.length) return output;
+  // What is left must still say what was written: an email the person now sees for the first time.
+  const to = output.blocks.flatMap(block => block.type === 'email_draft' ? block.to ?? [] : []);
+  const lead = kept.some(sentence => /\bcorreos?\b/i.test(sentence)) ? []
+    : [to.length > 1 ? `Escribí un primer correo para tus ${to.length} contactos.` : 'Escribí un primer correo.'];
+  return { ...output, reply: [...lead, ...kept].join(' ') };
 }
 
 /** The meeting the earlier email asked for, back in an edit that dropped it without being asked (round 8: Haiku swapped the demo for
