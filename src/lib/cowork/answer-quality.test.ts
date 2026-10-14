@@ -392,3 +392,18 @@ test('a campaign or email offer with no quick reply that takes it gets its yes f
     suggestions: [{ label: 'Sí', message: 'Sí' }, { label: 'Buscar más prospectos', message: 'Busca más' }] });
   assert.deepEqual(other.suggestions?.map(chip => chip.label), ['Sí, crear la campaña', 'Buscar más prospectos']);
 });
+
+test('round 24: a stray brand tail, a one-row table the reply already tells and a question asked twice', async () => {
+  const { polishCoworkAnswer, polishCoworkText } = await import('./answer-quality');
+  assert.equal(polishCoworkText('donde AXIS podría ser pertinente.IA. Sigue.'), 'donde AXIS podría ser pertinente. Sigue.');
+  assert.equal(polishCoworkText('Usa ANTON.IA. Sigue.'), 'Usa ANTON.IA. Sigue.');
+  const table = { type: 'table', title: 'Pendientes de hoy', columns: ['Orden', 'Quién', 'Qué hago'],
+    rows: [['1', 'Rodrigo Pérez (Securitas Chile), Francisca Muñoz (Falabella)', 'Prepararles un primer correo']] };
+  const told = polishCoworkAnswer({ reply: 'Hoy tienes 2 contactos sin primer correo: Rodrigo Pérez de Securitas Chile y Francisca Muñoz de Falabella.', document: null, blocks: [table] });
+  assert.equal(told.blocks, null);
+  const other = polishCoworkAnswer({ reply: 'Hoy tienes un pendiente.', document: null, blocks: [table] });
+  assert.equal(other.blocks?.length, 1, 'a row the reply does not tell stays');
+  const twice = polishCoworkAnswer({ reply: 'Partiría con los cuatro.\n\n¿Te preparo una campaña pausada para estos cuatro? Queda guardada sin enviar.',
+    document: null, question: '¿Te preparo una campaña pausada para estos cuatro?' });
+  assert.equal(twice.reply, 'Partiría con los cuatro.\n\nQueda guardada sin enviar.\n\n¿Te preparo una campaña pausada para estos cuatro?');
+});
