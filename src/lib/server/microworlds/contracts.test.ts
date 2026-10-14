@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mirrorCriteria,mirrorFingerprint,microworldsInput,contactFromMicroworlds,chooseCachedContact,residualFields,hybridEnabled } from './contracts';
+import { mirrorCriteria,mirrorFingerprint,microworldsInput,contactFromMicroworlds,chooseCachedContact,residualFields,hybridEnabled,
+  mirrorLimit,runChargeUsd,monthCapUsd,coversAnySearch } from './contracts';
 const contact=contactFromMicroworlds({first_name:'Ana',last_name:'Pérez',organization_primary_domain:'demo.test',title:'Gerenta de Personas',
   linkedin_url:'https://linkedin.com/in/ana-demo',email:'ana@demo.test',mobile_number:'+56 9 1234 5678'},'demo.test')!;
 test('mirror inputs fix the company, bound100, request mobiles and do not add hidden eligibility or reinterpret company location',()=>{
@@ -36,4 +37,17 @@ test('fallback is per requested gap; cached email is contrasted only when phone 
   assert.equal(residualFields({email:true,phone:false},{}, {...contact,mobile:null}).apolloPhone,false);
   assert.equal(residualFields(requested,{email:'edited@demo.test',phone:'+15550100001'},contact).cacheEmail,null);
   assert.equal(residualFields(requested,{},null).apolloEmail,true);
+});
+test('runs are sized to the people shown and capped at plan price; the month cap never exceeds the database one',()=>{
+  assert.equal(mirrorLimit(0),20);assert.equal(mirrorLimit(12),20);assert.equal(mirrorLimit(30),45);assert.equal(mirrorLimit(80),100);
+  assert.equal(mirrorLimit(Number.NaN),100);
+  assert.equal(runChargeUsd(20,{}),0.07);assert.equal(runChargeUsd(100,{}),0.34);assert.equal(runChargeUsd(100,{MICROWORLDS_LEAD_USD:'0.001'}),0.12);
+  assert.equal(runChargeUsd(100,{MICROWORLDS_LEAD_USD:'1'}),1.5,'never above the per-run reserve');
+  assert.equal(monthCapUsd({}),4);assert.equal(monthCapUsd({MICROWORLDS_MONTH_USD:'2.5'}),2.5);
+  assert.equal(monthCapUsd({MICROWORLDS_MONTH_USD:'50'}),20);assert.equal(monthCapUsd({MICROWORLDS_MONTH_USD:'-1'}),4);
+  const sized=mirrorCriteria({domain:'demo.test',titles:['CEO'],limit:45});
+  assert.equal(microworldsInput(sized).max_result,45);assert.equal(mirrorFingerprint(sized),mirrorFingerprint({...sized,limit:undefined}));
+  assert.equal(mirrorCriteria({domain:'demo.test',limit:500}).limit,undefined);
+  assert.equal(coversAnySearch(mirrorCriteria({domain:'demo.test'})),true);assert.equal(coversAnySearch(mirrorCriteria({domain:'demo.test',limit:20})),false);
+  assert.equal(coversAnySearch(sized),false);
 });

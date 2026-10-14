@@ -328,6 +328,13 @@ env:
   - variable: MICROWORLDS_HYBRID_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Tope mensual por workspace en US$ (plan Apify de US$ 5 compartido con Oportunidades) y precio por contacto del plan.
+  - variable: MICROWORLDS_MONTH_USD
+    value: "4"
+    availability: [RUNTIME]
+  - variable: MICROWORLDS_LEAD_USD
+    value: "0.003"
+    availability: [RUNTIME]
   # Pipeline: cinco columnas, dos triggers y lectura privada de eventos verificados.
   - variable: CRM_DEAL_VALUES_ENABLED
     value: "true"
