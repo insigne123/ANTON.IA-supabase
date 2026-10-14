@@ -30,7 +30,7 @@ test('every section is complete, unique and points at real screens and sections'
 test('every entry of the menu has its help', () => {
   const sidebar = readFileSync('src/components/app-sidebar.tsx', 'utf8');
   const hrefs = NAV_SECTIONS.flatMap((section) => section.items.map((item) => item.href)).filter((href) => href !== '/cowork');
-  assert.ok(hrefs.length >= 14, 'the menu was read');
+  assert.ok(hrefs.length >= 13, 'the menu was read');
   for (const href of hrefs) assert.ok(helpSectionFor(href), `${href} has a section in the manual`);
   assert.match(sidebar, /href="\/ayuda"/, 'the menu links to the Centro de ayuda');
 });

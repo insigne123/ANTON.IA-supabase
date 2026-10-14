@@ -28,7 +28,7 @@ test('the cards of «Tu semana» keep their own height on phones', () => {
 test('the counts come from /api/home/summary and each one opens its screen', () => {
   assert.match(summary, /usePersonalHome<Summary>\('\/api\/home\/summary'/);
   assert.doesNotMatch(summary, /from\('contacted_leads'\)|supabase\./);
-  for (const href of ['/contacted?view=all', '/contacted?view=reply', '/saved/leads']) assert.ok(summary.includes(`href:'${href}'`), href);
+  for (const href of ['/contacted?view=all', '/contacted?view=reply', '/saved/leads/enriched']) assert.ok(summary.includes(`href:'${href}'`), href);
   assert.doesNotMatch(summary,/Campañas en curso|activeCampaigns|enrichedLeads/);
 });
 

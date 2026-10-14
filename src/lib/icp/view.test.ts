@@ -23,6 +23,6 @@ test('an industry is added to «Perfil» once, ignoring case and accents', () =>
 
 test('each recommended contact goes where the person acts on it', () => {
   assert.deepEqual(recommendationLink({ list: 'por_escribir', missing: [] }), { href: '/saved/leads/enriched', label: 'Escribir' });
-  assert.deepEqual(recommendationLink({ list: 'por_completar', missing: ['buscar su correo', 'investigarla'] }), { href: '/saved/leads', label: 'Buscar correo' });
-  assert.deepEqual(recommendationLink({ missing: ['investigarla'] }), { href: '/saved/leads', label: 'Abrir' });
+  assert.deepEqual(recommendationLink({ list: 'por_completar', missing: ['buscar su correo', 'investigarla'] }), { href: '/saved/leads/enriched', label: 'Buscar correo' });
+  assert.deepEqual(recommendationLink({ missing: ['investigarla'] }), { href: '/saved/leads/enriched', label: 'Abrir' });
 });

@@ -8,7 +8,7 @@ import type { SearchStarter } from '@/lib/search/search-guidance';
 const STEPS = [
   { icon: Building2, title: 'Elige empresas', text: 'Filtra por rubro, sede o tamaño y marca las que te interesan.' },
   { icon: Users, title: 'Busca contactos', text: 'Por cargo y nivel, solo dentro de esas empresas.' },
-  { icon: Save, title: 'Guarda los que sirven', text: 'Llegan a «Por completar», donde buscas su correo.' },
+  { icon: Save, title: 'Guarda los que sirven', text: 'Al guardarlos eliges si buscar su correo o también su móvil, y llegan a «Por escribir».' },
 ] as const;
 
 /** Before the first search: how the search works, in three steps, and the starting points that fill the filters. */

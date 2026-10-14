@@ -24,7 +24,7 @@ test('a brand-new account sees what blocks sending first: its offer, then its ma
 
 test('with everything set up, the primary step moves from finding to completing emails to writing', () => {
   assert.equal(buildTodayPlan(base()).primary.href, '/search');
-  assert.equal(buildTodayPlan(base({ counts: { saved: 4, withEmail: 0, readyToWrite: 0, sent: 0 } })).primary.href, '/saved/leads');
+  assert.equal(buildTodayPlan(base({ counts: { saved: 4, withEmail: 0, readyToWrite: 0, sent: 0 } })).primary.href, '/saved/leads/enriched');
   const ready = buildTodayPlan(base({ counts: { saved: 0, withEmail: 94, readyToWrite: 94, sent: 0 } }));
   assert.equal(ready.primary.href, '/saved/leads/enriched');
   assert.match(ready.primary.title, /94 contactos con correo/);

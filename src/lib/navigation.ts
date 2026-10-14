@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Bot, Briefcase, LayoutDashboard, LayoutGrid, Link2, MailCheck, Megaphone, Search, Send, Settings, Shield, ShieldCheck,
-  Table as TableIcon, User, Users,
+  Table as TableIcon, User,
 } from 'lucide-react';
 
 export type NavFeature = 'opportunities' | 'admin-dashboard' | 'cowork';
@@ -42,7 +42,6 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Contactos',
     items: [
       { href: '/saved/leads/enriched', icon: MailCheck, label: 'Por escribir', tour: 'saved-leads' },
-      { href: '/saved/leads', icon: Users, label: 'Por completar', exact: true },
       { href: '/sheet', label: 'Tabla de datos', icon: TableIcon, aliases: ['/leads/import'] },
     ],
   },

@@ -80,7 +80,7 @@ export function ColumnMapper({ csvHeaders, sampleRows, onConfirm, onCancel }: Co
             ) : !hasEmail ? (
                 <Alert variant="info">
                     <Info className="size-4" aria-hidden="true" />
-                    <AlertDescription>Sin columna de correo, quienes tengan teléfono van a «Por escribir» y el resto a «Por completar», donde puedes buscar su correo.</AlertDescription>
+                    <AlertDescription>Sin columna de correo, todos van a «Por escribir»: quienes no tengan teléfono esperan ahí a que busques su correo.</AlertDescription>
                 </Alert>
             ) : null}
 

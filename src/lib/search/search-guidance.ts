@@ -95,24 +95,24 @@ export function searchStartersFor(organizationName?: string | null): SearchStart
   return ORGANIZATION_STARTERS.find((entry) => entry.matches.test(name))?.starters || GENERIC_STARTERS;
 }
 
-/** Where saved people went and the one button that continues: with an email or phone they can be written to now; without one
- * they wait in «Por completar» for their email. */
+/** Where saved people went and the one button that continues: all go to «Por escribir»; who has no email waits there, at a
+ * click from its lookup. */
 export function savedLeadsToast(input: { withContact: number; withoutContact: number; duplicates: number }) {
   const { withContact, withoutContact, duplicates } = input;
   const total = withContact + withoutContact;
   const people = (count: number) => `${count} contacto${count === 1 ? '' : 's'}`;
   const duplicateNote = duplicates > 0 ? ` ${duplicates} ya estaba${duplicates === 1 ? '' : 'n'} guardado${duplicates === 1 ? '' : 's'}.` : '';
   if (total === 0) {
-    return { title: 'Ya tenías estos contactos', description: `No se agregó nadie nuevo.${duplicateNote}`.trim(), href: '/saved/leads', actionLabel: 'Ver guardados' };
+    return { title: 'Ya tenías estos contactos', description: `No se agregó nadie nuevo.${duplicateNote}`.trim(), href: '/saved/leads/enriched', actionLabel: 'Ver guardados' };
   }
   const parts: string[] = [];
   if (withContact > 0) parts.push(`${people(withContact)} con correo o teléfono, listos para escribirles`);
-  if (withoutContact > 0) parts.push(`${people(withoutContact)} sin correo: complétalos en «Por completar»`);
+  if (withoutContact > 0) parts.push(`${people(withoutContact)} sin correo: búscalo desde «Por escribir»`);
   return {
     title: `Guardaste ${people(total)}`,
     description: `${parts.join('. ')}.${duplicateNote}`,
-    href: withContact > 0 ? '/saved/leads/enriched' : '/saved/leads',
-    actionLabel: withContact > 0 ? 'Escribirles' : 'Completar correos',
+    href: '/saved/leads/enriched',
+    actionLabel: withContact > 0 ? 'Escribirles' : 'Buscar sus correos',
   };
 }
 

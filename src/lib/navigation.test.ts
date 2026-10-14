@@ -10,7 +10,7 @@ const item = (href: string) => {
   return found;
 };
 
-test('an entry stays lit on the screens below it and on its aliases, but «Hoy» and «Por completar» only on their own path', () => {
+test('an entry stays lit on the screens below it and on its aliases, but «Hoy» only on its own path', () => {
   assert.ok(isNavItemActive(item('/campaigns'), '/campaigns/history'));
   assert.ok(isNavItemActive(item('/sheet'), '/leads/import'));
   assert.ok(isNavItemActive(item('/connections'), '/gmail'));
@@ -18,15 +18,18 @@ test('an entry stays lit on the screens below it and on its aliases, but «Hoy»
   assert.ok(isNavItemActive(item('/contacted'), '/contacted?view=reply'));
   assert.ok(!isNavItemActive(item('/dashboard'), '/dashboard/admin/users'));
   assert.ok(isNavItemActive(item('/dashboard/admin'), '/dashboard/admin/users'));
-  assert.ok(!isNavItemActive(item('/saved/leads'), '/saved/leads/enriched'));
   assert.ok(isNavItemActive(item('/saved/leads/enriched'), '/saved/leads/enriched'));
   assert.ok(!isNavItemActive(item('/search'), '/searching'), 'a shared prefix is not a screen below');
   assert.ok(!isNavItemActive(item('/search'), null));
 });
 
+test('«Por completar» is gone: saved contacts without email wait in «Por escribir»', () => {
+  assert.equal(NAV_SECTIONS.flatMap((section) => section.items).some((entry) => entry.href === '/saved/leads'), false);
+});
+
 test('the phone top bar names the screen on view: its menu entry, or the screen itself outside the menu', () => {
   const cases: Array<[string | null, string | null]> = [
-    ['/dashboard', 'Hoy'], ['/dashboard/admin/teams', 'Administración'], ['/saved/leads', 'Por completar'],
+    ['/dashboard', 'Hoy'], ['/dashboard/admin/teams', 'Administración'],
     ['/saved/leads/enriched', 'Por escribir'], ['/leads/import', 'Tabla de datos'], ['/settings/privacy-requests', 'Privacidad'],
     ['/campaigns/history', 'Campañas'], ['/contact/compose', 'Redactar correo'], ['/contact/sequence', 'Secuencia'],
     ['/ayuda/perfil', 'Centro de ayuda'], ['/cowork', 'Cowork'], ['/opportunities', 'Oportunidades'],

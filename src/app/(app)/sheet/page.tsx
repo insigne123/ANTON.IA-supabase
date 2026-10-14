@@ -513,7 +513,7 @@ export default function SheetPage() {
                     ) : (row.kind === 'lead_enriched' || row.kind === 'opportunity') && row.hasEmail ? (
                       <Button asChild size="sm"><Link href={`/contact/compose?id=${encodeURIComponent(row.sourceId)}`} aria-label={`Preparar correo para ${row.name || 'este contacto'}`}>Preparar correo</Link></Button>
                     ) : row.kind === 'lead_saved' ? (
-                      <Button asChild size="sm" variant="outline"><Link href={`/saved/leads?q=${encodeURIComponent(row.name || row.email || row.company || '')}`} aria-label={`Abrir a ${row.name || 'este contacto'} en «Por completar»`}>Abrir</Link></Button>
+                      <Button asChild size="sm" variant="outline"><Link href="/saved/leads/enriched" aria-label={`Abrir «Por escribir», donde ${row.name || 'este contacto'} espera su correo`}>Abrir</Link></Button>
                     ) : null}
                   </TableCell>
                 </TableRow>

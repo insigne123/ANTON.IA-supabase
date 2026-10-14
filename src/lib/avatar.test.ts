@@ -19,10 +19,8 @@ test('no screen builds an avatar URL that carries a prospect name to a third par
   const search = readFileSync('src/app/(app)/search/page.tsx', 'utf8');
   // The provider lead → row mapping moved to lead-ui.ts when the search page was split.
   const leadUi = readFileSync('src/lib/search/lead-ui.ts', 'utf8');
-  const saved = readFileSync('src/app/(app)/saved/leads/page.tsx', 'utf8');
   assert.doesNotMatch(search, /ui-avatars\.com/);
   assert.doesNotMatch(leadUi, /ui-avatars\.com/);
   assert.match(leadUi, /safeAvatarUrl\(raw\.photo_url\)/);
   assert.match(search, /<InitialsAvatar name=\{lead\.name\}/);
-  assert.match(saved, /<AvatarImage src=\{safeAvatarUrl\(lead\.avatar\)\}/, 'saved leads may still hold old ui-avatars URLs');
 });

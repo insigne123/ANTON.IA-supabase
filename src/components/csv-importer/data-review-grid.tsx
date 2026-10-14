@@ -79,7 +79,7 @@ export function DataReviewGrid({ initialRows, contactedEmails = null, onBack, on
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">Corrige lo marcado o quita la fila. Solo se importan las filas listas.</p>
                     <div className="mt-3 flex flex-wrap gap-2" role="status" aria-live="polite">
                         <Badge variant="success">{counts.porEscribir} a Por escribir</Badge>
-                        <Badge variant="info">{counts.porCompletar} a Por completar</Badge>
+                        <Badge variant="info">{counts.porCompletar} sin correo</Badge>
                         {counts.repeated > 0 ? <Badge variant="neutral">{counts.repeated} {counts.repeated === 1 ? 'repetido' : 'repetidos'}</Badge> : null}
                         {counts.contacted > 0 ? <Badge variant="neutral">{counts.contacted} ya {counts.contacted === 1 ? 'contactado' : 'contactados'}</Badge> : null}
                         {counts.problems > 0 ? <Badge variant="danger">{counts.problems} por revisar</Badge> : null}
@@ -131,7 +131,7 @@ export function DataReviewGrid({ initialRows, contactedEmails = null, onBack, on
                                             </>
                                         ) : csvRowDestination(row) === 'por-escribir'
                                             ? <Badge variant="success">Por escribir</Badge>
-                                            : <Badge variant="info">Por completar</Badge>}
+                                            : <Badge variant="info">Sin correo</Badge>}
                                     </TableCell>
                                     {COLUMNS.map((column) => (
                                         <TableCell key={column.field} className="p-1 align-top">

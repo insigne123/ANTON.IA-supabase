@@ -403,7 +403,7 @@ export function coworkProposalLink(proposal: Pick<CoworkProposalView, 'type' | '
   }
   if (kind === 'campaign_create' || kind === 'campaign_activate' || kind === 'campaign_pause' || kind === 'campaign_schedule_batch' || kind === 'campaign_retry') return { href: '/campaigns', label: 'Ver campañas' };
   if (kind === 'save_contact' || kind === 'enrich_contact' || kind === 'enrich_batch' || kind === 'contacts_import' || kind === 'enrich_phone'
-    || kind === 'lead_prepare_batch') return { href: '/saved/leads', label: 'Ver tus contactos' };
+    || kind === 'lead_prepare_batch') return { href: '/saved/leads/enriched', label: 'Ver tus contactos' };
   if (kind === 'send_email' || kind === 'reply_thread') return { href: '/contacted', label: 'Ver en Contactados' };
   if (kind === 'profile_update') return { href: '/profile', label: 'Ver tu perfil' };
   return null;

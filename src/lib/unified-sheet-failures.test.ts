@@ -4,8 +4,8 @@ import test from 'node:test';
 import { unifiedFailureText } from './unified-sheet-failures';
 
 test('names each failed read as the person knows it, joined in Spanish', () => {
-  assert.equal(unifiedFailureText(['saved']), 'No pudimos leer «Por completar».');
-  assert.equal(unifiedFailureText(['saved', 'contacted']), 'No pudimos leer «Por completar» y las conversaciones.');
+  assert.equal(unifiedFailureText(['saved']), 'No pudimos leer los contactos sin correo.');
+  assert.equal(unifiedFailureText(['saved', 'contacted']), 'No pudimos leer los contactos sin correo y las conversaciones.');
   assert.equal(unifiedFailureText(['enriched', 'opportunities', 'custom']),
     'No pudimos leer «Por escribir», las oportunidades guardadas y las etapas y notas.');
 });

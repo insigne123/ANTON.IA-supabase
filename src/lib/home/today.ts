@@ -141,9 +141,9 @@ function primaryAction(input: TodayInput, setup: TodaySetupStep[], queue: TodayQ
   }
   if (input.counts.saved > 0) {
     return {
-      title: `Completa el correo de ${plural(input.counts.saved, 'contacto guardado', 'contactos guardados')}`,
-      description: 'Sin correo no se les puede escribir. Complétalo con un clic (usa créditos).',
-      href: '/saved/leads', cta: 'Completar correos',
+      title: `Busca el correo de ${plural(input.counts.saved, 'contacto guardado', 'contactos guardados')}`,
+      description: 'Sin correo no se les puede escribir. Búscalo con un clic en «Por escribir» (usa créditos).',
+      href: '/saved/leads/enriched', cta: 'Buscar sus correos',
     };
   }
   return {

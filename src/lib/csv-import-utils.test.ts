@@ -113,7 +113,7 @@ test('the import page saves each row where it belongs, checks who was contacted 
     assert.match(page, /supabaseService\.addLeadsDedup\(plan\.porCompletar/);
     assert.doesNotMatch(page, /'verified'/);
     assert.match(page, /const DEFAULT_BACK = \{ href: '\/sheet', label: 'Tabla de datos' \}/);
-    assert.match(page, /'por-completar': \{ href: '\/saved\/leads', label: 'Por completar' \}/, '«Volver» returns to where the import was opened');
+    assert.match(page, /'por-completar': \{ href: '\/saved\/leads\/enriched', label: 'Por escribir' \}/, 'an old «Por completar» link returns to «Por escribir»');
     const uploader = readFileSync('src/components/csv-importer/csv-uploader.tsx', 'utf8');
     assert.match(uploader, /<Button type="button" onClick=\{\(\) => inputRef\.current\?\.click\(\)\}/, 'a real button picks the file');
     assert.doesNotMatch(uploader, /document\.getElementById/);
