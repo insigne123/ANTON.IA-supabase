@@ -20,7 +20,7 @@ import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionContr
   type CoworkCrmAssign, type CoworkExceptionResolve, type CoworkMissionControl } from './team-proposals';
 import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
 import { COWORK_MAX_COORDINATOR_CALLS, COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
-import { coworkSameName, coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
+import { coworkSameName, coworkWithDemoNote, coworkWriteBriefSchema, type CoworkWriteBrief } from './writer';
 import { coworkDesignBriefSchema, type CoworkDesignBrief } from './design-brief';
 import { coworkAnalysisBriefSchema, coworkAnalystFallback, type CoworkAnalysisBrief } from './analyst';
 import { coworkWithCharts } from './charts';
@@ -1595,7 +1595,7 @@ async function runCoworkLoop(input: {
         const emails: CoworkEditedEmail[] | null = asked ? coworkCampaignEmails(answer.blocks) : null;
         // One email per person (Plan 15): each becomes that person's first email in the campaign.
         const personal: CoworkPersonalEmail[] | null = asked && !emails ? coworkPersonalEmails(answer.blocks) : null;
-        if (!emails && !personal) return withRememberSuggestion(answer);
+        if (!emails && !personal) return withRememberSuggestion(coworkWithDemoNote(answer));
         written = { emails, personal, answer };
         observations.push({ action: COWORK_WRITTEN_ACTION, input: '', result: emails ? {
           scope: 'writer_output', emails,

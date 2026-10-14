@@ -338,7 +338,7 @@ export function coworkEarlierThread(output: CoworkWriterOutput, context: Pick<Wr
   // The model's own sentence about the meeting goes first: the polish would drop it for a meeting the email no longer asks (round 14:
   // «Quité la demo…» was dropped and only the word count was left).
   const unsaid = softened ? edited.split(/(?<=[.!?])\s+/).filter(sentence => !/\b(?:demo|reunion\w*|llamada)\b/.test(normalize(sentence))).join(' ') : edited;
-  const reply = softened ? `${unsaid} La demo queda para más adelante: cerré con una pregunta más liviana.`.trim() : edited;
+  const reply = softened ? `${unsaid} ${DEMO_NOTE}`.trim() : edited;
   if (softened && !output.suggestions.some(item => /demo/i.test(item.label))) output = { ...output, suggestions: [{ label: 'Mantener la demo', message: 'Mantén la invitación a la demo' }, ...output.suggestions].slice(0, 4) };
   // An email the person sends: no campaign for it, and the replies offer changes Cowork makes.
   if (context.edit && !next.to?.length && (output.question || output.suggestions.some(item => CAMPAIGN_WORD.test(item.label + item.message)))) {
@@ -735,6 +735,13 @@ export function coworkNextStepIssues(output: Pick<CoworkWriterOutput, 'blocks' |
  * 4 contacts and closed with tone chips only, «no deja botón para crear la campaña»). The draft as it was when nothing is missing. */
 export function coworkWithNextStep(draft: CoworkWriterOutput, context: Pick<WriterContext, 'earlier' | 'followUp'> = {}): CoworkWriterOutput {
   const blocks = coworkWriterBlocks(draft);
+  // A follow-up of an unsent email goes in the same campaign as its second step, never in a campaign of its own (round 20: «propone
+  // crear una campaña aparte para el seguimiento», «campaña pausada para usarla si no responde»).
+  const single = blocks.filter(block => block.type === 'email_draft' && block.to?.length);
+  if (context.followUp && context.earlier?.length === 1 && single.length === 1 && /campa[ñn]a/i.test(draft.question || '') && !/\bdos correos\b/i.test(draft.question || '')) {
+    const name = GREETING_NAME.exec((single[0] as { body: string }).body)?.[1];
+    if (name) return { ...draft, question: `¿Creo la campaña pausada para ${name} con los dos correos, el seguimiento al día 8?` };
+  }
   const [issue] = coworkNextStepIssues({ blocks, question: draft.question }, context);
   if (!issue) return draft;
   const addressed = blocks.flatMap(block => block.type === 'email_draft' && block.to?.length ? [block] : []);
@@ -758,6 +765,14 @@ export function coworkMissingRecipients(output: Pick<CoworkWriterOutput, 'blocks
     const emails = [...new Set(recipients.filter(person => person.email && coworkSameName(person.name, entry)).map(person => person.email!.toLowerCase()))];
     return emails.length === 1 && !covered.has(emails[0]) ? [entry] : [];
   });
+}
+
+const DEMO_NOTE = 'La demo queda para más adelante: cerré con una pregunta más liviana.';
+/** The «Mantener la demo» chip never goes without its reason in the reply (rounds 14 and 20: the chip was there, the note was not). */
+export function coworkWithDemoNote<T extends { reply: string; suggestions?: unknown }>(answer: T): T {
+  const chips = Array.isArray(answer.suggestions) ? answer.suggestions as Array<{ label?: unknown }> : [];
+  if (!chips.some(chip => chip?.label === 'Mantener la demo') || /\bdemo\b/i.test(answer.reply)) return answer;
+  return { ...answer, reply: `${answer.reply.trim()} ${DEMO_NOTE}`.trim() };
 }
 
 /** Deterministic checks, before any model: what can be told from the text alone. */
@@ -1389,7 +1404,7 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
     // Still one short after the corrections: the reply says who gets the shared first email, so it never claims one for each.
     const left = coworkMissingRecipients({ blocks: coworkWriterBlocks(polished) }, input.brief, context.recipients);
     const told = left.length ? { ...polished, reply: `${polished.reply.trim()} A ${left.join(' y ')} le llega el correo base de la campaña, con su nombre.` } : polished;
-    return offersNext ? coworkWithNextStep(told, context) : told;
+    return coworkWithDemoNote(offersNext ? coworkWithNextStep(told, context) : told);
   };
   let issues = checked(first);
   if (!hasTime()) {

@@ -1159,6 +1159,15 @@ test('one email per person names everyone in the brief, and a question never ope
   assert.match((coworkPolishDraft(spaced, []).blocks[0] as { body: string }).body, /\n¿Qué día te acomoda\?\n/);
 });
 
+test('the «Mantener la demo» chip always comes with its reason', async () => {
+  const { coworkWithDemoNote } = await import('./writer');
+  const bare = { reply: 'Lo dejé en 23 palabras; antes tenía 46.', suggestions: [{ label: 'Mantener la demo', message: 'Mantén la invitación a la demo' }] };
+  assert.equal(coworkWithDemoNote(bare).reply, 'Lo dejé en 23 palabras; antes tenía 46. La demo queda para más adelante: cerré con una pregunta más liviana.');
+  const told = { ...bare, reply: 'Quité la demo.' };
+  assert.equal(coworkWithDemoNote(told), told);
+  assert.equal(coworkWithDemoNote({ reply: 'Listo.', suggestions: [] }).reply, 'Listo.');
+});
+
 test('a pasted email improved but still self-praising gets the pitch check', () => {
   const blocks = [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'AXIS', body: 'Hola,\n\nSomos Yago y tenemos una plataforma que revisa causas.\n\nNos encantaría mostrarte una demo.\n\nSaludos,\nNicolás' }];
   const issues = coworkDraftIssues(blocks, { prohibited: [] } as never);
@@ -1175,6 +1184,10 @@ test('emails with recipients and no closing question get the campaign offer', as
   assert.equal(coworkWithNextStep(one).question, '¿Creo la campaña pausada para Daniela?');
   const asked = { ...one, question: '¿Lo ajusto?' };
   assert.equal(coworkWithNextStep(asked), asked);
+  // A follow-up's campaign is the one with both emails (round 20).
+  const followUp = { ...one, question: '¿Creo una campaña pausada para usarla si Daniela no responde?' };
+  assert.equal(coworkWithNextStep(followUp, { followUp: true, earlier: [{ to: ['d@x.test'], subject: 'S', body: 'Hola Daniela,' }] } as never).question,
+    '¿Creo la campaña pausada para Daniela con los dos correos, el seguimiento al día 8?');
 });
 
 test('an email that ends with the signature and no closing word gets «Saludos,»; one that has it, or another signer, does not', async () => {
