@@ -778,6 +778,11 @@ export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext)
     if (context.signer && !normalize(email.body).includes(normalize(context.signer.split(/\s+/)[0]))) {
       issues.push({ where, problem: 'No lleva la firma del usuario.', fix: `Firma con ${context.signer}.`, short: 'firma completa' });
     }
+    // Self-praise and wishes read as a sales pitch (rounds 14–16: «mejora este correo» kept «Somos Yago y tenemos…» and «Nos
+    // encantaría mostrarte una demo», and the person had to ask again).
+    const praise = SELF_PRAISE.exec(plain);
+    if (praise) issues.push({ where, problem: `Suena a folleto («${praise[0]}»): habla de ti o de lo que te gustaría, no de la persona.`,
+      fix: 'Abre con un momento concreto del trabajo de la persona y di qué hace la oferta en una frase; pide la demo con una pregunta directa («¿Qué día te acomoda…?»), sin «nos encantaría» ni «somos…».', short: 'sin tono de folleto' });
     const internal = INTERNAL_REFERENCE.exec(plain);
     if (internal) issues.push({ where, problem: `Dice cómo se armó el correo («${internal[0]}»): el destinatario no lo entiende.`,
       fix: 'Di el hecho directo, sin «según…» ni referencias al perfil o a los datos.', short: 'sin referencias internas' });
@@ -1278,6 +1283,7 @@ export function coworkPolishDraft(output: CoworkWriterOutput, proofs: string[], 
 }
 
 // A question on its own line starts with a capital: «¿qué día les acomoda una demo?» read as a slip (v14 independent reading).
+const SELF_PRAISE = /\b(?:nos encantaria|me encantaria|somos [a-z]+ y (?:tenemos|ofrecemos|somos)|plataforma (?:increible|innovadora|revolucionaria|lider)|(?:increible|revolucionari[ao]|innovador[a]?) (?:plataforma|solucion|herramienta))\b/;
 const LOWER_QUESTION = /^\s*¿\p{Ll}/mu;
 const capitalQuestions = (body: string) => body.replace(/^(\s*¿)(\p{Ll})/gmu, (_, open: string, letter: string) => `${open}${letter.toLocaleUpperCase('es')}`);
 

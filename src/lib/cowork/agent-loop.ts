@@ -995,6 +995,30 @@ export function coworkCampaignForListedPeople(campaign: z.infer<typeof coworkCam
   return { ...campaign, criteria: { ...campaign.criteria, titles: [], industries: [], countries: [], sizes: [], seniorities: [], enrichedOnly: false } };
 }
 
+/**
+ * A campaign goes to the addresses the conversation read, as they are: an address the model copied with a slip (another domain, a
+ * missing letter) is put back from the contact it names, by the part before the «@» or by the person's name (round 16 with Luna: the
+ * staging turned one address down and the campaign went out without José, «su correo no está disponible para esta audiencia»).
+ */
+export function coworkCampaignWithReadAddresses(campaign: z.infer<typeof coworkCampaignDraftSchema>, read: unknown[]) {
+  const plain = (text: string) => text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const known = collectCoworkLeadRows(read).flatMap(row => typeof row.email === 'string' && row.email.includes('@')
+    ? [{ email: row.email.trim().toLowerCase(), name: plain(String(row.name || '')) }] : []);
+  if (!known.length) return campaign;
+  const fix = (email: string) => {
+    const address = email.trim().toLowerCase();
+    if (known.some(item => item.email === address)) return address;
+    const local = plain(address.split('@')[0] || '').replace(/[^a-z]/g, '');
+    const matches = known.filter(item => item.email.split('@')[0].replace(/[^a-z]/g, '') === local
+      || (local.length > 3 && item.name.split(/\s+/).filter(part => part.length > 2).every(part => local.includes(part))));
+    return matches.length === 1 ? matches[0].email : email;
+  };
+  const emails = [...new Set(campaign.emails.map(fix))];
+  if (emails.join() === campaign.emails.join()) return campaign;
+  const next = { ...campaign, emails, firstEmails: campaign.firstEmails.map(item => ({ ...item, email: fix(item.email) })) };
+  return coworkCampaignDraftSchema.safeParse(next).success ? next : campaign;
+}
+
 /** What a proposed campaign does, when the model left no explanation of its own. */
 function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): string {
   const people = campaign.emails.length;
@@ -1817,8 +1841,9 @@ async function runCoworkLoop(input: {
         const invalidCampaign = decision.action === 'campaign.create' ? campaignProblem(decision.campaign) : null;
         if (invalidCampaign) throw rejected('Invalid campaign definition', `La decisión anterior no cumple el formato (${invalidCampaign}). Corrígela.`.slice(0, 600));
         const campaign = decision.action === 'campaign.create' && decision.campaign
-          ? coworkCampaignForListedPeople(exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails)
-            : personalEmails ? coworkCampaignWithPersonalEmails(decision.campaign, personalEmails) : decision.campaign) : undefined;
+          ? coworkCampaignWithReadAddresses(coworkCampaignForListedPeople(exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails)
+            : personalEmails ? coworkCampaignWithPersonalEmails(decision.campaign, personalEmails) : decision.campaign),
+          [...(input.history || []).flatMap(item => item.observations || []), ...observations]) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
         // Only what changes: a field sent as null keeps its value.
         const profile = decision.action === 'profile.update' ? coworkProfilePatchFromDecision(decision.profile) ?? undefined : undefined;
