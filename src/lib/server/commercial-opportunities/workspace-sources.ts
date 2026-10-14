@@ -11,11 +11,13 @@ import { resolveTicketForOrganization } from './tickets';
 import { searchCompraAgil, compraAgilQuery } from './compra-agil';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { EXCLUSION_MOTIVES } from '@/lib/commercial-opportunities/workspace-radar';
 
 export const criteriaSchema = z.object({ roles: z.array(z.string().max(80)).max(30), keywords: z.array(z.string().max(120)).max(30),
   postQueries: z.array(z.string().max(400)).min(1).max(12), decisionMakerTitles: z.array(z.string().max(80)).max(12) });
 const verdictSchema = z.object({ evaluations: z.array(z.object({ id: z.string().uuid(), verdict: z.enum(['recommended', 'review', 'excluded']),
-  reason: z.string().max(1000), service: z.string().max(500), score: z.number().int().min(0).max(100) })).max(40) });
+  reason: z.string().max(1000), service: z.string().max(500), score: z.number().int().min(0).max(100),
+  motive: z.enum(EXCLUSION_MOTIVES).nullable().optional() })).max(40) });
 type Candidate = { kind: string; key: string; title: string; company?: string | null; domain?: string | null; description: string;
   deadline?: string | null; amount?: number | null; currency?: string | null; url?: string | null; raw?: Record<string, unknown> };
 export const candidateFingerprint = (candidate: Candidate) => createHash('sha256').update(JSON.stringify(candidate)).digest('hex');
@@ -143,6 +145,7 @@ export async function evaluateOpportunityBatch(client: SupabaseClient, job: Oppo
   const rows = opportunityDb(await client.from('commercial_opportunities').select('id,kind,title,company_name,data,deadline_at').eq('organization_id', job.organization_id).in('id', job.payload.ids || [])) || [];
   const evaluated = await opportunityGenerate(client, job, { step: 'evaluate', category: 'evaluation', role: 'screen', schema: verdictSchema, output: 5000,
     prompt: `Evalúa TODOS los candidatos contra la oferta del workspace, no solo palabras. Devuelve exactamente un veredicto por id: recommended, review o excluded, razón breve, servicio al que encaja y score de prioridad (no probabilidad).\n` +
+      `Si es excluded, motive dice por qué: otro_producto (piden otra cosa aunque compartan palabras), parte_menor (lo que ofrece es una parte menor), requisito (exigen algo que la oferta no tiene: productos o licencias de un fabricante, una certificación, presencia), escala (volumen, dotación o plazo fuera de proporción) o sin_compra (no muestra una compra: candidatos, proveedores, contratación interna); en los demás veredictos motive es null.\n` +
       `Ante ambigüedad o información incompleta usa review. Contrataciones no prueban compra externa. Distingue publicaciones de proveedores, candidatos y compradores. Un repost no prueba necesidad de quien comparte. Considera exclusiones de ESTA oferta; no descartes todas las agencias. La elegibilidad de licitaciones no está certificada leyendo su nombre.\n` + JSON.stringify({ offer: context.offer, services: context.services, exclusions: context.exclusions, priority: context.priority, candidates: rows }) });
   let count = 0;
   for (const row of rows) {
@@ -150,7 +153,8 @@ export async function evaluateOpportunityBatch(client: SupabaseClient, job: Oppo
     if (!answer || row.data?.profileRevision !== context.revision) continue;
     opportunityDb(await client.from('opportunity_evaluations').upsert({ organization_id: job.organization_id, opportunity_id: row.id, profile_revision: context.revision,
       content_hash: row.data.contentHash, verdict: answer.verdict, reason: answer.reason, service: answer.service, model: 'opportunity/screen', evidence: [{ source: row.data.source, description: row.data.description }] }, { onConflict: 'opportunity_id,profile_revision,content_hash' }));
-    opportunityDb(await client.from('commercial_opportunities').update({ score: answer.verdict === 'excluded' ? Math.min(10, answer.score) : answer.score, reasons: [answer.reason], data: { ...row.data, evaluation: answer.verdict, matchedService: answer.service } })
+    opportunityDb(await client.from('commercial_opportunities').update({ score: answer.verdict === 'excluded' ? Math.min(10, answer.score) : answer.score, reasons: [answer.reason], data: { ...row.data, evaluation: answer.verdict, matchedService: answer.service,
+      excludedMotive: answer.verdict === 'excluded' ? answer.motive ?? null : null } })
       .eq('organization_id', job.organization_id).eq('id', row.id).eq('data->>contentHash', row.data.contentHash).eq('data->>profileRevision', String(context.revision)));
     count++;
   }
