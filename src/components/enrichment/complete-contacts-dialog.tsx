@@ -19,14 +19,14 @@ const OPTIONS: Array<{ value: ContactLookup; label: string; short: string }> = [
 
 function Segmented({ value, onChange, label, compact, mixed }: { value: ContactLookup | null; onChange: (value: ContactLookup) => void; label: string; compact?: boolean; mixed?: boolean }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex shrink-0 rounded-full border border-border/70 bg-muted/40 p-0.5">
+    <div role="radiogroup" aria-label={label} className={cn('inline-flex shrink-0 rounded-full bg-muted p-0.5', compact && 'w-full sm:w-auto')}>
       {OPTIONS.map(option => {
         const selected = !mixed && value === option.value;
         return (
           <button key={option.value} type="button" role="radio" aria-checked={selected} onClick={() => onChange(option.value)}
-            className={cn('inline-flex items-center gap-1.5 rounded-full px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              compact ? 'h-7 text-xs' : 'h-8 text-sm',
-              selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+            className={cn('inline-flex items-center justify-center gap-1.5 rounded-full px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              compact ? 'h-8 flex-1 text-xs sm:h-7 sm:flex-none' : 'h-8 text-sm',
+              selected ? 'bg-background text-foreground shadow-sm ring-1 ring-border' : 'text-muted-foreground hover:text-foreground')}>
             {option.value === 'email' ? <Mail className="h-3.5 w-3.5" aria-hidden="true" /> : <Phone className="h-3.5 w-3.5" aria-hidden="true" />}
             {compact ? option.short : option.label}
           </button>
@@ -74,8 +74,8 @@ export function CompleteContactsDialog({ open, onOpenChange, people, onConfirm, 
 
         <ul className="min-h-0 flex-1 divide-y divide-border/50 overflow-y-auto px-6" aria-label="Qué buscar para cada contacto">
           {people.map(person => (
-            <li key={person.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-3">
-              <div className="min-w-0 flex-1">
+            <li key={person.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <div className="min-w-0 sm:flex-1">
                 <p className="truncate text-sm font-medium">{person.name || 'Sin nombre'}</p>
                 {(person.title || person.company) && (
                   <p className="truncate text-xs text-muted-foreground">{[person.title, person.company].filter(Boolean).join(' · ')}</p>

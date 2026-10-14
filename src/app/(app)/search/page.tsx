@@ -794,7 +794,7 @@ export default function SearchPage() {
 
   const [isSaving, setIsSaving] = useState(false);
   // Saved contacts without email or phone: the step that looks them up before «Por escribir».
-  const [toComplete, setToComplete] = useState<Lead[]>([]);
+  const [toComplete, setToComplete] = useState<UILaed[]>([]);
   const [completing, setCompleting] = useState(false);
   const [profileSearchNotice, setProfileSearchNotice] = useState<null | {
     tone: 'info' | 'warning';
@@ -839,7 +839,7 @@ export default function SearchPage() {
       const all = await supabaseService.getLeads();
       setSavedIds(new Set(all.map(l => l.id)));
       // The saved rows of who still needs an email (their id may change on save): the next step looks them up.
-      const savedKey = (lead: Lead) => `${lead.name || ''}|${lead.company || ''}|${lead.title || ''}`.toLowerCase();
+      const savedKey = (lead: { name?: string | null; company?: string | null; title?: string | null }) => `${lead.name || ''}|${lead.company || ''}|${lead.title || ''}`.toLowerCase();
       const pendingKeys = new Set(withoutDirectContactData.map(savedKey));
       const pending = all.filter(lead => pendingKeys.has(savedKey(lead)) && !String(lead.email || '').includes('@'));
       await refreshSavedApolloIds();
@@ -2719,7 +2719,7 @@ export default function SearchPage() {
       <CompleteContactsDialog
         open={toComplete.length > 0}
         onOpenChange={open => { if (!open) skipCompleteContacts(); }}
-        people={toComplete.map(lead => ({ id: lead.id, name: lead.name, title: lead.title, company: lead.company }))}
+        people={toComplete.map(lead => ({ id: lead.id, name: lead.name || '', title: lead.title, company: lead.company }))}
         onConfirm={lookups => void handleCompleteContacts(lookups)}
         onSkip={skipCompleteContacts}
         loading={completing}

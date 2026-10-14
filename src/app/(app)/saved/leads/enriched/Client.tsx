@@ -20,6 +20,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
 import { CompleteContactsDialog } from '@/components/enrichment/complete-contacts-dialog';
+import { savedLeadToEnriched } from '@/lib/leads-workspace/saved-enrichment';
 import { completeSavedContacts, completionSummary, type ContactLookup } from '@/lib/leads-workspace/complete-contacts';
 import { supabase } from '@/lib/supabase';
 import { hasMeaningfulLeadResearch } from '@/lib/lead-research';
@@ -92,6 +93,7 @@ export default function EnrichedLeadsClient() {
   const [withoutEmail, setWithoutEmail] = useState<Lead[]>([]);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const movingSavedRef = useRef(false);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
@@ -445,6 +447,22 @@ export default function EnrichedLeadsClient() {
       if (loadDataRequestIdRef.current !== requestId) return;
       setEnriched(patched);
       setWithoutEmail(saved.filter(lead => !String(lead.email || '').includes('@')));
+      // Saved contacts that already have an email belong here: they come in as they are, without a search or credits (before,
+      // «Por completar» had a button for it).
+      const ready = saved.filter(lead => String(lead.email || '').includes('@'));
+      if (ready.length > 0 && !movingSavedRef.current) {
+        movingSavedRef.current = true;
+        try {
+          await enrichedLeadsStorage.addDedup(ready.map(savedLeadToEnriched));
+          const ids = new Set(ready.map(lead => lead.id));
+          await supabaseService.removeWhere(lead => ids.has(lead.id));
+          if (loadDataRequestIdRef.current === requestId) setEnriched(withCompanyFromSaved(await enrichedLeadsStorageGet(), saved));
+        } catch (error) {
+          console.error('[enriched-leads] Moving saved contacts with email failed:', error);
+        } finally {
+          movingSavedRef.current = false;
+        }
+      }
       setReports(getLeadReports());
       await loadNativeResearchStatuses(patched);
     } catch (error) {

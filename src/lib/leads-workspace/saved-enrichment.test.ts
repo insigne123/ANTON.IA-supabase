@@ -50,13 +50,15 @@ test('a saved contact with an email moves without a search, keeping its provider
   assert.equal(moved.country, 'Chile');
 });
 
-test('«Por completar» moves only what the classification says, marks the rest and shows the cost before searching', () => {
-  const page = readFileSync('src/app/(app)/saved/leads/page.tsx', 'utf8');
-  assert.match(page, /classifyEnrichmentResults\(chosen,/);
-  assert.match(page, /supabaseService\.markEmailNotFound\(outcome\.notFound, attemptedAt\)/);
-  assert.doesNotMatch(page, /processedRefs/, 'a processed contact without email no longer leaves the list');
-  assert.match(page, /ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT/, 'the action bar names internal app credits, not upstream credits');
-  assert.match(page, /créditos.*de ANTON\.IA/);
-  assert.match(page, /data-tour="saved-list"/);
+test('the lookup after saving moves only what the classification says, marks the rest and shows the cost before searching', () => {
+  const routine = readFileSync('src/lib/leads-workspace/complete-contacts.ts', 'utf8');
+  assert.match(routine, /classifyEnrichmentResults\(group\.leads,/);
+  assert.match(routine, /supabaseService\.markEmailNotFound\(outcome\.notFound,/);
+  assert.doesNotMatch(routine, /processedRefs/, 'a processed contact without email is not moved');
+  const dialog = readFileSync('src/components/enrichment/complete-contacts-dialog.tsx', 'utf8');
+  assert.match(dialog, /ANTONIA_ENRICHMENT_CREDITS_PER_CONTACT/, 'the button names internal app credits, not upstream credits');
+  assert.match(dialog, /Buscar datos · \$\{credits\}/);
+  assert.match(dialog, /'Solo correo'/);
+  assert.match(dialog, /'Correo \+ teléfono'/);
   assert.deepEqual(Object.keys(SAVED_LOOKUP_LABELS).sort(), ['not_found', 'not_searched', 'with_email']);
 });

@@ -36,10 +36,8 @@ test('the retired Autopilot columns leave the sheet, also from a layout saved be
 test('Pipeline and the data sheet open the exact contact, not the whole list', () => {
   const sheet = readFileSync('src/app/(app)/sheet/page.tsx', 'utf8');
   assert.match(sheet, /href=\{`\/contacted\?c=\$\{encodeURIComponent\(row\.sourceId\)\}`\}/, '«Ver conversación» opens that conversation');
-  assert.match(sheet, /href=\{`\/saved\/leads\?q=\$\{encodeURIComponent\(/, '«Abrir» searches that contact in «Por completar»');
+  assert.match(sheet, /<Link href="\/saved\/leads\/enriched" aria-label=/, '«Abrir» goes to «Por escribir», where a contact without email waits');
   assert.doesNotMatch(sheet, /<Link href="\/contacted">|<Link href="\/saved\/leads">/);
-  const saved = readFileSync('src/app/(app)/saved/leads/page.tsx', 'utf8');
-  assert.match(saved, /new URLSearchParams\(window\.location\.search\)\.get\('q'\)/, '«Por completar» starts its search with ?q=');
   const drawer = readFileSync('src/components/crm/LeadDetailDrawer.tsx', 'utf8');
   assert.match(drawer, /\/contacted\?c=\$\{encodeURIComponent\(lead\.sourceId\)\}/);
   assert.doesNotMatch(drawer, /autopilotStatus/, 'no Autopilot badge in the drawer');
