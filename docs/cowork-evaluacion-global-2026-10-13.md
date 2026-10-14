@@ -4,17 +4,20 @@ Medición de Cowork completo, como lo usa una persona: portada, flujos, respuest
 
 ## Resumen
 
-- **Cowork pasó de 3,5–3,8 a 4,7 con Luna.** La versión anterior a estas iteraciones (las mismas respuestas, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Con las iteraciones 1 a 21 (PRs #339, #341, #343 a #346, #348, #350 a #359 y #360), la nota de cada ronda, con sus dos lectores ciegos, fue:
+- **Cowork pasó de 3,5–3,8 a 4,6 con Luna, estable en dos rondas seguidas.** La versión anterior a estas iteraciones (las mismas respuestas, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Con las iteraciones 1 a 22 (PRs #339, #341, #343 a #346, #348, #350 a #359, #360 y #362), la nota de cada ronda, con sus dos lectores ciegos, fue:
   - **Luna, el modelo de producción, a US$ 0,005 por tarea:**
     - ronda 21 (iteración 20): 4,61 y 4,73 → **4,67**;
     - ronda 22 (iteración 20, confirmación): 4,41 y 4,54 → **4,48**, bajo la meta;
-    - ronda 23 (iteración 21, la versión final): 4,78 y 4,66 → **4,72**.
-  - **Haiku 5.5 coordinador + Sonnet 5.5 Redactora, a US$ 0,022–0,025 por tarea:**
-    - ronda 21: 4,48;
-    - ronda 22: 4,69;
-    - ronda 23: 4,60 y 4,48 → **4,54**.
-- **Recomendación: Luna en producción.** Supera la meta en la versión final (4,72) y en dos de las tres rondas, con una nota igual o mejor que Haiku + Sonnet a una quinta parte del costo. Haiku + Sonnet queda como alternativa si se prefiere un poco más de consistencia en los correos. No se tocó la configuración de modelos de producción.
-- **Variación entre corridas:** la misma versión se mueve ±0,1 a ±0,2 de una ronda a otra, porque cada escenario corre una vez y el modelo no es determinista. Por eso cada ronda tiene dos lectores, la base se vuelve a leer en cada una y la versión final se midió en tres rondas seguidas. La ronda 22 (4,48) muestra que una corrida mala puede quedar justo bajo 4,5.
+    - ronda 23 (iteración 21): 4,78 y 4,66 → **4,72**;
+    - ronda 24 (iteración 21, confirmación): 4,35 y 4,38 → **4,37**, bajo la meta: llevó a la iteración 22;
+    - ronda 25 (iteración 22, la versión final): 4,56 y 4,57 → **4,57**;
+    - ronda 26 (iteración 22, confirmación): 4,55 y 4,59 → **4,57**.
+  - **Haiku 5.5 coordinador + Sonnet 5.5 Redactora, a US$ 0,022–0,027 por tarea:**
+    - rondas 21 a 24: 4,48 · 4,69 · 4,54 · 4,49;
+    - ronda 25: 4,56 y 4,52 → **4,54**;
+    - ronda 26: 4,44 y 4,50 → **4,47**.
+- **Recomendación: Luna en producción.** La versión final supera la meta en las dos rondas que la midieron, con sus cuatro lecturas sobre 4,5 (4,55 a 4,59), y queda igual o mejor que Haiku + Sonnet a una quinta parte del costo. Haiku + Sonnet queda como alternativa si se prefiere un poco más de consistencia en los correos. No se tocó la configuración de modelos de producción.
+- **Variación entre corridas:** la misma versión se mueve ±0,1 a ±0,2 de una ronda a otra, porque cada escenario corre una vez y el modelo no es determinista. Por eso cada ronda tiene dos lectores, la base se vuelve a leer en cada una y cada versión candidata se midió dos veces. Las rondas 22 y 24 muestran que una versión puede pasar en una ronda y bajar en la siguiente; la iteración 22 es la primera que pasa en dos rondas seguidas.
 
 ## Cómo se mide
 
@@ -90,6 +93,12 @@ Medición de Cowork completo, como lo usa una persona: portada, flujos, respuest
 | 22 | **Iteración 20 (confirmación), Luna** | 4,41 | **4,54** | 4,48 | US$ 0,0049 |
 | 23 | Iteración 21, Haiku + Sonnet | **4,60** | 4,48 | **4,54** | US$ 0,024 |
 | 23 | **Iteración 21, Luna** | **4,78** | **4,66** | **4,72** | US$ 0,005 |
+| 24 | Iteración 21 (confirmación), Haiku + Sonnet | 4,50 | 4,47 | 4,49 | US$ 0,027 |
+| 24 | Iteración 21 (confirmación), Luna | 4,35 | 4,38 | 4,37 | US$ 0,0049 |
+| 25 | Iteración 22, Haiku + Sonnet | **4,56** | **4,52** | **4,54** | US$ 0,025 |
+| 25 | **Iteración 22, Luna** | **4,56** | **4,57** | **4,57** | US$ 0,0051 |
+| 26 | Iteración 22 (confirmación), Haiku + Sonnet | 4,44 | **4,50** | 4,47 | US$ 0,026 |
+| 26 | **Iteración 22 (confirmación), Luna** | **4,55** | **4,59** | **4,57** | US$ 0,0051 |
 
 La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Las rondas 1, 3 a 5 y 7 quedan en el borrador de trabajo; la tabla deja las que comparan modelos o cierran una iteración.
 
@@ -143,6 +152,8 @@ La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo
 - **Tarjeta de campaña:** con una sola persona repite el correo (por persona y como secuencia).
 - **Tiempos:** los turnos que escriben y proponen la campaña tardan entre 40 y 60 s.
 - **Cautela de más:** en la ronda 23, al priorizar contactos, algunas respuestas todavía agregan reservas como «no como autoridad de compra confirmada», que los lectores leen como ruido.
+- **Iteración 22 (tras la ronda 24):** se quitan restos de marca pegados al texto («pertinente.IA.»), tablas de una fila que repiten la respuesta y la pregunta final dicha dos veces; un primer correo ya no describe cambios a una versión que nadie vio, y «¿cómo mejorar?» sin envíos parte con dos palancas concretas.
+- **Lo que más se repite en las rondas 25 y 26:** la vista previa de una plantilla para varios a veces muestra «Hola nombre» en vez del primer destinatario, y la tarjeta de búsqueda de correos a veces sale sin casillas para quitar personas.
 
 ## Límites
 
