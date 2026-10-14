@@ -2331,6 +2331,19 @@ test('a «dale» to a closing question that offered the campaign counts as askin
   assert.equal(coworkAcceptsCampaignOffer('dale', [{ runId: 'r1', observations: [], reply: 'Listo.\n\n¿Lo hago más corto?' }]), false);
 });
 
+test('a campaign address copied with a slip goes back to the one the conversation read', async () => {
+  const { coworkCampaignWithReadAddresses } = await import('./agent-loop');
+  const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google',
+    emails: ['daniela.rojas@manpower.test', 'jose.castro@grupoexpro.cl'],
+    criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false },
+    messages: [{ subject: 'Asunto', body: 'Hola {{nombre}},\n\nTexto.', delayDays: 0 }] });
+  const read = [{ action: 'leads.search', input: 'con correo', result: { scope: 'own_saved_contacts', items: [
+    { id: '00000000-0000-4000-8000-000000000071', name: 'Daniela Rojas', company: 'Manpower', email: 'daniela.rojas@manpower.test' },
+    { id: '00000000-0000-4000-8000-000000000072', name: 'José Castro', company: 'GrupoExpro', email: 'jose.castro@grupoexpro.test' }] } }];
+  assert.deepEqual(coworkCampaignWithReadAddresses(campaign, read).emails, ['daniela.rojas@manpower.test', 'jose.castro@grupoexpro.test']);
+  assert.equal(coworkCampaignWithReadAddresses(campaign, []), campaign);
+});
+
 test('a campaign to listed people is not narrowed by filters the person never asked for', async () => {
   const { coworkCampaignForListedPeople } = await import('./agent-loop');
   const campaign = coworkCampaignDraftSchema.parse({ name: 'AXIS', objective: 'Primera conversación', provider: 'google', emails: ['daniela.rojas@manpower.test'],

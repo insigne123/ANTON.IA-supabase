@@ -1148,6 +1148,12 @@ test('an edit that drops the demo it was not asked to drop gets its closing ques
   assert.match(told.reply, /Quité los adjetivos de venta\. La demo queda para más adelante: cerré con una pregunta más liviana\.$/);
 });
 
+test('a pasted email improved but still self-praising gets the pitch check', () => {
+  const blocks = [{ type: 'email_draft' as const, title: 'Correo', to: null, subject: 'AXIS', body: 'Hola,\n\nSomos Yago y tenemos una plataforma que revisa causas.\n\nNos encantaría mostrarte una demo.\n\nSaludos,\nNicolás' }];
+  const issues = coworkDraftIssues(blocks, { prohibited: [] } as never);
+  assert.ok(issues.some(issue => issue.short === 'sin tono de folleto'));
+});
+
 test('emails with recipients and no closing question get the campaign offer', async () => {
   const { coworkWithNextStep } = await import('./writer');
   const draft = { reply: 'Escribí el correo.', question: null, suggestions: [{ label: 'Más cercano', message: 'Hazlo más cercano' }],
