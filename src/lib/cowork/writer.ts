@@ -748,6 +748,18 @@ export function coworkWithNextStep(draft: CoworkWriterOutput, context: Pick<Writ
   return { ...draft, question };
 }
 
+/** Who the brief names, with an address, and got no email of their own when the Writer wrote one per person (round 17 with Luna: «un
+ * correo distinto para cada uno de los 4» and three cards, José left out). Empty when it wrote one shared email. */
+export function coworkMissingRecipients(output: Pick<CoworkWriterOutput, 'blocks'>, brief: Pick<CoworkWriteBrief, 'recipients'>, recipients: Recipient[] = []) {
+  const drafts = output.blocks.filter(block => block.type === 'email_draft');
+  if (drafts.length < 2) return [];
+  const covered = new Set(drafts.flatMap(block => (block.to ?? []).map(entry => entry.trim().toLowerCase())));
+  return (brief.recipients ?? []).flatMap(entry => {
+    const emails = [...new Set(recipients.filter(person => person.email && coworkSameName(person.name, entry)).map(person => person.email!.toLowerCase()))];
+    return emails.length === 1 && !covered.has(emails[0]) ? [entry] : [];
+  });
+}
+
 /** Deterministic checks, before any model: what can be told from the text alone. */
 export function coworkDraftIssues(blocks: CoworkBlock[], context: WriterContext): CoworkDraftIssue[] {
   const issues: CoworkDraftIssue[] = [];
@@ -1284,8 +1296,10 @@ export function coworkPolishDraft(output: CoworkWriterOutput, proofs: string[], 
 
 // A question on its own line starts with a capital: «¿qué día les acomoda una demo?» read as a slip (v14 independent reading).
 const SELF_PRAISE = /\b(?:nos encantaria|me encantaria|somos [a-z]+ y (?:tenemos|ofrecemos|somos)|plataforma (?:increible|innovadora|revolucionaria|lider)|(?:increible|revolucionari[ao]|innovador[a]?) (?:plataforma|solucion|herramienta))\b/;
-const LOWER_QUESTION = /^\s*¿\p{Ll}/mu;
-const capitalQuestions = (body: string) => body.replace(/^(\s*¿)(\p{Ll})/gmu, (_, open: string, letter: string) => `${open}${letter.toLocaleUpperCase('es')}`);
+// …and with no space after its mark (round 17: «¿ qué día»).
+const LOWER_QUESTION = /^\s*¿\s*\p{Ll}|¿[ \t]+/mu;
+const capitalQuestions = (body: string) => body.replace(/¿[ \t]+/gu, '¿')
+  .replace(/^(\s*¿)(\p{Ll})/gmu, (_, open: string, letter: string) => `${open}${letter.toLocaleUpperCase('es')}`);
 
 /** The Writer's blocks, kept to emails and sequences (a stray table or figure is dropped). */
 export function coworkWriterBlocks(output: CoworkWriterOutput): CoworkBlock[] {
@@ -1362,12 +1376,20 @@ export async function runCoworkWriter(input: WriterInput): Promise<CoworkWriterO
   }
   await input.step({ agent: 'writer', state: 'done', label: `Escribió ${what}` });
 
-  const checked = (draft: CoworkWriterOutput) => [...coworkDraftIssues(coworkWriterBlocks(draft), context), ...coworkReplyIssues(draft.reply),
+  const missing = (draft: CoworkWriterOutput): CoworkDraftIssue[] => {
+    const left = coworkMissingRecipients({ blocks: coworkWriterBlocks(draft) }, input.brief, context.recipients);
+    return left.length ? [{ where: 'Destinatarios', problem: `Escribiste un correo por persona y falta el de ${left.join(', ')}.`,
+      fix: `Agrega un email_draft para ${left.join(', ')}, con su nombre y su correo en to, igual de específico que los demás.`, short: 'un correo para cada uno' }] : [];
+  };
+  const checked = (draft: CoworkWriterOutput) => [...coworkDraftIssues(coworkWriterBlocks(draft), context), ...coworkReplyIssues(draft.reply), ...missing(draft),
     ...(input.brief.campaign || PASTED_EDIT.test(input.request) ? [] : coworkNextStepIssues({ blocks: coworkWriterBlocks(draft), question: draft.question }, context))];
   const offersNext = !(input.brief.campaign || PASTED_EDIT.test(input.request));
   const polish = (draft: CoworkWriterOutput) => {
     const polished = coworkPolishDraft(draft, context.proofs ?? [], context.products ?? [], context.signer);
-    return offersNext ? coworkWithNextStep(polished, context) : polished;
+    // Still one short after the corrections: the reply says who gets the shared first email, so it never claims one for each.
+    const left = coworkMissingRecipients({ blocks: coworkWriterBlocks(polished) }, input.brief, context.recipients);
+    const told = left.length ? { ...polished, reply: `${polished.reply.trim()} A ${left.join(' y ')} le llega el correo base de la campaña, con su nombre.` } : polished;
+    return offersNext ? coworkWithNextStep(told, context) : told;
   };
   let issues = checked(first);
   if (!hasTime()) {

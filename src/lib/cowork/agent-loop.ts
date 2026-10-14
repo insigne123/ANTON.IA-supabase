@@ -848,7 +848,15 @@ export function coworkLookupReply(lookup: LookupPeople, read: unknown[]) {
     + (waiting.length
       ? `Propongo buscar primero el perfil ${chosen.length === 1 ? 'de quien dirige o lidera un área, porque decide o influye' : `de los ${chosen.length} que dirigen o lideran un área, porque deciden o influyen`} en la compra: ${listed(chosen.map(who))}. ${listed(firsts)} ${waiting.length === 1 ? 'queda' : 'quedan'} para después por su cargo.`
       : `Propongo buscar el perfil de ${chosen.length === 1 ? 'tu contacto' : `tus ${chosen.length} contactos`}: ${listed(chosen.map(who))}.`)
-    + ' Con su perfil guardado te preparo las invitaciones, dentro de tu cupo semanal; nada se envía sin tu aprobación.';
+    + ` Con su perfil guardado te preparo las invitaciones${quotaOf(read)}; nada se envía sin tu aprobación.`;
+}
+
+/** The week's invitation quota, when it was read: its figure, not «tu cupo» (rounds 16–17: «no informa el cupo que se pidió revisar»). */
+function quotaOf(read: unknown[]) {
+  const quota = read.map(item => (item as { action?: unknown; result?: unknown } | null))
+    .find(item => item?.action === 'linkedin.quota')?.result as { remaining?: unknown; limit?: unknown } | undefined;
+  return typeof quota?.remaining === 'number' && typeof quota.limit === 'number'
+    ? `: te quedan ${quota.remaining} de ${quota.limit} invitaciones esta semana` : ', dentro de tu cupo semanal';
 }
 
 // A stand-in read with one saved contact without a profile: whether an answer offers the profile lookup, before reading who.
