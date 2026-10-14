@@ -4,10 +4,11 @@ Medición de Cowork completo, como lo usa una persona: portada, flujos, respuest
 
 ## Resumen
 
-- **La nota pasó de 3,6–3,8 a 4,6–4,7.** `main` antes de estas iteraciones saca 3,5 a 3,8 en todas las rondas (es el mismo conjunto de respuestas, leído de nuevo cada vez). Con las iteraciones 1 a 15 (PRs #339, #341, #343 a #346, #348 y #350 a #353), Haiku 5.5 como coordinador con Sonnet 5.5 como Redactora llega a **4,62 en la ronda 15 y 4,69 en la ronda 16, con los dos lectores sobre 4,5 en ambas rondas**.
-- **Luna queda en 4,3–4,4**, a una quinta parte del costo. Hasta la ronda 12 iba a la par con Haiku y Sonnet; desde la ronda 13 queda 0,2 a 0,4 por debajo. Pierde en pasos sueltos del modelo que los arreglos deterministas no cubren todos: dejar fuera a un contacto con una razón falsa, repetir el diagnóstico tras un «dale» y escribir un correo genérico cuando se pidió otra cosa.
-- **Recomendación:** para tener un Cowork de 4,5, usar Haiku 5.5 como coordinador y Sonnet 5.5 como Redactora, a unos US$ 0,025–0,028 por tarea, unas cinco veces lo que cuesta Luna (US$ 0,0055). Si el costo pesa más, Luna sigue siendo la mejor relación calidad/precio con 4,3–4,4. El cambio de modelo es una variable de entorno; no se tocó la configuración de producción. Haiku en todos los roles quedó 0,2 por debajo de Haiku con Sonnet (ronda 8), y Sonnet como coordinador (ronda 2) costó 12 veces más por +0,09.
-- **Variación entre corridas:** la misma versión puede moverse ±0,2 de una ronda a otra, porque cada escenario corre una vez y el modelo no es determinista. Por eso cada ronda tiene dos lectores y la base se vuelve a leer en cada una.
+- **Cowork pasó de 3,5–3,8 a 4,6.** La versión anterior a estas iteraciones (las mismas respuestas, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Con las iteraciones 1 a 20 (PRs #339, #341, #343 a #346, #348 y #350 a #359), la versión final se midió en dos rondas seguidas (21 y 22) con dos lectores ciegos cada una:
+  - **Luna, el modelo de producción:** 4,61 · 4,73 · 4,41 · 4,54 → **media 4,57**, tres de cuatro lecturas sobre 4,5, a **US$ 0,005 por tarea**.
+  - **Haiku 5.5 coordinador + Sonnet 5.5 Redactora:** 4,45 · 4,51 · 4,61 · 4,76 → **media 4,58**, a US$ 0,022–0,025 por tarea.
+- **Recomendación: Luna en producción.** Llega a la meta con la misma nota que Haiku + Sonnet a una quinta parte del costo. Haiku + Sonnet queda como alternativa si se prefiere un poco más de consistencia en los correos. No se tocó la configuración de modelos de producción.
+- **Variación entre corridas:** la misma versión se mueve ±0,1 a ±0,2 de una ronda a otra, porque cada escenario corre una vez y el modelo no es determinista. Por eso cada ronda tiene dos lectores, la base se vuelve a leer en cada una y la versión final se midió dos veces.
 
 ## Cómo se mide
 
@@ -69,8 +70,20 @@ Medición de Cowork completo, como lo usa una persona: portada, flujos, respuest
 | 15 | Iteración 13, Luna | 4,44 | 4,37 | 4,41 | US$ 0,0055 |
 | 16 | Iteración 14, Haiku + Sonnet | **4,64** | **4,73** | **4,69** | US$ 0,028 |
 | 16 | Iteración 14, Luna | 4,25 | 4,36 | 4,31 | US$ 0,0058 |
+| 17 | Iteración 16, Haiku + Sonnet | 4,48 | 4,40 | 4,44 | US$ 0,023 |
+| 17 | Iteración 16, Luna | 4,48 | 4,38 | 4,43 | US$ 0,0052 |
+| 18 | Iteración 17, Haiku + Sonnet | 4,64 | 4,62 | 4,63 | US$ 0,025 |
+| 18 | Iteración 17, Luna | 4,49 | 4,46 | 4,48 | US$ 0,005 |
+| 19 | Iteración 18, Haiku + Sonnet | 4,18 | 4,28 | 4,23 | US$ 0,020 |
+| 19 | Iteración 18, Luna | 4,35 | 4,51 | 4,43 | US$ 0,0051 |
+| 20 | Iteración 19, Haiku + Sonnet | 4,32 | 4,13 | 4,23 | US$ 0,019 |
+| 20 | Iteración 19, Luna | 4,49 | 4,36 | 4,43 | US$ 0,005 |
+| 21 | Iteración 20, Haiku + Sonnet | 4,45 | 4,51 | 4,48 | US$ 0,022 |
+| 21 | **Iteración 20, Luna** | **4,61** | **4,73** | **4,67** | US$ 0,0049 |
+| 22 | Iteración 20 (confirmación), Haiku + Sonnet | 4,61 | 4,76 | 4,69 | US$ 0,025 |
+| 22 | **Iteración 20 (confirmación), Luna** | 4,41 | **4,54** | 4,48 | US$ 0,0049 |
 
-La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo en cada ronda) queda entre 3,49 y 3,84 en todas las rondas. Las rondas 1, 3 a 5 y 7 quedan en el borrador de trabajo; la tabla deja las que comparan modelos o cierran una iteración.
+La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo en cada ronda) queda entre 3,45 y 3,84 en todas las rondas. Las rondas 1, 3 a 5 y 7 quedan en el borrador de trabajo; la tabla deja las que comparan modelos o cierran una iteración.
 
 ## Qué cambió
 
@@ -94,6 +107,15 @@ La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo
 - **Contactos sin correo:** «tengo contactos sin correo» siempre termina en la tarjeta para buscar sus correos, con los nombres y el costo, aunque el modelo responda sin leer o escriba un correo que nadie pidió.
 - **Cifras:** «¿Cómo voy?» siempre trae la tarjeta de cifras, también en 0.
 - **Siguiente paso:** todo correo con destinatarios termina ofreciendo la campaña pausada («con los dos correos» si incluye el seguimiento), y un «dale» a esa oferta la crea en el mismo turno.
+- **Coherencia (iteraciones 16 a 20):**
+  - Una dirección copiada con un error vuelve a la del contacto leído, así que nadie queda fuera de la campaña.
+  - Con un correo por persona, nadie del encargo queda sin el suyo.
+  - El texto cuenta las mismas personas que la tarjeta.
+  - Los cargos buscados quedan como compradores.
+  - El cupo de LinkedIn se dice con su cifra.
+  - «Mantener la demo» siempre trae su aviso.
+  - El seguimiento de un correo aún no enviado va en la misma campaña.
+- **Tono:** «mejorar este correo» marca «Nos encantaría…» y «Somos X y tenemos…». Se quitan las frases de cautela que los lectores leían como jerga y «¿Qué puedes hacer?» cierra con un paso concreto.
 - **Tarjetas:**
   - Una sola tarjeta para buscar correos, con casillas y el costo en el botón.
   - Sin jerga («enriquecer», «lote»).
@@ -104,16 +126,14 @@ La base (`main` anterior, mismas transcripciones de la ronda 3, leídas de nuevo
   - El acento en modo oscuro es más claro.
   - Los atajos de la portada entran juntos: antes, al cargar «Para hoy», algunos repetían su animación y quedaban invisibles un momento.
   - El título de una conversación es la primera frase del pedido.
+  - En modo oscuro los botones rellenos usan azul profundo con texto blanco.
+  - Los pendientes se ordenan por cargo, primero quien dirige el área.
 
 ## Lo que sigue bajando la nota
 
-- **Pasos sueltos del modelo (sobre todo Luna):**
-  - Repite el diagnóstico tras un «dale» en vez de avanzar.
-  - Deja fuera a un contacto con una razón falsa.
-  - La primera versión de «mejorar este correo» a veces cambia poco.
-- **Tarjeta de campaña:** con una sola persona muestra el correo dos veces (por persona y como secuencia). Además, el indicador de pasos y la palabra «enriquecimiento» siguen en algunas tarjetas.
-- **LinkedIn:** cuando se pide revisar el cupo, la respuesta no siempre da la cifra («100 de 100 libres»).
-- **Tiempos:** los turnos que escriben y proponen la campaña tardan 45 a 60 s.
+- **Pasos sueltos del modelo:** a veces repite el diagnóstico tras un «dale» antes de avanzar, la primera versión de «mejorar este correo» cambia poco o el correo es más genérico. Pasa en una o dos de catorce tareas por ronda, y cambia de tarea entre corridas.
+- **Tarjeta de campaña:** con una sola persona repite el correo (por persona y como secuencia).
+- **Tiempos:** los turnos que escriben y proponen la campaña tardan entre 40 y 60 s.
 
 ## Límites
 
