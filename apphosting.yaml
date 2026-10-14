@@ -8,6 +8,10 @@ runConfig:
   memoryMiB: 768
 
 env:
+  # Build only: «next build» checks types with the default heap (~2 GB) and ran out of memory on 14 oct 2026.
+  - variable: NODE_OPTIONS
+    value: --max-old-space-size=4096
+    availability: [BUILD]
   # Cowork private pilot: visible solo para nicolas.yarur.g@yago.cl (gate en código + grant DB).
   - variable: COWORK_ENABLED
     value: "true"
