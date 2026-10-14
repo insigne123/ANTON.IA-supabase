@@ -74,7 +74,7 @@ export function ResearchDraft({ runId, snapshotId, onAccessDenied }: {
       <p className="whitespace-pre-wrap break-words text-[14px] leading-6">{state.draft.text || 'El borrador está guardado en el editor de correos.'}</p>
       <p className="text-[12px] text-cw-muted">Versión actual del borrador. Crear este borrador no envía mensajes.</p>
       <div className="flex flex-wrap gap-2">
-        <a href={`/contact/compose?draftId=${encodeURIComponent(state.draft.id)}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-cw-accent px-3 text-[13px] font-medium text-cw-on-accent hover:bg-cw-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">Abrir en el editor de correos</a>
+        <a href={`/contact/compose?draftId=${encodeURIComponent(state.draft.id)}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-cw-accent-fill px-3 text-[13px] font-medium text-cw-on-accent hover:bg-cw-accent-fill-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">Abrir en el editor de correos</a>
         <CwButton size="sm" variant="ghost" onClick={() => setRefresh(value => value + 1)}><RotateCcw aria-hidden="true" />Actualizar versión</CwButton>
       </div>
     </section>;

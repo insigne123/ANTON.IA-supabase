@@ -60,7 +60,7 @@ function Block({ block }: { block: MdBlock }): ReactNode {
       const items = block.items.map((item, index) => <li key={index} className={cn(item.checked !== null && 'cw-task')}>
         {item.checked !== null && <span aria-hidden="true" className={cn(
           'mt-[0.32em] inline-flex h-[1em] w-[1em] shrink-0 items-center justify-center rounded-[4px] border text-[0.8em]',
-          item.checked ? 'border-cw-accent bg-cw-accent text-cw-on-accent' : 'border-cw-border-strong',
+          item.checked ? 'border-cw-accent bg-cw-accent-fill text-cw-on-accent' : 'border-cw-border-strong',
         )}>{item.checked ? '✓' : ''}</span>}
         {item.checked !== null && <span className="sr-only">{item.checked ? 'Completado: ' : 'Pendiente: '}</span>}
         <div className="min-w-0 flex-1 space-y-[0.32em]">{item.children.map((child, childIndex) => <Block key={childIndex} block={child} />)}</div>

@@ -27,7 +27,7 @@ type Variant = 'primary' | 'secondary' | 'ghost' | 'quiet' | 'danger';
 type Size = 'xs' | 'sm' | 'md' | 'icon' | 'icon-sm';
 
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-cw-accent text-cw-on-accent shadow-[var(--cw-shadow-sm)] hover:bg-cw-accent-hover',
+  primary: 'bg-cw-accent-fill text-cw-on-accent shadow-[var(--cw-shadow-sm)] hover:bg-cw-accent-fill-hover',
   secondary: 'border border-cw-border bg-cw-elevated text-cw-text shadow-[var(--cw-shadow-sm)] hover:border-cw-border-strong hover:bg-cw-panel',
   ghost: 'text-cw-muted hover:bg-cw-hover hover:text-cw-text',
   quiet: 'text-cw-text hover:bg-cw-hover',

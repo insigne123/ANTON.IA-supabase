@@ -68,7 +68,7 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   return <nav aria-label="Conversaciones" className="flex h-full min-h-0 flex-col">
     <div className="flex items-center gap-1 px-3 pb-2 pt-3">
       <CwButton variant="quiet" className="flex-1 justify-start gap-2.5 px-2.5 text-[14px]" onClick={onNew}>
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent text-cw-on-accent"><SquarePen className="!size-3.5" aria-hidden="true" /></span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent-fill text-cw-on-accent"><SquarePen className="!size-3.5" aria-hidden="true" /></span>
         Nueva conversación
       </CwButton>
       {closeStyle === 'dismiss'

@@ -128,6 +128,9 @@ html.dark {
   --cw-faint: hsl(215 16% 60%);
   --cw-accent: hsl(var(--primary));
   --cw-accent-hover: hsl(217.2 91.2% 39%);
+  /* Filled buttons: the accent itself in light. */
+  --cw-accent-fill: var(--cw-accent);
+  --cw-accent-fill-hover: var(--cw-accent-hover);
   --cw-accent-soft: hsl(var(--primary) / 0.09);
   --cw-accent-ring: hsl(var(--ring) / 0.45);
   --cw-on-accent: hsl(var(--primary-foreground));
@@ -158,6 +161,11 @@ html.dark {
      «el botón azul queda algo bajo de contraste»): about 7.9:1 against the label. */
   --cw-accent: hsl(213 94% 68%);
   --cw-accent-hover: hsl(213 94% 74%);
+  /* Filled buttons in the dark: a deep blue with a white label, about 5.2:1. The light blue with a dark label (7.9:1) still read as
+     «texto blanco sobre azul claro, contraste justo» to every reader from round 13 to 19; links and icons keep the light blue. */
+  --cw-accent-fill: hsl(221 83% 53%);
+  --cw-accent-fill-hover: hsl(221 83% 47%);
+  --cw-on-accent: hsl(0 0% 100%);
   --cw-accent-soft: hsl(var(--primary) / 0.14);
   --cw-success: #34d399;
   --cw-success-soft: rgba(16, 185, 129, 0.12);

@@ -41,6 +41,8 @@ export default {
           faint: 'var(--cw-faint)',
           accent: 'var(--cw-accent)',
           'accent-hover': 'var(--cw-accent-hover)',
+          'accent-fill': 'var(--cw-accent-fill)',
+          'accent-fill-hover': 'var(--cw-accent-fill-hover)',
           'accent-soft': 'var(--cw-accent-soft)',
           'on-accent': 'var(--cw-on-accent)',
           success: 'var(--cw-success)',
