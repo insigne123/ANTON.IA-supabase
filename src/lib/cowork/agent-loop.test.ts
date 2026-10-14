@@ -2300,6 +2300,29 @@ test('figures read with metrics.rates and given only in the text are asked for t
   assert.equal((answer as { blocks?: Array<{ type: string }> }).blocks?.[0]?.type, 'metrics');
 });
 
+test('asked about contacts without email, an unread answer or an email nobody asked for becomes the lookup card', async () => {
+  const id = (n: number) => `00000000-0000-4000-8000-00000000006${n}`;
+  const missing = { scope: 'own_saved_contacts', items: [{ id: id(1), name: 'Nehal Patil', title: 'Recruitment Manager', company: 'Adecco', email: null },
+    { id: id(2), name: 'Carlos Ahumada', title: 'Operations Manager', company: 'Minera Centinela', email: null }] };
+  const run = async (decision: unknown) => {
+    const executed: string[] = [];
+    const proposals: Array<{ prepareBatch?: { goal: string; people: unknown[] } }> = [];
+    await runCoworkReadLoop({ message: 'tengo contactos sin correo, ¿qué hago con ellos?', runId: '00000000-0000-4000-8000-0000000000ee',
+      signal: new AbortController().signal, authorize: async () => {}, record: async () => {}, prepareBatch: true,
+      write: async () => { throw new Error('nobody asked for an email'); },
+      execute: async (action, value) => { executed.push(`${action}:${value}`); return missing; },
+      proposeEffect: async proposal => { proposals.push(proposal as never); }, decide: async () => decision as never });
+    return { executed, proposals };
+  };
+  const unread = await run({ action: 'answer', query: null, leadId: null, answer: { reply: 'Parte por los 4 con correo.', document: null,
+    question: '¿Preparo el primer correo para esos 4 contactos?' } });
+  assert.deepEqual(unread.executed, ['leads.search:sin correo']);
+  assert.equal(unread.proposals[0]?.prepareBatch?.goal, 'email');
+  const wrote = await run({ action: 'draft.write', query: null, leadId: null, answer: null,
+    write: { kind: 'email', recipients: [], objective: 'Presentar AXIS', angle: null, tone: null, steps: null, notes: null, findings: null } });
+  assert.equal(wrote.proposals[0]?.prepareBatch?.people.length, 2);
+});
+
 test('a «dale» to a closing question that offered the campaign counts as asking for it', async () => {
   const { coworkAcceptsCampaignOffer } = await import('./agent-loop');
   const history = [{ runId: 'r1', observations: [], reply: 'Tienes 4 pendientes.\n\n¿Busco a los 4 contactos y te preparo el primer correo para dejar la campaña pausada?' }];

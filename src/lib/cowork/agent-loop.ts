@@ -1449,8 +1449,16 @@ async function runCoworkLoop(input: {
       }
       // «Tengo contactos sin correo, ¿qué hago?»: looking for their email is the step (round 13: Luna sent the person to write to the
       // others first and offered no card).
-      if (offersLookup && !lookup && coworkAsksMissingEmail(input.message)) {
-        lookup = coworkLookupProposal({ reply: '', question: '¿Busco el correo de los contactos que no lo tienen?' }, input.message, input.history, observations);
+      // Also when it answered without reading anyone or went to write an email nobody asked for (round 16: a generic «Hola nombre»).
+      const writesInstead = decision.action === 'draft.write' && input.proposeEffect && input.prepareBatch && !input.clarification && !informationOnly;
+      if ((offersLookup || writesInstead) && !lookup && coworkAsksMissingEmail(input.message)) {
+        const offer = { reply: '', question: '¿Busco el correo de los contactos que no lo tienen?' };
+        if (!coworkLookupProposal(offer, input.message, input.history, observations)) {
+          const probe: CoworkObservation = { action: 'leads.search', input: 'sin correo', result: await input.execute('leads.search', 'sin correo') };
+          await input.record(probe);
+          observations.push(probe);
+        }
+        lookup = coworkLookupProposal(offer, input.message, input.history, observations);
         if (lookup) forcedReply = coworkLookupReply(lookup, [...(input.history || []).flatMap(item => item.observations || []), ...observations]);
       }
       // A LinkedIn profile lookup offered in words is its card too; with nobody read yet, the saved contacts are read first.
@@ -1466,8 +1474,8 @@ async function runCoworkLoop(input: {
       if (decision.action === 'lead.enrich_batch' && decision.leadIds?.length && input.prepareBatch) {
         decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: { goal: 'email', people: decision.leadIds.map(leadId => ({ leadId })) } } as Decision;
       }
-      if (lookup && decision.action === 'prospecting.propose_search') {
-        decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup, searchCriteria: undefined,
+      if (lookup && (decision.action === 'prospecting.propose_search' || decision.action === 'draft.write')) {
+        decision = { ...decision, action: 'contacts.prepare_batch', prepareBatch: lookup, searchCriteria: undefined, write: undefined,
           answer: { reply: forcedReply ?? '', document: null } } as Decision;
       }
       if (lookup && decision.answer) {
