@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
 import { readWorkspaceOverview, createPrivateOpportunity, opportunityDb } from '@/lib/server/commercial-opportunities/workspace-store';
+import { criteriaSchema } from '@/lib/server/commercial-opportunities/workspace-sources';
 import { companyContextSchema, privateOpportunitySchema } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityDiscovery } from '@/lib/server/commercial-opportunities/workspace-jobs';
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
-    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification']), data: z.unknown() }).strict().parse(await request.json());
+    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria']), data: z.unknown() }).strict().parse(await request.json());
     if (body.action === 'notification') {
       const { id } = z.object({ id: z.string().uuid() }).strict().parse(body.data);
       opportunityDb(await auth.admin.from('opportunity_notifications').update({ read_at: new Date().toISOString() }).eq('id', id).eq('organization_id', scope.organizationId).eq('user_id', scope.userId));
@@ -30,6 +31,14 @@ export async function POST(request: Request) {
     assertOpportunityAdmin(scope);
     if (body.action === 'create') return opportunitiesJson({ id: await createPrivateOpportunity(auth.admin, scope, privateOpportunitySchema.parse(body.data)) }, 201);
     if (body.action === 'discover') return opportunitiesJson({ enqueued: await enqueueOpportunityDiscovery(auth.admin, scope, true) }, 202);
+    if (body.action === 'criteria') {
+      // What the daily search looks for, as the admin corrected it. Keeps the offer revision: no new derivation is paid.
+      const input = z.object({ criteria: criteriaSchema, expectedRevision: z.number().int().positive() }).strict().parse(body.data);
+      const saved = opportunityDb(await auth.admin.from('opportunity_company_context').update({ criteria: input.criteria })
+        .eq('organization_id', scope.organizationId).eq('revision', input.expectedRevision).select('revision').maybeSingle());
+      if (!saved) throw new AuthError('La oferta fue actualizada por otro administrador. Recarga antes de guardar.', 409);
+      return opportunitiesJson({ ok: true });
+    }
     const input = companyContextSchema.extend({ expectedRevision: z.number().int().nonnegative() }).parse(body.data);
     const current = opportunityDb(await auth.admin.from('opportunity_company_context').select('revision').eq('organization_id', scope.organizationId).maybeSingle());
     if (Number(current?.revision || 0) !== input.expectedRevision) throw new AuthError('La oferta fue actualizada por otro administrador. Recarga antes de guardar.', 409);

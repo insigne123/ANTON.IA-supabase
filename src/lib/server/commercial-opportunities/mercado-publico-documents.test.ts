@@ -31,7 +31,7 @@ test('questions and answers retain paired wording and dates; a malformed result 
  assert.match(text,/Pregunta 1/);assert.match(text,/SE REQUIEREN 9 PROFESIONALES/);assert.match(text,/16-09-2026/);
  assert.throws(()=>publicMercadoQuestions({status:403}));
 });
-test('retriever saves actual binaries and paired public responses, declares incomplete inventory and shares only its own anonymous session',async()=>{
+test('retriever saves actual binaries and paired public responses, never fetches the protected bases and shares only its own anonymous session',async()=>{
  const calls:any[]=[],saved:any[]=[];
  const download:any=async(url:string,options:any)=>{
   calls.push({url,options});let content,mime='text/html';
@@ -44,10 +44,20 @@ test('retriever saves actual binaries and paired public responses, declares inco
  };
  const result=await readPublicMercadoDocuments(base,async file=>{saved.push(file);},{download});
  assert.equal(result.downloaded,1);assert.equal(result.questions,true);assert.equal(saved.length,2);assert.match(Buffer.from(saved[1].bytes).toString(),/9 profesionales/);
- assert.ok(result.warnings.some(w=>/inventario completo/.test(w)));assert.equal(calls.some(c=>c.url.includes('/protected/')),false);
+ assert.equal(result.attachments,null,'a «Ver anexos» outside Mercado Público is not offered');assert.equal(calls.some(c=>c.url.includes('/protected/')),false);
  assert.ok(calls.every(c=>c.options.session===calls[0].options.session));
 });
 test('a login/challenge HTML masquerading as a file never counts as a downloaded annex',async()=>{
  const download:any=async(url:string,options:any)=>({url,bytes:Buffer.from(url===base?root.replace(/<input id="imgPreguntasLicitacion"[^>]+>/,''):options.publicForm?'<html>Access denied</html>':metadata),mime:'text/html',name:'Fuente.html'});
- let saved=0;const result=await readPublicMercadoDocuments(base,async()=>{saved++;},{download});assert.equal(saved,0);assert.equal(result.downloaded,0);assert.ok(result.warnings.some(w=>/no pudo descargarse/.test(w)));
+ let saved=0;const result=await readPublicMercadoDocuments(base,async()=>{saved++;},{download});assert.equal(saved,0);assert.equal(result.downloaded,0);assert.ok(result.warnings.some(w=>/no pudo incorporarse/.test(w)));
+});
+
+test('the bases are linked, not downloaded: «Ver anexos» is offered only on Mercado Público, and 97-2003 Word/Excel forms are kept',()=>{
+ const view='https://www.mercadopublico.cl/Procurement/Modules/Attachment/ViewAttachment.aspx?enc=abc%2bdef';
+ const page=root.replace(`onclick="open('/protected/ViewAttachment.aspx')"`,`onclick="open(&#39;../Attachment/ViewAttachment.aspx?enc=abc%2bdef&#39;)"`);
+ assert.equal(publicMercadoDocumentIndex(page,base)!.attachments,view);
+ assert.equal(publicMercadoDocumentIndex(root,base)!.attachments,null);
+ const legacy=metadata.replace('FORMULARIO 3.docx','FORMULARIO N° 1 IDENTIFICACION DEL OFERENTE.doc');
+ assert.deepEqual(publicMercadoDownloadControls(legacy,form).map(c=>c.name),['FORMULARIO N° 1 IDENTIFICACION DEL OFERENTE.doc']);
+ assert.deepEqual(publicMercadoDownloadControls(metadata.replace('FORMULARIO 3.docx','macro.exe'),form),[]);
 });

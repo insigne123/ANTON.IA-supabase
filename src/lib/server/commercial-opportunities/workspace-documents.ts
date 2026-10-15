@@ -6,6 +6,9 @@ import { coworkHtmlToText, coworkExcelTable } from '@/lib/server/cowork/file-bin
 import { coworkZipGuard } from '@/lib/cowork/zip-guard';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
+import { DocumentFileError, opportunityLegacyAsText, opportunityStorageName } from './document-files';
+
+export { opportunityLegacyAsText, opportunityStorageName };
 
 export type ExtractedOpportunityFile = { status: 'read' | 'partial' | 'scan' | 'damaged'; total: number | null; read: number; sections: Array<{ locator: string; text: string }> };
 export const opportunityMime = (name: string) => ({ pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -64,17 +67,21 @@ export async function saveOpportunityDocument(client: SupabaseClient, scope: Wor
   name: string; bytes: Uint8Array; sourceKind: 'upload' | 'pasted' | 'official' | 'public_web'; sourceUrl?: string;
 }) {
   await assertOpportunityRead(client, scope, id);
+  if (input.bytes.length < 1 || input.bytes.length > 20 * 1024 * 1024) throw new AuthError('Cada documento puede pesar hasta 20 MB.', 400);
+  const legacy = await opportunityLegacyAsText(input.name, input.bytes).catch(error => { throw error instanceof DocumentFileError ? new AuthError(error.message, 422) : error; });
+  if (legacy) input = { ...input, ...legacy };
   const name = input.name.replace(/[\u0000-\u001f\\/]/g, '_').slice(0, 300);
   const mime = opportunityMime(name);
-  if (!mime || input.bytes.length < 1 || input.bytes.length > 20 * 1024 * 1024) throw new AuthError('Usa PDF, Word, Excel o texto de hasta 20 MB.', 400);
+  if (!mime) throw new AuthError(`«${name.slice(0, 120)}»: usa PDF, Word, Excel o texto.`, 400);
   const sha = createHash('sha256').update(input.bytes).digest('hex');
   const existing = opportunityDb(await client.from('opportunity_documents').select('id').eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('sha256', sha).maybeSingle());
   if (existing) return existing.id;
   const count = await client.from('opportunity_documents').select('id', { head: true, count: 'exact' }).eq('organization_id', scope.organizationId).eq('opportunity_id', id);
   opportunityDb(count);
   if ((count.count || 0) >= 40) throw new AuthError('El expediente admite hasta 40 documentos por versión de trabajo.', 413);
-  const docId = randomUUID(); const storagePath = `${scope.organizationId}/${id}/${docId}/${name}`;
-  opportunityDb(await client.storage.from(OPPORTUNITY_BUCKET).upload(storagePath, input.bytes, { contentType: mime, upsert: false }));
+  const docId = randomUUID(); const storagePath = `${scope.organizationId}/${id}/${docId}/${opportunityStorageName(name)}`;
+  const stored = await client.storage.from(OPPORTUNITY_BUCKET).upload(storagePath, input.bytes, { contentType: mime, upsert: false });
+  if (stored.error) throw new AuthError(`No pudimos guardar «${name.slice(0, 120)}». Intenta de nuevo en un momento.`, 503);
   let extracted: ExtractedOpportunityFile;
   try { extracted = await extractOpportunityFile(name, input.bytes); }
   catch { extracted = { status: 'damaged', total: null, read: 0, sections: [] }; }

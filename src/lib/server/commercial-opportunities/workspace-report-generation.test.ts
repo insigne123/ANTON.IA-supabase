@@ -32,7 +32,7 @@ function fixture() {
   const state = { lease: true, budget: true };
   const report = { title: 'Reporte sintético', executive: 'Falta evidencia', recommendation: 'insufficient', reasons: [],
     sections: Array.from({ length: 5 }, (_, i) => ({ id: `${i}`, title: 'Sección', paragraphs: ['Prueba'], facts: [] })),
-    requirements: [], tasks: [], milestones: [], risks: [], scenarios: [], questions: [], warnings: [] };
+    requirements: [], tasks: [], milestones: [], risks: [], scenarios: [], questions: [], warnings: [], nextSteps: ['Subir las bases'] };
   const client = { from(table: string) {
     const query: any = { update() { return query; }, select() { return query; }, eq() { return query; }, gt() { return query; },
       async maybeSingle() { return { data: table === 'opportunity_jobs' ? state.lease ? { id: 'job' } : null : saved, error: null }; } };

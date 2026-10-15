@@ -17,8 +17,10 @@ export const reportSchema = z.object({
   scenarios: z.array(z.object({ name: s(200), monthlyCost: z.number().nonnegative(), months: z.number().int().min(1).max(240), overheadPercent: z.number().min(0).max(90),
     marginPercent: z.number().min(0).max(90), taxPercent: z.number().min(0).max(100).nullable(), paymentDelayMonths: z.number().min(0).max(24), guaranteePercent: z.number().min(0).max(100), assumptions: z.array(s(1000)).max(20) })).max(6),
   questions: z.array(s(2000)).max(30), warnings: z.array(s(1000)).max(30),
+  /** The three things to do now, in order. Reports before version 4 have none: the page derives them from the plan. */
+  nextSteps: z.array(s(300)).min(1).max(3),
 });
-export type OpportunityReport = z.infer<typeof reportSchema> & { generatedAt: string; coverage: Array<{ id: string; name: string; status: string; pagesRead: number; pagesTotal: number | null }>;
+export type OpportunityReport = Omit<z.infer<typeof reportSchema>, 'nextSteps'> & { nextSteps?: string[]; kind?: string; generatedAt: string; coverage: Array<{ id: string; name: string; status: string; pagesRead: number; pagesTotal: number | null }>;
   sources: Array<{ id: string; documentId: string; locator: string; name: string }> };
 export const answerSchema = z.object({ answer: s(12_000), citations: z.array(citationSchema).max(12), missing: z.array(s(500)).max(8) });
 export type DocumentChunk = { id: string; document_id: string; locator: string; content: string; ordinal: number };
@@ -38,12 +40,16 @@ export function validateOpportunityFacts(facts: z.infer<typeof evidenceFactSchem
 export function opportunityReportCoverage(documents: Array<{ extraction_status: string }>) {
   return documents.length > 0 && documents.every(doc => doc.extraction_status === 'read') ? 'complete' : 'partial';
 }
-export const REPORT_VERSION = 'opportunity-expedient/3';
+export const REPORT_VERSION = 'opportunity-expedient/4';
+/** A purchase with bases: a public tender, a Compra Ágil, a private invitation or a project. */
 export const REPORT_OUTLINE = [
-  'Decisión ejecutiva y condiciones para avanzar', 'Contexto del cliente y encaje con la empresa del workspace',
-  'Alcance, prestaciones y requisitos documentados', 'Elegibilidad, evidencia disponible y brechas',
-  'Criterios de evaluación y estrategia de participación', 'Condiciones contractuales, garantías, pagos y multas',
-  'Solución propuesta, recursos, gobierno, metodología y continuidad', 'Hoja de ruta de postulación y ejecución',
-  'Escenarios económicos, impuestos por confirmar, margen y capital de trabajo', 'Riesgos, mitigaciones y decisiones pendientes',
-  'Preguntas para la contraparte y documentos por preparar', 'Fuentes, cobertura y supuestos',
+  'Decisión y próximos pasos', 'Qué piden y cómo calza con tu oferta', 'Requisitos para postular y qué falta',
+  'Cómo se evalúa y cómo ganar puntaje', 'Condiciones del contrato: garantías, pagos y multas', 'Propuesta sugerida y plan de trabajo',
+  'Precio y números', 'Riesgos y cómo cubrirlos', 'Preguntas para el comprador y documentos por preparar',
 ];
+/** A LinkedIn signal (job ads grouped by company, a post): there are no bases, it is a reason to start a conversation. */
+export const SIGNAL_OUTLINE = [
+  'La señal y por qué es el momento', 'La empresa y lo que se sabe de ella', 'Cómo calza con tu oferta',
+  'A quién contactar', 'Cómo abordarlos: ángulo y primer mensaje', 'Preguntas para la primera conversación', 'Qué validar antes de invertir tiempo',
+];
+export const isSignalKind = (kind?: string | null) => kind === 'hiring' || kind === 'linkedin_post';

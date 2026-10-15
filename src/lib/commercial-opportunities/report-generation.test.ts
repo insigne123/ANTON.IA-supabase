@@ -7,7 +7,7 @@ import { opportunityReportPrompt, opportunitySynthesisSources, readOpportunityRe
 const report = () => ({
   title: 'Oportunidad de prueba', executive: 'Empresa por acreditar; bases parciales.', recommendation: 'insufficient', reasons: ['Faltan bases'],
   sections: Array.from({ length: 5 }, (_, i) => ({ id: `section-${i}`, title: `Sección ${i}`, paragraphs: ['Texto con "comillas", salto\nde línea y áéíóú.'], facts: [] })),
-  requirements: [], tasks: [], milestones: [], risks: [], scenarios: [], questions: [], warnings: ['Inventario no confirmado'],
+  requirements: [], tasks: [], milestones: [], risks: [], scenarios: [], questions: [], warnings: ['Inventario no confirmado'], nextSteps: ['Subir las bases'],
 });
 
 test('Claude compiles only one string while keeping room for the paid report reasoning', () => {
@@ -62,4 +62,19 @@ test('original synthesis sources keep exact chunk identity and text, counted by 
   assert.equal(bounded.omittedChunks, 1);
   assert.ok(bounded.bytes <= full.bytes - 1);
   assert.equal(opportunitySynthesisSources(chunks, 2).chunks.length, 0);
+});
+
+test('the report reads like a decision for a busy person and a LinkedIn signal gets a commercial outline, not a tender one', () => {
+  const tender = opportunityReportPrompt('2026-10-15', {}, 'tender');
+  assert.match(tender, /Requisitos para postular y qué falta/);
+  assert.match(tender, /como máximo 90 palabras/);
+  assert.match(tender, /nunca en formato ISO/);
+  assert.match(tender, /nunca de «workspace», «radar», «ficha», «campo», «null»/);
+  assert.doesNotMatch(tender, /son para recalcular con código|ofrece fórmulas paramétricas/);
+  const signal = opportunityReportPrompt('2026-10-15', {}, 'hiring');
+  assert.match(signal, /No es una licitación/);
+  assert.match(signal, /A quién contactar/);
+  assert.doesNotMatch(signal, /garantías, pagos y multas;/);
+  const schema = JSON.parse(tender.split('\n').find(line => line.startsWith('{') && line.includes('"properties"'))!);
+  assert.equal(schema.properties.nextSteps.maxItems, 3);
 });

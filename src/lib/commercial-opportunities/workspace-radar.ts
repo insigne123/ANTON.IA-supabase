@@ -1,5 +1,6 @@
 // What the workspace list adds from the person's own tender radar (13 oct 2026): what to do with each opportunity, where
 // to start, why the excluded ones were left out, and what almost every set of bases asks for. Pure: the page renders it.
+import { isSignalKind } from './expedient';
 import type { WorkItem } from './workspace';
 
 /** Why the evaluation left an opportunity out. Asked of the model next to «excluded»; older rows have none. */
@@ -18,7 +19,7 @@ const DAY = 86_400_000;
 /** Closing within this many days reads as urgent. */
 export const URGENT_DAYS = 3;
 
-export type WorkAdvice = { label: 'Postular' | 'Evaluar' | 'No postular' | 'Por evaluar'; tone: 'go' | 'evaluate' | 'no' | 'pending';
+export type WorkAdvice = { label: 'Postular' | 'Contactar' | 'Evaluar' | 'No postular' | 'No contactar' | 'Por evaluar'; tone: 'go' | 'evaluate' | 'no' | 'pending';
   daysLeft: number | null; urgent: boolean; closed: boolean };
 
 const evaluationOf = (item: Pick<WorkItem, 'kind' | 'data'>) => {
@@ -33,15 +34,18 @@ export function daysLeft(deadline: string | null | undefined, now: number) {
 
 /**
  * What to do with an opportunity, from its evaluation: recommended → «Postular», review → «Evaluar», excluded → «No postular»,
- * not evaluated yet → «Por evaluar». A deadline within three days is urgent; a past one is closed.
+ * not evaluated yet → «Por evaluar». A LinkedIn signal is a conversation, not an offer: «Contactar» / «No contactar».
+ * A deadline within three days is urgent; a past one is closed.
  */
 export function workAdvice(item: Pick<WorkItem, 'kind' | 'data' | 'deadline_at'>, now = Date.now()): WorkAdvice {
   const evaluation = evaluationOf(item);
   const left = daysLeft(item.deadline_at, now);
   const closed = Boolean(item.deadline_at && Date.parse(item.deadline_at) < now);
-  const base = evaluation === 'recommended' ? { label: 'Postular' as const, tone: 'go' as const }
+  const signal = isSignalKind(item.kind);
+  const base = evaluation === 'recommended' ? { label: signal ? 'Contactar' as const : 'Postular' as const, tone: 'go' as const }
     : evaluation === 'review' ? { label: 'Evaluar' as const, tone: 'evaluate' as const }
-      : evaluation === 'excluded' ? { label: 'No postular' as const, tone: 'no' as const } : { label: 'Por evaluar' as const, tone: 'pending' as const };
+      : evaluation === 'excluded' ? { label: signal ? 'No contactar' as const : 'No postular' as const, tone: 'no' as const }
+        : { label: 'Por evaluar' as const, tone: 'pending' as const };
   return { ...base, daysLeft: left, closed, urgent: !closed && left !== null && left < URGENT_DAYS && evaluation !== 'excluded' };
 }
 

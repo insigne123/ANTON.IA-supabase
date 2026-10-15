@@ -3,6 +3,7 @@ import {createOpportunityPublicSession,downloadOpportunitySource} from './worksp
 
 const HOST='www.mercadopublico.cl';
 const FORM_PATH='/Procurement/Modules/Attachment/VerAntecedentes.aspx';
+const ATTACHMENTS_PATH='/Procurement/Modules/Attachment/ViewAttachment.aspx';
 export function publicMercadoDocumentIndex(html:string,base:string){
  const url=new URL(base);if(url.hostname!==HOST||url.protocol!=='https:'||url.pathname!=='/Procurement/Modules/RFB/DetailsAcquisition.aspx')return null;
  const dom=new JSDOM(html);
@@ -13,7 +14,10 @@ export function publicMercadoDocumentIndex(html:string,base:string){
    try{const link=new URL(e.getAttribute('href')||'',base);return link.hostname===HOST&&link.protocol==='https:'&&link.pathname===FORM_PATH?[link.href]:[];}catch{return[];}
   });
   let forum:string|null=null;try{const href=dom.window.document.querySelector('#imgPreguntasLicitacion')?.getAttribute('href');if(href){const q=new URL(href,base);if(q.hostname===HOST&&q.protocol==='https:'&&q.pathname==='/Foros/Modules/FNormal/PopUps/PublicView.aspx')forum=q.href;}}catch{/* invalid link stays absent */}
-  return {code,forms:[...new Set(forms)].slice(0,12),forum};
+  // «Ver anexos»: the bases and annexes. Mercado Público protects them with reCAPTCHA, so the person opens them; we only link.
+  let attachments:string|null=null;try{const onclick=dom.window.document.querySelector('#imgAdjuntos')?.getAttribute('onclick')||'';
+   const target=onclick.match(/open\('([^']+)'/)?.[1];if(target){const a=new URL(target.replace(/&amp;/g,'&'),base);if(a.hostname===HOST&&a.protocol==='https:'&&a.pathname===ATTACHMENTS_PATH)attachments=a.href;}}catch{/* invalid link stays absent */}
+  return {code,forms:[...new Set(forms)].slice(0,12),forum,attachments};
  }finally{dom.window.close();}
 }
 export function publicMercadoDownloadControls(html:string,base:string){
@@ -27,7 +31,7 @@ export function publicMercadoDownloadControls(html:string,base:string){
   return [...form.querySelectorAll<HTMLInputElement>('input[type=image][name]')].flatMap(button=>{
    if(!/^grdAttachment\$ctl\d+\$grdIbtnView$/.test(button.name))return[];
    const name=button.closest('tr')?.querySelector('[id*=grdLblSourceFileName]')?.textContent?.trim()||'';
-   if(!/\.(pdf|docx|xlsx)$/i.test(name))return[];
+   if(!/\.(pdf|docx?|xlsx?)$/i.test(name))return[];
    return [{name,action:action.href,body:{...hidden,[button.name+'.x']:'1',[button.name+'.y']:'1'}}];
   }).slice(0,12);
  }finally{dom.window.close();}
@@ -39,25 +43,35 @@ export function publicMercadoQuestions(value:unknown){
   return [`Pregunta ${String(q.Numero||q.idP).slice(0,30)} (${String(q.FechaHora||'').slice(0,60)}):\n${q.Descripcion.slice(0,12000)}\nRespuesta publicada (${String(q.RespuestaPublicada.FechaHora||'').slice(0,60)}):\n${q.RespuestaPublicada.Descripcion.slice(0,12000)}`];
  }).join('\n\n');
 }
+/** Where the person finds this tender's bases: the public page and its «Ver anexos» window. Read-only, cached an hour. */
+const linkCache=new Map<string,{at:number;links:{ficha:string;attachments:string|null;forum:string|null;forms:number;code:string}|null}>();
+export async function publicMercadoLinks(base:string,options:{download?:typeof downloadOpportunitySource}={}){
+ const cached=linkCache.get(base);if(cached&&Date.now()-cached.at<3600_000)return cached.links;
+ let links=null;
+ try{const root=await (options.download||downloadOpportunitySource)(base,{session:createOpportunityPublicSession()});const index=publicMercadoDocumentIndex(root.bytes.toString('utf8'),root.url);
+  if(index)links={ficha:base,attachments:index.attachments,forum:index.forum,forms:index.forms.length,code:index.code};}catch{/* the plain public link still works */}
+ if(linkCache.size>500)linkCache.clear();linkCache.set(base,{at:Date.now(),links});
+ return links;
+}
 /** Read the public controls as published. Never request the protected inventory behind reCAPTCHA. */
 export async function readPublicMercadoDocuments(base:string,save:(file:{name:string;bytes:Uint8Array;sourceUrl:string})=>Promise<void>,options:{download?:typeof downloadOpportunitySource;deadline?:number}={}){
  const download=options.download||downloadOpportunitySource;const session=createOpportunityPublicSession();const deadline=options.deadline||Date.now()+90000;
- const warnings:string[]=['El inventario completo de bases y modificaciones no está certificado. Las descargas corresponden a formularios públicos y al foro accesible.'];
+ const warnings:string[]=[];
  const root=await download(base,{session});const index=publicMercadoDocumentIndex(root.bytes.toString('utf8'),root.url);
- if(!index)return {downloaded:0,questions:false,warnings:['No se pudo reconocer la ficha pública de esta licitación.']};
+ if(!index)return {downloaded:0,questions:false,attachments:null,warnings:['No se pudo leer la ficha pública de esta licitación.']};
  let downloaded=0,questions=false;
  for(const link of index.forms){
-  if(Date.now()>deadline){warnings.push('Quedaron formularios públicos por descargar.');break;}
+  if(Date.now()>deadline){warnings.push('Quedaron formularios de Mercado Público por incorporar.');break;}
   try{
    const page=await download(link,{session});const controls=publicMercadoDownloadControls(page.bytes.toString('utf8'),page.url);
-   if(!controls.length)warnings.push('Un formulario público no mostró controles de descarga legibles.');
+   if(!controls.length)warnings.push('Un grupo de formularios de Mercado Público no tenía archivos para descargar.');
    for(const control of controls){
-    if(Date.now()>deadline){warnings.push('Quedaron formularios públicos por descargar.');break;}
+    if(Date.now()>deadline){warnings.push('Quedaron formularios de Mercado Público por incorporar.');break;}
     const file=await download(control.action,{session,publicForm:control.body,expectedName:control.name});
     if(file.mime.includes('html'))throw new Error('OPPORTUNITY_DOCUMENT_DOWNLOAD_UNAVAILABLE');
     await save({name:control.name,bytes:file.bytes,sourceUrl:link});downloaded++;
    }
-  }catch{warnings.push('Un formulario público no pudo descargarse.');}
+  }catch{warnings.push('Un formulario de Mercado Público no pudo incorporarse; descárgalo desde la ficha.');}
  }
  if(index.forum&&Date.now()<deadline){
   try{
@@ -69,7 +83,7 @@ export async function readPublicMercadoDocuments(base:string,save:(file:{name:st
    const response=await download(source,{session,publicForm:{opt:'101',RFBCode:code},expectedName:'Preguntas y respuestas.txt'});
    const text=publicMercadoQuestions(JSON.parse(response.bytes.toString('utf8')));
    if(text){await save({name:'Preguntas y respuestas públicas.txt',bytes:Buffer.from(text),sourceUrl:index.forum});questions=true;}
-  }catch{warnings.push('No se pudieron leer las preguntas y respuestas públicas.');}
+  }catch{warnings.push('No se pudieron incorporar las preguntas y respuestas del foro.');}
  }else if(index.forum)warnings.push('Quedó pendiente consultar el foro público.');
- return {downloaded,questions,warnings:[...new Set(warnings)]};
+ return {downloaded,questions,attachments:index.attachments,warnings:[...new Set(warnings)]};
 }
