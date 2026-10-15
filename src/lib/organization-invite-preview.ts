@@ -11,7 +11,8 @@ export type InviteRow = {
 export type InvitePreview =
   | { status: 'invalid' }
   | {
-      status: 'valid' | 'expired' | 'used' | 'revoked';
+      /** «joined»: the signed-in account already accepted it, so the page confirms instead of calling it used. */
+      status: 'valid' | 'expired' | 'used' | 'revoked' | 'joined';
       organizationName: string;
       role: InviteRole;
       /** The invited address with most of its local part hidden, so a forwarded link does not expose it. */
@@ -44,12 +45,13 @@ export function describeInvitePreview(
 ): InvitePreview {
   if (!invite || !organizationName) return { status: 'invalid' };
   const expiresAt = invite.expires_at ? Date.parse(invite.expires_at) : Number.NaN;
+  const signedIn = Boolean(normalizeEmail(sessionEmail));
+  const matchesSession = signedIn ? normalizeEmail(sessionEmail) === normalizeEmail(invite.email) : null;
   const status = invite.revoked_at ? 'revoked'
-    : invite.accepted_at ? 'used'
+    : invite.accepted_at ? (matchesSession ? 'joined' : 'used')
       : !Number.isFinite(expiresAt) || expiresAt <= now ? 'expired'
         : 'valid';
   const role: InviteRole = invite.role === 'owner' || invite.role === 'admin' ? invite.role : 'member';
-  const signedIn = Boolean(normalizeEmail(sessionEmail));
   return {
     status,
     organizationName,
@@ -57,7 +59,7 @@ export function describeInvitePreview(
     emailHint: maskEmail(invite.email),
     expiresAt: invite.expires_at,
     signedIn,
-    matchesSession: signedIn ? normalizeEmail(sessionEmail) === normalizeEmail(invite.email) : null,
+    matchesSession,
   };
 }
 
