@@ -152,6 +152,9 @@ export function PrepareBatchReview({ runId, onApprove, onReject, resolving }: {
     <div className="space-y-1">
       {!oneLookup && <p className="text-[14px]"><span className="font-semibold">{kept.length} de {people(preview.items.length)}</span>
         <span className="text-cw-muted"> quedan listas con esta aprobación, cada una solo con lo que le falta.</span></p>}
+      {/* Next to the count, not only folded below: the message, the card and the list say the same numbers. */}
+      {!!preview.ready.length && <p className="text-[13px] text-cw-muted">
+        {preview.ready.length === 1 ? 'Otra persona ya estaba lista y no se toca.' : `Otras ${preview.ready.length} ya estaban listas y no se tocan.`}</p>}
       <p className="text-[12.5px] text-cw-muted">{costLine(kept)}{preview.balance
         ? ` Te quedan ${preview.balance.remaining} créditos${preview.balance.stale ? ' (dato de hace un rato)' : ''}.` : ''}</p>
     </div>

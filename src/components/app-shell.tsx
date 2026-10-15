@@ -15,6 +15,8 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/s
 import { useAuth } from '@/context/AuthContext';
 import { NavAccessProvider, useNavAccess } from '@/hooks/use-nav-access';
 import { navLabelFor } from '@/lib/navigation';
+import { ShellChromeProvider, isImmersiveScreen } from '@/components/shell-chrome';
+import { cn } from '@/lib/utils';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, organizationId, organizationRole } = useAuth();
@@ -24,8 +26,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navAccess = useNavAccess({ userId: user?.id, email: user?.email, organizationId });
   const access = useMemo(() => ({ cowork: navAccess.cowork, opportunities: navAccess.opportunities }), [navAccess.cowork, navAccess.opportunities]);
   // The help shows the same parts of the app as the menu.
-  const helpVisibility = { opportunities: access.opportunities, admin: organizationRole === 'owner' || organizationRole === 'admin' || adminUsage };
+  const helpAdmin = organizationRole === 'owner' || organizationRole === 'admin' || adminUsage;
+  const helpVisibility = useMemo(() => ({ opportunities: access.opportunities, admin: helpAdmin }), [access.opportunities, helpAdmin]);
   const screenLabel = navLabelFor(pathname);
+  // Cowork takes the whole height: on a computer its header carries the menu, the help and the theme instead of this bar.
+  const immersive = isImmersiveScreen(pathname);
+  const chrome = useMemo(() => (immersive ? { start: <SidebarTrigger />, end: <><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></> } : null),
+    [immersive, helpVisibility]);
   const [workspaceAnnouncement, setWorkspaceAnnouncement] = useState('');
   const contentRef = useRef<HTMLElement>(null);
 
@@ -60,7 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="ml-auto flex shrink-0 items-center gap-1"><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
           </header>
 
-          <div className="sticky top-0 z-10 hidden h-12 items-center justify-between border-b bg-background/85 px-6 backdrop-blur-sm md:flex">
+          <div className={cn('sticky top-0 z-10 hidden h-12 items-center justify-between border-b bg-background/85 px-6 backdrop-blur-sm', !immersive && 'md:flex')}>
             <SidebarTrigger />
             <div className="flex items-center gap-1"><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></div>
           </div>
@@ -69,9 +76,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             ref={contentRef}
             id="contenido"
             tabIndex={-1}
-            className="min-h-0 min-w-0 flex-1 overflow-x-clip px-4 py-4 outline-none md:px-6 md:py-5"
+            className={cn('min-h-0 min-w-0 flex-1 overflow-x-clip px-4 py-4 outline-none md:px-6 md:py-5', immersive && 'md:p-0')}
           >
-            <NavAccessProvider value={access}>{children}</NavAccessProvider>
+            <ShellChromeProvider value={chrome}><NavAccessProvider value={access}>{children}</NavAccessProvider></ShellChromeProvider>
           </main>
         </SidebarInset>
       </ProductTourProvider>

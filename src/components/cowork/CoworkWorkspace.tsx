@@ -35,6 +35,7 @@ import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwVariants, 
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
 import { useCoworkQueue } from './useCoworkQueue';
 import { useCoworkHistory } from './useCoworkHistory';
+import { useShellChrome } from '@/components/shell-chrome';
 
 type ThreadState = CoworkTurnData & {
   ancestors?: CoworkTurnData[];
@@ -148,6 +149,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const [listError, setListError] = useState('');
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [maximized, setMaximized] = useState(false);
+  // On a computer the app's bar is hidden here and its menu, help and theme live in Cowork's own header (shell-chrome.tsx).
+  const chrome = useShellChrome();
   const [showFiles, setShowFiles] = useState(false);
   const [listVersion, setListVersion] = useState(0);
   const [threadVersion, setThreadVersion] = useState(0);
@@ -938,7 +941,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     searchContacts={ready ? searchContacts : null} onMention={addMention} templates
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
-  return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] max-md:-mx-4 max-md:-my-4 max-md:h-[calc(100dvh-3rem)] max-md:rounded-none max-md:border-0 max-md:shadow-none md:h-[calc(100dvh-5.5rem)]">
+  return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className={cn('cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] max-md:-mx-4 max-md:-my-4 max-md:h-[calc(100dvh-3rem)] max-md:rounded-none max-md:border-0 max-md:shadow-none md:h-[calc(100dvh-5.5rem)]', chrome && 'md:h-dvh md:rounded-none md:border-0 md:shadow-none')}>
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
       <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} onShortcuts={() => setShortcutsOpen(true)} {...threadActions} />
     </div>
@@ -953,6 +956,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
 
     <div className={cn('relative flex min-w-0 flex-1 flex-col', artifactOpen && 'hidden lg:flex', artifactOpen && maximized && 'lg:hidden')}>
       <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-cw-border px-2.5 sm:px-3">
+        {chrome && <span className="hidden shrink-0 md:inline-flex">{chrome.start}</span>}
         <CwButton ref={listOpener} variant="ghost" size="icon-sm" className={cn(railVisible && 'lg:hidden')} aria-label="Mostrar conversaciones" title="Conversaciones"
           onClick={() => { if (isDesktop && !artifactOpen) setRailCollapsed(false); else setDrawerOpen(true); }}>
           <History aria-hidden="true" />
@@ -967,6 +971,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden', railVisible && 'lg:hidden')} title="Nueva conversación">
           <SquarePen aria-hidden="true" /><span className="hidden sm:inline">Nueva conversación</span>
         </CwButton>
+        {chrome && <span className="hidden shrink-0 items-center gap-1 border-l border-cw-border pl-1.5 md:flex">{chrome.end}</span>}
       </header>
 
       <p className="sr-only" aria-live="polite">{inConversation && status ? status.label : ''}</p>

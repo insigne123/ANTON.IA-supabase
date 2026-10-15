@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Papa from 'papaparse';
-import { buildCoworkLeadCsv, collectCoworkLeadRows } from './lead-export';
+import { buildCoworkLeadCsv, collectCoworkLeadRows, coworkLeadColumns } from './lead-export';
 
 const id = '00000000-0000-4000-8000-000000000001';
 test('own lists retain every observed row at query and expanded-list boundaries', () => {
@@ -59,4 +59,12 @@ test('a search of up to 100 people exports all of them with why each one is on t
   assert.equal(rows.length, 100);
   assert.equal(rows[0].fit, 'Posible comprador: cargo con «gerente» · outsourcing, 120 empleados');
   assert.equal(buildCoworkLeadCsv([{ action: 'prospecting.search', result: { scope: 'external_search', items: [...items, { id: 'apollo:p100' }] } }]), null);
+});
+
+test('a search result already among the contacts keeps its mark for the table, and the download never carries it', () => {
+  const rows = collectCoworkLeadRows([{ action: 'prospecting.search', result: { scope: 'external_search', items: [
+    { id: 'apollo:1', name: 'Ana', savedLeadId: '11111111-1111-4111-8111-111111111111' }, { id: 'apollo:2', name: 'Luis' }] } }]);
+  assert.equal(rows.find(row => row.id === 'apollo:1')?.savedLeadId, '11111111-1111-4111-8111-111111111111');
+  assert.equal(rows.find(row => row.id === 'apollo:2')?.savedLeadId, undefined);
+  assert.ok(!(coworkLeadColumns as readonly string[]).includes('savedLeadId'));
 });

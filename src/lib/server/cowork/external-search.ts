@@ -13,6 +13,7 @@ import { COWORK_SEARCH_ROLE_NOTE, rankCoworkSearchPeople } from '@/lib/cowork/se
 import { normalizeCompanyName } from '@/lib/cowork/commercial-facts';
 import { admitCoworkContinuation } from './effects';
 import { readTeamLocks } from '@/lib/server/team-locks';
+import { coworkOwnSavedByProvider } from './prepare-batch';
 import { normalizeLockLinkedin, teamLockNotice } from '@/lib/team-lock';
 import type { AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
 import { linkedinProfilesMatch } from '@/lib/linkedin-url';
@@ -211,7 +212,7 @@ export async function processCoworkSearchQueue() {
     await requireCoworkWorkerAccess(client, scope);
     const current = await client.from('cowork_runs').select('status').eq('id', runId).single();
     if (current.error || current.data.status !== 'waiting_approval') throw new Error('Search cancelled');
-    const result = await withSearchTeamLocks(client, scope, await runCoworkSearch(criteria, scope.userId));
+    const result = await withOwnSavedContacts(client, scope, await withSearchTeamLocks(client, scope, await runCoworkSearch(criteria, scope.userId)));
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_search', { ...args, p_success: true,
       p_payload: { action: 'prospecting.search', input: criteria, result } });
@@ -248,6 +249,24 @@ async function withSearchTeamLocks<Result extends { items?: unknown[] }>(
       return notice ? { ...item, teamLock: notice.text, teamLockBlocks: notice.blocks } : item;
     });
     return { ...result, items };
+  } catch {
+    return result;
+  }
+}
+
+/**
+ * The people of a search who are already among the person's own contacts carry savedLeadId: the table says «En tus contactos»
+ * and the model counts them apart («6 nuevas; 4 ya estaban en tus contactos») instead of proposing to save all ten and then
+ * showing a card for six. Best effort: if the read fails, the result goes as it is.
+ */
+async function withOwnSavedContacts<Result extends { items?: unknown[] }>(
+  client: ReturnType<typeof getSupabaseAdminClient>, scope: { userId: string; organizationId: string }, result: Result,
+): Promise<Result> {
+  const people = (result.items || []) as Array<Record<string, unknown>>;
+  try {
+    const saved = await coworkOwnSavedByProvider(client, scope, people.map(item => String(item.id || '')));
+    if (!saved.size) return result;
+    return { ...result, items: people.map(item => (saved.has(String(item.id)) ? { ...item, savedLeadId: saved.get(String(item.id)) } : item)) };
   } catch {
     return result;
   }

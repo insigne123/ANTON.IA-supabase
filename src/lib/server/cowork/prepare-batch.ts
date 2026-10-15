@@ -150,6 +150,19 @@ async function loadProgress(client: Client, scope: Scope, leads: LeadRow[]) {
 }
 
 /**
+ * Which people of a search are already among the person's contacts, by provider id («apollo:…» → saved lead id). The same read
+ * the batch makes, so a search says «ya está en tus contactos» for exactly whom the card will later list as ready.
+ */
+export async function coworkOwnSavedByProvider(client: Client, scope: Scope, providerIds: string[]) {
+  const ids = [...new Set(providerIds.filter(id => id.startsWith('apollo:')).map(apolloKey))];
+  const saved = new Map<string, string>();
+  if (!ids.length) return saved;
+  const { byProvider } = await loadOwnLeads(client, scope, [], ids);
+  for (const [key, lead] of byProvider) saved.set(`apollo:${key}`, lead.id);
+  return saved;
+}
+
+/**
  * Stage the batch to propose: every person must be someone this conversation saw (a search result or a saved contact of the
  * person); what each one already has is read now and skipped, and the list is kept as the card will show it. Nothing runs here.
  * When nobody has anything left to do it says so, and the model moves on without asking for an approval.

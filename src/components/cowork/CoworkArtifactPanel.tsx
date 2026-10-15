@@ -16,6 +16,8 @@ import { ExportMenu } from './ExportMenu';
 import { ResearchSources } from './ResearchSources';
 import { cwSwap, m } from './motion';
 import { CwButton } from './ui';
+import { useShellChrome } from '@/components/shell-chrome';
+import { cn } from '@/lib/utils';
 
 const KIND_LABEL: Record<CoworkArtifact['kind'], string> = {
   block: 'Resultado', document: 'Documento', contacts: 'Tabla', file: 'Archivo', sources: 'Fuentes', code: 'Artefacto',
@@ -52,6 +54,7 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
   /** Every result of the conversation, newest first (a code artifact once, at its latest version): switch without closing. */
   others?: CoworkArtifact[];
 }) {
+  const chrome = useShellChrome();
   const [copied, setCopied] = useState(false);
   const label = artifact.kind === 'block' ? BLOCK_LABEL[artifact.block.type] : KIND_LABEL[artifact.kind];
   const closeLabel = artifact.kind === 'document' ? 'Cerrar documento' : `Cerrar ${label.toLowerCase()}`;
@@ -66,14 +69,15 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
   }
 
   return <aside aria-label={artifact.kind === 'document' ? 'Documento' : label} className="flex h-full min-h-0 flex-col bg-cw-elevated">
-    <header className="flex shrink-0 items-center gap-2 border-b border-cw-border px-3 py-2.5 sm:px-4">
+    {/* One line, the height of the conversation's header: the two columns share a single rule instead of two stacked bands. When the
+        conversation is hidden (a tablet, or the panel maximized), the app's menu, help and theme come here. */}
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-cw-border px-3 sm:px-4">
+      {chrome && <span className={cn('hidden shrink-0 md:inline-flex', !maximized && 'lg:hidden')}>{chrome.start}</span>}
       <CwButton variant="ghost" size="icon-sm" className="lg:hidden" onClick={onClose} aria-label="Volver a la conversación"><ArrowLeft aria-hidden="true" /></CwButton>
-      <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cw-border bg-cw-panel text-cw-accent sm:flex">
-        <CoworkArtifactIcon artifact={artifact} className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <h2 ref={headingRef} tabIndex={-1} className="truncate text-[14.5px] font-semibold tracking-tight text-cw-text focus-visible:outline-none">{artifact.title}</h2>
-        <p className="truncate text-[12px] text-cw-muted">{coworkArtifactMeta(artifact)}{when(artifact.createdAt) ? ` · ${when(artifact.createdAt)}` : ''}</p>
+      <CoworkArtifactIcon artifact={artifact} className="hidden h-4 w-4 shrink-0 text-cw-accent sm:block" />
+      <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <h2 ref={headingRef} tabIndex={-1} className="min-w-0 truncate text-[14.5px] font-semibold tracking-tight text-cw-text focus-visible:outline-none">{artifact.title}</h2>
+        <p className="hidden min-w-0 shrink-[2] truncate text-[12px] text-cw-muted sm:block">{coworkArtifactMeta(artifact)}{when(artifact.createdAt) ? ` · ${when(artifact.createdAt)}` : ''}</p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {artifact.kind === 'document' && <>
@@ -124,6 +128,7 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
           {maximized ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
         </CwButton>
         <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label={closeLabel} title="Cerrar"><X aria-hidden="true" /></CwButton>
+        {chrome && <span className={cn('hidden shrink-0 items-center gap-1 border-l border-cw-border pl-1.5 md:flex', !maximized && 'lg:hidden')}>{chrome.end}</span>}
       </div>
     </header>
     {/* Opening another result fades the new content in, so the change reads as a change of

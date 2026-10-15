@@ -54,6 +54,6 @@ test('the shell clips sideways without becoming a scroll box, so sticky bars ins
   for (const [file, code] of [['app-shell', shell], ['sidebar', sidebar]] as const) {
     assert.doesNotMatch(code, /overflow-x-hidden/, `${file} keeps no overflow-x-hidden wrapper`);
   }
-  assert.match(shell, /id="contenido"[\s\S]{0,80}className="[^"]*overflow-x-clip/, '<main> clips sideways');
+  assert.match(shell, /id="contenido"[\s\S]{0,80}className=(?:"|\{cn\(')[^"']*overflow-x-clip/, '<main> clips sideways');
   assert.equal((sidebar.match(/overflow-x-clip/g) || []).length, 2, 'the sidebar wrapper and the inset clip sideways');
 });
