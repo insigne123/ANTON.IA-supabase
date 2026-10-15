@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Globe, Loader2, Sparkles } from 'lucide-react';
+import { Building2, Globe, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,7 +12,7 @@ const PHASES = ['Leyendo tu sitio…', 'Revisando servicios, clientes y pruebas�
  * The fastest way to a complete profile: one address, the AI reads the site and proposes every field. The address is
  * prefilled with the saved website or, when there is none, the domain of a work email (ana@grupoexpro.com → grupoexpro.com).
  */
-export function ProfileAutofillCard({ website, websiteFromEmail, companyName, loading = false, running, error, onWebsiteChange, onRun }: {
+export function ProfileAutofillCard({ website, websiteFromEmail, companyName, loading = false, running, error, onWebsiteChange, onRun, onUseWorkspaceOffer }: {
   website: string;
   websiteFromEmail: boolean;
   companyName: string;
@@ -22,6 +22,8 @@ export function ProfileAutofillCard({ website, websiteFromEmail, companyName, lo
   error: string;
   onWebsiteChange: (value: string) => void;
   onRun: () => void;
+  /** The offer an admin already confirmed in «Oportunidades» would add something: one click, no AI call. */
+  onUseWorkspaceOffer?: () => void;
 }) {
   const [phase, setPhase] = useState(0);
   useEffect(() => {
@@ -69,6 +71,14 @@ export function ProfileAutofillCard({ website, websiteFromEmail, companyName, lo
               ? 'Lo tomamos de tu correo corporativo. Cámbialo si tu empresa usa otro sitio.'
               : '¿Sin sitio web? Deja este campo vacío y buscaremos tu empresa por su nombre.'}
       </p>
+      {onUseWorkspaceOffer ? (
+        <div className="mt-4 flex flex-col gap-3 border-t border-primary/15 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6 text-muted-foreground">Tu empresa ya confirmó su oferta en Oportunidades. Tráela aquí y revisa cada campo antes de guardar.</p>
+          <Button type="button" variant="outline" onClick={onUseWorkspaceOffer} disabled={loading || running} className="h-10 shrink-0 rounded-xl">
+            <Building2 className="h-4 w-4" aria-hidden="true" />Usar la oferta de tu empresa
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

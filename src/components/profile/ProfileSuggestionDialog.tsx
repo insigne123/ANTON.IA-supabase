@@ -111,6 +111,8 @@ export function ProfileSuggestionDialog({ suggestion, selection, profile, onSele
                               </a>
                             ))}
                           </span>
+                        ) : suggestion.sourceLabel ? (
+                          <span className="mt-2 block text-xs text-muted-foreground">Fuente: {suggestion.sourceLabel}.</span>
                         ) : inferred ? (
                           <span className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
                             <Lightbulb className="h-3 w-3" aria-hidden="true" />Sugerencia de la IA según tu oferta: ajústala a tu experiencia.
