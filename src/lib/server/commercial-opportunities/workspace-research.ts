@@ -14,6 +14,7 @@ import { MERCADO_PUBLICO_BASE } from './mercado-publico';
 import {gatherOpportunityBuyerContext} from './workspace-public-research';
 import {readPublicMercadoDocuments} from './mercado-publico-documents';
 import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report-view';
+import { opportunityChatDeadline, opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
 
 export async function enqueueOpportunityResearch(client: SupabaseClient, scope: WorkScope, id: string) {
   await assertOpportunityRead(client, scope, id);
@@ -166,12 +167,13 @@ export async function runOpportunityChat(client: SupabaseClient, job: Opportunit
   const report = message.report_id ? opportunityDb(await client.from('opportunity_reports').select('report').eq('organization_id', job.organization_id).eq('opportunity_id', job.opportunity_id).eq('id', message.report_id).maybeSingle()) : null;
   const item = opportunityDb(await client.from('commercial_opportunities').select('kind,title,buyer_name,company_name,deadline_at,reasons').eq('organization_id', job.organization_id).eq('id', job.opportunity_id).maybeSingle());
   const context = opportunityDb(await client.from('opportunity_company_context').select('offer').eq('organization_id', job.organization_id).maybeSingle());
-  const summary = report?.report ? { decision: report.report.recommendation, executive: String(report.report.executive || '').slice(0, 4000), nextSteps: report.report.nextSteps || [], questions: (report.report.questions || []).slice(0, 8) } : null;
+  const summary = opportunityChatReportContext(report?.report);
   const answer = await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: answerSchema, output: 3000,
     prompt: `Responde en español sobre esta oportunidad, directo y en no más de 150 palabras, salvo que pidan un texto. Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo en una frase y sugiere qué consultar. No presentes una propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.
+Escribe fechas y horas en hora de Chile; nunca menciones UTC. Lo que el informe ya estableció (requisitos con su estado, fechas) puedes usarlo diciendo que viene del informe: no digas que no existe solo porque no está en los fragmentos; si un fragmento lo contradice, dilo.
 Si piden redactar algo (un mensaje, un correo, una consulta), entrégalo listo para copiar, con datos del expediente y de la oferta, sin inventar nombres, cifras ni capacidades; si falta un dato, deja un espacio como [nombre].
 missing: a lo más 3 datos que cambiarían esta respuesta, en frases cortas; vacío si no hay.
-Oportunidad: ${JSON.stringify({ tipo: item?.kind, titulo: item?.title, cliente: item?.buyer_name || item?.company_name, cierre: item?.deadline_at, porQueAparecio: item?.reasons })}
+Oportunidad: ${JSON.stringify({ tipo: item?.kind, titulo: item?.title, cliente: item?.buyer_name || item?.company_name, cierre: opportunityChatDeadline(item?.deadline_at), porQueAparecio: item?.reasons })}
 Oferta de tu empresa: ${String(context?.offer || '').slice(0, 1500)}
 Informe: ${JSON.stringify(summary)}
 Pregunta: ${message.question}
