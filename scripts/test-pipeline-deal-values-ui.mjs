@@ -34,9 +34,10 @@ const bundle = await build({ plugins: [stubs], stdin: { contents: `import React 
   createRoot(document.getElementById('root')).render(<PipelineDashboard rows={rows} now={NOW} dealValues onOpenStage={() => {}} />);
   createRoot(document.getElementById('board')).render(<DndContext><KanbanColumn id="meeting" title="Reunión" count={2}
     leads={[rows[0], row('Hugo', 'meeting', { dealValue: 500000, dealCurrency: 'CLP' })]} /></DndContext>);
-  createRoot(document.getElementById('off')).render(<PipelineDashboard rows={rows} now={NOW} onOpenStage={() => {}} />);`,
+  createRoot(document.getElementById('off')).render(<PipelineDashboard rows={rows} now={NOW} onOpenStage={() => {}} />);
+  createRoot(document.getElementById('empty')).render(<PipelineDashboard rows={[row('Gabi', 'contacted'), row('Ines', 'new')]} now={NOW} dealValues onOpenStage={() => {}} />);`,
 resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"test"' } });
-const dom = new JSDOM('<div id="root"></div><div id="board"></div><div id="off"></div>', { url: 'http://localhost/crm', runScripts: 'outside-only', pretendToBeVisual: true });
+const dom = new JSDOM('<div id="root"></div><div id="board"></div><div id="off"></div><div id="empty"></div>', { url: 'http://localhost/crm', runScripts: 'outside-only', pretendToBeVisual: true });
 const { window } = dom;
 window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 const warn = window.console.warn.bind(window.console);
@@ -76,5 +77,12 @@ try {
   const off = window.document.getElementById('off');
   assert.ok(!/Pipeline abierto\$/.test(off.textContent) && ![...off.querySelectorAll('button')].some(button => button.textContent.trim() === 'Monto'),
     'without the switch the panel stays as it was');
-  console.log('PASS: with deal values the panel adds the open pipeline and what was won against the period before, names other currencies apart, shows the donut by amount with its table, and the board adds each column.');
+
+  // No amount written yet: two «—» tiles say nothing, so the six counts stay and one line says how to see money.
+  const empty = window.document.getElementById('empty');
+  const emptyTiles = [...empty.querySelector('section[aria-label="Cifras del pipeline"]').children].map(tile => tile.querySelector('p').textContent);
+  assert.deepEqual(emptyTiles, ['Abiertos', 'Contactos nuevos', 'Contactados', 'Tasa de respuesta', 'En reunión o más', '% ganados']);
+  assert.match(empty.textContent, /Para ver montos aquí, escribe el valor del negocio en el detalle de cada contacto\./);
+  assert.doesNotMatch(root.textContent, /Para ver montos aquí/, 'with amounts the hint is gone');
+  console.log('PASS: with deal values the panel adds the open pipeline and what was won against the period before, names other currencies apart, shows the donut by amount with its table, and the board adds each column; with no amount yet it shows the six counts and how to add one.');
 } finally { window.close(); }
