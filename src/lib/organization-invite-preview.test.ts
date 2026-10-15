@@ -37,6 +37,13 @@ test('revoked, used and expired follow the order the accept function checks; a m
   assert.deepEqual(describeInvitePreview(invite(), null, { now: NOW, sessionEmail: null }), { status: 'invalid' });
 });
 
+test('an invitation the signed-in person already accepted reads as joined, not used: accepting reloads the page', () => {
+  const accepted = invite({ accepted_at: '2026-10-02T00:00:00Z' });
+  assert.equal(describeInvitePreview(accepted, 'Yago QA', { now: NOW, sessionEmail: 'valentina.rios@yago-qa.cl' }).status, 'joined');
+  assert.equal(describeInvitePreview(accepted, 'Yago QA', { now: NOW, sessionEmail: 'diego@yago-qa.cl' }).status, 'used');
+  assert.equal(describeInvitePreview({ ...accepted, revoked_at: '2026-10-02T01:00:00Z' }, 'Yago QA', { now: NOW, sessionEmail: 'valentina.rios@yago-qa.cl' }).status, 'revoked');
+});
+
 test('an unknown role reads as member, the least access', () => {
   const preview = describeInvitePreview(invite({ role: 'superuser' }), 'Yago QA', { now: NOW, sessionEmail: null });
   assert.equal((preview as { role: string }).role, 'member');

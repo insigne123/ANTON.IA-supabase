@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { consultationEmail, humanDate, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps } from './report-view';
+import { consultationEmail, friendlyJobError, humanDate, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps } from './report-view';
 
 const milestones = [{ label: 'Recepción de consultas', date: '20 de octubre de 2026, 17:00', state: 'documented' as const, citations: [] },
   { label: 'Cierre de recepción de ofertas', date: '28 de octubre de 2026, 15:00', state: 'documented' as const, citations: [] }];
@@ -50,4 +50,15 @@ test('warnings: missing bases first, unreadable documents explained, system note
   assert.ok(!warnings.some(w => /tarifa confirmada|\bnull\b/.test(w)));
   assert.ok(warnings.includes('Fecha límite figura como sin dato en la ficha.'));
   assert.equal(opportunityReportWarnings([], [], false).length, 0);
+  assert.deepEqual(opportunityReportWarnings(['No se pudo leer el contenido de una fuente pública; el análisis del cliente es parcial.', 'Una fuente pública no pudo leerse.',
+    'Falta identificar al cliente para la investigación pública.'], [], false), ['No se pudo leer el contenido de una fuente pública; el análisis del cliente es parcial.'],
+    'the same note said twice reaches the person once, and a system note about the research never does');
+});
+
+test('a failed report explains what happened and what to do, never the internal accounting', () => {
+  assert.equal(friendlyJobError('La evaluación no terminó. Conservamos los datos y el consumo observado.'), 'Tardó más de lo esperado. Vuelve a intentarlo: suele resolverse al segundo intento.');
+  assert.match(friendlyJobError('Se alcanzó el presupuesto disponible para este trabajo.'), /límite de gasto del mes/);
+  assert.match(friendlyJobError('El expediente recibió documentos nuevos. Solicita un análisis actualizado.'), /cambió mientras se preparaba/);
+  assert.equal(friendlyJobError('Faltan documentos legibles para investigar. Adjunta las bases o la invitación.'), 'Faltan documentos legibles para investigar. Adjunta las bases o la invitación.');
+  assert.equal(friendlyJobError(null), 'Intenta de nuevo en un momento.');
 });

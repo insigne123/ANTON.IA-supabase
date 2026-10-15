@@ -70,7 +70,10 @@ export function consultationEmail(report: Pick<OpportunityReport, 'questions' | 
   ].join('\n');
 }
 
-const INTERNAL = [/tarifa confirmada/i, /investigaci[oó]n web del cliente/i, /recalcular con c[oó]digo/i, /f[oó]rmula param[eé]trica/i, /inventario completo de (las )?bases/i];
+const INTERNAL = [/tarifa confirmada/i, /investigaci[oó]n web del cliente/i, /recalcular con c[oó]digo/i, /f[oó]rmula param[eé]trica/i, /inventario completo de (las )?bases/i,
+  /identificar al cliente para la investigaci[oó]n/i];
+/** A short system note the report already says in its own words. */
+const SUBSUMED: Array<[RegExp, RegExp]> = [[/^una fuente p[uú]blica no pudo leerse\.?$/i, /fuente p[uú]blica/i]];
 /**
  * What the person must know or get before deciding: missing bases first, documents read only in part, then the rest.
  * System notes (a connector without a confirmed rate, internal formulas) are not for them.
@@ -81,7 +84,21 @@ export function opportunityReportWarnings(warnings: string[], documents: Array<{
       : d.extraction_status === 'partial' ? `«${d.name}» se leyó solo en parte.`
         : `«${d.name}» no se pudo leer: vuelve a subirlo como PDF o Word.`);
   const bases = basesMissing ? ['Faltan las bases y anexos de Mercado Público: descárgalos desde «Ver anexos» y súbelos en Documentos para un informe completo.'] : [];
-  const rest = warnings.filter(w => !INTERNAL.some(pattern => pattern.test(w))).map(w => w.replace(/\bnull\b/gi, 'sin dato'));
+  const rest = warnings.filter(w => !INTERNAL.some(pattern => pattern.test(w)))
+    .filter(w => !SUBSUMED.some(([note, said]) => note.test(w.trim()) && warnings.some(other => other !== w && said.test(other))))
+    .map(w => w.replace(/\bnull\b/gi, 'sin dato'));
   return [...new Set([...bases, ...reading, ...rest])].slice(0, 6);
 }
 export const isSignalReport = (report: Pick<OpportunityReport, 'kind'>) => isSignalKind(report.kind);
+
+const JOB_ERRORS: Array<[RegExp, string]> = [
+  [/no termin[oó]|consumo observado|no pudo terminar|pendiente de conciliaci[oó]n|retom[oó] en otro proceso|formato requerido/i, 'Tardó más de lo esperado. Vuelve a intentarlo: suele resolverse al segundo intento.'],
+  [/presupuesto/i, 'Se alcanzó el límite de gasto del mes en Oportunidades. Un administrador puede revisarlo en «Empresa del workspace».'],
+  [/documentos nuevos|oferta cambi[oó]|criterios cambiaron/i, 'El expediente cambió mientras se preparaba. Vuelve a generarlo para incluir lo nuevo.'],
+  [/proveedor de IA|precio verificable/i, 'La IA no está disponible en este momento. Inténtalo más tarde.'],
+];
+/** What a failed report or answer tells the person: what happened and what to do, never internal accounting. */
+export function friendlyJobError(error: string | null | undefined) {
+  if (!error) return 'Intenta de nuevo en un momento.';
+  return JOB_ERRORS.find(([pattern]) => pattern.test(error))?.[1] ?? error;
+}

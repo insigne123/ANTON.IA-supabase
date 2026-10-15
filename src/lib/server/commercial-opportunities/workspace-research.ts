@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { answerSchema, extractionSchema, REPORT_VERSION, validOpportunityCitation, validateOpportunityFacts, type DocumentChunk, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
@@ -32,9 +32,20 @@ export async function enqueueOpportunityResearch(client: SupabaseClient, scope: 
   if (row?.id) return row.id;
   const found = opportunityDb(await client.from('opportunity_jobs').select('id,state').eq('organization_id', scope.organizationId).eq('dedupe_key', key).single());
   if (!found) throw new AuthError('No se pudo recuperar el trabajo.', 503);
-  if(['blocked','failed'].includes(found.state)) {
-    // Same job, same budget steps: retry can recover receipts/results, never re-POST an uncertain paid call.
-    opportunityDb(await client.from('opportunity_jobs').update({state:'queued',error:null}).eq('id',found.id).eq('organization_id',scope.organizationId).in('state',['blocked','failed']));
+  if(found.state==='blocked') {
+    // Same job, same budget steps: a budget or content block recovers its receipts and results.
+    opportunityDb(await client.from('opportunity_jobs').update({state:'queued',error:null}).eq('id',found.id).eq('organization_id',scope.organizationId).eq('state','blocked'));
+  }
+  if(found.state==='failed') {
+    // A failed job keeps its uncertain paid call reserved forever, so retrying it could never pass that step: the person's
+    // retry starts a new job with its own budget steps. An active retry is reused, so a double click does not pay twice.
+    const active=opportunityDb(await client.from('opportunity_jobs').select('id').eq('organization_id',scope.organizationId).eq('opportunity_id',id)
+      .eq('kind','research').like('dedupe_key',`${key}:retry:%`).in('state',['queued','running','waiting']).limit(1).maybeSingle());
+    if(active?.id) return active.id;
+    const retry=opportunityDb(await client.from('opportunity_jobs').insert({ organization_id: scope.organizationId, opportunity_id: id, requested_by: scope.userId,
+      kind: 'research', dedupe_key: `${key}:retry:${randomUUID()}`, payload: { contentHash: hash, profileRevision: profile.revision } }).select('id').single());
+    if (!retry) throw new AuthError('No se pudo recuperar el trabajo.', 503);
+    return retry.id;
   }
   return found.id;
 }
@@ -124,6 +135,9 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   }
   if (skippedBlocks) warnings.push(skippedBlocks === 1 ? 'Una parte de los documentos no se pudo leer y el informe no la considera.' : `${skippedBlocks} partes de los documentos no se pudieron leer y el informe no las considera.`);
   if (skippedBlocks * 4 >= chunks.length) throw new AuthError('No pudimos leer los documentos. Intenta de nuevo en un momento.', 503);
+  // Writing the report takes up to 230 s: after a long reading it starts in the next tick, where the read blocks come
+  // back from their paid results in a few seconds.
+  if (Date.now() - started > 45_000) return { waiting: true as const };
   const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
     prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
       sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }, item.kind) });
@@ -150,9 +164,19 @@ export async function runOpportunityChat(client: SupabaseClient, job: Opportunit
   const found = opportunityDb(await client.rpc('opportunity_search_chunks', { p_org: job.organization_id, p_user: job.requested_by, p_id: job.opportunity_id, p_query: message.question })) as DocumentChunk[];
   const chunks = found?.length ? found : opportunityDb(await client.from('opportunity_document_chunks').select('id,document_id,locator,ordinal,content').eq('organization_id', job.organization_id).eq('opportunity_id', job.opportunity_id).order('ordinal').limit(8)) as DocumentChunk[];
   const report = message.report_id ? opportunityDb(await client.from('opportunity_reports').select('report').eq('organization_id', job.organization_id).eq('opportunity_id', job.opportunity_id).eq('id', message.report_id).maybeSingle()) : null;
+  const item = opportunityDb(await client.from('commercial_opportunities').select('kind,title,buyer_name,company_name,deadline_at,reasons').eq('organization_id', job.organization_id).eq('id', job.opportunity_id).maybeSingle());
+  const context = opportunityDb(await client.from('opportunity_company_context').select('offer').eq('organization_id', job.organization_id).maybeSingle());
+  const summary = report?.report ? { decision: report.report.recommendation, executive: String(report.report.executive || '').slice(0, 4000), nextSteps: report.report.nextSteps || [], questions: (report.report.questions || []).slice(0, 8) } : null;
   const answer = await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: answerSchema, output: 3000,
-    prompt: `Responde en español sobre esta oportunidad. Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo y sugiere qué consultar. No presentar propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.\nPregunta: ${message.question}\nResumen del informe: ${String(report?.report?.executive || '').slice(0, 6000)}\nFragmentos: ${JSON.stringify(chunks)}` });
+    prompt: `Responde en español sobre esta oportunidad, directo y en no más de 150 palabras, salvo que pidan un texto. Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo en una frase y sugiere qué consultar. No presentes una propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.
+Si piden redactar algo (un mensaje, un correo, una consulta), entrégalo listo para copiar, con datos del expediente y de la oferta, sin inventar nombres, cifras ni capacidades; si falta un dato, deja un espacio como [nombre].
+missing: a lo más 3 datos que cambiarían esta respuesta, en frases cortas; vacío si no hay.
+Oportunidad: ${JSON.stringify({ tipo: item?.kind, titulo: item?.title, cliente: item?.buyer_name || item?.company_name, cierre: item?.deadline_at, porQueAparecio: item?.reasons })}
+Oferta de tu empresa: ${String(context?.offer || '').slice(0, 1500)}
+Informe: ${JSON.stringify(summary)}
+Pregunta: ${message.question}
+Fragmentos: ${JSON.stringify(chunks)}` });
   answer.citations = answer.citations.filter(c => validOpportunityCitation(c, chunks));
-  if (!answer.citations.length) answer.missing = [...answer.missing, 'Esta respuesta no contiene una cita documental validada.'];
+  if (!answer.citations.length) answer.missing = ['Esta respuesta no contiene una cita documental validada.', ...answer.missing];
   return answer;
 }
