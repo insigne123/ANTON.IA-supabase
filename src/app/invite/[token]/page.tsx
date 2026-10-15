@@ -17,7 +17,7 @@ import { supabase } from '@/lib/supabase';
 
 type ValidPreview = Exclude<InvitePreview, { status: 'invalid' }>;
 
-const CLOSED: Record<Exclude<ValidPreview['status'], 'valid'>, string> = {
+const CLOSED: Record<Exclude<ValidPreview['status'], 'valid' | 'joined'>, string> = {
     expired: 'venció',
     used: 'ya se usó',
     revoked: 'fue revocada',
@@ -104,14 +104,15 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
                 <Button asChild className="w-full"><Link href={user ? '/dashboard' : '/login'}>{user ? 'Ir a Hoy' : 'Iniciar sesión'}</Link></Button>
             </div>
         );
-    } else if (accepted) {
+    } else if (accepted || preview.status === 'joined') {
+        // Accepting changes the active organization, which remounts this page: the preview then says «joined».
         title = `Ya eres parte de ${preview.organizationName}`;
         description = `Entraste como ${INVITE_ROLE_LABELS[preview.role]}.`;
         body = (
             <div className="space-y-4">
                 <Alert variant="success" role="status">
                     <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                    <AlertDescription>Tu espacio de trabajo cambió a {preview.organizationName}. Puedes cambiarlo desde el menú.</AlertDescription>
+                    <AlertDescription>Ya puedes trabajar en {preview.organizationName}. Para cambiar de espacio de trabajo, usa el menú.</AlertDescription>
                 </Alert>
                 <Button className="w-full" onClick={() => router.push('/dashboard')}>Ir a Hoy</Button>
             </div>
