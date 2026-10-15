@@ -41,7 +41,7 @@ export function OpportunityWorkWorkspace() {
   const [tab, setTab] = useState('summary'); const [modal, setModal] = useState<'create' | 'context' | 'assign' | 'task' | 'criteria' | null>(null);
   const [draft, setDraft] = useState<Record<string, any>>({}); const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState(''); const [question, setQuestion] = useState(''); const [messages, setMessages] = useState<any[]>([]);
-  const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected;
+  const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
   const watching = useRef<string | null>(null);
@@ -52,7 +52,15 @@ export function OpportunityWorkWorkspace() {
       if (!signal?.aborted) { setOverview(result); setProblem(''); }
     } catch (e) { if (!signal?.aborted) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar.'); setOverview(null); } }
   }, [filter, query, page]);
-  useEffect(() => { const controller = new AbortController(); void load(controller.signal); const timer = setInterval(() => void load(controller.signal), 15_000); return () => { controller.abort(); clearInterval(timer); }; }, [load]);
+  // The list is read again every minute while it is on view; an open opportunity or a hidden tab does not ask for it.
+  useEffect(() => {
+    const controller = new AbortController(); void load(controller.signal);
+    const refresh = () => { if (!document.hidden && !selectedRef.current) void load(controller.signal); };
+    const timer = setInterval(refresh, 60_000);
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { controller.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [load]);
   const loadDetail = useCallback(async (id: string, signal?: AbortSignal) => {
     try {
       const value = await json(await fetch(`/api/commercial-opportunities/${id}/workspace`, { cache: 'no-store', signal }));
@@ -63,11 +71,17 @@ export function OpportunityWorkWorkspace() {
   useEffect(() => {
     setDetail(null); setMessages([]); setTab('summary'); setNote(''); setQuestion(''); watching.current = null;
     if (!selected) return; const controller = new AbortController(); void loadDetail(selected, controller.signal);
-    const timer = setInterval(() => void loadDetail(selected, controller.signal), 8000);
+    // Every 8 s while a report or an answer is on its way, every 45 s otherwise, and never in a hidden tab.
+    let last = Date.now();
+    const timer = setInterval(() => {
+      if (document.hidden || (!busyRef.current && Date.now() - last < 45_000)) return;
+      last = Date.now(); void loadDetail(selected, controller.signal);
+    }, 8000);
     return () => { controller.abort(); clearInterval(timer); };
   }, [selected, loadDetail]);
   const research = detail?.jobs.find(j => j.kind === 'research') ?? null;
   const researching = Boolean(research && ACTIVE.includes(research.state));
+  busyRef.current = researching || messages.some(m => !m.answer?.answer);
   // Say so when the report the person is waiting for arrives, then show it.
   useEffect(() => {
     if (!research) return;
