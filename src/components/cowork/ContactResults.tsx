@@ -187,13 +187,13 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
               </div>
               <div className="col-start-2 min-w-0 sm:col-start-3 sm:row-start-1 sm:text-right">
                 {row.id.startsWith('apollo:') && !hasContact
-                  ? <p><span className="inline-flex rounded-md bg-cw-hover px-1.5 py-0.5 text-[11.5px] font-medium text-cw-muted">No guardado · sin correo</span></p>
+                  ? <p><span className="inline-flex rounded-md bg-cw-hover px-1.5 py-0.5 text-[11.5px] font-medium text-cw-muted">{row.savedLeadId ? 'En tus contactos' : 'No guardado · sin correo'}</span></p>
                   : <p className={hasContact ? 'truncate text-[13px] text-cw-text' : 'truncate text-[13px] text-cw-faint'}>{contact}</p>}
                 <p className="truncate text-[12px] text-cw-muted">{String(row.location || '')}{company ? `${row.location ? ' · ' : ''}${row.employees == null ? 'Dotación no informada' : `${row.employees} empleados`}` : ''}</p>
               </div>
             </div>
-            {(row.id.startsWith('apollo:') || (canResearch && !company)) && <div className="mt-2 pl-11">
-              {row.id.startsWith('apollo:') && <SaveContact runId={runId} providerId={row.id} onAccessDenied={onAccessDenied} onUseContact={id => onUseReport?.(id)} />}
+            {(row.id.startsWith('apollo:') ? !row.savedLeadId : canResearch && !company) && <div className="mt-2 pl-11">
+              {row.id.startsWith('apollo:') && !row.savedLeadId && <SaveContact runId={runId} providerId={row.id} onAccessDenied={onAccessDenied} onUseContact={id => onUseReport?.(id)} />}
               {canResearch && !row.id.startsWith('apollo:') && !company && <>
                 {(row.email || row.id in enriched)
                   ? <StartResearch key={`${row.id}:${row.id in enriched ? 'enriched' : 'email'}`} runId={runId} leadId={row.id} onAccessDenied={onAccessDenied} onUseReport={() => onUseReport?.(row.id)} />
