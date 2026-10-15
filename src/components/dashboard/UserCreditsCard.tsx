@@ -194,7 +194,7 @@ export default function UserCreditsCard({ className }: { className?: string }) {
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
-          <span>{state === 'error' && credits ? 'Mostrando el último saldo consultado' : usesTeamQuota ? 'El límite del equipo también condiciona el uso' : 'Asignación diaria · reinicio a medianoche UTC'}</span>
+          <span>{state === 'error' && credits ? 'Mostrando el último saldo consultado' : usesTeamQuota ? 'El límite del equipo también condiciona el uso' : `Asignación diaria · se renueva a las ${resetLabel || '00:00 UTC'}`}</span>
         </div>
       </CardContent>
     </Card>

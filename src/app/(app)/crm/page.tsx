@@ -186,7 +186,7 @@ export default function CRMPage() {
                     <div className="min-w-0">
                         <DocumentTitle title="Pipeline" />
                         <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
-                        <p className="mt-0.5 text-sm text-foreground/70">Prioriza oportunidades y mueve cada lead a su siguiente etapa.</p>
+                        <p className="mt-0.5 text-sm text-foreground/70">Prioriza oportunidades y mueve cada contacto a su siguiente etapa.</p>
                         <p className="mt-1 flex items-center gap-1.5 text-xs text-foreground/70">
                             <Sparkles className="h-3.5 w-3.5" />
                             Los envíos y las respuestas proponen cambios de etapa; nada se mueve hasta que los aceptes.
