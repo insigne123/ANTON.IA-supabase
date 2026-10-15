@@ -94,7 +94,8 @@ export function OpportunityWorkWorkspace() {
     try {
       const endpoint = id ? `/api/commercial-opportunities/${id}/workspace` : '/api/commercial-opportunities/workspace';
       const result = await json(await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, data }) }));
-      await load(); if (id) await loadDetail(id); if (!quiet) setFeedback(result.jobId || result.queued ? 'Trabajo en cola. Puedes continuar y volver cuando termine.' : 'Cambios guardados.');
+      // The open expediente first: it is what the person is looking at, and the list takes longer.
+      if (id) await loadDetail(id); await load(); if (!quiet) setFeedback(result.jobId || result.queued ? 'Trabajo en cola. Puedes continuar y volver cuando termine.' : 'Cambios guardados.');
       return result;
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar.'); return null; }
     finally { setBusy(false); }
@@ -211,7 +212,7 @@ export function OpportunityWorkWorkspace() {
         </header>
         <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
         {tab === 'summary' && <div className="space-y-5">
-          {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} onRetry={generate} />}
+          {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} pending={busy} onRetry={generate} />}
           {latest && newerDocuments.length > 0 && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-muted/30 p-4 text-sm"><p>Subiste {newerDocuments.length === 1 ? 'un documento nuevo' : `${newerDocuments.length} documentos nuevos`} después del informe. Actualízalo para incluir{newerDocuments.length === 1 ? 'lo' : 'los'}.</p><Button size="sm" onClick={generate} disabled={busy}>Actualizar informe</Button></div>}
           {latest && item.kind === 'tender' && !advice?.closed && !detail.documents.some(d => d.source_kind === 'upload') && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-cw-warning-soft p-4 text-sm"><p>Este informe se hizo sin las bases. Súbelas para completarlo: la IA podrá revisar requisitos, criterios y garantías.</p><Button size="sm" variant="outline" onClick={() => setTab('documents')}>Subir bases</Button></div>}
           {!latest && !researching && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={false} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
