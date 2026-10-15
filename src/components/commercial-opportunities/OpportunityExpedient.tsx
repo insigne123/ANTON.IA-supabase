@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Download, ExternalLink, FileText, Loader2, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { statusLabel } from '@/lib/commercial-opportunities/report-view';
+import { friendlyJobError, statusLabel } from '@/lib/commercial-opportunities/report-view';
 
 export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
 export type ExpedientDocument = { id: string; name: string; extraction_status: string; source_kind: string; source_url: string | null; pages_read: number | null; pages_total: number | null; created_at: string };
@@ -128,11 +128,11 @@ export function DocumentList({ id, documents, kind }: { id: string; documents: E
 /** While the report is being prepared: what is happening and how long it usually takes. */
 export function ReportProgress({ state, error, signal, onRetry }: { state: string; error?: string | null; signal?: boolean; onRetry: () => void }) {
   if (state === 'failed' || state === 'blocked') return <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-destructive/40 p-4 text-sm">
-    <p><span className="font-medium">No pudimos terminar el {signal ? 'análisis' : 'informe'}.</span> {error || 'Intenta de nuevo en un momento.'}</p>
+    <p><span className="font-medium">No pudimos terminar {signal ? 'la ficha comercial' : 'el informe'}.</span> {friendlyJobError(error)}</p>
     <Button size="sm" variant="outline" onClick={onRetry}>Intentar de nuevo</Button></div>;
   return <div role="status" className="rounded-2xl border bg-muted/30 p-4">
     <p className="flex items-center gap-2 text-sm font-medium"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{state === 'queued' ? 'En cola: empieza en menos de un minuto' : signal ? 'Analizando la señal y preparando la ficha…' : 'Leyendo los documentos y redactando el informe…'}</p>
     <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full w-1/3 animate-pulse rounded-full bg-primary" /></div>
-    <p className="mt-2 text-xs text-muted-foreground">Suele tardar entre 1 y 3 minutos. Puedes seguir trabajando: el {signal ? 'resultado' : 'informe'} aparecerá aquí.</p>
+    <p className="mt-2 text-xs text-muted-foreground">Suele tardar entre {signal ? '1 y 3' : '2 y 5'} minutos. Puedes seguir trabajando: {signal ? 'la ficha' : 'el informe'} aparecerá aquí y te avisaremos.</p>
   </div>;
 }
