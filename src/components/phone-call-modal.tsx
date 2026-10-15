@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Phone, CheckCircle2, UserX, Voicemail, FileText, Copy, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { EnrichedLead, LeadResearchReport } from '@/lib/types';
-import { getCompanyProfile } from '@/lib/data';
+import { profileService } from '@/lib/services/profile-service';
+import { buildEffectiveCompanyProfile } from '@/lib/signature-placeholders';
 
 type PhoneCallModalProps = {
     open: boolean;
@@ -60,7 +61,8 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
         if (!lead) return;
         setLoadingScript(true);
         try {
-            const companyProfile = getCompanyProfile();
+            // The person's own company: the script pitches what they sell, never a demo profile.
+            const companyProfile = buildEffectiveCompanyProfile(await profileService.getCurrentProfile().catch(() => null));
             const res = await fetch('/api/ai/generate-phone-script', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
