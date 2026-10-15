@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { friendlyJobError, statusLabel } from '@/lib/commercial-opportunities/report-view';
 
-export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv';
+export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.zip';
 export type ExpedientDocument = { id: string; name: string; extraction_status: string; source_kind: string; source_url: string | null; pages_read: number | null; pages_total: number | null; created_at: string };
 export type PublicLinks = { ficha: string; attachments: string | null; forum: string | null; forms: number; code: string | null } | null;
 type Upload = { name: string; state: 'uploading' | 'done' | 'error'; message?: string };
@@ -40,7 +40,7 @@ export function DocumentDrop({ onUpload, disabled, compact }: { onUpload: (files
         compact ? 'px-4 py-5' : 'px-6 py-8', over ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40', disabled && 'cursor-not-allowed opacity-60')}>
       <UploadCloud className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
       <p className="text-sm font-medium">Arrastra aquí las bases y anexos</p>
-      <p className="text-xs text-muted-foreground">o haz clic para elegirlos · PDF, Word o Excel, hasta 20 MB cada uno</p>
+      <p className="text-xs text-muted-foreground">o haz clic para elegirlos · PDF, Word, Excel o el ZIP de Mercado Público, hasta 20 MB cada documento</p>
     </div>
     <input ref={input} id="op-document" type="file" multiple accept={ACCEPTED_FILES} className="sr-only" onChange={e => void send(e.target.files)} />
     {uploads.length > 0 && <ul className="mt-3 space-y-1.5 text-sm" aria-live="polite">{uploads.map((u, i) => <li key={i} className="flex items-start gap-2">
@@ -78,7 +78,7 @@ export function ExpedientGuide({ kind, url, links, documents, onUpload, onGenera
           <p className="mt-2 text-xs text-muted-foreground">{links?.attachments ? 'Se abre en otra pestaña con la lista de archivos.' : 'En la ficha, pulsa «Ver anexos» (ícono de documentos, arriba a la derecha).'} Si aparece «No soy un robot», márcalo.</p>
         </Step>
         <Step n={2} title="Descarga las bases y anexos">
-          <p className="text-sm text-muted-foreground">Pulsa el ícono de descarga de cada archivo: bases administrativas, bases técnicas, anexos y aclaraciones. Quedan en tu carpeta Descargas.</p>
+          <p className="text-sm text-muted-foreground">Usa «Descargar todos» para bajarlos en un ZIP, o el ícono de descarga de cada archivo: bases administrativas, bases técnicas, anexos y aclaraciones. Quedan en tu carpeta Descargas.</p>
         </Step>
       </>}
       <Step n={publicTender ? 3 : 1} title={publicTender ? 'Súbelos aquí' : 'Sube los documentos'} done={uploaded.length > 0}>

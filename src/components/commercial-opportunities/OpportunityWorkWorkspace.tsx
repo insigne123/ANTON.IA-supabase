@@ -13,6 +13,7 @@ import {OpportunityTicketConnection} from './OpportunityTicketConnection';
 import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
 import { AdvicePill, ExclusionGroups, StartHere, TenderPrerequisites } from './OpportunityRadar';
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
+import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
 import { bySource, closesLabel, workAdvice } from '@/lib/commercial-opportunities/workspace-radar';
 import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
@@ -111,12 +112,18 @@ export function OpportunityWorkWorkspace() {
   const ask = (text: string) => { setTab('chat'); setQuestion(''); void perform('chat', { question: text, requestId: crypto.randomUUID() }, selected, true); };
   const upload = async (picked: File[], report: (u: Array<{ name: string; state: 'uploading' | 'done' | 'error'; message?: string }>) => void) => {
     if (!selected) return;
-    const states = picked.map(f => ({ name: f.name, state: 'uploading' as 'uploading' | 'done' | 'error', message: undefined as string | undefined })); report([...states]);
+    // A ZIP from Mercado Público («Descargar todos») goes up as the documents inside it (zip-uploads.ts).
+    const zips = picked.filter(isZip);
+    if (zips.length) report(zips.map(f => ({ name: f.name, state: 'uploading', message: 'Abriendo el ZIP…' })));
+    const { files, notes } = await expandZipUploads(picked);
+    const states = files.map(f => ({ name: f.name, state: 'uploading' as 'uploading' | 'done' | 'error', message: undefined as string | undefined }));
+    const left = notes.map(n => ({ name: n.name, state: 'error' as const, message: n.message }));
+    report([...states, ...left]);
     setBusy(true);
-    for (const [i, file] of picked.entries()) {
+    for (const [i, file] of files.entries()) {
       try { const body = new FormData(); body.set('file', file); await json(await fetch(`/api/commercial-opportunities/${selected}/documents`, { method: 'POST', body })); states[i] = { ...states[i], state: 'done' }; }
       catch (e) { states[i] = { ...states[i], state: 'error', message: e instanceof Error ? e.message : 'No se pudo subir.' }; }
-      report([...states]);
+      report([...states, ...left]);
     }
     setBusy(false); await loadDetail(selected);
   };
