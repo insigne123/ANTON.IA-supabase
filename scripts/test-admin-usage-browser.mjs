@@ -57,6 +57,13 @@ try{
     });
     await page.goto('https://usage.test/dashboard/admin?from=2026-09-01&to=2026-09-30');await page.addScriptTag({content:bundle.outputFiles[0].text});
     await page.getByRole('heading',{name:'Uso, resultados y créditos'}).waitFor();await page.getByText('Personas activas',{exact:true}).waitFor();
+    // The shortcut that matches the dates on view is marked; dates typed by hand mark none.
+    const presets=page.getByRole('group',{name:'Períodos rápidos'});
+    const pressed=async()=>presets.getByRole('button').evaluateAll(buttons=>buttons.filter(button=>button.getAttribute('aria-pressed')==='true').map(button=>button.textContent));
+    assert.deepEqual(await pressed(),[],'a hand-picked month marks no shortcut');
+    await presets.getByRole('button',{name:'7 días',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[aria-label="Períodos rápidos"] [aria-pressed="true"]'));
+    assert.deepEqual(await pressed(),['7 días'],'the chosen shortcut is the one marked');
+    await page.getByLabel('Desde').fill('2026-09-01');await page.getByLabel('Hasta').fill('2026-09-30');await page.waitForFunction(()=>!document.querySelector('[aria-label="Períodos rápidos"] [aria-pressed="true"]'));
     const colors=await page.evaluate(()=>{const probe=document.createElement('div');probe.style.backgroundColor='hsl(var(--background))';document.body.append(probe);const token=getComputedStyle(probe).backgroundColor;probe.remove();return {body:getComputedStyle(document.body).backgroundColor,token,defined:getComputedStyle(document.documentElement).getPropertyValue('--background').trim()};});
     assert.ok(colors.defined);assert.equal(colors.body,colors.token,'render actual light/dark tokens, not unthemed fixture CSS');
     const channels=colors.body.match(/\d+/g).map(Number);assert.ok(channels.every(value=>theme==='dark'?value<40:value>230),'the themes must have different backgrounds');
