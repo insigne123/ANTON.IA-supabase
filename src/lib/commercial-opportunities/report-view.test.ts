@@ -57,7 +57,7 @@ test('warnings: missing bases first, unreadable documents explained, system note
 
 test('a failed report explains what happened and what to do, never the internal accounting', () => {
   assert.equal(friendlyJobError('La evaluación no terminó. Conservamos los datos y el consumo observado.'), 'Tardó más de lo esperado. Vuelve a intentarlo: suele resolverse al segundo intento.');
-  assert.match(friendlyJobError('Se alcanzó el presupuesto disponible para este trabajo.'), /límite de gasto del mes/);
+  assert.match(friendlyJobError('Se alcanzó el presupuesto disponible para este trabajo.'), /gasto permitido para un informe o para el mes/);
   assert.match(friendlyJobError('El expediente recibió documentos nuevos. Solicita un análisis actualizado.'), /cambió mientras se preparaba/);
   assert.equal(friendlyJobError('Faltan documentos legibles para investigar. Adjunta las bases o la invitación.'), 'Faltan documentos legibles para investigar. Adjunta las bases o la invitación.');
   assert.equal(friendlyJobError(null), 'Intenta de nuevo en un momento.');
