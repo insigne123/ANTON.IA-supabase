@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/context/AuthContext';
+import { useSharedNavAccess } from '@/hooks/use-nav-access';
 import { useToast } from '@/hooks/use-toast';
 import {
   PROFILE_COMPANY_SIZES,
@@ -28,6 +29,7 @@ import {
   type ProfileSuggestionSelection,
 } from '@/lib/profile/profile-mappings';
 import { autofillEmptyMessage, suggestionFromAutofill, type AutofillResponse, type AutofillSuggestion } from '@/lib/profile/autofill-suggestion';
+import { suggestionFromWorkspaceOffer, type WorkspaceOffer } from '@/lib/profile/workspace-offer-suggestion';
 import { profileService } from '@/lib/services/profile-service';
 import { PasswordChangeForm } from '@/components/profile/password-change-form';
 import { ProfileAutofillCard } from '@/components/profile/ProfileAutofillCard';
@@ -93,6 +95,8 @@ export default function ProfilePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [suggestion, setSuggestion] = useState<AutofillSuggestion | null>(null);
   const [suggestionSelection, setSuggestionSelection] = useState<ProfileSuggestionSelection | null>(null);
+  const [workspaceOffer, setWorkspaceOffer] = useState<WorkspaceOffer | null>(null);
+  const { opportunities } = useSharedNavAccess();
   const { toast } = useToast();
   const isDirty = !isLoading && savedProfile !== null && !sameProfile(savedProfile, profile);
   const emailWebsite = useMemo(() => websiteFromWorkEmail(user?.email), [user?.email]);
@@ -115,6 +119,19 @@ export default function ProfilePage() {
     }
     void loadProfile();
   }, [loadAttempt]);
+
+  // The offer an admin confirmed in «Oportunidades» is the team's: whoever sells it can bring it here instead of retyping it.
+  useEffect(() => {
+    if (!opportunities) return;
+    const controller = new AbortController();
+    fetch('/api/commercial-opportunities/workspace/offer', { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((data) => { if (!controller.signal.aborted && data?.offer) setWorkspaceOffer(data.offer as WorkspaceOffer); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [opportunities]);
+  const workspaceSuggestion = useMemo(() => (workspaceOffer && !isLoading ? suggestionFromWorkspaceOffer(workspaceOffer, profile) : null),
+    [workspaceOffer, isLoading, profile]);
 
   // The AI card starts from the saved website or, without one, from the work email's domain.
   useEffect(() => {
@@ -236,6 +253,13 @@ export default function ProfilePage() {
     toast({ title: `${count} ${count === 1 ? 'campo listo' : 'campos listos'} para revisar`, description: 'Ajusta lo que quieras y presiona «Guardar cambios».' });
   };
 
+  const handleUseWorkspaceOffer = () => {
+    if (!workspaceSuggestion) return;
+    setAiError('');
+    setSuggestion(workspaceSuggestion);
+    setSuggestionSelection(getDefaultSuggestionSelection(profile, workspaceSuggestion.values));
+  };
+
   const closeSuggestionReview = () => {
     setSuggestion(null);
     setSuggestionSelection(null);
@@ -271,6 +295,7 @@ export default function ProfilePage() {
           error={aiError}
           onWebsiteChange={(value) => { setAiWebsiteTouched(true); setAiWebsite(value); setAiError(''); }}
           onRun={() => void handleAutofill()}
+          onUseWorkspaceOffer={workspaceSuggestion ? handleUseWorkspaceOffer : undefined}
         />
       ) : null}
 
