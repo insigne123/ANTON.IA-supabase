@@ -2,6 +2,10 @@ import { supabase } from '../supabase';
 import type { EnrichedLead } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { organizationService } from './organization-service';
+import { contactKeys } from '../leads-workspace/contact-keys';
+
+/** A saved person: their email, LinkedIn or name at their company, plus the row id. Any one match means already saved. */
+const keysOf = (lead: EnrichedLead) => [...contactKeys(lead), ...(lead.id?.trim() ? [`id:${lead.id.trim().toLowerCase()}`] : [])];
 
 const TABLE = 'enriched_leads';
 
@@ -176,21 +180,15 @@ export async function addEnrichedLeads(items: EnrichedLead[]) {
     const orgId = await organizationService.getCurrentOrganizationId();
 
     const existing = await getEnrichedLeads();
-    const key = (v: EnrichedLead) => {
-        const emailKey = normalizeEmailKey(v.email);
-        return String(emailKey || v.id || `${v.fullName}|${v.companyName}|${v.title}`)
-            .trim()
-            .toLowerCase();
-    };
-    const seen = new Set(existing.map(key));
+    const seen = new Set(existing.flatMap(keysOf));
 
     const toInsert: any[] = [];
 
     for (const item of items) {
-        const k = key(item);
-        if (!seen.has(k)) {
+        const keys = keysOf(item);
+        if (!keys.some((k) => seen.has(k))) {
             toInsert.push(mapEnrichedLeadToRow(item, user.id, orgId));
-            seen.add(k);
+            keys.forEach((k) => seen.add(k));
         }
     }
 
@@ -259,25 +257,15 @@ export const enrichedLeadsStorage = {
         const orgId = await organizationService.getCurrentOrganizationId();
 
         const existing = await getEnrichedLeads();
-        const keyOf = (l: EnrichedLead) => {
-            const emailKey = normalizeEmailKey(l.email);
-            return String(
-                emailKey ||
-                l.id?.trim() ||
-                `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`
-            )
-                .trim()
-                .toLowerCase();
-        };
-        const seen = new Set(existing.map(keyOf));
+        const seen = new Set(existing.flatMap(keysOf));
 
         const added: EnrichedLead[] = [];
         const dups: EnrichedLead[] = [];
         const toInsert: any[] = [];
 
         for (const raw of newOnes) {
-            const k = keyOf(raw);
-            if (!k || seen.has(k)) {
+            const keys = keysOf(raw);
+            if (keys.some((k) => seen.has(k))) {
                 dups.push(raw);
                 continue;
             }
@@ -287,7 +275,7 @@ export const enrichedLeadsStorage = {
             toInsert.push(row);
 
             // Add to local tracking
-            seen.add(k);
+            keys.forEach((k) => seen.add(k));
             added.push(mapRowToEnrichedLead(row)); // Approximate return value
         }
 
