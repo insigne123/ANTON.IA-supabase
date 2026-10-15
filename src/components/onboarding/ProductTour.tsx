@@ -280,7 +280,7 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     scrolledAreas.current.forEach((top, area) => { area.scrollTop = top; });
     scrolledAreas.current.clear();
     if (status === 'skipped') {
-      toast({ title: 'Recorrido omitido', description: 'Puedes verlo cuando quieras desde «Ver tutorial», al final del menú.' });
+      toast({ title: 'Recorrido omitido', description: 'Puedes verlo cuando quieras desde «Ver tutorial» (el botón ▶ junto a «Centro de ayuda»).' });
     }
     if (navigateTo) onNavigate(navigateTo);
   }, [markGuidesSeen, onNavigate, phase, save, sidebar, steps, userId]);
@@ -374,7 +374,7 @@ function WelcomeDialog({ open, stepCount, onStart, onDecline }: {
           </Button>
         </DialogFooter>
         <p className="-mt-2 text-center text-xs text-muted-foreground sm:text-left">
-          Si lo omites, puedes verlo cuando quieras desde «Ver tutorial», al final del menú.
+          Si lo omites, puedes verlo cuando quieras desde «Ver tutorial»: el botón ▶ junto a «Centro de ayuda», al final del menú.
         </p>
       </DialogContent>
     </Dialog>

@@ -15,10 +15,9 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarSeparator,
   useSidebar,
 } from '@/components/ui/sidebar';
-import { BookOpen, CircleHelp, LogOut } from 'lucide-react';
+import { BookOpen, ChevronRight, LogOut, PlayCircle } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
@@ -27,7 +26,7 @@ import { useProductTour } from '@/components/onboarding/ProductTour';
 import type { NavAccess } from '@/hooks/use-nav-access';
 import { NAV_SECTIONS, isNavItemActive } from '@/lib/navigation';
 
-const itemClass = 'h-9 rounded-xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/80 transition-colors duration-200 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground';
+const itemClass = 'h-8 rounded-xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/80 transition-colors duration-200 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground';
 const activeItemClass = 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]';
 
 /** `access` comes from the shell, which also uses it for the help: one request for both. */
@@ -44,6 +43,15 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
   const closeOnPhone = () => { if (isMobile) setOpenMobile(false); };
 
   const helpActive = pathname === '/ayuda' || pathname.startsWith('/ayuda/');
+  const [unfolded, setUnfolded] = React.useState<Record<string, boolean>>({});
+  // The open screen stays in view inside the menu, also when it sits below the fold of a laptop screen.
+  const sectionCount = NAV_SECTIONS.length;
+  React.useEffect(() => {
+    // After the entries that depend on access appear, which moves the rest down.
+    const frame = window.requestAnimationFrame(() =>
+      document.querySelector('[data-sidebar="content"] [aria-current="page"]')?.scrollIntoView?.({ block: 'center' }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [pathname, access.opportunities, access.cowork, canAccessAdminDashboard, sectionCount]);
   const visibleSections = NAV_SECTIONS
     .map((section) => ({
       ...section,
@@ -56,21 +64,33 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
 
   return (
     <Sidebar className="border-r border-sidebar-border/70 bg-[linear-gradient(180deg,hsl(var(--sidebar-background))_0%,hsl(var(--sidebar-background))_68%,hsl(var(--background))_100%)]">
-      <SidebarHeader className="gap-4 border-b border-sidebar-border/70 px-3 py-3">
-        <Logo size="xl" showWordmark className="py-1" />
+      <SidebarHeader className="gap-3 border-b border-sidebar-border/70 px-3 py-3">
+        <Logo size="lg" showWordmark />
         <WorkspaceSwitcher />
       </SidebarHeader>
 
       {/* The menu scrolls on short screens: its lower edge fades, so an item under it reads as «more below», not as cut off. */}
-      <SidebarContent className="px-2 pb-8 pt-2 [mask-image:linear-gradient(to_bottom,#000_calc(100%-2rem),transparent)]">
+      <SidebarContent className="gap-2 px-2 pb-4 pt-2 [mask-image:linear-gradient(to_bottom,#000_calc(100%-2rem),transparent)]">
         <nav aria-label="Navegación principal" className="contents">
-          {visibleSections.map((section, index) => (
-          <React.Fragment key={section.label}>
-            <SidebarGroup className="p-0">
-              <SidebarGroupLabel className="px-3 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/70">
-                {section.label}
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
+          {visibleSections.map((section) => {
+            const activeInside = section.items.some((item) => isNavItemActive(item, pathname));
+            const open = !section.collapsible || activeInside || Boolean(unfolded[section.label]);
+            // A section with a single entry of the same name («Administración») needs no title above it.
+            const titled = !(section.items.length === 1 && section.items[0].label === section.label);
+            const labelClass = 'h-6 px-3 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/70';
+            return (
+            <SidebarGroup key={section.label} className="p-0">
+              {section.collapsible ? (
+                <SidebarGroupLabel asChild className={cn(labelClass, 'w-full justify-between hover:text-sidebar-foreground')}>
+                  <button type="button" className="disabled:cursor-default" aria-expanded={open} onClick={() => setUnfolded((state) => ({ ...state, [section.label]: !open }))} disabled={activeInside}>
+                    {section.label}
+                    <ChevronRight aria-hidden="true" className={cn('h-3.5 w-3.5 transition-transform duration-200', open && 'rotate-90')} />
+                  </button>
+                </SidebarGroupLabel>
+              ) : titled ? (
+                <SidebarGroupLabel className={labelClass}>{section.label}</SidebarGroupLabel>
+              ) : null}
+              {open && <SidebarGroupContent>
                 <SidebarMenu className="gap-0.5">
                   {section.items.map((item) => {
                     const isActive = isNavItemActive(item, pathname);
@@ -92,28 +112,25 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
                     );
                   })}
                 </SidebarMenu>
-              </SidebarGroupContent>
+              </SidebarGroupContent>}
             </SidebarGroup>
-            {index < visibleSections.length - 1 && <SidebarSeparator className="mx-3 my-1.5 bg-sidebar-border/65" />}
-          </React.Fragment>
-          ))}
+            );
+          })}
         </nav>
       </SidebarContent>
 
       <SidebarFooter className="gap-3 border-t border-sidebar-border/70 px-3 py-2">
         <SidebarMenu className="gap-0.5">
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={helpActive} className={cn(itemClass, helpActive && activeItemClass)}>
+          {/* Help and the tutorial share a row, so the work sections above keep the height of a laptop screen. */}
+          <SidebarMenuItem className="flex items-center gap-1">
+            <SidebarMenuButton asChild isActive={helpActive} className={cn(itemClass, 'flex-1', helpActive && activeItemClass)}>
               <Link href="/ayuda" onClick={closeOnPhone} data-tour="help-center" aria-current={pathname === '/ayuda' ? 'page' : undefined}>
                 <BookOpen />
                 <span>Centro de ayuda</span>
               </Link>
             </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton data-tour="tour-help" onClick={productTour.start} className={itemClass}>
-              <CircleHelp />
-              <span>Ver tutorial</span>
+            <SidebarMenuButton data-tour="tour-help" onClick={productTour.start} tooltip="Ver tutorial" aria-label="Ver tutorial" title="Ver tutorial" className={cn(itemClass, 'w-8 shrink-0 justify-center px-0')}>
+              <PlayCircle />
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>

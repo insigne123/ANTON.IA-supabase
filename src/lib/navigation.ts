@@ -18,7 +18,8 @@ export type NavItem = {
   exact?: boolean;
 };
 
-export type NavSection = { label: string; items: NavItem[] };
+/** `collapsible`: folded until one of its screens is open, so the work sections fit on a laptop screen. */
+export type NavSection = { label: string; items: NavItem[]; collapsible?: boolean };
 
 /** Grouped by what the person is doing, in the order of the work: today, find people, the people to write to, follow-up.
  * Labels say the state of a contact («Por escribir»: has an email; «Por completar»: still needs one) instead of the table it
@@ -61,6 +62,7 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: 'Configuración',
+    collapsible: true,
     items: [
       { href: '/profile', icon: User, label: 'Perfil', tour: 'profile' },
       { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'], tour: 'connections' },
