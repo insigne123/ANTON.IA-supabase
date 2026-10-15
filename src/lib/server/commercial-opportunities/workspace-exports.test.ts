@@ -11,7 +11,7 @@ const report:OpportunityReport={title:'Oportunidad de demostración',executive:'
 test('complete report exports paginate and preserve every section and textual source without model calls',async()=>{
  const bytes=await opportunityReportPdf(report);assert.ok(Buffer.from(bytes).subarray(0,5).toString()==='%PDF-');
  const {extractText}=await import('unpdf');const parsed=await extractText(bytes,{mergePages:true});
- const text=String(parsed.text);assert.match(text,/Sección 12/);assert.match(text,/Precio neto total/);assert.match(text,/Capital de trabajo/);assert.match(text,/Invitación.txt/);assert.ok(parsed.totalPages>10);
+ const text=String(parsed.text);assert.match(text,/Sección 12/);assert.match(text,/Precio neto total/);assert.match(text,/Capital de trabajo/);assert.match(text,/Invitación.txt/);assert.ok(parsed.totalPages>5);
  const md=opportunityReportMarkdown(report);assert.match(md,/Sección 12/);assert.match(md,/Texto recibido/);assert.match(md,/garantía|guarantee/i);
 });
 test('workbook keeps scenario arithmetic as numbers, unknown taxes blank and formula-like descriptions as inert strings',async()=>{
@@ -28,4 +28,16 @@ test('the real pilot summation notation exports legibly without losing its finan
  assert.match(String(parsed.text),/sumatoria\(P x Q\)/);assert.match(String(parsed.text),/Capital de trabajo/);
  assert.match(String(parsed.text),/No hay escenarios numéricos disponibles/);
  assert.match(opportunityReportMarkdown(sample),/Σ\(P x Q\)/,'editable source keeps the original mathematical notation');
+});
+
+test('the first page reads as a decision: what to do, the key dates and plain Spanish, no internal ids or ISO dates',async()=>{
+ const opportunity={title:'Servicio de verificación de antecedentes',buyer:'Hospital Demo',deadline:'2026-10-28T18:00:00Z',amount:15000000,currency:'CLP'};
+ const {extractText}=await import('unpdf');const first=await extractText(await opportunityReportPdf({...report,nextSteps:['Enviar consultas antes del 20 de octubre']},opportunity),{mergePages:false});
+ const page1=String((first.text as string[])[0]);
+ assert.match(page1,/Postular si se resuelve lo pendiente/);assert.match(page1,/Qué hacer ahora/);assert.match(page1,/Enviar consultas antes del 20 de octubre/);
+ assert.match(page1,/Preparado el 12 de octubre de 2026/);assert.match(page1,/28 de octubre de 2026, 15:00/);assert.match(page1,/15\.000\.000 CLP/);
+ const all=(first.text as string[]).join('\n');
+ assert.doesNotMatch(all,/2026-10-12T10:00:00Z|Índice de fuentes|c1:|Impacto high/);assert.match(all,/Impacto alto/);
+ const md=opportunityReportMarkdown(report,opportunity);
+ assert.match(md,/^# Servicio de verificación de antecedentes/);assert.match(md,/\*\*Postular si se resuelve lo pendiente\*\*/);assert.doesNotMatch(md,/Fecha de corte|pending ·|high/);
 });

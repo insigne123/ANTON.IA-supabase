@@ -13,6 +13,7 @@ import { resolveTicketForOrganization } from './tickets';
 import { MERCADO_PUBLICO_BASE } from './mercado-publico';
 import {gatherOpportunityBuyerContext} from './workspace-public-research';
 import {readPublicMercadoDocuments} from './mercado-publico-documents';
+import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report-view';
 
 export async function enqueueOpportunityResearch(client: SupabaseClient, scope: WorkScope, id: string) {
   await assertOpportunityRead(client, scope, id);
@@ -48,7 +49,7 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   if(item.kind==='tender'&&item.url&&!job.payload.publicDocumentsChecked){
     try{
       const result=await readPublicMercadoDocuments(item.url,async file=>{await saveOpportunityDocument(client,scope,id,{name:file.name,bytes:file.bytes,sourceKind:'official',sourceUrl:file.sourceUrl});},{deadline:started+90000});
-      warnings.push(...result.warnings);
+      warnings.push(...result.warnings);job.payload.attachmentsUrl=result.attachments;
     }catch{warnings.push('No se pudieron obtener los formularios y el foro desde la ficha pública.');}
     job.payload.publicDocumentsChecked=true;job.payload.publicDocumentWarnings=warnings.slice();
     opportunityDb(await client.from('opportunity_jobs').update({payload:job.payload}).eq('id',job.id).eq('lease_token',job.lease_token));
@@ -65,13 +66,13 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
         if (!response.ok || !Array.isArray(body.Listado) || !body.Listado[0]) throw new Error('Unavailable');
         await saveOpportunityDocument(client, scope, id, { name: `Ficha oficial ${item.data.observed.code}.txt`, bytes: Buffer.from(JSON.stringify(body.Listado[0], null, 2)), sourceKind: 'official', sourceUrl: `https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json?codigo=${encodeURIComponent(item.data.observed.code)}` });
       } catch { warnings.push('No se pudo actualizar el detalle oficial de la licitación.'); }
-    } else warnings.push('Falta ticket para consultar el detalle oficial de la licitación.');
+    } else warnings.push('Conecta el ticket de Mercado Público en «Empresa del workspace» para incorporar la ficha oficial.');
     job.payload.officialChecked = true;
   }
   if (item.url && !job.payload.sourcesChecked) {
     try {
       const root = await downloadOpportunitySource(item.url);
-      await saveOpportunityDocument(client, scope, id, { name: root.name, bytes: root.bytes, sourceKind: item.kind === 'private' ? 'public_web' : 'official', sourceUrl: root.url });
+      await saveOpportunityDocument(client, scope, id, { name: root.name === 'Fuente.html' ? (item.kind === 'tender' ? 'Ficha pública de Mercado Público.html' : 'Página de la oportunidad.html') : root.name, bytes: root.bytes, sourceKind: item.kind === 'private' ? 'public_web' : 'official', sourceUrl: root.url });
       const links = root.mime.includes('html') ? opportunityAttachmentLinks(root.bytes.toString('utf8'), root.url) : [];
       for (const link of links) {
         if (Date.now() - started > 90_000) { warnings.push('Quedaron enlaces por descargar.'); break; }
@@ -106,26 +107,38 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   if (!chunks.length) throw new AuthError('Faltan documentos legibles para investigar. Adjunta las bases o la invitación.', 422);
   if (chunks.length >= 20000) warnings.push('La extracción supera la capacidad de esta versión de análisis.');
   const facts: Array<{ text: string; state: string; citations: any[] }> = [];
+  let skippedBlocks = 0;
   const missing: string[] = [];
   for (let offset = 0; offset < chunks.length; offset += 4) {
     if (Date.now() - started > 120_000) return { waiting: true as const };
     const block = chunks.slice(offset, offset + 4);
-    const extracted = await opportunityGenerate(client, job, { step: `extract:${createHash('sha256').update(block.map(c => c.id).join('|')).digest('hex')}`, category: 'research', role: 'extract', schema: extractionSchema, output: 4500,
+    let extracted;
+    // One unreadable block (a malformed model answer, or one already paid and unanswered) does not sink the whole report.
+    try { extracted = await opportunityGenerate(client, job, { step: `extract:${createHash('sha256').update(block.map(c => c.id).join('|')).digest('hex')}`, category: 'research', role: 'extract', schema: extractionSchema, output: 4500,
       prompt: `Extrae TODOS los requisitos, fechas, cifras, criterios, garantías y obligaciones de estos fragmentos. Conserva contradicciones y títulos que no correspondan al objeto. No interpretes una licitación privada con normas públicas. Las páginas de contexto público no son bases ni requisitos; sus hechos solo se atribuyen al cliente con identidad suficiente. En foros distingue preguntas de participantes y respuestas oficiales: una pregunta no acredita un requisito ni un error de las bases. Cita juntos pregunta y respuesta cuando esta sea breve. Cada hecho documentado lleva chunkId y cita literal con el dato, cifra, unidad y período que respalda, no solo una etiqueta. missing se refiere solo a estos bloques; no declares ausente una respuesta o dato de un bloque vecino. Lo desconocido queda desconocido. Oferta del workspace: ${context.offer}\n${JSON.stringify(block)}` });
+    } catch (error) {
+      if (!(error instanceof AuthError) || ![503, 409].includes(error.status) || /presupuesto|otro proceso/i.test(error.message)) throw error;
+      skippedBlocks++; continue;
+    }
     facts.push(...validateOpportunityFacts(extracted.facts, block)); missing.push(...extracted.missing);
   }
+  if (skippedBlocks) warnings.push(skippedBlocks === 1 ? 'Una parte de los documentos no se pudo leer y el informe no la considera.' : `${skippedBlocks} partes de los documentos no se pudieron leer y el informe no las considera.`);
+  if (skippedBlocks * 4 >= chunks.length) throw new AuthError('No pudimos leer los documentos. Intenta de nuevo en un momento.', 503);
   const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
     prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
-      sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }) });
+      sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }, item.kind) });
   const check = (citations: any[]) => citations.filter(c => validOpportunityCitation(c, chunks));
   raw.sections = raw.sections.map(section => ({ ...section, facts: validateOpportunityFacts(section.facts, chunks) }));
   raw.requirements = raw.requirements.map(r => { const evidence = check(r.evidence); return { ...r, evidence, status: r.status === 'supported' && !evidence.length ? 'unknown' : r.status }; });
   raw.milestones = raw.milestones.map(m => { const citations = check(m.citations); return { ...m, citations, state: m.state === 'documented' && !citations.length ? 'unknown' : m.state }; });
   raw.risks = raw.risks.map(r => { const citations = check(r.citations); return { ...r, citations, basis: r.basis === 'documented' && !citations.length ? 'unknown' : r.basis }; });
   raw.scenarios = raw.scenarios.filter(s => { try { opportunityFinancialScenario(s); return true; } catch { return false; } });
-  raw.warnings = [...new Set([...raw.warnings, ...warnings, ...(job.payload.sourceWarnings || []), ...documents.filter(d => d.extraction_status !== 'read').map(d => `Lectura ${d.extraction_status}: ${d.name}`)])];
+  // Asking for the bases only makes sense while one can still bid.
+  const open = !item.deadline_at || Date.parse(item.deadline_at) > Date.now();
+  const basesMissing = open && ['tender', 'compra_agil'].includes(item.kind) && !documents.some(d => d.source_kind === 'upload');
+  raw.warnings = opportunityReportWarnings([...raw.warnings, ...warnings, ...(job.payload.sourceWarnings || [])], documents, basesMissing);
   if(raw.recommendation==='advance' && (raw.warnings.length || raw.requirements.some(r=>r.status==='unknown'||r.status==='blocked')))raw.recommendation='conditional';
-  const report: OpportunityReport = { ...raw, generatedAt: job.payload.cutoff,
+  const report: OpportunityReport = { ...raw, kind: item.kind, generatedAt: job.payload.cutoff,
     coverage: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status, pagesRead: d.pages_read, pagesTotal: d.pages_total })),
     sources: chunks.map(c => ({ id: c.id, documentId: c.document_id, locator: c.locator, name: documents.find(d => d.id === c.document_id)?.name || 'Documento' })) };
   return { waiting: false as const, report };

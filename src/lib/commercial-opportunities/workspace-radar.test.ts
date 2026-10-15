@@ -19,6 +19,12 @@ test('each opportunity says what to do: recommended → Postular, review → Eva
   assert.equal(workAdvice({ ...item('e', null, null), kind: 'private' }, NOW).label, 'Evaluar', 'a private invitation starts in review');
 });
 
+test('a LinkedIn signal is a conversation to start: Contactar or No contactar, never Postular', () => {
+  assert.equal(workAdvice({ ...item('a', 'recommended', null), kind: 'hiring' }, NOW).label, 'Contactar');
+  assert.equal(workAdvice({ ...item('b', 'excluded', null), kind: 'linkedin_post' }, NOW).label, 'No contactar');
+  assert.equal(workAdvice({ ...item('c', 'review', null), kind: 'linkedin_post' }, NOW).label, 'Evaluar');
+});
+
 test('a deadline within three days is urgent, a past one is closed, and an excluded one is never urgent', () => {
   const soon = workAdvice(item('a', 'recommended', at(1.5)), NOW);
   assert.equal(soon.urgent, true);

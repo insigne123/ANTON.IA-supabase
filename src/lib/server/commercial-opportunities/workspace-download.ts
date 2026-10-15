@@ -32,7 +32,7 @@ export async function downloadOpportunitySource(value: string, options:SourceOpt
     const result = await new Promise<{ status: number; location?: string; bytes: Buffer; mime: string; disposition: string }>((resolve, reject) => {
       const request = httpsRequest(url, { signal, lookup: nativeResearchInternals.pinnedOfficialSiteLookup(addresses[0] as { address: string; family: 4 | 6 }),
         method:form?'POST':'GET',
-        headers: { Accept: 'application/pdf,text/html,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'User-Agent': 'ANTON.IA Opportunities/1.0',
+        headers: { Accept: 'application/pdf,text/html,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.ms-excel', 'User-Agent': 'ANTON.IA Opportunities/1.0',
           ...(form?{'Content-Type':'application/x-www-form-urlencoded'}:{}),
           ...(options.session?.cookies.get(url.hostname)?.size?{Cookie:[...options.session.cookies.get(url.hostname)!].map(([name,value])=>`${name}=${value}`).join('; ')}:{}) } }, response => {
         if(options.session)for(const raw of response.headers['set-cookie']||[]){
@@ -51,10 +51,13 @@ export async function downloadOpportunitySource(value: string, options:SourceOpt
     });
     if (result.status >= 300 && result.status < 400) { if (!result.location) throw new Error('OPPORTUNITY_REDIRECT_MISSING'); url = new URL(result.location, url);form=undefined; continue; }
     const expected=options.expectedName?.toLowerCase().split('.').pop();
-    const binaryExt=result.mime==='application/octet-stream'&&['pdf','docx','xlsx'].includes(expected||'')?expected:null;
+    const binaryExt=result.mime==='application/octet-stream'&&['pdf','docx','xlsx','doc','xls'].includes(expected||'')?expected:null;
     if(binaryExt==='pdf'&&!result.bytes.subarray(0,5).equals(Buffer.from('%PDF-')))throw new Error('OPPORTUNITY_SOURCE_FORMAT');
     if((binaryExt==='docx'||binaryExt==='xlsx')&&!(result.bytes[0]===80&&result.bytes[1]===75))throw new Error('OPPORTUNITY_SOURCE_FORMAT');
-    const ext = binaryExt || (result.mime.includes('pdf') ? 'pdf' : result.mime.includes('wordprocessingml') ? 'docx' : result.mime.includes('spreadsheetml') ? 'xlsx' : result.mime.includes('html') ? 'html' : result.mime.startsWith('text/') || result.mime==='application/json'&&form ? 'txt' : null);
+    // Word and Excel 97-2003 are OLE containers; public forms still use them.
+    if((binaryExt==='doc'||binaryExt==='xls')&&!(result.bytes[0]===0xd0&&result.bytes[1]===0xcf&&result.bytes[2]===0x11&&result.bytes[3]===0xe0))throw new Error('OPPORTUNITY_SOURCE_FORMAT');
+    const ext = binaryExt || (result.mime.includes('pdf') ? 'pdf' : result.mime.includes('wordprocessingml') ? 'docx' : result.mime.includes('spreadsheetml') ? 'xlsx'
+      : result.mime==='application/msword' ? 'doc' : result.mime==='application/vnd.ms-excel' ? 'xls' : result.mime.includes('html') ? 'html' : result.mime.startsWith('text/') || result.mime==='application/json'&&form ? 'txt' : null);
     if (!ext) throw new Error('OPPORTUNITY_SOURCE_FORMAT');
     const fileName = result.disposition.match(/filename="?([^";]+)/i)?.[1]?.replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 250) || options.expectedName?.replace(/[\\/\u0000-\u001f]/g,'_').slice(0,250) || `Fuente.${ext}`;
     return { ...result, url: url.toString(), name: fileName.toLowerCase().endsWith('.' + ext) ? fileName : `${fileName}.${ext}` };

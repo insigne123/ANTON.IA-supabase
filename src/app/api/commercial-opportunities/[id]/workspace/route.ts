@@ -7,6 +7,7 @@ import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunitie
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
+const STATE_LABELS: Record<string, string> = { unassigned: 'sin asignar', assigned: 'asignada', working: 'en gestión', blocked: 'bloqueada', submitted: 'oferta presentada', won: 'ganada', lost: 'perdida', archived: 'archivada' };
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, context: Context) {
   try { const auth = await requireOpportunityWorkspace(); const id = z.string().uuid().parse((await context.params).id);
@@ -29,7 +30,7 @@ export async function POST(request: Request, context: Context) {
       const saved = opportunityDb(await auth.admin.from('opportunity_work').update({ state: input.state, revision: input.expectedRevision + 1, updated_at: new Date().toISOString() })
         .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', input.expectedRevision).select('revision').maybeSingle());
       if (!saved) throw new AuthError('El estado cambió. Actualiza la oportunidad.', 409);
-      await addOpportunityActivity(auth.admin, scope, id, 'state', `Estado actualizado: ${input.state}`); return opportunitiesJson(saved);
+      await addOpportunityActivity(auth.admin, scope, id, 'state', `Estado: ${STATE_LABELS[input.state] ?? input.state}`); return opportunitiesJson(saved);
     }
     if (action === 'task') {
       const input = taskSchema.extend({ id: z.string().uuid().optional() }).parse(data);
