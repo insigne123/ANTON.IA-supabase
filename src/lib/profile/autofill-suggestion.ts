@@ -8,6 +8,8 @@ export type AutofillSuggestion = {
   values: CompanyProfileSuggestion;
   sources: Partial<Record<ProfileSuggestionField, ProfileAutofillSource[]>>;
   pagesRead: ProfileAutofillSource[];
+  /** Where every field came from, when it is not a web page (the offer confirmed in «Oportunidades»). */
+  sourceLabel?: string;
 };
 
 /** Fields the AI proposes from the offer when the site does not state them: shown as «Sugerencia», not as a fact. */
