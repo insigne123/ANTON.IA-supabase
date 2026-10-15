@@ -65,6 +65,7 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
   const previous = panel.period.short;
   // Amounts never mix currencies: they go in the one most deals use, and the rest are named apart.
   const deals = useMemo(() => (dealValues ? dealTotals(filtered, { days: panel.period.days, now }) : null), [dealValues, filtered, panel.period.days, now]);
+  const moneyTiles = Boolean(deals);
   const byValue = Boolean(deals) && measure === 'value';
   const donut = useMemo(() => panel.stages.map(slice => {
     if (!byValue || !deals) return { stage: slice.stage, label: slice.label, value: slice.count, share: slice.share };
@@ -115,8 +116,9 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
         </section>
       ) : null}
 
-      <section aria-label="Cifras del pipeline" className={cn('grid grid-cols-2 gap-3', dealValues ? 'md:grid-cols-4' : 'md:grid-cols-3 xl:grid-cols-6')}>
-        {dealValues ? (
+      {/* Without any amount written, two «—» tiles say nothing: the six counts fit one row and one line says how to see money. */}
+      <section aria-label="Cifras del pipeline" className={cn('grid grid-cols-2 gap-3', moneyTiles ? 'md:grid-cols-4' : 'md:grid-cols-3 xl:grid-cols-6')}>
+        {moneyTiles ? (
           <>
             <Tile label="Pipeline abierto" value={deals ? formatDealValueShort(deals.open, deals.currency) : '—'}
               caption={deals ? `en ${number.format(deals.openDeals)} ${deals.openDeals === 1 ? 'negocio abierto' : 'negocios abiertos'} con valor` : 'Escribe el valor en el detalle de cada lead'} />
@@ -136,6 +138,9 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
         <Tile label="En reunión o más" value={number.format(panel.meetings)} caption="reunión, negociación o ganado" />
         <Tile label="% ganados" value={percent(panel.winRate)} caption={`${panel.won} ${panel.won === 1 ? 'ganado' : 'ganados'} · ${panel.lost} ${panel.lost === 1 ? 'perdido' : 'perdidos'}`} />
       </section>
+      {dealValues && !deals ? (
+        <p className="-mt-1 text-xs text-muted-foreground">Para ver montos aquí, escribe el valor del negocio en el detalle de cada contacto.</p>
+      ) : null}
       {deals?.others.length ? (
         <p className="-mt-1 text-xs text-muted-foreground">
           Los montos suman los negocios en {DEAL_CURRENCY_NAME[deals.currency]}, la moneda de la mayoría. Aparte: {deals.others.map(item => `${number.format(item.deals)} ${item.deals === 1 ? 'negocio' : 'negocios'} en ${DEAL_CURRENCY_NAME[item.currency]}`).join(' y ')}.

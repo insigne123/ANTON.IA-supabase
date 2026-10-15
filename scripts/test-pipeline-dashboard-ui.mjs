@@ -42,7 +42,7 @@ try {
   const tiles = [...section('Cifras del pipeline').children].map(tile => tile.textContent);
   assert.deepEqual(tiles, [
     'Abiertos14de 16 en el pipeline',
-    'Leads nuevos9+8 vs 30 días antes',
+    'Contactos nuevos9+8 vs 30 días antes',
     'Contactados4+2 vs 30 días antes',
     'Tasa de respuesta50 %igual que 30 días antes',
     'En reunión o más2reunión, negociación o ganado',
@@ -85,7 +85,7 @@ try {
   await settle();
   assert.deepEqual([...months.querySelectorAll('tbody tr')].slice(-2).map(tr => [...tr.cells].map(cell => cell.textContent).join(' | ')),
     ['sept ’26 | 4 | 2 | 50 %', 'oct ’26 | 0 | 0 | —']);
-  const leads = section('Leads nuevos, últimos 13 meses');
+  const leads = section('Contactos nuevos, últimos 13 meses');
   buttonIn(leads, 'Ver como tabla').click();
   await settle();
   assert.equal(leads.querySelectorAll('tbody tr').length, 13, 'thirteen months, the current one included');
