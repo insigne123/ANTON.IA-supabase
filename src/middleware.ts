@@ -1,6 +1,7 @@
 import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { forwardSessionCookies } from '@/lib/server/forward-session-cookies';
 
 export async function middleware(req: NextRequest) {
     const requestHost = req.nextUrl.hostname.toLowerCase();
@@ -34,6 +35,7 @@ export async function middleware(req: NextRequest) {
     const {
         data: { session },
     } = await supabase.auth.getSession();
+    forwardSessionCookies(res);
 
     // If user is signed in and the current path is /login, redirect the user to /dashboard
     const recovering = req.nextUrl.searchParams.get('recuperar') === '1'

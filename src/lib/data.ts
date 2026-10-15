@@ -64,6 +64,15 @@ export const industryMapping: { [key: string]: string } = {
   "Information Services": "5567e0c97369640d2b3b1600",
 };
 
+/** What a person without a saved profile has: nothing. The demo company above never stands in for theirs. */
+export const emptyCompanyProfile = {
+  name: '', sector: '', description: '', website: '', contactInfo: '', logo: '', services: '', valueProposition: '', customMessage: '', emailSignature: '',
+};
+
+/**
+ * A company profile saved in this browser by an older version, or an empty one. Returning the demo company here put
+ * «Innovatech Solutions» and innovatech.com in real signatures, drafts and phone scripts of anyone with an incomplete profile.
+ */
 export function getCompanyProfile() {
   const storage = getBrowserStorage();
   if (storage) {
@@ -74,7 +83,7 @@ export function getCompanyProfile() {
       }
     } catch {}
   }
-  return companyProfile;
+  return { ...emptyCompanyProfile };
 }
 
 
