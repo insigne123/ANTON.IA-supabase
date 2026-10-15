@@ -345,8 +345,8 @@ export default function SheetPage() {
   return (
     <div className="mx-auto min-w-0 py-3 sm:py-5">
       <PageHeader
-        title="Datos"
-        description="Tu espacio de trabajo tipo Excel para revisar, ordenar y exportar leads y contactos. Los filtros y las columnas visibles se aplican al archivo."
+        title="Tabla de datos"
+        description="Todos tus contactos en una tabla, como en Excel: busca, filtra, ordena y exporta. Lo que filtras y las columnas visibles son lo que se descarga."
       />
 
       <div className="mb-3 rounded-xl border border-border/70 bg-card/80 p-2 shadow-sm">
@@ -511,7 +511,7 @@ export default function SheetPage() {
                     {row.kind === 'contacted' ? (
                       <Button asChild size="sm" variant="outline"><Link href={`/contacted?c=${encodeURIComponent(row.sourceId)}`} aria-label={`Ver la conversación con ${row.name || 'este contacto'}`}>Ver conversación</Link></Button>
                     ) : (row.kind === 'lead_enriched' || row.kind === 'opportunity') && row.hasEmail ? (
-                      <Button asChild size="sm"><Link href={`/contact/compose?id=${encodeURIComponent(row.sourceId)}`} aria-label={`Preparar correo para ${row.name || 'este contacto'}`}>Preparar correo</Link></Button>
+                      <Button asChild size="sm" variant="outline"><Link href={`/contact/compose?id=${encodeURIComponent(row.sourceId)}`} aria-label={`Preparar correo para ${row.name || 'este contacto'}`}>Preparar correo</Link></Button>
                     ) : row.kind === 'lead_saved' ? (
                       <Button asChild size="sm" variant="outline"><Link href="/saved/leads/enriched" aria-label={`Abrir «Por escribir», donde ${row.name || 'este contacto'} espera su correo`}>Abrir</Link></Button>
                     ) : null}

@@ -14,7 +14,7 @@ import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
 import { AdvicePill, ExclusionGroups, StartHere, TenderPrerequisites } from './OpportunityRadar';
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { bySource, closesLabel, workAdvice } from '@/lib/commercial-opportunities/workspace-radar';
-import { humanDate } from '@/lib/commercial-opportunities/report-view';
+import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@/lib/commercial-opportunities/workspace';
 
@@ -192,7 +192,7 @@ export function OpportunityWorkWorkspace() {
       {!detail && !problem && <div role="status" className="rounded-xl border p-8"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Abriendo la oportunidad…</div>}
       {detail && item && <>
         <header className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{TYPES[item.kind]}</span><AdvicePill item={item} /><span>· {STATES[detail.work?.state || 'unassigned']}</span></div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{TYPES[item.kind]}</span><AdvicePill item={item} decision={latest ? reportDecision({ recommendation: latest.report.recommendation, kind: latest.report.kind ?? item.kind }) : undefined} /><span>· {STATES[detail.work?.state || 'unassigned']}</span></div>
           <h1 className="max-w-4xl text-2xl font-semibold tracking-tight">{item.title}</h1>
           <p className="text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p>
           <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm">

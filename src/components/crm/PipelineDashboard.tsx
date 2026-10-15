@@ -126,7 +126,7 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
           </>
         ) : null}
         <Tile label="Abiertos" value={number.format(panel.open)} caption={`de ${number.format(panel.total)} en el pipeline`} />
-        <Tile label="Leads nuevos" value={number.format(panel.newLeads.value)} trend={panel.newLeads} previous={previous} />
+        <Tile label="Contactos nuevos" value={number.format(panel.newLeads.value)} trend={panel.newLeads} previous={previous} />
         <Tile label="Contactados" value={number.format(panel.contacted.value)} trend={panel.contacted} previous={previous} />
         <Tile label="Tasa de respuesta" value={percent(panel.responseRate.value)}
           caption={panel.responseRate.deltaPoints === null ? `de ${number.format(panel.contacted.value)} contactados`
@@ -144,7 +144,7 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Pipeline abierto por etapa"
-          subtitle={byValue && deals ? `${formatDealValue(deals.open, deals.currency)} en negocios abiertos · toca una etapa para verlos` : `${number.format(panel.open)} leads abiertos · toca una etapa para verlos`}
+          subtitle={byValue && deals ? `${formatDealValue(deals.open, deals.currency)} en negocios abiertos · toca una etapa para verlos` : `${number.format(panel.open)} contactos abiertos · toca una etapa para verlos`}
           action={deals ? (
             <div role="group" aria-label="Medir por" className="flex shrink-0 gap-1">
               <Button size="sm" variant={byValue ? 'outline' : 'default'} aria-pressed={!byValue} className="h-7 px-2 text-xs" onClick={() => setMeasure('count')}>Cantidad</Button>
@@ -239,10 +239,10 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
           </ChartContainer>
         </ChartCard>
 
-        <ChartCard title="Leads nuevos, últimos 13 meses" subtitle="Personas que entraron al pipeline cada mes"
-          table={<DataTable head={['Mes', 'Leads nuevos']} rows={panel.months.map(month => [month.label, number.format(month.newLeads)])} />}>
-          <ChartContainer config={{ newLeads: { label: 'Leads nuevos', color: 'hsl(var(--primary))' } }} className="aspect-auto h-[230px] w-full"
-            aria-label={`Leads nuevos por mes: ${panel.months.map(month => `${month.label} ${month.newLeads}`).join(', ')}`}>
+        <ChartCard title="Contactos nuevos, últimos 13 meses" subtitle="Personas que entraron al pipeline cada mes"
+          table={<DataTable head={['Mes', 'Contactos nuevos']} rows={panel.months.map(month => [month.label, number.format(month.newLeads)])} />}>
+          <ChartContainer config={{ newLeads: { label: 'Contactos nuevos', color: 'hsl(var(--primary))' } }} className="aspect-auto h-[230px] w-full"
+            aria-label={`Contactos nuevos por mes: ${panel.months.map(month => `${month.label} ${month.newLeads}`).join(', ')}`}>
             <AreaChart data={panel.months} margin={{ top: 16, right: 12, left: -12, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
               <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval="preserveStartEnd" minTickGap={16} />

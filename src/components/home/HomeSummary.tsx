@@ -8,7 +8,7 @@ import PerformanceChart from '@/components/dashboard/PerformanceChart';
 import type {HomeSummary as Summary} from '@/lib/server/home-summary';
 const METRICS=[{key:'sent',title:'Correos enviados hoy',icon:Send,href:'/contacted?view=all'},
   {key:'contacted',title:'Contactos de hoy',icon:Users,href:'/contacted?view=all'},
-  {key:'replied',title:'Respuestas humanas hoy',icon:MailCheck,href:'/contacted?view=reply'},
+  {key:'replied',title:'Respuestas de personas hoy',icon:MailCheck,href:'/contacted?view=reply'},
   {key:'saved',title:'Guardados hoy',icon:Bookmark,href:'/saved/leads/enriched'}] as const;
 export function HomeSummary(){
   const {data:summary,error,loading,load}=usePersonalHome<Summary>('/api/home/summary');
