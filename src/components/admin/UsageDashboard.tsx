@@ -75,7 +75,8 @@ export function UsageDashboard(){
   },[data,query,sort]);
   const day=data?.daily.find(d=>d.day===selectedDay);
   const openPerson=(organizationId:string,userId:string)=>{setOrg(organizationId);setPerson(userId);setView('summary');setSelectedDay(null);setQuery('');};
-  const shortcuts=(days:number)=>{const range=days===0?{from:shiftDay(dayInZone(new Date()),-1),to:shiftDay(dayInZone(new Date()),-1)}:lastDaysInZone(days);setFrom(range.from);setTo(range.to);setSelectedDay(null);};
+  const presetRange=(days:number)=>days===0?{from:shiftDay(dayInZone(new Date()),-1),to:shiftDay(dayInZone(new Date()),-1)}:lastDaysInZone(days);
+  const shortcuts=(days:number)=>{const range=presetRange(days);setFrom(range.from);setTo(range.to);setSelectedDay(null);};
   const exportCsv=()=>{if(!data)return;setExportError('');try{const url=URL.createObjectURL(new Blob([usageReportCsv(data)],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`uso-resultados-${from}-${to}.csv`;a.click();URL.revokeObjectURL(url);}catch{setExportError('No pudimos descargar el resumen. Inténtalo de nuevo.');}};
   const openDay=(value:string)=>{dayOpener.current=document.activeElement instanceof HTMLElement?document.activeElement:document.querySelector<HTMLElement>('[role="tab"][data-state="active"]');setSelectedDay(value);};
   return <div className="mx-auto w-full max-w-[1320px] space-y-5 pb-10">
@@ -86,7 +87,9 @@ export function UsageDashboard(){
       <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={exportCsv} disabled={!data||loading||!data.ready}><Download aria-hidden="true"/>Exportar resumen</Button><Button variant="ghost" onClick={()=>void load()} disabled={loading}><RefreshCw className={cn(loading&&'animate-spin motion-reduce:animate-none')} aria-hidden="true"/>{loading?'Actualizando':'Actualizar'}</Button></div>
     </header>
     <section className="rounded-2xl border border-border/60 bg-card p-4" aria-label="Período y alcance del informe">
-      <div className="mb-3 flex flex-wrap gap-1.5">{[['Hoy',1],['Ayer',0],['7 días',7],['30 días',30],['90 días',90]].map(([label,days])=><Button key={label} variant="ghost" size="sm" onClick={()=>shortcuts(Number(days))}>{label}</Button>)}</div>
+      {/* The shortcut that matches the dates on view is marked, so the period is read at a glance; edited dates mark none. */}
+      <div role="group" aria-label="Períodos rápidos" className="mb-3 flex flex-wrap gap-1.5">{([['Hoy',1],['Ayer',0],['7 días',7],['30 días',30],['90 días',90]] as const).map(([label,days])=>{const range=presetRange(days);const active=range.from===from&&range.to===to;
+        return <Button key={label} variant={active?'secondary':'ghost'} size="sm" aria-pressed={active} className={cn(active&&'font-semibold')} onClick={()=>shortcuts(days)}>{label}</Button>;})}</div>
       <div className={cn('grid gap-3 sm:grid-cols-2',data?.platform?'xl:grid-cols-4':'xl:grid-cols-3')}>
         {data?.platform&&<div className="space-y-1.5"><Label htmlFor="usage-company">Empresa</Label><Select value={org||'all'} onValueChange={value=>{setOrg(value);setGroup('');setPerson('');}}><SelectTrigger id="usage-company"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Toda ANTON.IA</SelectItem>{data.organizations.map(o=><SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent></Select></div>}
         <div className="space-y-1.5"><Label htmlFor="usage-team">Equipo</Label><Select value={group||'all'} onValueChange={value=>{setGroup(value==='all'?'':value);setPerson('');}}><SelectTrigger id="usage-team"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos los equipos</SelectItem>{data?.groups.filter(g=>org==='all'||!org||g.organizationId===org).map(g=><SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}</SelectContent></Select></div>
