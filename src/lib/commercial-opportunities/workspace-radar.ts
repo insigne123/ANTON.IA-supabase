@@ -104,3 +104,29 @@ export const TENDER_PREREQUISITES: Array<{ title: string; items: string[] }> = [
     'Para las grandes, una Unión Temporal de Proveedores con un socio que tenga historial en el Estado.',
   ] },
 ];
+
+/** LinkedIn signals (job ads grouped by company, posts) have no deadline; everything else is a purchase with one or not. */
+export const LINKEDIN_KINDS = ['hiring', 'linkedin_post'] as const;
+export const isLinkedIn = (kind: string) => (LINKEDIN_KINDS as readonly string[]).includes(kind);
+
+/**
+ * By deadline: the open ones first, the nearest closing first; then the ones without a deadline, best match first; the
+ * closed ones last, the most recently closed first.
+ */
+export function byClosing<T extends Pick<WorkItem, 'deadline_at' | 'score' | 'updated_at'>>(items: T[], now = Date.now()): T[] {
+  const at = (item: T) => (item.deadline_at && Number.isFinite(Date.parse(item.deadline_at)) ? Date.parse(item.deadline_at) : null);
+  const rank = (item: T) => { const deadline = at(item); return deadline === null ? 1 : deadline >= now ? 0 : 2; };
+  return [...items].sort((a, b) => rank(a) - rank(b)
+    || (rank(a) === 0 ? at(a)! - at(b)! : rank(a) === 2 ? at(b)! - at(a)! : 0)
+    || b.score - a.score || Date.parse(b.updated_at) - Date.parse(a.updated_at));
+}
+
+export type SourceGroup<T> = { key: 'tenders' | 'linkedin'; label: string; note: string; items: T[] };
+/** Each view split in «Licitaciones» (public, Compra Ágil, received, projects) and «LinkedIn», each by closing. Empty groups are left out. */
+export function bySource<T extends Pick<WorkItem, 'kind' | 'deadline_at' | 'score' | 'updated_at'>>(items: T[], now = Date.now()): SourceGroup<T>[] {
+  const groups: SourceGroup<T>[] = [
+    { key: 'tenders', label: 'Licitaciones', note: 'Por fecha de cierre, la más próxima primero.', items: byClosing(items.filter(item => !isLinkedIn(item.kind)), now) },
+    { key: 'linkedin', label: 'LinkedIn', note: 'Avisos de trabajo y publicaciones. No tienen cierre: las más afines primero.', items: byClosing(items.filter(item => isLinkedIn(item.kind)), now) },
+  ];
+  return groups.filter(group => group.items.length > 0);
+}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { EXCLUSION_MOTIVES, TENDER_PREREQUISITES, closesLabel, exclusionGroups, startHere, workAdvice } from './workspace-radar';
+import { EXCLUSION_MOTIVES, TENDER_PREREQUISITES, byClosing, bySource, closesLabel, exclusionGroups, startHere, workAdvice } from './workspace-radar';
 
 const NOW = Date.parse('2026-10-14T12:00:00Z');
 const at = (days: number) => new Date(NOW + days * 86_400_000).toISOString();
@@ -61,7 +61,22 @@ test('the evaluation asks why an excluded one was left out and keeps it next to 
   const page = readFileSync('src/components/commercial-opportunities/OpportunityWorkWorkspace.tsx', 'utf8');
   assert.match(page, /<AdvicePill item=\{item\} \/>/);
   assert.match(page, /filter === 'recommended' && !query && <StartHere/);
-  assert.match(page, /filter === 'excluded' && items\.length > 0 \? <ExclusionGroups/);
+  assert.match(page, /bySource\(items\)\.map\(group =>/);
+  assert.match(page, /filter === 'excluded' \? <ExclusionGroups items=\{group\.items\}/);
   assert.match(page, /<TenderPrerequisites \/>/);
   assert.ok(TENDER_PREREQUISITES.length >= 4 && TENDER_PREREQUISITES.every(block => block.items.length >= 3));
+});
+
+test('each view is split in Licitaciones and LinkedIn, the open ones by nearest closing, closed ones last', () => {
+  const list = [
+    item('closed', 'review', at(-2)), item('later', 'review', at(20)), item('none', 'review', null, 90), item('soon', 'review', at(2)),
+    { ...item('ad-low', 'review', null, 40), kind: 'hiring' }, { ...item('post-high', 'review', null, 80), kind: 'linkedin_post' },
+    { ...item('received', 'review', at(5)), kind: 'private' },
+  ];
+  assert.deepEqual(byClosing(list.filter(i => !['hiring', 'linkedin_post'].includes(i.kind)), NOW).map(i => i.id), ['soon', 'received', 'later', 'none', 'closed']);
+  const groups = bySource(list, NOW);
+  assert.deepEqual(groups.map(g => [g.label, g.items.map(i => i.id)]),
+    [['Licitaciones', ['soon', 'received', 'later', 'none', 'closed']], ['LinkedIn', ['post-high', 'ad-low']]]);
+  assert.deepEqual(bySource([item('a', 'review', at(3))], NOW).map(g => g.key), ['tenders'], 'an empty group is not shown');
+  assert.deepEqual(byClosing([item('old', null, at(-9)), item('recent', null, at(-1))], NOW).map(i => i.id), ['recent', 'old']);
 });
