@@ -93,7 +93,8 @@ export const isSignalReport = (report: Pick<OpportunityReport, 'kind'>) => isSig
 
 const JOB_ERRORS: Array<[RegExp, string]> = [
   [/no termin[oó]|consumo observado|no pudo terminar|pendiente de conciliaci[oó]n|retom[oó] en otro proceso|formato requerido/i, 'Tardó más de lo esperado. Vuelve a intentarlo: suele resolverse al segundo intento.'],
-  [/presupuesto/i, 'Se alcanzó el límite de gasto del mes en Oportunidades. Un administrador puede revisarlo en «Empresa del workspace».'],
+  // The budget refusal does not say which cap was reached: one report (USD 0.75) or the month (USD 20).
+  [/presupuesto/i, 'Se alcanzó el gasto permitido para un informe o para el mes en Oportunidades. Revisa el uso en «Empresa del workspace», o deja solo las bases y anexos, y vuelve a intentarlo.'],
   [/documentos nuevos|oferta cambi[oó]|criterios cambiaron/i, 'El expediente cambió mientras se preparaba. Vuelve a generarlo para incluir lo nuevo.'],
   [/proveedor de IA|precio verificable/i, 'La IA no está disponible en este momento. Inténtalo más tarde.'],
 ];

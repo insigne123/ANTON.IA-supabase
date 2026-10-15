@@ -70,6 +70,16 @@ test('one reserved report call uses the envelope and replays without another cal
   assert.ok(f.settlements[0].p_cost > 0); assert.deepEqual(f.settlements[0].p_data, { json: JSON.stringify(f.report) });
 });
 
+test('a seven-document report stays under the 0.75 USD cap of one research, and the reserve still bounds its cost', async () => {
+  const f = fixture();
+  const prompt = 'á'.repeat(60_000); // 120 kB of UTF-8, the size of the synthesis that was refused in production
+  await opportunityGenerateReport(f.client, f.job, { ...f.input, prompt }, f.generate);
+  const bytes = Buffer.byteLength(prompt, 'utf8');
+  // Sonnet: 2 USD per million input tokens, 10 per million output, 24k output with reasoning; bytes bound tokens.
+  assert.ok(f.reservations[0].p_micro >= bytes * 2 + 24_000 * 10, 'the documents and the whole output stay reserved');
+  assert.ok(f.reservations[0].p_micro <= 727_000, `fits next to the reading steps (${f.reservations[0].p_micro})`);
+});
+
 test('invalid inner JSON keeps the paid receipt and result, does not expose source text or retry', async () => {
   const f = fixture(); f.setJson('{"PRIVATE_SOURCE_SENTINEL":');
   const safeError = (error: any) => error.status === 503 && !error.message.includes('PRIVATE_SOURCE_SENTINEL');
