@@ -9,6 +9,7 @@ import { OPPORTUNITY_BUCKET } from '@/lib/commercial-opportunities/workspace';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import {CoworkExportError} from '@/lib/server/cowork/file-exports';
 import {opportunitiesJson} from '@/lib/server/commercial-opportunities/responses';
+import { opportunityExportName } from '@/lib/commercial-opportunities/export-file-name';
 
 export const dynamic = 'force-dynamic'; export const maxDuration = 60;
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -45,8 +46,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       zip.file('Indice-documentos.json', JSON.stringify({ generatedAt: report.generatedAt, documents: index, warnings: report.warnings }, null, 2));
       bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 3 } }); mime = 'application/zip';
     }
-    // «Informe - Servicio de verificación….pdf» instead of an internal id; an ASCII twin for old clients.
-    const name = `${format === 'zip' ? 'Expediente' : 'Informe'} - ${(opportunity?.title || report.title).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90)}`;
+    // An ASCII twin of the name for old clients.
+    const name = opportunityExportName(format === 'zip' ? 'Expediente' : 'Informe', opportunity?.title || report.title);
     const ascii = opportunityStorageName(`${name}.x`).replace(/\.x$/, '').replace(/"/g, '');
     return new Response(new Uint8Array(bytes).buffer, { headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="${ascii}.${format}"; filename*=UTF-8''${encodeURIComponent(`${name}.${format}`)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
   } catch (error) { return error instanceof CoworkExportError?opportunitiesJson({error:error.message},error.status):opportunitiesError(error); }
