@@ -45,7 +45,7 @@ export async function expandZipUploads(picked: File[], load: (data: ArrayBuffer)
     const left = [other && `${other} ${other === 1 ? 'archivo no es' : 'archivos no son'} PDF, Word, Excel ni texto`,
       large && `${large} ${large === 1 ? 'supera' : 'superan'} 20 MB`, over && `${over} ${over === 1 ? 'quedó' : 'quedaron'} fuera por el máximo de ${MAX_FILES} archivos por ZIP`].filter(Boolean);
     if (!added) notes.push({ name: file.name, message: `El ZIP no trae bases ni anexos que podamos leer${left.length ? ` (${left.join('; ')})` : ''}.` });
-    else if (left.length) notes.push({ name: file.name, message: `Subimos ${added} ${added === 1 ? 'documento' : 'documentos'} del ZIP; ${left.join('; ')}.` });
+    else if (left.length) notes.push({ name: file.name, message: `Del ZIP tomamos ${added} ${added === 1 ? 'documento' : 'documentos'}; ${left.join('; ')}.` });
   }
   return { files, notes };
 }
