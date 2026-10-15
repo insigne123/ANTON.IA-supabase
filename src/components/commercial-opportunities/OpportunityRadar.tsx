@@ -18,8 +18,10 @@ const TONES: Record<WorkAdvice['tone'], string> = {
 const dayMonth = new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short', timeZone: 'America/Santiago' });
 
 /** «Postular», «Evaluar», «No postular» or «Por evaluar», with the deadline when it is close. */
-export function AdvicePill({ item, now = Date.now() }: { item: WorkItem; now?: number }) {
-  const advice = workAdvice(item, now);
+/** `decision`: once a report exists, an opportunity still «Por evaluar» shows the report's decision instead. */
+export function AdvicePill({ item, now = Date.now(), decision }: { item: WorkItem; now?: number; decision?: { label: string; tone: WorkAdvice['tone'] } }) {
+  const evaluated = workAdvice(item, now);
+  const advice = decision && evaluated.tone === 'pending' ? { ...evaluated, ...decision } : evaluated;
   const closes = advice.urgent ? closesLabel(advice) : null;
   return (
     <span className="flex flex-wrap items-center gap-1.5">

@@ -179,7 +179,7 @@ export default function DailyQuotaProgress({ className, kinds, compact, summary,
         </div>
       ))}
       <div className="text-[11px] text-muted-foreground">
-        Resetea aprox.: {resetDateStr || '...'} (medianoche UTC).
+        Se renueva: {resetDateStr || '…'} (hora local).
       </div>
     </div>
   );

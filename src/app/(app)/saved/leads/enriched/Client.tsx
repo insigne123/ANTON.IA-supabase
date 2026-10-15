@@ -1200,7 +1200,7 @@ export default function EnrichedLeadsClient() {
       <PageHeader
         title="Por escribir"
         count={enriched.length}
-        description="Contactos con correo. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas antes de enviar."
+        description="Tus contactos guardados. Investígalos y escríbeles: la IA prepara el borrador y tú lo revisas antes de enviar."
         actions={(
           <>
             <Button asChild variant="ghost" className="w-full sm:w-auto">
@@ -1485,7 +1485,7 @@ export default function EnrichedLeadsClient() {
                           <TableCell className="max-w-[300px]">{leadIdentity(e)}</TableCell>
                           <TableCell className="max-w-[220px]">{companyCell(e)}</TableCell>
                           <TableCell className="max-w-[280px]">{contactCell(e)}</TableCell>
-                          <TableCell>{stageBadge(e)}</TableCell>
+                          <TableCell className="whitespace-nowrap">{stageBadge(e)}</TableCell>
                           <TableCell>
                             <div className="flex items-center justify-end gap-1">
                               {rowAction(e)}
