@@ -2200,10 +2200,12 @@ export default function SearchPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{org.name}</span>
                       <span className="block truncate text-xs text-foreground/70">{displayDomain(org.primary_domain || org.website_url || '') || 'Sin sitio web visible'}</span>
-                      <span className="mt-1 block text-xs text-foreground/70">
-                        {place || 'Ubicación no disponible'}
-                        {typeof org.estimated_num_employees === 'number' ? ` · ${org.estimated_num_employees.toLocaleString('es-CL')} personas` : ''}
-                      </span>
+                      {/* Only what is known: a card full of «Ubicación no disponible» said nothing. */}
+                      {place || typeof org.estimated_num_employees === 'number' ? (
+                        <span className="mt-1 block text-xs text-foreground/70">
+                          {[place, typeof org.estimated_num_employees === 'number' ? `${org.estimated_num_employees.toLocaleString('es-CL')} personas` : ''].filter(Boolean).join(' · ')}
+                        </span>
+                      ) : null}
                     </span>
                   </label>
                 </li>
@@ -2399,9 +2401,9 @@ export default function SearchPage() {
           >
             <span className="block font-medium">{candidate.name}</span>
             <span className="mt-1 block text-sm text-foreground/70">{displayDomain(candidate.primary_domain || candidate.website_url || '') || 'Sin sitio web visible'}</span>
-            <span className="mt-2 block text-xs text-foreground/70">
-              {[candidate.city, candidate.state, candidate.country].filter(Boolean).join(', ') || 'Ubicación no disponible'}
-            </span>
+            {[candidate.city, candidate.state, candidate.country].some(Boolean) ? (
+              <span className="mt-2 block text-xs text-foreground/70">{[candidate.city, candidate.state, candidate.country].filter(Boolean).join(', ')}</span>
+            ) : null}
           </button>
         ))}
       </div>
