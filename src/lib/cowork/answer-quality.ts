@@ -253,7 +253,7 @@ export function withoutTrailingQuestions(line: string): string {
  * an aside that closes its line, so nothing after it is cut.
  */
 export function withoutRepeatedAside(reply: string, elsewhere = '', always = false): string {
-  const match = /Por cierto,\s*([^\n]*?[.!?])(?=[ \t]*(?:\n|$|¿))/u.exec(reply);
+  const match = /(?:Por cierto|By the way),\s*([^\n]*?[.!?])(?=[ \t]*(?:\n|$|¿))/u.exec(reply);
   if (!match) return reply;
   if (!always) {
     const before = `${reply.slice(0, match.index)}\n${elsewhere}`;
