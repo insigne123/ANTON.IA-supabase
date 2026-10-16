@@ -21,26 +21,30 @@ async function load() {
 const input = { kind: 'tender', title: 'Seguridad Museo', buyer: 'Corporación Cultural', deadline: '2026-10-29T12:00:00Z', offer: 'Guardias y monitoreo',
   facts: [{ text: 'Garantía de seriedad de $500.000 con vigencia de 60 días.', state: 'documented' }], missing: ['Monto estimado'] };
 
-test('a tender is read by four specialists and a planner, in parallel, each with its own step; one failure is left out', async () => {
+test('a tender is read by four specialists, a planner and the «Cómo postular» guide, in parallel, each with its own step; one failure is left out', async () => {
   const { runOpportunitySpecialists } = await load();
   const calls: Array<{ step: string; role: string; prompt: string }> = [];
   const generate = async (_client: unknown, _job: unknown, call: any) => {
     calls.push({ step: call.step, role: call.role, prompt: call.prompt });
     if (call.step.startsWith('specialist:puntaje')) throw new Error('model timeout');
     if (call.step.startsWith('route:')) return { steps: [{ title: 'Pedir la garantía', detail: 'Al banco', date: 'Esta semana', kind: 'prepare' }] };
+    if (call.step.startsWith('kit-v2:')) return { channel: 'portal', channelDetail: 'Mercado Público', folders: [], rules: [], numbers: { budget: null, budgetLabel: '', currency: 'CLP', budgetIncludesTax: null, portalValue: 'unknown', notes: [] }, guarantees: [], afterSubmit: [], inconsistencies: [] };
     return { findings: ['La garantía de seriedad es de $500.000.'], advice: ['Pedirla esta semana.'], missing: [] };
   };
   const review = await runOpportunitySpecialists({}, { id: 'j' }, input, generate);
   assert.deepEqual(calls.map(c => c.step.split(':')[0] + ':' + c.step.split(':')[1]).sort(),
-    ['route:' + calls.find(c => c.step.startsWith('route:'))!.step.split(':')[1], 'specialist:contrato', 'specialist:estrategia', 'specialist:puntaje', 'specialist:requisitos'].sort());
+    ['kit-v2:' + calls.find(c => c.step.startsWith('kit-v2:'))!.step.split(':')[1], 'route:' + calls.find(c => c.step.startsWith('route:'))!.step.split(':')[1], 'specialist:contrato', 'specialist:estrategia', 'specialist:puntaje', 'specialist:requisitos'].sort());
   assert.ok(calls.every(c => c.role === 'specialist'), 'Haiku, not the writer');
   assert.deepEqual(review.notes.map((n: any) => n.name), ['Requisitos y documentos', 'Contrato y garantías', 'Estrategia y precio']);
   assert.equal(review.route.steps[0].title, 'Pedir la garantía');
+  assert.equal(review.kit.channel, 'portal');
+  // The guide cites the facts: it reads them with their citations.
+  assert.match(calls.find(c => c.step.startsWith('kit-v2:'))!.prompt, /excludesIfMissing/);
   assert.match(calls[0].prompt, /Garantía de seriedad de \$500\.000/);
   assert.match(calls[0].prompt, /No inventes montos/);
   // The same facts, the same steps: a later tick gets the paid answers back instead of paying again.
   const again: string[] = [];
-  await runOpportunitySpecialists({}, { id: 'j' }, input, async (_c: unknown, _j: unknown, call: any) => { again.push(call.step); return call.step.startsWith('route:') ? { steps: [] } : { findings: [], advice: [], missing: [] }; });
+  await runOpportunitySpecialists({}, { id: 'j' }, input, async (_c: unknown, _j: unknown, call: any) => { again.push(call.step); return call.step.startsWith('route:') ? { steps: [] } : call.step.startsWith('kit-v2:') ? null : { findings: [], advice: [], missing: [] }; });
   assert.deepEqual(again.sort(), calls.map(c => c.step).sort());
 });
 
@@ -55,6 +59,8 @@ test('a LinkedIn signal gets its own team, and a planner that fails leaves the r
   assert.deepEqual(steps.filter(s => s.startsWith('specialist:')).map(s => s.split(':')[1]).sort(), ['contacto', 'empresa', 'validar']);
   assert.equal(review.route, null);
   assert.equal(review.notes.length, 3);
+  assert.ok(!steps.some(s => s.startsWith('kit-v2:')), 'a signal has no bases to hand in');
+  assert.equal(review.kit, null);
 });
 
 test('the facts the team reads stay small enough for one Haiku call', async () => {

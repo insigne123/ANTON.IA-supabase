@@ -129,10 +129,12 @@ export function DocumentList({ id, documents, kind }: { id: string; documents: E
 
 /** While the report is being prepared: who at the «oficina» is doing what (ReportOffice) and how long it usually takes. `pending`:
  * the retry was sent and its answer is on its way, so the button says so instead of looking untouched for the seconds the reload takes. */
-export function ReportProgress({ state, error, signal, pending = false, onRetry, progress, tender, documents = 0, buyer }: { state: string; error?: string | null;
-  signal?: boolean; pending?: boolean; onRetry: () => void; progress?: ReportJobProgress | null; tender?: boolean; documents?: number; buyer?: string | null }) {
+export function ReportProgress({ state, error, signal, pending = false, onRetry, progress, tender, documents = 0, buyer, kept = false }: { state: string; error?: string | null;
+  signal?: boolean; pending?: boolean; onRetry: () => void; progress?: ReportJobProgress | null; tender?: boolean; documents?: number; buyer?: string | null;
+  /** An earlier report stays below: a failed update does not take it away, and the notice says so. */
+  kept?: boolean }) {
   if (state === 'failed' || state === 'blocked') return <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-destructive/40 p-4 text-sm">
-    <p><span className="font-medium">No pudimos terminar {signal ? 'la ficha comercial' : 'el informe'}.</span> {friendlyJobError(error)}</p>
+    <p><span className="font-medium">{kept ? `No pudimos actualizar ${signal ? 'la ficha comercial' : 'el informe'}.` : `No pudimos terminar ${signal ? 'la ficha comercial' : 'el informe'}.`}</span> {friendlyJobError(error)}{kept ? ` ${signal ? 'La ficha anterior sigue' : 'El informe anterior sigue'} abajo.` : ''}</p>
     <Button size="sm" variant="outline" onClick={onRetry} disabled={pending} aria-busy={pending}>{pending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />}{pending ? 'Reintentando…' : 'Intentar de nuevo'}</Button></div>;
   if (progress) return <ReportOffice progress={progress} signal={signal} tender={tender} documents={documents} buyer={buyer} />;
   return <div role="status" className="rounded-2xl border bg-muted/30 p-4">

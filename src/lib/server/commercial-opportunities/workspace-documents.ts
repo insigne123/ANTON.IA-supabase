@@ -52,8 +52,20 @@ export async function extractOpportunityFile(name: string, bytes: Uint8Array): P
     return { status: partial ? 'partial' : 'read', total: null, read: 0, sections };
   }
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  const plain=ext==='html'?coworkHtmlToText(text):text;
+  const plain=ext==='html'?coworkHtmlToText(webPageBody(text)):text;
   return { status:plain.trim()?'read':'damaged', total: null, read: 0, sections: [{ locator: ext === 'html' ? 'Página web' : 'Texto recibido', text: plain }] };
+}
+/**
+ * What a captured web page says, without what the browser runs or draws: its head, scripts, styles, comments, SVG and
+ * hidden fields. Mercado Público's ficha carries kilobytes of CSS and JavaScript that read as text otherwise, and they
+ * reached the report and the chat as «fragments» of the expediente.
+ */
+export function webPageBody(html: string) {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<head\b[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<(script|style|noscript|template|svg|iframe|object)\b[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<(script|style|link|meta|input)\b[^>]*\/?>/gi, ' ');
 }
 export function opportunityTextChunks(sections: ExtractedOpportunityFile['sections']) {
   let ordinal = 0;

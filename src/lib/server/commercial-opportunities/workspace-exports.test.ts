@@ -62,3 +62,24 @@ test('the download keeps what the team marked: checks, highlights, the progress,
  // Without marks the export reads exactly as before.
  assert.doesNotMatch(opportunityReportMarkdown(marked),/\[x\]|\[ \]|Notas del equipo|Avance:/);
 });
+test('«Cómo postular» travels in the download: each document with its folder, its tick and whether it leaves the offer out',async()=>{
+ const {reportItemKey,marksFromRows}=await import('@/lib/commercial-opportunities/report-marks');
+ const submission={channel:'portal' as const,channelDetail:'Mercado Público, en carpetas de anexos administrativos, técnicos y económicos.',
+  folders:[{name:'Económicos',documents:[{title:'Anexo 4 Formato Oficial de Oferta Económica',source:'annex' as const,signed:true,validity:'',excludesIfMissing:true,howTo:'Neto y total con IVA deben coincidir.',evidence:[]},
+   {title:'Certificado F30',source:'certificate' as const,signed:false,validity:'No más de 30 días antes de la apertura',excludesIfMissing:false,howTo:'Dirección del Trabajo, en línea.',evidence:[]}]}],
+  rules:[{text:'Sueldo líquido de al menos $620.000: menos deja la oferta fuera de bases.',kind:'minimum' as const,evidence:[]}],
+  numbers:{budget:212000000,budgetLabel:'$212.000.000 impuestos incluidos',currency:'CLP',budgetIncludesTax:true,portalValue:'net' as const,notes:[]},
+  guarantees:[{kind:'Fiel cumplimiento',amount:'5% del valor contratado',validity:'Contrato más 60 días hábiles',when:'A la firma',payableTo:'Ilustre Municipalidad de Dalcahue'}],
+  afterSubmit:[],inconsistencies:[{text:'Dos carpetas o tres.',question:'¿Se entregan en dos o en tres carpetas?'}]};
+ const marks={items:marksFromRows([{item_key:reportItemKey('document','Anexo 4 Formato Oficial de Oferta Económica'),done:true,highlight:false,note:''}])};
+ const markdown=opportunityReportMarkdown({...report,submission},undefined,marks);
+ assert.match(markdown,/## Cómo postular/);
+ assert.match(markdown,/- \[x\] \*\*Anexo 4 Formato Oficial de Oferta Económica\*\*.*si falta, quedas fuera/);
+ assert.match(markdown,/- \[ \] \*\*Certificado F30\*\* · Certificado · No más de 30 días/);
+ assert.match(markdown,/Sueldo líquido de al menos \$620\.000/);
+ assert.match(markdown,/¿Se entregan en dos o en tres carpetas\?/);
+ const {extractText}=await import('unpdf');const text=String((await extractText(await opportunityReportPdf({...report,submission},undefined,marks),{mergePages:true})).text);
+ assert.match(text,/Cómo postular/);
+ assert.match(text,/Quedas\s+fuera/);
+ assert.match(text,/Fiel\s+cumplimiento/);
+});

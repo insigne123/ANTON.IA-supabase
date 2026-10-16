@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { AuthError } from '@/lib/server/auth-utils';
 import { requireOpportunitiesUser } from '@/lib/server/commercial-opportunities/access';
 import { OpportunitiesWorkspace } from '@/components/commercial-opportunities/OpportunitiesWorkspace';
@@ -13,7 +13,8 @@ export default async function OpportunitiesPage() {
     const auth = await requireOpportunitiesUser();
     return opportunityWorkspaceEnabled() ? <OpportunityWorkWorkspace key={`${auth.user.id}:${auth.organizationId}`} /> : <OpportunitiesWorkspace key={`${auth.user.id}:${auth.organizationId}`} />;
   } catch (error) {
-    if (error instanceof AuthError) notFound();
+    // A session that ended (revoked or expired) signs in again and comes back; any other refusal is a page that does not exist.
+    if (error instanceof AuthError) { if (error.status === 401) redirect('/login?next=%2Fopportunities'); notFound(); }
     throw error;
   }
 }

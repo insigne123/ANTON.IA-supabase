@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { answerSchema, extractionSchema, REPORT_VERSION, validOpportunityCitation, validateOpportunityFacts, type DocumentChunk, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { opportunityReportPrompt, opportunitySynthesisSources } from '@/lib/commercial-opportunities/report-generation';
-import { opportunityFinancialScenario, type WorkScope } from '@/lib/commercial-opportunities/workspace';
+import { OPPORTUNITY_BUCKET, opportunityFinancialScenario, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
 import { runOpportunitySpecialists } from './workspace-specialists';
@@ -17,6 +17,7 @@ import {readPublicMercadoDocuments} from './mercado-publico-documents';
 import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report-view';
 import { opportunityChatDeadline, opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
 import { nextReportProgress, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
+import { validateSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
 
 /** What the page's «oficina» shows (report-progress.ts): a note in the job's payload. The report matters more than its progress, so a
  * note that cannot be written never stops the job. */
@@ -93,7 +94,11 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   if (item.url && !job.payload.sourcesChecked) {
     try {
       const root = await downloadOpportunitySource(item.url);
-      await saveOpportunityDocument(client, scope, id, { name: root.name === 'Fuente.html' ? (item.kind === 'tender' ? 'Ficha pública de Mercado Público.html' : 'Página de la oportunidad.html') : root.name, bytes: root.bytes, sourceKind: item.kind === 'private' ? 'public_web' : 'official', sourceUrl: root.url });
+      const rootName = root.name === 'Fuente.html' ? (item.kind === 'tender' ? 'Ficha pública de Mercado Público.html' : 'Página de la oportunidad.html') : root.name;
+      // A page changes a little on every visit (session ids, timestamps): the new capture replaces the old one instead of
+      // adding a copy whose fragments repeat in the report and the chat.
+      if (/\.html$/i.test(rootName)) await replaceCapturedPage(client, scope, id, rootName);
+      await saveOpportunityDocument(client, scope, id, { name: rootName, bytes: root.bytes, sourceKind: item.kind === 'private' ? 'public_web' : 'official', sourceUrl: root.url });
       const links = root.mime.includes('html') ? opportunityAttachmentLinks(root.bytes.toString('utf8'), root.url) : [];
       for (const link of links) {
         if (Date.now() - started > 90_000) { warnings.push('Quedaron enlaces por descargar.'); break; }
@@ -176,10 +181,19 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   raw.warnings = opportunityReportWarnings([...raw.warnings, ...warnings, ...(job.payload.sourceWarnings || [])], documents, basesMissing);
   if(raw.recommendation==='advance' && (raw.warnings.length || raw.requirements.some(r=>r.status==='unknown'||r.status==='blocked')))raw.recommendation='conditional';
   const report: OpportunityReport = { ...raw, kind: item.kind, generatedAt: job.payload.cutoff,
-    route: review.route, reviewers: review.notes.map(note => note.name),
+    route: review.route, reviewers: review.notes.map(note => note.name), submission: review.kit ? validateSubmissionKit(review.kit, chunks) : null,
     coverage: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status, pagesRead: d.pages_read, pagesTotal: d.pages_total })),
     sources: chunks.map(c => ({ id: c.id, documentId: c.document_id, locator: c.locator, name: documents.find(d => d.id === c.document_id)?.name || 'Documento' })) };
   return { waiting: false as const, report };
+}
+/** Removes an earlier capture of the same page (its row, its fragments by cascade and its stored file). */
+async function replaceCapturedPage(client: SupabaseClient, scope: WorkScope, id: string, name: string) {
+  const old = (opportunityDb(await client.from('opportunity_documents').select('id,storage_path').eq('organization_id', scope.organizationId).eq('opportunity_id', id)
+    .eq('name', name).neq('source_kind', 'upload')) || []) as Array<{ id: string; storage_path: string | null }>;
+  if (!old.length) return;
+  opportunityDb(await client.from('opportunity_documents').delete().eq('organization_id', scope.organizationId).eq('opportunity_id', id).in('id', old.map(doc => doc.id)));
+  const paths = old.flatMap(doc => doc.storage_path ? [doc.storage_path] : []);
+  if (paths.length) await client.storage.from(OPPORTUNITY_BUCKET).remove(paths).catch(() => undefined);
 }
 export async function runOpportunityChat(client: SupabaseClient, job: OpportunityJob) {
   const scope = { organizationId: job.organization_id, userId: job.requested_by };
