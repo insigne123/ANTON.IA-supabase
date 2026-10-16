@@ -46,5 +46,5 @@ export async function reviewCoworkEmail(input: CoworkEmailReviewInput, options: 
 
 /** The seller's side of the state, read once for this person (own profile and the organization's offer). */
 export async function loadCoworkEmailReviewSeller(client: SupabaseClient, scope: { userId: string; organizationId: string }) {
-  return coworkEmailReviewSeller(await loadCoworkUserContext(client, scope, { memories: false }));
+  return coworkEmailReviewSeller(await loadCoworkUserContext(client, scope, { memories: false, mailbox: false }));
 }

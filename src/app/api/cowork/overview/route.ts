@@ -38,7 +38,7 @@ export async function GET() {
       // LinkedIn jobs are not readable through a session (only the worker's role): the same two
       // counts Cowork's linkedin.quota reads, scoped to you. Only the numbers leave the server.
       Promise.resolve().then(() => readCoworkLinkedinQuota(getSupabaseAdminClient(), scope)),
-      loadCoworkUserContext(auth.supabase, scope, { memories: false }),
+      loadCoworkUserContext(auth.supabase, scope, { memories: false, mailbox: false }),
       // «Desde tu última visita»: replies, research and opportunities through your session; LinkedIn as the quota above.
       loadCoworkSinceLastVisit({ client: auth.supabase, admin: getSupabaseAdminClient, opportunities }, scope),
       // «Para hoy»: who has an email and never got one (the same count «¿qué tengo pendiente?» reads).
