@@ -66,7 +66,8 @@ export function PipelineRoute({ stops, selected, onSelect }: { stops: PipelineSt
           })}
         </ol>
       </div>
-      <ol className="grid gap-2 md:hidden">
+      {/* minmax(0, 1fr): a truncated hint must not widen the column past the screen. */}
+      <ol className="grid grid-cols-[minmax(0,1fr)] gap-2 md:hidden">
         {stops.map((stop, index) => (
           <li key={stop.id}>
             <button type="button" aria-pressed={selected === stop.id} onClick={() => onSelect(stop.id)}

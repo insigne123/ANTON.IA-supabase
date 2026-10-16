@@ -242,7 +242,7 @@ export function OpportunityWorkWorkspace() {
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
       </section>)}</div>}
       </>}
-      <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>
+      {!(admin && view === 'pipeline') && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
     </>}
     {selected && <>
       <Button variant="ghost" className="-ml-2 self-start" onClick={close}><ArrowLeft className="mr-2 h-4 w-4" />Oportunidades</Button>

@@ -33,7 +33,7 @@ const render = (props: Record<string, unknown> = {}) => renderToStaticMarkup(Rea
 
 test('the road has one stop per stage with its count, exact totals for what nobody works yet, and urgent closings flagged', () => {
   const html = render();
-  for (const [label, count] of [['Por revisar', 40], ['Recomendadas', 12], ['Asignadas', 0], ['En preparación', 1], ['Presentadas', 1], ['Ganadas', 0]])
+  for (const [label, count] of [['Por revisar', 40], ['Recomendadas', 12], ['Asignadas', 0], ['En preparación', 1], ['Presentadas', 1], ['Ganadas', 0]] as const)
     assert.match(html, new RegExp(`aria-label="${label}: ${count}"`), label);
   assert.match(html, /title="1 cierran en menos de 7 días"/, 'Aseo hospital closes in 3 days');
   assert.match(html, /<nav aria-label="Etapas de las oportunidades">/);
