@@ -22,6 +22,14 @@ function AssistantAvatar() {
   );
 }
 
+/** A source quoted from the record's data («"deadline":"2026-06-18T15:01:00+00:00"») reads as text: «deadline: 2026-06-18 15:01». */
+export function readableQuote(quote: string) {
+  const text = quote.trim();
+  if (!/^[{\["]?\s*"[\w.\- ]+"\s*:/.test(text)) return text;
+  return text.replace(/[{}[\]]/g, '').replace(/"\s*:\s*"?/g, ': ').replace(/",\s*"/g, ' · ').replace(/"/g, '')
+    .replace(/(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?/g, '$1 $2').trim();
+}
+
 function Typing({ label }: { label: string }) {
   return (
     <div className="flex items-start gap-3">
@@ -71,7 +79,7 @@ function Answer({ answer }: { answer: OpportunityChatAnswer }) {
           <ul className="space-y-2">
             {citations.map((citation, index) => (
               <li key={`${citation.chunkId}-${index}`}>
-                <blockquote className="border-l-2 border-primary/40 pl-3 text-xs leading-5 text-muted-foreground">«{citation.quote}»</blockquote>
+                <blockquote className="border-l-2 border-primary/40 pl-3 text-xs leading-5 text-muted-foreground">«{readableQuote(citation.quote)}»</blockquote>
               </li>
             ))}
           </ul>
@@ -168,7 +176,7 @@ export function OpportunityChat({ messages, pending, suggestions, documentCount,
             onChange={event => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
             placeholder={placeholder}
-            className="max-h-48 min-h-[24px] flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+            className="max-h-48 min-h-[24px] flex-1 resize-none border-0 bg-transparent py-1 text-sm leading-6 shadow-none outline-none ring-0 placeholder:text-muted-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0"
           />
           <Button type="submit" size="icon" className="h-8 w-8 shrink-0 rounded-full" disabled={busy || waiting || draft.trim().length < 3} aria-label="Enviar pregunta">
             <ArrowUp className="h-4 w-4" aria-hidden="true" />

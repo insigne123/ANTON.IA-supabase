@@ -9,11 +9,12 @@ export type TeamMember = { user_id: string; name: string; role?: string | null }
 /** A desk in the office: a small table with its screen, drawn with the same line as the report's «oficina». */
 function Desk({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 64 26" aria-hidden="true" className="h-6 w-16 overflow-visible">
-      <rect x="20" y="1" width="24" height="14" rx="2" className={cn('fill-background stroke-foreground/30', active && 'stroke-primary/60')} strokeWidth="1.4" />
-      <path d="M32 15v4" className="stroke-foreground/30" strokeWidth="1.4" />
-      <path d="M4 20h56" className={cn('stroke-foreground/35', active && 'stroke-primary/60')} strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M10 20v5M54 20v5" className="stroke-foreground/25" strokeWidth="1.4" strokeLinecap="round" />
+    <svg viewBox="0 0 72 26" aria-hidden="true" className="relative z-10 -mt-3 h-[26px] w-[72px] overflow-visible">
+      {/* The desk in front of the person: its top, a laptop open toward them and a mug. */}
+      <rect x="2" y="6" width="68" height="7" rx="3" className={cn('fill-background stroke-foreground/30', active && 'stroke-primary/60')} strokeWidth="1.4" />
+      <path d="M22 6l3-5h16l3 5" className={cn('fill-muted stroke-foreground/35', active && 'stroke-primary/60')} strokeWidth="1.3" strokeLinejoin="round" />
+      <rect x="52" y="1.5" width="6" height="4.5" rx="1" className="fill-background stroke-foreground/30" strokeWidth="1.2" />
+      <path d="M10 13v12M62 13v12" className="stroke-foreground/25" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
@@ -29,11 +30,11 @@ export function TeamOffice({ people, responsibleId, empty = 'Nadie trabaja esta 
   return (
     <div className={cn('rounded-2xl border border-border/60 bg-muted/30 p-4', className)}>
       {seated.length ? (
-        <ul aria-label="Equipo de la oportunidad" className="flex flex-wrap justify-center gap-x-4 gap-y-3 sm:justify-start">
+        <ul aria-label="Equipo de la oportunidad" className="flex flex-wrap justify-center gap-x-5 gap-y-4 sm:justify-start">
           {seated.map((person, index) => {
             const lead = person.user_id === responsibleId;
             return (
-              <li key={person.user_id} className="flex w-20 flex-col items-center text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
+              <li key={person.user_id} className="flex w-[84px] flex-col items-center text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
                 style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}>
                 <span className={cn('relative motion-safe:animate-ghost-float')} style={{ animationDelay: `${index * 400}ms` }}>
                   <InitialsAvatar name={person.name} size="md" className={cn('ring-2 ring-background', lead && 'ring-primary/60')} />
@@ -60,9 +61,16 @@ export function TeamOffice({ people, responsibleId, empty = 'Nadie trabaja esta 
   );
 }
 
+/** Picking the first person makes them responsible; unpicking the responsible one passes it to the next. */
+export function toggleTeamMember(team: { selected: string[]; responsibleId: string }, id: string) {
+  const picked = team.selected.includes(id);
+  const selected = picked ? team.selected.filter(other => other !== id) : [...team.selected, id];
+  const responsibleId = picked && id === team.responsibleId ? selected[0] || '' : !team.responsibleId && !picked ? id : team.responsibleId;
+  return { selected, responsibleId };
+}
+
 /**
  * Who works the opportunity, picked with a tap: each person a tile; a picked person can be made responsible with the star.
- * Picking the first person makes them responsible; unpicking the responsible one passes it to the next.
  */
 export function TeamPicker({ members, selected, responsibleId, onChange }: {
   members: TeamMember[];
@@ -70,12 +78,7 @@ export function TeamPicker({ members, selected, responsibleId, onChange }: {
   responsibleId: string;
   onChange: (next: { selected: string[]; responsibleId: string }) => void;
 }) {
-  const toggle = (id: string) => {
-    const picked = selected.includes(id);
-    const next = picked ? selected.filter(other => other !== id) : [...selected, id];
-    const responsible = picked && id === responsibleId ? next[0] || '' : !responsibleId && !picked ? id : responsibleId;
-    onChange({ selected: next, responsibleId: responsible });
-  };
+  const toggle = (id: string) => onChange(toggleTeamMember({ selected, responsibleId }, id));
   return (
     <ul aria-label="Personas del workspace" className="grid gap-2 sm:grid-cols-2">
       {members.map(member => {
@@ -87,7 +90,7 @@ export function TeamPicker({ members, selected, responsibleId, onChange }: {
               className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <span className="relative">
                 <InitialsAvatar name={member.name} size="sm" />
-                {picked ? <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground" aria-hidden="true"><Check className="h-2.5 w-2.5" /></span> : null}
+                {picked ? <span className="absolute -bottom-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-background" aria-hidden="true"><Check className="h-2.5 w-2.5" /></span> : null}
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium">{member.name}</span>
