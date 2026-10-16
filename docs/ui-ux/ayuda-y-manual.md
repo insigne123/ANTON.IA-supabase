@@ -1,5 +1,7 @@
 # Ayuda: recorrido por toda la app, «?» en cada pantalla y Centro de ayuda (1 oct)
 
+> **Actualizado el 16 oct:** el panel de administración tiene su video («Administración», solo para dueños y administradores) y su guía, que se abre sola la primera vez. Ver «Panel de administración» en `docs/ui-ux/tutorial-guiado.md`.
+
 **Pedido:** que el tutorial sea más informativo y lleve a la persona por toda la app, que cada pantalla tenga un botón «?» para preguntarle a la IA o leer preguntas frecuentes, y un manual con toda la información.
 
 **Antes:**

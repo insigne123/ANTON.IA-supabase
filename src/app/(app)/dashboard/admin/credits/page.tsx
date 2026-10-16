@@ -535,7 +535,7 @@ export default function AdminCreditsPage() {
               </div>
             ) : null}
 
-            <section aria-labelledby="organization-policy-title">
+            <section aria-labelledby="organization-policy-title" data-tour="admin-credits-organization">
               <Card className="rounded-2xl border-border/60 bg-card/90 shadow-[0_16px_34px_-30px_rgba(15,23,42,0.45)]">
                 <CardHeader className="flex flex-col gap-3 space-y-0 px-5 pb-4 pt-5 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -683,7 +683,7 @@ export default function AdminCreditsPage() {
               </Card>
             </section>
 
-            <section aria-labelledby="team-limits-title">
+            <section aria-labelledby="team-limits-title" data-tour="admin-credits-teams">
               <Card className="rounded-2xl border-border/60 bg-card/90">
                 <CardHeader className="px-5 pb-3 pt-5">
                   <div className="flex items-start justify-between gap-3">
@@ -748,7 +748,7 @@ export default function AdminCreditsPage() {
               </Card>
             </section>
 
-            <section aria-labelledby="user-policies-title">
+            <section aria-labelledby="user-policies-title" data-tour="admin-credits-people">
               <Card className="rounded-2xl border-border/60 bg-card/90">
                 <CardHeader className="px-5 pb-3 pt-5">
                   <div className="flex items-start justify-between gap-3">

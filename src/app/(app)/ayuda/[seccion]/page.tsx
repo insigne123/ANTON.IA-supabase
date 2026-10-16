@@ -49,7 +49,7 @@ export default function HelpSectionPage() {
     return item ? [item] : [];
   });
   const guide = section.href ? pageGuideFor(section.href.split('?')[0]) : null;
-  const videos = videosForSection(section.id, visibleTutorialVideos({ opportunities }));
+  const videos = videosForSection(section.id, visibleTutorialVideos({ opportunities, admin }));
   const guideHref = section.href ? `${section.href}${section.href.includes('?') ? '&' : '?'}guia=1` : null;
 
   return (

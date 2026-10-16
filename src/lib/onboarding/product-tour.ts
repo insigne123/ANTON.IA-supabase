@@ -98,7 +98,9 @@ export function shouldOfferProductTour(input: { record: ProductTourRecord | null
 
 /** A short guide inside one screen: two to four spots on real controls, offered once on the first visit and replayed from «?». */
 export type PageGuideStep = { id: string; target: string; title: string; body: string };
-export type PageGuide = { id: string; title: string; routes: RegExp; steps: PageGuideStep[] };
+/** autoStart: the first visit opens the guide by itself instead of offering it (the admin panel, up to six spots), once its
+ * controls have loaded. */
+export type PageGuide = { id: string; title: string; routes: RegExp; steps: PageGuideStep[]; autoStart?: boolean };
 
 /** Key inside the Supabase user metadata: the guides already seen or declined, by id. */
 export const PAGE_GUIDES_METADATA_KEY = 'anton_guides';
@@ -149,6 +151,43 @@ export const PAGE_GUIDES: PageGuide[] = [
   { id: 'connections', title: 'Conexiones', routes: /^\/connections\/?$/, steps: [
     { id: 'list', target: 'connections-list', title: 'Conecta Gmail u Outlook',
       body: 'Los correos salen desde tu cuenta y las respuestas vuelven a ANTON.IA solas.' },
+  ] },
+  // The admin panel walks its owner through it by itself the first time: who uses the app, for what and what needs attention.
+  { id: 'admin', title: 'Administración', routes: /^\/dashboard\/admin(\/usage)?\/?$/, autoStart: true, steps: [
+    { id: 'sections', target: 'admin-nav', title: 'Cuatro secciones',
+      body: 'Uso y resultados, Personas, Equipos y Créditos. Partes aquí: qué usa tu equipo y qué está consiguiendo.' },
+    { id: 'period', target: 'admin-period', title: 'Elige el período',
+      body: 'Hoy, 7, 30 o 90 días, o tus propias fechas, y el equipo. Todo el informe cambia con lo que elijas.' },
+    { id: 'metrics', target: 'admin-metrics', title: 'Lo esencial en cuatro cifras',
+      body: 'Cuántas personas la usaron, cuánto interés y cuántas reuniones lograron, y los créditos que se gastaron.' },
+    { id: 'attention', target: 'admin-attention', title: 'Qué necesita atención',
+      body: 'Señales concretas, cada una con su evidencia. «Ver persona» abre el detalle de quien la necesita.' },
+    { id: 'people', target: 'admin-tabs', title: 'Persona por persona',
+      body: 'En «Personas» ves quién la usa, cuántos días y cuántos créditos. Toca un nombre para ver su detalle.' },
+    { id: 'export', target: 'admin-export', title: 'Llévatelo en una planilla',
+      body: '«Exportar resumen» descarga el informe del período para compartirlo o guardarlo.' },
+  ] },
+  { id: 'admin-people', title: 'Personas', routes: /^\/dashboard\/admin\/users\/?$/, steps: [
+    { id: 'invite', target: 'admin-people-invite', title: 'Invita a tu equipo',
+      body: '«Invitar miembro» envía el acceso por correo. Las invitaciones pendientes quedan abajo hasta que las acepten.' },
+    { id: 'filters', target: 'admin-people-filters', title: 'Busca y filtra',
+      body: 'Por nombre, rol, equipo o estado. Las cifras usan el período que elijas.' },
+    { id: 'list', target: 'admin-people-list', title: 'Cada persona y su actividad',
+      body: 'Rol, equipo, actividad y resultados. Abre a una persona para ver su detalle o cambiar su rol.' },
+  ] },
+  { id: 'admin-teams', title: 'Equipos', routes: /^\/dashboard\/admin\/teams\/?$/, steps: [
+    { id: 'create', target: 'admin-teams-create', title: 'Arma tus equipos',
+      body: '«Crear equipo» agrupa personas y «Asignar persona» las suma. Una persona puede estar en varios.' },
+    { id: 'performance', target: 'admin-teams-performance', title: 'Compara equipos',
+      body: 'Contactos, envíos y resultados de cada equipo, contados en el equipo principal de cada persona.' },
+  ] },
+  { id: 'admin-credits', title: 'Créditos', routes: /^\/dashboard\/admin\/credits\/?$/, steps: [
+    { id: 'organization', target: 'admin-credits-organization', title: 'La regla de la organización',
+      body: 'El límite diario que vale para todos, salvo que un equipo o una persona tenga uno propio.' },
+    { id: 'teams', target: 'admin-credits-teams', title: 'Límites por equipo',
+      body: 'Excepciones para un equipo completo, dentro del límite compartido de la organización.' },
+    { id: 'people', target: 'admin-credits-people', title: 'Por persona',
+      body: 'Revisa cuánto usa cada persona y programa una excepción si alguien necesita más.' },
   ] },
 ];
 

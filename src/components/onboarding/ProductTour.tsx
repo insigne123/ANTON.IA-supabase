@@ -36,6 +36,8 @@ const SETTLE_MS = 320;
 const GUIDE_OFFER_DELAY_MS = 900;
 /** A guide asked for from the help center waits up to this long for the screen to show its controls. */
 const GUIDE_REQUEST_WAIT_MS = 3000;
+/** A guide that opens by itself waits longer: the admin panel shows its figures once its report loads. */
+const GUIDE_AUTO_WAIT_MS = 8000;
 /** A tour step whose control is still not on screen after this long says so (an empty list, for example). */
 const MISSING_TARGET_MS = 2500;
 
@@ -178,6 +180,7 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
   useEffect(() => {
     setOfferedGuide(null);
     if (guideRequested.current || !guidesLoaded || phase !== 'idle' || !currentGuide || seenGuides[currentGuide.id]) return;
+    if (currentGuide.autoStart) return;
     const timer = window.setTimeout(() => {
       if (currentGuide.steps.some((step) => visibleElement(step.target))) setOfferedGuide(currentGuide);
     }, GUIDE_OFFER_DELAY_MS);
@@ -200,6 +203,23 @@ export function ProductTourProvider({ userId, onNavigate, children }: ProductTou
     setGuideId(guide.id);
     setPhase('guide');
   }, [markGuideSeen]);
+
+  // A guide that opens by itself (the admin panel) starts on the first visit once its controls are on screen, or after a
+  // longer wait with the ones there are; with none, it waits for the next visit.
+  useEffect(() => {
+    if (guideRequested.current || !guidesLoaded || phase !== 'idle' || !currentGuide?.autoStart || seenGuides[currentGuide.id]) return;
+    const guide = currentGuide;
+    const since = Date.now();
+    const attempt = () => {
+      if (!guide.steps.every((step) => visibleElement(step.target)) && Date.now() - since < GUIDE_AUTO_WAIT_MS) {
+        timer = window.setTimeout(attempt, 250);
+        return;
+      }
+      if (guide.steps.some((step) => visibleElement(step.target))) startGuide(guide.id);
+    };
+    let timer = window.setTimeout(attempt, GUIDE_OFFER_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentGuide, guidesLoaded, phase, seenGuides, startGuide]);
 
   // The requested guide starts when its controls are on screen, or after a short wait with the ones there are.
   useEffect(() => {

@@ -243,7 +243,7 @@ function TeamsPageContent() {
   return (
     <div className="mx-auto w-full max-w-[1320px] pb-10">
       <PageHeader title="Equipos" description="Organiza personas y compara el rendimiento de cada equipo.">
-        <Button type="button" onClick={() => { setCreateError(null); setCreateOpen(true); }} className="rounded-xl" disabled={managementDisabled}><Plus aria-hidden="true" />Crear equipo</Button>
+        <Button type="button" data-tour="admin-teams-create" onClick={() => { setCreateError(null); setCreateOpen(true); }} className="rounded-xl" disabled={managementDisabled}><Plus aria-hidden="true" />Crear equipo</Button>
         <Button type="button" variant="outline" onClick={() => openAssignment()} className="rounded-xl" disabled={managementDisabled || teams.length === 0}><UserPlus aria-hidden="true" />Asignar persona</Button>
         <Button type="button" variant="ghost" size="icon" onClick={() => void loadTeams({ silent: true })} disabled={loading || refreshing} className="rounded-xl" aria-label="Actualizar equipos"><RefreshCw className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" /></Button>
       </PageHeader>
@@ -268,7 +268,7 @@ function TeamsPageContent() {
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden rounded-[24px] border-border/60 bg-card/90 dark:bg-card/75">
+          <Card data-tour="admin-teams-performance" className="overflow-hidden rounded-[24px] border-border/60 bg-card/90 dark:bg-card/75">
             <CardHeader className="flex flex-col gap-3 space-y-0 border-b border-border/60 px-5 py-5 sm:flex-row sm:items-end sm:justify-between sm:px-6">
               <div><CardTitle className="text-lg">Rendimiento por equipo</CardTitle><CardDescription className="mt-1">Los resultados se cuentan en el equipo principal de cada persona.</CardDescription></div>
               <div className="w-full space-y-1.5 sm:w-44"><Label htmlFor="teams-period">Período</Label><Select value={period} onValueChange={(value) => setPeriod(value as Period)}><SelectTrigger id="teams-period" className="h-10 rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="7">Últimos 7 días</SelectItem><SelectItem value="30">Últimos 30 días</SelectItem><SelectItem value="90">Últimos 90 días</SelectItem></SelectContent></Select></div>
