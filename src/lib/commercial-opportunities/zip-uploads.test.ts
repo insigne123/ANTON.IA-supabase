@@ -15,7 +15,7 @@ test('the ZIP that Mercado Público downloads goes up as the documents inside it
     '__MACOSX/._Planilla.xlsx': 'meta', 'Anexos/plano.dwg': 'cad', 'Anexos/': '' });
   const { files, notes } = await expandZipUploads([zip, new File(['%PDF'], 'Aclaraciones.pdf')], load);
   assert.deepEqual(files.map(f => f.name).sort(), ['Aclaraciones.pdf', 'Anexo N°1.docx', 'Bases Administrativas.pdf', 'Planilla.xlsx']);
-  assert.deepEqual(notes, [{ name: 'Licitaciones_20261015195726.zip', message: 'Subimos 3 documentos del ZIP; 1 archivo no es PDF, Word, Excel ni texto.' }]);
+  assert.deepEqual(notes, [{ name: 'Licitaciones_20261015195726.zip', message: 'Del ZIP tomamos 3 documentos; 1 archivo no es PDF, Word, Excel ni texto.' }]);
 });
 
 test('a ZIP with nothing readable, or that cannot be opened, says so and what to do', async () => {
