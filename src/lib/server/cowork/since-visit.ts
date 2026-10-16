@@ -20,9 +20,12 @@ export async function readCoworkLastVisit(client: SupabaseClient, scope: Scope):
 }
 
 export type CoworkSinceSources = {
-  /** The person's own session: replies, research, runs and opportunities go through its row rules. */
+  /** The person's own session: replies, research and runs go through its row rules. */
   client: SupabaseClient;
-  /** LinkedIn jobs are only readable by the worker's role (as in the overview's quota). */
+  /**
+   * LinkedIn jobs and the organization's opportunities are only readable by the worker's role (no session can read
+   * commercial_opportunities): as in the overview's quota, only counts leave the server.
+   */
   admin: () => SupabaseClient;
   opportunities: boolean;
 };
@@ -58,7 +61,7 @@ export async function loadCoworkSinceLastVisit(sources: CoworkSinceSources, scop
         return rows.map(row => ({ name: names.get(String(row.lead_id || '')) ?? null, company: (row.company_name as string | null) ?? null }));
       }),
     sources.opportunities
-      ? sources.client.from('commercial_opportunities').select('kind,status').eq('organization_id', scope.organizationId)
+      ? sources.admin().from('commercial_opportunities').select('kind,status').eq('organization_id', scope.organizationId)
         .neq('status', 'dismissed').gt('first_seen_at', since).limit(300)
         .then(({ data, error }) => {
           if (error) throw error;

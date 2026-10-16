@@ -55,18 +55,26 @@ test('what arrived since the last visit, each source on its own; one that fails 
     lead_research_jobs: [{ lead_id: 'l1', company_name: 'Minera Centinela', status: 'completed', completed_at: '2026-10-05T10:00:00Z' },
       { lead_id: 'l2', company_name: 'Adecco', status: 'failed', completed_at: '2026-10-05T10:00:00Z' }],
     leads: [{ id: 'l1', name: 'Carlos Ahumada' }],
-    commercial_opportunities: [{ kind: 'compra_agil', status: 'new', first_seen_at: '2026-10-05T11:20:00Z' },
-      { kind: 'hiring', status: 'dismissed', first_seen_at: '2026-10-05T11:20:00Z' }, { kind: 'project', status: 'new', first_seen_at: '2026-09-01T11:20:00Z' }],
   };
+  // No session can read commercial_opportunities (it has no grant nor policy for them): the worker's role counts them.
   // LinkedIn without a complete sync says nothing (agenda-read's rule).
-  const admin = () => fakeClient({ cowork_linkedin_sweep_state: [{ last_completed_at: '2026-10-06T10:00:00Z', has_more: true }] }) as never;
-  const since = await loadCoworkSinceLastVisit({ client: fakeClient(tables) as never, admin, opportunities: true }, scope, NOW);
+  const workerTables = {
+    cowork_linkedin_sweep_state: [{ last_completed_at: '2026-10-06T10:00:00Z', has_more: true }],
+    commercial_opportunities: [{ kind: 'compra_agil', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
+      { kind: 'hiring', status: 'dismissed', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
+      { kind: 'project', status: 'new', first_seen_at: '2026-09-01T11:20:00Z', organization_id: ORG },
+      { kind: 'tender', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: '00000000-0000-4000-8000-0000000000ff' }],
+  };
+  const admin = () => fakeClient(workerTables) as never;
+  const session = fakeClient(tables);
+  const since = await loadCoworkSinceLastVisit({ client: session as never, admin, opportunities: true }, scope, NOW);
   assert.equal(since?.at, '2026-10-04T15:00:00Z');
   assert.deepEqual(since?.items.map(item => item.text), [
     '1 respuesta nueva: Marcela Rojas (Constructora Andes) · 1 pide reunión',
     '1 investigación lista: Carlos Ahumada (Minera Centinela)',
     '1 oportunidad nueva: 1 licitación o Compra Ágil',
   ]);
+  assert.equal(session.reads.includes('commercial_opportunities'), false, 'the session would get a 403');
   // Without access to «Oportunidades» they are not read; a failing source does not take the others with it.
   const client = fakeClient(tables, ['contacted_leads']);
   const partial = await loadCoworkSinceLastVisit({ client: client as never, admin, opportunities: false }, scope, NOW);
