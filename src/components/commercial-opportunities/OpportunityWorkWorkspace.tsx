@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
+import { PipelineBoard, type PipelineSuggestion } from './PipelineBoard';
+import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
 import type { MarkChange } from './ReportMarks';
 import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { OpportunityContacts } from './OpportunityContacts';
@@ -56,6 +58,11 @@ export function OpportunityWorkWorkspace() {
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
+  // The admin sees the pipeline first; «Lista» keeps the filters and cards.
+  const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
+  const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number } } | null>(null);
+  const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const watching = useRef<string | null>(null);
   useEffect(() => { if (!feedback) return; const timer = setTimeout(() => setFeedback(''), 6000); return () => clearTimeout(timer); }, [feedback]);
   useEffect(() => { const read = () => setSelected(opportunityInUrl()); read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read); }, []);
@@ -101,6 +108,22 @@ export function OpportunityWorkWorkspace() {
     if (watching.current === research.id && research.state === 'ready') { watching.current = null; setTab('summary'); setFeedback(isSignalKind(detail?.item.kind) ? 'La ficha comercial está lista.' : 'Tu informe está listo.'); }
   }, [research, detail?.item.kind]);
   const admin = overview?.mode === 'management';
+  const loadPipeline = useCallback(async () => {
+    try { setPipeline(await json(await fetch('/api/commercial-opportunities/workspace?view=pipeline', { cache: 'no-store' }))); }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar el embudo.'); }
+  }, []);
+  useEffect(() => { if (admin && view === 'pipeline' && !selected) void loadPipeline(); }, [admin, view, selected, loadPipeline]);
+  const review = async () => {
+    setReviewing(true); setProblem('');
+    try { const result = await json(await fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pipeline_review', data: {} }) }));
+      setSuggestions(result.suggestions ?? []); }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'La IA no pudo revisar el embudo.'); }
+    finally { setReviewing(false); }
+  };
+  const moveTo = async (id: string, state: WorkRecord['state'], revision: number) => {
+    const done = await perform('state', { state, expectedRevision: revision }, id, true);
+    if (done) { setSuggestions(current => current?.filter(s => s.id !== id) ?? null); await loadPipeline(); setFeedback(`Movida a «${WORK_STATE_LABELS[state]}».`); }
+  };
   const perform = async (action: string, data: unknown, id = selected, quiet = false) => {
     setBusy(true); setProblem(''); setFeedback('');
     try {
@@ -206,6 +229,11 @@ export function OpportunityWorkWorkspace() {
           {overview.context ? <Button variant="outline" disabled={busy || !overview.sourceStatus.automation} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
       {unread.length > 0 && <section aria-label="Novedades" className="rounded-xl border p-4"><h2 className="flex items-center gap-2 font-semibold"><Bell className="h-4 w-4" />Novedades</h2><div className="mt-3 space-y-2">{unread.map(n => <button key={n.id} onClick={() => open(n.opportunity_id)} className="block w-full rounded-lg border p-3 text-left text-sm hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{n.title}<span className="mt-1 block text-xs text-muted-foreground">{date(n.created_at)} · Abrir</span></button>)}</div></section>}
       <TenderPrerequisites />
+      {admin && <div role="group" aria-label="Vista" className="inline-flex w-fit rounded-xl bg-muted p-1">{([['pipeline', 'Embudo'], ['list', 'Lista']] as const).map(([key, label]) =>
+        <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>}
+      {admin && view === 'pipeline' ? (pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} members={overview.members} busy={busy}
+        suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} />
+        : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>) : <>
       <div className="flex flex-wrap gap-3"><div className="flex min-w-0 flex-1 flex-wrap gap-1" aria-label="Filtrar oportunidades">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar en las oportunidades" aria-label="Buscar en las oportunidades" className="w-full sm:w-72" /></div>
       {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{query ? 'Prueba otro texto o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p></section>}
       {admin && filter === 'recommended' && !query && <StartHere items={items} onOpen={open} />}
@@ -213,6 +241,7 @@ export function OpportunityWorkWorkspace() {
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><h2 id={`source-${group.key}`} className="text-lg font-semibold">{group.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{group.items.length}</span></h2><p className="text-xs text-muted-foreground">{group.note}</p></div>
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
       </section>)}</div>}
+      </>}
       <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>
     </>}
     {selected && <>
