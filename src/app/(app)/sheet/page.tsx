@@ -46,6 +46,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import { exportToPdf, exportToXlsx } from '@/lib/sheet-export';
+import { supabase } from '@/lib/supabase';
 import { loadUnifiedRows, unifiedFailureText } from '@/lib/unified-sheet-data';
 import { defaultColumns } from '@/lib/unified-sheet-storage';
 import type { CustomData } from '@/lib/services/unified-sheet-service';
@@ -320,6 +321,11 @@ export default function SheetPage() {
     }
   }
 
+  const sharedSaves = useMemo(() => new Set(rows.map((row) => row.savedById).filter(Boolean)).size > 1, [rows]);
+  // «Guardado por ti» on your own rows: two members may share a name.
+  const [me, setMe] = useState<string | null>(null);
+  useEffect(() => { void supabase.auth.getUser().then(({ data }) => setMe(data.user?.id ?? null)).catch(() => setMe(null)); }, []);
+
   function renderCell(row: UnifiedRow, column: ColumnDef) {
     if (column.editable) {
       return (
@@ -363,10 +369,11 @@ export default function SheetPage() {
             />
           </div>
 
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {/* On a phone the four tools share one row (the refresh button was left alone on a second one). */}
+          <div className="grid min-w-0 grid-cols-[1fr_1fr_1fr_auto] items-center gap-1.5 sm:flex sm:flex-wrap">
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-9">
+                <Button variant="outline" size="sm" className="h-9 px-2 sm:px-3">
                   <Filter className="h-4 w-4" /> Filtros
                   {activeFilterCount > 0 && <span className="rounded-full bg-primary px-1.5 text-[11px] text-primary-foreground">{activeFilterCount}</span>}
                 </Button>
@@ -410,8 +417,8 @@ export default function SheetPage() {
               </PopoverContent>
             </Popover>
 
-            <Button variant="outline" size="sm" className="h-9" onClick={() => setColumnsOpen(true)}><Columns3 className="h-4 w-4" /> Columnas</Button>
-            <Button asChild variant="outline" size="sm" className="h-9"><Link href="/leads/import"><Import className="h-4 w-4" /> Importar</Link></Button>
+            <Button variant="outline" size="sm" className="h-9 px-2 sm:px-3" onClick={() => setColumnsOpen(true)}><Columns3 className="h-4 w-4" /> Columnas</Button>
+            <Button asChild variant="outline" size="sm" className="h-9 px-2 sm:px-3"><Link href="/leads/import"><Import className="h-4 w-4" /> Importar</Link></Button>
             <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => void refresh()} disabled={loading} aria-label="Actualizar datos">
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
@@ -505,6 +512,8 @@ export default function SheetPage() {
                       style={{ minWidth: column.width ? `${column.width}px` : undefined, textAlign: column.align || 'left' }}
                     >
                       {column.editable ? renderCell(row, column) : <div className="line-clamp-2 break-words">{renderCell(row, column)}</div>}
+                      {/* With more than one person saving contacts, each row says whose it is: the same person saved twice is two rows, not a duplicate. */}
+                      {index === 0 && sharedSaves && (row.savedBy || row.savedById) ? <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{row.savedById && row.savedById === me ? 'Guardado por ti' : `Guardado por ${row.savedBy || 'otra persona del equipo'}`}</span> : null}
                     </TableCell>
                   ))}
                   <TableCell className="sticky right-0 z-10 border-l bg-card px-3 py-2 text-right group-hover:bg-muted">

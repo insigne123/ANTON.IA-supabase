@@ -115,6 +115,8 @@ function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow
       linkedinUrl: normalizeStr((l as any)?.linkedin_url ?? l?.linkedinUrl) || null,
       status: 'saved',
       kind: 'lead_saved',
+      savedBy: normalizeStr((l as any)?.foundBy?.name) || null,
+      savedById: normalizeStr((l as any)?.userId) || null,
       createdAt: (l as any)?.createdAt ?? null,
       updatedAt: (l as any)?.updatedAt ?? null,
       stage: custom?.stage ?? null,

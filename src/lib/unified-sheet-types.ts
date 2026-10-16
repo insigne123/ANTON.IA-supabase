@@ -30,6 +30,10 @@ export interface UnifiedRow {
   repliedAt?: string | null;
   source?: 'search' | 'opportunity' | 'contacted' | 'manual';
 
+  /** Who in the team saved it, when it is a saved contact: two members can save the same person, and each row is theirs. */
+  savedBy?: string | null;
+  savedById?: string | null;
+
   // Flags
   hasEmail?: boolean;     // <-- NUEVO: bandera útil para filtros/orden
 
