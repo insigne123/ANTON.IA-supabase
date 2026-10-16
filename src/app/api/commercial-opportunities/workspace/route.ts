@@ -4,7 +4,8 @@ import { readWorkspaceOverview, createPrivateOpportunity, opportunityDb } from '
 import { criteriaSchema } from '@/lib/server/commercial-opportunities/workspace-sources';
 import { companyContextSchema, privateOpportunitySchema } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
-import { enqueueOpportunityDiscovery } from '@/lib/server/commercial-opportunities/workspace-jobs';
+import { enqueueOpportunityDiscovery, runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
+import { readOpportunityPipeline } from '@/lib/server/commercial-opportunities/workspace-pipeline';
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
     const params = new URL(request.url).searchParams;
+    if (params.get('view') === 'pipeline') { assertOpportunityAdmin(scope); return opportunitiesJson(await readOpportunityPipeline(auth.admin, scope)); }
     const options = z.object({ view: z.enum(['all','recommended','review','excluded','pending','assigned','working','blocked','submitted','won','lost','archived']), query: z.string().max(200), page: z.coerce.number().int().min(0).max(1000) })
       .parse({ view: params.get('view') || 'all', query: params.get('query') || '', page: params.get('page') || '0' });
     const overview = await readWorkspaceOverview(auth.admin, scope, options);
@@ -22,7 +24,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
-    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria']), data: z.unknown() }).strict().parse(await request.json());
+    const body = z.object({ action: z.enum(['create', 'context', 'discover', 'notification', 'criteria', 'pipeline_review']), data: z.unknown() }).strict().parse(await request.json());
     if (body.action === 'notification') {
       const { id } = z.object({ id: z.string().uuid() }).strict().parse(body.data);
       opportunityDb(await auth.admin.from('opportunity_notifications').update({ read_at: new Date().toISOString() }).eq('id', id).eq('organization_id', scope.organizationId).eq('user_id', scope.userId));
@@ -31,6 +33,17 @@ export async function POST(request: Request) {
     assertOpportunityAdmin(scope);
     if (body.action === 'create') return opportunitiesJson({ id: await createPrivateOpportunity(auth.admin, scope, privateOpportunitySchema.parse(body.data)) }, 201);
     if (body.action === 'discover') return opportunitiesJson({ enqueued: await enqueueOpportunityDiscovery(auth.admin, scope, true) }, 202);
+    if (body.action === 'pipeline_review') {
+      // The AI's look at the opportunities in play, answered in this request (one per person and minute; a repeat reads it).
+      const key = `pipeline:${scope.userId}:${new Date().toISOString().slice(0, 16)}`;
+      opportunityDb(await auth.admin.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'evaluate',
+        dedupe_key: key, payload: { pipeline: true } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
+      await runQueuedOpportunityJobNow(auth.admin, scope.organizationId, key, 'evaluate');
+      const job = opportunityDb(await auth.admin.from('opportunity_jobs').select('state,result,error').eq('organization_id', scope.organizationId).eq('dedupe_key', key).maybeSingle());
+      if (job?.state === 'ready') return opportunitiesJson({ suggestions: job.result?.suggestions || [] });
+      if (job && ['failed', 'blocked'].includes(job.state)) throw new AuthError(job.error || 'La revisión no terminó. Intenta de nuevo en un momento.', 503);
+      return opportunitiesJson({ suggestions: null, queued: true }, 202);
+    }
     if (body.action === 'criteria') {
       // What the daily search looks for, as the admin corrected it. Keeps the offer revision: no new derivation is paid.
       const input = z.object({ criteria: criteriaSchema, expectedRevision: z.number().int().positive() }).strict().parse(body.data);
