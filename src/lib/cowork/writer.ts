@@ -1289,9 +1289,20 @@ export function coworkPlainReply(reply: string) {
 }
 
 // A closing word before the signature (round 10 readings: «el correo va sin despedida», four times with Luna).
-const SIGN_OFF = /^(?:saludos|un saludo|atentamente|cordialmente|gracias|muchas gracias|quedo atent[oa]|un abrazo|abrazo)\b/i;
+const SIGN_OFF = /^(?:saludos|un saludo|atentamente|cordialmente|gracias|muchas gracias|quedo atent[oa]|un abrazo|abrazo|best|kind regards|regards|sincerely|thanks|thank you|cheers|atenciosamente|abra[çc]os?|um abra[çc]o|obrigad[oa]|cumprimentos)\b/i;
+// The closing word in the email's own language (round 25: «Saludos,» under an email written in English or in Portuguese).
+const ENGLISH = /^(?:hello|hi|hey|dear|good (?:morning|afternoon))\b|\b(?:the|you|your|we|our|would|this week)\b/i;
+const PORTUGUESE = /^(?:ol[áa]|prezad[oa]s?|bom dia|boa tarde)\b|\b(?:voc[êe]s?|n[óo]s|obrigad[oa]|candidat[oa]s|semana|gostar[íi]amos)\b|[çã]o\b/i;
+function signOffWord(body: string) {
+  const portuguese = PORTUGUESE.test(body) && !/\b(?:usted|ustedes|postulantes|hola)\b/i.test(body);
+  if (portuguese) return 'Atenciosamente,';
+  const words = body.match(/\p{L}+/gu) ?? [];
+  const english = words.filter(word => /^(?:the|you|your|we|our|to|and|of|for|is|are|this|with|would|have)$/i.test(word)).length;
+  return ENGLISH.test(body.split('\n')[0]) || english >= Math.max(3, words.length / 12) ? 'Best regards,' : 'Saludos,';
+}
 
-/** «Saludos,» before the signature when the email ends with the signer's name and no closing word. */
+/** A closing word before the signature when the email ends with the signer's name and none: «Saludos,», or its words in the email's
+ * language. */
 export function coworkWithSignOff(body: string, signer: string | null | undefined): string {
   const name = signer ? normalize(signer).split(/\s+/)[0] : '';
   const paragraphs = body.trimEnd().split(/\n\s*\n/);
@@ -1300,7 +1311,7 @@ export function coworkWithSignOff(body: string, signer: string | null | undefine
   const first = last.split('\n')[0].trim();
   const previous = (paragraphs[paragraphs.length - 2].trim().split('\n').pop() || '').trim();
   if (SIGN_OFF.test(first) || SIGN_OFF.test(previous) || !normalize(first).startsWith(name)) return body;
-  paragraphs[paragraphs.length - 1] = `Saludos,\n${last}`;
+  paragraphs[paragraphs.length - 1] = `${signOffWord(paragraphs.slice(0, -1).join('\n\n'))}\n${last}`;
   return paragraphs.join('\n\n');
 }
 

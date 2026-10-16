@@ -5,6 +5,7 @@ import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_REASONING_EFFORT, COWORK_RESCUE_TIM
 import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling, type CoworkTurnBudget } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
+import { coworkProfileChangeLabel } from '@/lib/cowork/profile-proposal';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkOpportunitiesAllowed } from './opportunities-read';
@@ -494,8 +495,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           if (!proposal.profile) throw new Error('Missing profile patch');
           const staged = await stageCoworkProfileUpdate(scope, run.id, proposal.profile);
           targetId = `profile:${staged.hash}`;
-          const names = { full_name: 'nombre', job_title: 'cargo', company_name: 'empresa', company_domain: 'dominio', signatures: 'datos extendidos' } as Record<string, string>;
-          label = `Actualizar tu perfil (${staged.changed.map(key => names[key] || key).join(', ')})`.slice(0, 280);
+          label = coworkProfileChangeLabel(proposal.profile).slice(0, 280);
         }
         if (proposal.kind === 'saved_search_create') {
           if (!proposal.savedSearch || !('name' in proposal.savedSearch)) throw new Error('Missing saved-search proposal');

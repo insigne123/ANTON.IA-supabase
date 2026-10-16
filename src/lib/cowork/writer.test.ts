@@ -1206,6 +1206,11 @@ test('an email that ends with the signature and no closing word gets «Saludos,�
   assert.equal(coworkWithSignOff(body.replace('¿Cuántos postulantes revisan al mes?', 'Gracias.'), 'Nicolás Yarur'), body.replace('¿Cuántos postulantes revisan al mes?', 'Gracias.'));
   assert.equal(coworkWithSignOff(body, 'Carla Soto'), body);
   assert.equal(coworkWithSignOff(body, null), body);
+  // In the email's own language (round 25).
+  assert.match(coworkWithSignOff('Hello,\n\nWe are Yago, and we would love to show you a demo.\n\nNicolás Yarur', 'Nicolás Yarur'), /demo\.\n\nBest regards,\nNicolás Yarur$/);
+  assert.match(coworkWithSignOff('Olá,\n\nA AXIS automatiza a revisão de antecedentes de candidatos.\n\nQuantas candidaturas vocês revisam por mês?\n\nNicolás Yarur', 'Nicolás Yarur'), /mês\?\n\nAtenciosamente,\nNicolás Yarur$/);
+  assert.equal(coworkWithSignOff('Hi Ana,\n\nThanks for your time.\n\nBest,\nNicolás Yarur', 'Nicolás Yarur'), 'Hi Ana,\n\nThanks for your time.\n\nBest,\nNicolás Yarur');
+  assert.match(coworkWithSignOff('Hola José,\n\nCuando se acumulan postulantes, revisar sus antecedentes uno por uno deja la vacante abierta.\n\n¿Cuánto les toma hoy?\n\nNicolás Yarur', 'Nicolás Yarur'), /\n\nSaludos,\nNicolás Yarur$/);
 });
 
 test('an edit\'s reply carries the real word count and never claims a greeting or signature it changed', async () => {
