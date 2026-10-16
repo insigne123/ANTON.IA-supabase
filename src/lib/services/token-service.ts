@@ -38,7 +38,8 @@ export const tokenService = {
             .select('refresh_token, expires_at')
             .eq('user_id', userId)
             .eq('provider', provider)
-            .single();
+            // Callers try one provider and then the other: a missing row is an answer, not a PostgREST 406.
+            .maybeSingle();
 
         if (error || !data) return null;
 
