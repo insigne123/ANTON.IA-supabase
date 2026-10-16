@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { OpportunityReport } from './expedient';
 
-export const MARK_KINDS = { requirement: 'req', task: 'task', step: 'step', date: 'date', risk: 'risk', question: 'ask', route: 'route' } as const;
+export const MARK_KINDS = { requirement: 'req', task: 'task', step: 'step', date: 'date', risk: 'risk', question: 'ask', route: 'route', document: 'doc' } as const;
 export type MarkKind = keyof typeof MARK_KINDS;
 
 const normalize = (text: string) => text.normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase('es');

@@ -17,6 +17,7 @@ import {readPublicMercadoDocuments} from './mercado-publico-documents';
 import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report-view';
 import { opportunityChatDeadline, opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
 import { nextReportProgress, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
+import { validateSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
 
 /** What the page's «oficina» shows (report-progress.ts): a note in the job's payload. The report matters more than its progress, so a
  * note that cannot be written never stops the job. */
@@ -176,7 +177,7 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   raw.warnings = opportunityReportWarnings([...raw.warnings, ...warnings, ...(job.payload.sourceWarnings || [])], documents, basesMissing);
   if(raw.recommendation==='advance' && (raw.warnings.length || raw.requirements.some(r=>r.status==='unknown'||r.status==='blocked')))raw.recommendation='conditional';
   const report: OpportunityReport = { ...raw, kind: item.kind, generatedAt: job.payload.cutoff,
-    route: review.route, reviewers: review.notes.map(note => note.name),
+    route: review.route, reviewers: review.notes.map(note => note.name), submission: review.kit ? validateSubmissionKit(review.kit, chunks) : null,
     coverage: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status, pagesRead: d.pages_read, pagesTotal: d.pages_total })),
     sources: chunks.map(c => ({ id: c.id, documentId: c.document_id, locator: c.locator, name: documents.find(d => d.id === c.document_id)?.name || 'Documento' })) };
   return { waiting: false as const, report };

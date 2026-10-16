@@ -1,16 +1,16 @@
 'use client';
 // The report as one document: the decision and what to do now on top, then requirements, plan, risks, questions and the
 // detailed analysis, with a short index. A LinkedIn signal reads as a commercial plan, not as a tender.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Award, Check, Copy, Flag, Highlighter, Hourglass, ListChecks, MessageCircleQuestion, PenLine, Phone, Upload, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/workspace';
 import { IMPACT_LABELS, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
-import { emptyMark, parseReportDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
+import { parseReportDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { RoutePath, type RouteNode } from './RoutePath';
-import { MarkedItem, ReminderMenu, type MarkChange } from './ReportMarks';
+import { MarkedItem, ReminderMenu, useReportMarks, type MarkChange } from './ReportMarks';
 
 const TONES = { go: 'bg-cw-success-soft text-cw-success', evaluate: 'bg-cw-warning-soft text-cw-warning', no: 'bg-muted text-muted-foreground', pending: 'bg-muted text-muted-foreground' };
 const IMPACT_TONES: Record<string, string> = { high: 'bg-destructive/10 text-destructive', medium: 'bg-cw-warning-soft text-cw-warning', low: 'bg-muted text-muted-foreground' };
@@ -32,21 +32,7 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
   people?: Array<{ user_id: string; name: string }>;
 }) {
   const [copied, setCopied] = useState(false);
-  const interactive = Boolean(initialMarks?.available && onMark);
-  const [marks, setMarks] = useState<ReportMarks>(initialMarks?.items ?? {});
-  useEffect(() => { setMarks(initialMarks?.items ?? {}); }, [initialMarks]);
-  const [saving, setSaving] = useState(false);
-  const change = async (input: MarkChange) => {
-    if (!onMark) return;
-    const before = marks[input.key];
-    // At once on screen; back as it was if the server says no.
-    setMarks(current => ({ ...current, [input.key]: { ...(current[input.key] ?? emptyMark(input.key)),
-      ...(input.done !== undefined ? { done: input.done } : {}), ...(input.highlight !== undefined ? { highlight: input.highlight } : {}), ...(input.note !== undefined ? { note: input.note.trim() } : {}) } }));
-    setSaving(true);
-    const saved = await onMark(input).catch(() => null);
-    setSaving(false);
-    setMarks(current => { const next = { ...current }; if (saved) next[input.key] = saved; else if (before) next[input.key] = before; else delete next[input.key]; return next; });
-  };
+  const { interactive, marks, saving, change } = useReportMarks(initialMarks, onMark);
   const itemMarks = interactive ? marks : null;
   const authorOf = (id?: string | null) => people?.find(p => p.user_id === id)?.name ?? null;
   const whenOf = (at?: string | null) => humanDate(at, true);

@@ -2,12 +2,13 @@
 
 // The parts of the person's own tender radar the workspace list was missing: what to do with each opportunity, where to
 // start, the excluded ones by why, and what almost every set of bases asks for.
-import { ChevronDown, ClipboardCheck, Flag } from 'lucide-react';
+import { useState } from 'react';
+import { Bell, ChevronDown, ClipboardCheck, Flag } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WorkItem } from '@/lib/commercial-opportunities/workspace';
-import { TENDER_PREREQUISITES, closesLabel, exclusionGroups, startHere, workAdvice, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
+import { TENDER_PREREQUISITES, closesLabel, exclusionGroups, latestNews, startHere, workAdvice, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
 
 const TONES: Record<WorkAdvice['tone'], string> = {
   go: 'bg-cw-success-soft text-cw-success',
@@ -133,5 +134,35 @@ export function TenderPrerequisites() {
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/** «Novedades» in a few quiet lines: one per opportunity, three at first, and a way to clear them. */
+export function NewsList({ notifications, onOpen, onClear, when }: {
+  notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null }>;
+  onOpen: (opportunityId: string) => void; onClear: (ids: string[]) => void; when: (at: string) => string;
+}) {
+  const [all, setAll] = useState(false);
+  const { items, ids } = latestNews(notifications);
+  if (!items.length) return null;
+  const shown = all ? items : items.slice(0, 3);
+  return (
+    <section aria-labelledby="op-news" className="rounded-2xl border px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <h2 id="op-news" className="flex items-center gap-2 text-sm font-semibold"><Bell className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Novedades<span className="font-normal tabular-nums text-muted-foreground">{items.length}</span></h2>
+        <Button type="button" variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => onClear(ids)}>Marcar como leídas</Button>
+      </div>
+      <ul className="mt-1 divide-y">
+        {shown.map(n => (
+          <li key={n.id}>
+            <button type="button" onClick={() => onOpen(n.opportunity_id)} className="flex w-full items-center justify-between gap-3 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <span className="min-w-0 truncate">{n.title}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{when(n.created_at)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {items.length > 3 ? <button type="button" onClick={() => setAll(v => !v)} className="mt-1 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{all ? 'Ver menos' : `Ver ${items.length - 3} más`}</button> : null}
+    </section>
   );
 }

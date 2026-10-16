@@ -134,3 +134,14 @@ export function bySource<T extends Pick<WorkItem, 'kind' | 'deadline_at' | 'scor
   ];
   return groups.filter(group => group.items.length > 0);
 }
+
+/**
+ * «Novedades»: the unread notices, the newest first and one per opportunity (three reports of the same tender are one
+ * piece of news). The rest stay counted so they can be marked as read together.
+ */
+export function latestNews<T extends { id: string; opportunity_id: string; created_at: string; read_at: string | null }>(notifications: T[]) {
+  const unread = notifications.filter(n => !n.read_at).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const seen = new Set<string>();
+  const items = unread.filter(n => { if (seen.has(n.opportunity_id)) return false; seen.add(n.opportunity_id); return true; });
+  return { items, ids: unread.map(n => n.id) };
+}
