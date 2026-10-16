@@ -4,6 +4,7 @@ import { AuthError } from '@/lib/server/auth-utils';
 import { isOpportunityAdmin, type WorkScope, type WorkspaceOverview, type WorkItem, type WorkRecord, type privateOpportunitySchema, type assignmentSchema } from '@/lib/commercial-opportunities/workspace';
 import type { z } from 'zod';
 import { reportJobProgress } from '@/lib/commercial-opportunities/report-progress';
+import { marksFromRows, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { assertOpportunityRead, assertOpportunityAdmin, readableOpportunityIds } from './workspace-access';
 
 export function opportunityDb<T>(result: { data: T; error: { code?: string; message?: string } | null }): T {
@@ -85,16 +86,49 @@ export async function assignOpportunity(client: SupabaseClient, scope: WorkScope
   return opportunityDb(await client.rpc('opportunity_assign', { p_org: scope.organizationId, p_actor: scope.userId, p_id: id, p_revision: input.expectedRevision,
     p_team: input.teamId, p_users: [...users], p_responsible: input.responsibleId, p_objective: input.objective, p_due: input.dueAt }));
 }
+/**
+ * What the team marked on the report (done, highlighted, notes). Before the table exists (a deploy ahead of its
+ * migration) the report shows without marks instead of failing.
+ */
+export async function readOpportunityReportMarks(client: SupabaseClient, scope: WorkScope, id: string): Promise<{ available: boolean; items: ReportMarks }> {
+  const { data, error } = await client.from('opportunity_report_marks').select('item_key,done,highlight,note,updated_by,updated_at')
+    .eq('organization_id', scope.organizationId).eq('opportunity_id', id).limit(1000);
+  if (error) {
+    if (['42P01', 'PGRST205'].includes(String((error as { code?: string }).code))) return { available: false, items: {} };
+    throw error;
+  }
+  return { available: true, items: marksFromRows(data) };
+}
+/**
+ * One mark on the report: done, highlighted or its note, merged with what was there. Done and notes leave a line in the
+ * activity, once per item and state, so the team sees who moved what; a highlight is personal reading aid and does not.
+ */
+export async function saveOpportunityReportMark(client: SupabaseClient, scope: WorkScope, id: string,
+  input: { key: string; label: string; done?: boolean; highlight?: boolean; note?: string }) {
+  await assertOpportunityRead(client, scope, id);
+  const current = opportunityDb(await client.from('opportunity_report_marks').select('done,highlight,note')
+    .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('item_key', input.key).maybeSingle()) as { done: boolean; highlight: boolean; note: string } | null;
+  const next = { done: input.done ?? current?.done ?? false, highlight: input.highlight ?? current?.highlight ?? false, note: (input.note ?? current?.note ?? '').trim() };
+  const saved = opportunityDb(await client.from('opportunity_report_marks').upsert({ organization_id: scope.organizationId, opportunity_id: id, item_key: input.key,
+    ...next, updated_by: scope.userId, updated_at: new Date().toISOString() }, { onConflict: 'opportunity_id,item_key' }).select('item_key,done,highlight,note,updated_by,updated_at').single());
+  const label = input.label.slice(0, 160);
+  if (input.done !== undefined && input.done !== (current?.done ?? false))
+    await addOpportunityActivity(client, scope, id, 'report_mark', `${input.done ? 'Listo' : 'Pendiente de nuevo'}: ${label}`, { key: input.key });
+  if (input.note !== undefined && next.note && next.note !== (current?.note ?? ''))
+    await addOpportunityActivity(client, scope, id, 'report_note', `Nota en «${label}»: ${next.note.slice(0, 300)}`, { key: input.key });
+  return marksFromRows(saved ? [saved] : [])[input.key] ?? null;
+}
 export async function readOpportunityDetail(client: SupabaseClient, scope: WorkScope, id: string) {
   await assertOpportunityRead(client, scope, id);
   const item = opportunityDb(await client.from('commercial_opportunities').select(COLUMNS).eq('organization_id', scope.organizationId).eq('id', id).single()) as WorkItem;
   const scoped = (table: string) => client.from(table).select('*').eq('organization_id', scope.organizationId).eq('opportunity_id', id);
-  const [work, participants, activity, tasks, documents, reports, jobs, contacts] = await Promise.all([
+  const [work, participants, activity, tasks, documents, reports, jobs, contacts, marks] = await Promise.all([
     scoped('opportunity_work').maybeSingle(), scoped('opportunity_participants'), scoped('opportunity_activity').order('created_at', { ascending: false }).limit(200),
     scoped('opportunity_tasks').order('due_at', { ascending: true }), scoped('opportunity_documents').order('created_at'),
     scoped('opportunity_reports').order('created_at', { ascending: false }).limit(5),
     client.from('opportunity_jobs').select('id,kind,state,error,created_at,updated_at,requested_by,payload').eq('organization_id',scope.organizationId).eq('opportunity_id',id)
       .or(`kind.neq.chat,requested_by.eq.${scope.userId}`).order('created_at',{ascending:false}).limit(20), scoped('opportunity_contact_links'),
+    readOpportunityReportMarks(client, scope, id),
   ]);
   const people = opportunityDb(participants) || [];
   const members = await workspaceMembers(client, scope);
@@ -102,7 +136,7 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
   return { item, work: opportunityDb(work), decisionMakerTitles: context?.criteria?.decisionMakerTitles || [], participants: members.filter(m => people.some(p => p.user_id === m.user_id)),
     members: members.map(({ user_id, name }) => ({ user_id, name })),
     activity: opportunityDb(activity), tasks: opportunityDb(tasks), documents: opportunityDb(documents)?.map(({ storage_path, ...doc }) => doc),
-    reports: opportunityDb(reports), contacts: opportunityDb(contacts),
+    reports: opportunityDb(reports), contacts: opportunityDb(contacts), marks,
     // A report's progress for the page's «oficina»; the payload itself never leaves the server.
     jobs: (opportunityDb(jobs) || []).map(({ payload, ...job }) => job.kind === 'research' ? { ...job, progress: reportJobProgress(job.state, payload) } : job) };
 }

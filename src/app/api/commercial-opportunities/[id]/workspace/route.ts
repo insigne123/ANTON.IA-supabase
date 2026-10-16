@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityRead, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
-import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb } from '@/lib/server/commercial-opportunities/workspace-store';
+import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb, saveOpportunityReportMark } from '@/lib/server/commercial-opportunities/workspace-store';
+import { markInputSchema } from '@/lib/commercial-opportunities/report-marks';
 import { assignmentSchema, activitySchema, taskSchema, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
@@ -19,7 +20,7 @@ export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') return opportunitiesJson({ revision: await assignOpportunity(auth.admin, scope, id, assignmentSchema.parse(data)) });
     if (action === 'activity') {
       const input = activitySchema.parse(data); await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
@@ -44,6 +45,7 @@ export async function POST(request: Request, context: Context) {
       else opportunityDb(await auth.admin.from('opportunity_tasks').insert({ ...values, organization_id: scope.organizationId, opportunity_id: id, created_by: scope.userId }));
       await addOpportunityActivity(auth.admin, scope, id, 'task', `Tarea ${input.status}: ${input.title}`); return opportunitiesJson({ ok: true });
     }
+    if (action === 'mark') return opportunitiesJson(await saveOpportunityReportMark(auth.admin, scope, id, markInputSchema.parse(data)));
     if (action === 'link') {
       const { contactId } = z.object({ contactId: z.string().min(1).max(200) }).strict().parse(data);
       const contact = opportunityDb(await auth.admin.from('leads').select('id').eq('organization_id', scope.organizationId).eq('id', contactId).maybeSingle());
