@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { z } from 'zod';
 import {
-  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkDraftIssues, coworkNextStepIssues, coworkPolishDraft, coworkReplyIssues, coworkReplyMatchesDraft, coworkPolishProofs, coworkReviewIssues, coworkSplitOffer, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
+  COWORK_REVIEWER_RULES, COWORK_WRITER_RULES, coworkCanonicalVariables, coworkDraftIssues, coworkNextStepIssues, coworkPolishDraft, coworkReplyIssues, coworkReplyMatchesDraft, coworkPolishProofs, coworkReviewIssues, coworkSplitOffer, coworkWriterContext, coworkWriterPrompt, runCoworkWriter, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput, coworkSignerPreference } from './writer';
 
 const signed = 'Hola {{nombre}},\nEn Yago revisamos antecedentes laborales con AXIS en minutos para {{empresa}}.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur\nGerente Comercial, Yago';
 const sequence = (bodies: string[]) => ({ type: 'sequence' as const, title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index] ?? 11, subject: `Asunto ${index + 1}`, body })) });
@@ -198,6 +198,22 @@ test('the Writer gets what the coordinator found, to tell the person along with 
   const prompt = JSON.parse(coworkWriterPrompt({ request: 'armame una secuencia', brief: { ...brief, findings }, userContext: null, observations: [] }));
   assert.equal(prompt.brief.findings, findings);
   assert.equal(prompt.issues, undefined);
+});
+
+test('a variable written in the email\'s language is the one the campaign fills (round 27: «Olá {{nome}},»)', () => {
+  assert.equal(coworkCanonicalVariables('Olá {{nome}}, na {{ company }} como {{job_title}}'), 'Olá {{nombre}}, na {{empresa}} como {{cargo}}');
+  const draft = { reply: 'Listo.', question: null, suggestions: [], blocks: [{ type: 'email_draft', title: 'RH', to: null, subject: 'Seleção na {{company}}', body: 'Olá {{nome}},\n\nTexto.\n\nAtenciosamente,\nNicolás Yarur' }] } as unknown as CoworkWriterOutput;
+  const polished = coworkPolishDraft(draft, []);
+  const block = polished.blocks[0] as { subject: string; body: string };
+  assert.equal(block.subject, 'Seleção na {{empresa}}');
+  assert.match(block.body, /^Olá \{\{nombre\}\},/);
+});
+
+test('a request in English gets its reply, question and buttons in English, even for an email in Spanish (round 27)', () => {
+  const english = JSON.parse(coworkWriterPrompt({ request: 'please write a short email to Daniela Rojas presenting AXIS, in Spanish', brief, userContext: null, observations: [] }));
+  assert.equal(english.replyLanguage, 'inglés');
+  const spanish = JSON.parse(coworkWriterPrompt({ request: 'escríbele a Nehal en inglés', brief, userContext: null, observations: [] }));
+  assert.equal(spanish.replyLanguage, undefined);
 });
 
 test('the Writer knows an answer inside an open conversation: «Re: » and the subject of the send, one draft per person, never a campaign or all approved together', () => {
@@ -805,6 +821,8 @@ test('the v12 reading: the Reviewer\'s «sin respaldo» on a trade\'s consequenc
   const first = output([signed.replace('en minutos', 'gratis'), signed, signed]);
   const fixed = { ...output([signed, signed, signed]), reply: 'Ajusté la consecuencia para mostrar qué pasa con los postulantes cuando la revisión se demora.' };
   assert.equal((await harness([first, fixed]).run()).reply, first.reply);
+  const english = { ...fixed, reply: 'I revised the opening to show the recruitment impact of manual reviews.' };
+  assert.equal((await harness([first, english]).run()).reply, first.reply);
   assert.match(COWORK_REVIEWER_RULES.join('\n'), /«cada antecedente pendiente es un conductor que no sale a ruta», «el puesto sigue vacío»\) es el planteamiento del correo/);
   assert.match(COWORK_WRITER_RULES.join('\n'), /fácil de responder en una línea y de menos de 15 palabras/);
 });
@@ -1082,6 +1100,9 @@ test('the reply says the variables in plain words and drops the brief\'s words',
   assert.equal(coworkPlainReply('Hice un solo correo para los cuatro. La campaña reemplaza {{nombre}} y {{empresa}} con sus datos. Abre con el momento de su rubro.'),
     'Hice un solo correo para los cuatro. Abre con el momento de su rubro.');
   assert.equal(coworkPlainReply('Un correo para Ana.\n\nVa con su nombre.'), 'Un correo para Ana.\n\nVa con su nombre.');
+  // Round 26: a reply that was only «Queda en pausa…» left the email without a word above it.
+  assert.equal(coworkPlainReply('Queda en pausa hasta que la actives.'), 'Te dejé el correo listo abajo.');
+  assert.equal(coworkPlainReply(''), 'Te dejé el correo listo abajo.');
 });
 
 test('a follow-up of an email nobody sent yet offers the campaign with both', () => {

@@ -295,6 +295,8 @@ test('tables preserve bounded rows and columns for export; excess Markdown stays
 test('with `always`, the aside goes whoever it names (the turn read today\'s agenda)', () => {
   assert.equal(withoutRepeatedAside('Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.', '', true), 'Responde hoy a Marcela Rojas.');
   assert.equal(withoutRepeatedAside('Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.'), 'Responde hoy a Marcela Rojas. Por cierto, todavía espera respuesta.');
+  // An answer in English says it in English (round 27: «Por cierto, those 4 contacts…»).
+  assert.equal(withoutRepeatedAside('Reply to Marcela Rojas today. By the way, she is still waiting.', '', true), 'Reply to Marcela Rojas today.');
 });
 
 test('the reply drops what it avoided supposing, and keeps the rest of the sentence', () => {
