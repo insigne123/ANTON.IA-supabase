@@ -228,9 +228,13 @@ export function coworkChartHeadline(block: Chart) {
   return `Mayor: ${block.labels[at]}, ${coworkChartValue(block, series.values[at])}${name} · ${count} ${unit}`;
 }
 
+// A person named twice, by name and by address («Francisca Muñoz», «francisca.munoz@…»), is one recipient: the card said
+// «para Francisca Muñoz y 1 más» for one email (round g1, 16 Oct 2026).
+const personKey = (value: string) => value.split('@')[0].normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 function people(to: string[] | null) {
   if (!to?.length) return '';
-  return to.length === 1 ? ` · para ${to[0]}` : ` · para ${to[0]} y ${to.length - 1} más`;
+  const unique = to.filter((value, index) => to.findIndex(other => personKey(other) === personKey(value)) === index);
+  return unique.length === 1 ? ` · para ${unique[0]}` : ` · para ${unique[0]} y ${unique.length - 1} más`;
 }
 
 /** One line under the card title: kind and size, in plain words. */

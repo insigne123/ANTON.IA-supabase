@@ -232,7 +232,9 @@ export function withoutTrailingQuestions(line: string): string {
     while (sentences.length && /\?[^\p{L}\p{N}]*$/u.test(sentences[sentences.length - 1])) sentences.pop();
     kept = sentences.join('');
   }
-  kept = kept.trim();
+  // «…confirmar la reunión; ¿te propongo…?» leaves «…reunión;»: the sentence ends with a period, not with what joined it to the
+  // question (round g1, 16 Oct 2026: three answers ended in «;»).
+  kept = kept.trim().replace(/\s*[;:,—–-]+$/u, '.');
   // Emphasis left open by a dropped «**¿…?**» is not content.
   return /[\p{L}\p{N}]/u.test(kept) ? kept : '';
 }
@@ -395,9 +397,15 @@ function withOfferChip(chips: CoworkSuggestion[], question: string | null): Cowo
 const LEADING_YES = /^\s*s[íi],?\s+/iu;
 const capital = (text: string) => text.charAt(0).toLocaleUpperCase('es') + text.slice(1);
 
+// A question a yes does not answer: it asks for something («¿Qué producto ofreces?») or offers a pick («¿Hoy o mañana?»).
+const OPEN_QUESTION = /^[\s¿]*(?:(?:a|con|de|en|para|por)\s+)?(?:qu[ée](?!\s+(?:te\s+parece|tal\s+si))|cu[áa]l(?:es)?|c[óo]mo|qui[ée]n(?:es)?|d[óo]nde|cu[áa]nt[oa]s?|cu[áa]ndo)(?!\p{L})/iu;
+const EITHER_OR = /(?<!\p{L})o(?!\p{L})[^?]*\?\s*$/u;
+/** Whether a one-tap yes answers the closing question (round 25: «Sí, adelante» under «¿Qué problema necesitas resolver?»). */
+export const coworkYesAnswers = (question: string | null) => Boolean(question && !OPEN_QUESTION.test(question) && !EITHER_OR.test(question));
+
 /** The quick replies as the person reads them: a yes needs a question to answer, and one offer takes one reply. */
 function quickReplies(chips: CoworkSuggestion[], question: string | null, reply: string): CoworkSuggestion[] {
-  if (!question && !/\?\s*$/.test(reply)) {
+  if ((!question && !/\?\s*$/.test(reply)) || (question && !coworkYesAnswers(question))) {
     return chips.filter(chip => !BARE_YES.test(chip.label)).map(chip => LEADING_YES.test(chip.label)
       ? { label: capital(chip.label.replace(LEADING_YES, '')), message: capital(chip.message.replace(LEADING_YES, '')) } : chip);
   }
@@ -477,7 +485,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     question,
     blocks: blocks.length ? blocks : null,
     suggestions: choices ? null : suggestions.length ? nullIfEmpty(quickReplies(suggestions, question, reply))
-      : question ? [namedYes(COWORK_YES_CHIP, question)] : null,
+      : coworkYesAnswers(question) ? [namedYes(COWORK_YES_CHIP, question)] : null,
     choices,
   };
 }

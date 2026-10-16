@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutRepeatedOffer, withoutCaveats, withoutScopeNote } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutRepeatedOffer, withoutCaveats, withoutScopeNote, withoutTrailingQuestions } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -146,6 +146,14 @@ test('the closing question is one plain sentence that ends the reply exactly onc
     [{ label: 'Sí, crear la campaña con los dos correos', message: 'Sí, adelante.' }]);
   assert.deepEqual(polish('Te dejé la lista.', '¿La reviso?').suggestions, [{ label: 'Sí, adelante', message: 'Sí, adelante.' }]);
   assert.equal(polish('Listo.', null).suggestions, null);
+  // A yes does not answer a question that asks for something or offers a pick (round 25).
+  assert.equal(polish('Para escribirlo bien necesito un dato.', '¿Qué producto o servicio ofreces?').suggestions, null);
+  assert.equal(polish('Te ayudo.', '¿Cuál es el problema que necesitas resolver con soporte?').suggestions, null);
+  assert.equal(polish('Te dejé el borrador.', '¿Lo dejo pausado o prefieres revisarlo antes?').suggestions, null);
+  assert.deepEqual(polishCoworkAnswer({ reply: 'Necesito saber a quién.', document: null, question: '¿A quién se lo envío?',
+    suggestions: [{ label: 'Sí, adelante', message: 'Sí, adelante.' }, { label: 'Sí, a Felipe', message: 'Sí, a Felipe' }] }).suggestions,
+    [{ label: 'A Felipe', message: 'A Felipe' }]);
+  assert.deepEqual(polish('Te dejé el borrador.', '¿Qué te parece si creo la campaña?').suggestions, [{ label: 'Sí, crear la campaña', message: 'Sí, adelante.' }]);
   assert.deepEqual(polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña?',
     suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] }).suggestions, [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }]);
   // The chat shows the body and the question apart.
@@ -411,4 +419,11 @@ test('round 24: a stray brand tail, a one-row table the reply already tells and 
   const twice = polishCoworkAnswer({ reply: 'Partiría con los cuatro.\n\n¿Te preparo una campaña pausada para estos cuatro? Queda guardada sin enviar.',
     document: null, question: '¿Te preparo una campaña pausada para estos cuatro?' });
   assert.equal(twice.reply, 'Partiría con los cuatro.\n\nQueda guardada sin enviar.\n\n¿Te preparo una campaña pausada para estos cuatro?');
+});
+
+test('dropping the closing question never leaves the sentence hanging on what joined it', () => {
+  assert.equal(withoutTrailingQuestions('Todavía falta acordar una hora para confirmar la reunión; ¿qué horarios tienes el martes?'),
+    'Todavía falta acordar una hora para confirmar la reunión.');
+  assert.equal(withoutTrailingQuestions('No tiene correo registrado: ¿lo busco?'), 'No tiene correo registrado.');
+  assert.equal(withoutTrailingQuestions('Te dejo la lista. ¿La reviso?'), 'Te dejo la lista.');
 });

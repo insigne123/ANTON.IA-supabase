@@ -34,6 +34,7 @@ test('the CSV opens in a spreadsheet with accents and no formulas', () => {
 
 test('card lines are plain', () => {
   assert.equal(coworkBlockMeta({ type: 'email_draft', title: 'x', to: ['Felipe', 'Camila', 'Rodrigo'], subject: 's', body: 'b' }), 'Correo · para Felipe y 2 más');
+  assert.equal(coworkBlockMeta({ type: 'email_draft', title: 'x', to: ['Francisca Muñoz', 'francisca.munoz@falabella.test'], subject: 's', body: 'b' }), 'Correo · para Francisca Muñoz', 'one person by name and by address');
   assert.equal(coworkBlockMeta({ type: 'email_draft', title: 'x', to: null, subject: 's', body: 'b' }), 'Correo');
   assert.equal(coworkBlockMeta(sequence), 'Secuencia · 2 correos en 4 días');
   assert.equal(coworkBlockMeta(table), 'Tabla · 2 filas');
