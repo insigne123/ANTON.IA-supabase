@@ -185,17 +185,26 @@ export async function runOpportunityChat(client: SupabaseClient, job: Opportunit
   const item = opportunityDb(await client.from('commercial_opportunities').select('kind,title,buyer_name,company_name,deadline_at,reasons').eq('organization_id', job.organization_id).eq('id', job.opportunity_id).maybeSingle());
   const context = opportunityDb(await client.from('opportunity_company_context').select('offer').eq('organization_id', job.organization_id).maybeSingle());
   const summary = opportunityChatReportContext(report?.report);
+  // The conversation so far (the last six turns, oldest first), so a follow-up («¿y el plazo?») reads as one.
+  const earlier = (opportunityDb(await client.from('opportunity_chat_messages').select('question,answer,created_at').eq('organization_id', job.organization_id)
+    .eq('user_id', job.requested_by).eq('opportunity_id', job.opportunity_id).lt('created_at', message.created_at).not('answer', 'is', null)
+    .order('created_at', { ascending: false }).limit(6)) || []) as Array<{ question: string; answer: { answer?: string } | null }>;
+  const conversation = earlier.reverse().map(turn => ({ pregunta: turn.question.slice(0, 600), respuesta: String(turn.answer?.answer || '').slice(0, 900) }));
   const answer = await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: answerSchema, output: 3000,
-    prompt: `Responde en español sobre esta oportunidad, directo y en no más de 150 palabras, salvo que pidan un texto. Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo en una frase y sugiere qué consultar. No presentes una propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.
+    prompt: `Eres el asistente de ANTON.IA dentro del expediente de esta oportunidad y conversas con quien la trabaja. Responde en español de Chile, cálido y directo, en no más de 150 palabras salvo que pidan un texto. Usa markdown simple: párrafos cortos, listas con guiones al enumerar y **negrita** para lo clave; sin títulos.
+Si es un saludo, un agradecimiento o una pregunta general que no depende del expediente, responde breve y natural, sin citas, ofrece dos o tres cosas concretas que puedes hacer con este expediente y usa mode «conversation». Si respondes algo del expediente, usa mode «expedient».
+Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo en una frase y sugiere qué consultar. No presentes una propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.
+Si la pregunta sigue la conversación previa («¿y el plazo?», «resúmelo»), respóndela en ese contexto.
 Escribe fechas y horas en hora de Chile; nunca menciones UTC. Lo que el informe ya estableció (requisitos con su estado, fechas) puedes usarlo diciendo que viene del informe: no digas que no existe solo porque no está en los fragmentos; si un fragmento lo contradice, dilo.
 Si piden redactar algo (un mensaje, un correo, una consulta), entrégalo listo para copiar, con datos del expediente y de la oferta, sin inventar nombres, cifras ni capacidades; si falta un dato, deja un espacio como [nombre].
 missing: a lo más 3 datos que cambiarían esta respuesta, en frases cortas; vacío si no hay.
 Oportunidad: ${JSON.stringify({ tipo: item?.kind, titulo: item?.title, cliente: item?.buyer_name || item?.company_name, cierre: opportunityChatDeadline(item?.deadline_at), porQueAparecio: item?.reasons })}
 Oferta de tu empresa: ${String(context?.offer || '').slice(0, 1500)}
 Informe: ${JSON.stringify(summary)}
+Conversación previa: ${JSON.stringify(conversation)}
 Pregunta: ${message.question}
 Fragmentos: ${JSON.stringify(chunks)}` });
   answer.citations = answer.citations.filter(c => validOpportunityCitation(c, chunks));
-  if (!answer.citations.length) answer.missing = ['Esta respuesta no contiene una cita documental validada.', ...answer.missing];
+  if (!answer.citations.length && answer.mode !== 'conversation') answer.missing = ['No encontré una cita textual en los documentos para esto: confírmalo en las bases.', ...answer.missing];
   return answer;
 }

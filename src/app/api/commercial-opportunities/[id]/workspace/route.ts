@@ -4,6 +4,7 @@ import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, oppor
 import { assignmentSchema, activitySchema, taskSchema, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
+import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -64,6 +65,8 @@ export async function POST(request: Request, context: Context) {
     if (existing?.opportunity_id !== id) throw new AuthError('La pregunta pertenece a otra oportunidad.', 409);
     opportunityDb(await auth.admin.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, opportunity_id: id, requested_by: scope.userId,
       kind: 'chat', dedupe_key: key, payload: { requestId: input.requestId } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
-    return opportunitiesJson({ queued: true, requestId: input.requestId }, 202);
+    // Answered now, as a conversation; if a worker took it first (or this fails), the page keeps waiting for that answer.
+    const answered = await answerOpportunityChatNow(auth.admin, scope.organizationId, key).catch(() => false);
+    return opportunitiesJson({ queued: !answered, answered, requestId: input.requestId }, answered ? 200 : 202);
   } catch (error) { return opportunitiesError(error); }
 }
