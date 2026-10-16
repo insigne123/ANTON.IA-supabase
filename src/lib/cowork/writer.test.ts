@@ -1268,3 +1268,10 @@ test('the person\'s own text, however they ask to change it, is not a new email'
     assert.equal(coworkWriterPasted(ask), true, ask);
   assert.equal(coworkWriterPasted('escríbele a Daniela Rojas de Manpower para presentarle AXIS'), false);
 });
+
+test('a draft is not said to be paused, and a sentence does not end on a conjunction', async () => {
+  const { coworkPlainReply } = await import('./writer');
+  assert.equal(coworkPlainReply('Preparé una versión centrada en procesos con varias candidaturas y. Queda en pausa hasta que la actives.'),
+    'Preparé una versión centrada en procesos con varias candidaturas.');
+  assert.equal(coworkPlainReply('Preparé el correo para Daniela.'), 'Preparé el correo para Daniela.');
+});
