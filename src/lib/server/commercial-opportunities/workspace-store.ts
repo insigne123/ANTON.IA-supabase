@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { isOpportunityAdmin, type WorkScope, type WorkspaceOverview, type WorkItem, type WorkRecord, type privateOpportunitySchema, type assignmentSchema } from '@/lib/commercial-opportunities/workspace';
 import type { z } from 'zod';
+import { reportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { assertOpportunityRead, assertOpportunityAdmin, readableOpportunityIds } from './workspace-access';
 
 export function opportunityDb<T>(result: { data: T; error: { code?: string; message?: string } | null }): T {
@@ -85,7 +86,7 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
     scoped('opportunity_work').maybeSingle(), scoped('opportunity_participants'), scoped('opportunity_activity').order('created_at', { ascending: false }).limit(200),
     scoped('opportunity_tasks').order('due_at', { ascending: true }), scoped('opportunity_documents').order('created_at'),
     scoped('opportunity_reports').order('created_at', { ascending: false }).limit(5),
-    client.from('opportunity_jobs').select('id,kind,state,error,created_at,updated_at,requested_by').eq('organization_id',scope.organizationId).eq('opportunity_id',id)
+    client.from('opportunity_jobs').select('id,kind,state,error,created_at,updated_at,requested_by,payload').eq('organization_id',scope.organizationId).eq('opportunity_id',id)
       .or(`kind.neq.chat,requested_by.eq.${scope.userId}`).order('created_at',{ascending:false}).limit(20), scoped('opportunity_contact_links'),
   ]);
   const people = opportunityDb(participants) || [];
@@ -93,5 +94,7 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
   const context = opportunityDb(await client.from('opportunity_company_context').select('criteria').eq('organization_id', scope.organizationId).maybeSingle());
   return { item, work: opportunityDb(work), decisionMakerTitles: context?.criteria?.decisionMakerTitles || [], participants: members.filter(m => people.some(p => p.user_id === m.user_id)),
     activity: opportunityDb(activity), tasks: opportunityDb(tasks), documents: opportunityDb(documents)?.map(({ storage_path, ...doc }) => doc),
-    reports: opportunityDb(reports), jobs: opportunityDb(jobs), contacts: opportunityDb(contacts) };
+    reports: opportunityDb(reports), contacts: opportunityDb(contacts),
+    // A report's progress for the page's «oficina»; the payload itself never leaves the server.
+    jobs: (opportunityDb(jobs) || []).map(({ payload, ...job }) => job.kind === 'research' ? { ...job, progress: reportJobProgress(job.state, payload) } : job) };
 }

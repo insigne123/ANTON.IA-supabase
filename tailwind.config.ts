@@ -125,10 +125,16 @@ export default {
             height: '0',
           },
         },
+        // The office ghost at work (Oportunidades, ReportOffice): a slow float, only with motion allowed.
+        'ghost-float': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-3px)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        'ghost-float': 'ghost-float 2.8s ease-in-out infinite',
       },
     },
   },

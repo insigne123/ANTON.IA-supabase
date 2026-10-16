@@ -18,8 +18,9 @@ import { bySource, closesLabel, workAdvice } from '@/lib/commercial-opportunitie
 import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@/lib/commercial-opportunities/workspace';
+import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 
-type Job = { id: string; kind: string; state: string; error: string | null; created_at: string };
+type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress };
 type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[] };
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
 const STATES: Record<string, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada', queued: 'En cola', running: 'En curso', waiting: 'Continuando', ready: 'Terminado', failed: 'No terminó' };
@@ -219,7 +220,8 @@ export function OpportunityWorkWorkspace() {
         </header>
         <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
         {tab === 'summary' && <div className="space-y-5">
-          {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} pending={busy} onRetry={generate} />}
+          {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} pending={busy} onRetry={generate}
+            progress={research.progress} tender={item.kind === 'tender'} documents={detail.documents.length} buyer={item.buyer_name || item.company_name} />}
           {latest && newerDocuments.length > 0 && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-muted/30 p-4 text-sm"><p>Subiste {newerDocuments.length === 1 ? 'un documento nuevo' : `${newerDocuments.length} documentos nuevos`} después del informe. Actualízalo para incluir{newerDocuments.length === 1 ? 'lo' : 'los'}.</p><Button size="sm" onClick={generate} disabled={busy}>Actualizar informe</Button></div>}
           {latest && item.kind === 'tender' && !advice?.closed && !detail.documents.some(d => d.source_kind === 'upload') && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-cw-warning-soft p-4 text-sm"><p>Este informe se hizo sin las bases. Súbelas para completarlo: la IA podrá revisar requisitos, criterios y garantías.</p><Button size="sm" variant="outline" onClick={() => setTab('documents')}>Subir bases</Button></div>}
           {!latest && !researching && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={false} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
