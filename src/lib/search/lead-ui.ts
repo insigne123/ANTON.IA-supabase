@@ -111,6 +111,11 @@ export function normalizeLeadForUI(raw: Lead, options?: {
     status: 'saved',
     emailEnrichment: revealEmail && raw.email ? { enriched: true } : undefined,
     hasEmailOnFile: (raw as { has_email?: unknown }).has_email === true || undefined,
+    // Only what the provider sent: the «probabilidad de calce» reads it, and a missing field stays out of the lead.
+    ...(raw.headline?.trim() ? { headline: raw.headline.trim() } : {}),
+    ...(raw.seniority?.trim() ? { seniority: raw.seniority.trim() } : {}),
+    ...(raw.departments?.length ? { departments: raw.departments.filter(Boolean).slice(0, 6) } : {}),
+    ...((options?.organization?.estimated_num_employees ?? raw.organization_size) ? { companySize: options?.organization?.estimated_num_employees ?? raw.organization_size } : {}),
   };
 }
 

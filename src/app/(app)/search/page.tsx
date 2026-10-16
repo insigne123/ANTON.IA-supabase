@@ -88,11 +88,24 @@ import {
 import { ResultsActionBar } from '@/components/search/ResultsActionBar';
 import { SearchIntro } from '@/components/search/SearchIntro';
 import { SearchLeadRow } from '@/components/search/SearchLeadRow';
+import { LeadFitBadge, LeadFitNotice } from '@/components/leads/LeadFitBadge';
+import { useLeadFit } from '@/hooks/use-lead-fit';
+import type { LeadFitLead } from '@/lib/lead-fit/core';
 
 const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
 
 type SearchMode = LeadSearchMode;
 type SearchSource = 'apollo' | 'leads_finder';
+/** What a search result says about the person, for the «probabilidad de calce» at the search stage. */
+function searchFitLead(lead: UILaed): LeadFitLead {
+  const known = (value?: string | null) => (value && value !== '—' ? value : null);
+  return {
+    name: known(lead.name), title: known(lead.title), headline: lead.headline || null, seniority: lead.seniority || null,
+    departments: lead.departments || null, company: known(lead.company), industry: known(lead.industry), companySize: lead.companySize ?? null,
+    location: known(lead.location), linkedinUrl: lead.linkedinUrl || null, email: lead.email || null,
+    emailStatus: lead.hasEmailOnFile ? 'on_file' : null, providerId: lead.sourceProviderId || lead.apolloId || null,
+  };
+}
 function currentCompanySignature(criteria:typeof DEFAULT_FILTERS){return criteria.searchMode==='company_name'?JSON.stringify({mode:'company',name:criteria.companyName.trim().toLowerCase(),domains:splitDomainInput(criteria.companyDomains).sort()}):companyFilterSignature(criteria);}
 
 export default function SearchPage() {
@@ -117,6 +130,7 @@ export default function SearchPage() {
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DEFAULT);
   const totalPages = useMemo(() => Math.max(1, Math.ceil(leads.length / pageSize)), [leads.length, pageSize]);
   const pagedLeads = useMemo(() => leads.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize), [leads, pageIndex, pageSize]);
+  const fitView = useLeadFit(pagedLeads.map((lead) => ({ stage: 'search' as const, lead: searchFitLead(lead) })), !isLoading);
   const abortRef = useRef<AbortController | null>(null);
   const profileStatusAbortRef = useRef<AbortController | null>(null);
   const submittingRef = useRef(false);
@@ -2432,6 +2446,7 @@ export default function SearchPage() {
       {searchError}
       {isLoading ? rowSkeleton('Buscando personas') : pagedLeads.length > 0 ? (
         <>
+          <LeadFitNotice view={fitView} className="mb-2" />
           <ul className="space-y-2 md:hidden" aria-label="Personas encontradas">
             {pagedLeads.map((lead) => (
               <li key={lead.id}>
@@ -2443,6 +2458,7 @@ export default function SearchPage() {
                   onSelect={(checked) => handleSelectLead(lead.id, checked)}
                   lock={teamLockFor(lead)}
                   details={profileDetails(lead) ?? contactOnFile(lead)}
+                  fit={<LeadFitBadge lead={searchFitLead(lead)} stage="search" view={fitView} />}
                 />
               </li>
             ))}
@@ -2457,6 +2473,9 @@ export default function SearchPage() {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Cargo</TableHead>
                   <TableHead>Empresa</TableHead>
+                  <TableHead className="w-[88px]">
+                    <span title="Probabilidad de que sea un prospecto ideal para tu oferta, estimada por la IA">Calce</span>
+                  </TableHead>
                   <TableHead>Estado</TableHead>
                 </TableRow>
               </TableHeader>
@@ -2496,6 +2515,9 @@ export default function SearchPage() {
                       <TableCell>
                         <div>{lead.company}</div>
                         {lead.industry && lead.industry !== '—' ? <div className="text-xs text-foreground/70">{lead.industry}</div> : null}
+                      </TableCell>
+                      <TableCell>
+                        <LeadFitBadge lead={searchFitLead(lead)} stage="search" view={fitView} />
                       </TableCell>
                       <TableCell>
                         {saved ? <Badge variant="success">Guardado</Badge> : contacted ? <Badge variant="info">Contactado</Badge> : <span className="text-xs text-foreground/70">Nuevo</span>}

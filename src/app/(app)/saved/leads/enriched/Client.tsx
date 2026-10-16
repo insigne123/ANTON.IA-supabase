@@ -49,6 +49,9 @@ import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
 import { EmailOwnerWarning, LeadName } from '@/components/leads/LeadName';
 import { TeamLockBadge } from '@/components/collaboration/TeamLockBadge';
 import { useTeamLocks } from '@/hooks/use-team-locks';
+import { useLeadFit } from '@/hooks/use-lead-fit';
+import { LeadFitBadge, LeadFitNotice } from '@/components/leads/LeadFitBadge';
+import type { LeadFitLead } from '@/lib/lead-fit/core';
 import { normalizeLockEmail } from '@/lib/team-lock';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { useConfirm } from '@/components/confirm-dialog';
@@ -82,6 +85,18 @@ import {
 } from '@/lib/leads-workspace/enriched-view';
 
 const PAGE_SIZE = 50;
+
+/** What «Por escribir» knows of a contact, for the «probabilidad de calce»; the server adds its research report itself. */
+function enrichedFitLead(lead: EnrichedLead): LeadFitLead {
+  return {
+    name: lead.fullName || null, title: lead.title || null, headline: lead.headline || null, seniority: lead.seniority || null,
+    departments: lead.departments || null, company: lead.companyName || null, industry: lead.organizationIndustry || lead.industry || null,
+    companySize: lead.organizationSize ?? null, companyDomain: lead.companyDomain || lead.organizationDomain || lead.companyWebsite || null,
+    location: [lead.city, lead.state, lead.country].filter(Boolean).join(', ') || null, linkedinUrl: lead.linkedinUrl || null,
+    email: lead.email || null, emailStatus: lead.emailStatus || null, hasPhone: Boolean(lead.primaryPhone || lead.phoneNumbers?.length),
+    providerId: lead.sourceProviderId || lead.apolloId || null, leadId: lead.id,
+  };
+}
 
 export default function EnrichedLeadsClient() {
   const router = useRouter();
@@ -713,6 +728,9 @@ export default function EnrichedLeadsClient() {
   const pageLeads = useMemo(() => listed.slice(startIdx, endIdx), [listed, startIdx, endIdx]);
   // Who in the team already holds each contact on this page (Plan 5, PR-9b); empty without collaboration.
   const teamLocks = useTeamLocks({ emails: pageLeads.map(e => normalizeLockEmail(e.email)).filter(email => email.includes('@')) });
+  // A contact with its research report is estimated at «tras investigarlo»; the rest at «Por escribir». Once research is known.
+  const fitStage = (lead: EnrichedLead) => (hasReport(lead) ? 'researched' as const : 'saved' as const);
+  const fitView = useLeadFit(pageLeads.map((lead) => ({ stage: fitStage(lead), lead: enrichedFitLead(lead) })), !loadingLeads && nativeResearchStatusKnown);
   const teamLockFor = (lead: EnrichedLead) => teamLocks?.byEmail[normalizeLockEmail(lead.email)];
 
   const pendingPhoneCount = useMemo(
@@ -1427,6 +1445,7 @@ export default function EnrichedLeadsClient() {
               />
             ) : !loadError ? (
               <>
+                <LeadFitNotice view={fitView} className="mb-2" />
                 <ul className="space-y-2 lg:hidden" aria-label="Contactos por escribir">
                   {pageLeads.map((e) => (
                     <li key={e.id} className={cn('rounded-xl border border-border/60 bg-card p-3', selected.has(e.id) && 'border-primary/50 bg-primary/5')}>
@@ -1440,7 +1459,7 @@ export default function EnrichedLeadsClient() {
                         />
                         <div className="min-w-0 flex-1 space-y-2">
                           {leadIdentity(e)}
-                          <div>{stageBadge(e)}</div>
+                          <div className="flex flex-wrap items-center gap-2">{stageBadge(e)}<LeadFitBadge lead={enrichedFitLead(e)} stage={fitStage(e)} view={fitView} /></div>
                           <div className="text-sm">{companyCell(e)}</div>
                           <div className="text-sm">{contactCell(e)}</div>
                           <div className="flex flex-wrap items-center gap-1">
@@ -1467,6 +1486,9 @@ export default function EnrichedLeadsClient() {
                         <TableHead>Contacto</TableHead>
                         <TableHead>Empresa</TableHead>
                         <TableHead>Correo y teléfono</TableHead>
+                        <TableHead className="w-[88px]">
+                          <span title="Probabilidad de que sea un prospecto ideal para tu oferta, estimada por la IA">Calce</span>
+                        </TableHead>
                         <TableHead>Etapa</TableHead>
                         <TableHead className="text-right"><span className="sr-only">Acciones</span></TableHead>
                       </TableRow>
@@ -1485,6 +1507,7 @@ export default function EnrichedLeadsClient() {
                           <TableCell className="max-w-[300px]">{leadIdentity(e)}</TableCell>
                           <TableCell className="max-w-[220px]">{companyCell(e)}</TableCell>
                           <TableCell className="max-w-[280px]">{contactCell(e)}</TableCell>
+                          <TableCell><LeadFitBadge lead={enrichedFitLead(e)} stage={fitStage(e)} view={fitView} /></TableCell>
                           <TableCell className="whitespace-nowrap">{stageBadge(e)}</TableCell>
                           <TableCell>
                             <div className="flex items-center justify-end gap-1">
