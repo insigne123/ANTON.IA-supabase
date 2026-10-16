@@ -30,3 +30,15 @@ test('«Bajas y bloqueos» blocks a single address too, and the block test does 
   assert.match(source, /Bloquear correo/);
   assert.match(source, /blocked: 'success', review: 'warning', clear: 'info', error: 'destructive'/);
 });
+
+test('«Solicitudes» keeps one row of actions: status as one control, the irreversible ones behind «Más acciones»', () => {
+  const source = read('privacy-requests');
+  assert.match(source, /aria-label=\{`Estado de la solicitud de/);
+  assert.doesNotMatch(source, /Marcar ingresada|>\s*Rechazar\s*</, 'statuses are one select, not four buttons');
+  assert.match(source, /Más acciones/);
+  const menu = source.slice(source.indexOf('<DropdownMenuContent'), source.indexOf('</DropdownMenuContent>'));
+  assert.match(menu, /'block'/); assert.match(menu, /'suspend_account'/); assert.match(menu, /text-destructive[\s\S]*?'delete'/);
+  assert.doesNotMatch(source, /<Button\s+variant="destructive"/, 'no solid red button in every card');
+  assert.match(source, /Última acción: \{actionLabel\(request\.last_action_type\)\}/);
+  assert.doesNotMatch(source, /En revision|Ultima |revision manual|relacion:|basica|supresion|oposicion|rapidamente/, 'Spanish with its accents');
+});
