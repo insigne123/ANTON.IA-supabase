@@ -1,3 +1,4 @@
+import { claimForCoworkUsers } from './worker-users';
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { coworkClarificationAnswer, coworkDecisionSchema, coworkRescueNote, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from '@/lib/cowork/agent-loop';
 import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_REASONING_EFFORT, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
@@ -116,9 +117,11 @@ export async function processCoworkQueue() {
 
 async function processCoworkConversationRun(): Promise<{ claimed: boolean; processed: number }> {
   const client = getSupabaseAdminClient();
-  const { data, error } = await client.rpc('cowork_claim_run', { p_user_id: process.env.COWORK_OWNER_USER_ID });
-  if (error) throw error;
-  const run = data?.[0];
+  const run = await claimForCoworkUsers(async (userId) => {
+    const { data, error } = await client.rpc('cowork_claim_run', { p_user_id: userId });
+    if (error) throw error;
+    return data?.[0];
+  });
   if (!run) return { claimed: false, processed: 0 };
   const scope = { userId: run.user_id, organizationId: run.organization_id };
   const controller = new AbortController();
