@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutRepeatedOffer, withoutCaveats, withoutScopeNote } from './answer-quality';
+import { COWORK_YES_CHIP, coworkAnswerIssues, coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText, coworkMetricFit, withTablesAsBlocks, withoutRepeatedAside, withoutRepeatedOffer, withoutCaveats, withoutScopeNote, withoutTrailingQuestions } from './answer-quality';
 import { coworkChoiceMessage, coworkReplyBody, coworkStoredChoices, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -146,6 +146,14 @@ test('the closing question is one plain sentence that ends the reply exactly onc
     [{ label: 'Sí, crear la campaña con los dos correos', message: 'Sí, adelante.' }]);
   assert.deepEqual(polish('Te dejé la lista.', '¿La reviso?').suggestions, [{ label: 'Sí, adelante', message: 'Sí, adelante.' }]);
   assert.equal(polish('Listo.', null).suggestions, null);
+  // A yes does not answer a question that asks for something or offers a pick (round 25).
+  assert.equal(polish('Para escribirlo bien necesito un dato.', '¿Qué producto o servicio ofreces?').suggestions, null);
+  assert.equal(polish('Te ayudo.', '¿Cuál es el problema que necesitas resolver con soporte?').suggestions, null);
+  assert.equal(polish('Te dejé el borrador.', '¿Lo dejo pausado o prefieres revisarlo antes?').suggestions, null);
+  assert.deepEqual(polishCoworkAnswer({ reply: 'Necesito saber a quién.', document: null, question: '¿A quién se lo envío?',
+    suggestions: [{ label: 'Sí, adelante', message: 'Sí, adelante.' }, { label: 'Sí, a Felipe', message: 'Sí, a Felipe' }] }).suggestions,
+    [{ label: 'A Felipe', message: 'A Felipe' }]);
+  assert.deepEqual(polish('Te dejé el borrador.', '¿Qué te parece si creo la campaña?').suggestions, [{ label: 'Sí, crear la campaña', message: 'Sí, adelante.' }]);
   assert.deepEqual(polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña?',
     suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] }).suggestions, [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }]);
   // The chat shows the body and the question apart.
@@ -411,4 +419,63 @@ test('round 24: a stray brand tail, a one-row table the reply already tells and 
   const twice = polishCoworkAnswer({ reply: 'Partiría con los cuatro.\n\n¿Te preparo una campaña pausada para estos cuatro? Queda guardada sin enviar.',
     document: null, question: '¿Te preparo una campaña pausada para estos cuatro?' });
   assert.equal(twice.reply, 'Partiría con los cuatro.\n\nQueda guardada sin enviar.\n\n¿Te preparo una campaña pausada para estos cuatro?');
+});
+
+test('dropping the closing question never leaves the sentence hanging on what joined it', () => {
+  assert.equal(withoutTrailingQuestions('Todavía falta acordar una hora para confirmar la reunión; ¿qué horarios tienes el martes?'),
+    'Todavía falta acordar una hora para confirmar la reunión.');
+  assert.equal(withoutTrailingQuestions('No tiene correo registrado: ¿lo busco?'), 'No tiene correo registrado.');
+  assert.equal(withoutTrailingQuestions('Te dejo la lista. ¿La reviso?'), 'Te dejo la lista.');
+});
+
+test('a goodbye is answered without a closing question or buttons', async () => {
+  const { coworkAsFarewell, coworkIsFarewell } = await import('./answer-quality');
+  assert.equal(coworkIsFarewell('gracias, eso era todo. chao!'), true);
+  assert.equal(coworkIsFarewell('chao'), true);
+  assert.equal(coworkIsFarewell('¿chao o adiós es más formal?'), false);
+  assert.equal(coworkIsFarewell('escríbele a Chaoui'), false);
+  assert.equal(coworkIsFarewell('gracias'), false, 'a thanks alone may come before another request');
+  const answer = polishCoworkAnswer({ reply: 'De nada, Nicolás. ¡Que estés bien!', document: null, question: '¿Preparo los primeros correos?' });
+  const bye = coworkAsFarewell(answer);
+  assert.equal(bye.reply, 'De nada, Nicolás. ¡Que estés bien!');
+  assert.equal(bye.question, null);
+  assert.equal(bye.suggestions, null);
+});
+
+test('the closing question is a question: what follows it stays out, and a yes is not one', () => {
+  assert.equal(coworkQuestion('¿Te lo dejo listo para enviarle a Felipe? Queda en pausa hasta que lo actives.'), '¿Te lo dejo listo para enviarle a Felipe?');
+  assert.equal(coworkQuestion('Sí, déjalo listo para enviarle a Daniela?'), null);
+  assert.equal(coworkQuestion('¿Sí, déjalo listo para enviarle a Daniela?'), null);
+  assert.equal(coworkQuestion('¿Si te parece, creo la campaña?'), '¿Si te parece, creo la campaña?');
+  assert.equal(coworkQuestion('¿Creo la campaña pausada para Felipe?'), '¿Creo la campaña pausada para Felipe?');
+});
+
+test('«cancela eso» with a proposal waiting discards it', async () => {
+  const { coworkCancelsProposal } = await import('./answer-quality');
+  for (const text of ['cancela eso', 'Cancela', 'no, cancela la campaña', 'mejor no', 'descártala', 'olvídalo', 'déjalo así', 'no lo hagas.'])
+    assert.equal(coworkCancelsProposal(text), true, text);
+  for (const text of ['cancela la campaña y escríbele solo a Daniela', '¿cancelo la campaña?', 'no sé', 'para Rodrigo también'])
+    assert.equal(coworkCancelsProposal(text), false, text);
+});
+
+test('a WhatsApp message comes as the message to copy, not as an email card with a campaign', async () => {
+  const { coworkAsChatMessage, coworkAsksChatMessage } = await import('./answer-quality');
+  assert.equal(coworkAsksChatMessage('conviértelo en un mensaje de WhatsApp: Hola, somos Yago…'), true);
+  assert.equal(coworkAsksChatMessage('mándale un correo por whatsapp no, por mail'), false);
+  const answer = polishCoworkAnswer({ reply: 'Te lo dejé breve para WhatsApp.', document: null, question: '¿Preparo una campaña pausada con este correo?',
+    blocks: [{ type: 'email_draft', title: 'Mensaje de WhatsApp', to: null, subject: 'AXIS',
+      body: 'Hola, soy Nicolás, de Yago. AXIS revisa antecedentes laborales de postulantes.\n\n¿Tienes 30 minutos esta semana?\n\nSaludos,\nNicolás Yarur\nGerente Comercial\nYago SpA' }],
+    suggestions: [{ label: 'Sí, prepara la campaña', message: 'Sí, prepara la campaña' }, { label: 'Más breve', message: 'Más breve' }] });
+  const chat = coworkAsChatMessage(answer, 'Nicolás Yarur');
+  assert.equal((chat.document as { content: string } | null)?.content, 'Hola, soy Nicolás, de Yago. AXIS revisa antecedentes laborales de postulantes.\n\n¿Tienes 30 minutos esta semana?');
+  assert.equal(chat.blocks, null);
+  assert.equal(chat.question, null);
+  assert.equal(chat.reply, 'Te lo dejé breve para WhatsApp.');
+  assert.deepEqual(chat.suggestions?.map(chip => chip.label), ['Más breve']);
+});
+
+test('a question in English or Portuguese keeps its own punctuation', () => {
+  assert.equal(coworkQuestion('Should I prepare the first emails for these four?'), 'Should I prepare the first emails for these four?');
+  assert.equal(coworkQuestion('Quer que eu prepare o primeiro e-mail?'), 'Quer que eu prepare o primeiro e-mail?');
+  assert.equal(coworkQuestion('Creo la campaña pausada?'), '¿Creo la campaña pausada?');
 });

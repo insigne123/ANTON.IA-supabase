@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Bell, Download, ExternalLink, FilePlus2, Loader2, Search, Settings, Users } from 'lucide-react';
+import { ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, Loader2, Search, Settings, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,10 +8,18 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
+import { SubmissionKit } from './SubmissionKit';
+import { PipelineBoard, type PipelineSuggestion } from './PipelineBoard';
+import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
+import type { MarkChange } from './ReportMarks';
+import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { OpportunityContacts } from './OpportunityContacts';
+import { OpportunityChat } from './OpportunityChat';
+import { TeamOffice, TeamPicker } from './TeamOffice';
+import { InitialsAvatar } from '@/components/initials-avatar';
 import {OpportunityTicketConnection} from './OpportunityTicketConnection';
 import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
-import { AdvicePill, ExclusionGroups, StartHere, TenderPrerequisites } from './OpportunityRadar';
+import { AdvicePill, ExclusionGroups, NewsList, StartHere, TenderPrerequisites } from './OpportunityRadar';
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
 import { bySource, closesLabel, workAdvice } from '@/lib/commercial-opportunities/workspace-radar';
@@ -21,12 +29,17 @@ import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress };
-type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[] };
+type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
+  marks?: { available: boolean; items: ReportMarks } };
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
 const STATES: Record<string, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada', queued: 'En cola', running: 'En curso', waiting: 'Continuando', ready: 'Terminado', failed: 'No terminó' };
 const ACTIVE = ['queued', 'running', 'waiting'];
 const date = (value: string | null | undefined) => humanDate(value, true) || 'Sin fecha';
 const localDate = (value: string) => value ? new Date(value).toISOString() : null;
+/** «Hoy», «Mañana», «En 3 días», «En una semana»: the next action at 9:00 local time, as the date field writes it. */
+const QUICK_DUE: Array<[string, number]> = [['Hoy', 0], ['Mañana', 1], ['En 3 días', 3], ['En una semana', 7]];
+const dueIn = (days: number) => { const at = new Date(); at.setDate(at.getDate() + days); at.setHours(9, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0'); return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T09:00`; };
 const money = (n: number) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(n);
 const list = (s: string) => (s || '').split('\n').map(s => s.trim()).filter(Boolean);
 async function json(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error || 'No se pudo completar la acción.'); return value; }
@@ -42,10 +55,15 @@ export function OpportunityWorkWorkspace() {
   const [selected, setSelected] = useState<string | null>(null); const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState('summary'); const [modal, setModal] = useState<'create' | 'context' | 'assign' | 'task' | 'criteria' | null>(null);
   const [draft, setDraft] = useState<Record<string, any>>({}); const [files, setFiles] = useState<File[]>([]);
-  const [note, setNote] = useState(''); const [question, setQuestion] = useState(''); const [messages, setMessages] = useState<any[]>([]);
+  const [note, setNote] = useState(''); const [pendingQuestion, setPendingQuestion] = useState<string | null>(null); const [messages, setMessages] = useState<any[]>([]);
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
+  // The admin sees the pipeline first; «Lista» keeps the filters and cards.
+  const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
+  const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number } } | null>(null);
+  const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const watching = useRef<string | null>(null);
   useEffect(() => { if (!feedback) return; const timer = setTimeout(() => setFeedback(''), 6000); return () => clearTimeout(timer); }, [feedback]);
   useEffect(() => { const read = () => setSelected(opportunityInUrl()); read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read); }, []);
@@ -71,7 +89,7 @@ export function OpportunityWorkWorkspace() {
     } catch (e) { if (!signal?.aborted && selectedRef.current === id) { setDetail(null); setMessages([]); setProblem(e instanceof Error ? e.message : 'No se pudo abrir.'); } }
   }, []);
   useEffect(() => {
-    setDetail(null); setMessages([]); setTab('summary'); setNote(''); setQuestion(''); watching.current = null;
+    setDetail(null); setMessages([]); setTab('summary'); setNote(''); setPendingQuestion(null); watching.current = null;
     if (!selected) return; const controller = new AbortController(); void loadDetail(selected, controller.signal);
     // Every 8 s while a report or an answer is on its way, every 45 s otherwise, and never in a hidden tab.
     let last = Date.now();
@@ -91,6 +109,22 @@ export function OpportunityWorkWorkspace() {
     if (watching.current === research.id && research.state === 'ready') { watching.current = null; setTab('summary'); setFeedback(isSignalKind(detail?.item.kind) ? 'La ficha comercial está lista.' : 'Tu informe está listo.'); }
   }, [research, detail?.item.kind]);
   const admin = overview?.mode === 'management';
+  const loadPipeline = useCallback(async () => {
+    try { setPipeline(await json(await fetch('/api/commercial-opportunities/workspace?view=pipeline', { cache: 'no-store' }))); }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar el embudo.'); }
+  }, []);
+  useEffect(() => { if (admin && view === 'pipeline' && !selected) void loadPipeline(); }, [admin, view, selected, loadPipeline]);
+  const review = async () => {
+    setReviewing(true); setProblem('');
+    try { const result = await json(await fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pipeline_review', data: {} }) }));
+      setSuggestions(result.suggestions ?? []); }
+    catch (e) { setProblem(e instanceof Error ? e.message : 'La IA no pudo revisar el embudo.'); }
+    finally { setReviewing(false); }
+  };
+  const moveTo = async (id: string, state: WorkRecord['state'], revision: number) => {
+    const done = await perform('state', { state, expectedRevision: revision }, id, true);
+    if (done) { setSuggestions(current => current?.filter(s => s.id !== id) ?? null); await loadPipeline(); setFeedback(`Movida a «${WORK_STATE_LABELS[state]}».`); }
+  };
   const perform = async (action: string, data: unknown, id = selected, quiet = false) => {
     setBusy(true); setProblem(''); setFeedback('');
     try {
@@ -102,6 +136,16 @@ export function OpportunityWorkWorkspace() {
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar.'); return null; }
     finally { setBusy(false); }
   };
+  // A mark on the report saves on its own: no reload of the expediente and no «Cambios guardados» banner for a tick.
+  const mark = async (change: MarkChange): Promise<ReportMark | null> => {
+    if (!selected) return null;
+    try {
+      const saved = await json(await fetch(`/api/commercial-opportunities/${selected}/workspace`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark', data: change }) })) as ReportMark;
+      // The report and «Cómo postular» tick the same items: both read the saved mark when they open.
+      setDetail(current => current?.marks ? { ...current, marks: { ...current.marks, items: { ...current.marks.items, [saved.key]: saved } } } : current);
+      return saved;
+    } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar la marca.'); return null; }
+  };
   const open = (id: string) => {
     setProblem(''); setSelected(id);
     if (opportunityInUrl() !== id) window.history.pushState(null, '', `${window.location.pathname}?op=${encodeURIComponent(id)}`);
@@ -110,7 +154,8 @@ export function OpportunityWorkWorkspace() {
   };
   const close = () => { setSelected(null); setProblem(''); if (opportunityInUrl()) window.history.pushState(null, '', window.location.pathname); };
   const generate = () => { if (!detail) return; if (admin && detail.item.data.evaluation === 'excluded' && !detail.reports.length) setReconsider(true); else { setTab('summary'); void perform('research', {}, selected, true); } };
-  const ask = (text: string) => { setTab('chat'); setQuestion(''); void perform('chat', { question: text, requestId: crypto.randomUUID() }, selected, true); };
+  // The question shows at once; the answer arrives in the same wait (the server answers it now) or, if a worker took it, by polling.
+  const ask = (text: string) => { setTab('chat'); setPendingQuestion(text); void perform('chat', { question: text, requestId: crypto.randomUUID() }, selected, true).finally(() => setPendingQuestion(null)); };
   const upload = async (picked: File[], report: (u: Array<{ name: string; state: 'uploading' | 'done' | 'error'; message?: string }>) => void) => {
     if (!selected) return;
     // A ZIP from Mercado Público («Descargar todos») goes up as the documents inside it (zip-uploads.ts).
@@ -173,7 +218,11 @@ export function OpportunityWorkWorkspace() {
   const newerDocuments = latest ? (detail?.documents || []).filter(d => d.source_kind === 'upload' && Date.parse(d.created_at) > Date.parse(latest.created_at)) : [];
   const links = usePublicLinks(selected, item?.kind);
   const advice = item ? workAdvice(item) : null;
-  const unread = overview?.notifications.filter(n => !n.read_at) || [];
+  // «Marcar como leídas»: each notice once, then the list again.
+  const clearNews = async (ids: string[]) => {
+    await Promise.all(ids.map(id => fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'notification', data: { id } }) }).catch(() => null)));
+    await load();
+  };
   return <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 sm:p-6">
     {!selected && <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{admin ? 'Hallazgos y oportunidades recibidas, con un equipo y una siguiente acción.' : 'Tus asignaciones, el equipo de trabajo y lo que hay que hacer después.'}</p></div>
       {admin && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={openContext}><Settings className="mr-2 h-4 w-4" />Empresa del workspace</Button><Button onClick={() => { setDraft({ currency: 'CLP',requestId:crypto.randomUUID() }); setFiles([]); setModal('create'); }}><FilePlus2 className="mr-2 h-4 w-4" />Cargar oportunidad</Button></div>}
@@ -184,9 +233,14 @@ export function OpportunityWorkWorkspace() {
     {overview && !selected && <>
       {admin && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">{overview.context ? 'Oferta compartida confirmada' : 'Confirma qué ofrece tu empresa'}</p><p className="mt-1 text-xs text-muted-foreground">{overview.context ? `Búsqueda diaria ${(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} · Límite mensual US$20 · US$${overview.budget.spent.toFixed(2)} usados` : 'La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.'}</p></div>
         <div className="flex flex-wrap gap-2">{overview.context && (overview.context as any).criteria?.postQueries?.length ? <Button variant="ghost" onClick={openCriteria}><Search className="mr-2 h-4 w-4" />Qué buscamos</Button> : null}
-          {overview.context ? <Button variant="outline" disabled={busy || !overview.sourceStatus.automation} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
-      {unread.length > 0 && <section aria-label="Novedades" className="rounded-xl border p-4"><h2 className="flex items-center gap-2 font-semibold"><Bell className="h-4 w-4" />Novedades</h2><div className="mt-3 space-y-2">{unread.map(n => <button key={n.id} onClick={() => open(n.opportunity_id)} className="block w-full rounded-lg border p-3 text-left text-sm hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{n.title}<span className="mt-1 block text-xs text-muted-foreground">{date(n.created_at)} · Abrir</span></button>)}</div></section>}
+          {overview.context ? (overview.sourceStatus.automation ? <Button variant="outline" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null) : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
+      <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />
       <TenderPrerequisites />
+      {admin && <div role="group" aria-label="Vista" className="inline-flex w-fit rounded-xl bg-muted p-1">{([['pipeline', 'Embudo'], ['list', 'Lista']] as const).map(([key, label]) =>
+        <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>}
+      {admin && view === 'pipeline' ? (pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} members={overview.members} busy={busy}
+        suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} />
+        : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>) : <>
       <div className="flex flex-wrap gap-3"><div className="flex min-w-0 flex-1 flex-wrap gap-1" aria-label="Filtrar oportunidades">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar en las oportunidades" aria-label="Buscar en las oportunidades" className="w-full sm:w-72" /></div>
       {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{query ? 'Prueba otro texto o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p></section>}
       {admin && filter === 'recommended' && !query && <StartHere items={items} onOpen={open} />}
@@ -194,7 +248,8 @@ export function OpportunityWorkWorkspace() {
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><h2 id={`source-${group.key}`} className="text-lg font-semibold">{group.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{group.items.length}</span></h2><p className="text-xs text-muted-foreground">{group.note}</p></div>
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
       </section>)}</div>}
-      <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>
+      </>}
+      {!(admin && view === 'pipeline') && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
     </>}
     {selected && <>
       <Button variant="ghost" className="-ml-2 self-start" onClick={close}><ArrowLeft className="mr-2 h-4 w-4" />Oportunidades</Button>
@@ -208,19 +263,23 @@ export function OpportunityWorkWorkspace() {
             {!signal && <div><dt className="text-xs text-muted-foreground">Cierre</dt><dd className="font-medium">{humanDate(item.deadline_at, true) ?? 'Sin fecha informada'}{advice && closesLabel(advice) ? <span className={cn('ml-2 text-xs', advice.urgent ? 'text-destructive' : 'text-muted-foreground')}>{closesLabel(advice)}</span> : null}</dd></div>}
             {!signal && <div><dt className="text-xs text-muted-foreground">Monto</dt><dd className="font-medium">{item.amount ? `${money(item.amount)} ${item.currency || ''}` : 'No informado'}</dd></div>}
             {typeof (item.data as any)?.observed?.code === 'string' && <div><dt className="text-xs text-muted-foreground">Código</dt><dd className="font-medium">{(item.data as any).observed.code}</dd></div>}
-            <div><dt className="text-xs text-muted-foreground">Equipo</dt><dd className="font-medium">{detail.participants.length ? detail.participants.map(p => `${p.name}${p.user_id === detail.work?.responsible_id ? ' (responsable)' : ''}`).join(', ') : 'Sin asignar'}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Equipo</dt><dd className="flex items-center gap-2 font-medium">{detail.participants.length ? <><span className="flex -space-x-2" aria-hidden="true">{detail.participants.slice(0, 4).map(p => <InitialsAvatar key={p.user_id} name={p.name} size="sm" className="ring-2 ring-background" />)}</span><span>{detail.participants.map(p => `${p.name}${p.user_id === detail.work?.responsible_id ? ' (responsable)' : ''}`).join(', ')}</span></> : 'Sin asignar'}</dd></div>
           </dl>
           <div className="flex flex-wrap gap-2">
             {/* One main action per screen: while the guide shows its own «Generar», the header does not repeat it. */}
-            {(latest || researching || tab !== 'summary') && <Button onClick={generate} disabled={busy || researching}>{researching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}{researching ? 'Preparando…' : latest ? (signal ? 'Actualizar ficha comercial' : 'Actualizar informe') : (signal ? 'Generar ficha comercial' : 'Generar informe')}</Button>}
+            {/* With the report ready, the main action is the next step: applying, or finding whom to write to. */}
+            {latest && !researching && <Button onClick={() => setTab(signal ? 'contacts' : 'apply')}>{signal ? <Users className="mr-2 h-4 w-4" aria-hidden="true" /> : <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" />}{signal ? 'Buscar a quién escribir' : 'Cómo postular'}</Button>}
+            {(latest || researching || tab !== 'summary') && <Button variant={latest && !researching ? 'ghost' : 'default'} onClick={generate} disabled={busy || researching}>{researching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}{researching ? 'Preparando…' : latest ? (signal ? 'Actualizar ficha comercial' : 'Actualizar informe') : (signal ? 'Generar ficha comercial' : 'Generar informe')}</Button>}
             {admin && <Button variant="outline" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}><Users className="mr-2 h-4 w-4" />Asignar equipo</Button>}
             {item.url && <Button asChild variant="ghost"><a href={item.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-2 h-4 w-4" />{item.kind === 'tender' ? 'Ver en Mercado Público' : signal ? 'Ver en LinkedIn' : 'Ver fuente'}</a></Button>}
           </div>
           {detail.work?.objective && <p className="text-sm">Objetivo: {detail.work.objective}</p>}
         </header>
-        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
+        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular']]), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
         {tab === 'summary' && <div className="space-y-5">
-          {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} pending={busy} onRetry={generate}
+          {detail.participants.length ? <section aria-label="Equipo de trabajo" className="space-y-2"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">Equipo de trabajo</h2>{admin && <Button variant="ghost" size="sm" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}>Cambiar equipo</Button>}</div>
+            <TeamOffice people={detail.participants} responsibleId={detail.work?.responsible_id} /></section> : null}
+          {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} pending={busy} onRetry={generate} kept={Boolean(latest)}
             progress={research.progress} tender={item.kind === 'tender'} documents={detail.documents.length} buyer={item.buyer_name || item.company_name} />}
           {latest && newerDocuments.length > 0 && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-muted/30 p-4 text-sm"><p>Subiste {newerDocuments.length === 1 ? 'un documento nuevo' : `${newerDocuments.length} documentos nuevos`} después del informe. Actualízalo para incluir{newerDocuments.length === 1 ? 'lo' : 'los'}.</p><Button size="sm" onClick={generate} disabled={busy}>Actualizar informe</Button></div>}
           {latest && item.kind === 'tender' && !advice?.closed && !detail.documents.some(d => d.source_kind === 'upload') && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-cw-warning-soft p-4 text-sm"><p>Este informe se hizo sin las bases. Súbelas para completarlo: la IA podrá revisar requisitos, criterios y garantías.</p><Button size="sm" variant="outline" onClick={() => setTab('documents')}>Subir bases</Button></div>}
@@ -229,9 +288,13 @@ export function OpportunityWorkWorkspace() {
           {latest && <>
             <div className="flex flex-wrap items-center justify-end gap-2"><label className="sr-only" htmlFor="op-export">Formato de descarga</label><select id="op-export" value={download} onChange={e => setDownload(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring">{[['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel'], ['md', 'Markdown'], ['zip', 'Expediente completo (ZIP)']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><Button asChild variant="outline" size="sm"><a href={`/api/commercial-opportunities/${selected}/export?format=${download}`}><Download className="mr-2 h-4 w-4" />Descargar</a></Button></div>
             <OpportunityWorkReport report={latest.report} opportunity={{ title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency }}
-              onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')} />
+              onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')}
+              marks={detail.marks} onMark={mark} people={detail.members || detail.participants} />
           </>}
         </div>}
+        {tab === 'apply' && !signal && <SubmissionKit report={latest?.report ?? null} opportunity={{ title: item.title, kind: item.kind, amount: item.amount, currency: item.currency, deadline: item.deadline_at }}
+          marks={detail.marks} onMark={mark} people={detail.members || detail.participants} onGenerate={generate} generating={researching}
+          onDraft={latest ? title => ask(`Prepara el borrador de «${title}» tal como lo piden las bases, con los datos de mi empresa que conoces y espacios como [RUT] o [firma] para lo que falte, listo para copiar.`) : undefined} />}
         {tab === 'documents' && <section className="space-y-5">
           {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
           {signal && <p className="text-sm text-muted-foreground">Las señales de LinkedIn no tienen bases. Si recibiste algo de esta empresa (una invitación, un requerimiento), súbelo en <button type="button" className="underline" onClick={() => document.getElementById('op-document')?.click()}>Documentos</button>.</p>}
@@ -240,11 +303,10 @@ export function OpportunityWorkWorkspace() {
         </section>}
         {tab === 'tasks' && <section className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Plan de trabajo</h2><Button variant="outline" onClick={() => { setDraft({}); setModal('task'); }}>Crear tarea</Button></div>{!detail.tasks.length && <p className="rounded-xl border p-5 text-sm text-muted-foreground">{latest ? 'Crea la primera tarea o usa «Crear tarea» en los pasos del informe.' : 'Crea la primera tarea. Cuando generes el informe, podrás convertir sus pasos en tareas con un clic.'}</p>}{detail.tasks.map(t => <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"><div><p className="font-medium">{t.title}</p><p className="mt-1 text-xs text-muted-foreground">{date(t.due_at)} · {detail.participants.find(p => p.user_id === t.owner_id)?.name || 'Sin responsable'}</p>{t.evidence && <p className="mt-2 text-sm">{t.evidence}</p>}</div><select aria-label={`Estado de ${t.title}`} value={t.status} disabled={busy} onChange={e => void perform('task', { id: t.id, title: t.title, ownerId: t.owner_id, dueAt: t.due_at, status: e.target.value, evidence: t.evidence })} className="h-10 rounded-md border bg-background px-3 text-sm">{[['pending', 'Pendiente'], ['working', 'En curso'], ['done', 'Realizada'], ['blocked', 'Bloqueada']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>)}{detail.work && <div className="flex flex-wrap items-center gap-2 border-t pt-3"><span className="text-xs text-muted-foreground">Cambiar estado:</span>{['working', 'blocked', 'submitted', ...(admin ? ['won', 'lost', 'archived'] : [])].map(state => <Button variant="outline" size="sm" key={state} disabled={busy} onClick={() => void perform('state', { state, expectedRevision: detail.work!.revision })}>{STATES[state]}</Button>)}</div>}</section>}
         {tab === 'contacts' && <OpportunityContacts id={selected} company={item.company_name || item.buyer_name || item.title} domain={item.company_domain} titles={detail.decisionMakerTitles || []} />}
-        {tab === 'activity' && <section className="space-y-4"><h2 className="font-semibold">Actividad del equipo</h2><form onSubmit={e => { e.preventDefault(); void perform('activity', { kind: 'note', text: note, dueAt: null }).then(r => { if (r) setNote(''); }); }} className="space-y-2"><Label htmlFor="op-note">Registrar avance o nota</Label><Textarea id="op-note" value={note} onChange={e => setNote(e.target.value)} maxLength={4000} placeholder="Ej.: enviamos las consultas al comprador; esperamos respuesta el 23 de octubre." /><Button disabled={busy || !note.trim()}>Guardar avance</Button></form><ol className="space-y-3">{detail.activity.map(a => <li key={a.id} className="rounded-xl border p-4"><p className="text-sm">{a.body}</p><p className="mt-2 text-xs text-muted-foreground">{detail.participants.find(p => p.user_id === a.actor_id)?.name || 'Administración'} · {date(a.created_at)}</p></li>)}</ol></section>}
-        {tab === 'chat' && <section className="max-w-4xl space-y-4"><div><h2 className="font-semibold">Pregúntale a la IA sobre esta oportunidad</h2><p className="mt-1 text-sm text-muted-foreground">Responde con lo que dicen los documentos del expediente y te muestra la cita de donde lo sacó. {detail.documents.length ? `Tiene ${detail.documents.length === 1 ? '1 documento' : `${detail.documents.length} documentos`} para consultar.` : 'Todavía no hay documentos: genera el informe o sube las bases para mejores respuestas.'}</p></div>
-          {!messages.length && <div className="flex flex-wrap gap-2">{(signal ? SUGGESTED_QUESTIONS.signal : SUGGESTED_QUESTIONS.tender).map(q => <Button key={q} variant="outline" size="sm" className="h-auto whitespace-normal py-1.5 text-left" disabled={busy} onClick={() => ask(q)}>{q}</Button>)}</div>}
-          {messages.map(m => <div key={m.id} className="space-y-3 rounded-xl border p-4"><p className="font-medium">{m.question}</p>{m.answer?.answer ? <p className="whitespace-pre-wrap text-sm leading-7">{m.answer.answer}</p> : <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Buscando en los documentos… suele tardar menos de un minuto.</p>}{m.answer?.citations?.length ? <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Ver {m.answer.citations.length === 1 ? 'la cita' : `las ${m.answer.citations.length} citas`} de los documentos</summary><div className="mt-2 space-y-2">{m.answer.citations.map((c: any, i: number) => <blockquote key={i} className="border-l-2 pl-3">{c.quote}</blockquote>)}</div></details> : null}{m.answer?.missing?.length ? <div className="text-xs text-muted-foreground"><p className="font-medium">Para confirmar</p><ul className="mt-1 list-disc space-y-1 pl-4">{m.answer.missing.slice(0, 3).map((text: string, i: number) => <li key={i}>{text}</li>)}</ul></div> : null}</div>)}
-          <form className="space-y-2" onSubmit={e => { e.preventDefault(); if (question.trim().length >= 3) ask(question.trim()); }}><Label htmlFor="op-question">Tu pregunta</Label><Textarea id="op-question" value={question} onChange={e => setQuestion(e.target.value)} placeholder={signal ? '¿Qué cargo debería contactar primero?' : '¿Qué documentos faltan para preparar la propuesta?'} maxLength={2000} /><Button disabled={busy || question.trim().length < 3}>Preguntar</Button></form></section>}
+        {tab === 'activity' && <section className="space-y-4"><h2 className="font-semibold">Actividad del equipo</h2><form onSubmit={e => { e.preventDefault(); void perform('activity', { kind: 'note', text: note, dueAt: null }).then(r => { if (r) setNote(''); }); }} className="space-y-2"><Label htmlFor="op-note">Registrar avance o nota</Label><Textarea id="op-note" value={note} onChange={e => setNote(e.target.value)} maxLength={4000} placeholder="Ej.: enviamos las consultas al comprador; esperamos respuesta el 23 de octubre." /><Button disabled={busy || !note.trim()}>Guardar avance</Button></form><ol aria-label="Actividad" className="ml-3.5 space-y-5 border-l border-border/70 pl-6">{detail.activity.map(a => { const who = (detail.members || detail.participants).find(p => p.user_id === a.actor_id)?.name || 'El sistema'; return <li key={a.id} className="relative"><InitialsAvatar name={who} size="sm" className="absolute -left-[38px] top-0 ring-4 ring-background" /><p className="text-sm leading-6">{a.body}</p><p className="text-xs text-muted-foreground">{who} · {date(a.created_at)}</p></li>; })}</ol></section>}
+        {tab === 'chat' && <OpportunityChat messages={messages} pending={pendingQuestion} documentCount={detail.documents.length} busy={busy}
+          suggestions={signal ? SUGGESTED_QUESTIONS.signal : SUGGESTED_QUESTIONS.tender}
+          placeholder={signal ? '¿Qué cargo debería contactar primero?' : 'Pregunta lo que quieras sobre esta licitación…'} onAsk={ask} />}
       </>}
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
@@ -252,7 +314,14 @@ export function OpportunityWorkWorkspace() {
       <form className="space-y-4" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>{([['offer', 'Qué ofrece la empresa', 'Ej.: Automatizamos la consulta de causas judiciales de postulantes para empresas que contratan en volumen. Entregamos un reporte por persona en menos de 24 horas.'], ['services', 'Servicios o productos · uno por línea', 'Ej.:\nVerificación de antecedentes de postulantes\nMonitoreo de causas laborales'], ['territories', 'Territorios atendidos · opcional', 'Ej.: Chile'], ['exclusions', 'Qué no ofrece · opcional', 'Ej.: No hacemos reclutamiento ni vendemos software de terceros']] as const).map(([key, label, placeholder]) => <div key={key}><Label htmlFor={`op-${key}`}>{label}</Label><Textarea id={`op-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} placeholder={placeholder} rows={key === 'offer' ? 5 : 3} required={key === 'offer' || key === 'services'} /></div>)}<Label htmlFor="op-priority">Prioridad de señales de LinkedIn</Label><select id="op-priority" value={draft.priority} onChange={e => field('priority', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="hiring">Ofertas laborales primero</option><option value="posts">Publicaciones comerciales primero</option><option value="balanced">Ambas por igual</option></select><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(draft.automation)} onChange={e => field('automation', e.target.checked)} />Buscar oportunidades nuevas cada día</label><Label htmlFor="op-hour">Hora de la búsqueda diaria (Chile)</Label><Input id="op-hour" type="number" min={0} max={23} value={draft.hour} onChange={e => field('hour', e.target.value)} /></>
         : modal === 'criteria' ? <>{([['roles', 'Cargos en avisos de trabajo que revelan una necesidad'], ['keywords', 'Palabras para licitaciones y compras públicas'], ['postQueries', 'Búsquedas de publicaciones en LinkedIn'], ['decisionMakerTitles', 'Cargos de quienes deciden la compra']] as const).map(([key, label]) => <div key={key}><Label htmlFor={`op-criteria-${key}`}>{label}</Label><Textarea id={`op-criteria-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} rows={key === 'postQueries' ? 5 : 4} required={key === 'postQueries'} /></div>)}</>
-        : modal === 'assign' ? <><Label htmlFor="op-team">Equipo existente · opcional</Label><select id="op-team" value={draft.teamId || ''} onChange={e => field('teamId', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">Seleccionar personas</option>{overview?.groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select><fieldset className="space-y-2"><legend className="text-sm font-medium">Participantes adicionales</legend>{overview?.members.map(m => <label key={m.user_id} className="flex items-center gap-2 rounded-md border p-2 text-sm"><input type="checkbox" checked={(draft.participantIds || []).includes(m.user_id)} onChange={e => field('participantIds', e.target.checked ? [...(draft.participantIds || []), m.user_id] : draft.participantIds.filter((id: string) => id !== m.user_id))} />{m.name}</label>)}</fieldset><Label htmlFor="op-responsible">Responsable principal</Label><select id="op-responsible" value={draft.responsibleId || ''} onChange={e => { field('responsibleId', e.target.value); if (e.target.value && !(draft.participantIds || []).includes(e.target.value)) field('participantIds', [...(draft.participantIds || []), e.target.value]); }} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">Sin responsable individual aún</option>{overview?.members.map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select><Label htmlFor="op-objective">Objetivo</Label><Textarea id="op-objective" value={draft.objective || ''} onChange={e => field('objective', e.target.value)} /><Label htmlFor="op-due">Próxima acción · hora local</Label><Input id="op-due" type="datetime-local" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /></>
+        : modal === 'assign' ? <>
+          {overview?.groups.length ? <div className="space-y-1.5"><p className="text-sm font-medium">Usar un equipo del workspace · opcional</p><div className="flex flex-wrap gap-2">{overview.groups.map(g => <Button key={g.id} type="button" size="sm" variant={draft.teamId === g.id ? 'secondary' : 'outline'} aria-pressed={draft.teamId === g.id} onClick={() => field('teamId', draft.teamId === g.id ? '' : g.id)}>{g.name}</Button>)}</div><p className="text-xs text-muted-foreground">Suma a todas las personas de ese equipo.</p></div> : null}
+          <div className="space-y-1.5"><p className="text-sm font-medium">¿Quién trabaja esta oportunidad?</p><p className="text-xs text-muted-foreground">Toca a cada persona; la estrella marca a quien responde por ella.</p>
+            <TeamPicker members={overview?.members || []} selected={draft.participantIds || []} responsibleId={draft.responsibleId || ''} onChange={next => { field('participantIds', next.selected); field('responsibleId', next.responsibleId); }} /></div>
+          <TeamOffice people={(overview?.members || []).filter(m => (draft.participantIds || []).includes(m.user_id))} responsibleId={draft.responsibleId} empty={draft.teamId ? 'Se sumará el equipo elegido.' : 'Elige a las personas y aquí verás a tu equipo.'} />
+          <Label htmlFor="op-objective">Objetivo · opcional</Label><Input id="op-objective" value={draft.objective || ''} onChange={e => field('objective', e.target.value)} placeholder="Ej.: presentar la oferta antes del cierre" maxLength={500} />
+          <div className="space-y-1.5"><p className="text-sm font-medium">Próxima acción · opcional</p><div className="flex flex-wrap items-center gap-2">{QUICK_DUE.map(([label, days]) => <Button key={label} type="button" size="sm" variant={draft.dueAt === dueIn(days) ? 'secondary' : 'outline'} aria-pressed={draft.dueAt === dueIn(days)} onClick={() => field('dueAt', dueIn(days))}>{label}</Button>)}<Input id="op-due" type="datetime-local" aria-label="Otra fecha y hora" className="h-9 w-auto" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /></div></div>
+        </>
         : modal === 'task' ? <><Label htmlFor="op-task-title">Acción</Label><Input id="op-task-title" required value={draft.title || ''} onChange={e => field('title', e.target.value)} /><Label htmlFor="op-task-owner">Responsable</Label><select id="op-task-owner" value={draft.ownerId || ''} onChange={e => field('ownerId', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">Sin asignar</option>{detail?.participants.map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select><Label htmlFor="op-task-due">Fecha · hora local</Label><Input id="op-task-due" type="datetime-local" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /><Label htmlFor="op-task-evidence">Evidencia o resultado esperado</Label><Textarea id="op-task-evidence" value={draft.evidence || ''} onChange={e => field('evidence', e.target.value)} /></>
         : <>{[['title', 'Nombre de la oportunidad'], ['company', 'Cliente o entidad convocante'], ['url', 'Enlace · opcional']].map(([key, label]) => <div key={key}><Label htmlFor={`op-new-${key}`}>{label}</Label><Input id={`op-new-${key}`} type={key === 'url' ? 'url' : 'text'} required={key !== 'url'} value={draft[key] || ''} onChange={e => field(key, e.target.value)} /></div>)}<Label htmlFor="op-kind">Tipo</Label><select id="op-kind" value={draft.kind || 'private_tender'} onChange={e => field('kind', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="private_tender">Licitación privada</option><option value="proposal">Solicitud de propuesta</option><option value="quote">Solicitud de cotización</option><option value="commercial">Oportunidad comercial</option></select><Label htmlFor="op-invitation">Invitación o contexto recibido</Label><Textarea id="op-invitation" rows={6} value={draft.description || ''} onChange={e => field('description', e.target.value)} maxLength={40000} placeholder="Pega aquí el correo o mensaje con la invitación." /><Label htmlFor="op-new-deadline">Cierre · hora local, opcional</Label><Input id="op-new-deadline" type="datetime-local" value={draft.deadline || ''} onChange={e => field('deadline', e.target.value)} /><div className="grid grid-cols-2 gap-3"><div><Label htmlFor="op-amount">Monto · opcional</Label><Input id="op-amount" type="number" min={0} value={draft.amount || ''} onChange={e => field('amount', e.target.value)} /></div><div><Label htmlFor="op-currency">Moneda</Label><Input id="op-currency" value={draft.currency || 'CLP'} onChange={e => field('currency', e.target.value)} /></div></div><Label htmlFor="op-new-files">Bases y anexos</Label><Input id="op-new-files" type="file" multiple accept={ACCEPTED_FILES} onChange={e => setFiles(Array.from(e.target.files || []))} /><p className="text-xs text-muted-foreground">PDF, Word o Excel, hasta 20 MB cada uno. También puedes subirlos después en Documentos.</p></>}
         {problem && modal && <p role="alert" className="text-sm text-destructive">{problem}</p>}<div className="flex justify-end gap-2"><Button variant="outline" type="button" disabled={busy} onClick={() => setModal(null)}>Cancelar</Button><Button type="submit" disabled={busy}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{modal === 'context' ? 'Confirmar oferta' : modal === 'criteria' ? 'Guardar' : modal === 'assign' ? 'Asignar y notificar' : 'Guardar'}</Button></div>

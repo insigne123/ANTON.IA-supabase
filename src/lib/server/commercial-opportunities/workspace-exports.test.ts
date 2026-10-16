@@ -41,3 +41,45 @@ test('the first page reads as a decision: what to do, the key dates and plain Sp
  const md=opportunityReportMarkdown(report,opportunity);
  assert.match(md,/^# Servicio de verificación de antecedentes/);assert.match(md,/\*\*Postular si se resuelve lo pendiente\*\*/);assert.doesNotMatch(md,/Fecha de corte|pending ·|high/);
 });
+
+test('the download keeps what the team marked: checks, highlights, the progress, the route and the notes with their author',async()=>{
+ const {reportItemKey,marksFromRows}=await import('@/lib/commercial-opportunities/report-marks');
+ const marked={...report,nextSteps:['Pedir la boleta al banco'],reviewers:['Requisitos y documentos','Contrato y garantías'],
+  milestones:[{label:'Fin de consultas',date:'20-10-2026 12:00',state:'documented' as const,citations:[]},{label:'Cierre',date:'1 nov 2026',state:'documented' as const,citations:[]}]};
+ const marks={names:{u1:'Ana Soto'},items:marksFromRows([
+  {item_key:reportItemKey('requirement','Confirmar alcance'),done:true,highlight:true,note:'Lo pidió Ana por correo al comprador.',updated_by:'u1',updated_at:'2026-10-16T15:00:00Z'},
+  {item_key:reportItemKey('step','Pedir la boleta al banco'),done:false,highlight:false,note:''}])};
+ const md=opportunityReportMarkdown(marked,undefined,marks);
+ assert.match(md,/\*\*Avance:\*\* 1 de 3 listos/);
+ assert.match(md,/- \[ \] Pedir la boleta al banco/);
+ assert.match(md,/- \[x\] \*\*Confirmar alcance\*\* \*\*\(destacado\)\*\*/);
+ assert.match(md,/## Ruta de la postulación/);
+ assert.match(md,/## Notas del equipo\n\n> \*\*Confirmar alcance\*\* \(destacado\)\n> Lo pidió Ana por correo al comprador\.\n> — Ana Soto · 16 de octubre de 2026, 12:00/);
+ assert.match(md,/Revisaron: Requisitos y documentos, Contrato y garantías\./);
+ const {extractText}=await import('unpdf');const text=String((await extractText(await opportunityReportPdf(marked,undefined,marks),{mergePages:true})).text);
+ assert.match(text,/Avance: 1 de 3 listos/);assert.match(text,/Notas del equipo/);assert.match(text,/Lo pidió Ana por correo al comprador/);assert.match(text,/Ana Soto/);
+ assert.match(text,/Ruta de la postulación/);assert.match(text,/Revisaron antes de escribir/);
+ // Without marks the export reads exactly as before.
+ assert.doesNotMatch(opportunityReportMarkdown(marked),/\[x\]|\[ \]|Notas del equipo|Avance:/);
+});
+test('«Cómo postular» travels in the download: each document with its folder, its tick and whether it leaves the offer out',async()=>{
+ const {reportItemKey,marksFromRows}=await import('@/lib/commercial-opportunities/report-marks');
+ const submission={channel:'portal' as const,channelDetail:'Mercado Público, en carpetas de anexos administrativos, técnicos y económicos.',
+  folders:[{name:'Económicos',documents:[{title:'Anexo 4 Formato Oficial de Oferta Económica',source:'annex' as const,signed:true,validity:'',excludesIfMissing:true,howTo:'Neto y total con IVA deben coincidir.',evidence:[]},
+   {title:'Certificado F30',source:'certificate' as const,signed:false,validity:'No más de 30 días antes de la apertura',excludesIfMissing:false,howTo:'Dirección del Trabajo, en línea.',evidence:[]}]}],
+  rules:[{text:'Sueldo líquido de al menos $620.000: menos deja la oferta fuera de bases.',kind:'minimum' as const,evidence:[]}],
+  numbers:{budget:212000000,budgetLabel:'$212.000.000 impuestos incluidos',currency:'CLP',budgetIncludesTax:true,portalValue:'net' as const,notes:[]},
+  guarantees:[{kind:'Fiel cumplimiento',amount:'5% del valor contratado',validity:'Contrato más 60 días hábiles',when:'A la firma',payableTo:'Ilustre Municipalidad de Dalcahue'}],
+  afterSubmit:[],inconsistencies:[{text:'Dos carpetas o tres.',question:'¿Se entregan en dos o en tres carpetas?'}]};
+ const marks={items:marksFromRows([{item_key:reportItemKey('document','Anexo 4 Formato Oficial de Oferta Económica'),done:true,highlight:false,note:''}])};
+ const markdown=opportunityReportMarkdown({...report,submission},undefined,marks);
+ assert.match(markdown,/## Cómo postular/);
+ assert.match(markdown,/- \[x\] \*\*Anexo 4 Formato Oficial de Oferta Económica\*\*.*si falta, quedas fuera/);
+ assert.match(markdown,/- \[ \] \*\*Certificado F30\*\* · Certificado · No más de 30 días/);
+ assert.match(markdown,/Sueldo líquido de al menos \$620\.000/);
+ assert.match(markdown,/¿Se entregan en dos o en tres carpetas\?/);
+ const {extractText}=await import('unpdf');const text=String((await extractText(await opportunityReportPdf({...report,submission},undefined,marks),{mergePages:true})).text);
+ assert.match(text,/Cómo postular/);
+ assert.match(text,/Quedas\s+fuera/);
+ assert.match(text,/Fiel\s+cumplimiento/);
+});

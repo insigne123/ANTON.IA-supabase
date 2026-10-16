@@ -3,9 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { answerSchema, extractionSchema, REPORT_VERSION, validOpportunityCitation, validateOpportunityFacts, type DocumentChunk, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { opportunityReportPrompt, opportunitySynthesisSources } from '@/lib/commercial-opportunities/report-generation';
-import { opportunityFinancialScenario, type WorkScope } from '@/lib/commercial-opportunities/workspace';
+import { OPPORTUNITY_BUCKET, opportunityFinancialScenario, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
+import { runOpportunitySpecialists } from './workspace-specialists';
 import { opportunityGenerate, opportunityGenerateReport, type OpportunityJob } from './workspace-ai';
 import { saveOpportunityDocument } from './workspace-documents';
 import { downloadOpportunitySource, opportunityAttachmentLinks } from './workspace-download';
@@ -16,6 +17,7 @@ import {readPublicMercadoDocuments} from './mercado-publico-documents';
 import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report-view';
 import { opportunityChatDeadline, opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
 import { nextReportProgress, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
+import { validateSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
 
 /** What the page's «oficina» shows (report-progress.ts): a note in the job's payload. The report matters more than its progress, so a
  * note that cannot be written never stops the job. */
@@ -92,7 +94,11 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   if (item.url && !job.payload.sourcesChecked) {
     try {
       const root = await downloadOpportunitySource(item.url);
-      await saveOpportunityDocument(client, scope, id, { name: root.name === 'Fuente.html' ? (item.kind === 'tender' ? 'Ficha pública de Mercado Público.html' : 'Página de la oportunidad.html') : root.name, bytes: root.bytes, sourceKind: item.kind === 'private' ? 'public_web' : 'official', sourceUrl: root.url });
+      const rootName = root.name === 'Fuente.html' ? (item.kind === 'tender' ? 'Ficha pública de Mercado Público.html' : 'Página de la oportunidad.html') : root.name;
+      // A page changes a little on every visit (session ids, timestamps): the new capture replaces the old one instead of
+      // adding a copy whose fragments repeat in the report and the chat.
+      if (/\.html$/i.test(rootName)) await replaceCapturedPage(client, scope, id, rootName);
+      await saveOpportunityDocument(client, scope, id, { name: rootName, bytes: root.bytes, sourceKind: item.kind === 'private' ? 'public_web' : 'official', sourceUrl: root.url });
       const links = root.mime.includes('html') ? opportunityAttachmentLinks(root.bytes.toString('utf8'), root.url) : [];
       for (const link of links) {
         if (Date.now() - started > 90_000) { warnings.push('Quedaron enlaces por descargar.'); break; }
@@ -152,12 +158,16 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   }
   if (skippedBlocks) warnings.push(skippedBlocks === 1 ? 'Una parte de los documentos no se pudo leer y el informe no la considera.' : `${skippedBlocks} partes de los documentos no se pudieron leer y el informe no las considera.`);
   if (skippedBlocks * 4 >= chunks.length) throw new AuthError('No pudimos leer los documentos. Intenta de nuevo en un momento.', 503);
+  await noteProgress(client, job, { stage: 'write', total: parts });
+  // The specialists read the facts in parallel (Haiku, a few seconds); on a later tick their answers come back paid.
+  const review = await runOpportunitySpecialists(client, job, { kind: item.kind, title: item.title, buyer: item.buyer_name || item.company_name || null,
+    deadline: item.deadline_at || null, offer: String(context.offer || ''), facts, missing });
   // Writing the report takes up to 230 s: after a long reading it starts in the next tick, where the read blocks come
   // back from their paid results in a few seconds.
   if (Date.now() - started > 45_000) return { waiting: true as const };
-  await noteProgress(client, job, { stage: 'write', total: parts });
   const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
     prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
+      specialists: review.notes.map(({ id, ...note }) => note),
       sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }, item.kind) });
   const check = (citations: any[]) => citations.filter(c => validOpportunityCitation(c, chunks));
   raw.sections = raw.sections.map(section => ({ ...section, facts: validateOpportunityFacts(section.facts, chunks) }));
@@ -171,9 +181,19 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   raw.warnings = opportunityReportWarnings([...raw.warnings, ...warnings, ...(job.payload.sourceWarnings || [])], documents, basesMissing);
   if(raw.recommendation==='advance' && (raw.warnings.length || raw.requirements.some(r=>r.status==='unknown'||r.status==='blocked')))raw.recommendation='conditional';
   const report: OpportunityReport = { ...raw, kind: item.kind, generatedAt: job.payload.cutoff,
+    route: review.route, reviewers: review.notes.map(note => note.name), submission: review.kit ? validateSubmissionKit(review.kit, chunks) : null,
     coverage: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status, pagesRead: d.pages_read, pagesTotal: d.pages_total })),
     sources: chunks.map(c => ({ id: c.id, documentId: c.document_id, locator: c.locator, name: documents.find(d => d.id === c.document_id)?.name || 'Documento' })) };
   return { waiting: false as const, report };
+}
+/** Removes an earlier capture of the same page (its row, its fragments by cascade and its stored file). */
+async function replaceCapturedPage(client: SupabaseClient, scope: WorkScope, id: string, name: string) {
+  const old = (opportunityDb(await client.from('opportunity_documents').select('id,storage_path').eq('organization_id', scope.organizationId).eq('opportunity_id', id)
+    .eq('name', name).neq('source_kind', 'upload')) || []) as Array<{ id: string; storage_path: string | null }>;
+  if (!old.length) return;
+  opportunityDb(await client.from('opportunity_documents').delete().eq('organization_id', scope.organizationId).eq('opportunity_id', id).in('id', old.map(doc => doc.id)));
+  const paths = old.flatMap(doc => doc.storage_path ? [doc.storage_path] : []);
+  if (paths.length) await client.storage.from(OPPORTUNITY_BUCKET).remove(paths).catch(() => undefined);
 }
 export async function runOpportunityChat(client: SupabaseClient, job: OpportunityJob) {
   const scope = { organizationId: job.organization_id, userId: job.requested_by };
@@ -185,17 +205,26 @@ export async function runOpportunityChat(client: SupabaseClient, job: Opportunit
   const item = opportunityDb(await client.from('commercial_opportunities').select('kind,title,buyer_name,company_name,deadline_at,reasons').eq('organization_id', job.organization_id).eq('id', job.opportunity_id).maybeSingle());
   const context = opportunityDb(await client.from('opportunity_company_context').select('offer').eq('organization_id', job.organization_id).maybeSingle());
   const summary = opportunityChatReportContext(report?.report);
+  // The conversation so far (the last six turns, oldest first), so a follow-up («¿y el plazo?») reads as one.
+  const earlier = (opportunityDb(await client.from('opportunity_chat_messages').select('question,answer,created_at').eq('organization_id', job.organization_id)
+    .eq('user_id', job.requested_by).eq('opportunity_id', job.opportunity_id).lt('created_at', message.created_at).not('answer', 'is', null)
+    .order('created_at', { ascending: false }).limit(6)) || []) as Array<{ question: string; answer: { answer?: string } | null }>;
+  const conversation = earlier.reverse().map(turn => ({ pregunta: turn.question.slice(0, 600), respuesta: String(turn.answer?.answer || '').slice(0, 900) }));
   const answer = await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: answerSchema, output: 3000,
-    prompt: `Responde en español sobre esta oportunidad, directo y en no más de 150 palabras, salvo que pidan un texto. Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo en una frase y sugiere qué consultar. No presentes una propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.
+    prompt: `Eres el asistente de ANTON.IA dentro del expediente de esta oportunidad y conversas con quien la trabaja. Responde en español de Chile, cálido y directo, en no más de 150 palabras salvo que pidan un texto. Usa markdown simple: párrafos cortos, listas con guiones al enumerar y **negrita** para lo clave; sin títulos.
+Si es un saludo, un agradecimiento o una pregunta general que no depende del expediente, responde breve y natural, sin citas, ofrece dos o tres cosas concretas que puedes hacer con este expediente y usa mode «conversation». Si respondes algo del expediente, usa mode «expedient».
+Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo en una frase y sugiere qué consultar. No presentes una propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.
+Si la pregunta sigue la conversación previa («¿y el plazo?», «resúmelo»), respóndela en ese contexto.
 Escribe fechas y horas en hora de Chile; nunca menciones UTC. Lo que el informe ya estableció (requisitos con su estado, fechas) puedes usarlo diciendo que viene del informe: no digas que no existe solo porque no está en los fragmentos; si un fragmento lo contradice, dilo.
 Si piden redactar algo (un mensaje, un correo, una consulta), entrégalo listo para copiar, con datos del expediente y de la oferta, sin inventar nombres, cifras ni capacidades; si falta un dato, deja un espacio como [nombre].
 missing: a lo más 3 datos que cambiarían esta respuesta, en frases cortas; vacío si no hay.
 Oportunidad: ${JSON.stringify({ tipo: item?.kind, titulo: item?.title, cliente: item?.buyer_name || item?.company_name, cierre: opportunityChatDeadline(item?.deadline_at), porQueAparecio: item?.reasons })}
 Oferta de tu empresa: ${String(context?.offer || '').slice(0, 1500)}
 Informe: ${JSON.stringify(summary)}
+Conversación previa: ${JSON.stringify(conversation)}
 Pregunta: ${message.question}
 Fragmentos: ${JSON.stringify(chunks)}` });
   answer.citations = answer.citations.filter(c => validOpportunityCitation(c, chunks));
-  if (!answer.citations.length) answer.missing = ['Esta respuesta no contiene una cita documental validada.', ...answer.missing];
+  if (!answer.citations.length && answer.mode !== 'conversation') answer.missing = ['No encontré una cita textual en los documentos para esto: confírmalo en las bases.', ...answer.missing];
   return answer;
 }

@@ -10,6 +10,8 @@ export const maxDuration = 120;
 
 const headers = { 'Cache-Control': 'private, no-store' };
 let inflight: Promise<number> | null = null;
+/** The hosting front closes a request with a 502 at 30 s: answer before that and let the step finish on its own. */
+const WAKE_ANSWER_MS = 25_000;
 
 /**
  * Latency optimization only. While the owner has the workspace open, it asks
@@ -38,8 +40,14 @@ export async function POST() {
       return NextResponse.json({ woken: false }, { status: 202, headers });
     }
     if (inflight) return NextResponse.json({ woken: false, busy: true }, { status: 202, headers });
-    inflight = drain().finally(() => { inflight = null; });
-    const processed = await inflight;
+    // A failure after the answer has nobody to reach: it is swallowed here and the scheduler still owns recovery.
+    const running = drain().catch(() => 0).finally(() => { inflight = null; });
+    inflight = running;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const processed = await Promise.race([running, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), WAKE_ANSWER_MS); })])
+      .finally(() => clearTimeout(timer));
+    // A long step keeps running (the page keeps polling, so the instance keeps working); the next wake finds it busy.
+    if (processed === null) return NextResponse.json({ woken: true, working: true }, { status: 202, headers });
     return NextResponse.json({ woken: true, processed }, { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);

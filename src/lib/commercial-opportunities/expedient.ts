@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EVIDENCE_STATES } from './workspace';
+import type { SubmissionKit } from './submission-kit';
 
 const s = (max: number) => z.string().max(max);
 export const citationSchema = z.object({ chunkId: s(100), quote: s(1200) });
@@ -21,8 +22,15 @@ export const reportSchema = z.object({
   nextSteps: z.array(s(300)).min(1).max(3),
 });
 export type OpportunityReport = Omit<z.infer<typeof reportSchema>, 'nextSteps'> & { nextSteps?: string[]; kind?: string; generatedAt: string; coverage: Array<{ id: string; name: string; status: string; pagesRead: number; pagesTotal: number | null }>;
-  sources: Array<{ id: string; documentId: string; locator: string; name: string }> };
-export const answerSchema = z.object({ answer: s(12_000), citations: z.array(citationSchema).max(12), missing: z.array(s(500)).max(8) });
+  sources: Array<{ id: string; documentId: string; locator: string; name: string }>;
+  /** The route to submit drawn by the planner, and who reviewed before the writer (reports since 16 Oct 2026). */
+  route?: { steps: Array<{ title: string; detail: string; date: string; kind: 'prepare' | 'ask' | 'submit' | 'wait' | 'decide' | 'contact' }> } | null;
+  reviewers?: string[];
+  /** «Cómo postular»: what to hand in, how, and what leaves the offer out (purchases with bases, reports since 16 Oct 2026). */
+  submission?: SubmissionKit | null };
+export const answerSchema = z.object({ answer: s(12_000), citations: z.array(citationSchema).max(12), missing: z.array(s(500)).max(8),
+  /** «conversation»: a greeting, thanks or general question that does not rest on the expedient (no citation is owed). */
+  mode: z.enum(['expedient', 'conversation']).optional() });
 export type DocumentChunk = { id: string; document_id: string; locator: string; content: string; ordinal: number };
 const normalize = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase('es');
 

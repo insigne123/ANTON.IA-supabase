@@ -1,3 +1,4 @@
+import { claimForCoworkUsers } from './worker-users';
 import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getCoworkRun } from './runs';
@@ -89,9 +90,11 @@ export async function processCoworkDraftQueue() {
     return { processed: 0, claimed: false };
   }
   const client = getSupabaseAdminClient();
-  const taken = await client.rpc('cowork_take_draft', { p_user_id: process.env.COWORK_OWNER_USER_ID });
-  if (taken.error) throw taken.error;
-  const job = taken.data?.[0];
+  const job = await claimForCoworkUsers(async (userId) => {
+    const taken = await client.rpc('cowork_take_draft', { p_user_id: userId });
+    if (taken.error) throw taken.error;
+    return taken.data?.[0];
+  });
   if (!job) return { processed: 0, claimed: false };
   const scope = { userId: job.user_id, organizationId: job.organization_id };
   const finish = (success: boolean, fields: { draftId?: string; subject?: string | null; text?: string | null; error?: string }) =>

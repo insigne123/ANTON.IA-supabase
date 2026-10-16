@@ -22,7 +22,7 @@ test('reads always enforce user and organization and sanitize PostgREST grammar'
   const filter = String(f.calls.find(call => call[0] === 'or')?.[1]);
   const parts = filter.split(',');
   assert.ok(!filter.includes('('));
-  assert.equal(parts.length, 14);
+  assert.equal(parts.length, 16, 'two terms over eight fields, the industry included');
   assert.ok(parts.every(part => /^\w+\.ilike\.%[^%,()]*%$/.test(part)));
   assert.equal(result.scope, 'own_saved_contacts');
   assert.equal(result.returned, 0);
@@ -281,7 +281,7 @@ test('a search term looks in «Por escribir» with its own columns and no gramma
   const f = tablesClient({ leads: [], enriched_leads: [{ id: ENRICHED_B, full_name: 'Susana Mora', email: 'smora@andes.cl', created_at: '2026-09-25T10:00:00Z' }] });
   const result = await queryCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'Susana (Mora)');
   const filter = String(f.calls.find(call => call[0] === 'or' && call[1] === 'enriched_leads')?.[2]);
-  assert.ok(filter.split(',').every(part => /^(full_name|title|company_name|email|city|country)\.ilike\.%[^%,()]*%$/.test(part)), filter);
+  assert.ok(filter.split(',').every(part => /^(full_name|title|company_name|email|city|country|organization_industry)\.ilike\.%[^%,()]*%$/.test(part)), filter);
   assert.equal(result.returned, 1);
   assert.equal(result.partial, false);
 });
@@ -477,4 +477,20 @@ test('«con correo» puts who decides the purchase first and junior roles last; 
   assert.deepEqual((ordered.items as Array<{ id: string }>).map(item => item.id), ['4', '2', '3', '1'], 'who runs the area, then who leads a team');
   const plain = await queryCoworkLeads(withNot(rows), { userId: 'owner', organizationId: 'org' }, 'leads.search', '');
   assert.deepEqual((plain.items as Array<{ id: string }>).map(item => item.id), ['1', '2', '3', '4']);
+});
+
+// Round g1: «nesesito mandar unos mails a la jente de rrhh q tengo guardada» found nobody, though all seven contacts work in
+// selection or people and four are in the «Servicios de RR. HH.» industry.
+test('«rrhh» finds the RR. HH. industry and the people, selection and talent titles', async () => {
+  const f = client();
+  await queryCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'rrhh');
+  const filter = String(f.calls.find(call => call[0] === 'or')?.[1]);
+  assert.ok(filter.includes('industry.ilike.%rr.hh%'), filter);
+  assert.ok(filter.includes('industry.ilike."%rr. hh%"'), filter);
+  assert.ok(filter.includes('title.ilike."%recursos humanos%"'), filter);
+  assert.ok(filter.includes('title.ilike.%selecci%'), filter);
+  assert.ok(!filter.includes('('));
+  const { coworkSearchTermForms } = await import('./lead-tools');
+  assert.deepEqual(coworkSearchTermForms('Logística'), ['Logística'], 'other terms stay as they are');
+  assert.equal(coworkSearchTermForms('RR.HH.').length, 10);
 });

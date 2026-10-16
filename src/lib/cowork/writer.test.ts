@@ -206,7 +206,7 @@ test('the Writer knows an answer inside an open conversation: «Re: » and the s
   assert.match(rule!, /notes lo dice y observations trae el replies\.thread de cada persona/);
   assert.match(rule!, /un bloque email_draft por persona, con to su correo y asunto «Re: » más el asunto del envío original tal como lo trae su lectura, sin cambiarlo/);
   assert.match(rule!, /sin inventar precios, plazos ni fechas, y lo que debe decidir el usuario no va en el texto/);
-  assert.match(rule!, /No es una campaña: question no la ofrece; ofrece el paso que dicen notes o findings, con esas palabras: si es proponer el envío de la primera respuesta, «¿Propongo enviar primero la de <nombre>\?» \(no «¿Apruebas…\?»: aún no hay tarjeta que aprobar\)/);
+  assert.match(rule!, /No es una campaña: question no la ofrece; ofrece el paso que dicen notes o findings, con esas palabras: si es proponer el envío de la primera respuesta, «¿Propongo enviar primero la de <nombre>\?», o con una sola respuesta «¿Propongo enviárselo a <nombre>\?» \(no «¿Apruebas…\?»: aún no hay tarjeta que aprobar\)/);
   assert.match(rule!, /nunca aprobar todas juntas\. Los borradores no se aprueban: no digas que se aprueban en su tarjeta; di que cada envío se aprueba cuando se proponga/);
 });
 
@@ -1206,6 +1206,11 @@ test('an email that ends with the signature and no closing word gets «Saludos,�
   assert.equal(coworkWithSignOff(body.replace('¿Cuántos postulantes revisan al mes?', 'Gracias.'), 'Nicolás Yarur'), body.replace('¿Cuántos postulantes revisan al mes?', 'Gracias.'));
   assert.equal(coworkWithSignOff(body, 'Carla Soto'), body);
   assert.equal(coworkWithSignOff(body, null), body);
+  // In the email's own language (round 25).
+  assert.match(coworkWithSignOff('Hello,\n\nWe are Yago, and we would love to show you a demo.\n\nNicolás Yarur', 'Nicolás Yarur'), /demo\.\n\nBest regards,\nNicolás Yarur$/);
+  assert.match(coworkWithSignOff('Olá,\n\nA AXIS automatiza a revisão de antecedentes de candidatos.\n\nQuantas candidaturas vocês revisam por mês?\n\nNicolás Yarur', 'Nicolás Yarur'), /mês\?\n\nAtenciosamente,\nNicolás Yarur$/);
+  assert.equal(coworkWithSignOff('Hi Ana,\n\nThanks for your time.\n\nBest,\nNicolás Yarur', 'Nicolás Yarur'), 'Hi Ana,\n\nThanks for your time.\n\nBest,\nNicolás Yarur');
+  assert.match(coworkWithSignOff('Hola José,\n\nCuando se acumulan postulantes, revisar sus antecedentes uno por uno deja la vacante abierta.\n\n¿Cuánto les toma hoy?\n\nNicolás Yarur', 'Nicolás Yarur'), /\n\nSaludos,\nNicolás Yarur$/);
 });
 
 test('an edit\'s reply carries the real word count and never claims a greeting or signature it changed', async () => {
@@ -1226,4 +1231,47 @@ test('round 24: «qué mejorar» over a first email does not narrate a revision 
     question: null, suggestions: [], blocks: [{ type: 'email_draft' as const, title: 'Primer correo', to: ['a@x.test', 'b@x.test', 'c@x.test', 'd@x.test'], subject: 'A', body: 'Hola,\n\nTexto.' }] };
   assert.equal(coworkNewEmailReply(output, { pasted: false }).reply,
     'Escribí un primer correo para tus 4 contactos. La campaña quedaría pausada; no se enviará hasta que la actives con otra aprobación.');
+});
+
+test('the signature carries the signer\'s name as the profile writes it, and one reply is not sent «primero»', async () => {
+  const { coworkCanonicalSignature, coworkWithNextStep } = await import('./writer');
+  const body = 'Hola Francisca,\n\nTexto.\n\nSaludos,\nNicolás Yarურ\nGerente Comercial\nYago SpA';
+  assert.equal(coworkCanonicalSignature(body, 'Nicolás Yarur'), body.replace('Yarურ', 'Yarur'));
+  assert.equal(coworkCanonicalSignature(body.replace('Yarურ', 'Yarrur'), 'Nicolás Yarur'), body.replace('Yarურ', 'Yarur'));
+  const other = body.replace('Nicolás Yarურ', 'Nicolás Fernández');
+  assert.equal(coworkCanonicalSignature(other, 'Nicolás Yarur'), other, 'another signer stays');
+  assert.equal(coworkCanonicalSignature(body, 'Nicolás'), body);
+  const one = { reply: 'Preparé la respuesta.', question: '¿Propongo enviar primero la de Francisca?', suggestions: [],
+    blocks: [{ type: 'email_draft' as const, title: 'Respuesta', to: ['francisca@falabella.test'], subject: 'Precio de AXIS', body: 'Hola Francisca,\n\nTexto.' }] };
+  assert.equal(coworkWithNextStep(one).question, '¿Propongo enviárselo a Francisca?');
+});
+
+test('an email in English or Portuguese greets and closes in that language', async () => {
+  const { coworkGreetingInLanguage } = await import('./writer');
+  const english = 'Hola Nehal,\n\nWhen recruitment teams are screening candidates, checking each record is one more step before a placement moves forward.\n\nHow does your team handle these checks today?\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(english), english.replace('Hola Nehal', 'Hi Nehal').replace('Saludos,', 'Best regards,'));
+  const portuguese = 'Hola,\n\nA AXIS automatiza a revisão de antecedentes de candidatos.\n\nQuantas candidaturas vocês revisam por mês?\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(portuguese), portuguese.replace('Hola,', 'Olá,').replace('Saludos,', 'Atenciosamente,'));
+  const nehal = 'Hola Nehal,\n\nIn recruitment services, when several applicants are moving through screening at once, checking labor-related judicial records one by one leaves a candidate ready for placement waiting to move forward.\n\nAXIS automatically reviews applicants’ labor-related judicial records.\n\nHow does your team currently review these records?\n\nBest regards,\nNicolás Yarur';
+  assert.match(coworkGreetingInLanguage(nehal), /^Hi Nehal,/);
+  const spanish = 'Hola José,\n\nCuando se acumulan postulantes, revisarlos uno por uno deja la vacante abierta.\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(spanish), spanish);
+  const formal = 'Estimado Rodrigo Pérez:\n\nEn seguridad privada, revisar antecedentes uno por uno deja turnos sin cubrir.\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(formal), formal.replace('Saludos,', 'Saludos cordiales,'));
+});
+
+test('the person\'s own text, however they ask to change it, is not a new email', async () => {
+  const { coworkWriterPasted } = await import('./writer');
+  const email = 'Hola, somos Yago y tenemos una plataforma increíble llamada AXIS que revisa causas judiciales de forma automática.';
+  for (const ask of [`pásalo a formal: ${email}`, `quiero responder esto, mejóralo: "ok gracias, te escribo después cuando tenga tiempo para ver lo de la demo"`,
+    `tradúcelo al inglés: ${email}`, `conviértelo en un mensaje de WhatsApp: ${email}`, `ponlo en viñetas: ${email}`, `¿qué opinas de este correo? ${email}`])
+    assert.equal(coworkWriterPasted(ask), true, ask);
+  assert.equal(coworkWriterPasted('escríbele a Daniela Rojas de Manpower para presentarle AXIS'), false);
+});
+
+test('a draft is not said to be paused, and a sentence does not end on a conjunction', async () => {
+  const { coworkPlainReply } = await import('./writer');
+  assert.equal(coworkPlainReply('Preparé una versión centrada en procesos con varias candidaturas y. Queda en pausa hasta que la actives.'),
+    'Preparé una versión centrada en procesos con varias candidaturas.');
+  assert.equal(coworkPlainReply('Preparé el correo para Daniela.'), 'Preparé el correo para Daniela.');
 });

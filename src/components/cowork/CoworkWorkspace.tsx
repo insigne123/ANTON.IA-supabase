@@ -7,6 +7,7 @@ import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import { coworkWithMentions, coworkMessageMentions, type CoworkMention } from '@/lib/cowork/mentions';
+import { coworkCancelsProposal } from '@/lib/cowork/answer-quality';
 import { coworkEditedMessage, coworkTurnVersions, coworkVersionLeaf, type CoworkFeedback } from '@/lib/cowork/turn-actions';
 import { COWORK_KEY_HANDLERS, coworkIsMac, coworkShortcut, coworkTypesIntoComposer } from '@/lib/cowork/shortcuts';
 import type { CoworkOverview } from '@/lib/cowork/overview';
@@ -736,6 +737,11 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     if (!latest || !latestIsCurrent) { queue(); return; }
     const status = latest.run.status;
     if (pendingDecision) {
+      // «Cancela eso» is the «Descartar» of the card, said in words: the proposal goes, and nothing waits in the queue.
+      if (files.length === 0 && coworkCancelsProposal(typed)) {
+        if (await resolve(false)) { setMessage(''); attach.clear(); }
+        return;
+      }
       // A typed question is not a rejection of the pending work. Replacement is an explicit action of the queue.
       if (state?.canClarify && (/[?¿]/.test(typed) || /^(?:cu[aá]nto|c[oó]mo|por qu[eé]|qu[eé] (?:pasa|har[aá]|incluye)|expl[ií]came)\b/i.test(typed))) {
         await send(latest.run.id, latest.run.id);

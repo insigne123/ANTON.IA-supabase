@@ -25,9 +25,15 @@ test('a ZIP with nothing readable, or that cannot be opened, says so and what to
   assert.match((await expandZipUploads([broken], load)).notes[0].message, /No pudimos abrir este ZIP/);
 });
 
-test('names written by Windows (Windows-1252) keep their accents, and only .zip files are opened', () => {
+test('names written by Windows keep their accents, in Windows-1252 or code page 850, and only .zip files are opened', () => {
   assert.equal(decodeZipName(Uint8Array.from([0x42, 0x61, 0x73, 0x65, 0x73, 0x20, 0x54, 0xe9, 0x63, 0x6e, 0x69, 0x63, 0x61, 0x73, 0x2e, 0x70, 0x64, 0x66])), 'Bases Técnicas.pdf');
   assert.equal(decodeZipName(new TextEncoder().encode('Anexo Nº2 técnico.pdf')), 'Anexo Nº2 técnico.pdf');
+  // Windows' own «carpeta comprimida» on a Spanish system: code page 850, as the bases of «ARTELUZA» arrived.
+  const cp850 = (text: string) => Uint8Array.from(Array.from(text, char => ({ Ñ: 0xa5, Ó: 0xe0, '°': 0xf8, º: 0xa7, é: 0x82, í: 0xa1, ó: 0xa2, ñ: 0xa4 } as Record<string, number>)[char] ?? char.charCodeAt(0)));
+  assert.equal(decodeZipName(cp850('3-DISEÑOS_DE_DIFUSIÓN.pdf')), '3-DISEÑOS_DE_DIFUSIÓN.pdf');
+  assert.equal(decodeZipName(cp850('1-RES._EXT._N°1534_APRUEBA_BASES.pdf')), '1-RES._EXT._N°1534_APRUEBA_BASES.pdf');
+  assert.equal(decodeZipName(cp850('Anexo técnico y económico.docx')), 'Anexo técnico y económico.docx');
+  assert.equal(decodeZipName(cp850('Declaración jurada Nº3.pdf'.replace('Nº', 'N' + 'º'))), 'Declaración jurada Nº3.pdf');
   assert.equal(isZip({ name: 'Licitaciones.ZIP', type: '' }), true);
   assert.equal(isZip({ name: 'Bases.pdf', type: 'application/pdf' }), false);
 });

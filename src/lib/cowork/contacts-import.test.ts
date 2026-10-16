@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  COWORK_IMPORT_LIMIT, coworkContactKeys, coworkGuessImportColumns, coworkImportColumns, coworkImportLabel, coworkImportPlan, coworkImportSummary,
+  COWORK_IMPORT_LIMIT, COWORK_TYPED_CONTACTS_SOURCE, coworkContactKeys, coworkContactsImportSchema, coworkTypedContactsTable, coworkGuessImportColumns, coworkImportColumns, coworkImportLabel, coworkImportPlan, coworkImportSummary,
 } from './contacts-import';
 
 test('each field is found in the header that says it holds it, the most specific reading first', () => {
@@ -83,4 +83,19 @@ test('the card says how many come in, who stays out, the columns and what to kno
   // Nothing left out, nothing to note: the card stays short.
   const clean = coworkImportSummary({ file: 'a.csv', sheet: null, columns: [], count: 9, duplicates: 0, skipped: 0, withoutEmail: 0, overLimit: 0, limit: 500 });
   assert.deepEqual([clean.leftOut, clean.notes, clean.more], [[], [], 'y 1 contacto más']);
+});
+
+test('people typed in the message import like a file: the same plan, without columns to map, and never a file and people at once', () => {
+  const typed = { people: [{ name: 'Pablo Díaz', email: 'pablo.diaz@sodexo.test', title: 'Jefe de Selección', company: 'Sodexo' }] };
+  assert.equal(coworkContactsImportSchema.safeParse(typed).success, true);
+  assert.equal(coworkContactsImportSchema.safeParse({ file: 'feria.csv' }).success, true);
+  assert.equal(coworkContactsImportSchema.safeParse({ file: 'feria.csv', ...typed }).success, false, 'one source at a time');
+  assert.equal(coworkContactsImportSchema.safeParse({}).success, false);
+  assert.equal(coworkContactsImportSchema.safeParse({ people: Array.from({ length: 21 }, (_, i) => ({ name: `P${i}` })) }).success, false, 'a long list belongs in a file');
+  const { table, columns } = coworkTypedContactsTable(typed.people);
+  const plan = coworkImportPlan(table, columns, new Set());
+  assert.deepEqual(plan.contacts, [{ name: 'Pablo Díaz', email: 'pablo.diaz@sodexo.test', title: 'Jefe de Selección', company: 'Sodexo', linkedinUrl: null, location: null }]);
+  // Someone already saved stays out, as in a file.
+  assert.equal(coworkImportPlan(table, columns, new Set(coworkContactKeys({ name: 'Pablo Díaz', email: 'pablo.diaz@sodexo.test' }))).contacts.length, 0);
+  assert.equal(coworkImportLabel(COWORK_TYPED_CONTACTS_SOURCE, plan), 'Importar 1 contacto de la conversación');
 });

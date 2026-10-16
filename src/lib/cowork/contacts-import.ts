@@ -26,11 +26,36 @@ export const coworkImportColumnsSchema = z.object({
   name: header, lastName: header, email: header, title: header, company: header, linkedinUrl: header, location: header,
 }).strict();
 
-/** contacts.import: the uploaded file (with «#Hoja» for an Excel sheet other than the first) and, if the guess would miss, its columns. */
-export const coworkContactsImportSchema = z.object({
-  file: z.string().trim().min(1).max(160),
-  columns: coworkImportColumnsSchema.nullable().optional(),
+/** Where typed contacts come from, as the card and the label name it («1 contacto nuevo de la conversación»). */
+export const COWORK_TYPED_CONTACTS_SOURCE = 'la conversación';
+const typedField = (max: number) => z.string().trim().max(max).nullable().optional();
+/** A person the user wrote in the message («agrega a Pablo Díaz, jefe de selección de Sodexo, pablo.diaz@sodexo.cl»): only what they wrote. */
+export const coworkTypedContactSchema = z.object({
+  name: z.string().trim().min(1).max(300), email: typedField(320), title: typedField(300), company: typedField(300), linkedinUrl: typedField(2048), location: typedField(300),
 }).strict();
+/** The most people one message brings; a longer list belongs in a file. */
+export const COWORK_TYPED_CONTACTS_LIMIT = 20;
+
+/**
+ * contacts.import: the uploaded file (with «#Hoja» for an Excel sheet other than the first) and, if the guess would miss,
+ * its columns; or the people the user wrote in the conversation. One of the two, never both.
+ */
+export const coworkContactsImportSchema = z.object({
+  file: z.string().trim().min(1).max(160).nullable().optional(),
+  columns: coworkImportColumnsSchema.nullable().optional(),
+  people: z.array(coworkTypedContactSchema).min(1).max(COWORK_TYPED_CONTACTS_LIMIT).nullable().optional(),
+}).strict().refine(value => Boolean(value.file) !== Boolean(value.people?.length), {
+  message: 'Usa file (un archivo subido) o people (personas que el usuario escribió), no ambos.',
+});
+
+/** The typed people as the table an import reads: one column per field, one row per person. */
+export function coworkTypedContactsTable(people: Array<z.infer<typeof coworkTypedContactSchema>>) {
+  const fields = ['name', 'email', 'title', 'company', 'linkedinUrl', 'location'] as const;
+  return {
+    table: { columns: [...fields], body: people.map(person => fields.map(field => person[field] ?? '')) },
+    columns: Object.fromEntries(fields.map(field => [field, field])) as CoworkImportColumnMap,
+  };
+}
 export type CoworkContactsImportInput = z.infer<typeof coworkContactsImportSchema>;
 
 export type CoworkImportContact = {

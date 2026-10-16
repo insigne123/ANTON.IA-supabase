@@ -30,7 +30,7 @@ export function ContactsImportReview({ runId, onApprove, onReject, resolving }: 
     return () => { disposed = true; };
   }, [runId]);
   if (error) return <ReviewError message={error} />;
-  if (!preview) return <ReviewLoading label="Cargando los contactos del archivo…" />;
+  if (!preview) return <ReviewLoading label="Cargando los contactos…" />;
   const summary = coworkImportSummary(preview);
   return <div className="space-y-4">
     <div className="space-y-1">
@@ -38,9 +38,10 @@ export function ContactsImportReview({ runId, onApprove, onReject, resolving }: 
         <span className="text-cw-muted"> {summary.source}</span></p>
       {!!summary.leftOut.length && <p className="text-[12.5px] text-cw-muted">Quedan fuera: {summary.leftOut.join(' · ')}.</p>}
     </div>
-    <ReviewFields>
+    {/* Typed contacts have no columns to map. */}
+    {summary.columns.length ? <ReviewFields>
       <ReviewField label="Columnas"><ReviewChips values={summary.columns} empty="Sin columnas" /></ReviewField>
-    </ReviewFields>
+    </ReviewFields> : null}
     <div className="overflow-x-auto rounded-xl border border-cw-border bg-cw-panel">
       <table className="w-full text-left text-[13px]">
         <caption className="sr-only">Contactos que se importan</caption>

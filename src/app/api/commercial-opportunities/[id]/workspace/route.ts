@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityRead, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
-import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb } from '@/lib/server/commercial-opportunities/workspace-store';
+import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb, saveOpportunityReportMark } from '@/lib/server/commercial-opportunities/workspace-store';
+import { markInputSchema } from '@/lib/commercial-opportunities/report-marks';
+import { applyAutomaticMove, routeKindOf } from '@/lib/server/commercial-opportunities/workspace-pipeline';
 import { assignmentSchema, activitySchema, taskSchema, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
+import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +21,7 @@ export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') return opportunitiesJson({ revision: await assignOpportunity(auth.admin, scope, id, assignmentSchema.parse(data)) });
     if (action === 'activity') {
       const input = activitySchema.parse(data); await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
@@ -41,7 +44,16 @@ export async function POST(request: Request, context: Context) {
       const values = { title: input.title, owner_id: input.ownerId, due_at: input.dueAt, status: input.status, evidence: input.evidence, updated_at: new Date().toISOString() };
       if (input.id) opportunityDb(await auth.admin.from('opportunity_tasks').update(values).eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('id', input.id));
       else opportunityDb(await auth.admin.from('opportunity_tasks').insert({ ...values, organization_id: scope.organizationId, opportunity_id: id, created_by: scope.userId }));
-      await addOpportunityActivity(auth.admin, scope, id, 'task', `Tarea ${input.status}: ${input.title}`); return opportunitiesJson({ ok: true });
+      await addOpportunityActivity(auth.admin, scope, id, 'task', `Tarea ${input.status}: ${input.title}`);
+      if (input.status === 'working' || input.status === 'done') await applyAutomaticMove(auth.admin, scope, id, { kind: 'task_started' }).catch(() => null);
+      return opportunitiesJson({ ok: true });
+    }
+    if (action === 'mark') {
+      const input = markInputSchema.parse(data);
+      const saved = await saveOpportunityReportMark(auth.admin, scope, id, input);
+      // Ticking an item can move the stage: into preparation, or to «Presentada» when it is the step to submit.
+      if (input.done) await applyAutomaticMove(auth.admin, scope, id, { kind: 'marked_done', label: input.label, routeKind: await routeKindOf(auth.admin, scope, id, input.key) }).catch(() => null);
+      return opportunitiesJson(saved);
     }
     if (action === 'link') {
       const { contactId } = z.object({ contactId: z.string().min(1).max(200) }).strict().parse(data);
@@ -64,6 +76,8 @@ export async function POST(request: Request, context: Context) {
     if (existing?.opportunity_id !== id) throw new AuthError('La pregunta pertenece a otra oportunidad.', 409);
     opportunityDb(await auth.admin.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, opportunity_id: id, requested_by: scope.userId,
       kind: 'chat', dedupe_key: key, payload: { requestId: input.requestId } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
-    return opportunitiesJson({ queued: true, requestId: input.requestId }, 202);
+    // Answered now, as a conversation; if a worker took it first (or this fails), the page keeps waiting for that answer.
+    const answered = await answerOpportunityChatNow(auth.admin, scope.organizationId, key).catch(() => false);
+    return opportunitiesJson({ queued: !answered, answered, requestId: input.requestId }, answered ? 200 : 202);
   } catch (error) { return opportunitiesError(error); }
 }

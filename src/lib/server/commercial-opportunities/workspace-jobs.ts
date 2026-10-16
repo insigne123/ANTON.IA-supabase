@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { opportunityAutomationEnabled, opportunityWorkspaceEnabled, opportunityLocalClock, type WorkScope } from '@/lib/commercial-opportunities/workspace';
@@ -7,6 +7,7 @@ import { assertOpportunityAdmin } from './workspace-access';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { criteriaSchema, captureOpportunityLinkedIn, captureOpportunityTenders, evaluateOpportunityBatch } from './workspace-sources';
 import { runOpportunityResearch, runOpportunityChat } from './workspace-research';
+import { applyAutomaticMove, runPipelineReview } from './workspace-pipeline';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -41,6 +42,25 @@ export async function opportunityWorkerTick(client: SupabaseClient) {
   const claimed = opportunityDb(await client.rpc('opportunity_claim_job')) as OpportunityJob[];
   const job = claimed?.[0];
   if (!job) return { processed: 0 };
+  return runOpportunityJob(client, job);
+}
+/**
+ * A chat question answered while the person waits, like a conversation: its own job, taken here only while still queued
+ * (the same conditional update the claim makes), so a worker that took it first answers it instead and nothing runs twice.
+ */
+export async function answerOpportunityChatNow(client: SupabaseClient, organizationId: string, dedupeKey: string) {
+  const done = await runQueuedOpportunityJobNow(client, organizationId, dedupeKey, 'chat');
+  return done?.processed === 1 && done.state === 'ready';
+}
+/** A queued job taken in the same request, only while still queued: a worker that took it first keeps it. */
+export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate') {
+  const job = opportunityDb(await client.from('opportunity_jobs')
+    .update({ state: 'running', lease_token: randomUUID(), lease_until: new Date(Date.now() + 5 * 60_000).toISOString(), attempts: 1, updated_at: new Date().toISOString() })
+    .eq('organization_id', organizationId).eq('dedupe_key', dedupeKey).eq('kind', kind).eq('state', 'queued').select('*').maybeSingle()) as OpportunityJob | null;
+  return job ? runOpportunityJob(client, job) : null;
+}
+/** One claimed job, run and committed with its lease: the worker's tick and the chat answered now share it. */
+export async function runOpportunityJob(client: SupabaseClient, job: OpportunityJob) {
   let result: any = null; let state = 'ready'; let error: string | null = null;
   try {
     const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', job.organization_id).maybeSingle());
@@ -48,10 +68,12 @@ export async function opportunityWorkerTick(client: SupabaseClient) {
     if (job.payload.revision && job.payload.revision !== context.revision) throw new AuthError('Los criterios cambiaron; se preparará una búsqueda actualizada.', 409);
     if (job.kind === 'criteria') {
       const criteria = await opportunityGenerate(client, job, { role: 'screen', category: 'evaluation', step: 'criteria', schema: criteriaSchema, output: 3000,
-        prompt: `Deriva criterios comerciales desde la oferta confirmada, sin inventar servicios. roles son cargos que aparecen en avisos de trabajo y revelan que una empresa necesita esta oferta (por ejemplo, cargos que se contratan en volumen o la creación de un área), nunca los cargos de quienes deciden la compra; esos van en decisionMakerTitles. Genera también palabras/categorías de compras públicas y consultas de publicaciones LinkedIn. Los posts deben buscar compradores/necesidades, no promoción de proveedores. Consultas de hasta400 caracteres/5 operadores, sin site: (se enviarán al buscador LinkedIn). Datos: ${JSON.stringify({ offer: context.offer, services: context.services, territories: context.territories, exclusions: context.exclusions, priority: context.priority })}` });
+        prompt: `Deriva criterios comerciales desde la oferta confirmada, sin inventar servicios. roles son cargos que aparecen en avisos de trabajo y revelan que una empresa necesita esta oferta (por ejemplo, cargos que se contratan en volumen o la creación de un área), nunca los cargos de quienes deciden la compra; esos van en decisionMakerTitles. Genera también palabras/categorías de compras públicas y 5 consultas de publicaciones LinkedIn, cada una sobre una necesidad distinta. Los posts deben buscar compradores/necesidades, no promoción de proveedores: frases cortas entre comillas unidas por OR, a lo más un AND, y excluye a quien busca empleo con NOT ("busco trabajo" OR opentowork). Consultas de hasta 400 caracteres/5 operadores, sin site: (se enviarán al buscador LinkedIn). Datos: ${JSON.stringify({ offer: context.offer, services: context.services, territories: context.territories, exclusions: context.exclusions, priority: context.priority })}` });
       opportunityDb(await client.from('opportunity_company_context').update({ criteria }).eq('organization_id', job.organization_id).eq('revision', context.revision));
       result = { criteriaReady: true };
       if (context.automation && opportunityAutomationEnabled()) await enqueueOpportunityDiscovery(client, { organizationId: job.organization_id, userId: job.requested_by, role: 'admin' }, true);
+    } else if (job.kind === 'evaluate' && job.payload.pipeline) {
+      result = await runPipelineReview(client, job);
     } else if (['tenders', 'hiring', 'posts', 'evaluate'].includes(job.kind)) {
       if (!opportunityAutomationEnabled()) throw new AuthError('La búsqueda automática aún no está activada.', 409);
       if (job.kind === 'tenders') { result = await captureOpportunityTenders(client, job, context);if(result.waiting)state='waiting'; }
@@ -68,7 +90,11 @@ export async function opportunityWorkerTick(client: SupabaseClient) {
     error = failure instanceof AuthError ? failure.message : 'El trabajo no pudo terminar. Los documentos y reservas se conservan.';
   }
   const committed = opportunityDb(await client.rpc('opportunity_finish_job', { p_id: job.id, p_lease: job.lease_token, p_state: state, p_result: result, p_error: error }));
-  if (committed && state === 'ready' && job.kind === 'research' && job.opportunity_id) await notifyReportReady(client, job).catch(() => undefined);
+  if (committed && state === 'ready' && job.kind === 'research' && job.opportunity_id) {
+    await notifyReportReady(client, job).catch(() => undefined);
+    // A report ready moves an assigned opportunity into preparation (pipeline.ts).
+    await applyAutomaticMove(client, { organizationId: job.organization_id, userId: job.requested_by }, job.opportunity_id, { kind: 'report_ready' }).catch(() => null);
+  }
   return { processed: committed ? 1 : 0, state, kind: job.kind };
 }
 /** Whoever asked for the report hears it is ready, even without a team assigned (participants already get it). */

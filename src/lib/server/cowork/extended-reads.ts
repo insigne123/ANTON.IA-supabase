@@ -166,10 +166,18 @@ export { readOrganizationOffer };
 export async function readCoworkAppContext(scope: Scope, builder = buildSupliaContext, client?: SupabaseClient) {  // Reuses the shared context builder (connections, counts, offer): Cowork needs
   // the same verified connection state before discussing sends. No tokens included.
   const context = await builder({ user: { id: scope.userId }, organizationId: scope.organizationId, organizationIds: [scope.organizationId], supabase: null } as never);
-  const organizationOffer = context.offer ? null : await readOrganizationOffer(client, scope.organizationId);
+  const [organizationOffer, yours] = await Promise.all([
+    context.offer ? null : readOrganizationOffer(client, scope.organizationId),
+    // The person's own saved contacts, the figure the home shows as «tus contactos».
+    client ? Promise.resolve().then(async () => {
+      const result = await client.from('leads').select('id', { count: 'exact', head: true }).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
+      return result.error || typeof result.count !== 'number' ? null : result.count;
+    }).catch(() => null) : null,
+  ]);
   return {
     scope: 'organization_context',
-    emailConnections: context.emailConnections, counts: context.counts,
+    scopeNote: 'counts son del workspace completo (todo el equipo); yourLeads son los contactos que guardó esta persona. «Tus contactos» es yourLeads.',
+    emailConnections: context.emailConnections, counts: { ...context.counts, ...(yours === null ? {} : { yourLeads: yours }) },
     performance: context.performance,
     offer: context.offer || organizationOffer,
     offerSource: context.offer ? 'profile' : organizationOffer ? 'organization' : null,

@@ -158,3 +158,11 @@ test('the user context carries memories only when there are some, and the home s
   assert.equal(context?.offer, 'Verificación de antecedentes');
   assert.ok(context && !('memories' in context));
 });
+
+test('read through a session, the context leaves the connected mailboxes to the server instead of drawing a 403', async () => {
+  const { client: db, calls } = client({ id: userId, full_name: 'Pruebas QA' });
+  await loadCoworkUserContext(db as never, scope, { memories: false, mailbox: false });
+  assert.deepEqual(calls.map(call => call.table).filter(table => table === 'provider_tokens'), []);
+  await loadCoworkUserContext(db as never, scope, { memories: false });
+  assert.deepEqual(calls.map(call => call.table).filter(table => table === 'provider_tokens'), ['provider_tokens'], 'the worker, with the server role, still reads them');
+});

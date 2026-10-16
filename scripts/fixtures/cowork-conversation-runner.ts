@@ -18,7 +18,7 @@ import { coworkTurnCeiling } from '../../src/lib/cowork/turn-budget';
 import { coworkJudgeFix, type CoworkJudgement, type CoworkShownAnswer } from '../../src/lib/cowork/judge';
 import { coworkWriterBlocks, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput } from '../../src/lib/cowork/writer';
 import {
-  COWORK_IMPORT_FIELDS, COWORK_IMPORT_FIELD_LABEL, COWORK_IMPORT_LIMIT, COWORK_IMPORT_SHOWN, coworkContactKeys, coworkImportColumns, coworkImportPlan,
+  COWORK_IMPORT_FIELDS, COWORK_IMPORT_FIELD_LABEL, COWORK_IMPORT_LIMIT, COWORK_IMPORT_SHOWN, COWORK_TYPED_CONTACTS_SOURCE, coworkContactKeys, coworkImportColumns, coworkImportPlan, coworkTypedContactsTable,
   coworkImportLabel, coworkImportSummary, type CoworkContactsImportInput,
 } from '../../src/lib/cowork/contacts-import';
 import { coworkReplyRefusal, type CoworkReplyThread } from '../../src/lib/cowork/reply-thread';
@@ -158,11 +158,15 @@ export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, optio
  */
 export function corpusStageImport(input: CoworkContactsImportInput, read: (action: string, input: string) => unknown) {
   const quote = (value: string) => `«${value}»`;
-  const file = read('files.read', input.file) as { found?: boolean; name?: string; kind?: string; columns?: string[]; rows?: string[][]; sheet?: string | null } | null;
-  if (!file?.found || !file.name) throw new Error(`No encontré ${quote(input.file)} entre los archivos que subiste: léelo primero con files.read y usa su nombre exacto.`);
+  // People typed in the message: the same plan as a file, without columns to map.
+  const typed = input.people?.length ? coworkTypedContactsTable(input.people) : null;
+  const file = typed
+    ? { found: true, name: COWORK_TYPED_CONTACTS_SOURCE, kind: 'table', columns: typed.table.columns, rows: typed.table.body as string[][], sheet: null }
+    : read('files.read', String(input.file)) as { found?: boolean; name?: string; kind?: string; columns?: string[]; rows?: string[][]; sheet?: string | null } | null;
+  if (!file?.found || !file.name) throw new Error(`No encontré ${quote(String(input.file))} entre los archivos que subiste: léelo primero con files.read y usa su nombre exacto.`);
   if (file.kind !== 'table' || !file.columns || !file.rows) throw new Error('Los contactos se importan desde un CSV, un Excel (.xlsx) o una lista JSON; este archivo no trae una tabla.');
   if (!file.rows.length) throw new Error('El archivo no trae filas para importar.');
-  const { columns, unknown } = coworkImportColumns(file.columns, input.columns);
+  const { columns, unknown } = typed ? { columns: typed.columns, unknown: [] as string[] } : coworkImportColumns(file.columns, input.columns);
   const headers = file.columns.map(quote).join(', ');
   if (unknown.length) throw new Error(`El archivo no tiene ${unknown.length === 1 ? 'la columna' : 'las columnas'} ${unknown.map(quote).join(', ')}; sus columnas son ${headers}.`);
   if (!columns.name) throw new Error(`No encontré la columna con el nombre de cada persona; las columnas del archivo son ${headers}. Indica cuál es en columns.name.`);
@@ -175,7 +179,7 @@ export function corpusStageImport(input: CoworkContactsImportInput, read: (actio
   }
   const summary = coworkImportSummary({ file: file.name, sheet: file.sheet ?? null, count: plan.contacts.length, duplicates: plan.duplicates,
     skipped: plan.skipped, withoutEmail: plan.contacts.filter(contact => !contact.email).length, overLimit: plan.overLimit, limit: COWORK_IMPORT_LIMIT,
-    columns: COWORK_IMPORT_FIELDS.flatMap(field => columns[field] ? [{ field, label: COWORK_IMPORT_FIELD_LABEL[field], header: columns[field]! }] : []) });
+    columns: typed ? [] : COWORK_IMPORT_FIELDS.flatMap(field => columns[field] ? [{ field, label: COWORK_IMPORT_FIELD_LABEL[field], header: columns[field]! }] : []) });
   // The label the worker gives the proposal, and the card as ContactsImportReview draws it.
   return { label: coworkImportLabel(file.name, plan), card: {
     entran: `${summary.headline} ${summary.source}`,

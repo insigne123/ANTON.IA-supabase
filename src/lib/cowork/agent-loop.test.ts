@@ -78,7 +78,7 @@ test('lead-scoped effect labels use the observed contact name, never raw IDs', a
     decide: async observations => observations.length === 0 ? found : enrich,
   });
   assert.deepEqual(proposals, [{ kind: 'enrich_contact', targetId: leadId,
-    label: 'Buscar el correo de José C. (GrupoExpro)', originRunId: runId }]);
+    label: 'Buscar los datos de José C. (GrupoExpro)', originRunId: runId }]);
 });
 
 test('a campaign card names the campaign campaigns.list showed, never its ID', async () => {
@@ -308,6 +308,25 @@ test('parallel and sequential queries share one total read budget', async () => 
   assert.equal(calls, 3);
 });
 
+test('the writing context is a free read: contacts, sends and campaigns fill the ceiling and it still comes in', async () => {
+  const executed: string[] = [];
+  let decisions = 0;
+  const result = await runCoworkReadLoop({
+    message: 'crea una campaña para mis contactos con correo', signal: new AbortController().signal, authorize: async () => {},
+    ceiling: { ...COWORK_TURN_DEFAULTS, reads: 3 },
+    decide: async (_observations, _mustAnswer, _rejections, budget?: CoworkTurnBudget) => {
+      decisions++;
+      if (decisions === 1) return { action: 'reads.parallel', query: null, leadId: null, answer: null,
+        reads: [{ action: 'leads.search', input: 'con correo' }, { action: 'contacted.search', input: '' }, { action: 'campaigns.list', input: '' }, { action: 'message.context', input: '' }] };
+      assert.equal(budget?.readsLeft, 0, 'the three counted reads are spent; the writing context was free');
+      return answer;
+    },
+    execute: async action => { executed.push(action); return {}; }, record: async () => {},
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.deepEqual(executed.sort(), ['campaigns.list', 'contacted.search', 'leads.search', 'message.context']);
+});
+
 test('a fixed read sent with periods runs once instead of costing the decision', async () => {
   const executed: string[] = [];
   let decisions = 0;
@@ -501,9 +520,9 @@ test('importing contacts is proposed only when it is on, for a file seen in the 
   // On: the file files.read found (a sheet of it) anchors the proposal to the run that read it.
   await runCoworkReadLoop({ ...base, contactsImport: true, execute: async () => found,
     decide: async observations => observations.length ? importing : readFile });
-  assert.deepEqual(proposals[0], { kind: 'contacts_import', targetId: 'new-contacts-import', label: 'Importar contactos de un archivo',
+  assert.deepEqual(proposals[0], { kind: 'contacts_import', targetId: 'new-contacts-import', label: 'Guardar contactos',
     originRunId: runId, contactsImport: { file: 'prospectos.xlsx#Prospectos', columns: { name: 'Quién' } } });
-  assert.match(notes[0], /Propongo guardar en tus contactos a las personas del archivo que aún no están/);
+  assert.match(notes[0], /Propongo guardar en tus contactos a las personas que aún no están/);
   // Proposed before reading anything: the loop lists the uploads once, and a file that is not there is refused.
   await assert.rejects(runCoworkReadLoop({ ...base, contactsImport: true,
     execute: async action => { reads.push(action); return { scope: 'own_uploads', files: [{ name: 'otra.csv', runId, size: 3 }] }; },

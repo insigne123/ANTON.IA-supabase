@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { getBrowserStorage } from '@/lib/browser-storage';
-import { COWORK_OWNER_EMAIL } from '@/lib/cowork/access';
+import { isCoworkEmailAllowed } from '@/lib/cowork/access';
 
 export type NavAccess = { cowork: boolean; opportunities: boolean };
 
@@ -46,7 +46,8 @@ export function useNavAccess({ userId, email, organizationId }: {
   // Read while rendering: the user is unknown on the server and on the first render, so this never differs at hydration.
   const cached = useMemo(() => readCachedNavAccess(scope), [scope]);
   const [answers, setAnswers] = useState<{ scope: string; access: Partial<NavAccess> }>({ scope: '', access: {} });
-  const isCoworkOwner = email?.trim().toLowerCase() === COWORK_OWNER_EMAIL;
+  // Only the accounts Cowork is open to ask the server; it still decides by id, grant and membership.
+  const isCoworkOwner = isCoworkEmailAllowed(email);
 
   useEffect(() => {
     if (!scope) return;
