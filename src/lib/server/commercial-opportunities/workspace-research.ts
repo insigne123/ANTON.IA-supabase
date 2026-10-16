@@ -15,6 +15,14 @@ import {gatherOpportunityBuyerContext} from './workspace-public-research';
 import {readPublicMercadoDocuments} from './mercado-publico-documents';
 import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report-view';
 import { opportunityChatDeadline, opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
+import { nextReportProgress, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
+
+/** What the page's «oficina» shows (report-progress.ts): a note in the job's payload. The report matters more than its progress, so a
+ * note that cannot be written never stops the job. */
+async function noteProgress(client: SupabaseClient, job: OpportunityJob, note: ReportProgressNote) {
+  job.payload.progress = nextReportProgress(job.payload.progress, note, new Date());
+  try { await client.from('opportunity_jobs').update({ payload: job.payload }).eq('id', job.id).eq('lease_token', job.lease_token); } catch { /* next note */ }
+}
 
 export async function enqueueOpportunityResearch(client: SupabaseClient, scope: WorkScope, id: string) {
   await assertOpportunityRead(client, scope, id);
@@ -98,6 +106,7 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   }
   if (item.data?.description) await saveOpportunityDocument(client, scope, id, { name: 'Ficha de oportunidad.txt', bytes: Buffer.from(JSON.stringify({ title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency, source: item.url, description: item.data.description }, null, 2)), sourceKind: item.kind === 'private' ? 'pasted' : 'official' });
   if(!job.payload.buyerContextChecked){
+    await noteProgress(client, job, { stage: 'buyer' });
     const publicWarnings=await gatherOpportunityBuyerContext(client,job,{name:item.buyer_name||item.company_name||'',domain:item.company_domain||null},started);
     job.payload.buyerContextChecked=true;job.payload.publicWarnings=publicWarnings;
     opportunityDb(await client.from('opportunity_jobs').update({payload:job.payload}).eq('id',job.id).eq('lease_token',job.lease_token));
@@ -121,9 +130,16 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   const facts: Array<{ text: string; state: string; citations: any[] }> = [];
   let skippedBlocks = 0;
   const missing: string[] = [];
+  const parts = Math.ceil(chunks.length / 4);
+  let noted = 0;
   for (let offset = 0; offset < chunks.length; offset += 4) {
     if (Date.now() - started > 120_000) return { waiting: true as const };
     const block = chunks.slice(offset, offset + 4);
+    // Every few seconds, not every part: parts already read come back in a moment when a job resumes.
+    if (Date.now() - noted > 3000) {
+      noted = Date.now();
+      await noteProgress(client, job, { stage: 'read', read: offset / 4, total: parts, document: documents.find(d => d.id === block[0].document_id)?.name || null });
+    }
     let extracted;
     // One unreadable block (a malformed model answer, or one already paid and unanswered) does not sink the whole report.
     try { extracted = await opportunityGenerate(client, job, { step: `extract:${createHash('sha256').update(block.map(c => c.id).join('|')).digest('hex')}`, category: 'research', role: 'extract', schema: extractionSchema, output: 4500,
@@ -139,6 +155,7 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   // Writing the report takes up to 230 s: after a long reading it starts in the next tick, where the read blocks come
   // back from their paid results in a few seconds.
   if (Date.now() - started > 45_000) return { waiting: true as const };
+  await noteProgress(client, job, { stage: 'write', total: parts });
   const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
     prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
       sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }, item.kind) });

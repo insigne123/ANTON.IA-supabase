@@ -6,6 +6,8 @@ import { CheckCircle2, Download, ExternalLink, FileText, Loader2, UploadCloud } 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { friendlyJobError, statusLabel } from '@/lib/commercial-opportunities/report-view';
+import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
+import { ReportOffice } from './ReportOffice';
 
 export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.zip';
 export type ExpedientDocument = { id: string; name: string; extraction_status: string; source_kind: string; source_url: string | null; pages_read: number | null; pages_total: number | null; created_at: string };
@@ -125,12 +127,14 @@ export function DocumentList({ id, documents, kind }: { id: string; documents: E
   })}</div>;
 }
 
-/** While the report is being prepared: what is happening and how long it usually takes. `pending`: the retry was sent and
- * its answer is on its way, so the button says so instead of looking untouched for the seconds the reload takes. */
-export function ReportProgress({ state, error, signal, pending = false, onRetry }: { state: string; error?: string | null; signal?: boolean; pending?: boolean; onRetry: () => void }) {
+/** While the report is being prepared: who at the «oficina» is doing what (ReportOffice) and how long it usually takes. `pending`:
+ * the retry was sent and its answer is on its way, so the button says so instead of looking untouched for the seconds the reload takes. */
+export function ReportProgress({ state, error, signal, pending = false, onRetry, progress, tender, documents = 0, buyer }: { state: string; error?: string | null;
+  signal?: boolean; pending?: boolean; onRetry: () => void; progress?: ReportJobProgress | null; tender?: boolean; documents?: number; buyer?: string | null }) {
   if (state === 'failed' || state === 'blocked') return <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-destructive/40 p-4 text-sm">
     <p><span className="font-medium">No pudimos terminar {signal ? 'la ficha comercial' : 'el informe'}.</span> {friendlyJobError(error)}</p>
     <Button size="sm" variant="outline" onClick={onRetry} disabled={pending} aria-busy={pending}>{pending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />}{pending ? 'Reintentando…' : 'Intentar de nuevo'}</Button></div>;
+  if (progress) return <ReportOffice progress={progress} signal={signal} tender={tender} documents={documents} buyer={buyer} />;
   return <div role="status" className="rounded-2xl border bg-muted/30 p-4">
     <p className="flex items-center gap-2 text-sm font-medium"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />{state === 'queued' ? 'En cola: empieza en menos de un minuto' : signal ? 'Analizando la señal y preparando la ficha…' : 'Leyendo los documentos y redactando el informe…'}</p>
     <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full w-1/3 animate-pulse rounded-full bg-primary" /></div>
