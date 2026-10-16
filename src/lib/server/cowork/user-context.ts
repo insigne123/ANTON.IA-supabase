@@ -83,7 +83,7 @@ export function coworkUserContextFromProfile(profile: Record<string, unknown> | 
 /** Read once per run, before the first decision: the person as «Perfil» stores them plus what they approved for ANTON.IA to
  * remember, with the same offer rule as app.context (own profile first, then the organization settings). Own profile only: no
  * email, signatures or tokens. Any failure returns null and the model falls back to profile.get and app.context. */
-export async function loadCoworkUserContext(client: SupabaseClient, scope: Scope, options: { memories?: boolean } = {}): Promise<CoworkUserContext | null> {
+export async function loadCoworkUserContext(client: SupabaseClient, scope: Scope, options: { memories?: boolean; mailbox?: boolean } = {}): Promise<CoworkUserContext | null> {
   try {
     const userId = z.string().uuid().parse(scope.userId);
     // select('*') like the shared app context: older offer fields differ between workspaces.
@@ -94,7 +94,8 @@ export async function loadCoworkUserContext(client: SupabaseClient, scope: Scope
     const [organization, memories, mailbox] = await Promise.all([
       profileOffer(profile) ? null : readOrganizationOffer(client, scope.organizationId),
       options.memories === false ? [] : loadCoworkMemories(client, { userId, organizationId: scope.organizationId }),
-      readMailSenderPreference(client, userId).catch(() => null),
+      // Connected mailboxes are readable only by the server role: a session reading them gets a 403, so it does not ask.
+      options.mailbox === false ? null : readMailSenderPreference(client, userId).catch(() => null),
     ]);
     return {
       ...coworkUserContextFromProfile(profile, organization),
