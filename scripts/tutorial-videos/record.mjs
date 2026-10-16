@@ -72,10 +72,17 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const words = value => String(value || '').split(/\s+/).filter(Boolean).length;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-/** The camera on the app: the scale and offset that frame `rect` (app pixels) at `zoom` times the fitted size. */
+/** Room left around a framed control, in stage pixels: the camera never zooms so far that the control leaves the window. */
+const FRAME_MARGIN = 28;
+
+/** The camera on the app: the scale and offset that frame `rect` (app pixels) at `zoom` times the fitted size, or less when
+ * the control would not fit in the window at that zoom (a full-width bar spilled over the frame and the notes). */
 function frameFor(rect, zoom) {
   if (!rect || zoom <= 1) return { s: BASE_SCALE, tx: 0, ty: 0 };
-  const s = BASE_SCALE * zoom;
+  const fits = Math.min((WINDOW.width - 2 * FRAME_MARGIN) / Math.max(1, rect.w * BASE_SCALE), (WINDOW.height - 2 * FRAME_MARGIN) / Math.max(1, rect.h * BASE_SCALE));
+  const fitted = Math.min(zoom, fits);
+  if (fitted <= 1) return { s: BASE_SCALE, tx: 0, ty: 0 };
+  const s = BASE_SCALE * fitted;
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
   return {
@@ -88,6 +95,12 @@ const toStage = (point, camera) => ({ x: WINDOW.x + camera.tx + point.x * camera
 const rectToStage = (rect, camera) => {
   const a = toStage({ x: rect.x, y: rect.y }, camera);
   return { x: a.x, y: a.y, w: rect.w * camera.s, h: rect.h * camera.s };
+};
+/** What the window shows of a control: the highlight and the arrow never reach past the frame of the window. */
+const clipToWindow = rect => {
+  const left = Math.max(rect.x, WINDOW.x + 3), top = Math.max(rect.y, WINDOW.y + 3);
+  const right = Math.min(rect.x + rect.w, WINDOW.x + WINDOW.width - 3), bottom = Math.min(rect.y + rect.h, WINDOW.y + WINDOW.height - 3);
+  return { x: left, y: top, w: Math.max(0, right - left), h: Math.max(0, bottom - top) };
 };
 
 /** Finds the control a scene talks about, inside the app, by what the person reads on it. */
@@ -211,7 +224,7 @@ class Recorder {
       if (state.cursor.visible && (x < WINDOW.x || x > WINDOW.x + WINDOW.width || y < WINDOW.y || y > WINDOW.y + WINDOW.height)) state.cursor.visible = false;
     }
     if (target) {
-      const rect = rectToStage(target.rect, state.zoom);
+      const rect = clipToWindow(rectToStage(target.rect, state.zoom));
       const aim = { x: target.rect.x + Math.min(target.rect.w / 2, 120), y: target.rect.y + target.rect.h / 2 };
       const destination = toStage(aim, state.zoom);
       // The cursor: slow, eased, from where it was.
@@ -261,8 +274,17 @@ class Recorder {
         await this.shot();
         await target.element.click({ timeout: 10000 });
         state.cursor.pressed = false;
-        await this.animate(0.5, (t, raw) => { state.cursor.halo = raw; });
+        // A click that changes the screen: the highlight and the arrow fade with the halo, or they would point at where the
+        // control was (an earlier video ended its step pointing at «Volver al equipo»).
+        const leaving = Boolean(scene.waitFor);
+        const highlight = state.highlight, arrow = state.arrow;
+        await this.animate(0.5, (t, raw) => {
+          state.cursor.halo = raw;
+          if (leaving && highlight) state.highlight = { ...highlight, opacity: 1 - t };
+          if (leaving && arrow) state.arrow = { ...arrow, opacity: 1 - t };
+        });
         state.cursor.halo = 0;
+        if (leaving) { state.highlight = null; state.arrow = null; }
       }
     }
     if (scene.waitFor) {
@@ -274,6 +296,7 @@ class Recorder {
       while (!finished && Date.now() - started < 1500) await this.shot();
       if (!(await done)) throw new Error(`No apareció «${scene.waitFor.name || scene.waitFor.text || scene.waitFor.label}»`);
       state.highlight = null;
+      state.arrow = null;
       await this.shot();
     }
     if (scene.after) await scene.after(this.frame, this.page);
