@@ -12,12 +12,16 @@ env:
   - variable: NODE_OPTIONS
     value: --max-old-space-size=4096
     availability: [BUILD]
-  # Cowork private pilot: visible solo para nicolas.yarur.g@yago.cl (gate en código + grant DB).
+  # Cowork private pilot: el dueño y la cuenta QA que lo evalúa (lista fija en src/lib/cowork/access.ts + grant DB).
   - variable: COWORK_ENABLED
     value: "true"
     availability: [RUNTIME]
   - variable: COWORK_OWNER_USER_ID
     value: de3a3194-29b1-449a-828a-53608a7ebe47
+    availability: [RUNTIME]
+  # Además del dueño: la cuenta QA (nicolas.yarur.g+qa@yago.cl), 16 oct 2026. Separados por coma; solo ids de correos permitidos.
+  - variable: COWORK_ALLOWED_USER_IDS
+    value: 9f7776c6-b4c4-4e5c-9acc-58fcb1f5b4ad
     availability: [RUNTIME]
   - variable: COWORK_WORKER_ENABLED
     value: "true"

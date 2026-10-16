@@ -1,3 +1,4 @@
+import { claimForCoworkUsers } from './worker-users';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
@@ -64,10 +65,13 @@ const jobSchema = z.object({
 export async function processCoworkSpecialistQueue(): Promise<{ claimed: boolean; processed: number }> {
   if (process.env.COWORK_ENABLED !== 'true' || !coworkSpecialistQueueEnabled()) return { claimed: false, processed: 0 };
   const client = getSupabaseAdminClient();
-  const taken = await client.rpc('cowork_take_specialist', { p_user_id: process.env.COWORK_OWNER_USER_ID });
-  if (taken.error) throw taken.error;
-  if (!taken.data?.[0]) return { claimed: false, processed: 0 };
-  const job = jobSchema.parse(taken.data[0]);
+  const taken = await claimForCoworkUsers(async (userId) => {
+    const result = await client.rpc('cowork_take_specialist', { p_user_id: userId });
+    if (result.error) throw result.error;
+    return result.data?.[0];
+  });
+  if (!taken) return { claimed: false, processed: 0 };
+  const job = jobSchema.parse(taken);
   const scope = { userId: job.user_id, organizationId: job.organization_id };
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(), 25000);
