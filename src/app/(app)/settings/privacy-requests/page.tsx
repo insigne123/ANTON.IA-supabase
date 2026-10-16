@@ -8,6 +8,7 @@ import { useConfirm } from '@/components/confirm-dialog';
 import { formatDateTime } from '@/lib/dates';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -77,8 +78,8 @@ type SubjectLookupResponse = {
 
 const statusOptions = [
   { value: 'all', label: 'Todas' },
-  { value: 'submitted', label: 'Ingresadas' },
-  { value: 'in_review', label: 'En revision' },
+  { value: 'submitted', label: 'Recibidas' },
+  { value: 'in_review', label: 'En revisión' },
   { value: 'resolved', label: 'Resueltas' },
   { value: 'rejected', label: 'Rechazadas' },
 ] as const;
@@ -98,6 +99,8 @@ function statusBadgeVariant(status: string): 'success' | 'info' | 'danger' | 'ne
 
 const STATUS_LABELS: Record<string, string> = { submitted: 'Recibida', in_review: 'En revisión', resolved: 'Resuelta', rejected: 'Rechazada' };
 const statusLabel = (status: string) => STATUS_LABELS[status] || 'Sin estado';
+const ACTION_LABELS: Record<string, string> = { export: 'Exportación', block: 'Bloqueo', delete: 'Eliminación', suspend_account: 'Suspensión de acceso' };
+const actionLabel = (action: string) => ACTION_LABELS[action] || action;
 const dateTime = (value: string | null | undefined) => (value ? formatDateTime(value) : 'sin fecha');
 
 function requestTypeLabel(value: string) {
@@ -253,7 +256,7 @@ export default function PrivacyRequestsSettingsPage() {
           tone: 'warning',
           message: data.result.outcome === 'pending'
             ? `El contacto para ${targetEmail} quedó bloqueado. Vuelve a ejecutar la eliminación cuando termine el trabajo en curso.${reasonText}`
-            : `El contacto para ${targetEmail} quedo bloqueado. La eliminacion no se ejecuto y requiere revision manual.${reasonText}`,
+            : `El contacto para ${targetEmail} quedó bloqueado. La eliminación no se ejecutó y requiere revisión manual.${reasonText}`,
         });
         await loadRequests();
         if (lookupEmail === targetEmail || lookupResult?.email === targetEmail) {
@@ -285,7 +288,7 @@ export default function PrivacyRequestsSettingsPage() {
       } else {
         const warnings = Array.isArray(data?.result?.warnings) ? data.result.warnings : [];
         const warningText = warnings.length > 0 ? ` Aviso: ${warnings[0]}` : '';
-        setActionNotice({ tone: 'success', message: `Se eliminaron los datos comerciales para ${targetEmail} y se mantuvo una supresion minima.${warningText}` });
+        setActionNotice({ tone: 'success', message: `Se eliminaron los datos comerciales para ${targetEmail} y se mantuvo una supresión mínima.${warningText}` });
       }
 
       await loadRequests();
@@ -353,13 +356,13 @@ export default function PrivacyRequestsSettingsPage() {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Ingresadas</CardDescription>
+            <CardDescription>Recibidas</CardDescription>
             <CardTitle className="text-2xl">{summary.submitted}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>En revision</CardDescription>
+            <CardDescription>En revisión</CardDescription>
             <CardTitle className="text-2xl">{summary.inReview}</CardTitle>
           </CardHeader>
         </Card>
@@ -375,7 +378,7 @@ export default function PrivacyRequestsSettingsPage() {
         <CardHeader>
           <CardTitle>Bandeja</CardTitle>
           <CardDescription>
-            Vista operativa basica. Esta pantalla no resuelve la solicitud por si sola; sirve para revisar ingreso, contexto y seguimiento interno.
+            Vista operativa básica. Esta pantalla no resuelve la solicitud por sí sola; sirve para revisar ingreso, contexto y seguimiento interno.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -407,7 +410,7 @@ export default function PrivacyRequestsSettingsPage() {
                   <div className="text-xs text-muted-foreground">
                     {request.requester_company || 'Sin empresa'}
                     {request.target_email ? ` · dato consultado: ${request.target_email}` : ''}
-                    {request.relation_to_data ? ` · relacion: ${request.relation_to_data}` : ''}
+                    {request.relation_to_data ? ` · relación: ${request.relation_to_data}` : ''}
                   </div>
                 </div>
                 <div className="text-right text-xs text-muted-foreground">
@@ -430,15 +433,29 @@ export default function PrivacyRequestsSettingsPage() {
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-xs text-muted-foreground">
-                  <div>{request.reviewed_by_email ? `Ultima revision por: ${request.reviewed_by_email}` : 'Sin revision interna registrada'}</div>
+                  <div>{request.reviewed_by_email ? `Última revisión por: ${request.reviewed_by_email}` : 'Sin revisión interna registrada'}</div>
                   {request.last_action_type ? (
                     <div>
-                      Ultima accion: {request.last_action_type}
+                      Última acción: {actionLabel(request.last_action_type)}
                       {request.last_action_at ? ` · ${dateTime(request.last_action_at)}` : ''}
                     </div>
                   ) : null}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={request.status}
+                    onValueChange={(value) => void updateStatus(request.id, value as 'submitted' | 'in_review' | 'resolved' | 'rejected')}
+                    disabled={updatingId === request.id || actionLoadingId === request.id}
+                  >
+                    <SelectTrigger className="h-9 w-[150px]" aria-label={`Estado de la solicitud de ${request.requester_name || request.requester_email}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.filter((option) => option.value !== 'all').map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{STATUS_LABELS[option.value]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -448,69 +465,26 @@ export default function PrivacyRequestsSettingsPage() {
                     {actionLoadingId === request.id ? 'Procesando…' : 'Exportar JSON'}
                   </Button>
                   <Button
-                    variant="secondary"
+                    variant="ghost"
                     size="sm"
                     disabled={lookupLoading || actionLoadingId === request.id}
                     onClick={() => runLookup(request.target_email || request.requester_email)}
                   >
-                    Buscar email
+                    Buscar datos
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={actionLoadingId === request.id}
-                    onClick={() => runSubjectAction(request, 'block')}
-                  >
-                    Bloquear contacto
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={actionLoadingId === request.id}
-                    onClick={() => runSubjectAction(request, 'suspend_account')}
-                  >
-                    Suspender acceso SaaS
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={actionLoadingId === request.id}
-                    onClick={() => runSubjectAction(request, 'delete')}
-                  >
-                    Eliminar datos
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={updatingId === request.id || actionLoadingId === request.id || request.status === 'submitted'}
-                    onClick={() => updateStatus(request.id, 'submitted')}
-                  >
-                    Marcar ingresada
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={updatingId === request.id || actionLoadingId === request.id || request.status === 'in_review'}
-                    onClick={() => updateStatus(request.id, 'in_review')}
-                  >
-                    En revision
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={updatingId === request.id || actionLoadingId === request.id || request.status === 'resolved'}
-                    onClick={() => updateStatus(request.id, 'resolved')}
-                  >
-                    Resolver
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={updatingId === request.id || actionLoadingId === request.id || request.status === 'rejected'}
-                    onClick={() => updateStatus(request.id, 'rejected')}
-                  >
-                    Rechazar
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" disabled={actionLoadingId === request.id}>Más acciones</Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => void runSubjectAction(request, 'block')}>Bloquear contacto</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void runSubjectAction(request, 'suspend_account')}>Suspender acceso a la app</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => void runSubjectAction(request, 'delete')}>
+                        Eliminar datos…
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             </div>
@@ -522,7 +496,7 @@ export default function PrivacyRequestsSettingsPage() {
         <CardHeader>
           <CardTitle>Búsqueda por email</CardTitle>
           <CardDescription>
-            Usa esta herramienta para revisar rapidamente que registros existen para un correo antes de responder una solicitud de acceso, supresion u oposicion.
+            Usa esta herramienta para revisar rápidamente qué registros existen para un correo antes de responder una solicitud de acceso, supresión u oposición.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
