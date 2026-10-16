@@ -20,7 +20,8 @@ export async function lookupBulkCampaignSubject(email: string, admin = getSupaba
   for (let offset = 0; ; offset += 500) {
     const { data, error } = await admin.from('bulk_campaigns')
       .select('id,organization_id,user_id,status,created_at,approved_at,recipients')
-      .contains('recipients', [{ email: normalized }]).order('id').range(offset, offset + 499);
+      // recipients is jsonb: postgrest-js sends an array as a Postgres array literal ({...}), so the JSON goes as text.
+      .contains('recipients', JSON.stringify([{ email: normalized }])).order('id').range(offset, offset + 499);
     // Compatibility before the first migration. An outage/permission error must not silently truncate exports.
     if (error) {
       if (offset === 0 && ['42P01', '42p01', 'PGRST205'].includes(error.code)) return [];
