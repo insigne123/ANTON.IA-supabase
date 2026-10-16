@@ -155,8 +155,9 @@ export function NewsList({ notifications, onOpen, onClear, when }: {
       <ul className="mt-1 divide-y">
         {shown.map(n => (
           <li key={n.id}>
-            <button type="button" onClick={() => onOpen(n.opportunity_id)} className="flex w-full items-center justify-between gap-3 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <span className="min-w-0 truncate">{n.title}</span>
+            {/* On a phone the date goes under the title, so the title reads whole («Informe listo: ADQU…» did not). */}
+            <button type="button" onClick={() => onOpen(n.opportunity_id)} className="flex w-full flex-col gap-0.5 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <span className="min-w-0 line-clamp-2 sm:line-clamp-1">{n.title}</span>
               <span className="shrink-0 text-xs text-muted-foreground">{when(n.created_at)}</span>
             </button>
           </li>
