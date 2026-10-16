@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityRead, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
 import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb, saveOpportunityReportMark } from '@/lib/server/commercial-opportunities/workspace-store';
 import { markInputSchema } from '@/lib/commercial-opportunities/report-marks';
+import { applyAutomaticMove, routeKindOf } from '@/lib/server/commercial-opportunities/workspace-pipeline';
 import { assignmentSchema, activitySchema, taskSchema, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
@@ -43,9 +44,17 @@ export async function POST(request: Request, context: Context) {
       const values = { title: input.title, owner_id: input.ownerId, due_at: input.dueAt, status: input.status, evidence: input.evidence, updated_at: new Date().toISOString() };
       if (input.id) opportunityDb(await auth.admin.from('opportunity_tasks').update(values).eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('id', input.id));
       else opportunityDb(await auth.admin.from('opportunity_tasks').insert({ ...values, organization_id: scope.organizationId, opportunity_id: id, created_by: scope.userId }));
-      await addOpportunityActivity(auth.admin, scope, id, 'task', `Tarea ${input.status}: ${input.title}`); return opportunitiesJson({ ok: true });
+      await addOpportunityActivity(auth.admin, scope, id, 'task', `Tarea ${input.status}: ${input.title}`);
+      if (input.status === 'working' || input.status === 'done') await applyAutomaticMove(auth.admin, scope, id, { kind: 'task_started' }).catch(() => null);
+      return opportunitiesJson({ ok: true });
     }
-    if (action === 'mark') return opportunitiesJson(await saveOpportunityReportMark(auth.admin, scope, id, markInputSchema.parse(data)));
+    if (action === 'mark') {
+      const input = markInputSchema.parse(data);
+      const saved = await saveOpportunityReportMark(auth.admin, scope, id, input);
+      // Ticking an item can move the stage: into preparation, or to «Presentada» when it is the step to submit.
+      if (input.done) await applyAutomaticMove(auth.admin, scope, id, { kind: 'marked_done', label: input.label, routeKind: await routeKindOf(auth.admin, scope, id, input.key) }).catch(() => null);
+      return opportunitiesJson(saved);
+    }
     if (action === 'link') {
       const { contactId } = z.object({ contactId: z.string().min(1).max(200) }).strict().parse(data);
       const contact = opportunityDb(await auth.admin.from('leads').select('id').eq('organization_id', scope.organizationId).eq('id', contactId).maybeSingle());
