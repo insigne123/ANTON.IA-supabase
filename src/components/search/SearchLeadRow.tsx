@@ -15,7 +15,7 @@ type TeamLock = Parameters<typeof TeamLockBadge>[0]['lock'];
  * One person in the results of «Buscar prospectos»: checkbox, initials, name and role, company and the marks that matter
  * before saving. Someone already saved or contacted cannot be selected again, and the row says why.
  */
-export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock, showCompany = true, details }: {
+export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock, showCompany = true, details, fit }: {
   lead: UILaed;
   selected: boolean;
   saved: boolean;
@@ -25,6 +25,8 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
   showCompany?: boolean;
   /** Email or phone lines (LinkedIn profile search). */
   details?: ReactNode;
+  /** The «probabilidad de calce» (LeadFitBadge). */
+  fit?: ReactNode;
 }) {
   const disabled = saved || contacted;
   const place = [lead.company && showCompany ? lead.company : '', lead.location && lead.location !== '—' ? lead.location : '']
@@ -52,7 +54,10 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
             <p className="truncate text-sm font-medium">{lead.name}</p>
             <p className="line-clamp-2 text-sm text-foreground/70">{lead.title}</p>
           </div>
-          {saved ? <Badge variant="success" className="shrink-0">Guardado</Badge> : contacted ? <Badge variant="info" className="shrink-0">Contactado</Badge> : null}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {fit}
+            {saved ? <Badge variant="success" className="shrink-0">Guardado</Badge> : contacted ? <Badge variant="info" className="shrink-0">Contactado</Badge> : null}
+          </div>
         </div>
         {place ? <p className="mt-1 truncate text-xs text-foreground/70">{place}</p> : null}
         {lead.email ? <p className="mt-0.5 truncate text-xs text-foreground/70">{lead.email}</p> : null}

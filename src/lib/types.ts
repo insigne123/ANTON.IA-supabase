@@ -91,6 +91,11 @@ export interface Lead {
   enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
   /** A search result that says it has an email without showing it (Leads Finder, Plan 11): revealed by enriching. */
   hasEmailOnFile?: boolean;
+  /** What the search knows of the person and the company, for the «probabilidad de calce» (src/lib/lead-fit/core.ts). */
+  headline?: string | null;
+  seniority?: string | null;
+  departments?: string[] | null;
+  companySize?: number | null;
   score?: number;
   scoreTier?: 'hot' | 'warm' | 'cool' | 'cold';
   scoreReason?: string | null;
