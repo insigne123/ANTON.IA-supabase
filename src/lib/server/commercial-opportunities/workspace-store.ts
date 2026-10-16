@@ -22,19 +22,26 @@ export async function workspaceMembers(client: SupabaseClient, scope: WorkScope)
   return rows.map(row => ({ user_id: row.user_id, role: row.role, name: String(names.get(row.user_id) || 'Integrante') }));
 }
 export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkScope, options: { view?: string; query?: string; page?: number } = {}): Promise<WorkspaceOverview> {
-  const ids = await readableOpportunityIds(client, scope);
-  const items = opportunityDb(await client.rpc('opportunity_workspace_list', { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0 })) as WorkItem[] || [];
+  const admin = isOpportunityAdmin(scope.role);
+  const period = new Date().toISOString().slice(0, 7) + '-01';
+  // The reads do not depend on each other, so they go together (one after another they took ~2.7 s of the page's load);
+  // only the work records wait for the list.
+  const [ids, items, notifications, groups, context, budget, members] = await Promise.all([
+    readableOpportunityIds(client, scope),
+    client.rpc('opportunity_workspace_list', { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0 })
+      .then(result => (opportunityDb(result) as WorkItem[]) || []),
+    client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at')
+      .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).order('created_at', { ascending: false }).limit(100).then(result => opportunityDb(result) || []),
+    admin ? client.from('organization_reporting_groups').select('id,name').eq('organization_id', scope.organizationId).eq('is_active', true).then(result => opportunityDb(result) || []) : [],
+    admin ? client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle().then(result => opportunityDb(result)) : null,
+    admin ? client.from('opportunity_budget_months').select('spent_micro_usd,reserved_micro_usd').eq('organization_id', scope.organizationId).eq('period', period).maybeSingle()
+      .then(result => opportunityDb(result)) : null,
+    admin ? workspaceMembers(client, scope) : [],
+  ]);
   const itemIds = items.map(item => item.id);
   const work = itemIds.length ? opportunityDb(await client.from('opportunity_work').select('*').eq('organization_id', scope.organizationId).in('opportunity_id', itemIds)) as WorkRecord[] : [];
-  const notifications = opportunityDb(await client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at')
-    .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).order('created_at', { ascending: false }).limit(100)) || [];
-  const admin = isOpportunityAdmin(scope.role);
-  const groups = admin ? opportunityDb(await client.from('organization_reporting_groups').select('id,name').eq('organization_id', scope.organizationId).eq('is_active', true)) || [] : [];
-  const context = admin ? opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle()) : null;
-  const period = new Date().toISOString().slice(0, 7) + '-01';
-  const budget = admin ? opportunityDb(await client.from('opportunity_budget_months').select('spent_micro_usd,reserved_micro_usd').eq('organization_id', scope.organizationId).eq('period', period).maybeSingle()) : null;
   return { mode: admin ? 'management' : 'assigned', items, work: work || [], notifications: notifications.filter(n => ids === null || ids.includes(n.opportunity_id)),
-    members: admin ? await workspaceMembers(client, scope) : [], groups, context,
+    members, groups, context,
     budget: { spent: Number(budget?.spent_micro_usd || 0) / 1e6, reserved: Number(budget?.reserved_micro_usd || 0) / 1e6, cap: 20 },
     sourceStatus: admin ? { claude: Boolean(process.env.ANTHROPIC_API_KEY), linkedin: Boolean(process.env.APIFY_TOKEN), posts: Boolean(process.env.APIFY_TOKEN && process.env.OPPORTUNITIES_POST_USD_PER_ITEM),
       jsearch: Boolean(process.env.JSEARCH_API_KEY), automation: process.env.OPPORTUNITIES_AUTOMATION_ENABLED === 'true' } : {} };

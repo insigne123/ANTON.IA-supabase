@@ -1062,7 +1062,7 @@ export default function EnrichedLeadsClient() {
     researching: 'Investigando',
     review: 'Revisar informe',
     ready: 'Listos para escribir',
-    no_email: 'Sin correo',
+    no_email: 'Correo no encontrado',
   };
   // «Por investigar» and «Listos para escribir» always show (the tour points at them); the rest only when someone is there.
   const stageChips: Array<{ value: 'all' | EnrichedStage; label: string; count: number }> = [

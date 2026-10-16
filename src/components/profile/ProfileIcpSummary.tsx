@@ -28,7 +28,7 @@ export function ProfileIcpSummary({ profile, dirty, onEdit }: {
           <p className="mt-1 text-sm leading-5 text-muted-foreground">
             {defined
               ? 'A quién buscamos cuando partes de «Tu cliente ideal» en Búsqueda.'
-              : 'Aún no defines a quién le vendes. Con cargos o industrias, Búsqueda parte desde aquí.'}
+              : 'Aún no defines a quién le vendes. Con cargos o industrias, «Buscar prospectos» parte desde aquí.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

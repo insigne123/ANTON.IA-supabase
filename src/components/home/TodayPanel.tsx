@@ -43,6 +43,8 @@ export function TodayPanel() {
   }
 
   const setupComplete = data.setupDone === data.setup.length;
+  // The step «Lo primero hoy» already shows with its button: in the checklist it is marked, not said again.
+  const isPrimary = (step: TodayResponse['setup'][number]) => !step.done && step.href === data.primary.href && step.title === data.primary.title;
 
   return (
     <section aria-label="Hoy" className="space-y-4" data-tour="today">
@@ -126,8 +128,9 @@ export function TodayPanel() {
                 <div className="min-w-0 flex-1">
                   <p className={cn('text-sm font-medium', step.done && 'text-muted-foreground line-through decoration-muted-foreground/50')}>
                     {step.title}<span className="sr-only">{step.done ? ' (hecho)' : ' (pendiente)'}</span>
+                    {isPrimary(step) && <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">Siguiente · arriba</span>}
                   </p>
-                  {!step.done ? (
+                  {!step.done && !isPrimary(step) ? (
                     <>
                       <p className="text-xs text-muted-foreground">{step.description}</p>
                       <Button asChild variant="link" size="sm" className="h-auto px-0 text-xs">
