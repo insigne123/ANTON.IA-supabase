@@ -130,11 +130,17 @@ export default {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-3px)' },
         },
+        // A route of steps drawing itself once (informe interactivo, CRM): the path has pathLength=1.
+        'route-draw': {
+          from: { strokeDashoffset: '1' },
+          to: { strokeDashoffset: '0' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
         'ghost-float': 'ghost-float 2.8s ease-in-out infinite',
+        'route-draw': 'route-draw 1.4s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
     },
   },
