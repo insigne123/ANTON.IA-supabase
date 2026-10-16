@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { opportunityAutomationEnabled, opportunityWorkspaceEnabled, opportunityLocalClock, type WorkScope } from '@/lib/commercial-opportunities/workspace';
@@ -41,6 +41,22 @@ export async function opportunityWorkerTick(client: SupabaseClient) {
   const claimed = opportunityDb(await client.rpc('opportunity_claim_job')) as OpportunityJob[];
   const job = claimed?.[0];
   if (!job) return { processed: 0 };
+  return runOpportunityJob(client, job);
+}
+/**
+ * A chat question answered while the person waits, like a conversation: its own job, taken here only while still queued
+ * (the same conditional update the claim makes), so a worker that took it first answers it instead and nothing runs twice.
+ */
+export async function answerOpportunityChatNow(client: SupabaseClient, organizationId: string, dedupeKey: string) {
+  const job = opportunityDb(await client.from('opportunity_jobs')
+    .update({ state: 'running', lease_token: randomUUID(), lease_until: new Date(Date.now() + 5 * 60_000).toISOString(), attempts: 1, updated_at: new Date().toISOString() })
+    .eq('organization_id', organizationId).eq('dedupe_key', dedupeKey).eq('kind', 'chat').eq('state', 'queued').select('*').maybeSingle()) as OpportunityJob | null;
+  if (!job) return false;
+  const done = await runOpportunityJob(client, job);
+  return done.processed === 1 && done.state === 'ready';
+}
+/** One claimed job, run and committed with its lease: the worker's tick and the chat answered now share it. */
+export async function runOpportunityJob(client: SupabaseClient, job: OpportunityJob) {
   let result: any = null; let state = 'ready'; let error: string | null = null;
   try {
     const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', job.organization_id).maybeSingle());
