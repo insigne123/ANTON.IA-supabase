@@ -210,7 +210,7 @@ export type CorpusTurnResult = {
   reply: string;
   document: { title: string; content: string } | null;
   proposal: { kind: string; label: string; targetId?: string; campaign?: unknown; linkedinMessage?: string;
-    code?: { language: string; code: string; inputFiles: string[] }; contactsImport?: { file: string; columns?: unknown; card?: unknown };
+    code?: { language: string; code: string; inputFiles: string[] }; contactsImport?: { file?: string | null; people?: unknown; columns?: unknown; card?: unknown };
     /** A reply proposed inside a conversation, as the server stages it: the person's own address, «Re: » once and the text that would go out. */
     replyThread?: { contactedId: string; to: string; subject: string; body: string };
     /** A batch of LinkedIn invitations or messages as the server stages it: who goes today, with the text each gets, and who waits and why. */

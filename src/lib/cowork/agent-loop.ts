@@ -68,7 +68,8 @@ export const coworkDecisionSchema = z.object({
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', 'icp.analyze', 'leads.recommend', 'opportunities.list',
     'answer', 'draft.write', 'artifact.create', 'analysis.write', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
-  reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
+  // Four: three reads that count and the writing context, which does not (FREE_READS).
+  reads: z.array(coworkReadTaskSchema).min(1).max(4).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
   /** The steps the person sees while the turn works (rule 12); only the first consulting decision uses it. */
   outline: z.array(z.object({ label: z.string().max(300), read: z.string().max(80).nullable() }).strict()).max(10).nullable().optional(),
@@ -404,7 +405,7 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   if (action === 'linkedin.message') return 'Proponer mensaje LinkedIn';
   if (action === 'linkedin.invite_batch') return 'Proponer invitaciones en LinkedIn para varias personas';
   if (action === 'linkedin.message_batch') return 'Proponer mensajes en LinkedIn para varias personas';
-  if (action === 'contacts.import') return 'Importar contactos de un archivo';
+  if (action === 'contacts.import') return 'Guardar contactos';
   if (action === 'email.reply_thread') return targetName ? `Responder a ${targetName} en su hilo` : 'Responder en el hilo de una conversación';
   if (action === 'campaign.retry') return 'Reintentar los envíos fallidos de una campaña';
   if (action === 'lead.enrich_phone') return named('Revelar el teléfono de');
@@ -510,11 +511,18 @@ export function coworkTurnFailure(error: unknown): CoworkTurnFailure | null {
 
 const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage, linkedinBatch, prepareBatch, campaignId, contactsImport o preference).';
 
+/**
+ * Reads that do not count toward the turn's ceiling: the organization's writing context is one small, fixed read the
+ * Writer needs for a sequence. «Crea una campaña para mis contactos con correo» needs contacts, sends and campaigns
+ * besides it, and with three reads the turn stopped before writing (round g1, 16 Oct 2026).
+ */
+const FREE_READS: ReadonlySet<string> = new Set(['message.context']);
+
 function budgetFeedback(readsUsed: number, maximum: number) {
   const left = Math.max(0, maximum - readsUsed);
   return left > 0
     ? `Solo quedan ${left} lecturas en este trabajo: pide como máximo ${left} o responde con lo observado.`
-    : 'No quedan lecturas en este trabajo: responde con lo observado o propone un paso sobre un objetivo ya observado.';
+    : 'No quedan lecturas en este trabajo (message.context no cuenta): responde con lo observado o propone un paso sobre un objetivo ya observado.';
 }
 
 /** Specialists cite observations by index 0 to 2 (specialists.ts): a review sees at most three. */
@@ -967,7 +975,7 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   if (action === 'lead.enrich') return `Propongo buscar el correo de ${who} con el proveedor; usa un crédito. Revísalo antes de aprobar.`;
   if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
   if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
-  if (action === 'contacts.import') return 'Propongo guardar en tus contactos a las personas del archivo que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.';
+  if (action === 'contacts.import') return 'Propongo guardar en tus contactos a las personas que aún no están. Revisa en la tarjeta quiénes entran antes de aprobar.';
   if (action === 'lead.enrich_phone') return `Propongo pedir el teléfono de ${who} al proveedor: cuesta 10 créditos y es una persona por aprobación. La tarjeta muestra tu saldo; revísalo antes de aprobar.`;
   if (action === 'campaign.retry') return 'Propongo reintentar los envíos de esa campaña que fallaron por un motivo que se puede reintentar. En la tarjeta ves cuáles son; si la apruebas, vuelven a la cola y salen con los frenos de siempre, sin enviarse dos veces.';
   if (action === 'email.reply_thread') return `Preparé la respuesta para ${who} y la propongo enviar en su hilo. Revisa el texto en la tarjeta antes de aprobarla: si la apruebas, sale tal cual.`;
@@ -1987,7 +1995,8 @@ async function runCoworkLoop(input: {
         const effectAction = decision.action;
         const originOf = () => effectAction === 'code.execute'
           ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
-          : contactsImport ? importOriginRunId(contactsImport.file, observations, input.history || [], input.runId || '')
+          // People typed in the conversation come from this run; a file must have been seen.
+          : contactsImport ? (contactsImport.file ? importOriginRunId(contactsImport.file, observations, input.history || [], input.runId || '') : input.runId || null)
           : effectTargetRun(effectAction, targetId, observations, input.history || [], input.runId || '');
         let originRunId = originOf();
         // A campaign is proposed next to the list of existing ones. When the model
@@ -2102,8 +2111,9 @@ async function runCoworkLoop(input: {
         // A fixed read asked twice (for example, with two periods) is one read.
         const reads = decision.reads?.filter((task, index, all) =>
           all.findIndex(other => other.action === task.action && other.input === task.input) === index);
-        if (!reads || readsUsed + reads.length > readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
-        readsUsed += reads.length;
+        const counted = reads ? reads.filter(task => !FREE_READS.has(task.action)).length : 0;
+        if (!reads || readsUsed + counted > readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
+        readsUsed += counted;
         await executeCoworkParallelReads(reads, {
           signal: input.signal, authorize: input.authorize,
           execute: task => input.execute(task.action, task.input),
@@ -2129,7 +2139,7 @@ async function runCoworkLoop(input: {
         observations.push(observation);
         continue;
       }
-      if (readsUsed >= readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
+      if (!FREE_READS.has(decision.action) && readsUsed >= readLimit()) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, readLimit()));
       const value = COWORK_DOMAIN_FIXED_READS.some(action => action === decision.action) ? ''
         : decision.action === 'leads.search' || decision.action === 'crm.search' || decision.action === 'contacted.search' || decision.action === 'deliverability.check' || decision.action === 'site.read' || decision.action === 'leads.count' || decision.action === 'compliance.obligation'
           || decision.action === 'files.read'
@@ -2155,7 +2165,7 @@ async function runCoworkLoop(input: {
       if (value === null || value === undefined) {
         throw rejected('Missing tool argument', 'Falta el argumento de la consulta (query, leadId, draftId, campaignId o stepId según la acción): complétalo con un valor observado.');
       }
-      readsUsed++;
+      if (!FREE_READS.has(decision.action)) readsUsed++;
       await input.authorize();
       input.signal.throwIfAborted();
       const result = await input.execute(decision.action, value);
