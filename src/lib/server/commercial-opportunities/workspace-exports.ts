@@ -2,6 +2,7 @@ import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient
 import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/workspace';
 import { IMPACT_LABELS, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
 import {normalizeCoworkPdfText} from '@/lib/server/cowork/file-exports';
+import { reportChecklist, reportItemKey, reportProgress, reportRoute, type MarkKind, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 
 const LABELS:Record<string,string>={monthlyNet:'Precio neto mensual',totalNet:'Precio neto total',totalWithTax:'Total con impuestos',workingCapital:'Capital de trabajo',guarantee:'Garantía'};
 const label=(v:string)=>LABELS[v]||IMPACT_LABELS[v]||statusLabel(v);
@@ -9,6 +10,24 @@ const pdfText=(value:string)=>normalizeCoworkPdfText(value.replace(/[Σ∑](?=\s
 const money=(n:number)=>new Intl.NumberFormat('es-CL',{maximumFractionDigits:0}).format(n);
 /** What the export knows about the opportunity besides the report: its name, buyer, deadline and amount. */
 export type ExportOpportunity = { title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
+/** What the team marked on the report, with the names of who wrote each note. */
+export type ExportMarks = { items: ReportMarks; names?: Record<string, string> };
+const markOf = (marks: ExportMarks | undefined, kind: MarkKind, text: string) => marks?.items[reportItemKey(kind, text)];
+const check = (marks: ExportMarks | undefined, kind: MarkKind, text: string) => marks ? (markOf(marks, kind, text)?.done ? '[x] ' : '[ ] ') : '';
+/** Every note, in report order, with its item and who wrote it. */
+function teamNotes(report: OpportunityReport, marks?: ExportMarks) {
+  if (!marks) return [];
+  const items: Array<[MarkKind, string]> = [...reportNextSteps(report).map(t => ['step', t] as [MarkKind, string]), ...reportRoute(report).map(r => ['route', r.title] as [MarkKind, string]),
+    ...report.milestones.map(m => ['date', m.label] as [MarkKind, string]), ...report.requirements.map(r => ['requirement', r.title] as [MarkKind, string]),
+    ...report.tasks.map(t => ['task', t.title] as [MarkKind, string]), ...report.risks.map(r => ['risk', r.title] as [MarkKind, string]), ...report.questions.map(q => ['question', q] as [MarkKind, string])];
+  const seen = new Set<string>();
+  return items.flatMap(([kind, label]) => {
+    const mark = markOf(marks, kind, label);
+    if (!mark?.note || seen.has(mark.key)) return [];
+    seen.add(mark.key);
+    return [{ label, note: mark.note, highlight: mark.highlight, by: [mark.updatedBy ? marks.names?.[mark.updatedBy] : null, humanDate(mark.updatedAt, true)].filter(Boolean).join(' · ') }];
+  });
+}
 function cover(report: OpportunityReport, opportunity?: ExportOpportunity) {
   const dates = reportKeyDates(report, opportunity?.deadline);
   const facts = isSignalReport(report) ? [] : [
@@ -20,16 +39,22 @@ function cover(report: OpportunityReport, opportunity?: ExportOpportunity) {
 }
 const sourceOf=(report:OpportunityReport,chunkId:string)=>{const source=report.sources.find(s=>s.id===chunkId);return source?`${source.name}, ${source.locator}`:'documento del expediente';};
 
-export function opportunityReportMarkdown(report: OpportunityReport, opportunity?: ExportOpportunity) {
+export function opportunityReportMarkdown(report: OpportunityReport, opportunity?: ExportOpportunity, marks?: ExportMarks) {
   const c = cover(report, opportunity);
+  const star = (kind: MarkKind, text: string) => markOf(marks, kind, text)?.highlight ? ' **(destacado)**' : '';
+  const progress = marks ? reportProgress(reportChecklist(report, c.steps), marks.items) : null;
   const lines = [`# ${opportunity?.title || report.title}`, `**${c.decision}** · Preparado el ${c.prepared}${opportunity?.buyer ? ` · ${opportunity.buyer}` : ''}`,
     ...(c.facts.length ? [c.facts.map(([k, v]) => `**${k}:** ${v}`).join(' · ')] : []),
-    '', '## Resumen', report.executive, ...report.reasons.map(r => `- ${r}`), '', '## Qué hacer ahora', ...c.steps.map((s, i) => `${i + 1}. ${s}`)];
+    ...(progress?.total ? [`**Avance:** ${progress.done} de ${progress.total} listos`] : []),
+    ...(report.reviewers?.length ? [`Revisaron: ${report.reviewers.join(', ')}.`] : []),
+    '', '## Resumen', report.executive, ...report.reasons.map(r => `- ${r}`), '', '## Qué hacer ahora', ...c.steps.map((s, i) => marks ? `- ${check(marks, 'step', s)}${s}${star('step', s)}` : `${i + 1}. ${s}`)];
+  const route = reportRoute(report);
+  if (route.length >= 3) lines.push('', isSignalReport(report) ? '## Ruta comercial' : '## Ruta de la postulación', ...route.map((r, i) => `${i + 1}. ${check(marks, 'route', r.title)}**${r.title}**${r.date ? ` · ${r.date}` : ''}${r.detail ? `\n   ${r.detail}` : ''}`));
   const warnings = opportunityReportWarnings(report.warnings, [], false);
   if (warnings.length) lines.push('', '## Antes de decidir', ...warnings.map(w => `- ${w}`));
   if (report.milestones.length) lines.push('', '## Fechas clave', ...report.milestones.map(m => `- **${m.label}:** ${m.date}`));
-  if (report.requirements.length) lines.push('', isSignalReport(report) ? '## Qué validar con la empresa' : '## Requisitos para postular', ...report.requirements.map(r => `- **${r.title}** · ${label(r.status)}\n  ${r.action}${r.role || r.due ? `\n  ${[r.role, r.due].filter(Boolean).join(' · ')}` : ''}`));
-  if (report.tasks.length) lines.push('', isSignalReport(report) ? '## Pasos comerciales' : '## Plan de trabajo', ...report.tasks.map(t => `- **${t.title}** · ${[t.role, t.due].filter(Boolean).join(' · ')}${t.dependency ? `\n  Antes: ${t.dependency}` : ''}${t.evidence ? `\n  Resultado: ${t.evidence}` : ''}`));
+  if (report.requirements.length) lines.push('', isSignalReport(report) ? '## Qué validar con la empresa' : '## Requisitos para postular', ...report.requirements.map(r => `- ${check(marks, 'requirement', r.title)}**${r.title}**${star('requirement', r.title)} · ${label(r.status)}\n  ${r.action}${r.role || r.due ? `\n  ${[r.role, r.due].filter(Boolean).join(' · ')}` : ''}`));
+  if (report.tasks.length) lines.push('', isSignalReport(report) ? '## Pasos comerciales' : '## Plan de trabajo', ...report.tasks.map(t => `- ${check(marks, 'task', t.title)}**${t.title}**${star('task', t.title)} · ${[t.role, t.due].filter(Boolean).join(' · ')}${t.dependency ? `\n  Antes: ${t.dependency}` : ''}${t.evidence ? `\n  Resultado: ${t.evidence}` : ''}`));
   if (report.risks.length) lines.push('', '## Riesgos y cómo cubrirlos', ...report.risks.map(r => `- **${r.title}** · ${label(r.impact)}\n  ${r.mitigation}`));
   if (report.questions.length) lines.push('', isSignalReport(report) ? '## Preguntas para la primera conversación' : '## Preguntas para el comprador', ...report.questions.map((q, i) => `${i + 1}. ${q}`));
   lines.push('', '## Números');
@@ -37,10 +62,12 @@ export function opportunityReportMarkdown(report: OpportunityReport, opportunity
   for (const s of report.scenarios) { const r = opportunityFinancialScenario(s); lines.push(`### ${s.name}`, ...s.assumptions.map(a => `- Supuesto: ${a}`), ...Object.entries(r).map(([k, v]) => `- ${label(k)}: ${v === null ? 'por confirmar' : money(v)}`)); }
   lines.push('', '## Análisis detallado');
   for (const section of report.sections) lines.push('', `### ${section.title}`, ...section.paragraphs, ...section.facts.map(f => `- ${f.text}${f.citations.map(c => ` (Fuente: ${sourceOf(report, c.chunkId)}: «${c.quote}»)`).join('')}`));
+  const notes = teamNotes(report, marks);
+  if (notes.length) lines.push('', '## Notas del equipo', ...notes.map(n => `> **${n.label}**${n.highlight ? ' (destacado)' : ''}\n> ${n.note.replace(/\n/g, '\n> ')}${n.by ? `\n> — ${n.by}` : ''}`));
   lines.push('', '## Documentos leídos', ...report.coverage.map(d => `- ${d.name}: ${label(d.status)}${d.pagesTotal ? `, ${d.pagesRead} de ${d.pagesTotal} páginas` : ''}`));
   return lines.join('\n\n');
 }
-export async function opportunityReportPdf(report: OpportunityReport, opportunity?: ExportOpportunity) {
+export async function opportunityReportPdf(report: OpportunityReport, opportunity?: ExportOpportunity, marks?: ExportMarks) {
   const { jsPDF } = await import('jspdf'); const imported = await import('jspdf-autotable');
   const autoTable=typeof imported.default==='function'?imported.default:(imported.default as unknown as {default:typeof imported.default}).default;
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' }); let y = 24;
@@ -52,9 +79,11 @@ export async function opportunityReportPdf(report: OpportunityReport, opportunit
     for (const line of lines) { space(size > 12 ? 8 : 5); pdf.text(line, 17, y); y += size > 12 ? 7 : size > 10 ? 5.6 : 5; } y += 3;
   };
   const heading = (value: string) => { space(22);pdf.outline?.add(null,pdfText(value),{pageNumber:pdf.getCurrentPageInfo().pageNumber}); pdf.setFont('helvetica', 'bold'); text(value, 14); pdf.setFont('helvetica', 'normal'); };
-  const table = (headers: string[], body: any[][]) => {
+  // Highlighted rows keep the warm tint they have on screen.
+  const table = (headers: string[], body: any[][], highlighted: boolean[] = []) => {
     space(25); autoTable(pdf, { startY: y, head: [headers], body:body.map(row=>row.map(cell=>pdfText(String(cell)))), margin: { left: 17, right: 17, top: 23, bottom: 22 },
-      styles: { fontSize: 9, cellPadding: 3, overflow: 'linebreak' }, headStyles: { fillColor: [37, 99, 235] }, alternateRowStyles: { fillColor: [248, 250, 252] }, rowPageBreak: 'avoid', showHead: 'everyPage' });
+      styles: { fontSize: 9, cellPadding: 3, overflow: 'linebreak' }, headStyles: { fillColor: [37, 99, 235] }, alternateRowStyles: { fillColor: [248, 250, 252] }, rowPageBreak: 'avoid', showHead: 'everyPage',
+      didParseCell: (data: any) => { if (data.section === 'body' && highlighted[data.row.index]) data.cell.styles.fillColor = [254, 243, 199]; } });
     y = (pdf as any).lastAutoTable.finalY + 8;
   };
   // Cover: the decision, the key dates and what to do now fit on the first page.
@@ -66,17 +95,32 @@ export async function opportunityReportPdf(report: OpportunityReport, opportunit
   space(16); pdf.setFillColor(...(tone[reportDecision(report).tone] || tone.pending)); pdf.roundedRect(17, y - 5, 176, 11, 2, 2, 'F');
   pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.setTextColor(30, 41, 59); pdf.text(pdfText(c.decision), 21, y + 2); pdf.setFont('helvetica', 'normal'); y += 13;
   if (c.facts.length) table(c.facts.map(([k]) => k), [c.facts.map(([, v]) => v)]);
+  const progress = marks ? reportProgress(reportChecklist(report, c.steps), marks.items) : null;
+  if (progress?.total) {
+    space(14); pdf.setFontSize(9); pdf.setTextColor(71, 85, 105); pdf.text(pdfText(`Avance: ${progress.done} de ${progress.total} listos`), 17, y);
+    pdf.setFillColor(226, 232, 240); pdf.roundedRect(70, y - 2.6, 123, 3.2, 1.6, 1.6, 'F');
+    if (progress.done) { pdf.setFillColor(5, 150, 105); pdf.roundedRect(70, y - 2.6, Math.max(3.2, 123 * progress.done / progress.total), 3.2, 1.6, 1.6, 'F'); }
+    y += 8;
+  }
   text(report.executive, 11);
+  if (report.reviewers?.length) text(`Revisaron antes de escribir: ${report.reviewers.join(', ')}.`, 9, [100, 116, 139]);
   pdf.setFont('helvetica', 'bold'); text('Qué hacer ahora', 12); pdf.setFont('helvetica', 'normal');
-  c.steps.forEach((s, i) => text(`${i + 1}. ${s}`));
+  c.steps.forEach((s, i) => text(marks ? `${check(marks, 'step', s)}${s}` : `${i + 1}. ${s}`));
   report.reasons.forEach(r => text(`• ${r}`, 10, [71, 85, 105]));
   const warnings = opportunityReportWarnings(report.warnings, [], false);
   if (warnings.length) { heading('Antes de decidir'); warnings.forEach(w => text(`• ${w}`)); }
-  if (report.milestones.length) { heading('Fechas clave'); table(['Hito', 'Fecha'], report.milestones.map(m => [m.label, m.date])); }
+  const lit = (kind: MarkKind, values: string[]) => values.map(v => Boolean(markOf(marks, kind, v)?.highlight));
+  const done = (kind: MarkKind, value: string) => markOf(marks, kind, value)?.done ? 'Listo' : '';
+  const route = reportRoute(report);
+  if (route.length >= 3) { heading(isSignalReport(report) ? 'Ruta comercial' : 'Ruta de la postulación');
+    table([...(marks ? ['Estado'] : []), 'Paso', 'Cuándo', 'Qué hacer'], route.map((r, i) => [...(marks ? [done('route', r.title) || '—'] : []), `${i + 1}. ${r.title}`, r.date || '—', r.detail || '—']), lit('route', route.map(r => r.title))); }
+  if (report.milestones.length) { heading('Fechas clave'); table(['Hito', 'Fecha'], report.milestones.map(m => [m.label, m.date]), lit('date', report.milestones.map(m => m.label))); }
   if (report.requirements.length) { heading(isSignalReport(report) ? 'Qué validar con la empresa' : 'Requisitos para postular');
-    table(['Requisito', 'Situación', 'Qué hacer', 'Quién / cuándo'], report.requirements.map(r => [r.title, label(r.status), r.action, [r.role, r.due].filter(Boolean).join('\n')])); }
-  if (report.tasks.length) { heading(isSignalReport(report) ? 'Pasos comerciales' : 'Plan de trabajo'); table(['Tarea', 'Quién / cuándo', 'Antes', 'Resultado'], report.tasks.map(t => [t.title, [t.role, t.due].filter(Boolean).join('\n'), t.dependency, t.evidence])); }
-  if (report.risks.length) { heading('Riesgos y cómo cubrirlos'); table(['Riesgo', 'Impacto', 'Cómo cubrirlo'], report.risks.map(r => [r.title, label(r.impact), r.mitigation])); }
+    table([...(marks ? ['Estado'] : []), 'Requisito', 'Situación', 'Qué hacer', 'Quién / cuándo'], report.requirements.map(r => [...(marks ? [done('requirement', r.title) || '—'] : []), r.title, label(r.status), r.action, [r.role, r.due].filter(Boolean).join('\n')]), lit('requirement', report.requirements.map(r => r.title))); }
+  if (report.tasks.length) { heading(isSignalReport(report) ? 'Pasos comerciales' : 'Plan de trabajo'); table([...(marks ? ['Estado'] : []), 'Tarea', 'Quién / cuándo', 'Antes', 'Resultado'], report.tasks.map(t => [...(marks ? [done('task', t.title) || '—'] : []), t.title, [t.role, t.due].filter(Boolean).join('\n'), t.dependency, t.evidence]), lit('task', report.tasks.map(t => t.title))); }
+  if (report.risks.length) { heading('Riesgos y cómo cubrirlos'); table(['Riesgo', 'Impacto', 'Cómo cubrirlo'], report.risks.map(r => [r.title, label(r.impact), r.mitigation]), lit('risk', report.risks.map(r => r.title))); }
+  const notes = teamNotes(report, marks);
+  if (notes.length) { heading('Notas del equipo'); table(['Sobre', 'Nota', 'Quién / cuándo'], notes.map(n => [n.label, n.note, n.by || '—']), notes.map(n => n.highlight)); }
   if (report.questions.length) {
     heading(isSignalReport(report) ? 'Preguntas para la primera conversación' : 'Preguntas para el comprador');
     if (isSignalReport(report)) report.questions.forEach((q, i) => text(`${i + 1}. ${q}`));

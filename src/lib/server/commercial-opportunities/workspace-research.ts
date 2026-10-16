@@ -6,6 +6,7 @@ import { opportunityReportPrompt, opportunitySynthesisSources } from '@/lib/comm
 import { opportunityFinancialScenario, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
+import { runOpportunitySpecialists } from './workspace-specialists';
 import { opportunityGenerate, opportunityGenerateReport, type OpportunityJob } from './workspace-ai';
 import { saveOpportunityDocument } from './workspace-documents';
 import { downloadOpportunitySource, opportunityAttachmentLinks } from './workspace-download';
@@ -152,12 +153,16 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   }
   if (skippedBlocks) warnings.push(skippedBlocks === 1 ? 'Una parte de los documentos no se pudo leer y el informe no la considera.' : `${skippedBlocks} partes de los documentos no se pudieron leer y el informe no las considera.`);
   if (skippedBlocks * 4 >= chunks.length) throw new AuthError('No pudimos leer los documentos. Intenta de nuevo en un momento.', 503);
+  await noteProgress(client, job, { stage: 'write', total: parts });
+  // The specialists read the facts in parallel (Haiku, a few seconds); on a later tick their answers come back paid.
+  const review = await runOpportunitySpecialists(client, job, { kind: item.kind, title: item.title, buyer: item.buyer_name || item.company_name || null,
+    deadline: item.deadline_at || null, offer: String(context.offer || ''), facts, missing });
   // Writing the report takes up to 230 s: after a long reading it starts in the next tick, where the read blocks come
   // back from their paid results in a few seconds.
   if (Date.now() - started > 45_000) return { waiting: true as const };
-  await noteProgress(client, job, { stage: 'write', total: parts });
   const raw = await opportunityGenerateReport(client, job, { step: `synthesis-envelope-v2:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`, output: 16_000,
     prompt: opportunityReportPrompt(job.payload.cutoff, { item, company: { offer: context.offer, services: context.services, territories: context.territories }, facts, missing,
+      specialists: review.notes.map(({ id, ...note }) => note),
       sources: opportunitySynthesisSources(chunks), warnings: [...warnings, ...(job.payload.sourceWarnings || [])], documents: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status })) }, item.kind) });
   const check = (citations: any[]) => citations.filter(c => validOpportunityCitation(c, chunks));
   raw.sections = raw.sections.map(section => ({ ...section, facts: validateOpportunityFacts(section.facts, chunks) }));
@@ -171,6 +176,7 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   raw.warnings = opportunityReportWarnings([...raw.warnings, ...warnings, ...(job.payload.sourceWarnings || [])], documents, basesMissing);
   if(raw.recommendation==='advance' && (raw.warnings.length || raw.requirements.some(r=>r.status==='unknown'||r.status==='blocked')))raw.recommendation='conditional';
   const report: OpportunityReport = { ...raw, kind: item.kind, generatedAt: job.payload.cutoff,
+    route: review.route, reviewers: review.notes.map(note => note.name),
     coverage: documents.map(d => ({ id: d.id, name: d.name, status: d.extraction_status, pagesRead: d.pages_read, pagesTotal: d.pages_total })),
     sources: chunks.map(c => ({ id: c.id, documentId: c.document_id, locator: c.locator, name: documents.find(d => d.id === c.document_id)?.name || 'Documento' })) };
   return { waiting: false as const, report };
