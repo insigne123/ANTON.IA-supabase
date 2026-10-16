@@ -41,3 +41,24 @@ test('the first page reads as a decision: what to do, the key dates and plain Sp
  const md=opportunityReportMarkdown(report,opportunity);
  assert.match(md,/^# Servicio de verificación de antecedentes/);assert.match(md,/\*\*Postular si se resuelve lo pendiente\*\*/);assert.doesNotMatch(md,/Fecha de corte|pending ·|high/);
 });
+
+test('the download keeps what the team marked: checks, highlights, the progress, the route and the notes with their author',async()=>{
+ const {reportItemKey,marksFromRows}=await import('@/lib/commercial-opportunities/report-marks');
+ const marked={...report,nextSteps:['Pedir la boleta al banco'],reviewers:['Requisitos y documentos','Contrato y garantías'],
+  milestones:[{label:'Fin de consultas',date:'20-10-2026 12:00',state:'documented' as const,citations:[]},{label:'Cierre',date:'1 nov 2026',state:'documented' as const,citations:[]}]};
+ const marks={names:{u1:'Ana Soto'},items:marksFromRows([
+  {item_key:reportItemKey('requirement','Confirmar alcance'),done:true,highlight:true,note:'Lo pidió Ana por correo al comprador.',updated_by:'u1',updated_at:'2026-10-16T15:00:00Z'},
+  {item_key:reportItemKey('step','Pedir la boleta al banco'),done:false,highlight:false,note:''}])};
+ const md=opportunityReportMarkdown(marked,undefined,marks);
+ assert.match(md,/\*\*Avance:\*\* 1 de 3 listos/);
+ assert.match(md,/- \[ \] Pedir la boleta al banco/);
+ assert.match(md,/- \[x\] \*\*Confirmar alcance\*\* \*\*\(destacado\)\*\*/);
+ assert.match(md,/## Ruta de la postulación/);
+ assert.match(md,/## Notas del equipo\n\n> \*\*Confirmar alcance\*\* \(destacado\)\n> Lo pidió Ana por correo al comprador\.\n> — Ana Soto · 16 de octubre de 2026, 12:00/);
+ assert.match(md,/Revisaron: Requisitos y documentos, Contrato y garantías\./);
+ const {extractText}=await import('unpdf');const text=String((await extractText(await opportunityReportPdf(marked,undefined,marks),{mergePages:true})).text);
+ assert.match(text,/Avance: 1 de 3 listos/);assert.match(text,/Notas del equipo/);assert.match(text,/Lo pidió Ana por correo al comprador/);assert.match(text,/Ana Soto/);
+ assert.match(text,/Ruta de la postulación/);assert.match(text,/Revisaron antes de escribir/);
+ // Without marks the export reads exactly as before.
+ assert.doesNotMatch(opportunityReportMarkdown(marked),/\[x\]|\[ \]|Notas del equipo|Avance:/);
+});

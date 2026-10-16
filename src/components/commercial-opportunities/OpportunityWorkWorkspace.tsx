@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
+import type { MarkChange } from './ReportMarks';
+import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { OpportunityContacts } from './OpportunityContacts';
 import { OpportunityChat } from './OpportunityChat';
 import { TeamOffice, TeamPicker } from './TeamOffice';
@@ -24,7 +26,8 @@ import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress };
-type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[] };
+type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
+  marks?: { available: boolean; items: ReportMarks } };
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
 const STATES: Record<string, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada', queued: 'En cola', running: 'En curso', waiting: 'Continuando', ready: 'Terminado', failed: 'No terminó' };
 const ACTIVE = ['queued', 'running', 'waiting'];
@@ -108,6 +111,14 @@ export function OpportunityWorkWorkspace() {
       return result;
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar.'); return null; }
     finally { setBusy(false); }
+  };
+  // A mark on the report saves on its own: no reload of the expediente and no «Cambios guardados» banner for a tick.
+  const mark = async (change: MarkChange): Promise<ReportMark | null> => {
+    if (!selected) return null;
+    try {
+      const saved = await json(await fetch(`/api/commercial-opportunities/${selected}/workspace`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark', data: change }) }));
+      return saved as ReportMark;
+    } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar la marca.'); return null; }
   };
   const open = (id: string) => {
     setProblem(''); setSelected(id);
@@ -239,7 +250,8 @@ export function OpportunityWorkWorkspace() {
           {latest && <>
             <div className="flex flex-wrap items-center justify-end gap-2"><label className="sr-only" htmlFor="op-export">Formato de descarga</label><select id="op-export" value={download} onChange={e => setDownload(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring">{[['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel'], ['md', 'Markdown'], ['zip', 'Expediente completo (ZIP)']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><Button asChild variant="outline" size="sm"><a href={`/api/commercial-opportunities/${selected}/export?format=${download}`}><Download className="mr-2 h-4 w-4" />Descargar</a></Button></div>
             <OpportunityWorkReport report={latest.report} opportunity={{ title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency }}
-              onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')} />
+              onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')}
+              marks={detail.marks} onMark={mark} people={detail.members || detail.participants} />
           </>}
         </div>}
         {tab === 'documents' && <section className="space-y-5">
