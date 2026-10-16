@@ -347,6 +347,11 @@ test('a tool name copied into a reply is said in the person\'s words', async () 
   const { polishCoworkText } = await import('./answer-quality');
   assert.equal(polishCoworkText('Después puedo usar lead.enrich para traer su perfil.'), 'Después puedo usar la búsqueda de su correo para traer su perfil.');
   assert.equal(polishCoworkText('Escríbele a francisca.munoz@falabella.test.'), 'Escríbele a francisca.munoz@falabella.test.');
+  // A web address or an email is not a tool name: the LinkedIn profile in a table kept its address.
+  assert.equal(polishCoworkText('https://www.linkedin.com/in/ana-ruiz/'), 'https://www.linkedin.com/in/ana-ruiz/');
+  assert.equal(polishCoworkText('Su perfil: linkedin.com/in/ana-ruiz'), 'Su perfil: linkedin.com/in/ana-ruiz');
+  assert.equal(polishCoworkText('Lo busqué en linkedin.com y escribí a ana@email.com.'), 'Lo busqué en linkedin.com y escribí a ana@email.com.');
+  assert.equal(polishCoworkText('Usé linkedin.invite para invitarla.'), 'Usé la invitación de LinkedIn para invitarla.');
 });
 
 test('a bare yes under a campaign or an email offer says what it does, and the sender is called Gmail', () => {

@@ -62,7 +62,8 @@ try {
   assert.match(text(), /dejó de calzar con la audiencia/);
   // The sequence for everyone says what its variables do, and «pausada» is said in plain words.
   assert.match(text(), /Secuencia para todos · 2 correos/);
-  assert.match(text(), /\{\{nombre\}\}, \{\{empresa\}\} y \{\{cargo\}\} se completan con los datos de cada persona\. El correo 1 de la secuencia va solo a quienes no tienen uno propio\./);
+  assert.match(text(), /El nombre, la empresa y el cargo se completan con los datos de cada persona\. El primer correo de la secuencia va solo a quienes no tienen uno propio\./);
+  assert.doesNotMatch(text(), /\{\{(nombre|empresa|cargo)\}\} se completan/, 'the note names the fields in words, not as variables');
   assert.match(text(), /Al aprobar, la campaña queda guardada sin enviar en Gmail: nada sale hasta que la actives, y activarla pide otra aprobación\./);
   assert.equal(button('Crear campaña sin enviar').disabled, false);
 
