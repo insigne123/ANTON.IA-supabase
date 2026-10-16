@@ -372,11 +372,16 @@ test('with the Writer on, a drafting turn hands the emails over and still passes
     ['writer:working:Escribiendo 3 correos', 'writer:done:Escribió 3 correos', 'reviewer:working:Aplicando 1 ajuste', 'reviewer:done:1 ajuste']);
 });
 
+// The week's figures as a card, as in the ideal turn: the loop's own closing check passes the first answer, so what is left
+// for the judge is the read it offers instead of making.
+const WEEK_FIGURES = { type: 'metrics', title: 'Correos de la semana', period: 'Últimos 7 días', items: [
+  { label: 'Envíos', value: '0', detail: null }, { label: 'Respuestas', value: '0', detail: null }, { label: 'Rebotes', value: '0', detail: null }] };
+
 test('with the judge on, an answer that offers a read it could do is fixed in the turn and passes its checks', async () => {
   const entry = CORPUS.find(item => item.id === 'metricas-semana')!;
-  // The first answer asks before looking and leaves the figures out of the card; the judge asks for
+  // The first answer gives the week's figures but asks before looking at the campaigns; the judge asks for
   // a fix, and the correction reads the campaigns and answers like the ideal turn.
-  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?' });
+  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?', blocks: [WEEK_FIGURES] });
   const decide: CorpusDecider = async context => {
     const fixing = ((context.rejectedDecisions || []) as Array<{ reason: string }>).some(rejection => /una revisión de tu respuesta/.test(rejection.reason));
     if (context.observations.length === 0) return parallel([{ action: 'metrics.rates', input: '' }]);
@@ -403,7 +408,7 @@ test('with the judge on, an answer that offers a read it could do is fixed in th
 
 test('with the judge on, a correction with a figure nothing supports leaves the first answer, and the report says why', async () => {
   const entry = CORPUS.find(item => item.id === 'metricas-semana')!;
-  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?' });
+  const offered = answer('Esta semana no enviaste correos desde ANTON.IA.', null, undefined, { question: '¿Quieres que revise tus campañas para ver por qué?', blocks: [WEEK_FIGURES] });
   // The correction invents a rate: neither the reads nor the first answer say 73 %.
   const invented = answer('Esta semana no enviaste correos desde ANTON.IA; tus campañas abren el 73 % de lo que envían.', null, undefined, { question: '¿Armamos una campaña corta?' });
   const decide: CorpusDecider = async context => {

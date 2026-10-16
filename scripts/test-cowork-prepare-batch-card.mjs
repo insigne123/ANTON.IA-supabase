@@ -46,8 +46,8 @@ const card = await render('<PrepareBatchReview runId="run-1" resolving={false} o
 try {
   const { dom, posts } = card;
   const document = dom.window.document;
-  await settle(dom, 'ul[aria-label="Personas del lote"] li');
-  const rows = [...document.querySelectorAll('ul[aria-label="Personas del lote"] li')].map(li => li.textContent);
+  await settle(dom, 'ul[aria-label="Personas de la lista"] li');
+  const rows = [...document.querySelectorAll('ul[aria-label="Personas de la lista"] li')].map(li => li.textContent);
   assert.equal(rows.length, 2);
   assert.match(rows[0], /Rafael D\.apellido al buscar el correo/);
   assert.match(rows[0], /GuardarBuscar correoInvestigar/, 'a search result gets every step, in order');
@@ -57,7 +57,7 @@ try {
   assert.match(document.body.textContent, /Usa hasta 1 crédito para buscar correos \(1 por persona\) y 2 investigaciones de tu cupo diario\. Te quedan 120 créditos\./);
   assert.match(document.body.textContent, /1 persona ya estaba lista/);
   const approve = () => [...document.querySelectorAll('button')].find(button => /^Preparar a/.test(button.textContent));
-  assert.equal(approve().textContent, 'Preparar a 2 personas');
+  assert.equal(approve().textContent, 'Preparar a 2 personas · 1 crédito', 'the button says what it costs');
 
   // Taking Rafael off: his steps go grey, the cost drops and the approval names one person.
   const box = document.querySelector('input[aria-label="Quitar de la lista a Rafael D."]');

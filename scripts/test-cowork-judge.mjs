@@ -29,13 +29,14 @@ const five = { comprension: 5, veracidad: 5, utilidad: 5, claridad: 5, friccion:
 const clean = { scores: five, problemas: [], veredicto: 'buena' };
 const worth = { scores: { ...five, utilidad: 3, friccion: 2 }, veredicto: 'mala',
   problemas: ['Pregunta si revisa qué campaña rinde menos, aunque podía consultar las campañas antes de responder.'] };
-// The Writer's turn, with both flags on: its answer went through the Reviewer, not the judge.
+// The Writer's turn, with both flags on: its answer went through the Reviewer, not the judge. Its email closes with a
+// question answered in one line, so the checks pass it on to the Reviewer.
 const findings = 'Felipe y Camila tienen correo y nunca recibieron nada.';
 const handOff = { action: 'draft.write', query: null, leadId: null, answer: null,
   write: { kind: 'email', recipients: ['Felipe Muñoz'], objective: 'Una conversación sobre AXIS', angle: null, tone: null, steps: null, notes: null, findings } };
 const written = { reply: findings, question: '¿Creo la campaña pausada para Felipe?', suggestions: chips('Sí, crea la campaña pausada'),
   blocks: [{ type: 'email_draft', title: 'Correo a Felipe', to: ['Felipe Muñoz'], subject: 'Antecedentes en minutos',
-    body: 'Hola Felipe,\nRevisas antecedentes laborales en minutos con AXIS.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur' }] };
+    body: 'Hola Felipe,\nRevisas antecedentes laborales en minutos con AXIS.\n¿Cuántos ingresos revisan al mes?\nNicolás Yarur' }] };
 
 const state = { calls: [], generations: [], reads: [], script: [], ledger: 'roles' };
 globalThis.__coworkJudge = state;
@@ -65,7 +66,7 @@ const mocks = {
   './mission-control': 'export const stageCoworkMissionControl=async()=>{throw new Error("unexpected mission")};',
   './reply-thread-effect': 'export const stageCoworkReplyThread=async()=>{throw new Error("unexpected reply")};',
   '@/lib/server/bulk-campaigns': 'export const getBulkCampaign=async()=>{throw new Error("unexpected campaign")};',
-  '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};',
+  '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};export const createNativeDraft=async()=>{throw new Error("unexpected draft")};export const getNativeDraftWritingStyle=async()=>{throw new Error("unexpected draft")};export const campaignFollowUpDraftIds=()=>{throw new Error("unexpected draft")};',
   '@/ai/openai-json': 'export const generateStructuredWithTelemetry=opts=>globalThis.__coworkJudge.generate(opts);export const generateStructured=async()=>{throw new Error("unused")};',
   '@/lib/server/supabase-admin': `export const getSupabaseAdminClient=()=>{const chain={table:'',select:()=>chain,eq:()=>chain,gt:()=>chain,limit:()=>chain,in:()=>chain,order:()=>chain,
   maybeSingle:async()=>({data:chain.table==='cowork_runs'?{id:'run',parent_run_id:null,depth:0}:null,error:null}),
@@ -80,13 +81,13 @@ const mocks = {
     }
     return {data:true};},from:table=>{chain.table=table;return chain;}};}`,
   '@/lib/server/daily-quota-store': 'export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50});export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:50});export const getEnrichmentQuotaOperation=async()=>null;export const claimEnrichmentQuotaOperation=async()=>{throw new Error("unused")};export const markEnrichmentQuotaOperationSubmitted=async()=>{};export const releaseEnrichmentQuotaOperation=async()=>{};export const completeEnrichmentQuotaOperation=async()=>{};',
-  './access': 'export const requireCoworkWorkerAccess=async()=>{};',
-  './runs': 'export const coworkWorkerConfigured=()=>true;export const getCoworkRun=async()=>null;',
+  './access': 'export const requireCoworkWorkerAccess=async()=>{};export const requireOpportunitiesAccess=async()=>{throw new Error("unexpected opportunities access")};',
+  './runs': 'export const coworkWorkerConfigured=()=>true;export const getCoworkRun=async()=>null;export const coworkRunIsAutomatic=()=>false;',
   './lead-tools': 'export const queryCoworkLeads=async()=>{throw new Error("unexpected read")};',
   './conversation-context': 'export const loadCoworkHistory=async()=>({turns:[]});',
   './user-context': 'export const loadCoworkUserContext=async()=>({fullName:"Nicolás Yarur",companyName:"Yago"});',
   './external-search': 'export const processCoworkSearchQueue=async()=>({claimed:false});',
-  './effects': 'export const processCoworkEffectQueue=async()=>({claimed:false});export const resolveCoworkEffect=async()=>true;',
+  './effects': 'export const processCoworkEffectQueue=async()=>({claimed:false});export const resolveCoworkEffect=async()=>true;export const admitCoworkContinuation=async()=>null;',
   // The correction's read: the campaigns, with the one that does worst.
   './operations': 'export const coworkOperationHash=()=>"hash";export const createCoworkOperationGateway=()=>({invoke:async(scope,call)=>{globalThis.__coworkJudge.reads.push(call.capability);return {items:[{name:"AXIS RR. HH.",sent:40,replies:1}]};}});export const createCoworkOperationDependencies=()=>{throw new Error("unused dependencies")};',
   './read-capabilities': 'export const coworkReadCapabilities=()=>[];',

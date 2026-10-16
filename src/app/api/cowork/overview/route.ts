@@ -29,7 +29,8 @@ export async function GET() {
     const scope = { userId: auth.user.id, organizationId: auth.organizationId };
     const own = (table: string) => auth.supabase.from(table).select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
-    const opportunities = await canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId);
+    // Without the service client the home still arrives: «Desde tu última visita» just leaves Opportunities out.
+    const opportunities = await Promise.resolve().then(() => canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId)).catch(() => false);
     const [contacts, withEmail, campaigns, linkedin, context, since, toWrite] = await Promise.allSettled([
       own('leads'),
       own('leads').not('email', 'is', null).neq('email', ''),

@@ -128,9 +128,11 @@ const MUTATIONS: Array<{ id: string; what: string; change: Parameters<typeof deg
     change: { reply: swap(' (Marcela Rojas, de Servicios Norte, pidió reunión hace 4 días)', ''), blocks: null } },
   { id: 'agenda-toca-hoy', what: 'adds the meeting request to the three interested', notices: 'no suma la reunión pedida a los interesados: son 3, no 4',
     change: { reply: swap('3 interesados esperan respuesta', '4 interesados esperan respuesta'), blocks: null } },
-  { id: 'agenda-toca-hoy', what: 'draws the table with vertical bars inside the reply', notices: 'no escribe la tabla con barras verticales en el texto',
+  // A table written with bars becomes the table block (Plan 15, withTablesAsBlocks): the bars never reach the person, and a
+  // one-row table still does not replace the list.
+  { id: 'agenda-toca-hoy', what: 'draws a one-row table with vertical bars inside the reply instead of the list', notices: 'entrega la lista como tabla, en orden',
     change: { reply: text => `${text}\n\n| # | Quién o qué | Qué hago |\n|---|---|---|\n| 1 | Marcela Rojas · Servicios Norte | Responderle |`, blocks: null } },
-  { id: 'agenda-fuente-caida', what: 'draws the table with vertical bars inside the reply', notices: 'no escribe la tabla con barras verticales en el texto',
+  { id: 'agenda-fuente-caida', what: 'draws a one-row table with vertical bars inside the reply instead of the list', notices: 'entrega la lista como tabla, en orden',
     change: { reply: text => `${text}\n\n| # | Quién o qué | Qué hago |\n|---|---|---|\n| 1 | Marcela Rojas · Servicios Norte | Responderle |`, blocks: null } },
   { id: 'agenda-fuente-caida', what: 'leaves the list out of a table', notices: 'entrega la lista como tabla, en orden',
     change: { blocks: null } },
@@ -162,6 +164,11 @@ for (const mutation of MUTATIONS) {
     assert.ok(missed.includes(mutation.notices), `«${mutation.notices}» did not fail; failing: ${missed.join(' | ') || 'none'}`);
   });
 }
+
+test('agenda-toca-hoy: a table written with vertical bars leaves the reply, so the bars never reach the person', async () => {
+  const missed = await failing('agenda-toca-hoy', degrade(IDEAL['agenda-toca-hoy'], MUTATIONS.find(item => item.what.startsWith('draws a one-row table'))!.change));
+  assert.ok(!missed.includes('no escribe la tabla con barras verticales en el texto'), missed.join(' | '));
+});
 
 // The other side of a check: the same facts in other words are not a failure. These are the ways the real model put them.
 test('agenda-toca-hoy: «no conté» says the automatic replies were kept apart as well as «no cuentan» does', async () => {
