@@ -145,7 +145,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     faqs: [
       { q: '¿Dónde quedan los contactos guardados?', a: 'En «Por escribir». Los que aún no tienen correo aparecen arriba, en el aviso «aún no tienen correo», con «Buscar sus datos».' },
-      { q: '¿Qué pasa si no se encuentra el correo?', a: 'El contacto queda guardado y marcado «Sin correo», con la fecha. Puedes pulsar «Buscar sus datos» otro día o escribirle por LinkedIn.' },
+      { q: '¿Qué pasa si no se encuentra el correo?', a: 'El contacto queda guardado y marcado «Correo no encontrado», con la fecha. Puedes pulsar «Buscar sus datos» otro día o escribirle por LinkedIn.' },
       { q: '¿Cuánto cuesta pedir también el teléfono?', a: 'Lo mismo: un crédito por contacto, con o sin teléfono.' },
     ],
     related: ['por-escribir', 'buscar', 'creditos'],

@@ -21,7 +21,8 @@ import {cn} from '@/lib/utils';
 
 const n=(value:number|null|undefined)=>value===null||value===undefined?'—':value.toLocaleString('es-CL');
 const date=(value:string)=>new Date(value+'T12:00:00Z').toLocaleDateString('es-CL',{day:'numeric',month:'short',timeZone:'UTC'}).replace('.','');
-const time=(value:string|null)=>value?new Date(value).toLocaleString('es-CL',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'America/Santiago'}).replace('.',''):'Sin uso registrado';
+// 24-hour time, as everywhere else in the app: the 12-hour «p. m.» lost a dot to the month's and read «12:26 p m.».
+const time=(value:string|null)=>value?new Date(value).toLocaleString('es-CL',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:'America/Santiago'}).replace(/(\p{L}{3})\./u,'$1'):'Sin uso registrado';
 const chartConfig={active:{label:'Personas activas',color:'hsl(var(--chart-1))'},credits:{label:'Créditos del cupo diario',color:'hsl(var(--chart-2))'}};
 const commercialLabels:Array<{key:keyof CommercialCounts;label:string}>=[{key:'saved',label:'Contactos guardados'},
   {key:'researchCompleted',label:'Investigaciones terminadas'},{key:'drafts',label:'Borradores preparados'},{key:'contacted',label:'Contactos con envío registrado'},

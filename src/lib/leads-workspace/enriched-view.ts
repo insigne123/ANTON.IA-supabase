@@ -91,7 +91,7 @@ export const ENRICHED_STAGE_LABELS: Record<EnrichedStage, string> = {
   researching: 'Investigando',
   review: 'Revisar informe',
   ready: 'Listo para escribir',
-  no_email: 'Sin correo',
+  no_email: 'Correo no encontrado',
 };
 
 /** The stage chips, in working order; «Investigando» and «Revisar informe» show only when someone is there. */

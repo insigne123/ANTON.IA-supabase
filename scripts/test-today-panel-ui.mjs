@@ -68,6 +68,15 @@ try {
   assert.equal([...page.doc.querySelectorAll('ol a')].map((link) => link.getAttribute('href')).join(','), '/search,/search');
   page.close();
 
+  // When «Lo primero hoy» is a setup step, the checklist marks it instead of repeating its description and link.
+  const profileFirst = { ...PLAN, queue: [], setupDone: 0, setup: PLAN.setup.map((step) => ({ ...step, done: false })),
+    primary: { title: 'Cuéntanos qué vendes', description: 'd', href: '/profile', cta: 'Completar perfil' } };
+  const setupPage = await mount(() => ({ ok: true, status: 200, json: async () => profileFirst }));
+  await setupPage.waitFor(() => setupPage.doc.body.textContent.includes('Siguiente · arriba'), 'the marked step');
+  assert.equal([...setupPage.doc.querySelectorAll('a')].filter((link) => link.getAttribute('href') === '/profile').length, 1, 'one link to the profile: the main button');
+  assert.equal([...setupPage.doc.querySelectorAll('ol a')].map((link) => link.getAttribute('href')).join(','), '/connections,/search,/search');
+  setupPage.close();
+
   const failing = await mount((_url, call) => call === 1
     ? { ok: false, status: 500, json: async () => ({}) }
     : { ok: true, status: 200, json: async () => ({ ...PLAN, queue: [], primary: { ...PLAN.primary, title: 'Encuentra tus primeros prospectos', href: '/search', cta: 'Buscar prospectos' } }) });

@@ -25,7 +25,7 @@ type Detail = { item: WorkItem; work: WorkRecord | null; participants: Workspace
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
 const STATES: Record<string, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada', queued: 'En cola', running: 'En curso', waiting: 'Continuando', ready: 'Terminado', failed: 'No terminó' };
 const ACTIVE = ['queued', 'running', 'waiting'];
-const date = (value: string | null | undefined) => value ? new Date(value).toLocaleString('es-CL', { dateStyle: 'medium', timeStyle: 'short' }) : 'Sin fecha';
+const date = (value: string | null | undefined) => humanDate(value, true) || 'Sin fecha';
 const localDate = (value: string) => value ? new Date(value).toISOString() : null;
 const money = (n: number) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(n);
 const list = (s: string) => (s || '').split('\n').map(s => s.trim()).filter(Boolean);

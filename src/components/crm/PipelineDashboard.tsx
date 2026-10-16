@@ -31,7 +31,10 @@ const STAGE_COLOR: Record<PipelineStage, string> = {
 };
 const PERIOD_KEY = 'anton.crm.period';
 const number = new Intl.NumberFormat('es-CL');
-const percent = (value: number | null) => (value === null ? '—' : `${Math.round(value * 100)} %`);
+// A share that rounds to 0 % or 100 % but is not: one contact out of 553 reads «<1 %», not «0 %».
+// Room for the y-axis labels of the largest value («200» was cut to «'00» by a negative margin and a fixed width).
+const axisWidth = (values: number[]) => Math.max(28, number.format(Math.max(0, ...values)).length * 8 + 10);
+const percent = (value: number | null) => (value === null ? '—' : value > 0 && value < 0.005 ? '<1 %' : value > 0.995 && value < 1 ? '>99 %' : `${Math.round(value * 100)} %`);
 
 export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now, dealValues = false }: {
   rows: UnifiedRow[];
@@ -229,10 +232,10 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
           table={<DataTable head={['Mes', 'Contactados', 'Respondieron', 'Tasa']} rows={panel.months.slice(-6).map(month => [month.label, number.format(month.contacted), number.format(month.replied), percent(month.responseRate)])} />}>
           <ChartContainer config={{ contacted: { label: 'Contactados', color: 'hsl(var(--primary))' } }} className="aspect-auto h-[230px] w-full"
             aria-label={`Contactos por mes: ${panel.months.slice(-6).map(month => `${month.label} ${month.contacted}`).join(', ')}`}>
-            <BarChart data={panel.months.slice(-6)} margin={{ top: 16, right: 8, left: -12, bottom: 0 }}>
+            <BarChart data={panel.months.slice(-6)} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
               <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={36} />
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={axisWidth(panel.months.slice(-6).map(month => Math.max(month.contacted, panel.contactedThreshold ?? 0)))} />
               <Tooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent indicator="line"
                 formatter={(value, _name, item) => <MonthReadout contacted={Number(value)} replied={Number(item?.payload?.replied || 0)} />} />} />
               {panel.contactedThreshold !== null ? (
@@ -248,10 +251,10 @@ export function PipelineDashboard({ rows, onOpenStage, pending, refreshedAt, now
           table={<DataTable head={['Mes', 'Contactos nuevos']} rows={panel.months.map(month => [month.label, number.format(month.newLeads)])} />}>
           <ChartContainer config={{ newLeads: { label: 'Contactos nuevos', color: 'hsl(var(--primary))' } }} className="aspect-auto h-[230px] w-full"
             aria-label={`Contactos nuevos por mes: ${panel.months.map(month => `${month.label} ${month.newLeads}`).join(', ')}`}>
-            <AreaChart data={panel.months} margin={{ top: 16, right: 12, left: -12, bottom: 0 }}>
+            <AreaChart data={panel.months} margin={{ top: 16, right: 12, left: 0, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
               <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval="preserveStartEnd" minTickGap={16} />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={36} />
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={axisWidth(panel.months.map(month => month.newLeads))} />
               <Tooltip cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1 }} content={<ChartTooltipContent indicator="line" />} />
               <Area dataKey="newLeads" type="monotone" stroke="var(--color-newLeads)" strokeWidth={2} fill="var(--color-newLeads)" fillOpacity={0.1}
                 dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: 'hsl(var(--card))' }} isAnimationActive={false} />
