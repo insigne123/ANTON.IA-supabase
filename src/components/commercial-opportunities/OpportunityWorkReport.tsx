@@ -2,7 +2,7 @@
 // The report as one document: the decision and what to do now on top, then requirements, plan, risks, questions and the
 // detailed analysis, with a short index. A LinkedIn signal reads as a commercial plan, not as a tender.
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, Flag, Highlighter, ListChecks, MessageCircleQuestion, Users } from 'lucide-react';
+import { Award, Check, Copy, Flag, Highlighter, Hourglass, ListChecks, MessageCircleQuestion, PenLine, Phone, Upload, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
@@ -21,7 +21,7 @@ export const SUGGESTED_QUESTIONS = {
 };
 
 type Opportunity = { title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
-const ROUTE_ICONS: Record<string, string> = { prepare: '✎', ask: '?', submit: '↑', wait: '…', decide: '★', contact: '☎' };
+const ROUTE_ICONS: Record<string, typeof PenLine> = { prepare: PenLine, ask: MessageCircleQuestion, submit: Upload, wait: Hourglass, decide: Award, contact: Phone };
 export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people }: {
   report: OpportunityReport & { route?: { steps: Array<{ title: string; detail: string; date: string; kind: 'prepare' | 'ask' | 'submit' | 'wait' | 'decide' | 'contact' }> } | null };
   opportunity: Opportunity; onTask: (title: string, evidence: string) => void;
@@ -88,7 +88,7 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
   const routeNodes: RouteNode[] = route.map((step, index) => {
     const done = Boolean(marks[step.key]?.done);
     const firstOpen = route.findIndex(other => !marks[other.key]?.done);
-    return { id: step.key, title: step.title, meta: step.date || null, detail: step.detail || null, icon: <span aria-hidden="true">{ROUTE_ICONS[step.kind] ?? index + 1}</span>,
+    return { id: step.key, title: step.title, meta: step.date || null, detail: step.detail || null, icon: (() => { const Icon = ROUTE_ICONS[step.kind]; return Icon ? <Icon className="h-4 w-4" aria-hidden="true" /> : undefined; })(),
       state: done ? 'done' : index === firstOpen ? 'current' : 'next',
       action: interactive ? <button type="button" role="checkbox" aria-checked={done} disabled={saving} onClick={() => void change({ key: step.key, label: step.title, done: !done })}
         className="rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
