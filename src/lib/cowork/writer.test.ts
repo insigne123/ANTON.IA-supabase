@@ -206,7 +206,7 @@ test('the Writer knows an answer inside an open conversation: «Re: » and the s
   assert.match(rule!, /notes lo dice y observations trae el replies\.thread de cada persona/);
   assert.match(rule!, /un bloque email_draft por persona, con to su correo y asunto «Re: » más el asunto del envío original tal como lo trae su lectura, sin cambiarlo/);
   assert.match(rule!, /sin inventar precios, plazos ni fechas, y lo que debe decidir el usuario no va en el texto/);
-  assert.match(rule!, /No es una campaña: question no la ofrece; ofrece el paso que dicen notes o findings, con esas palabras: si es proponer el envío de la primera respuesta, «¿Propongo enviar primero la de <nombre>\?» \(no «¿Apruebas…\?»: aún no hay tarjeta que aprobar\)/);
+  assert.match(rule!, /No es una campaña: question no la ofrece; ofrece el paso que dicen notes o findings, con esas palabras: si es proponer el envío de la primera respuesta, «¿Propongo enviar primero la de <nombre>\?», o con una sola respuesta «¿Propongo enviárselo a <nombre>\?» \(no «¿Apruebas…\?»: aún no hay tarjeta que aprobar\)/);
   assert.match(rule!, /nunca aprobar todas juntas\. Los borradores no se aprueban: no digas que se aprueban en su tarjeta; di que cada envío se aprueba cuando se proponga/);
 });
 
@@ -1231,4 +1231,17 @@ test('round 24: «qué mejorar» over a first email does not narrate a revision 
     question: null, suggestions: [], blocks: [{ type: 'email_draft' as const, title: 'Primer correo', to: ['a@x.test', 'b@x.test', 'c@x.test', 'd@x.test'], subject: 'A', body: 'Hola,\n\nTexto.' }] };
   assert.equal(coworkNewEmailReply(output, { pasted: false }).reply,
     'Escribí un primer correo para tus 4 contactos. La campaña quedaría pausada; no se enviará hasta que la actives con otra aprobación.');
+});
+
+test('the signature carries the signer\'s name as the profile writes it, and one reply is not sent «primero»', async () => {
+  const { coworkCanonicalSignature, coworkWithNextStep } = await import('./writer');
+  const body = 'Hola Francisca,\n\nTexto.\n\nSaludos,\nNicolás Yarურ\nGerente Comercial\nYago SpA';
+  assert.equal(coworkCanonicalSignature(body, 'Nicolás Yarur'), body.replace('Yarურ', 'Yarur'));
+  assert.equal(coworkCanonicalSignature(body.replace('Yarურ', 'Yarrur'), 'Nicolás Yarur'), body.replace('Yarურ', 'Yarur'));
+  const other = body.replace('Nicolás Yarურ', 'Nicolás Fernández');
+  assert.equal(coworkCanonicalSignature(other, 'Nicolás Yarur'), other, 'another signer stays');
+  assert.equal(coworkCanonicalSignature(body, 'Nicolás'), body);
+  const one = { reply: 'Preparé la respuesta.', question: '¿Propongo enviar primero la de Francisca?', suggestions: [],
+    blocks: [{ type: 'email_draft' as const, title: 'Respuesta', to: ['francisca@falabella.test'], subject: 'Precio de AXIS', body: 'Hola Francisca,\n\nTexto.' }] };
+  assert.equal(coworkWithNextStep(one).question, '¿Propongo enviárselo a Francisca?');
 });

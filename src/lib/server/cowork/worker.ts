@@ -4,7 +4,7 @@ import { coworkClarificationAnswer, coworkDecisionSchema, coworkRescueNote, runC
 import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_REASONING_EFFORT, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
 import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling, type CoworkTurnBudget } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
-import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
+import { coworkAsFarewell, coworkIsFarewell, polishCoworkAnswer } from '@/lib/cowork/answer-quality';
 import { coworkProfileChangeLabel } from '@/lib/cowork/profile-proposal';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
@@ -681,7 +681,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'completed',
-      p_payload: { ...polishCoworkAnswer(clarificationOnly ? coworkClarificationAnswer(result) : result), telemetry },
+      p_payload: { ...(() => {
+        const answer = polishCoworkAnswer(clarificationOnly ? coworkClarificationAnswer(result) : result);
+        return coworkIsFarewell(run.message) ? coworkAsFarewell(answer) : answer;
+      })(), telemetry },
     });
     if (finished.error) throw finished.error;
     if (finished.data === true && pendingMemory) await saveCoworkThreadMemory(client, scope, run, pendingMemory);

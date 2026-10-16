@@ -427,3 +427,17 @@ test('dropping the closing question never leaves the sentence hanging on what jo
   assert.equal(withoutTrailingQuestions('No tiene correo registrado: ¿lo busco?'), 'No tiene correo registrado.');
   assert.equal(withoutTrailingQuestions('Te dejo la lista. ¿La reviso?'), 'Te dejo la lista.');
 });
+
+test('a goodbye is answered without a closing question or buttons', async () => {
+  const { coworkAsFarewell, coworkIsFarewell } = await import('./answer-quality');
+  assert.equal(coworkIsFarewell('gracias, eso era todo. chao!'), true);
+  assert.equal(coworkIsFarewell('chao'), true);
+  assert.equal(coworkIsFarewell('¿chao o adiós es más formal?'), false);
+  assert.equal(coworkIsFarewell('escríbele a Chaoui'), false);
+  assert.equal(coworkIsFarewell('gracias'), false, 'a thanks alone may come before another request');
+  const answer = polishCoworkAnswer({ reply: 'De nada, Nicolás. ¡Que estés bien!', document: null, question: '¿Preparo los primeros correos?' });
+  const bye = coworkAsFarewell(answer);
+  assert.equal(bye.reply, 'De nada, Nicolás. ¡Que estés bien!');
+  assert.equal(bye.question, null);
+  assert.equal(bye.suggestions, null);
+});

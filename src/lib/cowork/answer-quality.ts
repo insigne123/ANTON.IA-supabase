@@ -490,6 +490,17 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
   };
 }
 
+// A goodbye with nothing else asked (round 25: «gracias, eso era todo. chao!» got «¿Preparo los primeros correos…?» and its button).
+const FAREWELL = /(?<!\p{L})(?:chao|chau|adi[oó]s|hasta (?:luego|ma[ñn]ana|pronto|el lunes)|nos vemos|bye|eso (?:era|es|ser[ií]a) todo|nada m[aá]s por (?:hoy|ahora))(?!\p{L})/iu;
+export const coworkIsFarewell = (message: string) => message.trim().length <= 80 && !message.includes('?') && FAREWELL.test(message);
+
+/** The answer to a goodbye: what it says, without a closing question, quick replies or options. */
+export function coworkAsFarewell<T extends { reply: string; question: string | null; suggestions: unknown; choices: unknown }>(answer: T): T {
+  const question = answer.question?.trim();
+  const reply = question && answer.reply.trimEnd().endsWith(question) ? answer.reply.trimEnd().slice(0, -question.length).trimEnd() : answer.reply;
+  return { ...answer, reply: reply || answer.reply, question: null, suggestions: null, choices: null };
+}
+
 /** Jargon the person should never have to decode. Used by the evaluation corpus. */
 export const COWORK_JARGON: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bcobertura\b(?:\s+(?:del?|de los|de las))?\s+(?:Gmail|Outlook|correo|buz[oó]n|LinkedIn)\b/i, label: 'expone la cobertura técnica del correo' },
