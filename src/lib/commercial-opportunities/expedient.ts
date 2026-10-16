@@ -22,7 +22,9 @@ export const reportSchema = z.object({
 });
 export type OpportunityReport = Omit<z.infer<typeof reportSchema>, 'nextSteps'> & { nextSteps?: string[]; kind?: string; generatedAt: string; coverage: Array<{ id: string; name: string; status: string; pagesRead: number; pagesTotal: number | null }>;
   sources: Array<{ id: string; documentId: string; locator: string; name: string }> };
-export const answerSchema = z.object({ answer: s(12_000), citations: z.array(citationSchema).max(12), missing: z.array(s(500)).max(8) });
+export const answerSchema = z.object({ answer: s(12_000), citations: z.array(citationSchema).max(12), missing: z.array(s(500)).max(8),
+  /** «conversation»: a greeting, thanks or general question that does not rest on the expedient (no citation is owed). */
+  mode: z.enum(['expedient', 'conversation']).optional() });
 export type DocumentChunk = { id: string; document_id: string; locator: string; content: string; ordinal: number };
 const normalize = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase('es');
 
