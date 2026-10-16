@@ -18,16 +18,18 @@ test('the same person keeps one key from search to «Por escribir»: LinkedIn fi
 test('each stage reads what it knows: search without the email itself, «Por escribir» with it, research with the report', () => {
   const lead = { title: 'Gerente de Personas', company: 'Acme', industry: 'Retail', companySize: 320, email: 'ana@acme.cl', emailStatus: 'verified',
     hasPhone: true, linkedinUrl: 'linkedin.com/in/ana', leadId: 'lead-1', providerId: 'apollo-1' };
-  const search = leadFitFacts('search', lead);
+  // Each stage returns its own shape; reading them as records lets one test compare what each one carries.
+  const facts = (...args: Parameters<typeof leadFitFacts>) => leadFitFacts(...args) as Record<string, unknown>;
+  const search = facts('search', lead);
   assert.equal(search.correoDisponible, true);
   assert.equal('correo' in search, false);
   assert.equal(JSON.stringify(search).includes('ana@acme.cl'), false, 'the model reads the person, not their address');
-  const saved = leadFitFacts('saved', lead);
+  const saved = facts('saved', lead);
   assert.equal(saved.correo, 'verified');
   assert.equal(saved.telefono, true);
   assert.equal('informe' in saved, false);
   const research = { extractos: ['Abrieron 3 tiendas y buscan 40 vendedores.'], calceDelInforme: 80 };
-  assert.deepEqual(leadFitFacts('researched', lead, research).informe, research);
+  assert.deepEqual(facts('researched', lead, research).informe, research);
   assert.equal('informe' in leadFitFacts('researched', lead, null), false, 'without its report it reads as «Por escribir»');
   for (const facts of [search, saved]) assert.equal(JSON.stringify(facts).includes('lead-1') || JSON.stringify(facts).includes('apollo-1'), false);
 });
