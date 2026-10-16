@@ -33,6 +33,9 @@ test('phase 1 migration scopes tenant reads and keeps sensitive writes server-on
 
 test('provider connection checks use the authenticated server boundary', () => {
   assert.match(tokenService, /getSupabaseAdminClient/);
+  // Looking up a provider the person has not connected returns no token instead of a 406 from PostgREST.
+  assert.match(tokenService, /\.maybeSingle\(\)/);
+  assert.doesNotMatch(tokenService, /\.single\(\)/);
   assert.match(tokenStatusRoute, /getSupabaseAdminClient\(\)/);
 
   for (const source of [gmailPage, outlookPage]) {
