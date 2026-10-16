@@ -1245,3 +1245,13 @@ test('the signature carries the signer\'s name as the profile writes it, and one
     blocks: [{ type: 'email_draft' as const, title: 'Respuesta', to: ['francisca@falabella.test'], subject: 'Precio de AXIS', body: 'Hola Francisca,\n\nTexto.' }] };
   assert.equal(coworkWithNextStep(one).question, '¿Propongo enviárselo a Francisca?');
 });
+
+test('an email in English or Portuguese greets and closes in that language', async () => {
+  const { coworkGreetingInLanguage } = await import('./writer');
+  const english = 'Hola Nehal,\n\nWhen recruitment teams are screening candidates, checking each record is one more step before a placement moves forward.\n\nHow does your team handle these checks today?\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(english), english.replace('Hola Nehal', 'Hi Nehal').replace('Saludos,', 'Best regards,'));
+  const portuguese = 'Hola,\n\nA AXIS automatiza a revisão de antecedentes de candidatos.\n\nQuantas candidaturas vocês revisam por mês?\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(portuguese), portuguese.replace('Hola,', 'Olá,').replace('Saludos,', 'Atenciosamente,'));
+  const spanish = 'Hola José,\n\nCuando se acumulan postulantes, revisarlos uno por uno deja la vacante abierta.\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(spanish), spanish);
+});

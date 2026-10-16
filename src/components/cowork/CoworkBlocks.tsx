@@ -322,6 +322,12 @@ function Merged({ text, values = null }: { text: string; values?: CoworkMergePre
   })}</>;
 }
 
+/** A template's text with {{nombre}}, {{empresa}} and {{cargo}} as marks, never as code (round 25: the campaign card showed «Ingresos en
+ * {{empresa}}»). */
+export function CoworkMergedText({ text }: { text: string }) {
+  return <Merged text={text} />;
+}
+
 /** Under a template previewed with its first recipient: whose data it shows, and that each person gets their own. */
 function PreviewNote({ preview }: { preview: CoworkMergePreview }) {
   return <p className="text-[12px] text-cw-muted">Vista previa con los datos de {preview.person}. Cada persona recibe los suyos.</p>;

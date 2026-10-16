@@ -441,3 +441,11 @@ test('a goodbye is answered without a closing question or buttons', async () => 
   assert.equal(bye.question, null);
   assert.equal(bye.suggestions, null);
 });
+
+test('the closing question is a question: what follows it stays out, and a yes is not one', () => {
+  assert.equal(coworkQuestion('¿Te lo dejo listo para enviarle a Felipe? Queda en pausa hasta que lo actives.'), '¿Te lo dejo listo para enviarle a Felipe?');
+  assert.equal(coworkQuestion('Sí, déjalo listo para enviarle a Daniela?'), null);
+  assert.equal(coworkQuestion('¿Sí, déjalo listo para enviarle a Daniela?'), null);
+  assert.equal(coworkQuestion('¿Si te parece, creo la campaña?'), '¿Si te parece, creo la campaña?');
+  assert.equal(coworkQuestion('¿Creo la campaña pausada para Felipe?'), '¿Creo la campaña pausada para Felipe?');
+});

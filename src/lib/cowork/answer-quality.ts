@@ -211,7 +211,12 @@ export function coworkBlocks(value: unknown): CoworkBlock[] {
 /** The closing question on the next step as one plain sentence, or null.
  * Wrapping formatting goes; a missing opening «¿» is added. */
 export function coworkQuestion(value: unknown): string | null {
-  const text = polishCoworkText(String(value ?? '')).replace(/\s+/g, ' ').trim().replace(/^(?:\*\*)(.+)(?:\*\*)$/, '$1').trim();
+  let text = polishCoworkText(String(value ?? '')).replace(/\s+/g, ' ').trim().replace(/^(?:\*\*)(.+)(?:\*\*)$/, '$1').trim();
+  // A question followed by what it means («¿Te lo dejo listo…? Queda en pausa hasta que lo actives.»): the question is the closing.
+  const asked = /^(¿[^?]{3,}\?)\s+[^?¿]{3,}[.!]$/u.exec(text);
+  if (asked) text = asked[1];
+  // A yes is a reply, not a question (round 25: «¿Sí, déjalo listo para enviarle a Daniela?»).
+  if (/^¿?\s*sí[,!]?\s/iu.test(text)) return null;
   if (text.length < 4 || text.length > 300 || UUID.test(text) || !/\?$/.test(text) || /\[[^\]]{2,}\]/.test(text)) return null;
   return text.includes('¿') ? text : `¿${text}`;
 }
