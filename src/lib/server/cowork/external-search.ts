@@ -1,3 +1,4 @@
+import { claimForCoworkUsers } from './worker-users';
 import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -194,9 +195,11 @@ export async function admitSearchContinuation(
 export async function processCoworkSearchQueue() {
   if (process.env.COWORK_ENABLED !== 'true' || process.env.COWORK_EXTERNAL_SEARCH_ENABLED !== 'true') return { processed: 0, claimed: false };
   const client = getSupabaseAdminClient();
-  const claim = await client.rpc('cowork_take_search', { p_user_id: process.env.COWORK_OWNER_USER_ID });
-  if (claim.error) throw claim.error;
-  const job = claim.data?.[0];
+  const job = await claimForCoworkUsers(async (userId) => {
+    const claim = await client.rpc('cowork_take_search', { p_user_id: userId });
+    if (claim.error) throw claim.error;
+    return claim.data?.[0];
+  });
   if (!job) return { processed: 0, claimed: false };
   const scope = { userId: job.user_id, organizationId: job.organization_id };
   const runId = job.run_id;

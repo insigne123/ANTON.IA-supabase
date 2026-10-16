@@ -5,6 +5,7 @@ export function assertCoworkIdentity(user: CoworkIdentity | null | undefined) {
   if (!isCoworkIdentityAllowed(user, {
     enabled: process.env.COWORK_ENABLED,
     ownerId: process.env.COWORK_OWNER_USER_ID,
+    allowedIds: process.env.COWORK_ALLOWED_USER_IDS,
   })) throw new AuthError('Cowork no está disponible para esta cuenta.', 403);
 }
 

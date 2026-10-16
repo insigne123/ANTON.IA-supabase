@@ -1,3 +1,4 @@
+import { claimForCoworkUsers, coworkWorkerUserIds } from './worker-users';
 import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -304,7 +305,7 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
   if (process.env.COWORK_EXECUTOR_ASYNC_ENABLED === 'true' && process.env.COWORK_CODE_FENCING_ENABLED === 'true') {
     // Only isolated, idempotent code jobs can safely be reclaimed. External sends are never replayed this way.
     const stale = await client.from('cowork_effect_proposals').select('run_id,user_id,organization_id,updated_at')
-      .eq('kind', 'code_execute').eq('status', 'executing').eq('user_id', process.env.COWORK_OWNER_USER_ID)
+      .eq('kind', 'code_execute').eq('status', 'executing').in('user_id', coworkWorkerUserIds())
       .lt('updated_at', new Date(Date.now() - 300000).toISOString()).limit(1).maybeSingle();
     if (stale.error) throw stale.error;
     if (stale.data) {
@@ -318,9 +319,11 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
       }
     }
   }
-  const taken = await client.rpc('cowork_take_effect', { p_user_id: process.env.COWORK_OWNER_USER_ID });
-  if (taken.error) throw taken.error;
-  const job = taken.data?.[0];
+  const job = await claimForCoworkUsers(async (userId) => {
+    const taken = await client.rpc('cowork_take_effect', { p_user_id: userId });
+    if (taken.error) throw taken.error;
+    return taken.data?.[0];
+  });
   if (!job) return { processed: 0, claimed: false };
   const scope = { userId: job.user_id, organizationId: job.organization_id };
   const args = { p_run_id: job.run_id, p_user_id: scope.userId, p_organization_id: scope.organizationId };
