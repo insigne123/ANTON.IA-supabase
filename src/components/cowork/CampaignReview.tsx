@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { ReviewActions, ReviewChips, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote } from './ReviewParts';
-import { CoworkEmailFields } from './CoworkBlocks';
+import { CoworkEmailFields, CoworkMergedText } from './CoworkBlocks';
 import { CampaignPeople, type CampaignPerson } from './CampaignPeople';
 import { CwButton } from './ui';
 
@@ -132,10 +132,10 @@ export function CampaignReview({ runId, onApprove, onReject, resolving }: {
             <details className="group rounded-xl border border-cw-border bg-cw-panel" open={index === listed[0].index}>
               <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-3.5 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cw-elevated text-[12px] font-semibold text-cw-muted ring-1 ring-cw-border">{index + 1}</span>
-                <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">{message.subject}</span>
+                <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium"><CoworkMergedText text={message.subject} /></span>
                 <span className="shrink-0 text-[12px] text-cw-muted">{index === 0 ? 'Día 1' : `Día ${days[index]} · +${message.delayDays}d`}</span>
               </summary>
-              <p className="whitespace-pre-wrap break-words border-t border-cw-border px-4 py-3 text-[14px] leading-6">{message.body}</p>
+              <p className="whitespace-pre-wrap break-words border-t border-cw-border px-4 py-3 text-[14px] leading-6"><CoworkMergedText text={message.body} /></p>
             </details>
           </li>)}
       </ol>

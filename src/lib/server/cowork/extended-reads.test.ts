@@ -163,6 +163,20 @@ test('app.context exposes connections and offer without tokens or memories', asy
   assert.ok(!('profile' in result) && !('memories' in result));
 });
 
+test('app.context tells the team\'s contacts from the person\'s own, so Cowork never calls the team\'s «tus contactos»', async () => {
+  const builder = async () => ({
+    emailConnections: { google: false, outlook: false },
+    counts: { leads: 378, contacted: 0, campaigns: 21, activeMissions: 0, openExceptions: 4 },
+    performance: null, offer: 'Evaluaciones', user: { id: 'user-1' }, organizationId: 'org-1', profile: null, memories: [],
+  });
+  const { client, calls } = mockClient({ leads: { count: 0 } });
+  const result = await readCoworkAppContext(scope, builder as never, client);
+  assert.equal(result.counts.leads, 378);
+  assert.equal((result.counts as { yourLeads?: number }).yourLeads, 0);
+  assert.match(result.scopeNote, /todo el equipo.*yourLeads/);
+  assert.ok(calls.some(call => call.table === 'leads' && call.method === 'eq' && call.args[0] === 'user_id' && call.args[1] === 'user-1'));
+});
+
 test('files.list scopes to the user prefix and reports names without contents', async () => {
   const { client, calls } = mockClient({}, {
     'cowork-uploads/org-1/user-1': [{ name: 'run-a' }, { name: 'run-b' }],

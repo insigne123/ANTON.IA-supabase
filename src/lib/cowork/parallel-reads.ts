@@ -43,7 +43,7 @@ export async function executeCoworkParallelReads<T>(tasks: CoworkReadTask[], opt
   execute: (task: CoworkReadTask) => Promise<T>;
   record: (task: CoworkReadTask, result: T) => Promise<void>;
 }) {
-  const validated = z.array(coworkReadTaskSchema).min(1).max(3).parse(tasks);
+  const validated = z.array(coworkReadTaskSchema).min(1).max(4).parse(tasks);
   const unique = new Set(validated.map(task => JSON.stringify(task)));
   if (unique.size !== validated.length) throw new Error('Duplicate parallel read');
   const results = new Array<T>(validated.length);

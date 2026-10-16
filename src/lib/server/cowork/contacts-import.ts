@@ -6,7 +6,8 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { deterministicMessagingUuid } from '@/lib/messaging-contracts';
 import { COWORK_FILE_UNREADABLE, coworkDecodeFile, coworkFileKind, coworkFileTable } from '@/lib/cowork/file-read';
 import {
-  COWORK_IMPORT_FIELD_LABEL, COWORK_IMPORT_LIMIT, COWORK_IMPORT_SHOWN, coworkContactKeys, coworkContactsImportSchema, coworkImportColumns, coworkImportLabel, coworkImportPlan,
+  COWORK_IMPORT_FIELD_LABEL, COWORK_IMPORT_LIMIT, COWORK_IMPORT_SHOWN, COWORK_TYPED_CONTACTS_SOURCE, coworkContactKeys, coworkContactsImportSchema, coworkImportColumns, coworkImportLabel, coworkImportPlan,
+  coworkTypedContactsTable,
   type CoworkImportColumnMap, type CoworkImportContact, type CoworkImportField,
 } from '@/lib/cowork/contacts-import';
 import { requireCoworkWorkerAccess } from './access';
@@ -84,25 +85,34 @@ export async function stageCoworkContactsImport(scope: Scope, runId: string, inp
   if (state.error || !state.data || (state.data.status !== 'running' && state.data.status !== 'waiting_approval')) {
     throw new Error('El trabajo ya no admite propuestas.');
   }
-  const found = await findCoworkUpload(client, scope, request.file);
-  if (!found.found) throw new Error(`No encontré ${quote(request.file)} entre los archivos que subiste: léelo primero con files.read y usa su nombre exacto.`);
-  const { upload } = found;
-  const table = await importTable(client, scope, upload);
-  const { columns, unknown } = coworkImportColumns(table.columns, request.columns);
-  const headers = table.columns.map(quote).join(', ');
-  if (unknown.length) throw new Error(`El archivo no tiene ${unknown.length === 1 ? 'la columna' : 'las columnas'} ${unknown.map(quote).join(', ')}; sus columnas son ${headers}.`);
-  if (!columns.name) throw new Error(`No encontré la columna con el nombre de cada persona; las columnas del archivo son ${headers}. Indica cuál es en columns.name.`);
+  // People the user wrote in the message: the same plan, card and approved effect as a file, without one.
+  const typed = request.people?.length ? coworkTypedContactsTable(request.people) : null;
+  let fileName: string, table: { columns: string[]; body: unknown[][]; sheet: string | null }, columns: CoworkImportColumnMap;
+  if (typed) {
+    fileName = COWORK_TYPED_CONTACTS_SOURCE; table = { ...typed.table, sheet: null }; columns = typed.columns;
+  } else {
+    const found = await findCoworkUpload(client, scope, String(request.file));
+    if (!found.found) throw new Error(`No encontré ${quote(String(request.file))} entre los archivos que subiste: léelo primero con files.read y usa su nombre exacto.`);
+    const { upload } = found;
+    fileName = upload.name;
+    table = await importTable(client, scope, upload);
+    const mapped = coworkImportColumns(table.columns, request.columns);
+    const headers = table.columns.map(quote).join(', ');
+    if (mapped.unknown.length) throw new Error(`El archivo no tiene ${mapped.unknown.length === 1 ? 'la columna' : 'las columnas'} ${mapped.unknown.map(quote).join(', ')}; sus columnas son ${headers}.`);
+    if (!mapped.columns.name) throw new Error(`No encontré la columna con el nombre de cada persona; las columnas del archivo son ${headers}. Indica cuál es en columns.name.`);
+    columns = mapped.columns;
+  }
   const plan = coworkImportPlan(table, columns, await savedContactKeys(client, scope));
   if (!plan.contacts.length) {
     throw new Error(plan.duplicates
-      ? `No hay contactos nuevos: ${plan.duplicates === 1 ? 'la persona del archivo ya está' : `las ${plan.duplicates} personas del archivo ya están`} en tus contactos.`
-      : 'Ninguna fila del archivo trae un nombre para importar.');
+      ? `No hay contactos nuevos: ${plan.duplicates === 1 ? `la persona ${typed ? 'que me diste' : 'del archivo'} ya está` : `las ${plan.duplicates} personas ${typed ? 'que me diste' : 'del archivo'} ya están`} en tus contactos.`
+      : typed ? 'Falta el nombre de la persona para guardarla.' : 'Ninguna fila del archivo trae un nombre para importar.');
   }
-  const hash = hashCoworkContactsImport(runId, upload.name, table.sheet, plan.contacts);
+  const hash = hashCoworkContactsImport(runId, fileName, table.sheet, plan.contacts);
   const cap = (value: number) => Math.min(value, 1_000_000);
   const staged = await client.from('cowork_contacts_import_proposals').upsert({
     run_id: runId, user_id: scope.userId, organization_id: scope.organizationId,
-    file_name: upload.name, sheet: table.sheet, column_map: columns, contacts: plan.contacts,
+    file_name: fileName, sheet: table.sheet, column_map: typed ? {} : columns, contacts: plan.contacts,
     total_rows: cap(plan.total), duplicates: cap(plan.duplicates), skipped: cap(plan.skipped), patch_hash: hash,
   }, { onConflict: 'run_id', ignoreDuplicates: true }).select('run_id').maybeSingle();
   if (staged.error) throw new Error('No se pudo preparar la importación.');
@@ -111,7 +121,7 @@ export async function stageCoworkContactsImport(scope: Scope, runId: string, inp
       .eq('run_id', runId).eq('user_id', scope.userId).eq('organization_id', scope.organizationId).maybeSingle();
     if (existing.error || !existing.data || existing.data.patch_hash !== hash) throw new Error('Este trabajo ya tiene otra importación propuesta.');
   }
-  return { hash, label: coworkImportLabel(upload.name, plan), plan };
+  return { hash, label: coworkImportLabel(fileName, plan), plan };
 }
 
 const contactSchema = z.object({

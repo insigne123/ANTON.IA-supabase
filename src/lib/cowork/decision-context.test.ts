@@ -348,3 +348,13 @@ test('another version carries the earlier answers and what to change; feedback i
   const rated = coworkDecisionContext(instructions, { ...base, history: { turns: [{ request: 'hola', reply: 'Hola', feedback: { rating: 'down', reason: 'Demasiado largo', comment: null } }] } });
   assert.match(String(rated.historyFeedbackInstruction), /sé más breve/);
 });
+
+test('the language the person wrote in, when it is not Spanish', async () => {
+  const { coworkReplyLanguage } = await import('./decision-context');
+  assert.equal(coworkReplyLanguage('what do I have pending today?'), 'inglés');
+  assert.equal(coworkReplyLanguage('hi! what can you do for me?'), 'inglés');
+  assert.equal(coworkReplyLanguage('hazme un follow up para el lead de Falabella, keep it short'), null);
+  assert.equal(coworkReplyLanguage('escríbele a Nehal en inglés'), null);
+  assert.equal(coworkReplyLanguage('olá, você pode me ajudar hoje?'), 'portugués');
+  assert.equal(coworkReplyLanguage('ok'), null);
+});

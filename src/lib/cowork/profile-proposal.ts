@@ -59,3 +59,20 @@ export function coworkProfilePatchFromDecision(value: z.infer<typeof coworkProfi
 export function hashCoworkProfilePatch(patch: CoworkProfilePatch) {
   return canonicalSha256({ kind: 'profile_update', patch });
 }
+
+const PROFILE_WORDS: Record<string, string> = {
+  name: 'nombre', role: 'cargo', companyName: 'empresa', sector: 'rubro', website: 'sitio web', description: 'descripción',
+  services: 'servicios', valueProposition: 'oferta', proofPoints: 'pruebas', targetRoles: 'cliente ideal', targetIndustries: 'cliente ideal',
+  targetCompanySize: 'cliente ideal', targetLocations: 'cliente ideal',
+};
+/** The card's title in the person's words: what the change touches («Actualizar tu firma de Gmail»), never the column that keeps it
+ * (round 25: «Actualizar tu perfil (datos extendidos)» over a signature). */
+export function coworkProfileChangeLabel(patch: CoworkProfilePatch) {
+  const words = [...new Set(Object.entries(patch).flatMap(([key, value]) => {
+    if (value === undefined || value === null || value === '') return [];
+    if (key === 'signature') return [`firma de ${patch.signature!.channel === 'gmail' ? 'Gmail' : 'Outlook'}`];
+    return PROFILE_WORDS[key] ? [PROFILE_WORDS[key]] : [];
+  }))];
+  if (!words.length) return 'Actualizar tu perfil';
+  return words.length === 1 ? `Actualizar tu ${words[0]}` : `Actualizar tu perfil: ${words.slice(0, -1).join(', ')} y ${words.at(-1)}`;
+}

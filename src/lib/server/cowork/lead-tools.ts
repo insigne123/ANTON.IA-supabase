@@ -10,10 +10,24 @@ import { ENRICHED_CONTACT_COLUMNS, mergeOwnContacts, type EnrichedContactRecord 
 /** The most rows «Ver todos» brings to the panel and to the export (Plan 13): beyond it, the list is cut and says so. */
 export const COWORK_FULL_LIST_MAX = 500;
 
-// Email is searchable too: people often look a contact up by the address they know.
-const SEARCH_FIELDS = ['name', 'title', 'company', 'email', 'location', 'city', 'country'] as const;
+// Email is searchable too: people often look a contact up by the address they know. The industry too: «mis contactos de
+// RR. HH.» are often only that in their industry («Servicios de RR. HH.»), not in their title (round g1, 16 Oct 2026).
+const SEARCH_FIELDS = ['name', 'title', 'company', 'email', 'location', 'city', 'country', 'industry'] as const;
 // The same fields in «Por escribir» (enriched_leads), which Cowork reads too (Plan 6, PR-A).
-const ENRICHED_SEARCH_FIELDS = ['full_name', 'title', 'company_name', 'email', 'city', 'country'] as const;
+const ENRICHED_SEARCH_FIELDS = ['full_name', 'title', 'company_name', 'email', 'city', 'country', 'organization_industry'] as const;
+
+/**
+ * Areas people name in short that contacts carry in words: «la gente de rrhh» are the RR. HH. industry and the titles of
+ * people, selection and talent. A term matches when any of its forms appears; ranking still counts the person's own terms.
+ */
+const AREA_FORMS: Array<[RegExp, string[]]> = [
+  [/^(?:rrhh|rr\.?hh\.?|rh)$/i, ['rr. hh', 'rr.hh', 'recursos humanos', 'personas', 'selecci', 'reclut', 'talent', 'recruit', 'people']],
+];
+export function coworkSearchTermForms(term: string) {
+  return [term, ...(AREA_FORMS.find(([pattern]) => pattern.test(term.replace(/\s+/g, '')))?.[1] ?? [])];
+}
+/** A PostgREST «field ilike %form%»; a form with spaces («recursos humanos») goes quoted. */
+const ilike = (field: string, form: string) => /\s/.test(form) ? `${field}.ilike."%${form}%"` : `${field}.ilike.%${form}%`;
 
 /** What Cowork sees of a saved contact's LinkedIn: the canonical profile address or nothing. A stored value that is not a profile
  * (a company page, a typo) is never passed on, so nobody is proposed for an invitation that cannot be queued, and a malformed one
@@ -125,8 +139,9 @@ export async function queryCoworkLeads(
       enriched = enriched.or(profileFilter(profile));
     }
     if (terms.length > 0) {
-      query = query.or(terms.flatMap(term => SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
-      enriched = enriched.or(terms.flatMap(term => ENRICHED_SEARCH_FIELDS.map(field => `${field}.ilike.%${term}%`)).join(','));
+      const forms = [...new Set(terms.flatMap(coworkSearchTermForms))];
+      query = query.or(forms.flatMap(form => SEARCH_FIELDS.map(field => ilike(field, form))).join(','));
+      enriched = enriched.or(forms.flatMap(form => ENRICHED_SEARCH_FIELDS.map(field => ilike(field, form))).join(','));
     }
     if (withEmail) {
       query = query.not('email', 'is', null).neq('email', '');
@@ -169,7 +184,7 @@ export async function queryCoworkLeads(
   const created = (row: Record<string, unknown>) => String(row.created_at || '');
   const ranked = merged.rows.map(row => {
     const haystack = SEARCH_FIELDS.map(field => String((row as Record<string, unknown>)[field] || '')).join(' ').toLocaleLowerCase('es');
-    const matched = terms.filter(term => haystack.includes(term.toLocaleLowerCase('es'))).length;
+    const matched = terms.filter(term => coworkSearchTermForms(term).some(form => haystack.includes(form.toLocaleLowerCase('es')))).length;
     return { row, matched };
   // «Con correo» is who to write to: who decides the purchase comes first, then the most recent.
   }).sort((left, right) => right.matched - left.matched

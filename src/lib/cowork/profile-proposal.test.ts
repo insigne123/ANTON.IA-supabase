@@ -36,3 +36,10 @@ test('«Tu cliente ideal» can be proposed too: roles, industries, a size from �
     { targetRoles: 'Gerente de Personas, Jefe de RR. HH.', targetIndustries: 'Retail, Minería', targetCompanySize: '201-500' });
   assert.equal(coworkProfileDecisionSchema.safeParse({ ...strict, targetCompanySize: '200 a 500' }).success, false, 'a size outside the options of «Perfil» is refused');
 });
+
+test('the card says what the change touches, in the person\'s words', async () => {
+  const { coworkProfileChangeLabel } = await import('./profile-proposal');
+  assert.equal(coworkProfileChangeLabel({ signature: { channel: 'gmail', html: '<p>Nicolás</p>', enabled: true, separatorPlaintext: true } }), 'Actualizar tu firma de Gmail');
+  assert.equal(coworkProfileChangeLabel({ valueProposition: 'AXIS y verificación de títulos' }), 'Actualizar tu oferta');
+  assert.equal(coworkProfileChangeLabel({ targetRoles: 'Gerente de Personas', targetIndustries: 'Retail', role: 'Gerente Comercial' }), 'Actualizar tu perfil: cliente ideal y cargo');
+});

@@ -211,8 +211,15 @@ export function coworkBlocks(value: unknown): CoworkBlock[] {
 /** The closing question on the next step as one plain sentence, or null.
  * Wrapping formatting goes; a missing opening «¿» is added. */
 export function coworkQuestion(value: unknown): string | null {
-  const text = polishCoworkText(String(value ?? '')).replace(/\s+/g, ' ').trim().replace(/^(?:\*\*)(.+)(?:\*\*)$/, '$1').trim();
+  let text = polishCoworkText(String(value ?? '')).replace(/\s+/g, ' ').trim().replace(/^(?:\*\*)(.+)(?:\*\*)$/, '$1').trim();
+  // A question followed by what it means («¿Te lo dejo listo…? Queda en pausa hasta que lo actives.»): the question is the closing.
+  const asked = /^(¿[^?]{3,}\?)\s+[^?¿]{3,}[.!]$/u.exec(text);
+  if (asked) text = asked[1];
+  // A yes is a reply, not a question (round 25: «¿Sí, déjalo listo para enviarle a Daniela?»).
+  if (/^¿?\s*sí[,!]?\s/iu.test(text)) return null;
   if (text.length < 4 || text.length > 300 || UUID.test(text) || !/\?$/.test(text) || /\[[^\]]{2,}\]/.test(text)) return null;
+  // «¿» opens a Spanish question only (round 25: «¿Should I prepare the first emails…?»).
+  if (/^(?:should|would|could|can|do|does|did|shall|will|is|are|was|were|have|has|may|what|how|who|which|when|where|why|want|ready|quer|posso|devo|voc[êe]|vamos|podemos)\b/i.test(text)) return text;
   return text.includes('¿') ? text : `¿${text}`;
 }
 
@@ -232,7 +239,9 @@ export function withoutTrailingQuestions(line: string): string {
     while (sentences.length && /\?[^\p{L}\p{N}]*$/u.test(sentences[sentences.length - 1])) sentences.pop();
     kept = sentences.join('');
   }
-  kept = kept.trim();
+  // «…confirmar la reunión; ¿te propongo…?» leaves «…reunión;»: the sentence ends with a period, not with what joined it to the
+  // question (round g1, 16 Oct 2026: three answers ended in «;»).
+  kept = kept.trim().replace(/\s*[;:,—–-]+$/u, '.');
   // Emphasis left open by a dropped «**¿…?**» is not content.
   return /[\p{L}\p{N}]/u.test(kept) ? kept : '';
 }
@@ -395,9 +404,15 @@ function withOfferChip(chips: CoworkSuggestion[], question: string | null): Cowo
 const LEADING_YES = /^\s*s[íi],?\s+/iu;
 const capital = (text: string) => text.charAt(0).toLocaleUpperCase('es') + text.slice(1);
 
+// A question a yes does not answer: it asks for something («¿Qué producto ofreces?») or offers a pick («¿Hoy o mañana?»).
+const OPEN_QUESTION = /^[\s¿]*(?:(?:a|con|de|en|para|por)\s+)?(?:qu[ée](?!\s+(?:te\s+parece|tal\s+si))|cu[áa]l(?:es)?|c[óo]mo|qui[ée]n(?:es)?|d[óo]nde|cu[áa]nt[oa]s?|cu[áa]ndo)(?!\p{L})/iu;
+const EITHER_OR = /(?<!\p{L})o(?!\p{L})[^?]*\?\s*$/u;
+/** Whether a one-tap yes answers the closing question (round 25: «Sí, adelante» under «¿Qué problema necesitas resolver?»). */
+export const coworkYesAnswers = (question: string | null) => Boolean(question && !OPEN_QUESTION.test(question) && !EITHER_OR.test(question));
+
 /** The quick replies as the person reads them: a yes needs a question to answer, and one offer takes one reply. */
 function quickReplies(chips: CoworkSuggestion[], question: string | null, reply: string): CoworkSuggestion[] {
-  if (!question && !/\?\s*$/.test(reply)) {
+  if ((!question && !/\?\s*$/.test(reply)) || (question && !coworkYesAnswers(question))) {
     return chips.filter(chip => !BARE_YES.test(chip.label)).map(chip => LEADING_YES.test(chip.label)
       ? { label: capital(chip.label.replace(LEADING_YES, '')), message: capital(chip.message.replace(LEADING_YES, '')) } : chip);
   }
@@ -477,8 +492,53 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     question,
     blocks: blocks.length ? blocks : null,
     suggestions: choices ? null : suggestions.length ? nullIfEmpty(quickReplies(suggestions, question, reply))
-      : question ? [namedYes(COWORK_YES_CHIP, question)] : null,
+      : coworkYesAnswers(question) ? [namedYes(COWORK_YES_CHIP, question)] : null,
     choices,
+  };
+}
+
+// A goodbye with nothing else asked (round 25: «gracias, eso era todo. chao!» got «¿Preparo los primeros correos…?» and its button).
+const FAREWELL = /(?<!\p{L})(?:chao|chau|adi[oó]s|hasta (?:luego|ma[ñn]ana|pronto|el lunes)|nos vemos|bye|eso (?:era|es|ser[ií]a) todo|nada m[aá]s por (?:hoy|ahora))(?!\p{L})/iu;
+export const coworkIsFarewell = (message: string) => message.trim().length <= 80 && !message.includes('?') && FAREWELL.test(message);
+
+/** The answer to a goodbye: what it says, without a closing question, quick replies or options. */
+export function coworkAsFarewell<T extends { reply: string; question: string | null; suggestions: unknown; choices: unknown }>(answer: T): T {
+  const question = answer.question?.trim();
+  const reply = question && answer.reply.trimEnd().endsWith(question) ? answer.reply.trimEnd().slice(0, -question.length).trimEnd() : answer.reply;
+  return { ...answer, reply: reply || answer.reply, question: null, suggestions: null, choices: null };
+}
+
+// «Cancela eso» typed while a proposal waits (round 25: it waited in the queue, «Se enviará cuando resuelvas la propuesta», and the
+// proposal stayed): it discards the proposal, as «Descartar» does.
+const CANCELS = /^(?:no[,.!]?\s*)?(?:cancel(?:a|ar|alo|ala|ado)|desc[áa]rt(?:a|ar|alo|ala)|olv[íi]d(?:alo|ala|a eso)|mejor no|d[ée]jalo(?: as[íi])?|no lo hagas|no la crees|an[úu]la(?:lo|la)?|detenlo|para eso)(?:\s+(?:eso|esto|la propuesta|la campa[ñn]a|todo|por ahora|mejor))*\s*[.!]*$/iu;
+export const coworkCancelsProposal = (message: string) => CANCELS.test(message.trim());
+
+// A message for another channel, asked by name: WhatsApp, a text message (round 25: «conviértelo en un mensaje de WhatsApp» came back
+// as an email card with a subject and a three-line signature, twice).
+const CHAT_CHANNEL = /\b(?:whats\s?app|wsp|wasap|sms|mensaje de texto)\b/iu;
+const SIGN_OFF_LINE = /^(?:saludos(?: cordiales)?|un saludo|atentamente|cordialmente|abrazo|un abrazo|gracias|best(?: regards)?|regards|atenciosamente)[,.!]?\s*$/iu;
+export const coworkAsksChatMessage = (message: string) => CHAT_CHANNEL.test(message) && !/\bcorreo\b|\bmail\b/iu.test(message);
+
+/** The answer to a chat-message request: the email card becomes the message itself, without subject, sign-off or signature, as a
+ * document to copy; a campaign is not its next step. */
+export function coworkAsChatMessage<T extends { reply: string; document: { title: string; content: string } | null; question: string | null; blocks: CoworkBlock[] | null; suggestions: CoworkSuggestion[] | null }>(answer: T, signer: string | null = null): T {
+  const draft = answer.blocks?.find(block => block.type === 'email_draft' && !(block.to?.length));
+  if (!draft || draft.type !== 'email_draft' || answer.document) return answer;
+  const lines = draft.body.trim().split('\n');
+  const end = lines.findIndex(line => SIGN_OFF_LINE.test(line.trim()));
+  let kept = (end >= 0 ? lines.slice(0, end) : lines).join('\n').trim();
+  // Without the sign-off, the signer's full name may still close it: a chat message is signed, at most, with the first name.
+  const first = (signer || '').trim().split(/\s+/)[0];
+  if (end >= 0 && first && !kept.includes(first)) kept = `${kept}\n\n${first}`;
+  const campaign = (text: string | null | undefined) => /campa[ñn]a|correo/iu.test(text || '');
+  return {
+    ...answer,
+    document: { title: draft.title.replace(/^correo\b/iu, 'Mensaje') || 'Mensaje', content: kept },
+    blocks: answer.blocks!.filter(block => block !== draft).length ? answer.blocks!.filter(block => block !== draft) : null,
+    question: campaign(answer.question) ? null : answer.question,
+    reply: campaign(answer.question) && answer.question && answer.reply.trimEnd().endsWith(answer.question.trim())
+      ? answer.reply.trimEnd().slice(0, -answer.question.trim().length).trimEnd() : answer.reply,
+    suggestions: answer.suggestions?.filter(chip => !campaign(chip.label)) ?? null,
   };
 }
 

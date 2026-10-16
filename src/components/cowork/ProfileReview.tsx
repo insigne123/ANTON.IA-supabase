@@ -33,7 +33,7 @@ export function ProfileReview({ runId, onApprove, onReject, resolving }: {
     return () => { disposed = true; };
   }, [runId]);
   if (error) return <ReviewError message={error} />;
-  if (!preview) return <ReviewLoading label="Cargando cambios exactos del perfil…" />;
+  if (!preview) return <ReviewLoading label="Cargando los cambios de tu perfil…" />;
   const entries = Object.entries(preview.patch || {});
   return <div className="space-y-4">
     <ReviewFields>
@@ -52,6 +52,9 @@ export function ProfileReview({ runId, onApprove, onReject, resolving }: {
   </div>;
 }
 
+// An empty list or text is not a value to review (round 25: «Evidencias:» with nothing after it).
+const filled = (value: unknown) => Array.isArray(value) ? value.some(item => String(item ?? '').trim()) : Boolean(String(value ?? '').trim());
+
 function SignatureValues({ value }: { value: unknown }) {
   const signatures = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const extended = signatures.profile_extended && typeof signatures.profile_extended === 'object'
@@ -60,9 +63,9 @@ function SignatureValues({ value }: { value: unknown }) {
     services: 'Servicios', valueProposition: 'Propuesta de valor', proofPoints: 'Evidencias',
     targetRoles: 'Cargos de tu cliente ideal', targetIndustries: 'Industrias de tu cliente ideal', targetCompanySize: 'Tamaño de empresa', targetLocations: 'Regiones' };
   return <div className="space-y-3">
-    {Object.entries(labels).map(([key, label]) => extended[key] ? <p key={key} className="whitespace-pre-wrap">
+    {Object.entries(labels).map(([key, label]) => filled(extended[key]) ? <p key={key} className="whitespace-pre-wrap">
       <span className="font-medium">{label}: </span>{Array.isArray(extended[key])
-        ? (extended[key] as unknown[]).join('\n') : String(extended[key])}</p> : null)}
+        ? (extended[key] as unknown[]).filter(item => String(item ?? '').trim()).join('\n') : String(extended[key])}</p> : null)}
     {(['gmail', 'outlook'] as const).map(channel => {
       const config = signatures[channel] as { html?: unknown; enabled?: unknown } | undefined;
       if (!config || typeof config.html !== 'string') return null;
