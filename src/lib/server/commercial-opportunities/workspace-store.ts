@@ -100,6 +100,7 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
   const members = await workspaceMembers(client, scope);
   const context = opportunityDb(await client.from('opportunity_company_context').select('criteria').eq('organization_id', scope.organizationId).maybeSingle());
   return { item, work: opportunityDb(work), decisionMakerTitles: context?.criteria?.decisionMakerTitles || [], participants: members.filter(m => people.some(p => p.user_id === m.user_id)),
+    members: members.map(({ user_id, name }) => ({ user_id, name })),
     activity: opportunityDb(activity), tasks: opportunityDb(tasks), documents: opportunityDb(documents)?.map(({ storage_path, ...doc }) => doc),
     reports: opportunityDb(reports), contacts: opportunityDb(contacts),
     // A report's progress for the page's «oficina»; the payload itself never leaves the server.
