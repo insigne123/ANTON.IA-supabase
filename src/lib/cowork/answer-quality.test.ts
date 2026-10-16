@@ -449,3 +449,27 @@ test('the closing question is a question: what follows it stays out, and a yes i
   assert.equal(coworkQuestion('¿Si te parece, creo la campaña?'), '¿Si te parece, creo la campaña?');
   assert.equal(coworkQuestion('¿Creo la campaña pausada para Felipe?'), '¿Creo la campaña pausada para Felipe?');
 });
+
+test('«cancela eso» with a proposal waiting discards it', async () => {
+  const { coworkCancelsProposal } = await import('./answer-quality');
+  for (const text of ['cancela eso', 'Cancela', 'no, cancela la campaña', 'mejor no', 'descártala', 'olvídalo', 'déjalo así', 'no lo hagas.'])
+    assert.equal(coworkCancelsProposal(text), true, text);
+  for (const text of ['cancela la campaña y escríbele solo a Daniela', '¿cancelo la campaña?', 'no sé', 'para Rodrigo también'])
+    assert.equal(coworkCancelsProposal(text), false, text);
+});
+
+test('a WhatsApp message comes as the message to copy, not as an email card with a campaign', async () => {
+  const { coworkAsChatMessage, coworkAsksChatMessage } = await import('./answer-quality');
+  assert.equal(coworkAsksChatMessage('conviértelo en un mensaje de WhatsApp: Hola, somos Yago…'), true);
+  assert.equal(coworkAsksChatMessage('mándale un correo por whatsapp no, por mail'), false);
+  const answer = polishCoworkAnswer({ reply: 'Te lo dejé breve para WhatsApp.', document: null, question: '¿Preparo una campaña pausada con este correo?',
+    blocks: [{ type: 'email_draft', title: 'Mensaje de WhatsApp', to: null, subject: 'AXIS',
+      body: 'Hola, soy Nicolás, de Yago. AXIS revisa antecedentes laborales de postulantes.\n\n¿Tienes 30 minutos esta semana?\n\nSaludos,\nNicolás Yarur\nGerente Comercial\nYago SpA' }],
+    suggestions: [{ label: 'Sí, prepara la campaña', message: 'Sí, prepara la campaña' }, { label: 'Más breve', message: 'Más breve' }] });
+  const chat = coworkAsChatMessage(answer, 'Nicolás Yarur');
+  assert.equal((chat.document as { content: string } | null)?.content, 'Hola, soy Nicolás, de Yago. AXIS revisa antecedentes laborales de postulantes.\n\n¿Tienes 30 minutos esta semana?');
+  assert.equal(chat.blocks, null);
+  assert.equal(chat.question, null);
+  assert.equal(chat.reply, 'Te lo dejé breve para WhatsApp.');
+  assert.deepEqual(chat.suggestions?.map(chip => chip.label), ['Más breve']);
+});

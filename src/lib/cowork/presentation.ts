@@ -218,7 +218,7 @@ export type CoworkEffectCopy = { title: string; help: string; icon: CoworkIconKe
 const EFFECTS: Record<string, CoworkEffectCopy> = {
   save_contact: { title: 'Guardar contacto', icon: 'user-plus', help: 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' },
   start_research: { title: 'Investigar contacto', icon: 'research', help: 'Se encolará la investigación con tu cuota disponible. Suele tardar unos minutos; cuando termine te aviso en esta conversación con lo útil para escribirle.' },
-  enrich_contact: { title: 'Buscar su correo', icon: 'sparkles', help: 'Se consultará su correo al proveedor (sin teléfono). Usa 1 crédito y no inventa datos.' },
+  enrich_contact: { title: 'Buscar sus datos', icon: 'sparkles', help: 'Se consultan al proveedor su correo y, si lo tiene, su perfil de LinkedIn (sin teléfono). Usa 1 crédito y no inventa datos.' },
   request_draft: { title: 'Preparar borrador', icon: 'draft', help: 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.' },
   send_email: { title: 'Enviar correo', icon: 'send', help: 'Se enviará exactamente la versión mostrada.' },
   campaign_create: { title: 'Crear campaña', icon: 'campaign', help: 'Queda guardada sin enviar: nada sale hasta que la actives, y activarla pide otra aprobación.' },
@@ -310,7 +310,7 @@ export type CoworkOutcome = { happens: string; not: string };
 const OUTCOMES: Record<string, CoworkOutcome> = {
   save_contact: { happens: 'Se guarda el contacto en tus contactos.', not: 'No se le escribe ni se gasta crédito.' },
   start_research: { happens: 'Se investiga el contacto con tu cuota.', not: 'No se le escribe.' },
-  enrich_contact: { happens: 'Se busca su correo en el proveedor (1 crédito).', not: 'No se le escribe ni se inventan datos.' },
+  enrich_contact: { happens: 'Se buscan su correo y, si el proveedor lo tiene, su perfil de LinkedIn (1 crédito).', not: 'No se le escribe ni se inventan datos.' },
   request_draft: { happens: 'Se prepara un borrador en segundo plano.', not: 'No se envía nada.' },
   send_email: { happens: 'Se envía este correo, tal cual, desde tu cuenta.', not: 'No se envía a nadie más ni se cambia el texto.' },
   campaign_create: { happens: 'Se guarda la campaña con el correo de cada persona, sin enviar (pausada).', not: 'No sale nada hasta que la actives, y activarla pide otra aprobación.' },

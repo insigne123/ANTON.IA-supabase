@@ -1254,4 +1254,15 @@ test('an email in English or Portuguese greets and closes in that language', asy
   assert.equal(coworkGreetingInLanguage(portuguese), portuguese.replace('Hola,', 'Olá,').replace('Saludos,', 'Atenciosamente,'));
   const spanish = 'Hola José,\n\nCuando se acumulan postulantes, revisarlos uno por uno deja la vacante abierta.\n\nSaludos,\nNicolás Yarur';
   assert.equal(coworkGreetingInLanguage(spanish), spanish);
+  const formal = 'Estimado Rodrigo Pérez:\n\nEn seguridad privada, revisar antecedentes uno por uno deja turnos sin cubrir.\n\nSaludos,\nNicolás Yarur';
+  assert.equal(coworkGreetingInLanguage(formal), formal.replace('Saludos,', 'Saludos cordiales,'));
+});
+
+test('the person\'s own text, however they ask to change it, is not a new email', async () => {
+  const { coworkWriterPasted } = await import('./writer');
+  const email = 'Hola, somos Yago y tenemos una plataforma increíble llamada AXIS que revisa causas judiciales de forma automática.';
+  for (const ask of [`pásalo a formal: ${email}`, `quiero responder esto, mejóralo: "ok gracias, te escribo después cuando tenga tiempo para ver lo de la demo"`,
+    `tradúcelo al inglés: ${email}`, `conviértelo en un mensaje de WhatsApp: ${email}`, `ponlo en viñetas: ${email}`, `¿qué opinas de este correo? ${email}`])
+    assert.equal(coworkWriterPasted(ask), true, ask);
+  assert.equal(coworkWriterPasted('escríbele a Daniela Rojas de Manpower para presentarle AXIS'), false);
 });

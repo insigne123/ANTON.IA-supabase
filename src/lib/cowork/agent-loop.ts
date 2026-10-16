@@ -381,7 +381,8 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
   const named = (verb: string) => targetName ? `${verb} ${targetName}` : `${verb} ${targetId.slice(0, 120)}`;
   if (action === 'leads.save_contact') return named('Guardar contacto');
   if (action === 'research.start') return named('Investigar contacto');
-  if (action === 'lead.enrich') return named('Buscar el correo de');
+  // The lookup brings the email and, when the provider has it, the LinkedIn profile (round 25: «Buscar su correo» to invite by LinkedIn).
+  if (action === 'lead.enrich') return named('Buscar los datos de');
   if (action === 'email.send') return `Enviar correo del borrador ${targetId.slice(0, 120)}`;
   if (action === 'campaign.create') return 'Crear borrador de campaña';
   // A campaign by its name, never its ID («Aprobar y activar campaña 00000000-…»), as the worker labels it when staging.
@@ -1144,9 +1145,10 @@ function completeFrom(first: CoworkAnswer, retry: CoworkAnswer, offered: string 
  * spend another credit for the same provider answer. */
 function repeatedEnrichment(label: string, history: CoworkHistoryTurn[], kind: 'enrich_contact' | 'enrich_phone' = 'enrich_contact') {
   // Earlier turns named the same lookup «Enriquecer contacto …».
-  const earlier = label.replace(/^Buscar el correo de /, 'Enriquecer contacto ');
+  const name = label.replace(/^Buscar (?:los datos|el correo) de /, '');
+  const earlier = new Set([label, `Buscar los datos de ${name}`, `Buscar el correo de ${name}`, `Enriquecer contacto ${name}`]);
   return history.some(turn => ((turn as { actions?: Array<{ kind?: unknown; label?: unknown }> }).actions || [])
-    .some(action => action.kind === kind && (action.label === label || action.label === earlier)));
+    .some(action => action.kind === kind && typeof action.label === 'string' && earlier.has(action.label)));
 }
 
 function issueSummary(error: unknown): string | null {

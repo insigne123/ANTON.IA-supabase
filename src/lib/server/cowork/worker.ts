@@ -4,7 +4,7 @@ import { coworkClarificationAnswer, coworkDecisionSchema, coworkRescueNote, runC
 import { COWORK_RESCUE_MIN_MS, COWORK_RESCUE_REASONING_EFFORT, COWORK_RESCUE_TIMEOUT_MS, coworkRescueModel } from '@/lib/cowork/rescue-model';
 import { coworkDecisionTimeoutMs, coworkReasoningEffort, coworkTurnCeiling, type CoworkTurnBudget } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
-import { coworkAsFarewell, coworkIsFarewell, polishCoworkAnswer } from '@/lib/cowork/answer-quality';
+import { coworkAsChatMessage, coworkAsFarewell, coworkAsksChatMessage, coworkIsFarewell, polishCoworkAnswer } from '@/lib/cowork/answer-quality';
 import { coworkProfileChangeLabel } from '@/lib/cowork/profile-proposal';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
@@ -33,7 +33,7 @@ import { hashCoworkCodeProposal } from '@/lib/cowork/code-proposal';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
-import { coworkDecisionContext, coworkTimeZone } from '@/lib/cowork/decision-context';
+import { coworkDecisionContext, coworkReplyLanguage, coworkTimeZone } from '@/lib/cowork/decision-context';
 import { loadCoworkUserContext } from './user-context';
 import { coworkWorkspaceEnabled, loadCoworkWorkspace } from './workspace';
 import { loadCoworkPreviousVersions } from './previous-versions';
@@ -283,9 +283,11 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         ? ' Cada tarea puede incluir read {action,input}: analyst permite metrics.overview/crm.record; researcher research.get_existing/leads.get; verifier privacy.contactability/crm.collaboration. Solo IDs observados en su evidencia. La revisión ve como máximo tres consultas del turno, contando cada read junto con las ya ejecutadas. No permite escrituras ni proveedores externos.'
         : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
       : 'specialists.review está deshabilitado.'}`;
+    const replyLanguage = coworkReplyLanguage(run.message);
     const decisionPrompt = (observations: CoworkObservation[], mustAnswer: boolean, rejections: CoworkRejection[], turnBudget?: CoworkTurnBudget) =>
       JSON.stringify(coworkDecisionContext(instructions, {
         history, request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
+        ...(replyLanguage ? { replyLanguage } : {}),
         ...(threadMemory ? { threadMemory } : {}),
         ...(previousVersions.length ? { previousVersions } : {}),
         ...(activeTask ? { task: coworkTaskContext(activeTask) } : {}),
@@ -683,7 +685,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       p_run_id: run.id, p_token: run.lease_token, p_status: 'completed',
       p_payload: { ...(() => {
         const answer = polishCoworkAnswer(clarificationOnly ? coworkClarificationAnswer(result) : result);
-        return coworkIsFarewell(run.message) ? coworkAsFarewell(answer) : answer;
+        if (coworkIsFarewell(run.message)) return coworkAsFarewell(answer);
+        return coworkAsksChatMessage(run.message) ? coworkAsChatMessage(answer, userContext?.fullName ?? null) : answer;
       })(), telemetry },
     });
     if (finished.error) throw finished.error;

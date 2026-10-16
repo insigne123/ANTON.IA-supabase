@@ -78,7 +78,7 @@ test('lead-scoped effect labels use the observed contact name, never raw IDs', a
     decide: async observations => observations.length === 0 ? found : enrich,
   });
   assert.deepEqual(proposals, [{ kind: 'enrich_contact', targetId: leadId,
-    label: 'Buscar el correo de José C. (GrupoExpro)', originRunId: runId }]);
+    label: 'Buscar los datos de José C. (GrupoExpro)', originRunId: runId }]);
 });
 
 test('a campaign card names the campaign campaigns.list showed, never its ID', async () => {

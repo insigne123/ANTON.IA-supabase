@@ -149,6 +149,20 @@ const historyHasFeedback = (history: unknown) => Array.isArray((history as { tur
   && ((history as { turns: Array<{ feedback?: unknown }> }).turns).some(turn => Boolean(turn?.feedback));
 
 /** Shared by the worker and AXIS replay. Time comes from the server, not the model. */
+const ENGLISH_WORDS = /^(?:the|you|your|what|how|can|do|i|my|me|is|are|please|write|have|today|for|to|with|and|this|who|which|show|help|hi|hello)$/i;
+const SPANISH_WORDS = /^(?:que|qué|de|el|la|los|las|mis|mi|para|con|por|hola|cómo|como|un|una|es|hoy|tengo|hazme|escríbele|dame)$/i;
+const PORTUGUESE_WORDS = /^(?:você|vocês|não|olá|obrigad[oa]|meu|minha|hoje|tenho|como|quero|por favor|escreva)$/i;
+/** The language the person wrote in, when it is not Spanish (round 25: «what do I have pending today?» answered in Spanish). */
+export function coworkReplyLanguage(message: string): 'inglés' | 'portugués' | null {
+  const words = message.toLowerCase().match(/[\p{L}]+/gu) ?? [];
+  if (words.length < 2 || /[¿¡ñ]/.test(message)) return null;
+  const spanish = words.filter(word => SPANISH_WORDS.test(word)).length;
+  const portuguese = words.filter(word => PORTUGUESE_WORDS.test(word)).length + (/ção|ões|ã/.test(message) ? 1 : 0);
+  if (portuguese >= 2 && portuguese > spanish) return 'portugués';
+  const english = words.filter(word => ENGLISH_WORDS.test(word)).length;
+  return english >= 2 && english > spanish ? 'inglés' : null;
+}
+
 export function coworkDecisionContext(
   instructions: ReturnType<typeof coworkAgentInstructions>,
   {
@@ -163,7 +177,9 @@ export function coworkDecisionContext(
     /** «Otra versión» (Plan 13): the answers already given to this same message, with what the person said about them. */
     previousVersions?: CoworkPreviousVersion[];
     /** The approved long task this turn continues (task-plan.ts, Plan 13, 4c): its plan, what it spent and how to go on. */
-    task?: unknown },
+    task?: unknown;
+    /** The person wrote in another language: reply, question and suggestions go in it (coworkReplyLanguage). */
+    replyLanguage?: string },
   now = new Date(),
   timeZone = coworkTimeZone(),
 ) {
