@@ -125,7 +125,7 @@ test('deferred deletion is reported honestly by server, API, and UI', () => {
     runSubjectAction.indexOf("['manual_review', 'pending'].includes(data?.result?.outcome)")
       < runSubjectAction.indexOf('if (!response.ok)'),
   );
-  assert.match(privacyRequestsPage, /La eliminacion no se ejecuto y requiere revision manual/);
+  assert.match(privacyRequestsPage, /La eliminación no se ejecutó y requiere revisión manual/);
   assert.match(privacyRequestsPage, /Vuelve a ejecutar la eliminación cuando termine el trabajo en curso/);
 });
 

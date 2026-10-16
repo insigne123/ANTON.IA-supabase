@@ -155,7 +155,7 @@ export default function PrivacyIncidentsPage() {
           <form className="space-y-4" onSubmit={submitIncident}>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="incident-title">Titulo</Label>
+                <Label htmlFor="incident-title">Título</Label>
                 <Input id="incident-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
               </div>
               <div className="space-y-2">
@@ -195,7 +195,7 @@ export default function PrivacyIncidentsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="incident-resolution">Notas de contencion o cierre</Label>
+              <Label htmlFor="incident-resolution">Notas de contención o cierre</Label>
               <Textarea id="incident-resolution" value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} />
             </div>
 
