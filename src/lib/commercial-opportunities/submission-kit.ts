@@ -50,12 +50,19 @@ export type SubmissionKit = z.infer<typeof submissionKitSchema>;
 
 const clip = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value);
 /** The guide as the page shows it: short texts and bounded lists, whatever length the model wrote. */
+// Words of the pipeline, not of the bases («los hechos no precisan…»): a clause that says them is about the guide, not about applying.
+const PIPELINE_WORDS = /\b(?:los|estos|dichos) hechos\b|\bel expediente\b/i;
+const withoutPipelineWords = (text: string) => text.split(/(?<=[.;])\s+/).filter(part => !PIPELINE_WORDS.test(part)).join(' ').replace(/;$/, '.').trim();
+// The closing date restated as a rule: the page shows it once, in the portal's time (a guide read it as «18:00» next to «15:00»).
+const RESTATES_CLOSING = /\b(?:fecha|hora|plazo) (?:l[íi]mite|de cierre)\b|\bcierre de (?:la )?(?:recepci[óo]n|ofertas)\b|\bno se reciben ofertas\b/i;
+
 export function clampSubmissionKit(kit: SubmissionKit): SubmissionKit {
   return {
-    channel: kit.channel, channelDetail: clip(kit.channelDetail, 400),
+    channel: kit.channel, channelDetail: clip(withoutPipelineWords(kit.channelDetail), 400),
     folders: kit.folders.slice(0, 5).map(folder => ({ name: clip(folder.name, 80), documents: folder.documents.slice(0, 30).map(doc => ({
       ...doc, title: clip(doc.title, 200), validity: clip(doc.validity, 200), howTo: clip(doc.howTo, 400), evidence: doc.evidence.slice(0, 3) })) })),
-    rules: kit.rules.slice(0, 15).map(rule => ({ ...rule, text: clip(rule.text, 400), evidence: rule.evidence.slice(0, 3) })),
+    rules: kit.rules.filter(rule => !(rule.kind === 'deadline' && RESTATES_CLOSING.test(rule.text))).slice(0, 15)
+      .map(rule => ({ ...rule, text: clip(rule.text, 400), evidence: rule.evidence.slice(0, 3) })),
     numbers: { ...kit.numbers, budgetLabel: clip(kit.numbers.budgetLabel, 200), currency: clip(kit.numbers.currency, 12), notes: kit.numbers.notes.slice(0, 5).map(note => clip(note, 300)) },
     guarantees: kit.guarantees.slice(0, 3).map(g => ({ kind: clip(g.kind, 120), amount: clip(g.amount, 200), validity: clip(g.validity, 200), when: clip(g.when, 200), payableTo: clip(g.payableTo, 200) })),
     afterSubmit: kit.afterSubmit.slice(0, 6).map(line => clip(line, 300)),
@@ -66,7 +73,7 @@ export function clampSubmissionKit(kit: SubmissionKit): SubmissionKit {
 export const SUBMISSION_KIT_PROMPT = `Arma la guía para postular a esta oportunidad a partir de los hechos: qué entregar, cómo y qué deja la oferta fuera.
 channel: portal (Mercado Público u otro portal), email, physical, mixed o unknown; channelDetail: una frase con el canal exacto (la dirección de correo si la hay) y cómo se separan los archivos.
 folders: las carpetas o secciones en que se entregan los documentos, con el nombre que les dan las bases (por ejemplo «Administrativos», «Técnicos», «Económicos»); si las bases no las nombran, una sola carpeta «Documentos de la oferta». En cada documento: title (el nombre como lo dicen las bases, con su número de anexo), source (annex si es un formulario de las bases, company si es un documento propio como un programa de trabajo o un CV, certificate si es un certificado como el F30, la vigencia o la deuda fiscal, third_party si lo emite otro como un banco o un cliente), signed (true si debe ir firmado), validity (la antigüedad máxima o la vigencia exigida; vacía si no hay), excludesIfMissing (true solo si las bases dicen que su falta, su firma o su forma deja la oferta fuera, rechazada o inadmisible), howTo (una frase práctica: dónde se obtiene o qué debe contener) y evidence (cita exacta: chunkId y quote).
-rules: lo que deja la oferta fuera además de un documento faltante: montos mínimos (sueldos, aguinaldos), tope de presupuesto, formato del precio, hora de cierre, coherencia entre montos; cada una con su cita.
+rules: lo que deja la oferta fuera además de un documento faltante: montos mínimos (sueldos, aguinaldos), tope de presupuesto, formato del precio, coherencia entre montos; cada una con su cita.
 numbers: budget es el presupuesto disponible o máximo como número (sin puntos) o null; budgetLabel lo describe como lo dicen las bases; currency (CLP, UF, USD); budgetIncludesTax; portalValue dice si en el portal va el valor neto o el total; notes con las reglas de los montos (por ejemplo que el anexo económico y el detalle deben coincidir).
 guarantees: cada garantía exigida (seriedad, fiel cumplimiento, anticipo) con monto o porcentaje, vigencia, cuándo se entrega y a nombre de quién.
 afterSubmit: hasta 6 hitos después de enviar que exigen algo de la empresa (salvar errores formales en un plazo, firmar el contrato, entregar la garantía, documentos para cada pago).

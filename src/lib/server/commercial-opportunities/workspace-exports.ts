@@ -3,7 +3,7 @@ import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/wor
 import { IMPACT_LABELS, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
 import {normalizeCoworkPdfText} from '@/lib/server/cowork/file-exports';
 import { reportChecklist, reportItemKey, reportProgress, reportRoute, type MarkKind, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
-import { KIT_SOURCE_LABELS } from '@/lib/commercial-opportunities/submission-kit';
+import { KIT_SOURCE_LABELS, clampSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
 
 const LABELS:Record<string,string>={monthlyNet:'Precio neto mensual',totalNet:'Precio neto total',totalWithTax:'Total con impuestos',workingCapital:'Capital de trabajo',guarantee:'Garantía'};
 const label=(v:string)=>LABELS[v]||IMPACT_LABELS[v]||statusLabel(v);
@@ -56,7 +56,7 @@ export function opportunityReportMarkdown(report: OpportunityReport, opportunity
   if (warnings.length) lines.push('', '## Antes de decidir', ...warnings.map(w => `- ${w}`));
   if (report.milestones.length) lines.push('', '## Fechas clave', ...report.milestones.map(m => `- **${m.label}:** ${m.date}`));
   if (report.requirements.length) lines.push('', isSignalReport(report) ? '## Qué validar con la empresa' : '## Requisitos para postular', ...report.requirements.map(r => `- ${check(marks, 'requirement', r.title)}**${r.title}**${star('requirement', r.title)} · ${label(r.status)}\n  ${r.action}${r.role || r.due ? `\n  ${[r.role, r.due].filter(Boolean).join(' · ')}` : ''}`));
-  const kit = report.submission;
+  const kit = report.submission ? clampSubmissionKit(report.submission) : null;
   if (kit?.folders.length) {
     lines.push('', '## Cómo postular', kit.channelDetail);
     for (const folder of kit.folders) lines.push('', `### ${folder.name}`, ...folder.documents.map(d => `- ${check(marks, 'document', d.title)}**${d.title}**${star('document', d.title)} · ${[KIT_SOURCE_LABELS[d.source], d.signed ? 'con firma' : null, d.validity || null].filter(Boolean).join(' · ')}${d.excludesIfMissing ? ' · **si falta, quedas fuera**' : ''}${d.howTo ? `\n  ${d.howTo}` : ''}`));
@@ -127,7 +127,7 @@ export async function opportunityReportPdf(report: OpportunityReport, opportunit
   if (report.milestones.length) { heading('Fechas clave'); table(['Hito', 'Fecha'], report.milestones.map(m => [m.label, m.date]), lit('date', report.milestones.map(m => m.label))); }
   if (report.requirements.length) { heading(isSignalReport(report) ? 'Qué validar con la empresa' : 'Requisitos para postular');
     table([...(marks ? ['Estado'] : []), 'Requisito', 'Situación', 'Qué hacer', 'Quién / cuándo'], report.requirements.map(r => [...(marks ? [done('requirement', r.title) || '—'] : []), r.title, label(r.status), r.action, [r.role, r.due].filter(Boolean).join('\n')]), lit('requirement', report.requirements.map(r => r.title))); }
-  const kit = report.submission;
+  const kit = report.submission ? clampSubmissionKit(report.submission) : null;
   if (kit?.folders.length) {
     heading('Cómo postular');
     if (kit.channelDetail) text(kit.channelDetail, 10, [71, 85, 105]);

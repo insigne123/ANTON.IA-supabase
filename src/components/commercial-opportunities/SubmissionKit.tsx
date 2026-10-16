@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { parseReportDate, reportItemKey, reportProgress, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { humanDate, reportKeyDates } from '@/lib/commercial-opportunities/report-view';
-import { AFTER_SUBMIT_DEFAULTS, KIT_SOURCE_LABELS, PORTAL_STEPS, VAT_PERCENT, kitChecklist, offerNumbers, parseAmount, type SubmissionKit as Kit } from '@/lib/commercial-opportunities/submission-kit';
+import { AFTER_SUBMIT_DEFAULTS, KIT_SOURCE_LABELS, clampSubmissionKit, PORTAL_STEPS, VAT_PERCENT, kitChecklist, offerNumbers, parseAmount, type SubmissionKit as Kit } from '@/lib/commercial-opportunities/submission-kit';
 import { MarkedItem, useReportMarks, type MarkChange } from './ReportMarks';
 
 const money = (n: number, currency = 'CLP') => currency === 'CLP' || !currency
@@ -30,7 +30,7 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
   onGenerate?: () => void;
   generating?: boolean;
 }) {
-  const kit = report?.submission ?? null;
+  const kit = report?.submission ? clampSubmissionKit(report.submission) : null;
   const { interactive, marks, saving, change } = useReportMarks(initialMarks, onMark);
   const markProps = { marks: interactive ? marks : null, disabled: saving, onChange: (input: MarkChange) => void change(input),
     authorOf: (id?: string | null) => people?.find(p => p.user_id === id)?.name ?? null, whenOf: (at?: string | null) => humanDate(at, true) };

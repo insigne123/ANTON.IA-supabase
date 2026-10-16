@@ -84,3 +84,14 @@ test('a long answer keeps the guide: texts are clipped and lists bounded for the
   assert.equal(shown.folders[0].documents.length, 30);
   assert.ok(shown.folders[0].documents.every(doc => doc.howTo.length <= 400));
 });
+
+test('the guide speaks of the bases, not of how it was made, and does not restate the closing date as a rule', async () => {
+  const { clampSubmissionKit } = await import('./submission-kit');
+  const old = { ...kit, channelDetail: 'Portal ChileCompra; los hechos no precisan el nombre de la plataforma de carga ni cómo separar los archivos.',
+    rules: [...kit.rules, { text: 'La fecha límite consignada es el 5 de noviembre de 2026 a las 18:00; no se reciben ofertas después.', kind: 'deadline' as const, evidence: [] },
+      { text: 'Las muestras se entregan hasta el 3 de noviembre en la oficina de partes.', kind: 'deadline' as const, evidence: [] }] };
+  const shown = clampSubmissionKit(old);
+  assert.equal(shown.channelDetail, 'Portal ChileCompra.');
+  assert.deepEqual(shown.rules.map(rule => rule.kind), ['minimum', 'deadline'], 'another date that leaves the offer out stays');
+  assert.equal(clampSubmissionKit(kit).channelDetail, kit.channelDetail);
+});
