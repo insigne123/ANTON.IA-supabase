@@ -1252,6 +1252,8 @@ test('an email in English or Portuguese greets and closes in that language', asy
   assert.equal(coworkGreetingInLanguage(english), english.replace('Hola Nehal', 'Hi Nehal').replace('Saludos,', 'Best regards,'));
   const portuguese = 'Hola,\n\nA AXIS automatiza a revisão de antecedentes de candidatos.\n\nQuantas candidaturas vocês revisam por mês?\n\nSaludos,\nNicolás Yarur';
   assert.equal(coworkGreetingInLanguage(portuguese), portuguese.replace('Hola,', 'Olá,').replace('Saludos,', 'Atenciosamente,'));
+  const nehal = 'Hola Nehal,\n\nIn recruitment services, when several applicants are moving through screening at once, checking labor-related judicial records one by one leaves a candidate ready for placement waiting to move forward.\n\nAXIS automatically reviews applicants’ labor-related judicial records.\n\nHow does your team currently review these records?\n\nBest regards,\nNicolás Yarur';
+  assert.match(coworkGreetingInLanguage(nehal), /^Hi Nehal,/);
   const spanish = 'Hola José,\n\nCuando se acumulan postulantes, revisarlos uno por uno deja la vacante abierta.\n\nSaludos,\nNicolás Yarur';
   assert.equal(coworkGreetingInLanguage(spanish), spanish);
   const formal = 'Estimado Rodrigo Pérez:\n\nEn seguridad privada, revisar antecedentes uno por uno deja turnos sin cubrir.\n\nSaludos,\nNicolás Yarur';

@@ -218,6 +218,8 @@ export function coworkQuestion(value: unknown): string | null {
   // A yes is a reply, not a question (round 25: «¿Sí, déjalo listo para enviarle a Daniela?»).
   if (/^¿?\s*sí[,!]?\s/iu.test(text)) return null;
   if (text.length < 4 || text.length > 300 || UUID.test(text) || !/\?$/.test(text) || /\[[^\]]{2,}\]/.test(text)) return null;
+  // «¿» opens a Spanish question only (round 25: «¿Should I prepare the first emails…?»).
+  if (/^(?:should|would|could|can|do|does|did|shall|will|is|are|was|were|have|has|may|what|how|who|which|when|where|why|want|ready|quer|posso|devo|voc[êe]|vamos|podemos)\b/i.test(text)) return text;
   return text.includes('¿') ? text : `¿${text}`;
 }
 

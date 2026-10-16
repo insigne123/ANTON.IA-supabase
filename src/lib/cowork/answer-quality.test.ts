@@ -473,3 +473,9 @@ test('a WhatsApp message comes as the message to copy, not as an email card with
   assert.equal(chat.reply, 'Te lo dejé breve para WhatsApp.');
   assert.deepEqual(chat.suggestions?.map(chip => chip.label), ['Más breve']);
 });
+
+test('a question in English or Portuguese keeps its own punctuation', () => {
+  assert.equal(coworkQuestion('Should I prepare the first emails for these four?'), 'Should I prepare the first emails for these four?');
+  assert.equal(coworkQuestion('Quer que eu prepare o primeiro e-mail?'), 'Quer que eu prepare o primeiro e-mail?');
+  assert.equal(coworkQuestion('Creo la campaña pausada?'), '¿Creo la campaña pausada?');
+});

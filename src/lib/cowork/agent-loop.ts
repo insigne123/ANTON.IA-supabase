@@ -785,7 +785,10 @@ export function coworkLookupProposal(answer: { reply: string; question?: unknown
   const missing = collectCoworkLeadRows(read).filter(row => uuid.test(row.id) && !(typeof row.email === 'string' && row.email.includes('@')));
   const plain = (text: string) => text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const named = missing.filter(row => { const first = plain(String(row.name || '')).split(/\s+/)[0]; return first.length > 2 && plain(offer).includes(first); });
-  const people = (named.length ? named : missing).slice(0, max);
+  // Without a name, the offer is for everyone only when it says so («los 3», «tus contactos», «sus correos»); «¿Busco su correo?» about
+  // someone who is not saved (round 25: the general manager of Codelco) is not a card for the three saved contacts without one.
+  const everyone = /\b(?:contactos|personas|los que no|quienes no|todos|ellos|ellas|sus correos|los correos|(?:los|las|de los|de las)\s+(?:\d+|dos|tres|cuatro|cinco))\b/i.test(plain(offer));
+  const people = (named.length ? named : everyone ? missing : missing.length === 1 ? missing : []).slice(0, max);
   return people.length ? { goal: 'email', people: people.map(row => ({ leadId: row.id })) } : null;
 }
 
