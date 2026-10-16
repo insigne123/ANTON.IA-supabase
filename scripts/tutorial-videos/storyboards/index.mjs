@@ -13,7 +13,8 @@ import pipeline from './pipeline.mjs';
 import oportunidades from './oportunidades.mjs';
 import cowork from './cowork.mjs';
 import conexiones from './conexiones.mjs';
+import administracion from './administracion.mjs';
 
 export function STORYBOARDS() {
-  return [hoy, perfil, buscar, importar, contactos, firmas, campanas, conversaciones, pipeline, oportunidades, cowork, conexiones];
+  return [hoy, perfil, buscar, importar, contactos, firmas, campanas, conversaciones, pipeline, oportunidades, cowork, conexiones, administracion];
 }

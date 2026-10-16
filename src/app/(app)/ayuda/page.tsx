@@ -43,7 +43,7 @@ export default function HelpCenterPage() {
   const results = useMemo(() => (query.trim().length >= 2 ? searchHelp(query, sections, 8) : null), [query, sections]);
   const popular = useMemo(() => popularHelpQuestions(sections), [sections]);
   const path = FIRST_EMAIL_PATH.filter((step) => visibleIds.has(step.section));
-  const videos = useMemo(() => visibleTutorialVideos({ opportunities }), [opportunities]);
+  const videos = useMemo(() => visibleTutorialVideos({ opportunities, admin }), [opportunities, admin]);
 
   // Older links point at a section of this page (/ayuda#perfil): each section now has its own page.
   useEffect(() => {

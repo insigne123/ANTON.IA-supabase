@@ -33,8 +33,8 @@ export function PageHelpButton({ visibility, className }: { visibility: HelpVisi
   const visibleIds = useMemo(() => new Set(sections.map((section) => section.id)), [sections]);
   const section = useMemo(() => helpSectionFor(pathname, sections), [pathname, sections]);
   const video = useMemo(
-    () => videoForPath(pathname, sections, visibleTutorialVideos({ opportunities: visibility.opportunities })),
-    [pathname, sections, visibility.opportunities],
+    () => videoForPath(pathname, sections, visibleTutorialVideos({ opportunities: visibility.opportunities, admin: visibility.admin })),
+    [pathname, sections, visibility.opportunities, visibility.admin],
   );
 
   useEffect(() => { setOpen(false); }, [pathname]);

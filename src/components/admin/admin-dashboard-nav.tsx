@@ -18,7 +18,7 @@ export function AdminDashboardNav({usageOnly=false}:{usageOnly?:boolean}) {
 
   return (
     <div className="sticky top-12 z-[8] -mx-4 -mt-4 mb-6 border-b border-border/60 bg-background/90 px-4 backdrop-blur-xl md:-mx-6 md:-mt-5 md:px-6">
-      <nav aria-label="Administración" className="mx-auto flex w-full max-w-[1320px] gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav aria-label="Administración" data-tour="admin-nav" className="mx-auto flex w-full max-w-[1320px] gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {adminNavigation.filter(item=>!usageOnly||item.href==='/dashboard/admin').map((item) => {
           const active = item.exact ? pathname === item.href || pathname==='/dashboard/admin/usage' : pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;

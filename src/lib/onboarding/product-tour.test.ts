@@ -58,7 +58,8 @@ test('screen guides are short, unique, cover the main screens and point at ancho
   const ids = PAGE_GUIDES.map((guide) => guide.id);
   assert.equal(new Set(ids).size, ids.length);
   for (const guide of PAGE_GUIDES) {
-    assert.ok(guide.steps.length >= 1 && guide.steps.length <= 4, guide.id);
+    // A guide that opens by itself walks a whole panel: up to six spots; the ones offered stay short.
+    assert.ok(guide.steps.length >= 1 && guide.steps.length <= (guide.autoStart ? 6 : 4), guide.id);
     for (const step of guide.steps) {
       assert.ok(step.title.length <= 40, `${guide.id}:${step.id}`);
       assert.ok(step.body.length <= 140, `${guide.id}:${step.id}`);
@@ -72,6 +73,13 @@ test('screen guides are short, unique, cover the main screens and point at ancho
   assert.equal(pageGuideFor('/contacted/replied'), null); // Retired: the address redirects to /contacted?view=reply.
   assert.equal(pageGuideFor('/dashboard')?.id, 'home');
   assert.equal(pageGuideFor('/settings/privacy'), null);
+  // The admin panel: its first screen opens its guide by itself; the other three offer theirs.
+  assert.equal(pageGuideFor('/dashboard/admin')?.autoStart, true);
+  assert.equal(pageGuideFor('/dashboard/admin/usage')?.id, 'admin');
+  assert.equal(pageGuideFor('/dashboard/admin/users')?.id, 'admin-people');
+  assert.equal(pageGuideFor('/dashboard/admin/users/abc'), null);
+  assert.equal(pageGuideFor('/dashboard/admin/teams')?.autoStart, undefined);
+  assert.equal(pageGuideFor('/dashboard/admin/credits')?.id, 'admin-credits');
   assert.equal(pageGuideFor(null), null);
 });
 

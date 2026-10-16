@@ -40,6 +40,29 @@ Pasos v2 (textos en `src/lib/onboarding/product-tour.ts`): Hoy → Perfil → Co
 - **Ofrecerla de nuevo:** «Ver guía» o «Ahora no» la marcan como vista y no se vuelve a ofrecer sola. Sigue disponible en «Ayuda».
 - **Prueba:** la unitaria exige que cada ancla exista en el código (`data-tour="…"` en `src/**/*.tsx`). Si se borra un control, la prueba lo dice.
 
+## Panel de administración (16 oct)
+
+El panel de administración tiene cuatro guías, una por pantalla:
+
+| Pantalla | Puntos (ancla `data-tour`) |
+|---|---|
+| Uso y resultados (`/dashboard/admin`) | Cuatro secciones (`admin-nav`), Período (`admin-period`), Cuatro cifras (`admin-metrics`), Qué necesita atención (`admin-attention`), Persona por persona (`admin-tabs`), Exportar (`admin-export`) |
+| Personas (`/dashboard/admin/users`) | Invitar (`admin-people-invite`), Buscar y filtrar (`admin-people-filters`), Lista (`admin-people-list`) |
+| Equipos (`/dashboard/admin/teams`) | Crear equipo (`admin-teams-create`), Rendimiento por equipo (`admin-teams-performance`) |
+| Créditos (`/dashboard/admin/credits`) | Organización (`admin-credits-organization`), Equipos (`admin-credits-teams`), Personas (`admin-credits-people`) |
+
+- **Se abre sola la primera vez:** «Uso y resultados» lleva `autoStart`.
+  - En la primera visita, la guía se abre sin la tarjeta de oferta, cuando el informe ya mostró sus cifras.
+  - Espera hasta 8 s a que carguen. Si para entonces hay algunos controles en pantalla, muestra esos.
+  - Si no hay ninguno, espera a la próxima visita.
+- **Las otras tres pantallas** ofrecen su guía como las demás, con la tarjeta discreta.
+- **Pasos:**
+  - una guía que se abre sola recorre un panel completo y puede tener hasta 6 puntos;
+  - las que se ofrecen siguen con 4 como máximo.
+- **Dónde se guarda:** igual que las demás, en `anton_guides` y `antonia:guides:<userId>`. Cerrarla o terminarla la marca como vista, y desde «?» se repite cuando se quiera.
+- **El video:** está en «Administración» del Centro de ayuda y en el «?» del panel, solo para dueños y administradores. Se graba con `npm run tutorial:videos -- --videos=administracion`.
+  - El informe de uso es un equipo inventado de ocho personas que responde el navegador, porque el banco tiene dos personas.
+
 ## Reglas
 
 - **Cuándo se abre solo:** cuentas con menos de 30 días que no lo han terminado ni omitido en la versión vigente. Las cuentas más antiguas no lo ven solo, pero pueden abrirlo desde «Ver tutorial».

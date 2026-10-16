@@ -371,7 +371,7 @@ function PeoplePageContent() {
   return (
     <div className="mx-auto w-full max-w-[1320px] pb-10">
       <PageHeader title="Personas" description={`Administra acceso y revisa el rendimiento de ${overview?.organization.name || 'la organización'}.`}>
-        {overview && !loading && !refreshing && (currentRole === 'owner' || currentRole === 'admin') ? <InviteMemberDialog organizationId={overview.organization.id} onInviteSent={() => void loadPeople({ silent: true })} /> : null}
+        {overview && !loading && !refreshing && (currentRole === 'owner' || currentRole === 'admin') ? <div data-tour="admin-people-invite" className="inline-flex"><InviteMemberDialog organizationId={overview.organization.id} onInviteSent={() => void loadPeople({ silent: true })} /></div> : null}
         <Button type="button" variant="ghost" size="icon" onClick={() => { void loadPeople({ silent: true }); void loadOpportunityAccess(); }} disabled={loading || refreshing} className="rounded-xl" aria-label="Actualizar personas">
           <RefreshCw className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
         </Button>
@@ -396,7 +396,7 @@ function PeoplePageContent() {
             </div>
           ) : null}
 
-          <section aria-labelledby="people-filters-title" className="rounded-2xl border border-border/60 bg-card/65 p-4 dark:bg-card/45">
+          <section aria-labelledby="people-filters-title" data-tour="admin-people-filters" className="rounded-2xl border border-border/60 bg-card/65 p-4 dark:bg-card/45">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div><h2 id="people-filters-title" className="text-sm font-semibold">Buscar y filtrar</h2><p className="mt-1 text-xs text-muted-foreground">Las métricas usan el período seleccionado.</p></div>
               <div className="flex items-center gap-1">
@@ -423,7 +423,7 @@ function PeoplePageContent() {
             <PendingInvitations key={overview.organization.id} organizationId={overview.organization.id} />
           ) : null}
 
-          <Card className="overflow-hidden rounded-[24px] border-border/60 bg-card/90 dark:bg-card/75">
+          <Card data-tour="admin-people-list" className="overflow-hidden rounded-[24px] border-border/60 bg-card/90 dark:bg-card/75">
             <div className="flex items-center justify-between gap-4 border-b border-border/60 px-5 py-4 sm:px-6">
               <div><h2 className="font-semibold">Personas</h2><p className="mt-1 text-xs text-muted-foreground">{filteredPeople.length} de {summary.members} · {summary.active} activas · {summary.withoutTeam} sin equipo principal · {summary.unverified} con correo pendiente</p></div>
               {refreshing ? <span className="inline-flex items-center gap-2 text-xs text-muted-foreground" role="status"><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />Actualizando</span> : null}

@@ -18,7 +18,7 @@ export type TutorialVideo = {
   /** Screens without a manual section whose «?» panel offers it (Cowork). */
   routes?: RegExp;
   /** Hidden when the feature is off for the person, as in the menu. */
-  feature?: 'opportunities';
+  feature?: 'opportunities' | 'admin';
 };
 
 export const TUTORIAL_VIDEOS: TutorialVideo[] = [
@@ -34,6 +34,7 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'oportunidades', title: 'Oportunidades', summary: 'Empresas que están contratando, licitaciones y cómo ajustar lo que buscamos.', seconds: 75, sections: ['oportunidades'], feature: 'opportunities' },
   { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus conversaciones guardadas.', seconds: 50, sections: ['primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
   { id: 'conexiones', title: 'Conexiones', summary: 'Conecta tu correo, elige la cuenta que envía y consigue tu ticket de Mercado Público.', seconds: 61, sections: ['conexiones'] },
+  { id: 'administracion', title: 'Administración', summary: 'Quién usa la app y para qué, qué necesita atención, tu equipo y sus créditos.', seconds: 116, sections: ['administracion'], feature: 'admin' },
 ];
 
 export const tutorialVideoFiles = (video: Pick<TutorialVideo, 'id'>) => ({
@@ -48,9 +49,10 @@ export function formatVideoLength(seconds: number) {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
-/** The videos the person can see: the same rule as the menu for «Oportunidades». */
-export function visibleTutorialVideos(visibility: Pick<HelpVisibility, 'opportunities'>) {
-  return TUTORIAL_VIDEOS.filter(video => video.feature !== 'opportunities' || visibility.opportunities);
+/** The videos the person can see: the same rules as the menu for «Oportunidades» and «Administración». */
+export function visibleTutorialVideos(visibility: Pick<HelpVisibility, 'opportunities'> & Partial<Pick<HelpVisibility, 'admin'>>) {
+  return TUTORIAL_VIDEOS.filter(video => (video.feature !== 'opportunities' || visibility.opportunities)
+    && (video.feature !== 'admin' || visibility.admin === true));
 }
 
 /** The videos of a manual section, its own first. */

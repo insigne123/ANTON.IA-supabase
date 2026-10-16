@@ -182,4 +182,37 @@ const SEARCH = ['search-modes', 'search-starters', 'search-run'];
   } finally { none.close(); }
 }
 
-console.log('PASS: screen guides offered once, walked, declined, replayed from the «Ayuda» panel and explained when empty; Cowork offers its video. DOM only, not visual certification.');
+// 5. The admin panel opens its guide by itself on the first visit, with no offer; seen, it stays closed; its other screens
+//    offer theirs as usual.
+{
+  const ADMIN = ['admin-nav', 'admin-period', 'admin-metrics', 'admin-attention', 'admin-tabs', 'admin-export'];
+  const app = await open({ pathname: '/dashboard/admin', anchors: ADMIN });
+  try {
+    await app.waitFor(() => app.card()?.textContent.includes('Paso 1 de 6'), 'the admin guide, by itself');
+    assert.doesNotMatch(app.text(), /¿Primera vez en/, 'no offer before it');
+    assert.match(app.card().textContent, /Cuatro secciones/);
+    assert.deepEqual(app.posts, [{ guide: 'admin' }], 'seen as soon as it starts');
+    for (const step of [2, 3, 4, 5, 6]) {
+      app.button('Siguiente').click();
+      await app.waitFor(() => app.card().textContent.includes(`Paso ${step} de 6`), `step ${step}`);
+    }
+    assert.match(app.card().textContent, /Exportar resumen/);
+    app.button('Entendido').click();
+    await app.waitFor(() => !app.card(), 'closed');
+  } finally { app.close(); }
+
+  const seen = await open({ pathname: '/dashboard/admin', anchors: ADMIN, guides: { admin: true } });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    assert.equal(seen.card(), null, 'seen: it does not open again by itself');
+    assert.equal(seen.posts.length, 0);
+  } finally { seen.close(); }
+
+  const people = await open({ pathname: '/dashboard/admin/users', anchors: ['admin-people-invite', 'admin-people-filters', 'admin-people-list'] });
+  try {
+    await people.waitFor(() => people.text().includes('¿Primera vez en Personas?'), 'the quiet offer on Personas');
+    assert.equal(people.card(), null, 'offered, not opened');
+  } finally { people.close(); }
+}
+
+console.log('PASS: screen guides offered once, walked, declined, replayed from the «Ayuda» panel and explained when empty; Cowork offers its video; the admin panel opens its guide by itself once. DOM only, not visual certification.');
