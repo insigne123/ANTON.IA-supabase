@@ -34,7 +34,7 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'oportunidades', title: 'Oportunidades', summary: 'Empresas que están contratando, licitaciones y cómo ajustar lo que buscamos.', seconds: 75, sections: ['oportunidades'], feature: 'opportunities' },
   { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus conversaciones guardadas.', seconds: 50, sections: ['primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
   { id: 'conexiones', title: 'Conexiones', summary: 'Conecta tu correo, elige la cuenta que envía y consigue tu ticket de Mercado Público.', seconds: 61, sections: ['conexiones'] },
-  { id: 'administracion', title: 'Administración', summary: 'Quién usa la app y para qué, qué necesita atención, tu equipo y sus créditos.', seconds: 116, sections: ['administracion'], feature: 'admin' },
+  { id: 'administracion', title: 'Administración', summary: 'Quién usa la app y para qué, qué necesita atención, tu equipo y sus créditos.', seconds: 117, sections: ['administracion'], feature: 'admin' },
 ];
 
 export const tutorialVideoFiles = (video: Pick<TutorialVideo, 'id'>) => ({

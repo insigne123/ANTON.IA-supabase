@@ -126,7 +126,7 @@ export default {
     {
       title: 'Persona por persona', text: 'Quién la usó, cuántos días, qué pantallas y cuántos créditos.',
       say: 'En la pestaña Personas, cada persona y su uso.',
-      target: { role: 'tab', name: 'Personas' }, zoom: 1.6, arrow: true,
+      target: { role: 'tab', name: 'Personas' }, zoom: 1.35,
       waitFor: { role: 'button', name: 'Ver uso de Valentina Ríos' },
     },
     {
@@ -137,7 +137,7 @@ export default {
     {
       title: 'Abre a una persona', text: 'Su actividad, sus resultados y el cupo de créditos que le queda hoy.',
       say: 'Toca a una persona para ver su detalle.',
-      target: { role: 'button', name: 'Ver uso de Valentina Ríos' }, zoom: 1.6, arrow: true,
+      target: { role: 'button', name: 'Valentina Ríos', exact: true }, zoom: 1.5, arrow: true,
       waitFor: { role: 'heading', name: 'Valentina Ríos' }, hold: 0.8,
     },
     {
@@ -148,29 +148,29 @@ export default {
     {
       title: 'Llévatelo en una planilla', text: '«Exportar resumen» descarga el informe del período para compartirlo.',
       say: 'Y puedes exportar el resumen.',
-      target: { role: 'button', name: 'Exportar resumen' }, action: 'hover', zoom: 1.7, arrow: true,
+      target: { role: 'button', name: 'Exportar resumen' }, action: 'hover', zoom: 1.15, arrow: true,
     },
     {
       title: 'Personas', text: 'Quiénes tienen acceso, su rol, su equipo y cómo les va.',
       say: 'En Personas ves a todo tu equipo.',
-      target: { role: 'link', name: 'Personas', within: ADMIN_NAV }, zoom: 1.6, arrow: true,
+      target: { role: 'link', name: 'Personas', within: ADMIN_NAV }, zoom: 1.6,
       waitFor: { role: 'heading', name: 'Personas' },
     },
     {
       title: 'Invita a tu equipo', text: '«Invitar miembro» envía el acceso por correo.',
       say: 'Y desde aquí invitas a alguien nuevo.',
-      target: { role: 'button', name: 'Invitar miembro' }, action: 'hover', zoom: 1.7, arrow: true,
+      target: { role: 'button', name: 'Invitar miembro' }, action: 'hover', zoom: 1.15, arrow: true,
     },
     {
       title: 'Arma equipos', text: 'Agrupa personas para comparar resultados y compartir límites de créditos.',
       say: 'En Equipos, agrupas a las personas.',
-      target: { role: 'link', name: 'Equipos', within: ADMIN_NAV }, zoom: 1.6, arrow: true,
+      target: { role: 'link', name: 'Equipos', within: ADMIN_NAV }, zoom: 1.6,
       waitFor: { role: 'button', name: 'Crear equipo' }, hold: 1.2,
     },
     {
       title: 'Créditos', text: 'Cuánto puede usar cada persona al día.',
       say: 'Y en Créditos, decides cuánto puede usar cada uno.',
-      target: { role: 'link', name: 'Créditos', within: ADMIN_NAV }, zoom: 1.6, arrow: true,
+      target: { role: 'link', name: 'Créditos', within: ADMIN_NAV }, zoom: 1.6,
       waitFor: { css: '[data-tour="admin-credits-organization"]' },
     },
     {

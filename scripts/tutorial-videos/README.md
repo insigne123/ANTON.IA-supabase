@@ -35,6 +35,10 @@ No corre en CI ni agrega dependencias.
 - **El escenario:** `stage.html` carga la app en un iframe del mismo origen.
   - La cámara es una transformación CSS sobre ese iframe.
   - Notas, post-it, flecha, recuadro, cursor y subtítulos son HTML y SVG del escenario, con la tipografía de la app.
+- **Encuadre:**
+  - la cámara nunca acerca más de lo que cabe en la ventana, aunque el guion pida más `zoom`;
+  - el recuadro y la flecha se recortan al borde de la ventana;
+  - un clic con `waitFor`, que cambia la pantalla, borra el recuadro y la flecha al instante. Antes quedaban apuntando a donde estaba el control.
 - **Cuadro a cuadro, a 30 fps:** cada cuadro es una captura y el reloj es del guion. Así el cursor y el zoom se mueven suaves aunque la app tarde.
   - Mientras la app trabaja se filman hasta 1,5 s; lo demás se corta.
 - **Ritmo:**
