@@ -3,12 +3,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { AuthError } from '@/lib/server/auth-utils';
 import { canonicalLinkedInPost } from '@/lib/commercial-opportunities/workspace';
-import { opportunitySourceItemLimit } from '@/lib/commercial-opportunities/source-budget';
+import { linkedinRunCap, linkedinWindow, opportunitySourceItemLimit } from '@/lib/commercial-opportunities/source-budget';
 import { groupHiring, jobAdFromFantastic } from '@/lib/commercial-opportunities/hiring';
 import { tenderUrl, type Tender } from '@/lib/commercial-opportunities/tenders';
 import { listOpenLicitaciones } from './mercado-publico';
 import { resolveTicketForOrganization } from './tickets';
-import { searchCompraAgil, compraAgilQuery } from './compra-agil';
+import { CompraAgilError, searchCompraAgil, compraAgilQuery } from './compra-agil';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { EXCLUSION_MOTIVES } from '@/lib/commercial-opportunities/workspace-radar';
@@ -54,6 +54,7 @@ export async function persistOpportunityCandidates(client: SupabaseClient, job: 
 const tenderCandidate = (t: Tender): Candidate => ({ kind: t.source === 'compra_agil' ? 'compra_agil' : 'tender', key: `${t.source}:${t.code}`, title: t.name,
   company: t.buyer, description: t.description || t.name, deadline: t.closesAt, amount: t.amount, currency: t.currency, url: tenderUrl(t), raw: { code: t.code, status: t.status, items: t.items, region: t.region } });
 
+const COMPRA_AGIL_ATTEMPTS = 6;
 export async function captureOpportunityTenders(client: SupabaseClient, job: OpportunityJob, context: any) {
   const snapshot = opportunityDb(await client.from('opportunity_source_snapshots').select('candidates').eq('job_id',job.id).eq('organization_id',job.organization_id).maybeSingle());
   if (snapshot) return persistOpportunityCandidates(client,job,snapshot.candidates as Candidate[],context.revision);
@@ -61,7 +62,14 @@ export async function captureOpportunityTenders(client: SupabaseClient, job: Opp
   if (!ticket) throw new AuthError('Conecta el ticket de Mercado Público desde la cuenta administradora.', 409);
   // One ticket cannot run concurrent MP calls. Listing first; each Compra Ágil query gets its own checkpointed job.
   if (job.payload.keyword) {
-    const response = await searchCompraAgil({ keyword: compraAgilQuery(job.payload.keyword), publishedFrom: new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10), pages: 4 }, { fetch: globalThis.fetch, ticket: ticket.ticket, canWait: () => false });
+    let response: Awaited<ReturnType<typeof searchCompraAgil>>;
+    try {
+      response = await searchCompraAgil({ keyword: compraAgilQuery(job.payload.keyword), publishedFrom: new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10), pages: 4 }, { fetch: globalThis.fetch, ticket: ticket.ticket, canWait: () => false });
+    } catch (error) {
+      // The ticket takes a limited number of calls at a time: a 429 or a 5xx waits for a later tick instead of failing the search.
+      if (error instanceof CompraAgilError && error.retryable && Number(job.attempts || 0) < COMPRA_AGIL_ATTEMPTS) return { waiting: true as const };
+      throw error instanceof CompraAgilError ? new AuthError(error.message, 503) : error;
+    }
     const candidates=response.tenders.map(tenderCandidate);
     opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
     return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), coverage: response.error ? 'partial' : 'up_to_four_pages' };
@@ -109,21 +117,28 @@ async function apifyOpportunityItems(client: SupabaseClient, job: OpportunityJob
   opportunityDb(await client.rpc('opportunity_budget_settle', { p_id: admission.id, p_cost: cost, p_receipt: { ...receipt, status: run.status, fetched: items.length, cap }, p_data: { items } }));
   return { waiting: false as const, items };
 }
+/** When this source last finished a search for the workspace, to know how far back the next one has to look. */
+async function lastLinkedInRun(client: SupabaseClient, job: OpportunityJob) {
+  const last = opportunityDb(await client.from('opportunity_jobs').select('updated_at').eq('organization_id', job.organization_id).eq('kind', job.kind)
+    .eq('state', 'ready').neq('id', job.id).order('updated_at', { ascending: false }).limit(1).maybeSingle());
+  return (last?.updated_at as string | undefined) || null;
+}
 export async function captureOpportunityLinkedIn(client: SupabaseClient, job: OpportunityJob, context: any) {
-  const primary = context.priority === job.kind || context.priority === 'balanced';
-  const cap = context.priority === 'balanced' ? .11 : primary ? .14 : .06;
+  const kind = job.kind === 'posts' ? 'posts' : 'hiring';
+  const cap = linkedinRunCap(context.priority, kind);
+  const lookback = linkedinWindow(kind, await lastLinkedInRun(client, job));
   if (job.kind === 'posts') {
     const price = Number(process.env.OPPORTUNITIES_POST_USD_PER_ITEM);
     const start = Number(process.env.OPPORTUNITIES_POST_START_USD);
     const emptyQuery = Number(process.env.OPPORTUNITIES_POST_EMPTY_QUERY_USD);
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(start) || start < 0 || !Number.isFinite(emptyQuery) || emptyQuery < 0)
       throw new AuthError('Falta confirmar la tarifa del conector de publicaciones.', 503);
-    const queries = (context.criteria?.postQueries || []).slice(0, 3);
+    const queries = (context.criteria?.postQueries || []).slice(0, 5);
     if (!queries.length) throw new AuthError('Los criterios de publicaciones se están preparando.', 409);
     const perQuery = opportunitySourceItemLimit({ cap, price, start, emptyQuery, queries: queries.length, max: 30 });
     if (perQuery < 1) throw new AuthError('El saldo por corrida no alcanza para consultar publicaciones.', 402);
     const data = await apifyOpportunityItems(client, job, 'harvestapi~linkedin-post-search', { searchQueries: queries, maxPosts: perQuery,
-      postedLimit: 'week', sortBy: 'date', profileScraperMode: 'short', scrapeReactions: false, scrapeComments: false }, cap);
+      postedLimit: lookback, sortBy: 'date', profileScraperMode: 'short', scrapeReactions: false, scrapeComments: false }, cap);
     return data.waiting ? { waiting: true as const } : { ...await persistOpportunityCandidates(client, job, postCandidates(data.items), context.revision), coverage: 'bounded_queries' };
   }
   const price = Number(process.env.APIFY_FANTASTIC_USD_PER_JOB || .005);
@@ -133,7 +148,7 @@ export async function captureOpportunityLinkedIn(client: SupabaseClient, job: Op
   const roles = context.criteria?.roles || [];
   if (limit < 10 || !roles.length) throw new AuthError('Faltan criterios o presupuesto para consultar avisos laborales.', 409);
   const data = await apifyOpportunityItems(client, job, 'fantastic-jobs~advanced-linkedin-job-search-api', { titleSearch: roles.slice(0, 20), locationSearch: context.territories.length ? context.territories : ['Chile'],
-    timeRange: '24h', limit, removeAgency: false, descriptionType: 'text', recruiterOnly: false }, cap);
+    timeRange: lookback, limit, removeAgency: false, descriptionType: 'text', recruiterOnly: false }, cap);
   if (data.waiting) return { waiting: true as const };
   const ads = data.items.flatMap(item => { const ad = jobAdFromFantastic(item); return ad ? [ad] : []; });
   const grouped = groupHiring(ads, { roles, regions: [], minAds: 1, clients: [], contactsCompanies: [], excludeAgencies: false }, { now: new Date().toISOString(), windowDays: 30 });
