@@ -17,12 +17,18 @@ const brief = { kind: 'sequence', recipients: ['Felipe Muñoz', 'Camila Fuentes'
 const handOff = { action: 'draft.write', query: null, leadId: null, answer: null, write: brief };
 const answer = { action: 'answer', query: null, leadId: null, answer: { reply: 'Te dejo la secuencia que escribí yo.', document: null, question: '¿Creo la campaña pausada?', blocks: null,
   suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] } };
-const signed = body => `Hola {{nombre}},\n${body}\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Yarur`;
+// Each email opens with its own moment, names {{empresa}} and closes with its own one-line question, as the checks ask
+// (writer.test.ts): what is left for the Reviewer is what the checks cannot see, a figure no data backs.
+const closings = ['¿Cuántos ingresos revisan al mes?', '¿Quién revisa hoy los antecedentes de un candidato?', '¿Te sirve verlo 15 minutos esta semana?'];
+const signed = (body, index) => `Hola {{nombre}},\n${body}\n${closings[index]}\nNicolás Yarur`;
 const sequence = bodies => ({ reply: `${findings} Usé el tiempo que pierde RR. HH. revisando antecedentes a mano.`,
-  blocks: [{ type: 'sequence', title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index], subject: `Asunto ${index + 1}`, body: signed(body) })) }],
+  blocks: [{ type: 'sequence', title: 'Secuencia AXIS', steps: bodies.map((body, index) => ({ day: [1, 3, 7][index], subject: `Asunto ${index + 1}`, body: signed(body, index) })) }],
   question: '¿Creo la campaña pausada para Felipe y Camila?', suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] });
-const first = sequence(['AXIS atiende a 500 empresas.', 'Revisas antecedentes en minutos.', 'Sin trámites en el PJUD.']);
-const fixed = sequence(['Revisas antecedentes en el día.', 'Revisas antecedentes en minutos.', 'Sin trámites en el PJUD.']);
+const moments = ['Cuando en {{empresa}} entran varias personas la misma semana, cada antecedente pendiente es un puesto que queda vacío un día más.\n\nEn Yago revisamos con AXIS los antecedentes laborales de cada candidato en minutos.',
+  'El lunes llega la nómina de ingresos y alguien tiene que revisar cada nombre antes de firmar el contrato.',
+  'Cuando una jefatura pide el respaldo de un ingreso, hay que volver a buscarlo.\nCon AXIS queda guardado el resultado de cada revisión.'];
+const first = sequence([moments[0].replace('con AXIS', 'con AXIS, que atiende a 500 empresas,'), moments[1], moments[2]]);
+const fixed = sequence(moments);
 const review = { verdict: 'fix', issues: [{ where: '«Secuencia AXIS», correo 1', problem: 'Dice que AXIS atiende a 500 empresas, dato que no está en los datos.', fix: 'Quita la cifra.', short: 'sin cifras inventadas' }] };
 
 const state = { calls: [], generations: [], script: [], ledger: 'roles' };
@@ -53,7 +59,7 @@ const mocks = {
   './mission-control': 'export const stageCoworkMissionControl=async()=>{throw new Error("unexpected mission")};',
   './reply-thread-effect': 'export const stageCoworkReplyThread=async()=>{throw new Error("unexpected reply")};',
   '@/lib/server/bulk-campaigns': 'export const getBulkCampaign=async()=>{throw new Error("unexpected campaign")};',
-  '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};',
+  '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};export const createNativeDraft=async()=>{throw new Error("unexpected draft")};export const getNativeDraftWritingStyle=async()=>{throw new Error("unexpected draft")};export const campaignFollowUpDraftIds=()=>{throw new Error("unexpected draft")};',
   '@/ai/openai-json': 'export const generateStructuredWithTelemetry=opts=>globalThis.__coworkWriter.generate(opts);export const generateStructured=async()=>{throw new Error("unused")};',
   '@/lib/server/supabase-admin': `export const getSupabaseAdminClient=()=>{const chain={table:'',select:()=>chain,eq:()=>chain,gt:()=>chain,limit:()=>chain,in:()=>chain,order:()=>chain,
   maybeSingle:async()=>({data:chain.table==='cowork_runs'?{id:'run',parent_run_id:null,depth:0}:null,error:null}),
@@ -68,13 +74,13 @@ const mocks = {
     }
     return {data:true};},from:table=>{chain.table=table;return chain;}};}`,
   '@/lib/server/daily-quota-store': 'export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50});export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:50});export const getEnrichmentQuotaOperation=async()=>null;export const claimEnrichmentQuotaOperation=async()=>{throw new Error("unused")};export const markEnrichmentQuotaOperationSubmitted=async()=>{};export const releaseEnrichmentQuotaOperation=async()=>{};export const completeEnrichmentQuotaOperation=async()=>{};',
-  './access': 'export const requireCoworkWorkerAccess=async()=>{};',
-  './runs': 'export const coworkWorkerConfigured=()=>true;export const getCoworkRun=async()=>null;',
+  './access': 'export const requireCoworkWorkerAccess=async()=>{};export const requireOpportunitiesAccess=async()=>{throw new Error("unexpected opportunities access")};',
+  './runs': 'export const coworkWorkerConfigured=()=>true;export const getCoworkRun=async()=>null;export const coworkRunIsAutomatic=()=>false;',
   './lead-tools': 'export const queryCoworkLeads=async()=>{throw new Error("unexpected read")};',
   './conversation-context': 'export const loadCoworkHistory=async()=>({turns:[]});',
   './user-context': 'export const loadCoworkUserContext=async()=>({fullName:"Nicolás Yarur",companyName:"Yago"});',
   './external-search': 'export const processCoworkSearchQueue=async()=>({claimed:false});',
-  './effects': 'export const processCoworkEffectQueue=async()=>({claimed:false});export const resolveCoworkEffect=async()=>true;',
+  './effects': 'export const processCoworkEffectQueue=async()=>({claimed:false});export const resolveCoworkEffect=async()=>true;export const admitCoworkContinuation=async()=>null;',
   './operations': 'export const coworkOperationHash=()=>"hash";export const createCoworkOperationGateway=()=>({invoke:async()=>{throw new Error("unused gateway")}});export const createCoworkOperationDependencies=()=>{throw new Error("unused dependencies")};',
   './read-capabilities': 'export const coworkReadCapabilities=()=>[];',
   '@/lib/cowork/agent-instructions': 'export const coworkAgentInstructions=()=>({systemPrompt:"fixture",parallelReadCapability:"",researchCapability:"",externalSearchCapability:"",additionalCapability:"",effectCapability:""});',

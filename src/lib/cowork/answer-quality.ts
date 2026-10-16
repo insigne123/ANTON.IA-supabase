@@ -18,8 +18,9 @@ function outsideCode(text: string, transform: (chunk: string) => string) {
   return text.split(/(```[\s\S]*?```)/g).map(part => part.startsWith('```') ? part : transform(part)).join('');
 }
 
-// A tool name copied into the text (round 4: «propongo lead.enrich» in a reply), said in the person's words.
-const TOOL_NAME = /([*_`]?)\b((?:lead|leads|contacts|research|draft|campaign|campaigns|contacted|linkedin|profile|crm|lists|message|prospecting|saved_search|email)\.[a-z_]+)\b\1(?![\w.@-])/g;
+// A tool name copied into the text (round 4: «propongo lead.enrich» in a reply), said in the person's words. A web address or an email
+// is not one: «https://www.linkedin.com/in/ana-ruiz/» in a table read «https://www.esa acción/in/ana-ruiz/».
+const TOOL_NAME = /(?<![\w.@/:-])([*_`]?)\b((?:lead|leads|contacts|research|draft|campaign|campaigns|contacted|linkedin|profile|crm|lists|message|prospecting|saved_search|email)\.(?!(?:com|cl|net|org|io|es)\b)[a-z_]+)\b\1(?![\w.@/-])/g;
 const TOOL_WORDS: Array<[RegExp, string]> = [
   [/^(?:lead\.enrich(?:_batch)?|contacts\.prepare_batch)$/, 'la búsqueda de su correo'], [/^research\./, 'la investigación'],
   [/^linkedin\.invite/, 'la invitación de LinkedIn'], [/^linkedin\.message/, 'el mensaje de LinkedIn'], [/^campaigns?\./, 'la campaña'],

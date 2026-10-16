@@ -12,7 +12,7 @@ const result = await build({
     build.onResolve({ filter: /^next\/server$|^@\/lib\/server\/(cowork\/access|cowork\/runs|auth-utils)$/ }, args => ({ path: args.path, namespace: 'fixture' }));
     build.onLoad({ filter: /.*/, namespace: 'fixture' }, args => {
       if (args.path === 'next/server') return { contents: 'export const NextResponse = Response;' };
-      if (args.path.endsWith('auth-utils')) return { contents: 'export class AuthError extends Error {} export function handleAuthError(){return Response.json({error:"Forbidden"},{status:403})}' };
+      if (args.path.endsWith('auth-utils')) return { contents: 'export class AuthError extends Error {} export function handleAuthError(){return Response.json({error:"Forbidden"},{status:403})} export async function requireAuth(){throw new Error("unexpected auth")}' };
       if (args.path.endsWith('/access')) return { contents: 'import {AuthError} from "@/lib/server/auth-utils"; export async function requireCoworkAccess(){if(globalThis.__coworkExportTest.denied)throw new AuthError();return globalThis.__coworkExportTest.auth;}' };
       return { contents: `export async function getCoworkRun(auth,id){
         globalThis.__coworkExportTest.reads++;
