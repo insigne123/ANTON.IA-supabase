@@ -3,6 +3,7 @@ import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/wor
 import { IMPACT_LABELS, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
 import {normalizeCoworkPdfText} from '@/lib/server/cowork/file-exports';
 import { reportChecklist, reportItemKey, reportProgress, reportRoute, type MarkKind, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
+import { KIT_SOURCE_LABELS, clampSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
 
 const LABELS:Record<string,string>={monthlyNet:'Precio neto mensual',totalNet:'Precio neto total',totalWithTax:'Total con impuestos',workingCapital:'Capital de trabajo',guarantee:'Garantía'};
 const label=(v:string)=>LABELS[v]||IMPACT_LABELS[v]||statusLabel(v);
@@ -19,7 +20,8 @@ function teamNotes(report: OpportunityReport, marks?: ExportMarks) {
   if (!marks) return [];
   const items: Array<[MarkKind, string]> = [...reportNextSteps(report).map(t => ['step', t] as [MarkKind, string]), ...reportRoute(report).map(r => ['route', r.title] as [MarkKind, string]),
     ...report.milestones.map(m => ['date', m.label] as [MarkKind, string]), ...report.requirements.map(r => ['requirement', r.title] as [MarkKind, string]),
-    ...report.tasks.map(t => ['task', t.title] as [MarkKind, string]), ...report.risks.map(r => ['risk', r.title] as [MarkKind, string]), ...report.questions.map(q => ['question', q] as [MarkKind, string])];
+    ...report.tasks.map(t => ['task', t.title] as [MarkKind, string]), ...report.risks.map(r => ['risk', r.title] as [MarkKind, string]), ...report.questions.map(q => ['question', q] as [MarkKind, string]),
+    ...(report.submission?.folders || []).flatMap(f => f.documents.map(d => ['document', d.title] as [MarkKind, string]))];
   const seen = new Set<string>();
   return items.flatMap(([kind, label]) => {
     const mark = markOf(marks, kind, label);
@@ -54,6 +56,14 @@ export function opportunityReportMarkdown(report: OpportunityReport, opportunity
   if (warnings.length) lines.push('', '## Antes de decidir', ...warnings.map(w => `- ${w}`));
   if (report.milestones.length) lines.push('', '## Fechas clave', ...report.milestones.map(m => `- **${m.label}:** ${m.date}`));
   if (report.requirements.length) lines.push('', isSignalReport(report) ? '## Qué validar con la empresa' : '## Requisitos para postular', ...report.requirements.map(r => `- ${check(marks, 'requirement', r.title)}**${r.title}**${star('requirement', r.title)} · ${label(r.status)}\n  ${r.action}${r.role || r.due ? `\n  ${[r.role, r.due].filter(Boolean).join(' · ')}` : ''}`));
+  const kit = report.submission ? clampSubmissionKit(report.submission) : null;
+  if (kit?.folders.length) {
+    lines.push('', '## Cómo postular', kit.channelDetail);
+    for (const folder of kit.folders) lines.push('', `### ${folder.name}`, ...folder.documents.map(d => `- ${check(marks, 'document', d.title)}**${d.title}**${star('document', d.title)} · ${[KIT_SOURCE_LABELS[d.source], d.signed ? 'con firma' : null, d.validity || null].filter(Boolean).join(' · ')}${d.excludesIfMissing ? ' · **si falta, quedas fuera**' : ''}${d.howTo ? `\n  ${d.howTo}` : ''}`));
+    if (kit.rules.length) lines.push('', '### Lo que te deja fuera', ...kit.rules.map(r => `- ${r.text}`));
+    if (kit.guarantees.length) lines.push('', '### Garantías', ...kit.guarantees.map(g => `- **${g.kind}:** ${[g.amount, g.validity && `vigencia ${g.validity}`, g.when, g.payableTo && `a nombre de ${g.payableTo}`].filter(Boolean).join(' · ')}`));
+    if (kit.inconsistencies.length) lines.push('', '### Para preguntar en el foro', ...kit.inconsistencies.map((q, i) => `${i + 1}. ${q.question}`));
+  }
   if (report.tasks.length) lines.push('', isSignalReport(report) ? '## Pasos comerciales' : '## Plan de trabajo', ...report.tasks.map(t => `- ${check(marks, 'task', t.title)}**${t.title}**${star('task', t.title)} · ${[t.role, t.due].filter(Boolean).join(' · ')}${t.dependency ? `\n  Antes: ${t.dependency}` : ''}${t.evidence ? `\n  Resultado: ${t.evidence}` : ''}`));
   if (report.risks.length) lines.push('', '## Riesgos y cómo cubrirlos', ...report.risks.map(r => `- **${r.title}** · ${label(r.impact)}\n  ${r.mitigation}`));
   if (report.questions.length) lines.push('', isSignalReport(report) ? '## Preguntas para la primera conversación' : '## Preguntas para el comprador', ...report.questions.map((q, i) => `${i + 1}. ${q}`));
@@ -117,6 +127,16 @@ export async function opportunityReportPdf(report: OpportunityReport, opportunit
   if (report.milestones.length) { heading('Fechas clave'); table(['Hito', 'Fecha'], report.milestones.map(m => [m.label, m.date]), lit('date', report.milestones.map(m => m.label))); }
   if (report.requirements.length) { heading(isSignalReport(report) ? 'Qué validar con la empresa' : 'Requisitos para postular');
     table([...(marks ? ['Estado'] : []), 'Requisito', 'Situación', 'Qué hacer', 'Quién / cuándo'], report.requirements.map(r => [...(marks ? [done('requirement', r.title) || '—'] : []), r.title, label(r.status), r.action, [r.role, r.due].filter(Boolean).join('\n')]), lit('requirement', report.requirements.map(r => r.title))); }
+  const kit = report.submission ? clampSubmissionKit(report.submission) : null;
+  if (kit?.folders.length) {
+    heading('Cómo postular');
+    if (kit.channelDetail) text(kit.channelDetail, 10, [71, 85, 105]);
+    const docs = kit.folders.flatMap(f => f.documents.map(d => ({ folder: f.name, ...d })));
+    table([...(marks ? ['Estado'] : []), 'Documento', 'Carpeta', 'Tipo', 'Si falta'], docs.map(d => [...(marks ? [done('document', d.title) || '—'] : []), `${d.title}${d.howTo ? `\n${d.howTo}` : ''}`, d.folder, [KIT_SOURCE_LABELS[d.source], d.signed ? 'Con firma' : null, d.validity || null].filter(Boolean).join('\n'), d.excludesIfMissing ? 'Quedas fuera' : '—']), lit('document', docs.map(d => d.title)));
+    if (kit.rules.length) { text('Lo que te deja fuera:', 10, [100, 116, 139]); kit.rules.forEach(r => text(`• ${r.text}`)); }
+    if (kit.guarantees.length) table(['Garantía', 'Monto', 'Vigencia', 'Cuándo / a nombre de'], kit.guarantees.map(g => [g.kind, g.amount, g.validity, [g.when, g.payableTo].filter(Boolean).join('\n')]));
+    if (kit.inconsistencies.length) { text('Para preguntar en el foro:', 10, [100, 116, 139]); kit.inconsistencies.forEach((q, i) => text(`${i + 1}. ${q.question}`)); }
+  }
   if (report.tasks.length) { heading(isSignalReport(report) ? 'Pasos comerciales' : 'Plan de trabajo'); table([...(marks ? ['Estado'] : []), 'Tarea', 'Quién / cuándo', 'Antes', 'Resultado'], report.tasks.map(t => [...(marks ? [done('task', t.title) || '—'] : []), t.title, [t.role, t.due].filter(Boolean).join('\n'), t.dependency, t.evidence]), lit('task', report.tasks.map(t => t.title))); }
   if (report.risks.length) { heading('Riesgos y cómo cubrirlos'); table(['Riesgo', 'Impacto', 'Cómo cubrirlo'], report.risks.map(r => [r.title, label(r.impact), r.mitigation]), lit('risk', report.risks.map(r => r.title))); }
   const notes = teamNotes(report, marks);

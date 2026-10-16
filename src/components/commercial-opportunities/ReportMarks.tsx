@@ -6,9 +6,31 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { REMINDER_OPTIONS, emptyMark, googleCalendarUrl, reportCalendarFile, type ReminderId, type ReportMark } from '@/lib/commercial-opportunities/report-marks';
+import { REMINDER_OPTIONS, emptyMark, googleCalendarUrl, reportCalendarFile, type ReminderId, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 
 export type MarkChange = { key: string; label: string; done?: boolean; highlight?: boolean; note?: string };
+
+/**
+ * The team's marks on one screen: at once on screen, back as they were if the server says no. Without the table (or
+ * without a way to save) the screen reads as before, with nothing to tick.
+ */
+export function useReportMarks(initial: { available: boolean; items: ReportMarks } | null | undefined, onMark?: (change: MarkChange) => Promise<ReportMark | null>) {
+  const interactive = Boolean(initial?.available && onMark);
+  const [marks, setMarks] = useState<ReportMarks>(initial?.items ?? {});
+  useEffect(() => { setMarks(initial?.items ?? {}); }, [initial]);
+  const [saving, setSaving] = useState(false);
+  const change = async (input: MarkChange) => {
+    if (!onMark) return;
+    const before = marks[input.key];
+    setMarks(current => ({ ...current, [input.key]: { ...(current[input.key] ?? emptyMark(input.key)),
+      ...(input.done !== undefined ? { done: input.done } : {}), ...(input.highlight !== undefined ? { highlight: input.highlight } : {}), ...(input.note !== undefined ? { note: input.note.trim() } : {}) } }));
+    setSaving(true);
+    const saved = await onMark(input).catch(() => null);
+    setSaving(false);
+    setMarks(current => { const next = { ...current }; if (saved) next[input.key] = saved; else if (before) next[input.key] = before; else delete next[input.key]; return next; });
+  };
+  return { interactive, marks, saving, change };
+}
 
 /** A round check the size of a fingertip: «listo» or not, with the item's name for screen readers. */
 export function DoneCheck({ done, label, disabled, onChange }: { done: boolean; label: string; disabled?: boolean; onChange: (done: boolean) => void }) {

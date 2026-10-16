@@ -43,8 +43,15 @@ export async function requireAuth(request?: Request): Promise<AuthContext> {
     }
     const supabase = createRouteHandlerClient({ cookies });
 
-    // Verify the cookie-backed token with Supabase Auth before trusting its user.
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    // Verify the cookie-backed token with Supabase Auth before trusting its user. A revoked session (a new password, a
+    // sign-out elsewhere) makes the client clear its cookie, which a Server Component may not do: that is still no session.
+    let user: any = null;
+    let userError: unknown = null;
+    try {
+        ({ data: { user }, error: userError } = await supabase.auth.getUser());
+    } catch {
+        throw new AuthError('Unauthorized', 401);
+    }
     if (userError || !user) {
         throw new AuthError('Unauthorized', 401);
     }

@@ -31,6 +31,10 @@ test('a failed report offers one retry, and once pressed the button says it is o
   const pending = render({ pending: true });
   assert.match(pending, /Reintentando…/);
   assert.match(pending, /<button[^>]*disabled=""[^>]*aria-busy="true"/, 'a second press cannot send it twice');
+  // An update that fails leaves the earlier report, and says so.
+  const kept = text(render({ kept: true }));
+  assert.match(kept, /No pudimos actualizar el informe\./);
+  assert.match(kept, /El informe anterior sigue abajo\./);
 });
 
 test('while it runs, the progress says what is happening instead of the error', () => {
