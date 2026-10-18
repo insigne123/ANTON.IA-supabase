@@ -18,6 +18,7 @@ import type { MarkChange } from './ReportMarks';
 import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { OpportunityContacts } from './OpportunityContacts';
 import { OpportunityChat } from './OpportunityChat';
+import { OpportunityAssistant } from './OpportunityAssistant';
 import { TeamOffice, TeamPicker } from './TeamOffice';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import {OpportunityTicketConnection} from './OpportunityTicketConnection';
@@ -64,8 +65,12 @@ export function OpportunityWorkWorkspace() {
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
-  // The admin sees the pipeline first; «Lista» keeps the filters and cards; «Demanda futura» reads the Plan Anual de Compras.
-  const [view, setView] = useState<'pipeline' | 'list' | 'demand'>('pipeline');
+  // The admin sees the pipeline first; «Lista» keeps the filters and cards; «Demanda futura» reads the Plan Anual de Compras;
+  // «Asistente» is the section's general conversation, for everyone.
+  const [view, setView] = useState<'pipeline' | 'list' | 'demand' | 'assistant'>('pipeline');
+  const [assistantThread, setAssistantThread] = useState<string | null>(null);
+  // A question the assistant hands to one opportunity's chat: asked there once its expediente is open.
+  const handoff = useRef<{ id: string; question: string | null } | null>(null);
   const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number } } | null>(null);
   const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -187,6 +192,14 @@ export function OpportunityWorkWorkspace() {
   const generate = () => { if (!detail) return; if (admin && detail.item.data.evaluation === 'excluded' && !detail.reports.length) setReconsider(true); else { setTab('summary'); void perform('research', {}, selected, true); } };
   // The question shows at once; the answer arrives in the same wait (the server answers it now) or, if a worker took it, by polling.
   const ask = (text: string) => { setTab('chat'); setPendingQuestion(text); void perform('chat', { question: text, requestId: crypto.randomUUID() }, selected, true).finally(() => setPendingQuestion(null)); };
+  const continueIn = (id: string, question: string | null) => { handoff.current = { id, question }; open(id); };
+  useEffect(() => {
+    const next = handoff.current;
+    if (!detail || !next || next.id !== detail.item.id) return;
+    handoff.current = null;
+    if (next.question) ask(next.question); else setTab('chat');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the expediente the assistant handed over opens.
+  }, [detail]);
   const upload = async (picked: File[], report: (u: Array<{ name: string; state: 'uploading' | 'done' | 'error'; message?: string }>) => void) => {
     if (!selected) return;
     // A ZIP from Mercado Público («Descargar todos») goes up as the documents inside it (zip-uploads.ts).
@@ -265,11 +278,13 @@ export function OpportunityWorkWorkspace() {
       {admin && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">{overview.context ? 'Oferta compartida confirmada' : 'Confirma qué ofrece tu empresa'}</p><p className="mt-1 text-xs text-muted-foreground">{overview.context ? `Búsqueda diaria ${(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} · Límite mensual US$20 · US$${overview.budget.spent.toFixed(2)} usados` : 'La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.'}</p></div>
         <div className="flex flex-wrap gap-2">{overview.context && (overview.context as any).criteria?.postQueries?.length ? <Button variant="ghost" onClick={openCriteria}><Search className="mr-2 h-4 w-4" />Qué buscamos</Button> : null}
           {overview.context ? (overview.sourceStatus.automation ? <Button variant="outline" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null) : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
-      <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />
-      <TenderPrerequisites />
-      {admin && <div role="group" aria-label="Vista" className="inline-flex w-fit rounded-xl bg-muted p-1">{([['pipeline', 'Embudo'], ['list', 'Lista'], ['demand', 'Demanda futura']] as const).map(([key, label]) =>
-        <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>}
-      {admin && view === 'demand' ? <PurchasePlanDemand onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} />
+      {view !== 'assistant' && <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
+      {view !== 'assistant' && <TenderPrerequisites />}
+      <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{(admin ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['demand', 'Demanda futura'], ['assistant', 'Asistente']] as const : [['list', 'Mis oportunidades'], ['assistant', 'Asistente']] as const).map(([key, label]) => {
+        const pressed = admin || key === 'assistant' ? view === key : view !== 'assistant';
+        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', pressed ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>; })}</div>
+      {view === 'assistant' ? <OpportunityAssistant admin={admin} threadId={assistantThread} onThread={setAssistantThread} onOpen={open} onHandoff={continueIn} />
+        : admin && view === 'demand' ? <PurchasePlanDemand onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} />
         : admin && view === 'pipeline' ? (pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} members={overview.members} busy={busy}
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>) : <>
@@ -281,7 +296,7 @@ export function OpportunityWorkWorkspace() {
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
       </section>)}</div>}
       </>}
-      {!(admin && (view === 'pipeline' || view === 'demand')) && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
+      {!(admin && (view === 'pipeline' || view === 'demand')) && view !== 'assistant' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
     </>}
     {selected && <>
       <Button variant="ghost" className="-ml-2 self-start" onClick={close}><ArrowLeft className="mr-2 h-4 w-4" />Oportunidades</Button>
