@@ -7,6 +7,7 @@ import { assignmentSchema, activitySchema, taskSchema, WORK_STATES } from '@/lib
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
 import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
+import { enqueueOpportunityOffer, readOpportunityOffer, saveOpportunityOfferPrices } from '@/lib/server/commercial-opportunities/workspace-offer';
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -14,19 +15,31 @@ const STATE_LABELS: Record<string, string> = { unassigned: 'sin asignar', assign
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, context: Context) {
   try { const auth = await requireOpportunityWorkspace(); const id = z.string().uuid().parse((await context.params).id);
-    return opportunitiesJson(await readOpportunityDetail(auth.admin, opportunityScope(auth), id));
+    const scope = opportunityScope(auth);
+    // The detail checks the access first; the offer draft of the same opportunity comes with it.
+    const detail = await readOpportunityDetail(auth.admin, scope, id);
+    return opportunitiesJson({ ...detail, offer: await readOpportunityOffer(auth.admin, scope, id) });
   } catch (error) { return opportunitiesError(error); }
 }
 export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') return opportunitiesJson({ revision: await assignOpportunity(auth.admin, scope, id, assignmentSchema.parse(data)) });
     if (action === 'activity') {
       const input = activitySchema.parse(data); await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
     }
     if (action === 'research') return opportunitiesJson({ jobId: await enqueueOpportunityResearch(auth.admin, scope, id) }, 202);
+    if (action === 'offer') {
+      const input = z.object({ requestId: z.string().uuid(), instructions: z.string().trim().max(1500).optional() }).strict().parse(data);
+      return opportunitiesJson({ jobId: await enqueueOpportunityOffer(auth.admin, scope, id, input) }, 202);
+    }
+    if (action === 'offer_prices') {
+      const input = z.object({ draftId: z.string().uuid(), expectedRevision: z.number().int().nonnegative(),
+        prices: z.record(z.string().regex(/^\d{1,3}$/), z.union([z.number(), z.string().max(40)])) }).strict().parse(data);
+      return opportunitiesJson(await saveOpportunityOfferPrices(auth.admin, scope, id, input));
+    }
     if (action === 'state') {
       const input = z.object({ state: z.enum(WORK_STATES), expectedRevision: z.number().int().nonnegative() }).strict().parse(data);
       if (['unassigned', 'assigned', 'won', 'lost', 'archived'].includes(input.state)) assertOpportunityAdmin(scope);

@@ -9,6 +9,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
 import { SubmissionKit } from './SubmissionKit';
+import { OfferDraft } from './OfferDraft';
+import { PurchasePlanDemand } from './PurchasePlanDemand';
+import type { OfferPrices, SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
 import { PipelineBoard, type PipelineSuggestion } from './PipelineBoard';
 import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
 import type { MarkChange } from './ReportMarks';
@@ -30,7 +33,9 @@ import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-pr
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress };
 type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
-  marks?: { available: boolean; items: ReportMarks } };
+  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null } };
+/** The kinds with bases to answer with an offer (server/commercial-opportunities/workspace-offer.ts). */
+const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
 const STATES: Record<string, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada', queued: 'En cola', running: 'En curso', waiting: 'Continuando', ready: 'Terminado', failed: 'No terminó' };
 const ACTIVE = ['queued', 'running', 'waiting'];
@@ -59,8 +64,8 @@ export function OpportunityWorkWorkspace() {
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
-  // The admin sees the pipeline first; «Lista» keeps the filters and cards.
-  const [view, setView] = useState<'pipeline' | 'list'>('pipeline');
+  // The admin sees the pipeline first; «Lista» keeps the filters and cards; «Demanda futura» reads the Plan Anual de Compras.
+  const [view, setView] = useState<'pipeline' | 'list' | 'demand'>('pipeline');
   const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number } } | null>(null);
   const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -101,7 +106,16 @@ export function OpportunityWorkWorkspace() {
   }, [selected, loadDetail]);
   const research = detail?.jobs.find(j => j.kind === 'research') ?? null;
   const researching = Boolean(research && ACTIVE.includes(research.state));
-  busyRef.current = researching || messages.some(m => !m.answer?.answer);
+  const offerJob = detail?.jobs.find(j => j.kind === 'offer') ?? null;
+  const preparingOffer = Boolean(offerJob && ACTIVE.includes(offerJob.state));
+  busyRef.current = researching || preparingOffer || messages.some(m => !m.answer?.answer);
+  const offerWatch = useRef<string | null>(null);
+  // Same for the offer draft: say it is ready when the one the person asked for arrives.
+  useEffect(() => {
+    if (!offerJob) return;
+    if (ACTIVE.includes(offerJob.state)) { offerWatch.current = offerJob.id; return; }
+    if (offerWatch.current === offerJob.id && offerJob.state === 'ready') { offerWatch.current = null; setFeedback('Tu borrador de oferta está listo.'); }
+  }, [offerJob]);
   // Say so when the report the person is waiting for arrives, then show it.
   useEffect(() => {
     if (!research) return;
@@ -153,6 +167,23 @@ export function OpportunityWorkWorkspace() {
     for (const n of overview?.notifications.filter(n => n.opportunity_id === id && !n.read_at) || []) void fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'notification', data: { id: n.id } }) });
   };
   const close = () => { setSelected(null); setProblem(''); if (opportunityInUrl()) window.history.pushState(null, '', window.location.pathname); };
+  const prepareOffer = (instructions: string) => {
+    void perform('offer', { requestId: crypto.randomUUID(), ...(instructions ? { instructions } : {}) }, selected, true)
+      .then(result => { if (result) setFeedback('Preparando el borrador de oferta. Tarda unos minutos: te avisaremos cuando esté listo.'); });
+  };
+  // Prices save on their own, like the marks: no reload of the expediente.
+  const saveOfferPrices = async (draftId: string, expectedRevision: number, prices: Record<string, string>) => {
+    if (!selected) return null;
+    try {
+      const saved = await json(await fetch(`/api/commercial-opportunities/${selected}/workspace`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'offer_prices', data: { draftId, expectedRevision, prices } }) })) as { revision: number; prices: OfferPrices };
+      setDetail(current => current?.offer?.latest?.id === draftId ? { ...current, offer: { ...current.offer, latest: { ...current.offer.latest, revision: saved.revision, prices: saved.prices } } } : current);
+      return saved;
+    } catch (e) {
+      // Prices a teammate saved meanwhile come in, so the next save starts from them.
+      setProblem(e instanceof Error ? e.message : 'No se pudieron guardar los precios.'); void loadDetail(selected); return null;
+    }
+  };
   const generate = () => { if (!detail) return; if (admin && detail.item.data.evaluation === 'excluded' && !detail.reports.length) setReconsider(true); else { setTab('summary'); void perform('research', {}, selected, true); } };
   // The question shows at once; the answer arrives in the same wait (the server answers it now) or, if a worker took it, by polling.
   const ask = (text: string) => { setTab('chat'); setPendingQuestion(text); void perform('chat', { question: text, requestId: crypto.randomUUID() }, selected, true).finally(() => setPendingQuestion(null)); };
@@ -236,9 +267,10 @@ export function OpportunityWorkWorkspace() {
           {overview.context ? (overview.sourceStatus.automation ? <Button variant="outline" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null) : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
       <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />
       <TenderPrerequisites />
-      {admin && <div role="group" aria-label="Vista" className="inline-flex w-fit rounded-xl bg-muted p-1">{([['pipeline', 'Embudo'], ['list', 'Lista']] as const).map(([key, label]) =>
+      {admin && <div role="group" aria-label="Vista" className="inline-flex w-fit rounded-xl bg-muted p-1">{([['pipeline', 'Embudo'], ['list', 'Lista'], ['demand', 'Demanda futura']] as const).map(([key, label]) =>
         <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>}
-      {admin && view === 'pipeline' ? (pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} members={overview.members} busy={busy}
+      {admin && view === 'demand' ? <PurchasePlanDemand onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} />
+        : admin && view === 'pipeline' ? (pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} members={overview.members} busy={busy}
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>) : <>
       <div className="flex flex-wrap gap-3"><div className="flex min-w-0 flex-1 flex-wrap gap-1" aria-label="Filtrar oportunidades">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar en las oportunidades" aria-label="Buscar en las oportunidades" className="w-full sm:w-72" /></div>
@@ -249,7 +281,7 @@ export function OpportunityWorkWorkspace() {
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
       </section>)}</div>}
       </>}
-      {!(admin && view === 'pipeline') && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
+      {!(admin && (view === 'pipeline' || view === 'demand')) && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
     </>}
     {selected && <>
       <Button variant="ghost" className="-ml-2 self-start" onClick={close}><ArrowLeft className="mr-2 h-4 w-4" />Oportunidades</Button>
@@ -294,6 +326,10 @@ export function OpportunityWorkWorkspace() {
         </div>}
         {tab === 'apply' && !signal && <SubmissionKit report={latest?.report ?? null} opportunity={{ title: item.title, kind: item.kind, amount: item.amount, currency: item.currency, deadline: item.deadline_at }}
           marks={detail.marks} onMark={mark} people={detail.members || detail.participants} onGenerate={generate} generating={researching}
+          hideNumbers={Boolean(detail.offer?.latest?.draft.economic.lines.length)}
+          offer={latest && OFFER_KINDS.includes(item.kind) ? <OfferDraft offer={detail.offer} job={offerJob} onPrepare={prepareOffer} preparing={busy} onSavePrices={saveOfferPrices}
+            downloadHref={`/api/commercial-opportunities/${selected}/export?doc=offer&format=docx`}
+            budget={{ amount: latest.report.submission?.numbers.budget ?? item.amount, includesTax: latest.report.submission?.numbers.budgetIncludesTax ?? null }} /> : null}
           onDraft={latest ? title => ask(`Prepara el borrador de «${title}» tal como lo piden las bases, con los datos de mi empresa que conoces y espacios como [RUT] o [firma] para lo que falte, listo para copiar.`) : undefined} />}
         {tab === 'documents' && <section className="space-y-5">
           {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}

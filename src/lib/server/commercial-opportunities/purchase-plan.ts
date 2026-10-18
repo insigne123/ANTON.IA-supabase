@@ -1,0 +1,150 @@
+import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { AuthError } from '@/lib/server/auth-utils';
+import { PLAN_SCREEN_BATCH, PlanCandidates, planKeywords, planOpportunityDraft, planScreenPrompt, planScreenSchema, purchasePlanLine, purchasePlanReader, purchasePlanUrl,
+  type PurchasePlanLine, type PurchasePlanMatch } from '@/lib/commercial-opportunities/purchase-plan';
+import { opportunityLocalClock, type WorkScope } from '@/lib/commercial-opportunities/workspace';
+import { assertOpportunityAdmin } from './workspace-access';
+import { createPrivateOpportunity, opportunityDb } from './workspace-store';
+import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+
+const TABLE = 'opportunity_purchase_plan';
+const MAX_ZIP_BYTES = 60 * 1024 * 1024;
+
+type Fetch = typeof fetch;
+/**
+ * Reads a year's plan from ChileCompra (a ZIP of about 7 MB with one CSV of about 40 MB) as a stream, keeping only the
+ * candidates: the whole file never sits in memory as text. Null when the year is not published yet.
+ */
+export async function readPurchasePlanCandidates(year: number, keywords: string[], dependencies: { fetch?: Fetch } = {}) {
+  const response = await (dependencies.fetch ?? fetch)(purchasePlanUrl(year), { signal: AbortSignal.timeout(90_000) });
+  if (response.status === 404 || response.status === 403) return null;
+  if (!response.ok) throw new AuthError('No pudimos descargar el Plan Anual de Compras de ChileCompra. Lo intentaremos de nuevo.', 503);
+  const size = Number(response.headers.get('content-length') || 0);
+  if (size > MAX_ZIP_BYTES) throw new AuthError('El archivo del Plan Anual de Compras es más grande de lo esperado.', 422);
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength > MAX_ZIP_BYTES) throw new AuthError('El archivo del Plan Anual de Compras es más grande de lo esperado.', 422);
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(bytes);
+  const file = Object.values(zip.files).find(entry => !entry.dir && /\.csv$/i.test(entry.name));
+  if (!file) throw new AuthError('El archivo de ChileCompra no trae el plan en CSV.', 422);
+  const candidates = new PlanCandidates(keywords);
+  const seen = new Map<string, number>();
+  let read = 0; let empty = 0;
+  const stream = file.nodeStream('nodebuffer') as unknown as Readable;
+  stream.setEncoding('utf8');
+  const parser = purchasePlanReader(row => {
+    const line = purchasePlanLine(row, seen);
+    if (!line) { empty++; return; }
+    read++; candidates.offer(line);
+  });
+  // JSZip's stream is an older Readable without async iteration; setEncoding keeps a character split across chunks whole.
+  await new Promise<void>((resolve, reject) => {
+    stream.on('data', chunk => parser.write(String(chunk)));
+    stream.on('end', () => resolve()); stream.on('error', reject);
+  });
+  parser.end();
+  if (!parser.known || !read) throw new AuthError('El archivo del Plan Anual de Compras cambió de formato: no pudimos leer sus líneas.', 422);
+  return { year, read, skipped: parser.skipped + empty, candidates: candidates.list().map(item => item.line) };
+}
+
+/** The year to read: this year, or the last one published (early in the year the new plan may not be out). */
+export function planYear(now = new Date()) { return Number(opportunityLocalClock(now).day.slice(0, 4)); }
+
+/** Queues a reading. Once a month on its own (with the daily search), and when an admin asks («Actualizar», once a day). */
+export async function enqueueOpportunityDemand(client: SupabaseClient, scope: WorkScope, manual: boolean) {
+  assertOpportunityAdmin(scope);
+  const context = opportunityDb(await client.from('opportunity_company_context').select('revision,criteria,services').eq('organization_id', scope.organizationId).maybeSingle());
+  if (!context) throw new AuthError('Confirma primero la oferta del workspace.', 409);
+  if (!planKeywords({ keywords: context.criteria?.keywords, services: context.services }).length)
+    throw new AuthError('Faltan las palabras para compras públicas: revísalas en «Qué buscamos».', 409);
+  const day = opportunityLocalClock().day;
+  const key = manual ? `demand:manual:${day}:${context.revision}` : `demand:${day.slice(0, 7)}:${context.revision}`;
+  const row = opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'demand',
+    dedupe_key: key, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }).select('id').maybeSingle());
+  return row?.id ?? null;
+}
+
+/**
+ * The reading: the candidates of the file (kept in a snapshot, so a job that resumes does not download again), the model's
+ * screening in batches (each batch is a paid step that comes back on a retry) and the lines kept, replacing the last
+ * reading of that year. Resumes in the next tick when its time runs out.
+ */
+export async function runOpportunityDemand(client: SupabaseClient, job: OpportunityJob, context: any, started: number, dependencies: { fetch?: Fetch } = {}) {
+  const keywords = planKeywords({ keywords: context.criteria?.keywords, services: context.services });
+  if (!keywords.length) throw new AuthError('Faltan las palabras para compras públicas: revísalas en «Qué buscamos».', 409);
+  type Snapshot = { year: number; read: number; skipped: number; lines: PurchasePlanLine[] };
+  let snapshot = opportunityDb(await client.from('opportunity_source_snapshots').select('candidates').eq('job_id', job.id).eq('organization_id', job.organization_id).maybeSingle())?.candidates as Snapshot | undefined;
+  if (!snapshot) {
+    const year = planYear();
+    const found = await readPurchasePlanCandidates(year, keywords, dependencies) ?? await readPurchasePlanCandidates(year - 1, keywords, dependencies);
+    if (!found) throw new AuthError('ChileCompra aún no publica el Plan Anual de Compras.', 409);
+    snapshot = { year: found.year, read: found.read, skipped: found.skipped, lines: found.candidates };
+    opportunityDb(await client.from('opportunity_source_snapshots').insert({ job_id: job.id, organization_id: job.organization_id, candidates: snapshot }));
+    // Downloading and reading took its share of the tick: the screening starts with a fresh one.
+    if (Date.now() - started > 60_000) return { waiting: true as const };
+  }
+  const kept = new Map<string, { fit: 'alta' | 'media'; reason: string }>();
+  const offer = { offer: String(context.offer || ''), services: context.services || [], exclusions: context.exclusions || [] };
+  for (let offset = 0; offset < snapshot.lines.length; offset += PLAN_SCREEN_BATCH) {
+    if (Date.now() - started > 200_000) return { waiting: true as const };
+    const batch = snapshot.lines.slice(offset, offset + PLAN_SCREEN_BATCH);
+    const ids = new Set(batch.map(line => line.lineId));
+    const step = `plan:${snapshot.year}:${createHash('sha256').update(batch.map(line => line.lineId).join('|')).digest('hex').slice(0, 32)}`;
+    const answer = await opportunityGenerate(client, job, { step, category: 'evaluation', role: 'screen', schema: planScreenSchema, output: 6000,
+      prompt: planScreenPrompt(offer, batch) });
+    for (const match of answer.matches) if (ids.has(match.id.trim())) kept.set(match.id.trim(), { fit: match.fit, reason: match.reason.replace(/\s+/g, ' ').trim().slice(0, 300) });
+  }
+  const rows = snapshot.lines.filter(line => kept.has(line.lineId)).map(line => ({ organization_id: job.organization_id, year: snapshot!.year, line_id: line.lineId, run_id: job.id,
+    institution: line.institution, institution_code: line.institutionCode, product_code: line.productCode, description: line.description, quantity: line.quantity,
+    unit_amount: line.unitAmount, amount: line.amount, month: line.month, quarter: line.quarter, fit: kept.get(line.lineId)!.fit, reason: kept.get(line.lineId)!.reason }));
+  for (let offset = 0; offset < rows.length; offset += 500)
+    opportunityDb(await client.from(TABLE).upsert(rows.slice(offset, offset + 500), { onConflict: 'organization_id,year,line_id' }));
+  // The lines of the previous reading that this one did not keep go away; the kept ones were rewritten with this run.
+  opportunityDb(await client.from(TABLE).delete().eq('organization_id', job.organization_id).eq('year', snapshot.year).neq('run_id', job.id));
+  return { waiting: false as const, year: snapshot.year, read: snapshot.read, candidates: snapshot.lines.length, kept: rows.length };
+}
+
+type PlanRow = { line_id: string; institution: string; institution_code: string | null; product_code: string | null; description: string; quantity: number | null;
+  unit_amount: number | null; amount: number | null; month: number | null; quarter: number | null; fit: 'alta' | 'media'; reason: string; created_at: string; year: number };
+const toMatch = (row: PlanRow): PurchasePlanMatch => ({ lineId: row.line_id, institution: row.institution, institutionCode: row.institution_code, productCode: row.product_code,
+  description: row.description, quantity: row.quantity === null ? null : Number(row.quantity), unitAmount: row.unit_amount === null ? null : Number(row.unit_amount),
+  amount: row.amount === null ? null : Number(row.amount), month: row.month, quarter: row.quarter, fit: row.fit, reason: row.reason });
+
+/** What «Demanda futura» shows: the lines of the latest year read, the reading in course and its error, if any. */
+export async function readOpportunityDemand(client: SupabaseClient, scope: WorkScope) {
+  assertOpportunityAdmin(scope);
+  const [lines, jobs, context] = await Promise.all([
+    client.from(TABLE).select('*').eq('organization_id', scope.organizationId).order('year', { ascending: false }).order('amount', { ascending: false, nullsFirst: false }).limit(800),
+    client.from('opportunity_jobs').select('id,state,error,created_at,updated_at,result').eq('organization_id', scope.organizationId).eq('kind', 'demand').order('created_at', { ascending: false }).limit(1),
+    client.from('opportunity_company_context').select('criteria,services').eq('organization_id', scope.organizationId).maybeSingle(),
+  ]);
+  // Before the migration the table is missing: the page says the feature is not ready instead of failing.
+  if (lines.error) return { available: false, year: null, updatedAt: null, matches: [], job: null, keywords: [] };
+  const rows = (lines.data || []) as PlanRow[];
+  const year = rows[0]?.year ?? null;
+  const ofYear = rows.filter(row => row.year === year);
+  const job = (opportunityDb(jobs) || [])[0] ?? null;
+  const ctx = opportunityDb(context);
+  return { available: true, year, updatedAt: ofYear.reduce<string | null>((latest, row) => (!latest || row.created_at > latest ? row.created_at : latest), null),
+    matches: ofYear.map(toMatch), keywords: planKeywords({ keywords: ctx?.criteria?.keywords, services: ctx?.services }),
+    job: job ? { id: job.id, state: job.state, error: job.error, createdAt: job.created_at, updatedAt: job.updated_at, result: job.result ?? null } : null };
+}
+
+/** A uuid from a text, the same each time: following the same line twice opens the same opportunity. */
+const stableUuid = (text: string) => {
+  const hex = createHash('sha256').update(text).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+};
+/** «Seguir»: the plan line becomes an opportunity of the pipeline, with what the plan says and why it fits. */
+export async function followPlanLine(client: SupabaseClient, scope: WorkScope, input: { year: number; lineId: string }) {
+  assertOpportunityAdmin(scope);
+  const row = opportunityDb(await client.from(TABLE).select('*').eq('organization_id', scope.organizationId).eq('year', input.year).eq('line_id', input.lineId).maybeSingle()) as PlanRow | null;
+  if (!row) throw new AuthError('Esa línea ya no está en la demanda futura. Actualiza la vista.', 404);
+  const draft = planOpportunityDraft(toMatch(row), row.year);
+  return createPrivateOpportunity(client, scope, { ...draft, requestId: stableUuid(`plan:${scope.organizationId}:${row.year}:${row.line_id}`), url: null, deadline: null },
+    { reason: `En el Plan Anual de Compras ${row.year} de ${row.institution}`, origin: 'purchase_plan', documentName: 'Plan Anual de Compras.txt',
+      // One opportunity per line in the workspace, whichever admin follows it first.
+      dedupeKey: `plan:${row.year}:${row.line_id}`, activity: 'Oportunidad agregada desde el Plan Anual de Compras' });
+}

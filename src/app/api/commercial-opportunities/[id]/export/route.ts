@@ -10,13 +10,17 @@ import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient
 import {CoworkExportError} from '@/lib/server/cowork/file-exports';
 import {opportunitiesJson} from '@/lib/server/commercial-opportunities/responses';
 import { opportunityExportName } from '@/lib/commercial-opportunities/export-file-name';
+import { offerDraftMarkdown } from '@/lib/commercial-opportunities/offer-draft';
+import { readOpportunityOffer } from '@/lib/server/commercial-opportunities/workspace-offer';
 
 export const dynamic = 'force-dynamic'; export const maxDuration = 60;
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const format = z.enum(['pdf', 'md', 'docx', 'xlsx', 'zip']).parse(new URL(request.url).searchParams.get('format') || 'pdf');
+    const params = new URL(request.url).searchParams;
+    if (params.get('doc') === 'offer') return await offerExport(auth.admin, scope, id, z.enum(['docx', 'md']).parse(params.get('format') || 'docx'));
+    const format = z.enum(['pdf', 'md', 'docx', 'xlsx', 'zip']).parse(params.get('format') || 'pdf');
     const row = opportunityDb(await auth.admin.from('opportunity_reports').select('report').eq('organization_id', scope.organizationId).eq('opportunity_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle());
     if (!row) throw new AuthError('El informe aún no está disponible.', 409);
     const report = row.report as OpportunityReport; let bytes: Uint8Array; let mime: string;
@@ -50,9 +54,32 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       zip.file('Indice-documentos.json', JSON.stringify({ generatedAt: report.generatedAt, documents: index, warnings: report.warnings }, null, 2));
       bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 3 } }); mime = 'application/zip';
     }
-    // An ASCII twin of the name for old clients.
-    const name = opportunityExportName(format === 'zip' ? 'Expediente' : 'Informe', opportunity?.title || report.title);
-    const ascii = opportunityStorageName(`${name}.x`).replace(/\.x$/, '').replace(/"/g, '');
-    return new Response(new Uint8Array(bytes).buffer, { headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="${ascii}.${format}"; filename*=UTF-8''${encodeURIComponent(`${name}.${format}`)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
+    return download(bytes, mime, opportunityExportName(format === 'zip' ? 'Expediente' : 'Informe', opportunity?.title || report.title), format);
   } catch (error) { return error instanceof CoworkExportError?opportunitiesJson({error:error.message},error.status):opportunitiesError(error); }
+}
+/** The file as a download, with an ASCII twin of its name for old clients. */
+function download(bytes: Uint8Array, mime: string, name: string, format: string) {
+  const ascii = opportunityStorageName(`${name}.x`).replace(/\.x$/, '').replace(/"/g, '');
+  return new Response(new Uint8Array(bytes).buffer, { headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="${ascii}.${format}"; filename*=UTF-8''${encodeURIComponent(`${name}.${format}`)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
+}
+/** «Tu oferta» in Word or Markdown: the latest draft with the prices the team typed, compared with the budget of the bases. */
+async function offerExport(client: Parameters<typeof readOpportunityOffer>[0], scope: Parameters<typeof readOpportunityOffer>[1], id: string, format: 'docx' | 'md') {
+  const offer = await readOpportunityOffer(client, scope, id);
+  if (!offer.latest) throw new AuthError('Aún no hay un borrador de oferta.', 409);
+  const [itemRow, reportRow] = await Promise.all([
+    client.from('commercial_opportunities').select('title,buyer_name,company_name,amount').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle(),
+    client.from('opportunity_reports').select('report').eq('organization_id', scope.organizationId).eq('opportunity_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const item = opportunityDb(itemRow); const numbers = (opportunityDb(reportRow)?.report as OpportunityReport | undefined)?.submission?.numbers;
+  const title = item?.title || 'Oportunidad';
+  const markdown = offerDraftMarkdown(offer.latest, { title, buyer: item?.buyer_name || item?.company_name, amount: numbers?.budget ?? item?.amount ?? null, budgetIncludesTax: numbers?.budgetIncludesTax ?? null });
+  let bytes: Uint8Array; let mime: string;
+  if (format === 'md') { bytes = new TextEncoder().encode(markdown); mime = 'text/markdown'; }
+  else {
+    const { renderCoworkDocx } = await import('@/lib/server/cowork/docx-render');
+    const { parseMarkdown } = await import('@/lib/cowork/markdown');
+    bytes = await renderCoworkDocx(`Borrador de oferta: ${title}`, parseMarkdown(markdown));
+    mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+  return download(bytes, mime, opportunityExportName('Borrador de oferta', title), format);
 }

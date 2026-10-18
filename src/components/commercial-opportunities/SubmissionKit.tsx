@@ -19,7 +19,7 @@ const money = (n: number, currency = 'CLP') => currency === 'CLP' || !currency
   : `${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(n)} ${currency}`;
 const CHANNEL: Record<Kit['channel'], string> = { portal: 'Por el portal', email: 'Por correo', physical: 'En papel', mixed: 'Por más de un canal', unknown: 'Canal por confirmar' };
 
-export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark, people, onDraft, onGenerate, generating }: {
+export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark, people, onDraft, onGenerate, generating, offer, hideNumbers }: {
   report: OpportunityReport | null;
   opportunity: { title: string; kind: string; amount?: number | null; currency?: string | null; deadline?: string | null };
   marks?: { available: boolean; items: ReportMarks } | null;
@@ -29,6 +29,10 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
   onDraft?: (title: string) => void;
   onGenerate?: () => void;
   generating?: boolean;
+  /** «Tu oferta» (OfferDraft): the draft of what to hand in, right after the summary of the guide. */
+  offer?: ReactNode;
+  /** The draft's economic sheet already adds net, VAT and total: the quick calculator would repeat it. */
+  hideNumbers?: boolean;
 }) {
   const kit = report?.submission ? clampSubmissionKit(report.submission) : null;
   const { interactive, marks, saving, change } = useReportMarks(initialMarks, onMark);
@@ -74,6 +78,8 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
           </div>
         ) : null}
       </header>
+
+      {offer}
 
       {kit && kit.folders.length > 0 && (
         <section aria-labelledby="kit-documents" className="space-y-6">
@@ -146,7 +152,7 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
         </section>
       )}
 
-      <OfferNumbers kit={kit} amount={opportunity.amount ?? null} currency={opportunity.currency || 'CLP'} />
+      {hideNumbers ? null : <OfferNumbers kit={kit} amount={opportunity.amount ?? null} currency={opportunity.currency || 'CLP'} />}
 
       {kit && kit.guarantees.length > 0 && (
         <section aria-labelledby="kit-guarantees" className="space-y-4">
