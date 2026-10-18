@@ -95,6 +95,22 @@ export async function readPurchasePlanCandidates(year: number, keywords: string[
   return { year, source, read, skipped: parser.skipped + empty, candidates: candidates.list().map(item => item.line) };
 }
 
+/**
+ * The month's reading, queued with the daily search once the workspace has its words. Once a month (its key carries the
+ * month); one that stopped blocked (ChileCompra blocking with no copy yet, no budget left) tries again with the next search.
+ */
+export async function enqueueMonthlyDemand(client: SupabaseClient, scope: WorkScope, context: { revision: number; criteria?: any; services?: string[] | null }, day: string) {
+  if (!planKeywords({ keywords: context.criteria?.keywords, services: context.services }).length) return;
+  const key = `demand:${day.slice(0, 7)}:${context.revision}`;
+  const queued = await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'demand',
+    dedupe_key: key, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true });
+  // A database without the «demand» kind yet (its migration comes first) leaves the search of the day as it was.
+  if (queued.error?.code === '23514') return;
+  opportunityDb(queued);
+  opportunityDb(await client.from('opportunity_jobs').update({ state: 'queued', error: null })
+    .eq('organization_id', scope.organizationId).eq('dedupe_key', key).eq('state', 'blocked'));
+}
+
 /** The year to read: this year, or the last one published (early in the year the new plan may not be out). */
 export function planYear(now = new Date()) { return Number(opportunityLocalClock(now).day.slice(0, 4)); }
 
@@ -191,7 +207,7 @@ export async function readOpportunityDemand(client: SupabaseClient, scope: WorkS
   assertOpportunityAdmin(scope);
   const [lines, jobs, context] = await Promise.all([
     client.from(TABLE).select('*').eq('organization_id', scope.organizationId).order('year', { ascending: false }).order('amount', { ascending: false, nullsFirst: false }).limit(800),
-    client.from('opportunity_jobs').select('id,state,error,created_at,updated_at,result').eq('organization_id', scope.organizationId).eq('kind', 'demand').order('created_at', { ascending: false }).limit(1),
+    client.from('opportunity_jobs').select('id,state,error,created_at,updated_at,result').eq('organization_id', scope.organizationId).eq('kind', 'demand').order('updated_at', { ascending: false }).limit(5),
     client.from('opportunity_company_context').select('criteria,services').eq('organization_id', scope.organizationId).maybeSingle(),
   ]);
   // Before the migration the table is missing: the page says the feature is not ready instead of failing.
@@ -199,7 +215,10 @@ export async function readOpportunityDemand(client: SupabaseClient, scope: WorkS
   const rows = (lines.data || []) as PlanRow[];
   const year = rows[0]?.year ?? null;
   const ofYear = rows.filter(row => row.year === year);
-  const job = (opportunityDb(jobs) || [])[0] ?? null;
+  // The reading under way, or else the one that moved last: the month's reading, blocked this morning, does not hide an
+  // admin's reading that is running or done.
+  const recent = (opportunityDb(jobs) || []) as Array<{ id: string; state: string; error: string | null; created_at: string; updated_at: string; result: any }>;
+  const job = recent.find(row => ['queued', 'running', 'waiting'].includes(row.state)) ?? recent[0] ?? null;
   const ctx = opportunityDb(context);
   return { available: true, year, updatedAt: ofYear.reduce<string | null>((latest, row) => (!latest || row.created_at > latest ? row.created_at : latest), null),
     matches: ofYear.map(toMatch), keywords: planKeywords({ keywords: ctx?.criteria?.keywords, services: ctx?.services }),
