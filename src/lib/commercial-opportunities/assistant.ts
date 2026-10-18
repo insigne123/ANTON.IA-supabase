@@ -84,7 +84,7 @@ opportunities: hasta 6 ids de la lista que respondan la pregunta, con una nota d
 handoff: si la pregunta es sobre UNA oportunidad de la lista y necesita sus documentos (requisitos, garantías, plazos, cómo postular, redactar algo de ella), pon su id y la pregunta reformulada para su propio chat, que lee las bases; si no, null. En ese caso, en answer di en una frase lo que sabes y que en su conversación puede responder con las bases.
 followups: hasta 3 preguntas cortas que la persona podría hacer después.
 Si la pregunta sigue la conversación previa, respóndela en ese contexto. Si es un saludo, responde breve y ofrece dos o tres cosas concretas.
-Oferta de la empresa: ${input.offer.slice(0, 1500)}${input.services.length ? `\nServicios: ${input.services.slice(0, 15).join('; ')}` : ''}${input.ficha ? `\nFicha para licitaciones (si preguntan si pueden postular o cumplir algo; «no sé» es un dato que falta, nunca un no): ${JSON.stringify(input.ficha)}` : ''}
+Oferta de la empresa: ${input.offer.slice(0, 1500)}${input.services.length ? `\nServicios: ${input.services.slice(0, 15).join('; ')}` : ''}${input.ficha ? `\nFicha para licitaciones y documentos de la empresa (si preguntan si pueden postular, si cumplen algo o qué documento vence; «no sé» es un dato que falta, nunca un no): ${JSON.stringify(input.ficha)}` : ''}
 Oportunidades (las que la persona puede ver; tipo, cierre, estado del trabajo y evaluación de la IA: recommended = calza, excluded = descartada, pending = sin evaluar): ${JSON.stringify(input.items)}
 ${input.demand.length ? `Demanda futura (Plan Anual de Compras de los organismos, referencial): ${JSON.stringify(input.demand)}\n` : ''}Conversación previa: ${JSON.stringify(input.conversation)}
 Pregunta: ${input.question}`;

@@ -288,6 +288,9 @@ export function OpportunityWorkWorkspace() {
           {overview.context ? <Button variant="ghost" onClick={() => setProfileOpen(true)}><ClipboardCheck className="mr-2 h-4 w-4" />Ficha para licitaciones</Button> : null}
           {overview.context ? (overview.sourceStatus.automation ? <Button variant="outline" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null) : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
       {view !== 'assistant' && <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
+      {admin && view !== 'assistant' && overview.documentAlerts?.length ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-4 py-3 text-sm">
+        <p className="min-w-0"><span className="font-medium">{overview.documentAlerts[0].text}</span>{overview.documentAlerts.length > 1 ? <span className="text-muted-foreground"> · y {overview.documentAlerts.length - 1} más por renovar</span> : null}</p>
+        <Button size="sm" variant="outline" onClick={() => setProfileOpen(true)}>Ver documentos</Button></div> : null}
       {view !== 'assistant' && <TenderPrerequisites />}
       <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{(admin ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['demand', 'Demanda futura'], ['assistant', 'Asistente']] as const : [['list', 'Mis oportunidades'], ['assistant', 'Asistente']] as const).map(([key, label]) => {
         const pressed = admin || key === 'assistant' ? view === key : view !== 'assistant';

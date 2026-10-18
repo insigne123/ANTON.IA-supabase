@@ -18,8 +18,8 @@ import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report
 import { opportunityChatDeadline, opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
 import { nextReportProgress, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
 import { validateSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
-import { TENDER_PROFILE_RULE, tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
-import { loadTenderProfile } from './tender-profile-read';
+import { TENDER_PROFILE_RULE } from '@/lib/commercial-opportunities/tender-profile';
+import { loadCompanyForModel } from './tender-profile-read';
 
 /** What the page's «oficina» shows (report-progress.ts): a note in the job's payload. The report matters more than its progress, so a
  * note that cannot be written never stops the job. */
@@ -206,7 +206,7 @@ export async function runOpportunityChat(client: SupabaseClient, job: Opportunit
   const report = message.report_id ? opportunityDb(await client.from('opportunity_reports').select('report').eq('organization_id', job.organization_id).eq('opportunity_id', job.opportunity_id).eq('id', message.report_id).maybeSingle()) : null;
   const item = opportunityDb(await client.from('commercial_opportunities').select('kind,title,buyer_name,company_name,deadline_at,reasons').eq('organization_id', job.organization_id).eq('id', job.opportunity_id).maybeSingle());
   const context = opportunityDb(await client.from('opportunity_company_context').select('offer').eq('organization_id', job.organization_id).maybeSingle());
-  const ficha = await loadTenderProfile(client, job.organization_id);
+  const ficha = await loadCompanyForModel(client, job.organization_id);
   const summary = opportunityChatReportContext(report?.report);
   // The conversation so far (the last six turns, oldest first), so a follow-up («¿y el plazo?») reads as one.
   const earlier = (opportunityDb(await client.from('opportunity_chat_messages').select('question,answer,created_at').eq('organization_id', job.organization_id)
@@ -223,7 +223,7 @@ Si piden redactar algo (un mensaje, un correo, una consulta), entrégalo listo p
 missing: a lo más 3 datos que cambiarían esta respuesta, en frases cortas; vacío si no hay.
 Oportunidad: ${JSON.stringify({ tipo: item?.kind, titulo: item?.title, cliente: item?.buyer_name || item?.company_name, cierre: opportunityChatDeadline(item?.deadline_at), porQueAparecio: item?.reasons })}
 Oferta de tu empresa: ${String(context?.offer || '').slice(0, 1500)}
-${ficha ? `Si preguntan si cumplen un requisito o si conviene postular, usa la ficha para licitaciones de la empresa. ${TENDER_PROFILE_RULE}\nFicha para licitaciones: ${JSON.stringify(tenderProfileForModel(ficha))}\n` : ''}Informe: ${JSON.stringify(summary)}
+${ficha ? `Si preguntan si cumplen un requisito o si conviene postular, usa la ficha para licitaciones de la empresa. ${TENDER_PROFILE_RULE}\nFicha para licitaciones y documentos de la empresa: ${JSON.stringify(ficha)}\n` : ''}Informe: ${JSON.stringify(summary)}
 Conversación previa: ${JSON.stringify(conversation)}
 Pregunta: ${message.question}
 Fragmentos: ${JSON.stringify(chunks)}` });

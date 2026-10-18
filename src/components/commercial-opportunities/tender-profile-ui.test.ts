@@ -6,6 +6,7 @@ import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as profile from '../../lib/commercial-opportunities/tender-profile';
+import * as documents from '../../lib/commercial-opportunities/company-documents';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -20,8 +21,11 @@ const dependencies: Record<string, unknown> = {
   '@/components/ui/progress': { Progress: (props: any) => React.createElement('div', { role: 'progressbar', 'aria-label': props['aria-label'] }) },
   '@/components/ui/sheet': { Sheet: plain('div'), SheetContent: plain('div'), SheetDescription: plain('p'), SheetFooter: plain('div'), SheetHeader: plain('div'), SheetTitle: plain('h2') },
   '@/lib/commercial-opportunities/tender-profile': profile,
+  '@/lib/commercial-opportunities/company-documents': documents,
+  '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
+const { CompanyDocumentForm, CompanyDocumentRow } = dependencies['./CompanyDocuments'] = load(await compile('./CompanyDocuments.tsx'));
 const { TenderProfileFields, TenderProfileSheet, formFromProfile, profileFromForm } = load(await compile('./TenderProfileSheet.tsx'));
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/<!-- -->/g, '').replace(/\s+/g, ' ');
 
@@ -53,4 +57,27 @@ test('the sheet opens loading its answers', () => {
   const html = renderToStaticMarkup(React.createElement(TenderProfileSheet, { open: true, onOpenChange: () => {} }));
   assert.match(text(html), /Ficha para licitaciones/);
   assert.match(text(html), /Abriendo la ficha…/);
+});
+
+test('each company document says if it is current, with a download and its date or removal at hand', () => {
+  const today = documents.chileToday();
+  const inDays = (days: number) => new Date(Date.parse(`${today}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+  const row = (expiresAt: string | null) => renderToStaticMarkup(React.createElement(CompanyDocumentRow, { busy: false, onRenew: () => {}, onDelete: () => {},
+    document: { id: 'd1', kind: 'f30', label: 'Certificado F30', fileName: 'F30.pdf', expiresAt, createdAt: '' } }));
+  assert.match(row(inDays(5)), /class="text-xs text-cw-warning">Vence en 5 días</);
+  assert.match(row(inDays(-2)), /class="text-xs text-destructive">Venció el/);
+  assert.match(row(inDays(90)), /class="text-xs text-cw-success">Vigente hasta el/);
+  assert.match(row(null), />Sin vencimiento</);
+  assert.match(row(null), /href="\/api\/commercial-opportunities\/company-documents\?document=d1"[^>]*aria-label="Descargar Certificado F30"/);
+  assert.match(text(row(null)), /Cambiar vencimiento .*Quitar/);
+});
+
+test('the add form starts with the F30, explains it and asks when it was issued', () => {
+  const html = renderToStaticMarkup(React.createElement(CompanyDocumentForm, { busy: false, onAdd: () => {} }));
+  assert.match(html, /<label for="doc-kind">Documento<\/label>/);
+  assert.match(html, /<option value="f30" selected="">Certificado F30<\/option>/);
+  assert.match(text(html), /Las bases suelen pedirlo con menos de 30 días\./);
+  assert.match(html, /<label for="doc-issued">Emitido el<\/label>/);
+  assert.match(html, /accept="\.pdf,\.docx/);
+  assert.match(html, /<button type="submit"[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*Subir documento<\/button>/, 'nothing to upload until a file is chosen');
 });

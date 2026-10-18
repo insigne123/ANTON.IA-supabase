@@ -47,7 +47,9 @@ export type WorkspaceMember = { user_id: string; name: string; role: string };
 export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkItem[]; work: WorkRecord[];
   notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null }>;
   members: WorkspaceMember[]; groups: Array<{ id: string; name: string }>; context: Record<string, unknown> | null;
-  budget: { spent: number; reserved: number; cap: number }; sourceStatus: Record<string, boolean> };
+  budget: { spent: number; reserved: number; cap: number }; sourceStatus: Record<string, boolean>;
+  /** The company's documents lapsed or about to (company-documents.ts); admins only. */
+  documentAlerts?: Array<{ id: string; label: string; expiresAt: string; status: 'vencido' | 'por_vencer'; text: string }> };
 
 /** Pure arithmetic, shared by charts and exports. Missing tax is not silently assumed. */
 export function opportunityFinancialScenario(input: { monthlyCost: number; months: number; overheadPercent: number; marginPercent: number; taxPercent: number | null; paymentDelayMonths: number; guaranteePercent: number }) {

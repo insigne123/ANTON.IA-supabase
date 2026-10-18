@@ -29,7 +29,7 @@ async function load() {
 function memory(seed: Record<string, any[]> = {}, missing: string[] = []) {
   let serial = 0;
   const tables: Record<string, any[]> = { opportunity_requirement_fit: [], opportunity_tender_profile: [], opportunity_jobs: [], opportunity_reports: [], commercial_opportunities: [],
-    opportunity_company_context: [], ...seed };
+    opportunity_company_context: [], opportunity_company_documents: [], ...seed };
   const query = (name: string) => {
     const filters: Array<(row: any) => boolean> = [];
     const sorts: Array<{ key: string; ascending: boolean }> = [];
