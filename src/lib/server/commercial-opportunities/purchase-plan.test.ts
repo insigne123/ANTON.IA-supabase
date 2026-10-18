@@ -140,3 +140,44 @@ test('reading the demand and following a line are for admins, and a line becomes
     dedupeKey: 'plan:2026:abcdefabcdefabcd', activity: 'Oportunidad agregada desde el Plan Anual de Compras' });
   await assert.rejects(followPlanLine(client, admin, { year: 2026, lineId: '0000000000000000' }), /ya no está/);
 });
+
+// What ChileCompra's CloudFront answers a Google Cloud network, and what S3 answers for a year not published.
+const blockedFetch = (async () => new Response('<HTML><H1>403 ERROR</H1><H2>The request could not be satisfied.</H2>Request blocked.</HTML>',
+  { status: 403, headers: { server: 'CloudFront', 'content-type': 'text/html' } })) as unknown as typeof fetch;
+const missingFetch = (async () => new Response('<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>',
+  { status: 403, headers: { server: 'AmazonS3', 'content-type': 'application/xml' } })) as unknown as typeof fetch;
+/** A copy in parts, cut anywhere (even inside a line): the reader takes them as one stream. */
+const copyOf = (parts: Record<number, string[]>) => async (year: number) => parts[year] ? (async function* () { yield* parts[year]; })() : null;
+
+test('when ChileCompra blocks the server, the plan is read from the copy, cut in parts anywhere, with the same lines', async () => {
+  const { readPurchasePlanCandidates } = await load();
+  const direct = await readPurchasePlanCandidates(2026, ['aseo', 'call center'], { fetch: fetchOf(200, await zipped(CSV)) });
+  const cut = CSV.indexOf('PROPIEDAD') + 4;
+  const copied = await readPurchasePlanCandidates(2026, ['aseo', 'call center'], { fetch: blockedFetch, mirror: copyOf({ 2026: [CSV.slice(0, cut), CSV.slice(cut)] }) });
+  assert.equal(copied.source, 'copia'); assert.equal(direct.source, 'chilecompra');
+  assert.deepEqual([copied.read, copied.skipped], [direct.read, direct.skipped]);
+  assert.deepEqual(copied.candidates.map((line: any) => line.lineId), direct.candidates.map((line: any) => line.lineId), 'the same ids, so a followed line stays the same');
+});
+
+test('a year not published reads as null, but a blocked year with no copy says what happens', async () => {
+  const { readPurchasePlanCandidates } = await load();
+  assert.equal(await readPurchasePlanCandidates(2027, ['aseo'], { fetch: missingFetch, mirror: copyOf({}) }), null);
+  await assert.rejects(readPurchasePlanCandidates(2026, ['aseo'], { fetch: blockedFetch, mirror: copyOf({}) }), /no deja descargar el Plan Anual de Compras 2026 desde nuestro servidor/);
+  // Another failure of ChileCompra also falls back to the copy.
+  const failing = fetchOf(500);
+  assert.equal((await readPurchasePlanCandidates(2026, ['aseo'], { fetch: failing, mirror: copyOf({ 2026: [CSV] }) })).source, 'copia');
+});
+
+test('a reading blocked this year takes last year\'s copy, and with no copy at all says it is blocked, not unpublished', async () => {
+  const { runOpportunityDemand, planYear } = await load();
+  (globalThis as any).__screen = () => ({ matches: [] });
+  const context = { offer: 'Aseo', services: ['Aseo'], exclusions: [], criteria: { keywords: ['call center'] } };
+  const year = planYear();
+  const lastYear = memory();
+  const result = await runOpportunityDemand(lastYear.client, { id: 'run-2', organization_id: 'org', requested_by: 'u1', payload: {}, kind: 'demand' }, context, Date.now(),
+    { fetch: blockedFetch, mirror: copyOf({ [year - 1]: [CSV] }) });
+  assert.deepEqual([result.year, result.source, result.candidates], [year - 1, 'copia', 6]);
+  const none = memory();
+  await assert.rejects(runOpportunityDemand(none.client, { id: 'run-3', organization_id: 'org', requested_by: 'u1', payload: {}, kind: 'demand' }, context, Date.now(),
+    { fetch: blockedFetch, mirror: copyOf({}) }), /no deja descargar/);
+});
