@@ -69,32 +69,46 @@ test('a year not published yet reads as null, another failure says so, and a fil
 
 /** The tables the reading touches, in memory, with the few query methods it uses. */
 function memory(seed: Record<string, any[]> = {}) {
+  let serial = 0;
   const tables: Record<string, any[]> = { opportunity_source_snapshots: [], opportunity_purchase_plan: [], opportunity_jobs: [], opportunity_company_context: [], ...seed };
   const query = (name: string) => {
     let rows = () => tables[name];
+    // What the database sets on its own: a job starts queued.
+    const defaults = () => (name === 'opportunity_jobs' ? { state: 'queued', error: null } : {});
     const filters: Array<(row: any) => boolean> = [];
-    let action: { kind: 'select' | 'insert' | 'upsert' | 'delete'; values?: any; conflict?: string[] } = { kind: 'select' };
+    let action: { kind: 'select' | 'insert' | 'upsert' | 'update' | 'delete'; values?: any; conflict?: string[]; ignore?: boolean } = { kind: 'select' };
     const run = () => {
       const match = (row: any) => filters.every(filter => filter(row));
-      if (action.kind === 'insert') { tables[name].push(...[].concat(action.values)); return { data: action.values, error: null }; }
+      if (action.kind === 'insert') {
+        const added = ([].concat(action.values) as any[]).map(value => ({ id: value.id ?? `job-${++serial}`, ...defaults(), ...value }));
+        tables[name].push(...added); return { data: added, error: null };
+      }
       if (action.kind === 'upsert') {
+        let id: string | null = null;
         for (const value of [].concat(action.values) as any[]) {
           const index = tables[name].findIndex(row => action.conflict!.every(key => row[key] === value[key]));
-          if (index >= 0) tables[name][index] = { ...tables[name][index], ...value }; else tables[name].push({ id: `job-${tables[name].length + 1}`, ...value });
+          if (index >= 0 && action.ignore) continue;
+          if (index >= 0) { tables[name][index] = { ...tables[name][index], ...value }; id = tables[name][index].id; }
+          else { id = `job-${++serial}`; tables[name].push({ id, ...defaults(), ...value }); }
         }
-        return { data: { id: `job-${tables[name].length}` }, error: null };
+        return { data: id ? { id } : null, error: null };
       }
+      if (action.kind === 'update') { tables[name] = tables[name].map(row => match(row) ? { ...row, ...action.values } : row); return { data: null, error: null }; }
       if (action.kind === 'delete') { tables[name] = tables[name].filter(row => !match(row)); return { data: null, error: null }; }
       return { data: rows().filter(match), error: null };
     };
     const builder: any = {
       select: () => builder, insert: (values: any) => { action = { kind: 'insert', values }; return builder; },
-      upsert: (values: any, options: any) => { action = { kind: 'upsert', values, conflict: String(options.onConflict).split(',') }; return builder; },
+      upsert: (values: any, options: any) => { action = { kind: 'upsert', values, conflict: String(options.onConflict).split(','), ignore: Boolean(options.ignoreDuplicates) }; return builder; },
+      update: (values: any) => { action = { kind: 'update', values }; return builder; },
       delete: () => { action = { kind: 'delete' }; return builder; },
       eq: (key: string, value: unknown) => { filters.push(row => row[key] === value); return builder; },
+      in: (key: string, values: unknown[]) => { filters.push(row => values.includes(row[key])); return builder; },
+      like: (key: string, pattern: string) => { const regex = new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`); filters.push(row => regex.test(String(row[key]))); return builder; },
       neq: (key: string, value: unknown) => { filters.push(row => row[key] !== value); return builder; },
       order: () => builder, limit: () => builder,
       maybeSingle: async () => { const result = run(); return { data: Array.isArray(result.data) ? result.data[0] ?? null : result.data, error: null }; },
+      single: async () => { const result = run(); return { data: Array.isArray(result.data) ? result.data[0] ?? null : result.data, error: null }; },
       then: (resolve: (value: unknown) => void) => resolve(run()),
     };
     return builder;
@@ -180,4 +194,30 @@ test('a reading blocked this year takes last year\'s copy, and with no copy at a
   const none = memory();
   await assert.rejects(runOpportunityDemand(none.client, { id: 'run-3', organization_id: 'org', requested_by: 'u1', payload: {}, kind: 'demand' }, context, Date.now(),
     { fetch: blockedFetch, mirror: copyOf({}) }), /no deja descargar/);
+});
+
+test('an admin who asks again the same day gets the reading under way, a stopped one again, or a new one after a finished one', async () => {
+  const { enqueueOpportunityDemand } = await load();
+  const admin = { organizationId: 'org', userId: 'u1', role: 'admin' };
+  const { tables, client } = memory({ opportunity_company_context: [{ organization_id: 'org', revision: 3, criteria: { keywords: ['call center'] }, services: [] }] });
+  const first = await enqueueOpportunityDemand(client, admin, true);
+  assert.ok(first);
+  assert.equal(await enqueueOpportunityDemand(client, admin, true), first, 'a double click reads once');
+  const job = () => tables.opportunity_jobs.find(row => row.id === first);
+  Object.assign(job(), { state: 'blocked', error: 'ChileCompra no deja descargar…' });
+  assert.equal(await enqueueOpportunityDemand(client, admin, true), first);
+  assert.deepEqual([job().state, job().error], ['queued', null], 'a block that may have passed runs the same job again');
+  Object.assign(job(), { state: 'ready' });
+  const retry = await enqueueOpportunityDemand(client, admin, true);
+  assert.notEqual(retry, first);
+  assert.match(tables.opportunity_jobs.find(row => row.id === retry).dedupe_key, /^demand:manual:\d{4}-\d{2}-\d{2}:3:retry:[0-9a-f-]{36}$/);
+  tables.opportunity_jobs.find(row => row.id === retry).state = 'queued';
+  assert.equal(await enqueueOpportunityDemand(client, admin, true), retry, 'the retry under way is reused');
+  tables.opportunity_jobs.find(row => row.id === retry).state = 'failed';
+  const another = await enqueueOpportunityDemand(client, admin, true);
+  assert.ok(another && another !== retry && another !== first);
+  // The monthly reading never piles up: once queued for the month, it is not queued again.
+  assert.ok(await enqueueOpportunityDemand(client, admin, false));
+  assert.equal(await enqueueOpportunityDemand(client, admin, false), null);
+  await assert.rejects(enqueueOpportunityDemand(client, { organizationId: 'org', userId: 'u2', role: 'member' }, true), /administrador/);
 });
