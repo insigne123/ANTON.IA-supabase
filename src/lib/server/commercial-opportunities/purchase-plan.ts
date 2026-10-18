@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { PLAN_SCREEN_BATCH, PlanCandidates, planKeywords, planOpportunityDraft, planScreenPrompt, planScreenSchema, purchasePlanLine, purchasePlanReader, purchasePlanUrl,
   type PurchasePlanLine, type PurchasePlanMatch } from '@/lib/commercial-opportunities/purchase-plan';
-import { opportunityLocalClock, type WorkScope } from '@/lib/commercial-opportunities/workspace';
+import { OPPORTUNITY_BUCKET, opportunityLocalClock, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { assertOpportunityAdmin } from './workspace-access';
 import { createPrivateOpportunity, opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
@@ -13,40 +13,86 @@ const TABLE = 'opportunity_purchase_plan';
 const MAX_ZIP_BYTES = 60 * 1024 * 1024;
 
 type Fetch = typeof fetch;
+/** A copy of a year's plan, as the texts of its parts in order, or null when there is none. */
+export type PlanMirror = (year: number) => Promise<AsyncIterable<string> | null>;
+
+/** Where the copy of a year's plan lives: CSV parts under 15 MB (the bucket takes CSV up to 20 MB), header in the first. */
+export const planMirrorFolder = (year: number) => `public-data/purchase-plan/${year}`;
+const MIRROR_PART = /^part-\d{3}\.csv$/;
+
 /**
- * Reads a year's plan from ChileCompra (a ZIP of about 7 MB with one CSV of about 40 MB) as a stream, keeping only the
- * candidates: the whole file never sits in memory as text. Null when the year is not published yet.
+ * The copy in Storage, for when ChileCompra does not let the server download the file: its CloudFront blocks Google Cloud
+ * networks, where App Hosting runs («Request blocked», 18 Oct 2026). `scripts/mirror-purchase-plan.mjs` refreshes it.
  */
-export async function readPurchasePlanCandidates(year: number, keywords: string[], dependencies: { fetch?: Fetch } = {}) {
-  const response = await (dependencies.fetch ?? fetch)(purchasePlanUrl(year), { signal: AbortSignal.timeout(90_000) });
-  if (response.status === 404 || response.status === 403) return null;
-  if (!response.ok) throw new AuthError('No pudimos descargar el Plan Anual de Compras de ChileCompra. Lo intentaremos de nuevo.', 503);
-  const size = Number(response.headers.get('content-length') || 0);
-  if (size > MAX_ZIP_BYTES) throw new AuthError('El archivo del Plan Anual de Compras es más grande de lo esperado.', 422);
-  const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > MAX_ZIP_BYTES) throw new AuthError('El archivo del Plan Anual de Compras es más grande de lo esperado.', 422);
-  const { default: JSZip } = await import('jszip');
-  const zip = await JSZip.loadAsync(bytes);
-  const file = Object.values(zip.files).find(entry => !entry.dir && /\.csv$/i.test(entry.name));
-  if (!file) throw new AuthError('El archivo de ChileCompra no trae el plan en CSV.', 422);
+export function storagePlanMirror(client: SupabaseClient): PlanMirror {
+  return async year => {
+    const bucket = client.storage.from(OPPORTUNITY_BUCKET);
+    const { data, error } = await bucket.list(planMirrorFolder(year), { limit: 100, sortBy: { column: 'name', order: 'asc' } });
+    const names = error ? [] : (data || []).map(file => file.name).filter(name => MIRROR_PART.test(name)).sort();
+    if (!names.length) return null;
+    return (async function* parts() {
+      for (const name of names) {
+        const { data: blob, error: failed } = await bucket.download(`${planMirrorFolder(year)}/${name}`);
+        if (failed || !blob) throw new AuthError('No pudimos leer la copia del Plan Anual de Compras. Lo intentaremos de nuevo.', 503);
+        yield await blob.text();
+      }
+    })();
+  };
+}
+
+/** ChileCompra does not let the server download the file, and there is no copy of that year. */
+export class PlanBlockedError extends AuthError {
+  constructor(year: number) { super(`ChileCompra no deja descargar el Plan Anual de Compras ${year} desde nuestro servidor y aún no tenemos una copia. Lo estamos resolviendo.`, 503); }
+}
+
+/**
+ * Reads a year's plan as a stream, keeping only the candidates: the whole file never sits in memory as text. From
+ * ChileCompra (a ZIP of about 7 MB with one CSV of about 40 MB) or, when ChileCompra blocks the download or fails, from the
+ * copy. Null when the year is not published yet: S3 answers «AccessDenied» for a file that does not exist, while a
+ * blocked network gets CloudFront's «Request blocked».
+ */
+export async function readPurchasePlanCandidates(year: number, keywords: string[], dependencies: { fetch?: Fetch; mirror?: PlanMirror } = {}) {
   const candidates = new PlanCandidates(keywords);
   const seen = new Map<string, number>();
   let read = 0; let empty = 0;
-  const stream = file.nodeStream('nodebuffer') as unknown as Readable;
-  stream.setEncoding('utf8');
   const parser = purchasePlanReader(row => {
     const line = purchasePlanLine(row, seen);
     if (!line) { empty++; return; }
     read++; candidates.offer(line);
   });
-  // JSZip's stream is an older Readable without async iteration; setEncoding keeps a character split across chunks whole.
-  await new Promise<void>((resolve, reject) => {
-    stream.on('data', chunk => parser.write(String(chunk)));
-    stream.on('end', () => resolve()); stream.on('error', reject);
-  });
+  const response = await (dependencies.fetch ?? fetch)(purchasePlanUrl(year), { signal: AbortSignal.timeout(90_000) });
+  let source: 'chilecompra' | 'copia' = 'chilecompra';
+  if (response.ok) {
+    const size = Number(response.headers.get('content-length') || 0);
+    if (size > MAX_ZIP_BYTES) throw new AuthError('El archivo del Plan Anual de Compras es más grande de lo esperado.', 422);
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > MAX_ZIP_BYTES) throw new AuthError('El archivo del Plan Anual de Compras es más grande de lo esperado.', 422);
+    const { default: JSZip } = await import('jszip');
+    const zip = await JSZip.loadAsync(bytes);
+    const file = Object.values(zip.files).find(entry => !entry.dir && /\.csv$/i.test(entry.name));
+    if (!file) throw new AuthError('El archivo de ChileCompra no trae el plan en CSV.', 422);
+    const stream = file.nodeStream('nodebuffer') as unknown as Readable;
+    stream.setEncoding('utf8');
+    // JSZip's stream is an older Readable without async iteration; setEncoding keeps a character split across chunks whole.
+    await new Promise<void>((resolve, reject) => {
+      stream.on('data', chunk => parser.write(String(chunk)));
+      stream.on('end', () => resolve()); stream.on('error', reject);
+    });
+  } else {
+    const body = await response.text().catch(() => '');
+    const blocked = /request blocked/i.test(body) || (response.status === 403 && /cloudfront/i.test(response.headers.get('server') || ''));
+    if (!blocked && (response.status === 404 || response.status === 403)) return null;
+    const copy = await (dependencies.mirror ?? (async () => null))(year);
+    if (!copy) {
+      if (blocked) throw new PlanBlockedError(year);
+      throw new AuthError('No pudimos descargar el Plan Anual de Compras de ChileCompra. Lo intentaremos de nuevo.', 503);
+    }
+    source = 'copia';
+    for await (const text of copy) parser.write(text);
+  }
   parser.end();
   if (!parser.known || !read) throw new AuthError('El archivo del Plan Anual de Compras cambió de formato: no pudimos leer sus líneas.', 422);
-  return { year, read, skipped: parser.skipped + empty, candidates: candidates.list().map(item => item.line) };
+  return { year, source, read, skipped: parser.skipped + empty, candidates: candidates.list().map(item => item.line) };
 }
 
 /** The year to read: this year, or the last one published (early in the year the new plan may not be out). */
@@ -71,16 +117,24 @@ export async function enqueueOpportunityDemand(client: SupabaseClient, scope: Wo
  * screening in batches (each batch is a paid step that comes back on a retry) and the lines kept, replacing the last
  * reading of that year. Resumes in the next tick when its time runs out.
  */
-export async function runOpportunityDemand(client: SupabaseClient, job: OpportunityJob, context: any, started: number, dependencies: { fetch?: Fetch } = {}) {
+export async function runOpportunityDemand(client: SupabaseClient, job: OpportunityJob, context: any, started: number,
+  dependencies: { fetch?: Fetch; mirror?: PlanMirror } = {}) {
   const keywords = planKeywords({ keywords: context.criteria?.keywords, services: context.services });
   if (!keywords.length) throw new AuthError('Faltan las palabras para compras públicas: revísalas en «Qué buscamos».', 409);
-  type Snapshot = { year: number; read: number; skipped: number; lines: PurchasePlanLine[] };
+  type Snapshot = { year: number; source?: 'chilecompra' | 'copia'; read: number; skipped: number; lines: PurchasePlanLine[] };
   let snapshot = opportunityDb(await client.from('opportunity_source_snapshots').select('candidates').eq('job_id', job.id).eq('organization_id', job.organization_id).maybeSingle())?.candidates as Snapshot | undefined;
   if (!snapshot) {
     const year = planYear();
-    const found = await readPurchasePlanCandidates(year, keywords, dependencies) ?? await readPurchasePlanCandidates(year - 1, keywords, dependencies);
-    if (!found) throw new AuthError('ChileCompra aún no publica el Plan Anual de Compras.', 409);
-    snapshot = { year: found.year, read: found.read, skipped: found.skipped, lines: found.candidates };
+    const reading = { fetch: dependencies.fetch, mirror: dependencies.mirror ?? storagePlanMirror(client) };
+    // This year's plan, or last year's while the new one is not out (or is blocked with no copy yet).
+    let blocked: PlanBlockedError | null = null;
+    const read = async (from: number) => {
+      try { return await readPurchasePlanCandidates(from, keywords, reading); }
+      catch (failure) { if (failure instanceof PlanBlockedError) { blocked ??= failure; return null; } throw failure; }
+    };
+    const found = await read(year) ?? await read(year - 1);
+    if (!found) throw blocked ?? new AuthError('ChileCompra aún no publica el Plan Anual de Compras.', 409);
+    snapshot = { year: found.year, source: found.source, read: found.read, skipped: found.skipped, lines: found.candidates };
     opportunityDb(await client.from('opportunity_source_snapshots').insert({ job_id: job.id, organization_id: job.organization_id, candidates: snapshot }));
     // Downloading and reading took its share of the tick: the screening starts with a fresh one.
     if (Date.now() - started > 60_000) return { waiting: true as const };
@@ -103,7 +157,7 @@ export async function runOpportunityDemand(client: SupabaseClient, job: Opportun
     opportunityDb(await client.from(TABLE).upsert(rows.slice(offset, offset + 500), { onConflict: 'organization_id,year,line_id' }));
   // The lines of the previous reading that this one did not keep go away; the kept ones were rewritten with this run.
   opportunityDb(await client.from(TABLE).delete().eq('organization_id', job.organization_id).eq('year', snapshot.year).neq('run_id', job.id));
-  return { waiting: false as const, year: snapshot.year, read: snapshot.read, candidates: snapshot.lines.length, kept: rows.length };
+  return { waiting: false as const, year: snapshot.year, source: snapshot.source ?? 'chilecompra', read: snapshot.read, candidates: snapshot.lines.length, kept: rows.length };
 }
 
 type PlanRow = { line_id: string; institution: string; institution_code: string | null; product_code: string | null; description: string; quantity: number | null;

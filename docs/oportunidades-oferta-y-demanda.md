@@ -24,6 +24,14 @@ El trabajo `demand` (mensual al buscar oportunidades, o manual) descarga el ZIP,
 
 El archivo no es CSV estricto: una comilla es texto, una descripción cortada en su largo máximo deja una comilla abierta (leído como CSV, 13 de ellas se tragan 5.900 líneas), 775 descripciones se parten en dos líneas y unas pocas traen un «;». `purchasePlanReader` lee por línea, une las partidas hasta completar las diez columnas y devuelve un «;» extra a la descripción cuando el resto de la línea se lee bien; lo demás se cuenta como omitido, nunca se corre de columna. Con el archivo 2026: 303.488 líneas leídas y 63 omitidas, en unos 10 s y 190 MB de memoria.
 
+**Bloqueo de ChileCompra y copia en Storage.** El CloudFront de `pac-files.da.mercadopublico.cl` bloquea las redes de Google Cloud, donde corre App Hosting: responde 403 «Request blocked» (comprobado el 18 oct 2026; desde otras redes el archivo baja normal). Un año no publicado, en cambio, responde 403 de S3 con «AccessDenied». Cuando ChileCompra bloquea o falla, el servidor lee la copia en Storage (`opportunity-documents/public-data/purchase-plan/{año}/part-001.csv`, …: partes CSV de menos de 15 MB, porque el bucket acepta CSV hasta 20 MB); sin copia, el trabajo lo dice («no deja descargar… y aún no tenemos una copia») en vez de «aún no publica». La copia se refresca desde una red que ChileCompra deja pasar, al publicarse el plan del año y luego cada mes:
+
+```
+SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/mirror-purchase-plan.mjs 2026
+```
+
+(`--zip archivo.zip` usa un ZIP ya descargado; `--dry-run` solo muestra las partes.) Las líneas leídas de la copia tienen los mismos ids que las de ChileCompra.
+
 «Seguir» crea una oportunidad comercial privada con el origen `purchase_plan`, un id estable por línea (no se duplica) y el documento «Plan Anual de Compras.txt» con el detalle. El plan es referencial: el organismo puede comprar menos, en otra fecha o por otro mecanismo.
 
 ## Migraciones
