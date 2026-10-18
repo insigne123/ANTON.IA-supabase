@@ -182,7 +182,7 @@ export async function runOpportunityDemand(client: SupabaseClient, job: Opportun
     const batch = snapshot.lines.slice(offset, offset + PLAN_SCREEN_BATCH);
     const ids = new Set(batch.map(line => line.lineId));
     const step = `plan:${snapshot.year}:${createHash('sha256').update(batch.map(line => line.lineId).join('|')).digest('hex').slice(0, 32)}`;
-    const answer = await opportunityGenerate(client, job, { step, category: 'evaluation', role: 'screen', schema: planScreenSchema, output: 6000,
+    const answer = await opportunityGenerate(client, job, { step, category: 'evaluation', role: 'screen', schema: planScreenSchema, output: 8000,
       prompt: planScreenPrompt(offer, batch) });
     for (const match of answer.matches) if (ids.has(match.id.trim())) kept.set(match.id.trim(), { fit: match.fit, reason: match.reason.replace(/\s+/g, ' ').trim().slice(0, 300) });
   }
