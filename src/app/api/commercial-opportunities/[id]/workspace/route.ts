@@ -8,6 +8,8 @@ import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-o
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
 import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { enqueueOpportunityOffer, readOpportunityOffer, saveOpportunityOfferPrices } from '@/lib/server/commercial-opportunities/workspace-offer';
+import { answerFitQuestion, enqueueRequirementFit, readOpportunityFit } from '@/lib/server/commercial-opportunities/workspace-fit';
+import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -18,14 +20,15 @@ export async function GET(_request: Request, context: Context) {
     const scope = opportunityScope(auth);
     // The detail checks the access first; the offer draft of the same opportunity comes with it.
     const detail = await readOpportunityDetail(auth.admin, scope, id);
-    return opportunitiesJson({ ...detail, offer: await readOpportunityOffer(auth.admin, scope, id) });
+    const [offer, fit] = await Promise.all([readOpportunityOffer(auth.admin, scope, id), readOpportunityFit(auth.admin, scope.organizationId, detail.reports?.[0]?.id)]);
+    return opportunitiesJson({ ...detail, offer, fit });
   } catch (error) { return opportunitiesError(error); }
 }
 export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') return opportunitiesJson({ revision: await assignOpportunity(auth.admin, scope, id, assignmentSchema.parse(data)) });
     if (action === 'activity') {
       const input = activitySchema.parse(data); await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
@@ -34,6 +37,16 @@ export async function POST(request: Request, context: Context) {
     if (action === 'offer') {
       const input = z.object({ requestId: z.string().uuid(), instructions: z.string().trim().max(1500).optional() }).strict().parse(data);
       return opportunitiesJson({ jobId: await enqueueOpportunityOffer(auth.admin, scope, id, input) }, 202);
+    }
+    if (action === 'fit' || action === 'fit_answer') {
+      // An answer goes into the company's tender profile first; then the requirements are read again with it, now.
+      if (action === 'fit_answer') {
+        const input = z.object({ question: z.string().trim().min(2).max(200), answer: z.string().trim().min(1).max(500) }).strict().parse(data);
+        await answerFitQuestion(auth.admin, scope, id, input);
+      }
+      const key = await enqueueRequirementFit(auth.admin, scope, id);
+      const done = await runQueuedOpportunityJobNow(auth.admin, scope.organizationId, key, 'fit').catch(() => null);
+      return opportunitiesJson({ queued: !(done?.processed === 1 && done.state === 'ready'), state: done?.state ?? 'queued' }, done?.state === 'ready' ? 200 : 202);
     }
     if (action === 'offer_prices') {
       const input = z.object({ draftId: z.string().uuid(), expectedRevision: z.number().int().nonnegative(),

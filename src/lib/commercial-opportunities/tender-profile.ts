@@ -46,6 +46,8 @@ const tenderProfileShape = z.object({
   insurance: z.enum(['si', 'no']).nullable(),
   assets: text(2000),
   limits: text(2000),
+  /** Answers to the AI's questions about a requirement («¿Pueden entregar una boleta por $4.500.000?» → «Sí»), kept for the next tenders. */
+  notes: z.array(z.object({ question: z.string().trim().min(2).max(200), answer: z.string().trim().min(1).max(500), at: z.string().max(40) })).max(60).default([]),
 }).strict();
 export const tenderProfileSchema = tenderProfileShape.refine(value => value.contractMin === null || value.contractMax === null || value.contractMin <= value.contractMax,
   { message: 'El monto mínimo de contrato no puede superar al máximo.', path: ['contractMax'] });
@@ -54,7 +56,7 @@ export type TenderProfileField = keyof TenderProfile;
 
 export const EMPTY_TENDER_PROFILE: TenderProfile = { legalName: null, rut: null, size: null, employees: null, yearsOperating: null, regions: null, staffCapacity: null,
   contractMin: null, contractMax: null, publicExperience: null, publicContracts: null, privateClients: null, providerRegistry: null, certifications: null,
-  otherCertifications: null, guaranteeMax: null, insurance: null, assets: null, limits: null };
+  otherCertifications: null, guaranteeMax: null, insurance: null, assets: null, limits: null, notes: [] };
 
 /** A saved profile read leniently: a field that no longer validates comes back as «no sé», never breaking the page. */
 export function readTenderProfile(value: unknown): TenderProfile {
@@ -110,6 +112,7 @@ export function tenderProfileForModel(profile: TenderProfile, options: { legal?:
     seguroDeResponsabilidadCivil: yesNo(profile.insurance),
     equiposFlotaInstalacionesOLicencias: or(profile.assets),
     loQueNoHaceONoLeInteresa: or(profile.limits),
+    ...(profile.notes.length ? { respuestasDeLaEmpresa: profile.notes.slice(-40).map(note => `${note.question} → ${note.answer}`) } : {}),
   };
 }
 

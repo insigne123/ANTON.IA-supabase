@@ -44,9 +44,33 @@ Una a la vez, después de las del Asistente:
 1. `20261018132000_opportunity_jobs_profile.sql`: agrega el tipo `profile` a `opportunity_jobs`.
 2. `20261018133000_opportunity_tender_profile.sql`: crea la tabla `opportunity_tender_profile`, una fila por workspace, solo para `service_role` y con RLS activo.
 
+## ¿Cumplimos? (12b)
+
+Cada informe de licitación, Compra Ágil o privada se compara con la ficha (`workspace-fit.ts`, trabajo `fit`, Haiku con razonamiento medio). Se encola solo al quedar listo el informe, si hay ficha, o con «Revisar con mi ficha» en los requisitos. Cada requisito queda como:
+
+- **✓ Cumples:** la ficha o una respuesta lo muestra; se dice con qué dato.
+- **⚠ Falta un dato:** la ficha no lo dice; la IA hace una pregunta que se responde ahí mismo con «Sí», «No» o «Responder con detalle».
+- **✗ No cumples:** solo si el requisito tiene cita en las bases y un dato de la ficha lo contradice. Si falta alguno de los dos, es «falta un dato».
+- **Trámite de la postulación:** formularios y declaraciones que cualquier oferente presenta.
+
+La respuesta se guarda en la ficha («Respuestas a la IA», hasta 60) y la revisión se repite al tiro con ella. Cualquiera que trabaje la oportunidad puede responder; los administradores ven y quitan las respuestas en la ficha.
+
+La decisión del informe se muestra con la ficha (`decisionWithFit`):
+
+- un «No postular» que descansa en requisitos sin un ✗ con evidencia se muestra como «Postular si se resuelve lo pendiente», con la nota de qué responder;
+- un «Postular» con un ✗ con evidencia pasa a condicional.
+
+Un «No postular» por plazos, otro producto o alcance no cambia. El PDF y el Word del informe aún muestran la decisión original del informe.
+
+Las lecturas quedan en `opportunity_requirement_fit` (una por informe y versión de la ficha). Si la ficha cambió, la barra lo dice y ofrece «Revisar de nuevo con mi ficha».
+
+Migraciones, después de las anteriores:
+
+3. `20261018134000_opportunity_jobs_fit.sql`: agrega el tipo `fit`.
+4. `20261018135000_opportunity_requirement_fit.sql`: crea la tabla, solo `service_role`, con RLS, que se borra con su informe u oportunidad.
+
 ## Lo que sigue
 
-- **12b.** Cada requisito del informe como ✓ cumple, ⚠ falta un dato o ✗ no cumple frente a la ficha, con la cita de las bases. «No postular» solo cuando lo que deja fuera tiene evidencia. Las respuestas a las preguntas de la IA se guardan en la ficha.
 - **12c.** Carpeta de documentos de la empresa (F30, vigencia, estados financieros, certificados ISO) con vencimientos y avisos.
 
 ## Validación
@@ -61,4 +85,12 @@ Pruebas unitarias sin red:
   - el prompt de la evaluación diaria con y sin ficha;
 - vista renderizada de las preguntas.
 
-La prueba pgTAP `opportunity_tender_profile.test.sql` revisa RLS, permisos, una ficha por workspace, el objeto JSON, el tipo de trabajo y el borrado en cascada.
+Del cotejo (12b):
+- un ✗ sin cita o sin dato pasa a pregunta; lo que el modelo omitió también se pregunta;
+- la regla de decisión;
+- encolado una vez por informe y versión, solo con ficha y solo para quien puede leer la oportunidad;
+- la lectura guardada y rechazada si la ficha cambió;
+- las respuestas guardadas en la ficha;
+- la vista del informe con la barra, las insignias y las preguntas.
+
+Las pruebas pgTAP `opportunity_tender_profile.test.sql` y `opportunity_requirement_fit.test.sql` revisan RLS, permisos, unicidad, objetos JSON, los tipos de trabajo y el borrado en cascada.
