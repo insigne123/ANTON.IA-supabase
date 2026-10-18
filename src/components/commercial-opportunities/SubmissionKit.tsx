@@ -51,7 +51,7 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
   );
 
   return (
-    <article aria-labelledby="kit-title" className="mx-auto max-w-3xl space-y-10">
+    <article aria-labelledby="kit-title" className="mx-auto w-full min-w-0 max-w-3xl space-y-10">
       <header className="space-y-4 rounded-3xl border bg-background p-5 shadow-sm sm:p-7">
         <div className="space-y-1">
           <h2 id="kit-title" className="text-xl font-semibold tracking-tight">Cómo postular</h2>
