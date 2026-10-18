@@ -171,6 +171,24 @@ export function TenderProfileFields({ form, sources, onChange }: { form: TenderP
         {textarea('assets', 'Equipos, flota, instalaciones o licencias', 'Ej.: 6 camionetas 4x4, bodega en Puerto Montt, licencia de manipulación de alimentos')}
         {textarea('limits', 'Lo que no haces o no te interesa', 'Ej.: No hacemos obras civiles ni turnos nocturnos')}
       </section>
+
+      {form.notes.length ? (
+        <section aria-labelledby="tp-notes" className="space-y-3">
+          <div>
+            <h3 id="tp-notes" className="text-sm font-semibold">Respuestas a la IA</h3>
+            <p className="text-xs text-muted-foreground">Lo que el equipo respondió en los requisitos de una licitación. La IA lo usa en las siguientes.</p>
+          </div>
+          <ul className="divide-y rounded-xl border">
+            {form.notes.map(note => (
+              <li key={note.question} className="flex items-start justify-between gap-3 px-3 py-2.5">
+                <div className="min-w-0 text-sm"><p className="text-muted-foreground">{note.question}</p><p className="font-medium">{note.answer}</p></div>
+                <Button type="button" variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs" aria-label={`Quitar la respuesta a «${note.question}»`}
+                  onClick={() => set('notes', form.notes.filter(entry => entry.question !== note.question))}>Quitar</Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

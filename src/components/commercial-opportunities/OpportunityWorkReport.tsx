@@ -11,6 +11,8 @@ import { IMPACT_LABELS, consultationEmail, humanDate, isSignalReport, opportunit
 import { parseReportDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { RoutePath, type RouteNode } from './RoutePath';
 import { MarkedItem, ReminderMenu, useReportMarks, type MarkChange } from './ReportMarks';
+import { FitBadge, FitBar, FitQuestion, type OpportunityFitView } from './RequirementFit';
+import { decisionWithFit } from '@/lib/commercial-opportunities/requirement-fit';
 
 const TONES = { go: 'bg-cw-success-soft text-cw-success', evaluate: 'bg-cw-warning-soft text-cw-warning', no: 'bg-muted text-muted-foreground', pending: 'bg-muted text-muted-foreground' };
 const IMPACT_TONES: Record<string, string> = { high: 'bg-destructive/10 text-destructive', medium: 'bg-cw-warning-soft text-cw-warning', low: 'bg-muted text-muted-foreground' };
@@ -22,7 +24,7 @@ export const SUGGESTED_QUESTIONS = {
 
 type Opportunity = { title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
 const ROUTE_ICONS: Record<string, typeof PenLine> = { prepare: PenLine, ask: MessageCircleQuestion, submit: Upload, wait: Hourglass, decide: Award, contact: Phone };
-export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people }: {
+export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people, fit, fitBusy = false, onFit, onAnswer }: {
   report: OpportunityReport & { route?: { steps: Array<{ title: string; detail: string; date: string; kind: 'prepare' | 'ask' | 'submit' | 'wait' | 'decide' | 'contact' }> } | null };
   opportunity: Opportunity; onTask: (title: string, evidence: string) => void;
   onAsk: (question: string) => void; onContacts?: () => void;
@@ -30,6 +32,8 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
   marks?: { available: boolean; items: ReportMarks } | null;
   onMark?: (change: MarkChange) => Promise<ReportMark | null>;
   people?: Array<{ user_id: string; name: string }>;
+  /** «¿Cumplimos?»: the requirements against the company's tender profile (workspace-fit.ts); absent before its migration. */
+  fit?: OpportunityFitView | null; fitBusy?: boolean; onFit?: () => void; onAnswer?: (question: string, answer: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const { interactive, marks, saving, change } = useReportMarks(initialMarks, onMark);
@@ -38,7 +42,9 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
   const whenOf = (at?: string | null) => humanDate(at, true);
   const markProps = { marks: itemMarks, disabled: saving, onChange: (input: MarkChange) => void change(input), authorOf, whenOf };
   const signal = isSignalReport(report);
-  const decision = reportDecision(report);
+  // With the profile, a «No postular» that rests on unproven requirements reads as conditional (requirement-fit.ts).
+  const fitted = signal ? { recommendation: report.recommendation, note: null } : decisionWithFit(report, fit?.latest ?? null);
+  const decision = reportDecision({ ...report, recommendation: fitted.recommendation });
   const dates = reportKeyDates(report, opportunity.deadline);
   const steps = reportNextSteps(report);
   const route = reportRoute(report);
@@ -98,6 +104,7 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
           <span className={cn('rounded-full px-3 py-1 text-sm font-semibold', TONES[decision.tone])}>{decision.label}</span>
           <span className="text-xs text-muted-foreground">Preparado el {humanDate(report.generatedAt) ?? 'hoy'}</span>
         </div>
+        {fitted.note ? <p className="mt-2 text-sm text-muted-foreground">{fitted.note}</p> : null}
         <p className="mt-4 max-w-3xl text-[15px] leading-7 text-foreground/90">{report.executive}</p>
         {facts.length > 0 && <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-4">
           {facts.map(([label, value]) => <div key={label} className="min-w-0 bg-background px-4 py-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 text-sm font-semibold">{value}</dd></div>)}
@@ -161,17 +168,20 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
 
       {report.requirements.length > 0 && <section aria-labelledby="report-requirements" className="space-y-3">
         {heading('requirements', signal ? 'Qué validar con la empresa' : 'Requisitos para postular', report.requirements.length)}
-        <ul className="divide-y rounded-2xl border">{report.requirements.map((r, i) => <li key={i} className="p-4">
+        {!signal && fit ? <FitBar fit={fit} busy={fitBusy} onFit={onFit} /> : null}
+        <ul className="divide-y rounded-2xl border">{report.requirements.map((r, i) => { const itemFit = signal ? null : fit?.latest?.items[reportItemKey('requirement', r.title)] ?? null; return <li key={i} className="p-4">
           <MarkedItem markKey={reportItemKey('requirement', r.title)} label={r.title} {...markProps}>
             <div className="flex flex-wrap items-start justify-between gap-2"><p className="mark-title min-w-0 font-medium">{r.title}</p>
               <span className={cn('shrink-0 text-xs font-medium', REQUIREMENT_TONES[r.status])}>{statusLabel(r.status)}</span></div>
+            {itemFit ? <div className="mt-1.5"><FitBadge fit={itemFit} /></div> : null}
             {r.action && <p className="mt-1.5 text-sm">{r.action}</p>}
+            {itemFit?.fit === 'missing' && itemFit.question && onAnswer ? <FitQuestion id={`fit-${i}`} question={itemFit.question} busy={fitBusy} onAnswer={answer => onAnswer(itemFit.question!, answer)} /> : null}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">{[r.role, r.due].filter(Boolean).join(' · ')}</p>
               <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onTask(r.action || r.title, r.evidence.map(e => e.quote).join('\n'))}>Crear tarea</Button>
             </div>
           </MarkedItem>
-        </li>)}</ul>
+        </li>; })}</ul>
       </section>}
 
       {report.tasks.length > 0 && <section aria-labelledby="report-plan" className="space-y-3">

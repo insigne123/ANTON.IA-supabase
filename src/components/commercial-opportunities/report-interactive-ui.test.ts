@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import * as reportView from '@/lib/commercial-opportunities/report-view';
 import * as reportMarks from '@/lib/commercial-opportunities/report-marks';
 import * as workspace from '@/lib/commercial-opportunities/workspace';
+import * as requirementFit from '@/lib/commercial-opportunities/requirement-fit';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -18,14 +19,17 @@ const dependencies: Record<string, unknown> = {
   '@/components/ui/button': { Button: ({ asChild, variant, size, children, ...props }: any) => asChild ? children : React.createElement('button', props, children) },
   '@/components/ui/popover': { Popover: passthrough, PopoverTrigger: passthrough, PopoverContent: ({ children }: any) => React.createElement('div', { 'data-popover': '' }, children) },
   '@/components/ui/textarea': { Textarea: (props: any) => React.createElement('textarea', props) },
+  '@/components/ui/input': { Input: (props: any) => React.createElement('input', props) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
   '@/lib/commercial-opportunities/report-view': reportView,
   '@/lib/commercial-opportunities/report-marks': reportMarks,
   '@/lib/commercial-opportunities/workspace': workspace,
+  '@/lib/commercial-opportunities/requirement-fit': requirementFit,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./RoutePath'] = load(await compile('./RoutePath.tsx'));
 dependencies['./ReportMarks'] = load(await compile('./ReportMarks.tsx'));
+dependencies['./RequirementFit'] = load(await compile('./RequirementFit.tsx'));
 const { OpportunityWorkReport } = load(await compile('./OpportunityWorkReport.tsx'));
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/<!-- -->/g, '').replace(/\s+/g, ' ');
 
@@ -81,4 +85,30 @@ test('each future date offers a reminder, with Google Calendar and a calendar fi
   assert.match(text(html), /Recordatorios de todas/);
   assert.match(text(html), /Descargar todas \(\.ics\)/);
   assert.match(text(html), /Una semana antes/);
+});
+
+test('with the tender profile, each requirement says if the company meets it, asks what is missing, and a «No postular» without evidence softens', () => {
+  const key = (title: string) => reportMarks.reportItemKey('requirement', title);
+  const fit = { available: true, profileRevision: 3, latest: { profileRevision: 3, createdAt: '', noRestsOnRequirements: true, items: {
+    [key('Boleta de garantía de seriedad')]: { fit: 'missing', basis: '', question: '¿Pueden entregar una boleta por $4.500.000?' },
+    [key('Anexo N.º 1 firmado')]: { fit: 'na', basis: '', question: null },
+  } } };
+  const html = renderToStaticMarkup(React.createElement(OpportunityWorkReport, { report: { ...report, recommendation: 'do_not_advance' }, opportunity: { title: 'Seguridad Museo' },
+    onTask: () => {}, onAsk: () => {}, fit, onFit: () => {}, onAnswer: () => {} }));
+  assert.match(text(html), /Postular si se resuelve lo pendiente/, 'no requirement proven against the company: conditional, not «No postular»');
+  assert.doesNotMatch(text(html), /No postular/);
+  assert.match(text(html), /Con tu ficha no encontramos un requisito que te deje fuera: responde la pregunta de «Falta un dato» para decidir\./);
+  assert.match(text(html), /0 cumples · 1 falta un dato · 0 no cumples/);
+  assert.match(text(html), /Falta un dato/);
+  assert.match(text(html), /¿Pueden entregar una boleta por \$4\.500\.000\?/);
+  assert.match(html, /role="group" aria-label="Responder a la IA"/);
+  assert.match(text(html), /Trámite de la postulación/);
+  assert.doesNotMatch(text(html), /Revisar de nuevo con mi ficha/, 'the reading is current');
+  const stale = renderToStaticMarkup(React.createElement(OpportunityWorkReport, { report, opportunity: { title: 'Seguridad Museo' }, onTask: () => {}, onAsk: () => {},
+    fit: { ...fit, profileRevision: 4 }, onFit: () => {} }));
+  assert.match(text(stale), /tu ficha cambió desde esta revisión/);
+  assert.match(text(stale), /Revisar de nuevo con mi ficha/);
+  const none = renderToStaticMarkup(React.createElement(OpportunityWorkReport, { report, opportunity: { title: 'Seguridad Museo' }, onTask: () => {}, onAsk: () => {},
+    fit: { available: true, profileRevision: null, latest: null } }));
+  assert.match(text(none), /Con la «Ficha para licitaciones» de tu empresa, la IA te dice qué requisitos cumples/);
 });

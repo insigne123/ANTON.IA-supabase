@@ -20,6 +20,7 @@ import { OpportunityContacts } from './OpportunityContacts';
 import { OpportunityChat } from './OpportunityChat';
 import { OpportunityAssistant } from './OpportunityAssistant';
 import { TenderProfileSheet } from './TenderProfileSheet';
+import type { OpportunityFitView } from './RequirementFit';
 import { TeamOffice, TeamPicker } from './TeamOffice';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import {OpportunityTicketConnection} from './OpportunityTicketConnection';
@@ -35,7 +36,7 @@ import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-pr
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress };
 type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
-  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null } };
+  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null }; fit?: OpportunityFitView };
 /** The kinds with bases to answer with an offer (server/commercial-opportunities/workspace-offer.ts). */
 const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
@@ -194,6 +195,11 @@ export function OpportunityWorkWorkspace() {
   const generate = () => { if (!detail) return; if (admin && detail.item.data.evaluation === 'excluded' && !detail.reports.length) setReconsider(true); else { setTab('summary'); void perform('research', {}, selected, true); } };
   // The question shows at once; the answer arrives in the same wait (the server answers it now) or, if a worker took it, by polling.
   const ask = (text: string) => { setTab('chat'); setPendingQuestion(text); void perform('chat', { question: text, requestId: crypto.randomUUID() }, selected, true).finally(() => setPendingQuestion(null)); };
+  // «¿Cumplimos?»: read now with the profile; an answer is saved in the profile first (workspace-fit.ts).
+  const checkFit = async (action: 'fit' | 'fit_answer', data: Record<string, string>) => {
+    const result = await perform(action, data, selected, true);
+    if (result) setFeedback(action === 'fit_answer' ? 'Guardado en tu ficha para licitaciones. Revisamos los requisitos con tu respuesta.' : result.queued ? 'Revisando los requisitos con tu ficha. Tarda unos segundos.' : 'Requisitos revisados con tu ficha.');
+  };
   const continueIn = (id: string, question: string | null) => { handoff.current = { id, question }; open(id); };
   useEffect(() => {
     const next = handoff.current;
@@ -339,7 +345,8 @@ export function OpportunityWorkWorkspace() {
             <div className="flex flex-wrap items-center justify-end gap-2"><label className="sr-only" htmlFor="op-export">Formato de descarga</label><select id="op-export" value={download} onChange={e => setDownload(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring">{[['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel'], ['md', 'Markdown'], ['zip', 'Expediente completo (ZIP)']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><Button asChild variant="outline" size="sm"><a href={`/api/commercial-opportunities/${selected}/export?format=${download}`}><Download className="mr-2 h-4 w-4" />Descargar</a></Button></div>
             <OpportunityWorkReport report={latest.report} opportunity={{ title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency }}
               onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')}
-              marks={detail.marks} onMark={mark} people={detail.members || detail.participants} />
+              marks={detail.marks} onMark={mark} people={detail.members || detail.participants}
+              fit={detail.fit} fitBusy={busy} onFit={() => void checkFit('fit', {})} onAnswer={(question, answer) => void checkFit('fit_answer', { question, answer })} />
           </>}
         </div>}
         {tab === 'apply' && !signal && <SubmissionKit report={latest?.report ?? null} opportunity={{ title: item.title, kind: item.kind, amount: item.amount, currency: item.currency, deadline: item.deadline_at }}

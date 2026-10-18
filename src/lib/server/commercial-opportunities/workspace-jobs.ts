@@ -12,6 +12,7 @@ import { runOpportunityOffer } from './workspace-offer';
 import { enqueueMonthlyDemand, runOpportunityDemand } from './purchase-plan';
 import { runOpportunityAssistant } from './workspace-assistant';
 import { runTenderProfileSuggestion } from './workspace-tender-profile';
+import { enqueueFitAfterReport, runRequirementFit } from './workspace-fit';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -59,7 +60,7 @@ export async function answerOpportunityChatNow(client: SupabaseClient, organizat
   return done?.processed === 1 && done.state === 'ready';
 }
 /** A queued job taken in the same request, only while still queued: a worker that took it first keeps it. */
-export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant' | 'profile') {
+export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant' | 'profile' | 'fit') {
   const job = opportunityDb(await client.from('opportunity_jobs')
     .update({ state: 'running', lease_token: randomUUID(), lease_until: new Date(Date.now() + 5 * 60_000).toISOString(), attempts: 1, updated_at: new Date().toISOString() })
     .eq('organization_id', organizationId).eq('dedupe_key', dedupeKey).eq('kind', kind).eq('state', 'queued').select('*').maybeSingle()) as OpportunityJob | null;
@@ -92,6 +93,7 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
     } else if (job.kind === 'chat') result = await runOpportunityChat(client, job);
     else if (job.kind === 'assistant') result = await runOpportunityAssistant(client, job);
     else if (job.kind === 'profile') result = await runTenderProfileSuggestion(client, job);
+    else if (job.kind === 'fit') result = await runRequirementFit(client, job);
     else if (job.kind === 'offer') result = await runOpportunityOffer(client, job);
     else if (job.kind === 'demand') {
       const demand = await runOpportunityDemand(client, job, context, Date.now());
@@ -108,6 +110,8 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
     await notifyReportReady(client, job).catch(() => undefined);
     // A report ready moves an assigned opportunity into preparation (pipeline.ts).
     await applyAutomaticMove(client, { organizationId: job.organization_id, userId: job.requested_by }, job.opportunity_id, { kind: 'report_ready' }).catch(() => null);
+    // Its requirements are read against the company's tender profile, when there is one (workspace-fit.ts).
+    await enqueueFitAfterReport(client, job);
   }
   return { processed: committed ? 1 : 0, state, kind: job.kind };
 }
