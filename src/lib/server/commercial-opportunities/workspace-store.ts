@@ -47,15 +47,20 @@ export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkS
     sourceStatus: admin ? { claude: Boolean(process.env.ANTHROPIC_API_KEY), linkedin: Boolean(process.env.APIFY_TOKEN), posts: Boolean(process.env.APIFY_TOKEN && process.env.OPPORTUNITIES_POST_USD_PER_ITEM),
       jsearch: Boolean(process.env.JSEARCH_API_KEY), automation: process.env.OPPORTUNITIES_AUTOMATION_ENABLED === 'true' } : {} };
 }
-export async function createPrivateOpportunity(client: SupabaseClient, scope: WorkScope, input: z.infer<typeof privateOpportunitySchema>) {
+/**
+ * `options` names where the opportunity came from when it was not received by the team (a line of the purchase plan, for
+ * one), and `dedupeKey` makes it one per workspace whoever adds it.
+ */
+export async function createPrivateOpportunity(client: SupabaseClient, scope: WorkScope, input: z.infer<typeof privateOpportunitySchema>,
+  options: { reason?: string; origin?: string; documentName?: string; dedupeKey?: string; activity?: string } = {}) {
   assertOpportunityAdmin(scope);
-  const requestId=input.requestId||randomUUID();const key=`private:${scope.userId}:${requestId}`;
+  const requestId=input.requestId||randomUUID();const key=options.dedupeKey||`private:${scope.userId}:${requestId}`;
   const existing=opportunityDb(await client.from('commercial_opportunities').select('id').eq('organization_id',scope.organizationId).eq('kind','private').eq('dedupe_key',key).maybeSingle());
   let id = existing?.id || randomUUID();
   if(!existing){
    const inserted=await client.from('commercial_opportunities').insert({ id, organization_id: scope.organizationId, kind: 'private', dedupe_key: key,
     title: input.title, company_name: input.company, buyer_name: input.company, deadline_at: input.deadline, amount: input.amount, currency: input.currency,
-    url: input.url, reasons: ['Recibida directamente por el equipo'], data: { origin: 'admin_upload', evaluation: 'review', type: input.kind, description: input.description.slice(0, 2000), createdBy: scope.userId } });
+    url: input.url, reasons: [options.reason || 'Recibida directamente por el equipo'], data: { origin: options.origin || 'admin_upload', evaluation: 'review', type: input.kind, description: input.description.slice(0, 2000), createdBy: scope.userId } });
    if(inserted.error?.code==='23505'){
     const won=opportunityDb(await client.from('commercial_opportunities').select('id').eq('organization_id',scope.organizationId).eq('kind','private').eq('dedupe_key',key).single());
     if(!won)throw new AuthError('No se pudo recuperar la oportunidad recibida.',503);id=won.id;
@@ -63,9 +68,9 @@ export async function createPrivateOpportunity(client: SupabaseClient, scope: Wo
   }
   if (input.description) {
     const { saveOpportunityDocument } = await import('./workspace-documents');
-    await saveOpportunityDocument(client, scope, id, { name: 'Invitación recibida.txt', bytes: Buffer.from(input.description), sourceKind: 'pasted' });
+    await saveOpportunityDocument(client, scope, id, { name: options.documentName || 'Invitación recibida.txt', bytes: Buffer.from(input.description), sourceKind: 'pasted' });
   }
-  await addOpportunityActivity(client, scope, id, 'created', 'Oportunidad recibida incorporada al workspace',{},`private-created:${id}`);
+  await addOpportunityActivity(client, scope, id, 'created', options.activity || 'Oportunidad recibida incorporada al workspace',{},`private-created:${id}`);
   return id;
 }
 export async function addOpportunityActivity(client: SupabaseClient, scope: WorkScope, id: string, kind: string, body: string, data: Record<string, unknown> = {}, eventKey?: string) {

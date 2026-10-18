@@ -8,6 +8,9 @@ import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { criteriaSchema, captureOpportunityLinkedIn, captureOpportunityTenders, evaluateOpportunityBatch } from './workspace-sources';
 import { runOpportunityResearch, runOpportunityChat } from './workspace-research';
 import { applyAutomaticMove, runPipelineReview } from './workspace-pipeline';
+import { runOpportunityOffer } from './workspace-offer';
+import { runOpportunityDemand } from './purchase-plan';
+import { planKeywords } from '@/lib/commercial-opportunities/purchase-plan';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -19,6 +22,11 @@ export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope:
   const kinds = context.criteria?.postQueries?.length ? ['tenders', ...(context.criteria?.roles?.length ? ['hiring'] : []), 'posts'] : ['criteria'];
   for (const kind of kinds) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind, dedupe_key: `${prefix}:${kind}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
+  // «Demanda futura» reads the Plan Anual de Compras once a month (its key carries the month), once the words exist.
+  if (planKeywords({ keywords: context.criteria?.keywords, services: context.services }).length) {
+    opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'demand',
+      dedupe_key: `demand:${clock.day.slice(0, 7)}:${context.revision}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
+  }
   return kinds.length;
 }
 export async function enqueueDailyOpportunityWork(client: SupabaseClient) {
@@ -84,6 +92,12 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
       if (research.waiting) { state = 'waiting'; result = { progress: 'Lectura documental en curso' }; }
       else result = research.report;
     } else if (job.kind === 'chat') result = await runOpportunityChat(client, job);
+    else if (job.kind === 'offer') result = await runOpportunityOffer(client, job);
+    else if (job.kind === 'demand') {
+      const demand = await runOpportunityDemand(client, job, context, Date.now());
+      if (demand.waiting) { state = 'waiting'; result = { progress: 'Leyendo el Plan Anual de Compras' }; }
+      else result = demand;
+    }
     else throw new AuthError('El tipo de trabajo no está disponible.', 400);
   } catch (failure) {
     state = failure instanceof AuthError && [402, 409, 422].includes(failure.status) ? 'blocked' : 'failed';
