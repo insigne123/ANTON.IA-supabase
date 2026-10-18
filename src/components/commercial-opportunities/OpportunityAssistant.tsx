@@ -298,8 +298,8 @@ export function OpportunityAssistant({ admin, threadId, onThread, onOpen, onHand
       const result = await post({ action: 'ask', question, requestId: crypto.randomUUID(), threadId: threadId ?? null });
       current.current = result.threadId;
       if (result.threadId !== threadId) { created.current = result.threadId; onThread(result.threadId); }
-      await loadThread(result.threadId);
-      void loadSidebar();
+      // The conversation and the side list together, so the new conversation's name shows with its first answer.
+      await Promise.all([loadThread(result.threadId), loadSidebar()]);
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo enviar tu pregunta.'); }
     finally { setPending(null); setBusy(false); }
   };

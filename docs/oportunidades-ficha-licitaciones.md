@@ -21,10 +21,10 @@ En Oportunidades, los administradores ven el botón «Ficha para licitaciones» 
 - **El avance.** Por ejemplo, «10 de 16 respuestas».
 - **«Completar con IA».** Es un trabajo `profile`, respondido en la misma petición. Lee:
   - la oferta del workspace;
-  - lo que los administradores escribieron en Perfil (empresa, descripción, clientes, pruebas);
-  - la portada del sitio web de la empresa (`company_domain`), descargada con `downloadOpportunitySource`: solo https, con DNS fijado y sin direcciones privadas.
+  - lo que los administradores escribieron en Perfil (empresa, descripción, clientes, pruebas), solo si la empresa de su Perfil es la del workspace (`sameCompany`). Un Perfil personal puede describir otra empresa: en producción, una persona de Yago que administra GrupoExpro llenó la ficha de GrupoExpro con el nombre y los productos de Yago (18 oct 2026, corregido);
+  - la portada del sitio web de esa empresa (`company_domain` de un Perfil que coincide), descargada con `downloadOpportunitySource`: solo https, con DNS fijado y sin direcciones privadas.
 
-  Solo llena campos en blanco y marca cada sugerencia con su fuente. No sugiere la garantía, el registro ni el seguro, y el RUT solo si aparece completo y válido. Nada se guarda hasta que la persona pulsa «Guardar ficha».
+  El nombre de la empresa es el del workspace (`organizations.name`). Solo llena campos en blanco y marca cada sugerencia con su fuente. No sugiere la garantía, el registro ni el seguro. El RUT solo se sugiere si aparece completo y válido, y la razón social solo con su forma jurídica (SpA, Ltda., S.A., EIRL). Nada se guarda hasta que la persona pulsa «Guardar ficha».
 - **El guardado.** Se guarda con revisión: si otro administrador guardó antes, se avisa y no se pisa.
 - **«Revisar de nuevo».** Aparece después de guardar cuando hay licitaciones abiertas descartadas por `requisito` o `escala`. Las devuelve a la evaluación en lotes de 40, una vez por versión de la ficha (`profile-review:{revisión}:{oferta}:{n}`).
 
