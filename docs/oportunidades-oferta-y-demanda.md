@@ -24,13 +24,15 @@ El trabajo `demand` (mensual al buscar oportunidades, o manual) descarga el ZIP,
 
 El archivo no es CSV estricto: una comilla es texto, una descripción cortada en su largo máximo deja una comilla abierta (leído como CSV, 13 de ellas se tragan 5.900 líneas), 775 descripciones se parten en dos líneas y unas pocas traen un «;». `purchasePlanReader` lee por línea, une las partidas hasta completar las diez columnas y devuelve un «;» extra a la descripción cuando el resto de la línea se lee bien; lo demás se cuenta como omitido, nunca se corre de columna. Con el archivo 2026: 303.488 líneas leídas y 63 omitidas, en unos 10 s y 190 MB de memoria.
 
-**Bloqueo de ChileCompra y copia en Storage.** El CloudFront de `pac-files.da.mercadopublico.cl` bloquea las redes de Google Cloud, donde corre App Hosting: responde 403 «Request blocked» (comprobado el 18 oct 2026; desde otras redes el archivo baja normal). Un año no publicado, en cambio, responde 403 de S3 con «AccessDenied». Cuando ChileCompra bloquea o falla, el servidor lee la copia en Storage (`opportunity-documents/public-data/purchase-plan/{año}/part-001.csv`, …: partes CSV de menos de 15 MB, porque el bucket acepta CSV hasta 20 MB); sin copia, el trabajo lo dice («no deja descargar… y aún no tenemos una copia») en vez de «aún no publica». La copia se refresca desde una red que ChileCompra deja pasar, al publicarse el plan del año y luego cada mes:
+**Bloqueo de ChileCompra y copia en Storage.** El CloudFront de `pac-files.da.mercadopublico.cl` bloquea las redes en la nube: Google Cloud, donde corre App Hosting, y Azure, donde corre GitHub Actions, reciben 403 «Request blocked» (comprobado el 18 oct 2026; desde otras redes el archivo baja normal). Un año no publicado, en cambio, responde 403 de S3 con «AccessDenied». Cuando ChileCompra bloquea o falla, el servidor lee la copia en Storage (`opportunity-documents/public-data/purchase-plan/{año}/part-001.csv`, …: partes CSV de menos de 15 MB, porque el bucket acepta CSV hasta 20 MB); sin copia, el trabajo lo dice («no deja descargar… y aún no tenemos una copia») en vez de «aún no publica». Las líneas leídas de la copia tienen los mismos ids que las de ChileCompra.
+
+**Copia mensual.** Una tarea programada de Claude Code («Copia mensual del Plan Anual de Compras», el día 3 de cada mes a las 9:17 de Chile) corre en el entorno en la nube de Claude, cuya salida a internet ChileCompra no bloquea:
 
 ```
-SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/mirror-purchase-plan.mjs 2026
+SUPABASE_URL=https://yfdelflsheurzaicwayi.supabase.co SUPABASE_SERVICE_ROLE_KEY=… node scripts/mirror-purchase-plan.mjs <año>
 ```
 
-(`--zip archivo.zip` usa un ZIP ya descargado; `--dry-run` solo muestra las partes.) Las líneas leídas de la copia tienen los mismos ids que las de ChileCompra.
+El script no usa dependencias del proyecto (curl, unzip y la API REST de Storage), así que corre en una copia recién clonada. Si el año aún no está publicado (enero a marzo), termina con `{"published":false}` sin tocar nada y el servidor sigue con la copia del año anterior. La tarea necesita `FIREBASE_TOKEN` en las variables del entorno de Claude Code (con él lee `SUPABASE_SERVICE_ROLE_KEY` de los secretos de App Hosting) o directamente `SUPABASE_SERVICE_ROLE_KEY`. Se puede correr a mano desde cualquier red permitida; `--zip archivo.zip` usa un ZIP ya descargado y `--dry-run` solo muestra las partes.
 
 «Seguir» crea una oportunidad comercial privada con el origen `purchase_plan`, un id estable por línea (no se duplica) y el documento «Plan Anual de Compras.txt» con el detalle. El plan es referencial: el organismo puede comprar menos, en otra fecha o por otro mecanismo.
 
