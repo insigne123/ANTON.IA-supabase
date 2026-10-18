@@ -91,7 +91,9 @@ export function officialTenderItems(raw: unknown): OfficialItem[] {
 }
 
 /** What the company told the app about itself (Perfil), besides the workspace's offer: proofs, clients, differentiators. */
-export type CompanyFacts = { offer: string; services: string[]; territories: string[]; exclusions: string[]; profile?: string; extras?: Record<string, string> };
+export type CompanyFacts = { offer: string; services: string[]; territories: string[]; exclusions: string[]; profile?: string; extras?: Record<string, string>;
+  /** tenderProfileForModel(…, { legal: true }) of the «Ficha para licitaciones», when there is one. */
+  ficha?: Record<string, unknown> };
 const PROFILE_FIELDS: Array<[string, string[]]> = [
   ['Descripción', ['description']], ['Propuesta de valor', ['valueProposition', 'value_proposition']],
   ['Pruebas y resultados', ['proofPoints', 'proof_points']], ['Clientes que se pueden nombrar', ['referenceClients', 'reference_clients']],
@@ -137,7 +139,7 @@ export function offerDraftPrompt(input: {
 Escribe en español de Chile, formal y concreto, como se escribe una oferta a un organismo público. Frases cortas, sin relleno ni adjetivos vacíos.
 
 REGLAS
-- Nunca inventes experiencia, años, clientes, personal, certificaciones, equipos, plazos ni precios. Usa solo lo que dice la empresa abajo. Lo que falte va como marcador entre corchetes, por ejemplo [N.º de contratos similares], [nombre del jefe de proyecto], [RUT de la empresa], y se lista en missing.
+- Nunca inventes experiencia, años, clientes, personal, certificaciones, equipos, plazos ni precios. Usa solo lo que dice la empresa abajo, incluida su ficha para licitaciones (razón social, RUT, experiencia, certificaciones); en la ficha «no sé» es un dato que falta. Lo que falte va como marcador entre corchetes, por ejemplo [N.º de contratos similares], [nombre del jefe de proyecto], [RUT de la empresa], y se lista en missing.
 - technical: una sección por cada criterio de evaluación técnico o requisito técnico de las bases, en el orden en que las bases los evalúan; primero los que más puntaje dan. heading es un título corto; criterion es el criterio o requisito tal como lo nombran las bases; weight es su ponderación si las bases la dan («30 %», «20 puntos»), si no vacío. body es el texto de la oferta para ese criterio, listo para pegar: qué hará la empresa, cómo, con qué recursos y en qué plazos, usando lo que la empresa ofrece y marcadores para lo que falte. Cita en evidence el fragmento de las bases que pide ese criterio (chunkId y quote exactos de los hechos).
 - compliance: cada requisito técnico obligatorio o especificación que las bases piden cumplir, con answer en primera persona plural («Cumplimos: …», o «[confirmar si cumplimos: …]» cuando no se sabe). Cita el requisito.
 - economic.lines: las líneas que hay que cotizar, con su cantidad y unidad. Si vienen las líneas oficiales de Mercado Público, úsalas tal cual (misma descripción, cantidad y unidad) y en notes lo que las bases aclaren de cada una. Si no, sácalas de las bases. Nunca pongas precios: los escribe el equipo. priceBasis dice si en el portal va el valor neto o total con IVA (unknown si no se sabe). validity es la vigencia de la oferta que piden las bases; paymentTerms, la forma de pago; notes, lo que afecta el precio (reajustes, costos incluidos, multas, garantías).
@@ -148,7 +150,9 @@ REGLAS
 ${input.instructions ? `- Indicaciones del equipo para esta versión: ${input.instructions.slice(0, 1500)}\n` : ''}
 OPORTUNIDAD: ${JSON.stringify({ titulo: input.opportunity.title, organismo: input.opportunity.buyer, id: input.opportunity.code || null, cierre: input.opportunity.deadline, monto: input.opportunity.amount, moneda: input.opportunity.currency })}
 EMPRESA: ${JSON.stringify({ oferta: input.company.offer.slice(0, 3000), servicios: input.company.services.slice(0, 30), territorios: input.company.territories, noOfrece: input.company.exclusions,
-  perfil: input.company.profile ? input.company.profile.slice(0, 2000) : undefined, ...(input.company.extras || {}) })}
+  perfil: input.company.profile ? input.company.profile.slice(0, 2000) : undefined, ...(input.company.extras || {}),
+  // The «Ficha para licitaciones»: name, RUT, experience and certifications fill the markers instead of leaving them open.
+  ...(input.company.ficha ? { fichaParaLicitaciones: input.company.ficha } : {}) })}
 INFORME: ${JSON.stringify({ resumen: input.report.executive.slice(0, 2500), requisitos: input.report.requirements.slice(0, 60).map(r => ({ titulo: r.title, estado: r.status, accion: r.action.slice(0, 300) })),
   escenarios: input.report.scenarios.slice(0, 3).map(s => ({ nombre: s.name, meses: s.months, supuestos: s.assumptions.slice(0, 4) })) })}
 GUIA: ${JSON.stringify(kit ? { documentos: kit.folders.flatMap(f => f.documents.map(d => ({ carpeta: f.name, titulo: d.title, origen: d.source }))), reglas: kit.rules.map(r => r.text), numeros: kit.numbers, garantias: kit.guarantees } : null)}

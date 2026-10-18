@@ -11,6 +11,7 @@ import { applyAutomaticMove, runPipelineReview } from './workspace-pipeline';
 import { runOpportunityOffer } from './workspace-offer';
 import { enqueueMonthlyDemand, runOpportunityDemand } from './purchase-plan';
 import { runOpportunityAssistant } from './workspace-assistant';
+import { runTenderProfileSuggestion } from './workspace-tender-profile';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -58,7 +59,7 @@ export async function answerOpportunityChatNow(client: SupabaseClient, organizat
   return done?.processed === 1 && done.state === 'ready';
 }
 /** A queued job taken in the same request, only while still queued: a worker that took it first keeps it. */
-export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant') {
+export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant' | 'profile') {
   const job = opportunityDb(await client.from('opportunity_jobs')
     .update({ state: 'running', lease_token: randomUUID(), lease_until: new Date(Date.now() + 5 * 60_000).toISOString(), attempts: 1, updated_at: new Date().toISOString() })
     .eq('organization_id', organizationId).eq('dedupe_key', dedupeKey).eq('kind', kind).eq('state', 'queued').select('*').maybeSingle()) as OpportunityJob | null;
@@ -90,6 +91,7 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
       else result = research.report;
     } else if (job.kind === 'chat') result = await runOpportunityChat(client, job);
     else if (job.kind === 'assistant') result = await runOpportunityAssistant(client, job);
+    else if (job.kind === 'profile') result = await runTenderProfileSuggestion(client, job);
     else if (job.kind === 'offer') result = await runOpportunityOffer(client, job);
     else if (job.kind === 'demand') {
       const demand = await runOpportunityDemand(client, job, context, Date.now());

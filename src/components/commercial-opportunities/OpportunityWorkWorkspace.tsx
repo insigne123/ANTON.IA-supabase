@@ -19,6 +19,7 @@ import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/rep
 import { OpportunityContacts } from './OpportunityContacts';
 import { OpportunityChat } from './OpportunityChat';
 import { OpportunityAssistant } from './OpportunityAssistant';
+import { TenderProfileSheet } from './TenderProfileSheet';
 import { TeamOffice, TeamPicker } from './TeamOffice';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import {OpportunityTicketConnection} from './OpportunityTicketConnection';
@@ -69,6 +70,7 @@ export function OpportunityWorkWorkspace() {
   // «Asistente» is the section's general conversation, for everyone.
   const [view, setView] = useState<'pipeline' | 'list' | 'demand' | 'assistant'>('pipeline');
   const [assistantThread, setAssistantThread] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
   // A question the assistant hands to one opportunity's chat: asked there once its expediente is open.
   const handoff = useRef<{ id: string; question: string | null } | null>(null);
   const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number } } | null>(null);
@@ -277,6 +279,7 @@ export function OpportunityWorkWorkspace() {
     {overview && !selected && <>
       {admin && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">{overview.context ? 'Oferta compartida confirmada' : 'Confirma qué ofrece tu empresa'}</p><p className="mt-1 text-xs text-muted-foreground">{overview.context ? `Búsqueda diaria ${(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} · Límite mensual US$20 · US$${overview.budget.spent.toFixed(2)} usados` : 'La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.'}</p></div>
         <div className="flex flex-wrap gap-2">{overview.context && (overview.context as any).criteria?.postQueries?.length ? <Button variant="ghost" onClick={openCriteria}><Search className="mr-2 h-4 w-4" />Qué buscamos</Button> : null}
+          {overview.context ? <Button variant="ghost" onClick={() => setProfileOpen(true)}><ClipboardCheck className="mr-2 h-4 w-4" />Ficha para licitaciones</Button> : null}
           {overview.context ? (overview.sourceStatus.automation ? <Button variant="outline" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null) : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
       {view !== 'assistant' && <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
       {view !== 'assistant' && <TenderPrerequisites />}
@@ -361,6 +364,7 @@ export function OpportunityWorkWorkspace() {
       </>}
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
+    {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
     <Dialog open={modal !== null} onOpenChange={open => { if (!open && !busy) setModal(null); }}><DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Empresa del workspace' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? 'Asignar equipo de trabajo' : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Cuéntale a la IA qué vende tu empresa. Con eso busca licitaciones y señales de LinkedIn y decide cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-4" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>{([['offer', 'Qué ofrece la empresa', 'Ej.: Automatizamos la consulta de causas judiciales de postulantes para empresas que contratan en volumen. Entregamos un reporte por persona en menos de 24 horas.'], ['services', 'Servicios o productos · uno por línea', 'Ej.:\nVerificación de antecedentes de postulantes\nMonitoreo de causas laborales'], ['territories', 'Territorios atendidos · opcional', 'Ej.: Chile'], ['exclusions', 'Qué no ofrece · opcional', 'Ej.: No hacemos reclutamiento ni vendemos software de terceros']] as const).map(([key, label, placeholder]) => <div key={key}><Label htmlFor={`op-${key}`}>{label}</Label><Textarea id={`op-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} placeholder={placeholder} rows={key === 'offer' ? 5 : 3} required={key === 'offer' || key === 'services'} /></div>)}<Label htmlFor="op-priority">Prioridad de señales de LinkedIn</Label><select id="op-priority" value={draft.priority} onChange={e => field('priority', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="hiring">Ofertas laborales primero</option><option value="posts">Publicaciones comerciales primero</option><option value="balanced">Ambas por igual</option></select><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(draft.automation)} onChange={e => field('automation', e.target.checked)} />Buscar oportunidades nuevas cada día</label><Label htmlFor="op-hour">Hora de la búsqueda diaria (Chile)</Label><Input id="op-hour" type="number" min={0} max={23} value={draft.hour} onChange={e => field('hour', e.target.value)} /></>

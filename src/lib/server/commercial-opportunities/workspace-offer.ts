@@ -8,6 +8,8 @@ import { OPPORTUNITY_BUCKET, type WorkScope } from '@/lib/commercial-opportuniti
 import { assertOpportunityRead } from './workspace-access';
 import { addOpportunityActivity, opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { loadTenderProfile } from './tender-profile-read';
+import { tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
 
 /** The kinds with bases to answer: public tenders, Compra Ágil and the purchases a company receives (private). */
 export const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
@@ -55,6 +57,7 @@ export async function runOpportunityOffer(client: SupabaseClient, job: Opportuni
     client.from('opportunity_reports').select('id,report').eq('organization_id', job.organization_id).eq('opportunity_id', id).eq('id', job.payload.reportId).maybeSingle(),
     client.from('profiles').select('company_profile,signatures').eq('id', job.requested_by).maybeSingle(),
   ]);
+  const ficha = await loadTenderProfile(client, job.organization_id);
   const item = opportunityDb(itemRow); const context = opportunityDb(contextRow); const saved = opportunityDb(reportRow); const profile = opportunityDb(profileRow);
   if (!item) throw new AuthError('No encontramos esa oportunidad.', 404);
   if (!context) throw new AuthError('Un administrador debe confirmar primero la oferta del workspace.', 409);
@@ -63,7 +66,8 @@ export async function runOpportunityOffer(client: SupabaseClient, job: Opportuni
   const prompt = offerDraftPrompt({
     opportunity: { title: item.title, buyer: item.buyer_name || item.company_name, code: item.data?.observed?.code ?? null, deadline: item.deadline_at, amount: item.amount, currency: item.currency },
     company: { offer: String(context.offer || ''), services: context.services || [], territories: context.territories || [], exclusions: context.exclusions || [],
-      profile: typeof profile?.company_profile === 'string' ? profile.company_profile : undefined, extras: companyProfileExtras(profile?.signatures?.profile_extended) },
+      profile: typeof profile?.company_profile === 'string' ? profile.company_profile : undefined, extras: companyProfileExtras(profile?.signatures?.profile_extended),
+      ...(ficha ? { ficha: tenderProfileForModel(ficha, { legal: true }) } : {}) },
     report, officialItems: await readOfficialItems(client, job), instructions: job.payload.instructions,
   });
   const raw = await opportunityGenerate(client, job, { step: `offer:${createHash('sha256').update(prompt).digest('hex')}`, category: 'research', role: 'report',
