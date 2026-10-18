@@ -28,7 +28,8 @@ async function load() {
 function memory(seed: Record<string, any[]> = {}, options: { list?: (args: any) => any[]; missing?: string[] } = {}) {
   let serial = 0; let clock = Date.parse('2026-10-18T12:00:00Z');
   const tables: Record<string, any[]> = { opportunity_assistant_threads: [], opportunity_assistant_messages: [], opportunity_jobs: [], opportunity_work: [],
-    opportunity_company_context: [], opportunity_purchase_plan: [], opportunity_chat_messages: [], commercial_opportunities: [], organization_members: [], ...seed };
+    opportunity_company_context: [], opportunity_purchase_plan: [], opportunity_chat_messages: [], commercial_opportunities: [], organization_members: [],
+    opportunity_tender_profile: [], ...seed };
   const rpcs: any[] = [];
   const defaults = (name: string) => {
     const at = new Date(clock += 1000).toISOString();

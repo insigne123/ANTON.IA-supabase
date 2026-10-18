@@ -8,6 +8,8 @@ import { assistantAnswerSchema, assistantItem, assistantKeywords, assistantPromp
   type AssistantMessage, type AssistantThread, type SavedAssistantAnswer } from '@/lib/commercial-opportunities/assistant';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { loadTenderProfile } from './tender-profile-read';
+import { tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
 import { readableOpportunityIds } from './workspace-access';
 
 const THREADS = 'opportunity_assistant_threads';
@@ -97,7 +99,7 @@ export async function runOpportunityAssistant(client: SupabaseClient, job: Oppor
   const scope: WorkScope = { organizationId: job.organization_id, userId: job.requested_by, role: member.role };
   const message = opportunityDb(await client.from(MESSAGES).select('id,thread_id,question,created_at').eq('organization_id', job.organization_id)
     .eq('user_id', job.requested_by).eq('request_id', job.payload.requestId).single()) as { id: string; thread_id: string; question: string; created_at: string };
-  const [{ items, states }, demand, context, earlier] = await Promise.all([
+  const [{ items, states }, demand, context, earlier, ficha] = await Promise.all([
     assistantItems(client, scope, message.question),
     assistantDemand(client, scope),
     client.from('opportunity_company_context').select('offer,services').eq('organization_id', job.organization_id).maybeSingle().then(result => opportunityDb(result)),
@@ -105,12 +107,14 @@ export async function runOpportunityAssistant(client: SupabaseClient, job: Oppor
     client.from(MESSAGES).select('question,answer,created_at').eq('organization_id', job.organization_id).eq('thread_id', message.thread_id)
       .lt('created_at', message.created_at).not('answer', 'is', null).order('created_at', { ascending: false }).limit(6)
       .then(result => (opportunityDb(result) || []) as Array<{ question: string; answer: SavedAssistantAnswer | null }>),
+    loadTenderProfile(client, job.organization_id),
   ]);
   const today = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Santiago' }).format(new Date());
   const conversation = earlier.reverse().map(turn => ({ pregunta: turn.question.slice(0, 600), respuesta: String(turn.answer?.answer || '').slice(0, 900) }));
   const answer = await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: assistantAnswerSchema, output: 3000,
     prompt: assistantPrompt({ question: message.question, today, admin: isOpportunityAdmin(scope.role), offer: String(context?.offer || ''),
-      services: Array.isArray(context?.services) ? context.services.map(String) : [], items: items.map(item => assistantItem(item, states.get(item.id))), demand, conversation }) });
+      services: Array.isArray(context?.services) ? context.services.map(String) : [], items: items.map(item => assistantItem(item, states.get(item.id))), demand, conversation,
+      ficha: ficha ? tenderProfileForModel(ficha) : null }) });
   const saved = resolveAssistantAnswer(answer, new Map(items.map(item => [item.id, { title: item.title, buyer: item.buyer_name || item.company_name,
     kind: item.kind, deadline: item.deadline_at }])));
   opportunityDb(await client.from(MESSAGES).update({ answer: saved }).eq('organization_id', job.organization_id).eq('id', message.id));

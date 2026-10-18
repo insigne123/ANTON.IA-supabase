@@ -1,0 +1,64 @@
+# Oportunidades: ficha para licitaciones
+
+Primera parte del punto 12 («¿Conviene postular?» sin falsos «no»), 18 oct 2026. La ficha dice lo que la empresa es y puede hacer cuando postula. Con ella la IA no descarta una licitación por algo que la empresa sí tiene, y no adivina lo que no sabe.
+
+## Qué pregunta
+
+16 respuestas en cinco grupos (`tender-profile.ts`):
+
+- **Tu empresa:** razón social, RUT (con dígito verificador), tamaño por ventas anuales, personas y años en el rubro.
+- **Dónde y cuánto:** regiones de Chile donde presta el servicio, personas que podría asignar a un contrato nuevo y el rango de montos de contrato que le interesa.
+- **Experiencia:** si le ha vendido al Estado, contratos con organismos públicos y clientes privados similares.
+- **Lo que suelen pedir las bases:** Registro de Proveedores, certificaciones vigentes (ISO 9001, 14001, 45001, 27001, Sello ProPyme u otras), garantía máxima que puede entregar y seguro de responsabilidad civil.
+- **Medios y límites:** equipos, flota, instalaciones o licencias, y lo que no hace.
+
+Todo es opcional. En blanco significa «no sé», y la IA lo trata como un dato pendiente, nunca como un no. Una lista de certificaciones vacía, marcada como «No tenemos certificaciones», sí es un no.
+
+## Dónde se edita
+
+En Oportunidades, los administradores ven el botón «Ficha para licitaciones» junto a «Qué buscamos». Abre un panel lateral con:
+
+- **El avance.** Por ejemplo, «10 de 16 respuestas».
+- **«Completar con IA».** Es un trabajo `profile`, respondido en la misma petición. Lee:
+  - la oferta del workspace;
+  - lo que los administradores escribieron en Perfil (empresa, descripción, clientes, pruebas);
+  - la portada del sitio web de la empresa (`company_domain`), descargada con `downloadOpportunitySource`: solo https, con DNS fijado y sin direcciones privadas.
+
+  Solo llena campos en blanco y marca cada sugerencia con su fuente. No sugiere la garantía, el registro ni el seguro, y el RUT solo si aparece completo y válido. Nada se guarda hasta que la persona pulsa «Guardar ficha».
+- **El guardado.** Se guarda con revisión: si otro administrador guardó antes, se avisa y no se pisa.
+- **«Revisar de nuevo».** Aparece después de guardar cuando hay licitaciones abiertas descartadas por `requisito` o `escala`. Las devuelve a la evaluación en lotes de 40, una vez por versión de la ficha (`profile-review:{revisión}:{oferta}:{n}`).
+
+## Quién la lee
+
+- **La evaluación diaria** (`evaluateOpportunityBatch`). Con ficha, `requisito` y `escala` solo descartan cuando la ficha muestra que no se cumple: una región que no está, una garantía mayor que su máximo, una certificación que no tiene cuando la ficha dice cuáles tiene. Si no lo dice, el resultado es `review` y la razón indica qué dato falta. Sin ficha, esos motivos solo descartan cuando la oferta o sus exclusiones lo dicen.
+- **El chat de cada oportunidad**, cuando preguntan si cumplen un requisito o si conviene postular.
+- **El Asistente.**
+- **El borrador de oferta.** Recibe la razón social, el RUT, la experiencia y las certificaciones, que llenan los marcadores en vez de dejarlos abiertos.
+
+La lectura para los prompts (`tender-profile-read.ts`) no depende de la descarga ni de la IA. Sin ficha, o antes de la migración, todo sigue funcionando como antes.
+
+## Migraciones
+
+Una a la vez, después de las del Asistente:
+
+1. `20261018132000_opportunity_jobs_profile.sql`: agrega el tipo `profile` a `opportunity_jobs`.
+2. `20261018133000_opportunity_tender_profile.sql`: crea la tabla `opportunity_tender_profile`, una fila por workspace, solo para `service_role` y con RLS activo.
+
+## Lo que sigue
+
+- **12b.** Cada requisito del informe como ✓ cumple, ⚠ falta un dato o ✗ no cumple frente a la ficha, con la cita de las bases. «No postular» solo cuando lo que deja fuera tiene evidencia. Las respuestas a las preguntas de la IA se guardan en la ficha.
+- **12c.** Carpeta de documentos de la empresa (F30, vigencia, estados financieros, certificados ISO) con vencimientos y avisos.
+
+## Validación
+
+Pruebas unitarias sin red:
+
+- RUT, guardado y lectura tolerante, avance, texto para el modelo con «no sé», filtro de sugerencias y prompt;
+- con base y modelo en memoria:
+  - guardado solo de administradores y con revisión;
+  - revisión de descartadas (solo `requisito`/`escala` abiertas, una vez por versión);
+  - sugerencias desde Perfil y sitio web, sin scripts y sin el Perfil de quien no administra;
+  - el prompt de la evaluación diaria con y sin ficha;
+- vista renderizada de las preguntas.
+
+La prueba pgTAP `opportunity_tender_profile.test.sql` revisa RLS, permisos, una ficha por workspace, el objeto JSON, el tipo de trabajo y el borrado en cascada.
