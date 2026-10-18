@@ -49,7 +49,7 @@ test('the overview reads its parts together and still answers the same', async (
   assert.deepEqual({ ...overview, sourceStatus: undefined }, {
     mode: 'management', items: rows.opportunity_workspace_list, work: rows.opportunity_work, notifications: rows.opportunity_notifications,
     members: [{ user_id: 'u1', role: 'admin', name: 'Pruebas ANTON.IA' }], groups: rows.organization_reporting_groups, context: rows.opportunity_company_context,
-    budget: { spent: 2.14, reserved: 0, cap: 20 }, sourceStatus: undefined,
+    budget: { spent: 2.14, reserved: 0, cap: 20 }, sourceStatus: undefined, documentAlerts: [],
   });
 });
 

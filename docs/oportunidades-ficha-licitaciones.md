@@ -69,9 +69,27 @@ Migraciones, después de las anteriores:
 3. `20261018134000_opportunity_jobs_fit.sql`: agrega el tipo `fit`.
 4. `20261018135000_opportunity_requirement_fit.sql`: crea la tabla, solo `service_role`, con RLS, que se borra con su informe u oportunidad.
 
-## Lo que sigue
+## Documentos de la empresa (12c)
 
-- **12c.** Carpeta de documentos de la empresa (F30, vigencia, estados financieros, certificados ISO) con vencimientos y avisos.
+En la misma ficha, «Documentos de la empresa» guarda una vez lo que piden casi todas las bases. Tipos disponibles:
+
+- certificado F30 y F30-1;
+- vigencia de la sociedad y del poder del representante;
+- estados financieros;
+- certificados ISO;
+- otros.
+
+Cada documento se guarda con su fecha de vencimiento (`workspace-company-documents.ts`):
+
+- **Archivos.** Solo PDF o Word, revisados por sus primeros bytes, hasta 20 MB. Se guardan en el bucket privado `opportunity-documents`, bajo `company/{workspace}/`.
+- **Vencimiento sugerido.** Para el F30 y las vigencias se sugiere desde la fecha de emisión: 30 o 60 días, lo que suelen exigir las bases. Siempre se puede cambiar.
+- **Permisos.** Los administradores suben, cambian el vencimiento y quitan. Cualquiera del workspace descarga.
+- **Avisos.** Con 15 días de anticipación, o ya vencido, la vista de administradores muestra un aviso («Certificado F30: vence en 5 días», «Ver documentos»). Se calcula al leer, porque los avisos de Oportunidades pertenecen a una oportunidad.
+- **IA.** El cotejo de requisitos, el borrador de oferta, el chat de cada oportunidad y el Asistente reciben la carpeta con el estado de cada documento hoy (`documentosDeLaEmpresa`). Un F30 vigente cuenta como dato para ✓; uno vencido se dice.
+
+Migración, después de las anteriores:
+
+5. `20261018136000_opportunity_company_documents.sql`: crea la tabla, solo `service_role` y con RLS. Los tipos son conocidos, las rutas van bajo `company/`, el tope es de 20 MB y se borra con el workspace.
 
 ## Validación
 
@@ -93,4 +111,13 @@ Del cotejo (12b):
 - las respuestas guardadas en la ficha;
 - la vista del informe con la barra, las insignias y las preguntas.
 
-Las pruebas pgTAP `opportunity_tender_profile.test.sql` y `opportunity_requirement_fit.test.sql` revisan RLS, permisos, unicidad, objetos JSON, los tipos de trabajo y el borrado en cascada.
+De la carpeta (12c):
+- estados y textos de vencimiento en hora de Chile;
+- vencimiento sugerido;
+- avisos;
+- texto para el modelo;
+- subida solo de administradores, con validación del archivo y sin archivos huérfanos;
+- descarga solo dentro del workspace;
+- vistas de cada documento y del formulario.
+
+Las pruebas pgTAP `opportunity_tender_profile.test.sql`, `opportunity_requirement_fit.test.sql` y `opportunity_company_documents.test.sql` revisan RLS, permisos, unicidad, objetos JSON, los tipos de trabajo y el borrado en cascada.

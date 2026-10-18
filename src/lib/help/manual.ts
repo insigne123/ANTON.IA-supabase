@@ -122,6 +122,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Si administras Oportunidades, «Demanda futura» muestra lo que los organismos públicos planean comprar este año y calza con tu oferta, según su Plan Anual de Compras. «Seguir» agrega una compra a tus oportunidades para llegar antes de que la liciten.',
       'Si administras Oportunidades, completa la «Ficha para licitaciones» (junto a «Qué buscamos»): razón social, RUT, regiones, experiencia, certificaciones y garantías. «Completar con IA» la llena desde tu Perfil y tu sitio web. Con ella la IA no descarta una licitación por algo que sí tienes, y el borrador de oferta trae tus datos.',
       'En el informe de una licitación, cada requisito dice si cumples (✓), si falta un dato (⚠) o si no cumples (✗) según tu ficha. Responde las preguntas de «Falta un dato» con «Sí», «No» o en tus palabras: queda guardado en la ficha y la IA revisa de nuevo.',
+      'En la ficha, «Documentos de la empresa» guarda el F30, la vigencia de la sociedad, los estados financieros y tus certificados con su vencimiento. Te avisamos 15 días antes de que venzan y la IA sabe cuáles tienes vigentes.',
       'En «Asistente» conversa con la IA sobre todas tus oportunidades: qué calza esta semana, qué cierra pronto o qué piden las bases. Responde con las oportunidades que puedes ver, te deja abrirlas y, si la pregunta es sobre una licitación, te ofrece seguir en su propia conversación, que lee sus bases. Tus conversaciones quedan en la lista de la izquierda.',
     ],
     faqs: [

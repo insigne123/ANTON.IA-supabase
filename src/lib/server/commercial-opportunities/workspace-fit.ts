@@ -9,6 +9,8 @@ import { requirementFitPrompt, requirementFitSchema, resolveRequirementFit, type
 import { opportunityDb } from './workspace-store';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { loadCompanyDocuments } from './tender-profile-read';
+import { companyDocumentsForModel } from '@/lib/commercial-opportunities/company-documents';
 
 const TABLE = 'opportunity_requirement_fit';
 /** The kinds whose reports carry requirements to meet: a LinkedIn signal has things to validate, not bases. */
@@ -59,17 +61,20 @@ export async function enqueueFitAfterReport(client: SupabaseClient, job: Opportu
 /** The worker's side: one Haiku reading, kept honest (resolveRequirementFit), saved for the report and the profile version. */
 export async function runRequirementFit(client: SupabaseClient, job: OpportunityJob) {
   await assertOpportunityRead(client, { organizationId: job.organization_id, userId: job.requested_by }, job.opportunity_id!);
-  const [saved, profileRow, context] = await Promise.all([
+  const [saved, profileRow, context, documents] = await Promise.all([
     client.from('opportunity_reports').select('id,report').eq('organization_id', job.organization_id).eq('opportunity_id', job.opportunity_id).eq('id', job.payload.reportId)
       .maybeSingle().then(opportunityDb),
     client.from('opportunity_tender_profile').select('answers,revision').eq('organization_id', job.organization_id).maybeSingle().then(opportunityDb),
     client.from('opportunity_company_context').select('offer').eq('organization_id', job.organization_id).maybeSingle().then(opportunityDb),
+    loadCompanyDocuments(client, job.organization_id),
   ]);
   if (!saved) throw new AuthError('El informe cambió. Vuelve a revisarlo con tu ficha.', 409);
   if (!profileRow || Number(profileRow.revision) !== Number(job.payload.profileRevision)) throw new AuthError('La ficha cambió. Vuelve a revisarlo con tu ficha.', 409);
   const report = saved.report as OpportunityReport;
   const answer = await opportunityGenerate(client, job, { step: 'fit', category: 'research', role: 'specialist', schema: requirementFitSchema, output: 6000,
-    prompt: requirementFitPrompt({ report, ficha: tenderProfileForModel(readTenderProfile(profileRow.answers)), offer: String(context?.offer || '') }) });
+    prompt: requirementFitPrompt({ report, offer: String(context?.offer || ''), ficha: { ...tenderProfileForModel(readTenderProfile(profileRow.answers)),
+      // A current F30 or ISO certificate in the folder is a fact too; a lapsed one says so.
+      ...(documents.length ? { documentosDeLaEmpresa: companyDocumentsForModel(documents) } : {}) } }) });
   const fit = resolveRequirementFit(report, answer, Number(profileRow.revision));
   opportunityDb(await client.from(TABLE).upsert({ organization_id: job.organization_id, opportunity_id: job.opportunity_id, report_id: saved.id,
     profile_revision: fit.profileRevision, items: fit.items, no_rests_on_requirements: fit.noRestsOnRequirements },

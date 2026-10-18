@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { CompanyDocuments } from './CompanyDocuments';
 import { CERTIFICATIONS, CHILE_REGIONS, COMPANY_SIZES, EMPTY_TENDER_PROFILE, PROVIDER_REGISTRY, normalizeRut, tenderProfileProgress,
   type TenderProfile, type TenderProfileField, type TenderProfileSuggestion } from '@/lib/commercial-opportunities/tender-profile';
 
@@ -285,6 +286,7 @@ export function TenderProfileSheet({ open, onOpenChange }: { open: boolean; onOp
           <form id="tender-profile-form" className="py-2" onSubmit={event => { event.preventDefault(); void save(); }}>
             <TenderProfileFields form={form} sources={sources} onChange={next => { setForm(next); setSaved(false); }} />
           </form>
+          <div className="border-t pt-6"><CompanyDocuments /></div>
           <SheetFooter className="sticky bottom-0 mt-auto gap-2 border-t bg-background py-3">
             <Button type="button" variant="outline" disabled={Boolean(busy)} onClick={() => onOpenChange(false)}>Cerrar</Button>
             <Button type="submit" form="tender-profile-form" disabled={Boolean(busy) || Boolean(form.rut && form.rut.trim() && !normalizeRut(form.rut))}>
