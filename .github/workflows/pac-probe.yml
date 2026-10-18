@@ -1,0 +1,18 @@
+# Temporary probe: can a GitHub-hosted runner download ChileCompra's Plan Anual de Compras? (Its CloudFront blocks Google
+# Cloud.) Runs only on pushes to this probe branch and reads 1 KB; no secrets.
+name: pac-probe
+on:
+  push:
+    branches: [claude/pac-probe]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Runner IP
+        run: curl -s https://api.ipify.org; echo
+      - name: Plan Anual de Compras 2026 (1 KB)
+        run: |
+          curl -s -o /tmp/pac.bin -r 0-1023 -A "curl/8" -w "status=%{http_code} server=%header{server} bytes=%{size_download}\n" https://pac-files.da.mercadopublico.cl/2026/pacorganismos_2026.zip
+          head -c 120 /tmp/pac.bin | tr -cd '[:print:]'; echo
