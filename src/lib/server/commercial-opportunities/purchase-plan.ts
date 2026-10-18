@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
@@ -98,7 +98,11 @@ export async function readPurchasePlanCandidates(year: number, keywords: string[
 /** The year to read: this year, or the last one published (early in the year the new plan may not be out). */
 export function planYear(now = new Date()) { return Number(opportunityLocalClock(now).day.slice(0, 4)); }
 
-/** Queues a reading. Once a month on its own (with the daily search), and when an admin asks («Actualizar», once a day). */
+/**
+ * Queues a reading. Once a month on its own (with the daily search), and when an admin asks («Actualizar»). Asked again the
+ * same day, a reading under way is the same one; one that stopped for a reason that may have passed (ChileCompra blocked,
+ * no budget left) runs again, and a finished one gives way to a new one, as a report does (workspace-research.ts).
+ */
 export async function enqueueOpportunityDemand(client: SupabaseClient, scope: WorkScope, manual: boolean) {
   assertOpportunityAdmin(scope);
   const context = opportunityDb(await client.from('opportunity_company_context').select('revision,criteria,services').eq('organization_id', scope.organizationId).maybeSingle());
@@ -107,9 +111,25 @@ export async function enqueueOpportunityDemand(client: SupabaseClient, scope: Wo
     throw new AuthError('Faltan las palabras para compras públicas: revísalas en «Qué buscamos».', 409);
   const day = opportunityLocalClock().day;
   const key = manual ? `demand:manual:${day}:${context.revision}` : `demand:${day.slice(0, 7)}:${context.revision}`;
+  const payload = { revision: context.revision };
   const row = opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'demand',
-    dedupe_key: key, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }).select('id').maybeSingle());
-  return row?.id ?? null;
+    dedupe_key: key, payload }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }).select('id').maybeSingle());
+  if (row?.id || !manual) return row?.id ?? null;
+  const found = opportunityDb(await client.from('opportunity_jobs').select('id,state').eq('organization_id', scope.organizationId).eq('dedupe_key', key).maybeSingle());
+  if (!found || ['queued', 'running', 'waiting'].includes(found.state)) return found?.id ?? null;
+  if (found.state === 'blocked') {
+    opportunityDb(await client.from('opportunity_jobs').update({ state: 'queued', error: null }).eq('id', found.id).eq('organization_id', scope.organizationId).eq('state', 'blocked'));
+    return found.id;
+  }
+  // A failed job keeps its uncertain paid step reserved, and a finished one its result: the new reading is a job of its own.
+  // An active one is reused, so a double click does not read twice.
+  const active = opportunityDb(await client.from('opportunity_jobs').select('id').eq('organization_id', scope.organizationId).eq('kind', 'demand')
+    .like('dedupe_key', `${key}:retry:%`).in('state', ['queued', 'running', 'waiting']).limit(1).maybeSingle());
+  if (active?.id) return active.id as string;
+  const retry = opportunityDb(await client.from('opportunity_jobs').insert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'demand',
+    dedupe_key: `${key}:retry:${randomUUID()}`, payload }).select('id').single());
+  if (!retry) throw new AuthError('No se pudo recuperar el trabajo.', 503);
+  return retry.id as string;
 }
 
 /**
