@@ -287,7 +287,8 @@ export function TenderProfileSheet({ open, onOpenChange }: { open: boolean; onOp
             <TenderProfileFields form={form} sources={sources} onChange={next => { setForm(next); setSaved(false); }} />
           </form>
           <div className="border-t pt-6"><CompanyDocuments /></div>
-          <SheetFooter className="sticky bottom-0 mt-auto gap-2 border-t bg-background py-3">
+          {/* The sheet pads 1.5rem: the bar sits on its very edge, so nothing scrolls into view below it. */}
+          <SheetFooter className="sticky -bottom-6 -mx-6 mt-auto gap-2 border-t bg-background px-6 py-3">
             <Button type="button" variant="outline" disabled={Boolean(busy)} onClick={() => onOpenChange(false)}>Cerrar</Button>
             <Button type="submit" form="tender-profile-form" disabled={Boolean(busy) || Boolean(form.rut && form.rut.trim() && !normalizeRut(form.rut))}>
               {busy === 'save' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}Guardar ficha
