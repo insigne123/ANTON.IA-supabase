@@ -35,7 +35,7 @@ const profileModule = () => load(`export * from './src/lib/server/commercial-opp
 function memory(seed: Record<string, any[]> = {}, missing: string[] = []) {
   let serial = 0;
   const tables: Record<string, any[]> = { opportunity_tender_profile: [], opportunity_jobs: [], commercial_opportunities: [], opportunity_company_context: [],
-    organization_members: [], profiles: [], opportunity_evaluations: [], ...seed };
+    organization_members: [], profiles: [], opportunity_evaluations: [], organizations: [{ id: 'org', name: 'Aseo Sur' }], ...seed };
   const read = (row: any, key: string) => { const [column, field] = key.split('->>'); return field ? (row[column]?.[field] === undefined ? undefined : String(row[column][field])) : row[column]; };
   const query = (name: string) => {
     const filters: Array<(row: any) => boolean> = [];
@@ -124,8 +124,10 @@ test('«Completar con IA» reads Perfil, the website and the offer, and suggests
   const { runTenderProfileSuggestion } = await profileModule();
   const { client } = memory({
     opportunity_company_context: [{ organization_id: 'org', offer: 'Aseo industrial y hospitalario en el sur', services: ['Aseo hospitalario'], territories: ['Los Lagos'], exclusions: [] }],
-    organization_members: [{ organization_id: 'org', user_id: 'a1', role: 'admin' }, { organization_id: 'org', user_id: 'm1', role: 'member' }],
-    profiles: [{ id: 'a1', company_name: 'Aseo Sur', company_domain: 'aseosur.cl', company_profile: 'Somos Aseo Sur, 15 años en Chiloé', signatures: { profile_extended: { referenceClients: ['Hospital de Castro'] } } },
+    organization_members: [{ organization_id: 'org', user_id: 'a1', role: 'admin' }, { organization_id: 'org', user_id: 'm1', role: 'member' },
+      { organization_id: 'org', user_id: 'y1', role: 'admin' }],
+    profiles: [{ id: 'y1', company_name: 'Yago', company_domain: 'yago.cl', company_profile: 'Yago automatiza consultas al PJUD', signatures: {} },
+      { id: 'a1', company_name: 'Aseo Sur SpA', company_domain: 'aseosur.cl', company_profile: 'Somos Aseo Sur, 15 años en Chiloé', signatures: { profile_extended: { referenceClients: ['Hospital de Castro'] } } },
       { id: 'm1', company_name: 'No debe leerse', company_domain: 'otro.cl', company_profile: 'Perfil de un integrante' }],
     opportunity_tender_profile: [{ organization_id: 'org', answers: { legalName: 'Aseo Sur SpA' }, revision: 1 }],
   });
@@ -142,6 +144,8 @@ test('«Completar con IA» reads Perfil, the website and the offer, and suggests
   assert.match(call.prompt, /15 años en Chiloé/);
   assert.match(call.prompt, /Hospital de Castro/);
   assert.doesNotMatch(call.prompt, /Perfil de un integrante/, 'only what admins wrote about the company');
+  assert.doesNotMatch(call.prompt, /Yago|PJUD/, 'an admin whose «Perfil» is another company is not read');
+  assert.match(call.prompt, /Nombre de la empresa: Aseo Sur\n/, 'the workspace names the company');
   assert.ok(!('legalName' in suggestion.values), 'the saved name stays');
   assert.deepEqual([suggestion.values.rut, suggestion.values.yearsOperating, suggestion.values.certifications], ['76.086.428-5', 15, ['ISO 9001']]);
   assert.equal(suggestion.website, true);
@@ -170,4 +174,30 @@ test('the daily screening reads the profile: an unknown is a question, not a dis
   assert.match(prompt, /"certificacionesVigentes":"ISO 9001"/);
   assert.match(prompt, /"regionesDondeOpera":"Los Lagos"/);
   assert.match(prompt, /"garantiaMaximaQuePuedeEntregar":"no sé"/);
+});
+
+test('a «Perfil» is the workspace\'s company only when its name is', async () => {
+  const { sameCompany } = await profileModule();
+  assert.equal(sameCompany('Grupo Expro SpA', 'GrupoExpro'), true);
+  assert.equal(sameCompany('Expro', 'GrupoExpro'), true);
+  assert.equal(sameCompany('Yago', 'GrupoExpro'), false);
+  assert.equal(sameCompany('', 'GrupoExpro'), false);
+  assert.equal(sameCompany('SpA', 'Aseo Sur'), false, 'a legal form alone is no name');
+});
+
+test('with no «Perfil» of the workspace\'s company, the AI reads only the offer and no website', async () => {
+  const { runTenderProfileSuggestion } = await profileModule();
+  const { client } = memory({
+    opportunity_company_context: [{ organization_id: 'org', offer: 'Seguridad privada y monitoreo de cámaras', services: ['Guardias'], territories: [], exclusions: [] }],
+    organization_members: [{ organization_id: 'org', user_id: 'y1', role: 'admin' }],
+    profiles: [{ id: 'y1', company_name: 'Yago', company_domain: 'yago.cl', company_profile: 'Yago automatiza consultas al PJUD', signatures: {} }],
+    organizations: [{ id: 'org', name: 'GrupoExpro' }],
+  });
+  (globalThis as any).__downloaded = null;
+  (globalThis as any).__reply = () => ({ legalName: 'Yago', rut: null, size: null, employees: null, yearsOperating: null, regions: null, publicExperience: null,
+    publicContracts: null, privateClients: null, certifications: null, otherCertifications: null, assets: null, limits: null, sources: [] });
+  const suggestion = await runTenderProfileSuggestion(client, { id: 'j', organization_id: 'org', requested_by: 'y1', opportunity_id: null, kind: 'profile', payload: {}, lease_token: 'l', state: 'running' });
+  assert.equal((globalThis as any).__downloaded, null, 'no website of another company');
+  assert.match((globalThis as any).__call.prompt, /Perfil: \[\]\nSitio web: no disponible$/);
+  assert.deepEqual(suggestion.values, {}, 'a brand name is not a «razón social»');
 });

@@ -73,6 +73,13 @@ test('the AI\'s suggestions fill only blank fields, with valid values, and say w
     publicContracts: null, privateClients: null, certifications: null, otherCertifications: null, assets: null, limits: null, regions: ['Todo Chile'], sources: [] } as any, EMPTY_TENDER_PROFILE);
   assert.equal(country.values.regions?.length, 16);
   assert.ok(!('rut' in country.values), 'a RUT without a valid digit is not suggested');
+  const legal = (legalName: string) => cleanTenderProfileSuggestion({ legalName, rut: null, size: null, employees: null, yearsOperating: null, regions: null, publicExperience: null,
+    publicContracts: null, privateClients: null, certifications: null, otherCertifications: null, assets: null, limits: null, sources: [] }, EMPTY_TENDER_PROFILE).values.legalName ?? null;
+  assert.equal(legal('Yago'), null, 'a brand name is not a «razón social»');
+  assert.equal(legal('Aseo Sur SpA'), 'Aseo Sur SpA');
+  assert.equal(legal('Expro Seguridad Ltda.'), 'Expro Seguridad Ltda.');
+  assert.equal(legal('Inversiones del Pacífico S.A.'), 'Inversiones del Pacífico S.A.');
+  assert.equal(legal('Spa Relax Puerto Varas'), null, 'the legal form closes the name');
 });
 
 test('the suggestion prompt treats the website as data and asks only for what is written', () => {

@@ -81,6 +81,14 @@ export async function readTenderProfileSuggestion(client: SupabaseClient, organi
   return job ? { state: String(job.state), error: job.error as string | null, suggestion: (job.state === 'ready' ? job.result : null) as TenderProfileSuggestion | null } : null;
 }
 
+const foldCompany = (value: unknown) => String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+  .replace(/\b(spa|s\.?a\.?|ltda\.?|limitada|eirl|e\.i\.r\.l\.?|sociedad|grupo|chile)\b/g, '').replace(/[^a-z0-9]/g, '');
+/** «GrupoExpro» and «Grupo Expro SpA» are the same company; «Yago» is not. */
+export function sameCompany(profileCompany: unknown, workspaceCompany: string | null) {
+  const a = foldCompany(profileCompany); const b = foldCompany(workspaceCompany);
+  return Boolean(a && b && (a === b || (a.length >= 4 && b.includes(a)) || (b.length >= 4 && a.includes(b))));
+}
+
 /** The company's home page as text, when its domain is known and public; nothing when it cannot be read. */
 async function websiteText(domain: string | null, download = downloadOpportunitySource) {
   const host = String(domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -95,14 +103,19 @@ async function websiteText(domain: string | null, download = downloadOpportunity
 
 /** The worker's side: what the admins wrote about the company, its website and the offer, read once by the model. */
 export async function runTenderProfileSuggestion(client: SupabaseClient, job: OpportunityJob, options: { download?: typeof downloadOpportunitySource } = {}) {
-  const [context, leaders, current] = await Promise.all([
+  const [context, leaders, current, organization] = await Promise.all([
     client.from('opportunity_company_context').select('offer,services,territories,exclusions').eq('organization_id', job.organization_id).maybeSingle().then(opportunityDb),
     client.from('organization_members').select('user_id').eq('organization_id', job.organization_id).in('role', ['owner', 'admin']).limit(10).then(opportunityDb),
     loadTenderProfile(client, job.organization_id),
+    client.from('organizations').select('name').eq('id', job.organization_id).maybeSingle().then(opportunityDb),
   ]);
   const ids = ((leaders || []) as Array<{ user_id: string }>).map(row => row.user_id);
-  const profiles = ids.length ? ((opportunityDb(await client.from('profiles').select('company_name,company_domain,company_profile,signatures').in('id', ids))) || []) as any[] : [];
-  const companyName = profiles.map(row => String(row.company_name || '').trim()).find(Boolean) || null;
+  // A personal «Perfil» may describe another company (a consultant who administers the workspace): only the ones whose
+  // company is the workspace's are read, and the website only from them. In production a Yago admin of GrupoExpro
+  // filled GrupoExpro's profile with Yago's name and products.
+  const companyName = String(organization?.name || '').trim() || null;
+  const profiles = (ids.length ? ((opportunityDb(await client.from('profiles').select('company_name,company_domain,company_profile,signatures').in('id', ids))) || []) as any[] : [])
+    .filter(row => sameCompany(row.company_name, companyName));
   const domain = profiles.map(row => String(row.company_domain || '').trim()).find(Boolean) || null;
   const written = profiles.map(row => {
     const extended = row.signatures?.profile_extended && typeof row.signatures.profile_extended === 'object' ? row.signatures.profile_extended : {};
