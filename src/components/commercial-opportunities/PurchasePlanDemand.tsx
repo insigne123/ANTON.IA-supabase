@@ -18,6 +18,7 @@ const money = (n: number) => `$${new Intl.NumberFormat('es-CL', { maximumFractio
 const short = (n: number) => n >= 1e9 ? `$${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 1 }).format(n / 1e9)} mil millones`
   : n >= 1e6 ? `$${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(n / 1e6)} millones` : money(n);
 const LINES_SHOWN = 4;
+const readDate = (at: string) => new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'long', timeZone: 'America/Santiago' }).format(new Date(at));
 
 async function json(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error || 'No se pudo completar la acción.'); return value; }
 
@@ -78,7 +79,11 @@ export function PurchasePlanDemand({ onOpen, onCriteria }: { onOpen: (id: string
 
     {data?.available && reading ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Leyendo el Plan Anual de Compras de ChileCompra y eligiendo lo que calza con tu oferta. Tarda unos minutos.</p> : null}
 
-    {failed && !reading ? <p role="alert" className="flex gap-2 rounded-2xl bg-destructive/5 p-4 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />{failed.error || 'La lectura no terminó. Intenta de nuevo.'}</p> : null}
+    {failed && !reading ? <p role="alert" className="flex gap-2 rounded-2xl bg-destructive/5 p-4 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+      {data?.matches.length
+        // A reading that failed after a good one leaves the good one on view, and says so.
+        ? `La última lectura no terminó: ${failed.error || 'intenta de nuevo.'} Sigues viendo la anterior${data.updatedAt ? `, del ${readDate(data.updatedAt)}` : ''}.`
+        : failed.error || 'La lectura no terminó. Intenta de nuevo.'}</p> : null}
 
     {data?.available && !data.matches.length && !reading ? <div className="space-y-3 rounded-3xl border p-6">
       {data.job?.state === 'ready'
