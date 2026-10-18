@@ -9,8 +9,7 @@ import { criteriaSchema, captureOpportunityLinkedIn, captureOpportunityTenders, 
 import { runOpportunityResearch, runOpportunityChat } from './workspace-research';
 import { applyAutomaticMove, runPipelineReview } from './workspace-pipeline';
 import { runOpportunityOffer } from './workspace-offer';
-import { runOpportunityDemand } from './purchase-plan';
-import { planKeywords } from '@/lib/commercial-opportunities/purchase-plan';
+import { enqueueMonthlyDemand, runOpportunityDemand } from './purchase-plan';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -22,13 +21,8 @@ export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope:
   const kinds = context.criteria?.postQueries?.length ? ['tenders', ...(context.criteria?.roles?.length ? ['hiring'] : []), 'posts'] : ['criteria'];
   for (const kind of kinds) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind, dedupe_key: `${prefix}:${kind}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
-  // «Demanda futura» reads the Plan Anual de Compras once a month (its key carries the month), once the words exist.
-  if (planKeywords({ keywords: context.criteria?.keywords, services: context.services }).length) {
-    const demand = await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'demand',
-      dedupe_key: `demand:${clock.day.slice(0, 7)}:${context.revision}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true });
-    // A database without the «demand» kind yet (its migration comes first) leaves the search of the day as it was.
-    if (demand.error?.code !== '23514') opportunityDb(demand);
-  }
+  // «Demanda futura» reads the Plan Anual de Compras once a month, once the words exist.
+  await enqueueMonthlyDemand(client, scope, context, clock.day);
   return kinds.length;
 }
 export async function enqueueDailyOpportunityWork(client: SupabaseClient) {

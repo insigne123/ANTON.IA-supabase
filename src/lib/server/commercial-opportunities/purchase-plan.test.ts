@@ -76,6 +76,7 @@ function memory(seed: Record<string, any[]> = {}) {
     // What the database sets on its own: a job starts queued.
     const defaults = () => (name === 'opportunity_jobs' ? { state: 'queued', error: null } : {});
     const filters: Array<(row: any) => boolean> = [];
+    const sorts: Array<{ key: string; ascending: boolean }> = [];
     let action: { kind: 'select' | 'insert' | 'upsert' | 'update' | 'delete'; values?: any; conflict?: string[]; ignore?: boolean } = { kind: 'select' };
     const run = () => {
       const match = (row: any) => filters.every(filter => filter(row));
@@ -95,7 +96,9 @@ function memory(seed: Record<string, any[]> = {}) {
       }
       if (action.kind === 'update') { tables[name] = tables[name].map(row => match(row) ? { ...row, ...action.values } : row); return { data: null, error: null }; }
       if (action.kind === 'delete') { tables[name] = tables[name].filter(row => !match(row)); return { data: null, error: null }; }
-      return { data: rows().filter(match), error: null };
+      const found = rows().filter(match);
+      for (const sort of [...sorts].reverse()) found.sort((a, b) => (a[sort.key] < b[sort.key] ? -1 : a[sort.key] > b[sort.key] ? 1 : 0) * (sort.ascending ? 1 : -1));
+      return { data: found, error: null };
     };
     const builder: any = {
       select: () => builder, insert: (values: any) => { action = { kind: 'insert', values }; return builder; },
@@ -106,7 +109,8 @@ function memory(seed: Record<string, any[]> = {}) {
       in: (key: string, values: unknown[]) => { filters.push(row => values.includes(row[key])); return builder; },
       like: (key: string, pattern: string) => { const regex = new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`); filters.push(row => regex.test(String(row[key]))); return builder; },
       neq: (key: string, value: unknown) => { filters.push(row => row[key] !== value); return builder; },
-      order: () => builder, limit: () => builder,
+      order: (key: string, options?: { ascending?: boolean }) => { sorts.push({ key, ascending: options?.ascending !== false }); return builder; },
+      limit: () => builder,
       maybeSingle: async () => { const result = run(); return { data: Array.isArray(result.data) ? result.data[0] ?? null : result.data, error: null }; },
       single: async () => { const result = run(); return { data: Array.isArray(result.data) ? result.data[0] ?? null : result.data, error: null }; },
       then: (resolve: (value: unknown) => void) => resolve(run()),
@@ -220,4 +224,43 @@ test('an admin who asks again the same day gets the reading under way, a stopped
   assert.ok(await enqueueOpportunityDemand(client, admin, false));
   assert.equal(await enqueueOpportunityDemand(client, admin, false), null);
   await assert.rejects(enqueueOpportunityDemand(client, { organizationId: 'org', userId: 'u2', role: 'member' }, true), /administrador/);
+});
+
+test('the view shows the reading under way, or the one that moved last, not the month\'s one blocked in the morning', async () => {
+  const { readOpportunityDemand } = await load();
+  const admin = { organizationId: 'org', userId: 'u1', role: 'admin' };
+  const monthly = { id: 'm', organization_id: 'org', kind: 'demand', dedupe_key: 'demand:2026-10:1', state: 'blocked', error: 'ChileCompra no deja descargar…',
+    created_at: '2026-10-18T11:00:33Z', updated_at: '2026-10-18T11:00:54Z' };
+  const manual = { id: 'a', organization_id: 'org', kind: 'demand', dedupe_key: 'demand:manual:2026-10-18:1', state: 'running', error: null,
+    created_at: '2026-10-18T03:52:21Z', updated_at: '2026-10-18T14:27:08Z' };
+  const running = memory({ opportunity_jobs: [manual, monthly] });
+  assert.equal((await readOpportunityDemand(running.client, admin)).job.id, 'a');
+  const done = memory({ opportunity_jobs: [{ ...manual, state: 'ready', updated_at: '2026-10-18T14:31:00Z' }, monthly] });
+  assert.equal((await readOpportunityDemand(done.client, admin)).job.state, 'ready');
+  const queuedEarlier = memory({ opportunity_jobs: [{ ...manual, state: 'ready', updated_at: '2026-10-18T09:00:00Z' }, { ...monthly, state: 'queued', error: null }] });
+  assert.equal((await readOpportunityDemand(queuedEarlier.client, admin)).job.id, 'm');
+});
+
+test('the month\'s reading is queued once with the daily search, a blocked one tries again, and none without words', async () => {
+  const { enqueueMonthlyDemand } = await load();
+  const admin = { organizationId: 'org', userId: 'u1', role: 'admin' };
+  const context = { revision: 1, criteria: { keywords: ['call center'] }, services: [] };
+  const { tables, client } = memory();
+  await enqueueMonthlyDemand(client, admin, context, '2026-10-18');
+  await enqueueMonthlyDemand(client, admin, context, '2026-10-18');
+  assert.deepEqual(tables.opportunity_jobs.map(row => [row.dedupe_key, row.state]), [['demand:2026-10:1', 'queued']]);
+  Object.assign(tables.opportunity_jobs[0], { state: 'blocked', error: 'ChileCompra no deja descargar…' });
+  await enqueueMonthlyDemand(client, admin, context, '2026-10-19');
+  assert.deepEqual([tables.opportunity_jobs[0].state, tables.opportunity_jobs[0].error], ['queued', null]);
+  Object.assign(tables.opportunity_jobs[0], { state: 'ready' });
+  await enqueueMonthlyDemand(client, admin, context, '2026-10-20');
+  assert.equal(tables.opportunity_jobs[0].state, 'ready', 'a finished reading stays until next month');
+  await enqueueMonthlyDemand(client, admin, context, '2026-11-01');
+  assert.equal(tables.opportunity_jobs.length, 2);
+  const empty = memory();
+  await enqueueMonthlyDemand(empty.client, admin, { revision: 1, criteria: {}, services: [] }, '2026-10-18');
+  assert.equal(empty.tables.opportunity_jobs.length, 0);
+  // A database that does not know the kind yet leaves the daily search as it was.
+  const old = { from: () => ({ upsert: async () => ({ data: null, error: { code: '23514', message: 'violates check constraint' } }) }) };
+  await enqueueMonthlyDemand(old, admin, context, '2026-10-18');
 });
