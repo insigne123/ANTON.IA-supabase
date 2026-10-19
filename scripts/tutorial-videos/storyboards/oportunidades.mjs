@@ -1,20 +1,24 @@
 import { uid } from '../../visual-audit/fixtures/ids.mjs';
+import { fileURLToPath } from 'node:url';
 import { opportunityData } from './oportunidades-data.mjs';
 
 const NAV = { role: 'navigation', name: 'Navegación principal' };
 const TITLE = 'Servicio de verificación de antecedentes de postulantes';
+// Playwright cannot hand the file chooser a name with accents: the fixture's name has none.
+const INVITATION = fileURLToPath(new URL('../fixtures/Solicitud de presupuesto.pdf', import.meta.url));
 // The same ids as the demo data of the bench (visual-audit/fixtures/ids.mjs).
 const data = () => opportunityData({ ORG: uid(1), OWNER: uid(11), MEMBER: uid(12) });
 
 export default {
   id: 'oportunidades', title: 'Oportunidades', start: '/dashboard',
   intro: 'Licitaciones, Compra Ágil y empresas que están contratando, con un informe de la IA para decidir y ganar.',
-  learn: ['Leer el embudo', 'Abrir una licitación y su informe', 'Ver cómo ganarla'],
+  learn: ['Leer el embudo', 'Cargar una desde su documento', 'Abrir una licitación y su informe', 'Ver cómo ganarla'],
   mocks: [
     {
       url: /\/api\/commercial-opportunities\/workspace\?/, method: 'GET',
       respond: (_body, request) => (new URL(request.url()).searchParams.get('view') === 'pipeline' ? data().pipeline : data().overview),
     },
+    { url: /\/api\/commercial-opportunities\/workspace\/prefill$/, method: 'POST', respond: () => data().prefill },
     { url: /\/api\/commercial-opportunities\/workspace$/, method: 'POST', respond: { ok: true, suggestions: [] } },
     { url: /\/api\/commercial-opportunities\/[^/?]+\/workspace$/, method: 'GET', respond: () => data().detail },
     { url: /\/api\/commercial-opportunities\/[^/?]+\/market$/, method: 'GET', respond: () => data().market },
@@ -44,8 +48,34 @@ export default {
       target: { role: 'button', name: 'Revisar con IA' }, action: 'hover', zoom: 1.6, arrow: true,
     },
     {
+      title: 'De qué se trata', text: 'Bajo cada nombre, la IA resume la oportunidad en una frase.',
+      say: 'Cada tarjeta te dice de qué se trata.',
+      target: { text: /^Plataforma para publicar cargos/, exact: false }, zoomOn: { css: 'li:has(p:has-text("Plataforma de reclutamiento"))' }, action: 'none', zoom: 1.35,
+    },
+    {
+      title: 'Carga una que recibiste', text: 'Sube la invitación, las bases o el correo.',
+      say: 'Si te llega una invitación, súbela.',
+      // Without zoom: the dialog opens in the middle of the window, away from the button.
+      target: { role: 'button', name: 'Cargar oportunidad' }, zoom: 1, arrow: true,
+      waitFor: { text: 'Sube la invitación, las bases o el correo' },
+    },
+    {
+      title: 'La IA completa el formulario', text: 'Lee el documento y llena los datos. Tú los revisas antes de guardar.',
+      say: 'La IA llena el formulario por ti.',
+      target: { text: 'Elegir documento' }, zoomOn: { role: 'dialog' }, upload: INVITATION, zoom: 1.05,
+      waitFor: { text: /^Completamos el formulario con/, exact: false },
+      after: async frame => { await frame.getByRole('dialog').evaluate(node => node.scrollTo({ top: 0 })); },
+    },
+    {
+      title: 'Revisa y guarda', text: 'Dice qué no encontró, y el documento queda en «Bases y anexos».',
+      say: 'Revisas lo que encontró y guardas.',
+      target: { text: /^Completamos el formulario con/, exact: false }, zoomOn: { role: 'dialog' }, action: 'none', zoom: 1.05,
+    },
+    {
       title: 'La lista', text: 'Las recomendadas primero: calzan con tu oferta y aún no tienen equipo.',
       say: 'En «Lista», las que calzan contigo.',
+      // The form of the scene before stays open while it is read; it closes here, without saving.
+      before: async frame => { await frame.getByRole('button', { name: 'Cancelar' }).click(); await frame.getByRole('dialog').waitFor({ state: 'hidden' }); },
       target: { role: 'button', name: 'Lista', within: { role: 'group', name: 'Vista' } }, zoom: 1.6, arrow: true,
       waitFor: { role: 'heading', name: TITLE },
     },
@@ -94,6 +124,6 @@ export default {
   ],
   outro: {
     title: 'Oportunidades cada mañana', text: 'Revisa las recomendadas y trabaja las que calzan.',
-    items: ['El embudo y la lista', 'El informe: postular o no, y por qué', '«Cómo ganar» con el historial del organismo'],
+    items: ['El embudo, con un resumen de cada una', 'Cargar una desde su documento', 'El informe: postular o no, y por qué', '«Cómo ganar» con el historial del organismo'],
   },
 };
