@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { formatRut, moneyLabel, percentLabel, tenderUrl } from '@/lib/public-procurement/market';
+import { formatRut, moneyLabel, percentLabel, rutLabel, tenderUrl } from '@/lib/public-procurement/market';
 
 type Recent = { code: string; name: string; agency: string | null; publishedOn: string | null; status: string; won: boolean; amount: number | null; currency: string | null };
 type Activity = { bids: number; wins: number; awarded: number; recent: Recent[] };
@@ -121,7 +121,7 @@ export function CompetitorRadar({ onProfile }: { onProfile?: () => void }) {
       {results ? <div className="space-y-2" aria-live="polite">
         {!results.length ? <p className="text-sm text-muted-foreground">No encontramos proveedores con «{query.trim()}» en las licitaciones de los últimos años.</p>
           : <ul className="divide-y rounded-2xl border" aria-label="Resultados de la búsqueda">{results.map(supplier => <li key={supplier.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
-            <div className="min-w-0"><p className="text-sm font-medium">{supplier.name}</p><p className="text-xs text-muted-foreground">RUT {formatRut(supplier.rut)}</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium">{supplier.name}</p><p className="text-xs text-muted-foreground">{rutLabel(supplier.rut)}</p></div>
             <div className="flex items-center gap-1">{profileButton(supplier)}{followButton(supplier)}</div></li>)}</ul>}
       </div> : null}
 
@@ -130,7 +130,7 @@ export function CompetitorRadar({ onProfile }: { onProfile?: () => void }) {
         {!data.followed?.length ? <p className="rounded-2xl border p-5 text-sm leading-6 text-muted-foreground">Aún no sigues a nadie. {data.suggestions?.items.length ? 'Búscalos por nombre o RUT, o elige entre los sugeridos de abajo.' : 'Búscalos por nombre o RUT: por ejemplo, la empresa que ganó la última licitación a la que postulaste.'}</p>
           : <ul className="grid gap-3 xl:grid-cols-2">{data.followed.map(item => <li key={item.id} className="space-y-3 rounded-2xl border bg-background p-5">
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0"><p className="text-sm font-semibold leading-6">{item.name}</p><p className="text-xs text-muted-foreground">RUT {formatRut(item.rut)}</p></div>
+              <div className="min-w-0"><p className="text-sm font-semibold leading-6">{item.name}</p><p className="text-xs text-muted-foreground">{rutLabel(item.rut)}</p></div>
               <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" disabled={pending !== null} onClick={() => void follow(item.id, false)} aria-label={`Dejar de seguir a ${item.name}`}>
                 {pending === item.id ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <X className="h-4 w-4" aria-hidden="true" />}</Button>
             </div>
@@ -154,7 +154,7 @@ export function CompetitorRadar({ onProfile }: { onProfile?: () => void }) {
     <Dialog open={profile !== null} onOpenChange={open => { if (!open) setProfile(null); }}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         {profile ? <>
-          <DialogHeader><DialogTitle>{profile.supplier.name}</DialogTitle><DialogDescription>RUT {formatRut(profile.supplier.rut)} · licitaciones en los datos de ChileCompra</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{profile.supplier.name}</DialogTitle><DialogDescription>{rutLabel(profile.supplier.rut)} · licitaciones en los datos de ChileCompra</DialogDescription></DialogHeader>
           <div className="space-y-5">
             <Numbers value={{ bids: profile.bids, wins: profile.wins, awarded: profile.awarded, recent: [] }} />
             {profile.medianOfferRatio !== null ? <p className="text-sm">Suele ofertar <span className="font-semibold">{percentLabel(profile.medianOfferRatio)}</span> del monto estimado (mediana).</p> : null}

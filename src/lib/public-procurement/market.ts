@@ -81,6 +81,20 @@ export function formatRut(rut: string) {
   return `${body.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${verifier}`;
 }
 
+/**
+ * A RUT below 50.000.000 is a person's (persona natural), not a company's. ChileCompra publishes it, but a person who bids
+ * is shown by name only: the screens never repeat their RUT.
+ */
+export function isPersonRut(rut: string | null | undefined) {
+  const body = Number(String(rut || '').split('-')[0].replace(/\D/g, ''));
+  return Number.isFinite(body) && body > 0 && body < 50_000_000;
+}
+
+/** «RUT 76.020.266-5» for a company; «Persona natural» for a person. */
+export function rutLabel(rut: string) {
+  return isPersonRut(rut) ? 'Persona natural' : `RUT ${formatRut(rut)}`;
+}
+
 export function tenderUrl(code: string) {
   return `https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=${encodeURIComponent(code)}`;
 }

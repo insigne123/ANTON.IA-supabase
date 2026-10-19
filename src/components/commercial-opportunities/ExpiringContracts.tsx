@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, ExternalLink, Loader2, Plus, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { formatRut, moneyLabel, tenderUrl } from '@/lib/public-procurement/market';
+import { moneyLabel, rutLabel, tenderUrl } from '@/lib/public-procurement/market';
 import type { ExpiringContract } from '@/lib/public-procurement/contracts';
 
 type ContractsView = {
@@ -135,7 +135,7 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
               <p className="text-sm text-muted-foreground">{contract.agency || 'Organismo sin nombre'}{contract.region ? ` · ${contract.region}` : ''}</p>
             </div>
             <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-              <div><dt className="text-xs text-muted-foreground">Lo tiene</dt><dd>{contract.winnerName || 'Sin dato'}{contract.winners > 1 ? ` y ${contract.winners - 1} más` : ''}{contract.winnerRut ? <span className="block text-xs text-muted-foreground">RUT {formatRut(contract.winnerRut)}</span> : null}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Lo tiene</dt><dd>{contract.winnerName || 'Sin dato'}{contract.winners > 1 ? ` y ${contract.winners - 1} más` : ''}{contract.winnerRut ? <span className="block text-xs text-muted-foreground">{rutLabel(contract.winnerRut)}</span> : null}</dd></div>
               <div><dt className="text-xs text-muted-foreground">Monto y plazo</dt><dd className="tabular-nums">{amount || (contract.amount ? 'Precio por unidad' : 'Sin monto')}{contract.durationMonths ? <span className="text-muted-foreground"> · {contract.durationMonths} meses</span> : null}</dd></div>
             </dl>
             {contract.reason ? <p className="text-xs leading-5 text-muted-foreground">{contract.reason}</p> : null}

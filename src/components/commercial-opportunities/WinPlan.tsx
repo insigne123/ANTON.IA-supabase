@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, ExternalLink, Landmark, Loader2, RefreshCw, Sparkles, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { formatRut, moneyLabel, percentLabel, tenderUrl, type MarketStats, type MarketTender } from '@/lib/public-procurement/market';
+import { moneyLabel, percentLabel, rutLabel, tenderUrl, type MarketStats, type MarketTender } from '@/lib/public-procurement/market';
 import type { WinPlan as WinPlanData } from '@/lib/public-procurement/win-plan';
 
 type Similar = MarketTender & { score: number };
@@ -94,7 +94,7 @@ function Strategy({ data, onPrepare, busy }: { data: NonNullable<MarketView['pla
         <ul className="space-y-2">{plan.risks.map(risk => <li key={risk} className="flex gap-2 text-sm leading-6"><AlertTriangle className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{sentence(risk)}</li>)}</ul></div> : null}
     </div>
     {plan.competitors.length ? <div className="space-y-2"><h4 className="text-sm font-semibold">A quién tendrás enfrente</h4>
-      <ul className="space-y-2">{plan.competitors.map(item => <li key={item.rut} className="text-sm leading-6"><span className="font-medium">{item.name}</span> <span className="text-xs text-muted-foreground">RUT {formatRut(item.rut)}{item.wins ? ` · ganó ${item.wins} de las parecidas` : ''}</span><br /><span className="text-muted-foreground">{sentence(item.why)}</span></li>)}</ul></div> : null}
+      <ul className="space-y-2">{plan.competitors.map(item => <li key={item.rut} className="text-sm leading-6"><span className="font-medium">{item.name}</span> <span className="text-xs text-muted-foreground">{rutLabel(item.rut)}{item.wins ? ` · ganó ${item.wins} de las parecidas` : ''}</span><br /><span className="text-muted-foreground">{sentence(item.why)}</span></li>)}</ul></div> : null}
     <p className="text-xs leading-5 text-muted-foreground">Preparada el {new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'long', timeZone: 'America/Santiago' }).format(new Date(data.createdAt))}. Es una sugerencia sobre datos históricos: revisa las bases antes de decidir el precio.</p>
   </section>;
 }

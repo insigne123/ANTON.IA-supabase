@@ -9,6 +9,7 @@ Propuestas 9, 10 y 11, 19 oct 2026. Tres funciones sobre los datos abiertos de l
   - «Demanda futura»: el Plan Anual de Compras (ver `oportunidades-oferta-y-demanda.md`).
   - «Contratos por vencer»: contratos adjudicados a otras empresas que terminan entre un mes atrás y 15 meses adelante y calzan con la oferta, con quién los tiene, monto, duración y fecha estimada de término. «Seguir» crea una oportunidad privada «Renovación: …» (origen `expiring_contract`, una por código en el workspace).
   - «Competidores»: buscar proveedores por nombre o RUT, seguir hasta 30, y ver por cada uno sus ofertas, ganadas, monto adjudicado y últimos movimientos (12 meses). Con el RUT de la «Ficha para licitaciones» muestra el historial propio y sugiere a quienes ofertaron en las mismas licitaciones; sin RUT, a quienes más ganan en las palabras del workspace.
+  - Personas naturales: ChileCompra publica también a las personas que ofertan (RUT bajo 50.000.000). En «Competidores», «Contratos por vencer», «Cómo ganar» y la descripción de un contrato seguido se muestra solo su nombre, con «Persona natural» en vez del RUT (`rutLabel` e `isPersonRut` en `src/lib/public-procurement/market.ts`). La búsqueda por RUT sigue funcionando para quien ya lo conoce.
 - El **Asistente** de Oportunidades lee también los 25 contratos por vencer más próximos (solo administradores).
 
 ## Datos

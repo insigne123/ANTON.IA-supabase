@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  agencyKeyVariants, agencyTokens, awardRatio, bestAgencyMatch, contractEndsOn, formatRut, likePatterns, marketStats, moneyLabel, normalizeRut,
-  percentLabel, pickSimilar, searchWords, similarity, topicTokens, type MarketTender,
+  agencyKeyVariants, agencyTokens, awardRatio, bestAgencyMatch, contractEndsOn, formatRut, isPersonRut, likePatterns, marketStats, moneyLabel, normalizeRut,
+  percentLabel, pickSimilar, rutLabel, searchWords, similarity, topicTokens, type MarketTender,
 } from './market';
 
 const tender = (values: Partial<MarketTender>): MarketTender => ({
@@ -84,4 +84,14 @@ test('dates, money and RUTs read the Chilean way', () => {
   assert.deepEqual(likePatterns(['aseo', 'servicios', 'guardias de seguridad', 'TI', '50%']), ['%aseo%', '%guardias de seguridad%']);
   assert.deepEqual(likePatterns(['Verificación de antecedentes judiciales', 'Fumigación']),
     ['%verificacion de antecedentes judiciales%', '%verificacion de antecedentes%', '%fumigacion%'], 'folded, and a long phrase by its first words too');
+});
+
+test('a person who bids is shown by name only: their RUT is never repeated', () => {
+  assert.equal(isPersonRut('14205876-6'), true, 'persona natural');
+  assert.equal(isPersonRut('76562293-K'), false, 'SpA');
+  assert.equal(isPersonRut('96556940-5'), false, 'S.A.');
+  assert.equal(isPersonRut('61608000-1'), false, 'organismo público');
+  assert.equal(isPersonRut(''), false);
+  assert.equal(rutLabel('14205876-6'), 'Persona natural');
+  assert.equal(rutLabel('76020266-5'), 'RUT 76.020.266-5');
 });

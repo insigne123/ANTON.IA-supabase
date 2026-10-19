@@ -1,7 +1,7 @@
 // «Contratos por vencer» (propuesta 11): what a contract that ends looks like on the page and in the pipeline. Pure: the
 // server reads the contracts (workspace-market.ts) and the page shows them.
 import { opportunityLocalClock } from '@/lib/commercial-opportunities/workspace';
-import { formatRut, moneyLabel } from './market';
+import { formatRut, isPersonRut, moneyLabel } from './market';
 
 export type ExpiringContract = {
   tenderId: number; code: string; name: string; agency: string | null; region: string | null; category: string | null;
@@ -34,7 +34,7 @@ export function contractOpportunityDraft(contract: ExpiringContract) {
     company: (contract.agency || 'Organismo público').slice(0, 300),
     kind: 'commercial' as const,
     description: [
-      `${contract.agency || 'El organismo'} adjudicó «${contract.name}» (${contract.code}) a ${contract.winnerName || 'otro proveedor'}${contract.winnerRut ? ` (RUT ${formatRut(contract.winnerRut)})` : ''}${contract.awardedOn ? ` el ${humanDay(contract.awardedOn)}` : ''}${contract.durationMonths ? ` por ${contract.durationMonths} meses` : ''}${amount ? `, por ${amount}` : ''}.`,
+      `${contract.agency || 'El organismo'} adjudicó «${contract.name}» (${contract.code}) a ${contract.winnerName || 'otro proveedor'}${contract.winnerRut && !isPersonRut(contract.winnerRut) ? ` (RUT ${formatRut(contract.winnerRut)})` : ''}${contract.awardedOn ? ` el ${humanDay(contract.awardedOn)}` : ''}${contract.durationMonths ? ` por ${contract.durationMonths} meses` : ''}${amount ? `, por ${amount}` : ''}.`,
       contract.endsOn ? `El contrato vence cerca del ${humanDay(contract.endsOn)}: el organismo suele volver a licitarlo unos meses antes.` : '',
       contract.reason ? `Por qué calza: ${contract.reason}` : '',
       'Conviene conversar antes con el área que usa el servicio y preparar la oferta. La fecha de término es estimada (adjudicación más duración del contrato) y puede cambiar con prórrogas.',
