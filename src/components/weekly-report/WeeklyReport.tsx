@@ -14,7 +14,7 @@ import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import { REPORT_ROLES, deltaText, nextActions, personalHeadline, rate, type ReportRole, type WeeklyReport as Report } from '@/lib/weekly-report';
 
-type Response = { report: Report; email: boolean; mailbox: 'google' | 'outlook' | null; managers?: string[]; members?: Array<{ userId: string; name: string }> };
+type Response = { report: Report; email: boolean; mailbox: 'google' | 'outlook' | null; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
 
 const MAILBOX: Record<string, string> = { google: 'Gmail', outlook: 'Outlook' };
 const dateLabel = (at: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('es-CL', { ...options, timeZone: 'America/Santiago' }).format(new Date(at)).replace(/\./g, '');
@@ -210,7 +210,7 @@ export function WeeklyReport() {
         <ul className="mt-6 space-y-1">{(data?.members || []).map(member => <li key={member.userId}>
           <label className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 text-sm hover:bg-muted/40">
             <Checkbox checked={chosen.includes(member.userId)} onCheckedChange={value => setChosen(current => value ? [...current, member.userId] : current.filter(id => id !== member.userId))} />
-            {member.name}</label>
+            <span className="min-w-0"><span className="block truncate">{member.name}</span>{member.email ? <span className="block truncate text-xs text-muted-foreground">{member.email}</span> : null}</span></label>
         </li>)}</ul>
         <SheetFooter className="mt-6"><Button disabled={saving === 'managers'} onClick={() => { void post('managers', { action: 'managers', userIds: chosen }).then(result => {
           if (result) { setManagersOpen(false); setData(current => current && { ...current, managers: result.managers }); void load(); }
