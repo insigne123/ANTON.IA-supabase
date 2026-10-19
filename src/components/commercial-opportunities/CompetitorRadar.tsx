@@ -18,7 +18,7 @@ type RadarView = {
   available: boolean; coverage: { to: string | null };
   own?: (Supplier & Activity) | null; ownRutMissing?: boolean;
   followed?: Array<Supplier & Activity>;
-  suggestions?: { basis: 'cobidders' | 'keywords' | 'none'; items: Array<Supplier & { shared?: number; wins: number; bids?: number; awarded?: number }> };
+  suggestions?: { basis: 'cobidders' | 'keywords' | 'none'; items: Array<Supplier & { shared?: number; wins: number; bids?: number; awarded?: number }>; unavailable?: boolean };
 };
 type Profile = {
   supplier: Supplier; bids: number; wins: number; awarded: number; medianOfferRatio: number | null;
@@ -147,7 +147,10 @@ export function CompetitorRadar({ onProfile }: { onProfile?: () => void }) {
           <div className="min-w-0"><p className="text-sm font-medium">{item.name}</p>
             <p className="text-xs text-muted-foreground">{item.shared !== undefined ? `${item.shared} ${item.shared === 1 ? 'licitación' : 'licitaciones'} contigo · ganó ${item.wins}` : `Ganó ${item.wins} de ${item.bids ?? item.wins}${item.awarded ? ` · ${moneyLabel(item.awarded)}` : ''}`}</p></div>
           <div className="flex items-center gap-1">{profileButton(item)}{followButton(item)}</div></li>)}</ul>
-      </section> : null}
+      </section> : data.suggestions?.unavailable ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4 text-sm text-muted-foreground">
+        <p>No pudimos calcular a quiénes vigilar: el historial tardó demasiado en responder. Vuelve a intentarlo en unos minutos.</p>
+        <Button size="sm" variant="outline" onClick={() => void load()}>Reintentar</Button>
+      </div> : null}
       <p className="text-xs leading-5 text-muted-foreground">Fuente: datos abiertos de ChileCompra{data.coverage.to ? ` hasta ${monthLabel(data.coverage.to)}` : ''}. Las ofertas de quienes no ganaron se guardan del último año.</p>
     </> : null}
 

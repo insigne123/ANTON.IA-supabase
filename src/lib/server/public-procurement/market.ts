@@ -192,8 +192,15 @@ export async function readSupplierProfile(client: Client, supplierId: number): P
 export async function suggestCompetitors(client: Client, input: { ownRut: string | null; words: string[] }, now = new Date()) {
   const since = monthsAgo(now, 12);
   const own = input.ownRut ? await findSupplier(client, input.ownRut) : null;
+  // A history that does not answer in time (the free plan's database cuts at 8 s) leaves the radar without suggestions,
+  // not without the radar; after slow co-bidders it does not try the heavier search by words.
+  const unavailable = (error: { code?: string; message?: string }) => {
+    console.warn('[mercado] Sin sugerencias de competidores:', error.code, error.message);
+    return { basis: 'none' as const, own, items: [], unavailable: true };
+  };
   if (own) {
     const { data, error } = await client.rpc('public_procurement_cobidders', { p_supplier: own.id, p_since: since, p_limit: 12 });
+    if (error && !MISSING.has(String(error.code))) return unavailable(error);
     if (!error && data?.length) {
       return { basis: 'cobidders' as const, own, items: (data as any[]).map(row => ({ id: row.supplier_id, rut: row.rut, name: row.name, shared: row.shared, wins: row.their_wins })) };
     }
@@ -201,6 +208,6 @@ export async function suggestCompetitors(client: Client, input: { ownRut: string
   const patterns = likePatterns(input.words, 25);
   if (!patterns.length) return { basis: 'none' as const, own, items: [] };
   const { data, error } = await client.rpc('public_procurement_top_winners', { p_patterns: patterns, p_since: since, p_limit: 12 });
-  if (error) { if (MISSING.has(String(error.code)) || error.code === 'PGRST202') return { basis: 'none' as const, own, items: [] }; throw error; }
+  if (error) return MISSING.has(String(error.code)) ? { basis: 'none' as const, own, items: [] } : unavailable(error);
   return { basis: 'keywords' as const, own, items: ((data || []) as any[]).map(row => ({ id: row.supplier_id, rut: row.rut, name: row.name, bids: row.bids, wins: row.wins, awarded: Number(row.awarded) })) };
 }

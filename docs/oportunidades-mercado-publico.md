@@ -49,7 +49,7 @@ Corre como tarea programada de Claude Code una vez al mes, igual que la copia de
 ## Trabajos y costo
 
 - `winplan` (por clic): una llamada a Sonnet en la categoría `research` del presupuesto mensual, en caché por prompt. Guarda en el resultado del trabajo la estrategia y en qué se basó (organismo, cuántas parecidas, cobertura de los datos). Se valida: los competidores solo pueden ser RUT que aparecen en el historial dado, y un rango a más de 1,5 veces o bajo 0,2 veces el estimado se descarta como error de unidad.
-- `contracts` (mensual con la búsqueda diaria, o «Actualizar»): `public_procurement_expiring` trae hasta 600 contratos que dicen alguna palabra del workspace; Haiku filtra en lotes de 120 (categoría `evaluation`) y quedan los que la empresa podría ganar, con un motivo. El resultado queda en el trabajo; la vista muestra la última lectura terminada.
+- `contracts` (mensual con la búsqueda diaria, o «Actualizar»): `public_procurement_expiring` trae hasta 600 contratos que dicen alguna palabra del workspace; Haiku filtra en lotes de 120 (categoría `evaluation`) y quedan los que la empresa podría ganar, con un motivo. El resultado queda en el trabajo; la vista muestra la última lectura terminada. Si el historial no responde (por ejemplo, la consulta pasa el límite de la API), la lectura queda bloqueada con «No pudimos leer el historial de ChileCompra ahora» y la siguiente búsqueda diaria la vuelve a encolar, igual que «Demanda futura»; «Aún no cargamos el historial» queda solo para una base sin las funciones.
 - El radar no usa IA: lee las tablas.
 
 ## Migración y puesta en producción
@@ -58,3 +58,4 @@ Corre como tarea programada de Claude Code una vez al mes, igual que la copia de
 2. Desplegar la app. Sin datos cargados, las vistas dicen «Aún no cargamos el historial de ChileCompra» y los trabajos no se encolan.
 3. Correr el cargador (unos 15 minutos para los 48 meses) y verificar el tamaño de la base.
 4. Programar la carga mensual.
+5. Búsqueda rápida, una migración a la vez: `20261019150000_public_procurement_search_text.sql` (reescribe la tabla de licitaciones; verificar que `search_text` no quede vacía y el tamaño de la base) y luego `20261019151000_public_procurement_search_index.sql` (índices y funciones; verificar con `EXPLAIN` que «Contratos por vencer» use los dos índices).
