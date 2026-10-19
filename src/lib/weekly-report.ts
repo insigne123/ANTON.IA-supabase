@@ -93,6 +93,22 @@ export type NextAction = { text: string; href: string };
 
 const dueDay = (at: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', timeZone: 'America/Santiago' }).format(new Date(at));
 
+/**
+ * «Equipo» lists who did something in the week (wrote, got a reply or a meeting, or has replies waiting) and counts the
+ * rest: a team that prospects by other means, like one that only works Oportunidades, read as a table of zeros.
+ */
+export function teamActivity(team: TeamSection) {
+  const active = team.members.filter(member => member.sent || member.replies || member.meetings || member.pending);
+  return { active, idle: team.members.filter(member => !active.includes(member)) };
+}
+
+/** The team's sentence: its emails and replies, or that nobody wrote. */
+export function teamHeadline(team: TeamSection, which: ReportWeek['which']) {
+  if (!teamActivity(team).active.length) return `Nadie del equipo envió correos ${which === 'current' ? 'esta semana' : 'la semana pasada'}.`;
+  const { sent, replies, meetings } = team.totals;
+  return `Tu equipo envió ${plural(sent.now, 'correo', 'correos')} y recibió ${plural(replies.now, 'respuesta', 'respuestas')}.${meetings === 1 ? ' Una pidió reunión.' : meetings ? ` ${meetings.toLocaleString('es-CL')} pidieron reunión.` : ''}`;
+}
+
 /** Up to three things for the coming days, the most urgent first. */
 export function nextActions(report: Pick<WeeklyReport, 'personal' | 'team' | 'opportunities'>): NextAction[] {
   const { personal, team, opportunities } = report;
@@ -136,8 +152,13 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
   if (personal.touches && (personal.touches.calls || personal.touches.linkedin)) row(`${plural(personal.touches.calls, 'llamada', 'llamadas')} y ${plural(personal.touches.linkedin, 'contacto', 'contactos')} por LinkedIn`);
   if (team) {
     section('Equipo');
-    row(`${plural(team.totals.sent.now, 'correo enviado', 'correos enviados')} y ${plural(team.totals.replies.now, 'respuesta', 'respuestas')} entre ${plural(team.members.length, 'persona', 'personas')}`);
-    team.members.slice(0, 8).forEach(member => row(`${member.name}${member.detail ? ` (${member.detail})` : ''}: ${member.sent} enviados, ${member.replies} respuestas${member.pending ? `, ${member.pending} por responder` : ''}`));
+    const { active, idle } = teamActivity(team);
+    if (!active.length) row(teamHeadline(team, week.which).replace(/\.$/, ''));
+    else {
+      row(`${plural(team.totals.sent.now, 'correo enviado', 'correos enviados')} y ${plural(team.totals.replies.now, 'respuesta', 'respuestas')} entre ${plural(team.members.length, 'persona', 'personas')}`);
+      active.slice(0, 8).forEach(member => row(`${member.name}${member.detail ? ` (${member.detail})` : ''}: ${member.sent} enviados, ${member.replies} respuestas${member.pending ? `, ${member.pending} por responder` : ''}`));
+      if (idle.length) row(`${plural(idle.length, 'persona', 'personas')} sin actividad`);
+    }
   }
   if (opportunities) {
     section('Oportunidades');

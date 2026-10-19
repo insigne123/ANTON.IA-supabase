@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { deltaText, nextActions, personalHeadline, reportEmail, reportWeek, weekLabel, type PersonalSection, type WeeklyReport } from './weekly-report';
+import { deltaText, nextActions, personalHeadline, reportEmail, reportWeek, teamActivity, teamHeadline, weekLabel, type PersonalSection, type TeamSection, type WeeklyReport } from './weekly-report';
 
 const personal = (patch: Partial<PersonalSection> = {}): PersonalSection => ({
   sent: { now: 34, before: 20 }, contacted: { now: 30, before: 18 }, replies: { now: 5, before: 2 }, meetings: 1,
@@ -58,15 +58,44 @@ test('the email: the same report in a few lines, escaped, without tracking or un
   const report: WeeklyReport = {
     week: reportWeek(new Date('2026-10-20T12:00:00.000Z'), 'previous'), roles: ['personal', 'team'], name: 'Nicolás',
     personal: personal({ pending: [{ id: 'c1', name: 'Paula <b>', company: null, repliedAt: '2026-10-17T12:00:00Z' }] }),
-    team: { members: [{ userId: 'u1', name: 'Ana & Co', role: 'member', sent: 10, replies: 2, meetings: 0, pending: 1 }, { userId: 'u2', name: 'Rosa', detail: 'rosa@axis.cl', role: 'member', sent: 0, replies: 0, meetings: 0, pending: 0 }], totals: { sent: { now: 10, before: 4 }, replies: { now: 2, before: 1 }, meetings: 0 } },
+    team: { members: [{ userId: 'u1', name: 'Ana & Co', role: 'member', sent: 10, replies: 2, meetings: 0, pending: 1 }, { userId: 'u2', name: 'Rosa', detail: 'rosa@axis.cl', role: 'member', sent: 3, replies: 0, meetings: 0, pending: 0 },
+      { userId: 'u3', name: 'Tomás', role: 'member', sent: 0, replies: 0, meetings: 0, pending: 0 }], totals: { sent: { now: 13, before: 4 }, replies: { now: 2, before: 1 }, meetings: 0 } },
     opportunities: null,
   };
   const email = reportEmail(report, 'https://app.example/');
   assert.equal(email.subject, 'Tu informe semanal · 12–18 oct');
   assert.match(email.html, /Hola, Nicolás/);
   assert.match(email.html, /Ana &amp; Co: 10 enviados, 2 respuestas, 1 por responder/);
-  assert.match(email.html, /Rosa \(rosa@axis\.cl\): 0 enviados, 0 respuestas/, 'the email of a shared name goes next to it');
+  assert.match(email.html, /Rosa \(rosa@axis\.cl\): 3 enviados, 0 respuestas/, 'the email of a shared name goes next to it');
+  assert.doesNotMatch(email.html, /Tomás: 0 enviados/, 'who did nothing is not a line of zeros');
+  assert.match(email.html, /Revisa con Tomás por qué no envió correos/, 'though the action to talk with them stays');
+  assert.match(email.html, /1 persona sin actividad/);
   assert.match(email.html, /href="https:\/\/app\.example\/contacted\/replied"/);
   assert.match(email.text, /Ver el informe completo: https:\/\/app\.example\/weekly-report/);
   assert.doesNotMatch(email.html, /<b>|unsubscribe|tracking|pixel/i);
+});
+
+const member = (name: string, patch: Partial<TeamSection['members'][number]> = {}) => ({ userId: name, name, role: 'member', sent: 0, replies: 0, meetings: 0, pending: 0, ...patch });
+
+test('«Equipo» lists who did something in the week and counts the rest', () => {
+  const team: TeamSection = { members: [member('Ana', { sent: 4 }), member('Beto'), member('Caro', { pending: 1 }), member('Dani', { replies: 1 })],
+    totals: { sent: { now: 4, before: 0 }, replies: { now: 1, before: 0 }, meetings: 0 } };
+  const { active, idle } = teamActivity(team);
+  assert.deepEqual(active.map(item => item.name), ['Ana', 'Caro', 'Dani'], 'a reply waiting or received counts, in the same order');
+  assert.deepEqual(idle.map(item => item.name), ['Beto']);
+  assert.equal(teamHeadline(team, 'current'), 'Tu equipo envió 4 correos y recibió 1 respuesta.');
+  assert.equal(teamHeadline({ ...team, totals: { ...team.totals, sent: { now: 1, before: 0 }, meetings: 2 } }, 'current'), 'Tu equipo envió 1 correo y recibió 1 respuesta. 2 pidieron reunión.');
+  assert.equal(teamHeadline({ ...team, totals: { ...team.totals, meetings: 1 } }, 'current'), 'Tu equipo envió 4 correos y recibió 1 respuesta. Una pidió reunión.');
+});
+
+test('a team where nobody wrote reads as one sentence, on screen and in the email', () => {
+  const team: TeamSection = { members: Array.from({ length: 31 }, (_, index) => member(`Persona ${index + 1}`)), totals: { sent: { now: 0, before: 0 }, replies: { now: 0, before: 0 }, meetings: 0 } };
+  assert.equal(teamActivity(team).active.length, 0);
+  assert.equal(teamHeadline(team, 'current'), 'Nadie del equipo envió correos esta semana.');
+  assert.equal(teamHeadline(team, 'previous'), 'Nadie del equipo envió correos la semana pasada.');
+  const email = reportEmail({ week: reportWeek(new Date('2026-10-20T12:00:00.000Z'), 'previous'), roles: ['personal', 'team'], name: 'Gonzalo',
+    personal: personal(), team, opportunities: null }, 'https://app.example');
+  assert.match(email.text, /EQUIPO\n- Nadie del equipo envió correos la semana pasada\n/);
+  assert.doesNotMatch(email.text, /Persona \d+: 0 enviados/);
+  assert.doesNotMatch(email.text, /Revisa con/, 'no one to single out when nobody wrote');
 });
