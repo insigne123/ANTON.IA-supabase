@@ -38,6 +38,9 @@ test('the prompt holds the data as data, the rules for cards and handoff, and th
   assert.match(prompt, /"id":"o1"/);
   assert.match(prompt, /Demanda futura .*Lo Barnechea/);
   assert.match(prompt, /quien administra/);
+  assert.doesNotMatch(prompt, /Contratos por vencer \(/, 'only when given');
+  const withContracts = assistantPrompt({ ...base, demand: [], contracts: [{ organismo: 'I MUNICIPALIDAD DE MAIPU', contrato: 'Aseo edificio consistorial', loTiene: 'Aseo Norte SpA', monto: 90000000, vence: '15 de enero de 2027' }] });
+  assert.match(withContracts, /Contratos por vencer \(.*Aseo Norte SpA.*15 de enero de 2027/);
   const member = assistantPrompt({ ...base, admin: false, demand: [] });
   assert.doesNotMatch(member, /Demanda futura \(/);
   assert.match(member, /una persona del equipo comercial/);

@@ -8,6 +8,7 @@ import { assistantAnswerSchema, assistantItem, assistantKeywords, assistantPromp
   type AssistantMessage, type AssistantThread, type SavedAssistantAnswer } from '@/lib/commercial-opportunities/assistant';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { humanDay, type ExpiringContract } from '@/lib/public-procurement/contracts';
 import { loadCompanyForModel } from './tender-profile-read';
 import { readableOpportunityIds } from './workspace-access';
 
@@ -91,6 +92,18 @@ async function assistantDemand(client: SupabaseClient, scope: WorkScope) {
     monto: row.amount === null ? null : Number(row.amount), mes: `${label(row.month)} ${row.year}` }));
 }
 
+/** The contracts that end soonest, from the latest «Contratos por vencer» reading. Admins only, as the view. */
+async function assistantContracts(client: SupabaseClient, scope: WorkScope) {
+  if (!isOpportunityAdmin(scope.role)) return [];
+  const result = await client.from('opportunity_jobs').select('result').eq('organization_id', scope.organizationId).eq('kind', 'contracts').eq('state', 'ready')
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (result.error || !Array.isArray(result.data?.result?.contracts)) return [];
+  return (result.data.result.contracts as ExpiringContract[]).filter(contract => contract.endsOn)
+    .sort((a, b) => String(a.endsOn).localeCompare(String(b.endsOn))).slice(0, 25)
+    .map(contract => ({ organismo: (contract.agency || '').slice(0, 120), contrato: contract.name.slice(0, 160), loTiene: contract.winnerName?.slice(0, 120) ?? null,
+      monto: contract.currency === 'CLP' ? contract.amount : null, vence: humanDay(contract.endsOn) }));
+}
+
 /** The worker's side: reads what the person can see, asks Claude once, and keeps only the opportunities that exist. */
 export async function runOpportunityAssistant(client: SupabaseClient, job: OpportunityJob): Promise<SavedAssistantAnswer> {
   const member = opportunityDb(await client.from('organization_members').select('role').eq('organization_id', job.organization_id).eq('user_id', job.requested_by).maybeSingle());
@@ -98,9 +111,10 @@ export async function runOpportunityAssistant(client: SupabaseClient, job: Oppor
   const scope: WorkScope = { organizationId: job.organization_id, userId: job.requested_by, role: member.role };
   const message = opportunityDb(await client.from(MESSAGES).select('id,thread_id,question,created_at').eq('organization_id', job.organization_id)
     .eq('user_id', job.requested_by).eq('request_id', job.payload.requestId).single()) as { id: string; thread_id: string; question: string; created_at: string };
-  const [{ items, states }, demand, context, earlier, ficha] = await Promise.all([
+  const [{ items, states }, demand, contracts, context, earlier, ficha] = await Promise.all([
     assistantItems(client, scope, message.question),
     assistantDemand(client, scope),
+    assistantContracts(client, scope),
     client.from('opportunity_company_context').select('offer,services').eq('organization_id', job.organization_id).maybeSingle().then(result => opportunityDb(result)),
     // The conversation so far (the last six turns, oldest first), so «¿y cuál cierra primero?» reads as one.
     client.from(MESSAGES).select('question,answer,created_at').eq('organization_id', job.organization_id).eq('thread_id', message.thread_id)
@@ -112,7 +126,7 @@ export async function runOpportunityAssistant(client: SupabaseClient, job: Oppor
   const conversation = earlier.reverse().map(turn => ({ pregunta: turn.question.slice(0, 600), respuesta: String(turn.answer?.answer || '').slice(0, 900) }));
   const answer = await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: assistantAnswerSchema, output: 3000,
     prompt: assistantPrompt({ question: message.question, today, admin: isOpportunityAdmin(scope.role), offer: String(context?.offer || ''),
-      services: Array.isArray(context?.services) ? context.services.map(String) : [], items: items.map(item => assistantItem(item, states.get(item.id))), demand, conversation,
+      services: Array.isArray(context?.services) ? context.services.map(String) : [], items: items.map(item => assistantItem(item, states.get(item.id))), demand, contracts, conversation,
       ficha }) });
   const saved = resolveAssistantAnswer(answer, new Map(items.map(item => [item.id, { title: item.title, buyer: item.buyer_name || item.company_name,
     kind: item.kind, deadline: item.deadline_at }])));
