@@ -22,7 +22,7 @@ Requisitos: Node 22, Playwright con Chromium (sirve el global; también `PLAYWRI
 - Escrituras al cargar: llamadas no-GET a `/api/*` o a Supabase sin que nadie haya hecho clic.
 - Hosts externos pedidos por el navegador.
 - Acceso:
-  - el miembro no debe ver páginas con lista de acceso (Cowork, Oportunidades, Privacidad, Administración);
+  - el miembro no debe ver páginas con lista de acceso (Oportunidades, Privacidad, Administración). Cowork está abierto a todos desde el 19 oct 2026;
   - sin sesión, las páginas privadas llevan a `/login`.
 - Páginas que no terminan de cargar.
 - En el servidor:

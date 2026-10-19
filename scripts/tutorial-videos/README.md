@@ -12,7 +12,7 @@ Graba un video por módulo sobre la app real, con datos de demostración y sin r
 Sale un MP4 H.264 con su póster (`.jpg`) y los subtítulos en WebVTT (`.vtt`).
 
 ```bash
-npm run tutorial:videos                                  # los 13 videos, en public/tutorial-videos/
+npm run tutorial:videos                                  # los 16 videos, en public/tutorial-videos/
 npm run tutorial:videos -- --videos=buscar,pipeline      # solo esos
 npm run tutorial:videos -- --skip-build --out=/tmp/videos --keep-frames
 ```
@@ -31,6 +31,7 @@ No corre en CI ni agrega dependencias.
 
 - **El banco:** el mismo de la auditoría visual, con su compilación en `.next-audit`, el Supabase simulado y el bloqueo de red. Los datos son de demostración (`scripts/visual-audit/fixtures/`).
   - Las llamadas que el banco bloquea (búsqueda, envío, IA) las responde el navegador con la forma real (`mocks` de cada guion).
+  - Lo que depende del reloj o de datos que el banco no tiene también se responde así, con datos inventados: el informe semanal (un lunes saldría vacío), las llamadas del día y «Para retomar» en Hoy, y Oportunidades y Mercado público (`oportunidades-data.mjs`, sin datos de ChileCompra). Los organismos, proveedores y personas son ficticios, y los RUT llevan a propósito un dígito verificador que no corresponde.
   - Nada sale de la máquina y no se envía ningún correo.
 - **El escenario:** `stage.html` carga la app en un iframe del mismo origen.
   - La cámara es una transformación CSS sobre ese iframe.
@@ -77,6 +78,8 @@ Cada paso (`scene`):
 | `hold`, `pause` | Segundos de lectura al final y de espera antes de la acción |
 
 Si un paso falla, el script dice cuál y deja una captura `<id>-fallo.png` en la carpeta de salida.
+
+Con `zoomOn`, el control se mide de nuevo después de encuadrar la zona: si la app se desplazó, el recuadro y la flecha apuntan a donde quedó (antes apuntaban a la línea de abajo).
 
 ## Al cambiar una pantalla
 

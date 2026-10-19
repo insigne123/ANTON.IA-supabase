@@ -211,6 +211,9 @@ class Recorder {
     if (scene.target) target = await this.measure(scene.target);
     // Camera: into the control (or the area of the scene), or back out.
     const zoomRect = scene.zoomOn ? (await this.measure(scene.zoomOn)).rect : target?.rect;
+    // Bringing the area into view may scroll the app: the control is measured again, or the highlight and the arrow would
+    // point at where it was (an earlier video framed «Te esperan» and highlighted the line below).
+    if (scene.zoomOn && target) target.rect = await target.element.evaluate(node => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
     const nextCamera = frameFor(zoomRect, scene.zoom || 1);
     const fromCamera = state.zoom;
     if (Math.abs(nextCamera.s - fromCamera.s) > 0.001 || Math.abs(nextCamera.tx - fromCamera.tx) > 0.5 || Math.abs(nextCamera.ty - fromCamera.ty) > 0.5) {
