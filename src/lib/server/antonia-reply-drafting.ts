@@ -9,6 +9,7 @@ import { findCachedLeadResearchReport } from '@/lib/server/lead-research-reports
 import { loadSellerProfile } from '@/lib/server/seller-profile';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { stripHtmlToText } from '@/lib/email-outbound';
+import { bookingLinkForReply, readBookingPreference } from '@/lib/booking-link';
 import type { DraftSellerProfileV2 } from '@/lib/server/draft-context-v2';
 
 type ReplyAsset = {
@@ -129,7 +130,7 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
       .maybeSingle(),
     admin
       .from('profiles')
-      .select('full_name, company_name, company_domain, job_title')
+      .select('full_name, company_name, company_domain, job_title, signatures')
       .eq('id', input.userId)
       .maybeSingle(),
     contacted.mission_id
@@ -184,6 +185,8 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
     turnCount,
   });
   let finalDecision: AutonomousReplyDecision = decision;
+  // «Tu agenda» (Firmas y estilo): the person's own link when the answer shows interest; «never» keeps any link out.
+  const bookingLink = bookingLinkForReply(readBookingPreference(profileRes.data?.signatures), config.bookingLink, classification.intent);
 
   const report = await findCachedLeadResearchReport({
     userId: input.userId,
@@ -251,7 +254,7 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
           title: profileRes.data?.job_title || '',
         },
         organizationContext: {
-          bookingLink: String(config.bookingLink || ''),
+          bookingLink,
           meetingInstructions: String(config.meetingInstructions || ''),
           missionGoal,
           valueProposition: truncate(seller.valueProposition || '', 600),
@@ -271,7 +274,7 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
       const fallbackText = buildSuggestedMeetingReply({
         leadName: contacted.name,
         companyName: contacted.company,
-        bookingLink: String(config.bookingLink || ''),
+        bookingLink,
         meetingInstructions: String(config.meetingInstructions || ''),
       });
       draft = {
@@ -290,7 +293,7 @@ export async function draftAutonomousReply(input: DraftAutonomousReplyInput) {
       bodyHtml: draft.bodyHtml,
       desiredAction: finalDecision.recommendedAction,
       intent: classification.intent,
-      bookingLink: String(config.bookingLink || ''),
+      bookingLink,
       allowedAssetNames: enabledAssets.map((asset) => asset.name),
       recommendedAssetNames: draft.recommendedAssetNames,
     })
