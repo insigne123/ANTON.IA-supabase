@@ -67,7 +67,7 @@ export default {
     },
   ],
   outro: {
-    title: 'Tu pipeline, al día', text: 'Míralo cada semana para saber qué mover.',
+    title: 'Tu pipeline, al día', text: 'Míralo cada semana para saber qué mover. En «Empresas» ves a quién te falta conocer en cada una.',
     items: ['Lectura y cifras con comparación', 'La dona: toca una etapa para ver sus leads', 'Tablero: «Mover» a la etapa nueva'],
   },
 };

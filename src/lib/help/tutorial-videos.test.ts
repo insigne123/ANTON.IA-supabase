@@ -31,7 +31,8 @@ test('the files of each video are in public/, small enough to serve as they are'
       }
     }
   }
-  assert.ok(total <= 40 * MB, `los videos pesan ${(total / MB).toFixed(1)} MB`);
+  // 16 videos since 19 Oct 2026 (Informe semanal, Empresas and Mercado público): about 2,6 MB each.
+  assert.ok(total <= 45 * MB, `los videos pesan ${(total / MB).toFixed(1)} MB`);
 });
 
 test('each screen finds its video: by its manual section, or by its route when it has none', () => {
@@ -45,9 +46,19 @@ test('each screen finds its video: by its manual section, or by its route when i
   assert.deepEqual(videosForSection('tabla').map(video => video.id), ['importar']);
 });
 
-test('«Oportunidades» only for the accounts that see it in the menu', () => {
-  assert.ok(!visibleTutorialVideos({ opportunities: false }).some(video => video.id === 'oportunidades'));
-  assert.ok(visibleTutorialVideos({ opportunities: true }).some(video => video.id === 'oportunidades'));
+test('«Oportunidades» and «Mercado público» only for the accounts that see Oportunidades in the menu', () => {
+  for (const id of ['oportunidades', 'mercado-publico']) {
+    assert.ok(!visibleTutorialVideos({ opportunities: false }).some(video => video.id === id), id);
+    assert.ok(visibleTutorialVideos({ opportunities: true }).some(video => video.id === id), id);
+  }
+});
+
+test('the new screens have their video: the weekly report, the companies of the Pipeline and Cowork', () => {
+  const sections = visibleHelpSections({ opportunities: true, admin: true, cowork: true });
+  assert.equal(videoForPath('/weekly-report', sections)?.id, 'informe-semanal');
+  assert.deepEqual(videosForSection('pipeline').map(video => video.id), ['pipeline', 'empresas']);
+  assert.deepEqual(videosForSection('oportunidades').map(video => video.id), ['oportunidades', 'mercado-publico']);
+  assert.deepEqual(videosForSection('cowork').map(video => video.id), ['cowork']);
 });
 
 test('lengths read as minutes and seconds', () => {

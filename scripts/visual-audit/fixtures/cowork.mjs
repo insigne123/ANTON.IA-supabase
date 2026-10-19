@@ -1,6 +1,6 @@
 // Cowork: three finished threads for the owner (one with a follow-up turn in two versions, the latest rated 👍; one renamed; one
 // with a code artifact on the canvas)
-// and the access RPC, which only the owner passes. The artifact is a small static page in storage: the panel around it is what is audited.
+// and the access RPC: Cowork is open to every member of the organization (COWORK_OPEN_TO_ALL, 19 Oct 2026). The artifact is a small static page in storage: the panel around it is what is audited.
 export default function cowork(ctx) {
   const run = (n, message, { parent = null, root, status = 'completed', at }) => ({
     id: ctx.uid(9000 + n), user_id: ctx.OWNER, organization_id: ctx.ORG, request_id: ctx.uid(9100 + n), message, mode: 'approval', status,
@@ -99,7 +99,7 @@ export default function cowork(ctx) {
         memory(9204, ctx.MEMBER, 'user', 'prefiere correos de menos de 80 palabras', ctx.daysAgo(1)),
       ],
     },
-    rpc: { cowork_has_access: (_args, { user, service }) => service || user?.id === ctx.OWNER },
+    rpc: { cowork_has_access: (_args, { user, service }) => service || user?.id === ctx.OWNER || user?.id === ctx.MEMBER },
     storage: { [`cowork-artifacts/${ctx.ORG}/${ctx.OWNER}/${runs[3].id}/${artifact.name}`]: { type: 'text/html; charset=utf-8', body: page } },
   };
 }

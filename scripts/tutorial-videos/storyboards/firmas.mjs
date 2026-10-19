@@ -1,7 +1,7 @@
 export default {
   id: 'firmas', title: 'Firmas y estilo', start: '/settings/email-studio?tab=firma',
-  intro: 'Tu firma va al final de cada correo. Tus estilos le dicen a la IA cómo escribir.',
-  learn: ['Armar tu firma', 'Elegir el tono de tus correos', 'Usar datos de cada contacto'],
+  intro: 'Tu firma va al final de cada correo. Tus estilos le dicen a la IA cómo escribir. Tu agenda, cómo pedirte una reunión.',
+  learn: ['Armar tu firma', 'Elegir el tono de tus correos', 'Sumar tu enlace para agendar'],
   mocks: [{
     url: '**/api/email-styles', method: 'POST',
     respond: body => ({ style: { id: '00000000-0000-4000-8000-00000000c0de', name: body?.name, profile: body?.profile, isDefault: body?.isDefault, revision: 3, libraryScope: 'personal', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), contentHash: 'demo', archivedAt: null } }),
@@ -49,6 +49,28 @@ export default {
       say: 'Guarda tu estilo.', postit: 'La vista previa termina con tu firma real.',
       target: { role: 'button', name: 'Guardar estilo' }, zoom: 1.4, arrow: true,
     },
+    {
+      title: 'Tu agenda', text: 'El enlace donde eligen un horario contigo: Calendly, Google Calendar, Bookings…',
+      say: 'En «Agenda», pega tu enlace para agendar.',
+      target: { role: 'tab', name: 'Agenda' }, zoom: 1.4,
+      waitFor: { label: 'Enlace de tu agenda' },
+    },
+    {
+      title: 'Pega tu enlace', text: 'Reconoce el servicio y te deja probarlo.',
+      say: 'Pega la dirección que compartes para agendar.', postit: '¿No tienes una? Debajo está cómo crearla gratis en Google Calendar.',
+      target: { label: 'Enlace de tu agenda' }, type: 'calendly.com/camila-torres/30min', zoom: 1.6,
+    },
+    {
+      title: '¿Cuándo va?', text: 'Automático: la IA lo suma solo cuando la persona muestra interés o pide una reunión. Nunca en un primer correo.',
+      say: 'Elige cuándo va en tus correos.',
+      target: { role: 'radio', name: /Automático/, exact: false }, zoomOn: { role: 'radiogroup' }, zoom: 1.3, arrow: true,
+    },
+    {
+      title: 'Guárdala', text: 'Desde ahí, las respuestas sugeridas la incluyen cuando corresponde.',
+      say: 'Y guárdala.',
+      target: { role: 'button', name: 'Guardar agenda' }, zoom: 1.5,
+      waitFor: { text: 'Agenda guardada' },
+    },
   ],
-  outro: { title: 'Correos con tu sello', text: 'Tu firma en cada envío y un estilo que la IA respeta.', items: ['Firma armada en un minuto', 'Tono y largo con un clic', 'Variables como pastillas'] },
+  outro: { title: 'Correos con tu sello', text: 'Tu firma en cada envío, un estilo que la IA respeta y tu agenda cuando la piden.', items: ['Firma armada en un minuto', 'Tono y largo con un clic', 'Tu enlace para agendar'] },
 };

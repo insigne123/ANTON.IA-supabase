@@ -23,6 +23,7 @@
     "audit:interactions": "node scripts/visual-audit/interactions.mjs",
     "audit:simplicity": "node scripts/usability/run.mjs",
     "tutorial:videos": "node scripts/tutorial-videos/record.mjs",
+    "manual:build": "tsx scripts/user-manual/build.ts",
     "test:env:local": "node scripts/setup-local-test-env.mjs",
     "test:env:nonprod": "node scripts/setup-nonprod-test-env.mjs",
     "test:identity:ensure": "node scripts/bootstrap-test-identities.mjs",
