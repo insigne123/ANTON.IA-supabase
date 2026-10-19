@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
 type Similar = { id: string; name: string; industry?: string | null; size?: number | null; city?: string | null; country?: string | null; domain?: string | null; why?: string };
-type SimilarState = { status: 'loading' } | { status: 'ready'; items: Similar[]; note?: string } | { status: 'error'; text: string };
+type SimilarState = { status: 'loading' } | { status: 'ready'; items: Similar[]; note?: string; found?: Similar[] } | { status: 'error'; text: string };
 
 const stageLabel = (stage: string) => PIPELINE_STAGES.find(item => item.id === stage)?.label ?? 'Nuevos';
 const SLOT_HINT: Record<CommitteeSlot['role'], string> = {
@@ -96,8 +96,9 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
         setSimilar(current => ({ ...current, [base.key]: { status: 'ready', items: candidates.slice(0, 8), note: 'La IA no pudo elegir las más parecidas: son empresas del mismo rubro y tamaño.' } }));
         return;
       }
+      // When the AI finds none clearly alike, what the search returned stays one tap away instead of a dead end.
       setSimilar(current => ({ ...current, [base.key]: { status: 'ready', items: body.companies.map((item: Similar) => ({ ...item, domain: domainOf.get(item.id) ?? null })),
-        ...(body.companies.length ? {} : { note: 'Ninguna de las empresas encontradas se parece lo suficiente.' }) } }));
+        ...(body.companies.length ? {} : { note: `La IA no encontró empresas claramente parecidas entre las ${candidates.length} que trajo la búsqueda.`, found: candidates.slice(0, 12) }) } }));
     } catch (error) {
       setSimilar(current => ({ ...current, [base.key]: { status: 'error', text: error instanceof Error ? error.message : 'No pudimos buscar empresas parecidas.' } }));
     }
@@ -214,7 +215,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
               <div>
                 <h3 id="company-similar" className="text-sm font-medium">Empresas parecidas</h3>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {company.industry ? `Del mismo rubro${company.size ? ' y tamaño' : ''}, que aún no están en tu CRM. La IA elige las más parecidas y dice por qué. Usa una búsqueda de tu cupo diario.`
+                  {company.industry ? `Del mismo rubro${company.size ? ' y tamaño' : ''}, que aún no están en tu CRM. La IA elige las más parecidas con lo que informa el proveedor y lo que sabe de empresas conocidas, y dice por qué. Usa una búsqueda de tu cupo diario.`
                     : 'Esta empresa no tiene rubro guardado: búscala en «Buscar prospectos» para completarlo.'}
                 </p>
               </div>
@@ -224,6 +225,9 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
               {state?.status === 'error' ? <p role="alert" className="text-sm text-destructive">{state.text}</p> : null}
               {state?.status === 'ready' ? <div className="space-y-2">
                 {state.note ? <p className="text-xs leading-5 text-muted-foreground">{state.note}</p> : null}
+                {state.found?.length ? <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
+                  onClick={() => setSimilar(current => ({ ...current, [company.key]: { status: 'ready', items: state.found!, note: 'Comparten rubro y tamaño según el proveedor; revísalas antes de buscar personas.' } }))}>
+                  Ver las que trajo la búsqueda</Button> : null}
                 <ul className="space-y-2">
                   {state.items.map(item => <li key={item.id} className="rounded-xl border p-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
