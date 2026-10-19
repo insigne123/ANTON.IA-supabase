@@ -73,11 +73,11 @@ const job = { id: 'job', organization_id: 'org', requested_by: 'admin', payload:
 const answer = (input: any) => ({ summaries: JSON.parse(input.prompt.slice(input.prompt.indexOf('['))).map((item: any) => ({ id: item.id, summary: `De qué trata ${item.nombre} (${item.organismoOEmpresa ?? 'sin organismo'})` })) });
 
 test('a tender known by name reads its official file first: buyer, description and lines are saved, then its summary', async () => {
-  const module = await load();
+  const summaries = await load();
   const { tables, client } = memory({ commercial_opportunities: [opportunity('a')] });
   (globalThis as any).__answer = answer; (globalThis as any).__calls = []; delete (globalThis as any).__ticket;
   const asked: string[] = [];
-  const result = await module.runOpportunitySummaries(client, job, Date.now(), {
+  const result = await summaries.runOpportunitySummaries(client, job, Date.now(), {
     resolveTicket: async () => ({ ticket: 't' }),
     getLicitacion: async (code: string) => { asked.push(code); return { source: 'mercado_publico', code, name: 'LICITACIÓN a', description: 'Guardias para el recinto', buyer: 'Servicio Agrícola y Ganadero', buyerUnit: 'Aeropuerto',
       region: 'Región Metropolitana', amount: 48_000_000, currency: 'CLP', publishedAt: null, closesAt: null, status: 'publicada', items: [{ code: null, name: 'Guardias' }] }; },
@@ -96,13 +96,13 @@ test('a tender known by name reads its official file first: buyer, description a
 });
 
 test('a busy ticket leaves the tender for the next reading; one the model leaves out is not asked again; summarized ones are skipped', async () => {
-  const module = await load();
+  const summaries = await load();
   const { tables, client } = memory({ commercial_opportunities: [
     opportunity('busy'), opportunity('left', { kind: 'hiring', data: { evaluation: 'recommended', description: 'Guardia 4x4 · Santiago' }, score: 90 }),
     opportunity('done', { data: { evaluation: 'review', summary: { text: 'Ya resumida.' } } }), opportunity('closed', { data: { evaluation: 'excluded' } }),
   ] });
   (globalThis as any).__answer = () => ({ summaries: [] });
-  const result = await module.runOpportunitySummaries(client, job, Date.now(), {
+  const result = await summaries.runOpportunitySummaries(client, job, Date.now(), {
     resolveTicket: async () => ({ ticket: 't' }), getLicitacion: async () => { const error: any = new Error('busy'); error.busy = true; throw error; },
   });
   const byId = Object.fromEntries(tables.commercial_opportunities.map(row => [row.id, row]));
@@ -114,10 +114,10 @@ test('a busy ticket leaves the tender for the next reading; one the model leaves
 });
 
 test('without a ticket the name is enough; a change made meanwhile is not overwritten', async () => {
-  const module = await load();
+  const summaries = await load();
   const { tables, client } = memory({ commercial_opportunities: [opportunity('a'), opportunity('b')] });
   (globalThis as any).__answer = (input: any) => { tables.commercial_opportunities[1].updated_at = '2026-10-19T11:00:00Z'; return answer(input); };
-  await module.runOpportunitySummaries(client, job, Date.now(), { resolveTicket: async () => null, getLicitacion: async () => { throw new Error('not asked'); } });
+  await summaries.runOpportunitySummaries(client, job, Date.now(), { resolveTicket: async () => null, getLicitacion: async () => { throw new Error('not asked'); } });
   const [a, b] = tables.commercial_opportunities;
   assert.equal(a.data.summary.basis, 'nombre');
   assert.equal(a.buyer_name, null);
@@ -125,15 +125,15 @@ test('without a ticket the name is enough; a change made meanwhile is not overwr
 });
 
 test('the pipeline queues one reading when cards lack their summary, and none while one is under way', async () => {
-  const module = await load();
+  const summaries = await load();
   const { tables, client } = memory({});
   const scope = { organizationId: 'org', userId: 'admin', role: 'admin' };
-  assert.equal(await module.enqueueOpportunitySummaries(client, scope, [{ data: { summary: { text: 'x' } } }, { data: { summary: { text: '' } } }]), 0);
+  assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, [{ data: { summary: { text: 'x' } } }, { data: { summary: { text: '' } } }]), 0);
   assert.equal(tables.opportunity_jobs.length, 0);
-  assert.equal(await module.enqueueOpportunitySummaries(client, scope, [{ data: {} }, { data: null }]), 2);
+  assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, [{ data: {} }, { data: null }]), 2);
   assert.equal(tables.opportunity_jobs.length, 1);
   assert.deepEqual({ kind: tables.opportunity_jobs[0].kind, payload: tables.opportunity_jobs[0].payload }, { kind: 'evaluate', payload: { summaries: true } });
   tables.opportunity_jobs[0].dedupe_key = 'summaries:earlier';
-  await module.enqueueOpportunitySummaries(client, scope, [{ data: {} }]);
+  await summaries.enqueueOpportunitySummaries(client, scope, [{ data: {} }]);
   assert.equal(tables.opportunity_jobs.length, 1, 'the queued one is still to run');
 });
