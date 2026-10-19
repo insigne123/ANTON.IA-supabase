@@ -13,6 +13,7 @@ import { enqueueMonthlyDemand, runOpportunityDemand } from './purchase-plan';
 import { runOpportunityAssistant } from './workspace-assistant';
 import { runTenderProfileSuggestion } from './workspace-tender-profile';
 import { enqueueFitAfterReport, runRequirementFit } from './workspace-fit';
+import { enqueueMonthlyContracts, runMarketContracts, runWinPlan } from './workspace-market';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -24,8 +25,9 @@ export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope:
   const kinds = context.criteria?.postQueries?.length ? ['tenders', ...(context.criteria?.roles?.length ? ['hiring'] : []), 'posts'] : ['criteria'];
   for (const kind of kinds) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind, dedupe_key: `${prefix}:${kind}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
-  // «Demanda futura» reads the Plan Anual de Compras once a month, once the words exist.
+  // «Demanda futura» reads the Plan Anual de Compras once a month, once the words exist; «Contratos por vencer» too.
   await enqueueMonthlyDemand(client, scope, context, clock.day);
+  await enqueueMonthlyContracts(client, scope, context, clock.day).catch(() => undefined);
   return kinds.length;
 }
 export async function enqueueDailyOpportunityWork(client: SupabaseClient) {
@@ -99,6 +101,12 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
       const demand = await runOpportunityDemand(client, job, context, Date.now());
       if (demand.waiting) { state = 'waiting'; result = { progress: 'Leyendo el Plan Anual de Compras' }; }
       else result = demand;
+    }
+    else if (job.kind === 'winplan') result = await runWinPlan(client, job);
+    else if (job.kind === 'contracts') {
+      const contracts = await runMarketContracts(client, job, context, Date.now());
+      if (contracts.waiting) { state = 'waiting'; result = { progress: 'Revisando contratos por vencer' }; }
+      else result = contracts;
     }
     else throw new AuthError('El tipo de trabajo no está disponible.', 400);
   } catch (failure) {
