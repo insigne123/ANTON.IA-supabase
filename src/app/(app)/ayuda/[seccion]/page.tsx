@@ -29,8 +29,8 @@ export default function HelpSectionPage() {
   const { organizationRole } = useAuth();
   const admin = organizationRole === 'owner' || organizationRole === 'admin';
   // The same parts of the app as the menu: «Oportunidades» only for the accounts the server lets in.
-  const { opportunities } = useSharedNavAccess();
-  const sections = useMemo(() => visibleHelpSections({ opportunities, admin }), [opportunities, admin]);
+  const { opportunities, cowork } = useSharedNavAccess();
+  const sections = useMemo(() => visibleHelpSections({ opportunities, admin, cowork }), [opportunities, admin, cowork]);
   const section = sections.find((item) => item.id === id) || null;
 
   if (!section) {

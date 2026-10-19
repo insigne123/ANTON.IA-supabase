@@ -12,8 +12,13 @@ env:
   - variable: NODE_OPTIONS
     value: --max-old-space-size=4096
     availability: [BUILD]
-  # Cowork private pilot: el dueño y la cuenta QA que lo evalúa (lista fija en src/lib/cowork/access.ts + grant DB).
+  # Cowork abierto a todas las cuentas desde el 19 oct 2026 (COWORK_OPEN_TO_ALL): cada persona recibe su grant la primera
+  # vez que entra; un grant apagado por un administrador sigue apagado. Sin COWORK_OPEN_TO_ALL vuelve al piloto privado:
+  # el dueño y la cuenta QA (lista fija en src/lib/cowork/access.ts + grant DB).
   - variable: COWORK_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_OPEN_TO_ALL
     value: "true"
     availability: [RUNTIME]
   - variable: COWORK_OWNER_USER_ID

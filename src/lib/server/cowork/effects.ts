@@ -305,7 +305,7 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
   if (process.env.COWORK_EXECUTOR_ASYNC_ENABLED === 'true' && process.env.COWORK_CODE_FENCING_ENABLED === 'true') {
     // Only isolated, idempotent code jobs can safely be reclaimed. External sends are never replayed this way.
     const stale = await client.from('cowork_effect_proposals').select('run_id,user_id,organization_id,updated_at')
-      .eq('kind', 'code_execute').eq('status', 'executing').in('user_id', coworkWorkerUserIds())
+      .eq('kind', 'code_execute').eq('status', 'executing').in('user_id', await coworkWorkerUserIds(client))
       .lt('updated_at', new Date(Date.now() - 300000).toISOString()).limit(1).maybeSingle();
     if (stale.error) throw stale.error;
     if (stale.data) {

@@ -27,8 +27,8 @@ export function PageHelpButton({ visibility, className }: { visibility: HelpVisi
   const { guide, startGuide, start } = useProductTour();
   const [open, setOpen] = useState(false);
   const sections = useMemo(
-    () => visibleHelpSections({ opportunities: visibility.opportunities, admin: visibility.admin }),
-    [visibility.opportunities, visibility.admin],
+    () => visibleHelpSections({ opportunities: visibility.opportunities, admin: visibility.admin, cowork: visibility.cowork }),
+    [visibility.opportunities, visibility.admin, visibility.cowork],
   );
   const visibleIds = useMemo(() => new Set(sections.map((section) => section.id)), [sections]);
   const section = useMemo(() => helpSectionFor(pathname, sections), [pathname, sections]);

@@ -33,6 +33,8 @@ export async function POST(request: NextRequest) {
       // The same rule as the page and the menu: OPPORTUNITIES_ALLOWED_EMAILS or a member an admin let in.
       opportunities: await canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId),
       admin: auth.organizationRole === 'owner' || auth.organizationRole === 'admin',
+      // Open to every account since 19 Oct 2026; in the private pilot only its two accounts read about it.
+      cowork: process.env.COWORK_ENABLED === 'true' && process.env.COWORK_OPEN_TO_ALL === 'true',
     });
     const answer = await answerHelpQuestion({ question: body.data.question, sectionId: body.data.sectionId, sections });
     return NextResponse.json(answer, { headers: noStore });
