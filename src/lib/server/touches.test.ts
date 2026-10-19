@@ -95,7 +95,7 @@ test('«Hoy» creates the touches whose day came, a call only with a phone, and 
   const first = await readTouches(client, scope, now);
   assert.deepEqual(tables.contact_touches.map(row => `${row.contacted_id}:${row.rule_key}`).sort(), ['a:call:3', 'a:linkedin:1', 'c:linkedin:1'],
     'b answered, c has no phone for a call yet, d was written to before the cadence');
-  assert.deepEqual(first.touches.map((touch: any) => `${touch.contact.contactedId}:${touch.channel}`), ['a:linkedin', 'a:call', 'c:linkedin'], 'oldest due first');
+  assert.deepEqual(first.touches.map((touch: any) => `${touch.contact.contactedId}:${touch.channel}`), ['a:call', 'a:linkedin', 'c:linkedin'], 'calls first, then oldest due first');
   const call = first.touches.find((touch: any) => touch.channel === 'call');
   assert.equal(call.contact.tel, 'tel:+56912345678');
   assert.deepEqual(call.contact.linkedin, { href: 'https://www.linkedin.com/in/persona-a', search: false });

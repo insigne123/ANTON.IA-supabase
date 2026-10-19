@@ -231,25 +231,28 @@ export function TouchesCard() {
             const summary = summaries[touch.id] ?? touch.callSummary;
             const chosen = outcome[touch.id]?.value ?? '';
             return <li key={touch.id} className={cn('rounded-xl border border-border/60 p-3 transition-colors', isOpen && 'border-primary/40 bg-primary/[0.03]')}>
-              <div className="flex flex-wrap items-start gap-3">
+              {/* The actions go under the text, so the name, the role and the email it follows are read whole in the narrow column. */}
+              <div className="flex items-start gap-3">
                 <InitialsAvatar name={touch.contact.name} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium">{touch.contact.name}
-                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
-                      {touch.channel === 'call' ? <Phone className="h-3 w-3" aria-hidden="true" /> : <Linkedin className="h-3 w-3" aria-hidden="true" />}
-                      {touch.channel === 'call' ? 'Llamar' : 'LinkedIn'}{touch.day ? ` · día ${touch.day}` : ''}</span></p>
-                  <p className="truncate text-xs text-muted-foreground">{[touch.contact.role, touch.contact.company].filter(Boolean).join(' · ') || touch.contact.email}</p>
-                  {touch.firstEmail.subject ? <p className="truncate text-xs text-muted-foreground">Tu correo: «{touch.firstEmail.subject}»</p> : null}
-                </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-1">
-                  {touch.channel === 'call' && touch.contact.tel
-                    ? <Button asChild size="sm"><a href={touch.contact.tel}><Phone className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{touch.contact.phone}</a></Button>
-                    : touch.channel === 'linkedin'
-                      ? <Button asChild size="sm" variant="outline"><a href={touch.contact.linkedin.href} target="_blank" rel="noopener noreferrer">{touch.contact.linkedin.search ? 'Buscar en LinkedIn' : 'Abrir perfil'}<ExternalLink className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" /><span className="sr-only">(abre LinkedIn)</span></a></Button>
-                      : null}
-                  <Button size="sm" variant="ghost" aria-expanded={isOpen} onClick={() => isOpen ? setOpen(null) : void prepare(touch)} disabled={pending && !isOpen}>
-                    {pending && !touch.script ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}{isOpen ? 'Cerrar' : 'Guion y resultado'}
-                  </Button>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div>
+                    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">{touch.contact.name}
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
+                        {touch.channel === 'call' ? <Phone className="h-3 w-3" aria-hidden="true" /> : <Linkedin className="h-3 w-3" aria-hidden="true" />}
+                        {touch.channel === 'call' ? 'Llamar' : 'LinkedIn'}{touch.day ? ` · día ${touch.day}` : ''}</span></p>
+                    <p className="break-words text-xs leading-5 text-muted-foreground">{[touch.contact.role, touch.contact.company].filter(Boolean).join(' · ') || touch.contact.email}</p>
+                    {touch.firstEmail.subject ? <p className="truncate text-xs leading-5 text-muted-foreground" title={touch.firstEmail.subject}>Tu correo: «{touch.firstEmail.subject}»</p> : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {touch.channel === 'call' && touch.contact.tel
+                      ? <Button asChild size="sm"><a href={touch.contact.tel}><Phone className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{touch.contact.phone}</a></Button>
+                      : touch.channel === 'linkedin'
+                        ? <Button asChild size="sm" variant="outline"><a href={touch.contact.linkedin.href} target="_blank" rel="noopener noreferrer">{touch.contact.linkedin.search ? 'Buscar en LinkedIn' : 'Abrir perfil'}<ExternalLink className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" /><span className="sr-only">(abre LinkedIn)</span></a></Button>
+                        : null}
+                    <Button size="sm" variant="ghost" aria-expanded={isOpen} onClick={() => isOpen ? setOpen(null) : void prepare(touch)} disabled={pending && !isOpen}>
+                      {pending && !touch.script ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}{isOpen ? 'Cerrar' : 'Guion y resultado'}
+                    </Button>
+                  </div>
                 </div>
               </div>
               {error?.id === touch.id ? <p role="alert" className="mt-2 text-sm text-destructive">{error.text}</p> : null}
