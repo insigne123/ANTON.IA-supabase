@@ -82,7 +82,11 @@ export async function PATCH(req: NextRequest, context: Context) {
     // A reply arriving after the user opened the view must remain pending.
     const observedAt = typeof body.observedAt === 'string' ? Date.parse(body.observedAt) : NaN;
     if (body.resolved && (!Number.isFinite(observedAt) || observedAt > Date.now())) throw new AuthError('Actualiza la conversación antes de resolverla', 400);
-    const { data, error } = await supabase.from('contacted_leads').update({ conversation_resolved_at: body.resolved ? new Date(observedAt).toISOString() : null }).eq('id', contactedId).eq('organization_id', organizationId).eq('user_id', user.id).select('id').maybeSingle();
+    const update = (values: Record<string, unknown>) => supabase.from('contacted_leads').update(values).eq('id', contactedId).eq('organization_id', organizationId).eq('user_id', user.id).select('id').maybeSingle();
+    const resolvedAt = body.resolved ? new Date(observedAt).toISOString() : null;
+    // «Volver a pendiente» also forgets how it had ended (conversation_close_outcome, «Para retomar»).
+    let { data, error } = await update(body.resolved ? { conversation_resolved_at: resolvedAt } : { conversation_resolved_at: null, conversation_close_outcome: null });
+    if (error?.code === '42703') ({ data, error } = await update({ conversation_resolved_at: resolvedAt }));
     if (error) throw error;
     if (!data) throw new AuthError('No puedes modificar esta conversación', 403);
     return NextResponse.json({ ok: true });

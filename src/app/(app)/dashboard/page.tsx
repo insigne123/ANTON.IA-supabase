@@ -11,13 +11,14 @@ import {PersonalCredits} from '@/components/home/PersonalCredits';
 import { HomeSummary } from '@/components/home/HomeSummary';
 import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
+import { ReconnectCard } from '@/components/home/ReconnectCard';
 
 const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long',timeZone:'America/Santiago' });
 
 /**
  * «Hoy» (docs/inicio-hoy.md). The work first: the next step and what is waiting, in the main column. How the week goes,
- * the campaigns in progress and the credits sit beside it, so they never push the work down. On phones the order is
- * step → pending → summary → recommended.
+ * the campaigns in progress and the credits sit beside it, so they never push the work down. «Para retomar» follows the
+ * pending work when someone is due. On phones the order is step → pending → to reconnect → summary → recommended.
  */
 export default function DashboardPage() {
   // The date is read in the browser: the page is prerendered, and the server's day may not be the person's.
@@ -45,8 +46,9 @@ export default function DashboardPage() {
 
       {/* items-start at every width: a stretched grid item would turn a card's h-full into the whole column. */}
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="min-w-0 xl:col-start-1">
+        <div className="min-w-0 space-y-4 xl:col-start-1">
           <TodayPanel />
+          <ReconnectCard />
         </div>
 
         <aside aria-label="Tu actividad de hoy" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
