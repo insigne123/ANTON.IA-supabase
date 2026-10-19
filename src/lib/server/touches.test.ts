@@ -148,25 +148,29 @@ test('«Hecho» needs what happened in the channel; the script is prepared once 
 test('a recording becomes the call summary on its task and a note with the next step in the CRM', async () => {
   const { attachCallRecording } = await load('./src/lib/server/touch-calls');
   const { client, tables } = memory({ profiles: [profile(cadence)], contacted_leads: [contact('a', '2026-10-15T13:00:00Z')],
-    contact_touches: [{ id: 't1', organization_id: 'org-1', user_id: 'u-1', contacted_id: 'a', rule_key: 'call:3', channel: 'call', state: 'open', due_at: '2026-10-18T13:00:00Z' }] });
+    contact_touches: [{ id: 't1', organization_id: 'org-1', user_id: 'u-1', contacted_id: 'a', rule_key: 'call:3', channel: 'call', state: 'open', due_at: '2026-10-18T13:00:00Z' }],
+    unified_crm_data: [{ id: 'lead_saved|lead-a', organization_id: 'org-1', notes: 'Prefiere que le escriban los lunes.' }] });
   const sent: any[] = [];
   const fakeFetch = (async (url: string, init: any) => { sent.push({ url, form: init.body }); return new Response(JSON.stringify({ text: 'Hola Paula, te llamo por el correo de antecedentes. Sí, nos interesa, agendemos una demo el jueves.' }), { status: 200 }); }) as any;
   (globalThis as any).__crm = [];
   (globalThis as any).__answer = () => ({ summary: 'Le interesa revisar antecedentes de postulantes.', agreements: ['Demo el jueves'], nextSteps: [{ text: 'Enviar invitación a la demo', due: '2026-10-23' }],
     objections: [], interest: 'alto', meetingAgreed: true });
-  const result = await attachCallRecording(client, scope, 't1', { bytes: new TextEncoder().encode('audio').buffer, name: 'llamada.m4a', type: 'audio/x-m4a', durationSeconds: 312.4 },
+  const result = await attachCallRecording(client, scope, 't1', { bytes: new TextEncoder().encode('audio').buffer, name: 'llamada.m4a', type: 'audio/x-m4a', durationSeconds: 312.4, note: 'Decide la gerenta.' },
     { fetch: fakeFetch, env: { OPENAI_API_KEY: 'sk-test', TOUCHES_MODEL: 'claude-haiku-5-5' }, now: new Date('2026-10-19T15:00:00Z') });
   assert.equal(sent[0].url, 'https://api.openai.com/v1/audio/transcriptions');
   assert.equal(sent[0].form.get('model'), 'gpt-4o-mini-transcribe');
   assert.equal(sent[0].form.get('language'), 'es');
   assert.equal(result.summary.durationSeconds, 312);
-  assert.deepEqual([tables.contact_touches[0].state, tables.contact_touches[0].outcome], ['done', 'talked'], 'a recorded call was a conversation');
+  assert.deepEqual([tables.contact_touches[0].state, tables.contact_touches[0].outcome, tables.contact_touches[0].note], ['done', 'talked', 'Decide la gerenta.'], 'a recorded call was a conversation, with the note typed before');
+  assert.equal(result.crm, true, 'the card says it is in the CRM only when the contact is there');
   assert.equal(tables.contact_touches[0].call_summary.interest, 'alto');
   const crm = (globalThis as any).__crm[0];
   assert.equal(crm.leadId, 'lead-a');
   assert.equal(crm.stage, 'meeting', 'a meeting agreed suggests the stage; the person confirms it');
   assert.equal(crm.nextActionDueAt, '2026-10-23T12:00:00.000Z');
   assert.match(crm.notes, /^Llamada \(19 oct\): Le interesa/);
+  assert.match(crm.notes, /Tu nota: Decide la gerenta\.\n\nPrefiere que le escriban los lunes\.$/, 'the call goes on top of the notes written before, never over them');
+  assert.equal(crm.nextActionType, 'call_follow_up');
 
   await assert.rejects(attachCallRecording(client, scope, 't1', { bytes: new ArrayBuffer(0), name: 'x.m4a', type: 'audio/x-m4a' }), /vacío/);
   await assert.rejects(attachCallRecording(client, scope, 't1', { bytes: new TextEncoder().encode('x').buffer, name: 'notas.pdf', type: 'application/pdf' }), /Sube un audio/);

@@ -19,8 +19,10 @@ export async function POST(req: NextRequest, context: Context) {
     const file = form?.get('file');
     if (!(file instanceof File)) throw new AuthError('Adjunta la grabación de la llamada.', 400);
     const duration = Number(form?.get('duration') || 0);
+    const note = form?.get('note');
     const result = await attachCallRecording(getSupabaseAdminClient(), { organizationId: auth.organizationId, userId: auth.user.id }, id,
-      { bytes: await file.arrayBuffer(), name: file.name, type: file.type, durationSeconds: Number.isFinite(duration) && duration > 0 ? duration : null });
+      { bytes: await file.arrayBuffer(), name: file.name, type: file.type, durationSeconds: Number.isFinite(duration) && duration > 0 ? duration : null,
+        note: typeof note === 'string' ? note : null });
     return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     return handleAuthError(error instanceof TouchError ? new AuthError(error.message, error.status) : error);

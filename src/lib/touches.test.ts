@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  LINKEDIN_DAILY_CAP, cadenceRules, cadenceToSave, callCrmNote, callSummaryPrompt, chileDay, dueRulesFor, linkedinHref, outcomeLabel, readTouchCadence,
+  LINKEDIN_DAILY_CAP, cadenceRules, cadenceToSave, callCrmNote, callSummaryPrompt, humanDue, chileDay, dueRulesFor, linkedinHref, outcomeLabel, readTouchCadence,
   telHref, touchCancelReason, touchDueAt, touchExpired, touchScriptPrompt, touchesForToday, validOutcome,
 } from './touches';
 
@@ -92,5 +92,12 @@ test('the prompts carry the email as data and the limits of each channel', () =>
   assert.ok(summary.length < 61_500, 'the transcript is cut to its limit');
   assert.match(summary, /no inventes acuerdos/);
   assert.equal(callCrmNote({ summary: 'Le interesa para 2027.', agreements: ['Enviar propuesta'], nextSteps: [{ text: 'Mandar propuesta', due: '2026-10-24' }] }, '2026-10-19T15:00:00Z'),
-    'Llamada (19 oct): Le interesa para 2027.\nAcuerdos: Enviar propuesta.\nPróximo paso: Mandar propuesta (2026-10-24).');
+    'Llamada (19 oct): Le interesa para 2027.\nAcuerdos: Enviar propuesta.\nPróximo paso: Mandar propuesta (24 oct).');
+  // What the model writes as sentences reads as one list, and the seller's own note goes with it.
+  assert.equal(callCrmNote({ summary: 'Acordaron una demo.', agreements: ['Demo el jueves 22 a las 10:00.', 'Enviar un reporte de ejemplo.'], nextSteps: [{ text: 'Enviar el reporte.', due: null }] },
+    '2026-10-19T15:00:00Z', ' Decide la gerenta. '),
+    'Llamada (19 oct): Acordaron una demo.\nAcuerdos: Demo el jueves 22 a las 10:00; Enviar un reporte de ejemplo.\nPróximo paso: Enviar el reporte.\nTu nota: Decide la gerenta.');
+  assert.equal(humanDue('2026-11-03'), '3 nov');
+  assert.equal(humanDue('la próxima semana'), 'la próxima semana', 'a date it could not read stays as it was said');
+  assert.equal(humanDue(null), null);
 });
