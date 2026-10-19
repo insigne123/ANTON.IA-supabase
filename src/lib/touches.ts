@@ -102,12 +102,13 @@ export function dueRulesFor(contact: TouchContact & { hasPhone: boolean }, caden
 export type OpenTouch = { id: string; channel: TouchChannel; dueAt: string };
 
 /**
- * What «Hoy» shows: the touches due today or before, oldest first, with LinkedIn kept under its daily cap (the ones done
- * today count). The rest wait for tomorrow.
+ * What «Hoy» shows: the touches due today or before, calls first (they are made in office hours; LinkedIn can wait for a
+ * batch), oldest first, with LinkedIn kept under its daily cap (the ones done today count). The rest wait for tomorrow.
  */
 export function touchesForToday<T extends OpenTouch>(open: T[], linkedinDoneToday: number, now: Date) {
   const today = chileDay(now);
-  const due = open.filter(touch => chileDay(touch.dueAt) <= today).sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  const due = open.filter(touch => chileDay(touch.dueAt) <= today)
+    .sort((a, b) => Number(a.channel !== 'call') - Number(b.channel !== 'call') || a.dueAt.localeCompare(b.dueAt));
   let room = Math.max(0, LINKEDIN_DAILY_CAP - linkedinDoneToday);
   const shown: T[] = []; let waiting = 0;
   for (const touch of due) {

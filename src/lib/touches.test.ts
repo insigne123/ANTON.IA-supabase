@@ -52,10 +52,11 @@ test('«Hoy» shows what is due, oldest first, with LinkedIn under its daily cap
   const touches = [
     { id: 'call-late', channel: 'call' as const, dueAt: '2026-10-17T12:00:00Z' },
     { id: 'tomorrow', channel: 'call' as const, dueAt: '2026-10-20T12:00:00Z' },
-    ...Array.from({ length: 22 }, (_, index) => ({ id: `li-${index}`, channel: 'linkedin' as const, dueAt: `2026-10-19T1${index % 10}:00:00Z` })),
+    ...Array.from({ length: 22 }, (_, index) => ({ id: `li-${index}`, channel: 'linkedin' as const, dueAt: `2026-10-1${index % 2 ? 8 : 9}T1${index % 10}:00:00Z` })),
+    { id: 'call-today', channel: 'call' as const, dueAt: '2026-10-19T14:00:00Z' },
   ];
   const fresh = touchesForToday(touches, 0, now);
-  assert.equal(fresh.shown[0].id, 'call-late');
+  assert.deepEqual(fresh.shown.slice(0, 2).map(touch => touch.id), ['call-late', 'call-today'], 'calls first, oldest first');
   assert.equal(fresh.shown.filter(touch => touch.channel === 'linkedin').length, LINKEDIN_DAILY_CAP);
   assert.equal(fresh.waiting, 2);
   assert.ok(!fresh.shown.some(touch => touch.id === 'tomorrow'));
