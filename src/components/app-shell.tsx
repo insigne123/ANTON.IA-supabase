@@ -27,7 +27,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const access = useMemo(() => ({ cowork: navAccess.cowork, opportunities: navAccess.opportunities }), [navAccess.cowork, navAccess.opportunities]);
   // The help shows the same parts of the app as the menu.
   const helpAdmin = organizationRole === 'owner' || organizationRole === 'admin' || adminUsage;
-  const helpVisibility = useMemo(() => ({ opportunities: access.opportunities, admin: helpAdmin }), [access.opportunities, helpAdmin]);
+  const helpVisibility = useMemo(() => ({ opportunities: access.opportunities, admin: helpAdmin, cowork: access.cowork }),
+    [access.opportunities, helpAdmin, access.cowork]);
   const screenLabel = navLabelFor(pathname);
   // Cowork takes the whole height: on a computer its header carries the menu, the help and the theme instead of this bar.
   const immersive = isImmersiveScreen(pathname);

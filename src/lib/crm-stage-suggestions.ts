@@ -31,6 +31,8 @@ const EVENT_REASONS: Record<string, string> = {
   unsubscribe: 'Pidió no recibir más correos.',
   reply_review_required: 'Respondió; conviene leer qué dijo.',
   suplia_crm_update_stage: 'SUPL.IA propone este cambio.',
+  call_summary: 'En la llamada mostró interés.',
+  call_meeting: 'En la llamada quedaron en una reunión.',
 };
 
 /** Why the stage is suggested, in plain words: the event when it is known, otherwise what the event wrote as a note. */

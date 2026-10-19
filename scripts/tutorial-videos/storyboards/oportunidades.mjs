@@ -1,64 +1,99 @@
+import { uid } from '../../visual-audit/fixtures/ids.mjs';
+import { opportunityData } from './oportunidades-data.mjs';
+
 const NAV = { role: 'navigation', name: 'Navegación principal' };
+const TITLE = 'Servicio de verificación de antecedentes de postulantes';
+// The same ids as the demo data of the bench (visual-audit/fixtures/ids.mjs).
+const data = () => opportunityData({ ORG: uid(1), OWNER: uid(11), MEMBER: uid(12) });
 
 export default {
   id: 'oportunidades', title: 'Oportunidades', start: '/dashboard',
-  intro: 'Empresas que están contratando para lo que vendes, licitaciones públicas que calzan contigo y proyectos por partir.',
-  learn: ['Ver quién está contratando', 'Revisar licitaciones y Compra Ágil', 'Ajustar lo que buscamos'],
-  mocks: [{ url: '**/api/commercial-opportunities/*', method: 'PATCH', respond: { ok: true } }],
+  intro: 'Licitaciones, Compra Ágil y empresas que están contratando, con un informe de la IA para decidir y ganar.',
+  learn: ['Leer el embudo', 'Abrir una licitación y su informe', 'Ver cómo ganarla'],
+  mocks: [
+    {
+      url: /\/api\/commercial-opportunities\/workspace\?/, method: 'GET',
+      respond: (_body, request) => (new URL(request.url()).searchParams.get('view') === 'pipeline' ? data().pipeline : data().overview),
+    },
+    { url: /\/api\/commercial-opportunities\/workspace$/, method: 'POST', respond: { ok: true, suggestions: [] } },
+    { url: /\/api\/commercial-opportunities\/[^/?]+\/workspace$/, method: 'GET', respond: () => data().detail },
+    { url: /\/api\/commercial-opportunities\/[^/?]+\/market$/, method: 'GET', respond: () => data().market },
+    { url: /\/api\/commercial-opportunities\/[^/?]+\/chat$/, method: 'GET', respond: { messages: [] } },
+    { url: /\/api\/commercial-opportunities\/[^/?]+\/contacts/, method: 'GET', respond: { contacts: [] } },
+    {
+      url: /\/api\/commercial-opportunities\/[^/?]+\/sources$/, method: 'GET',
+      respond: { links: { ficha: 'https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=4521-61-LE26', attachments: null, forum: null, forms: 1, code: '4521-61-LE26' } },
+    },
+    { url: /\/api\/commercial-opportunities\/assistant/, method: 'GET', respond: () => data().assistant },
+  ],
   scenes: [
     {
       title: 'Abre Oportunidades', text: 'Está en el menú, en «Prospectar».',
-      say: 'Abre «Oportunidades» desde el menú.',
+      say: 'Abre Oportunidades desde el menú.',
       target: { role: 'link', name: 'Oportunidades', within: NAV },
-      waitFor: { role: 'tab', name: /Empresas contratando/, exact: false },
+      waitFor: { role: 'heading', name: 'Embudo de oportunidades' },
     },
     {
-      title: 'Empresas que están contratando', text: 'Cuántos avisos publicaron y para qué cargos: una señal de que necesitan lo que vendes.',
-      say: 'Primero, las empresas que están contratando.', postit: 'El calce pone arriba las que más se parecen a tu cliente ideal.',
-      target: { role: 'heading', name: 'Retail Andino' }, action: 'none', zoom: 1.5, arrow: true,
+      title: 'El embudo', text: 'De «Por revisar» a «Ganadas». Cada oportunidad avanza sola cuando el trabajo lo muestra.',
+      say: 'El embudo te dice dónde está cada oportunidad.',
+      target: { role: 'heading', name: 'Embudo de oportunidades' }, zoomOn: { css: 'section[aria-labelledby="pipeline-title"]' }, action: 'none', zoom: 1.1, highlight: false,
     },
     {
-      title: 'Mira la evidencia', text: 'Cada aviso, con dónde y cuándo se publicó.',
-      say: 'Abre los avisos para ver la evidencia.',
-      target: { role: 'button', name: /^Ver los avisos/, exact: false }, zoom: 1.55, arrow: true,
+      title: 'Revisar con IA', text: 'La IA propone qué mover de etapa. Nada cambia sin que lo aceptes.',
+      say: 'La IA te sugiere qué mover.',
+      target: { role: 'button', name: 'Revisar con IA' }, action: 'hover', zoom: 1.6, arrow: true,
     },
     {
-      title: 'Márcala', text: 'Queda a tu nombre, y tu equipo ve que la estás trabajando.',
-      say: 'Si te interesa, márcala.', postit: '«Buscar decisores» te lleva a las personas de esa empresa.',
-      target: { role: 'button', name: 'Me interesa' }, zoom: 1.6, arrow: true,
-      waitFor: { role: 'button', name: /Me interesan\s*1/, exact: false },
+      title: 'La lista', text: 'Las recomendadas primero: calzan con tu oferta y aún no tienen equipo.',
+      say: 'En «Lista», las que calzan contigo.',
+      target: { role: 'button', name: 'Lista', within: { role: 'group', name: 'Vista' } }, zoom: 1.6, arrow: true,
+      waitFor: { role: 'heading', name: TITLE },
     },
     {
-      title: 'Las tuyas, juntas', text: '«Me interesan» junta las que marcaste para preparar el contacto.',
-      say: 'Las que marcas quedan en «Me interesan».',
-      target: { role: 'button', name: /Me interesan\s*1/, exact: false }, zoom: 1.5, arrow: true,
-      waitFor: { role: 'button', name: 'Te interesa' },
+      title: 'Por qué calza', text: 'El motivo, el cierre, el monto y quién la trabaja.',
+      say: 'Cada una dice por qué calza contigo.', postit: 'Las encontramos cada mañana con tu oferta: no escribes palabras de búsqueda.',
+      target: { role: 'heading', name: TITLE }, zoomOn: { css: `article:has(h3:has-text("${TITLE}"))` }, action: 'none', zoom: 1.4,
     },
     {
-      title: 'Licitaciones y Compra Ágil', text: 'Compras públicas abiertas que calzan con tus palabras.',
-      say: 'Ahora, las licitaciones y Compra Ágil.',
-      target: { role: 'tab', name: /Licitaciones y Compra Ágil/, exact: false }, zoom: 1.5, arrow: true,
-      waitFor: { role: 'heading', name: 'Servicio de verificación de antecedentes para personal externo' },
+      title: 'Ábrela', text: 'El expediente: informe, cómo postular, cómo ganar, documentos y tareas.',
+      say: 'Ábrela para trabajarla.',
+      target: { css: `article:has(h3:has-text("${TITLE}")) button` }, zoom: 1.5, arrow: true,
+      waitFor: { text: 'Postular', exact: true },
     },
     {
-      title: 'Lo esencial de cada una', text: 'Monto, cuántos días quedan para postular y las palabras que calzan.',
-      say: 'Cada tarjeta dice el monto y cuándo cierra.', postit: 'Se buscan con tu ticket de Mercado Público, que es gratis.',
-      target: { role: 'heading', name: 'Servicio de verificación de antecedentes para personal externo' }, action: 'none', zoom: 1.5,
+      title: 'El informe', text: 'La IA leyó las bases: si conviene postular, por qué y qué hacer ahora.',
+      say: 'El informe te dice si conviene postular.', postit: 'Solo dice «No postular» con evidencia de las bases.',
+      target: { text: 'Postular', exact: true }, zoomOn: { text: /^Postular\. El hospital/, exact: false }, action: 'none', zoom: 1.35,
     },
     {
-      title: 'Ábrela en Mercado Público', text: 'Las bases y los plazos oficiales, en otra pestaña.',
-      say: 'Ábrela en Mercado Público para ver las bases.',
-      target: { role: 'link', name: /Ver en Mercado Público/, exact: false }, action: 'hover', zoom: 1.6, arrow: true,
+      title: 'Requisitos', text: 'Lo que ya cumples y lo que falta, con quién y para cuándo.',
+      say: 'Lo que piden y lo que te falta.',
+      target: { role: 'heading', name: /^Requisitos para postular/, exact: false }, action: 'none', zoom: 1.3, arrow: true,
     },
     {
-      title: 'Ajusta lo que buscamos', text: 'Cargos, regiones, palabras y fuentes. Buscamos cada mañana con esto.',
-      say: 'Y ajusta lo que buscamos cuando quieras.',
-      target: { role: 'button', name: 'Editar búsqueda' }, zoom: 1.5, arrow: true,
-      waitFor: { role: 'dialog', name: 'Qué buscamos' },
+      title: 'Cómo ganar', text: 'Lo que este organismo compró antes, quién ganó y a qué precio.',
+      say: 'En «Cómo ganar», el historial del organismo.',
+      target: { role: 'button', name: 'Cómo ganar' }, zoom: 1.6, arrow: true,
+      waitFor: { role: 'heading', name: 'Estrategia sugerida' },
+    },
+    {
+      title: 'Un precio con respaldo', text: 'El rango sale de lo que realmente se pagó en compras parecidas.',
+      say: 'Un rango de precio apoyado en lo que se pagó.', postit: 'Datos abiertos de ChileCompra de los últimos 4 años.',
+      target: { text: 'Rango de precio' }, zoomOn: { css: 'section[aria-labelledby="winplan-title"]' }, action: 'none', zoom: 1.15,
+    },
+    {
+      title: 'A quién tendrás enfrente', text: 'Quién ganó antes en este organismo y qué destacar en tu oferta.',
+      say: 'Y a quién tendrás enfrente.',
+      target: { role: 'heading', name: 'A quién tendrás enfrente' }, action: 'none', zoom: 1.4, arrow: true,
+    },
+    {
+      title: 'Pregúntale a la IA', text: 'Responde con las bases de esta licitación y cita de dónde lo sacó.',
+      say: 'Y si tienes dudas, pregúntale a la IA.',
+      target: { role: 'button', name: 'Preguntar a la IA' }, action: 'hover', zoom: 1.6, arrow: true,
     },
   ],
   outro: {
-    title: 'Oportunidades cada mañana', text: 'Revisa las nuevas y marca las que trabajarás.',
-    items: ['Empresas contratando, con evidencia', 'Licitaciones y Compra Ágil con tu ticket', '«Editar búsqueda» para ajustar'],
+    title: 'Oportunidades cada mañana', text: 'Revisa las recomendadas y trabaja las que calzan.',
+    items: ['El embudo y la lista', 'El informe: postular o no, y por qué', '«Cómo ganar» con el historial del organismo'],
   },
 };

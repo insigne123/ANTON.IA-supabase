@@ -41,7 +41,7 @@ test('the «?» of each screen opens its section, including the screens behind a
     ['/contact/compose', 'correo'], ['/contact/sequence', 'correo'], ['/contacted', 'conversaciones'], ['/contacted/replied', 'conversaciones'],
     ['/campaigns', 'campanas'], ['/crm', 'pipeline'], ['/profile', 'perfil'], ['/gmail', 'conexiones'], ['/outlook', 'conexiones'],
     ['/settings/email-studio', 'firmas'], ['/settings/unsubscribes', 'privacidad'], ['/leads/import', 'tabla'],
-    ['/dashboard/admin/users', 'administracion'], ['/search?mode=x', 'buscar'], ['/cowork', null], ['/ayuda', null], ['/ayuda/perfil', null], [null as never, null],
+    ['/dashboard/admin/users', 'administracion'], ['/search?mode=x', 'buscar'], ['/cowork', 'cowork'], ['/cowork?t=1', 'cowork'], ['/ayuda', null], ['/ayuda/perfil', null], [null as never, null],
   ];
   for (const [path, id] of cases) assert.equal(helpSectionFor(path)?.id ?? null, id, String(path));
 });
@@ -52,6 +52,9 @@ test('hidden features stay out of the manual for the people who cannot use them'
   const admin = visibleHelpSections({ opportunities: true, admin: true }).map((section) => section.id);
   assert.equal(admin.length, HELP_SECTIONS.length);
   assert.doesNotMatch(manualAsText(visibleHelpSections({ opportunities: false, admin: false })), /\[administracion\]/);
+  assert.ok(member.includes('cowork'), 'Cowork is open to every account');
+  assert.ok(!visibleHelpSections({ opportunities: true, admin: true, cowork: false }).some((section) => section.id === 'cowork'),
+    'an account without Cowork does not read about it');
 });
 
 test('search finds the answer without accents or case, FAQs first', () => {

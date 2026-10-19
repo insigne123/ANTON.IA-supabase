@@ -20,6 +20,13 @@ test('the admin panel is checked on the server before any of it renders', () => 
   assert.match(adminLayout, /throw error;/, 'a failed lookup reaches the panel error page, not a false 404');
 });
 
+test('the «Administración» menu probe answers a member who does not administer, instead of failing in their console', () => {
+  const usageAccess = readFileSync('src/app/api/dashboard/admin/usage/access/route.ts', 'utf8');
+  assert.match(usageAccess, /error\.status===403\)return NextResponse\.json\(\{canView:false\},\{headers\}\)/);
+  assert.match(usageAccess, /status:error instanceof AdminDashboardAuthError\?error\.status:503/, 'no session and a failed lookup keep their status');
+  assert.match(adminLayout, /usageError\.status===403\)notFound\(\)/, 'the panel itself still answers 404');
+});
+
 test('privacy requests and incidents answer 404 to anyone off PRIVACY_ADMIN_EMAILS, the list their APIs check', () => {
   assert.match(privacyGuard, /createServerComponentClient\(\{ cookies \}\)/);
   assert.match(privacyGuard, /if \(!user \|\| !isPrivacyAdminEmail\(user\.email\)\) notFound\(\)/);

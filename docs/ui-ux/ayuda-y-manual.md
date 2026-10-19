@@ -7,7 +7,9 @@
 **Antes:**
 - El recorrido v2 resaltaba entradas del menú, pero no abría las pantallas ni mostraba sus controles.
 - «Ayuda» solo repetía la guía corta de la pantalla, y no aparecía en pantallas sin guía (Privacidad, Firmas y estilo, Tabla de datos).
-- No había manual dentro de la app. `docs/manual-de-usuario-antonia.html` es un documento aparte, anterior al menú actual.
+- No había manual dentro de la app. `docs/manual-de-usuario-antonia.html` era un documento aparte, anterior al menú actual.
+
+> **Actualizado el 19 oct:** `docs/manual-de-usuario-antonia.html` y su PDF ya no se escriben a mano: `npm run manual:build -- --pdf` los genera desde `src/lib/help/manual.ts` y los videos de `src/lib/help/tutorial-videos.ts`, con el mismo texto del Centro de ayuda. Hay que correrlo después de cambiar el manual. Los videos son 16: se sumaron «Informe semanal», «Empresas» (la tercera vista del Pipeline) y «Mercado público», y se volvieron a grabar Hoy, Firmas y estilo, Pipeline y Oportunidades.
 
 ## Actualización del 5 oct: videos por módulo y recorrido v4 (Plan 11, sección 7)
 

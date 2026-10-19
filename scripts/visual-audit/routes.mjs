@@ -15,6 +15,7 @@ export function routeList(ctx) {
     app('/saved', 'Empresas guardadas'),
     app('/research', 'Investigaciones'),
     app('/contacted', 'Conversaciones'),
+    app('/weekly-report', 'Informe semanal'),
     app('/crm', 'Pipeline'),
     app('/sheet', 'Tabla de datos'),
     app('/campaigns', 'Campañas'),
@@ -22,7 +23,8 @@ export function routeList(ctx) {
     app('/contact/compose', 'Redactar'),
     app('/contact/sequence', 'Secuencia'),
     app('/opportunities', 'Oportunidades', { gate: 'opportunities' }),
-    app('/cowork', 'Cowork', { gate: 'cowork' }),
+    // Open to every account since 19 Oct 2026 (COWORK_OPEN_TO_ALL in apphosting.yaml): no list to check for the member.
+    app('/cowork', 'Cowork'),
     app('/profile', 'Perfil'),
     app('/connections', 'Conexiones'),
     app('/settings/email-studio', 'Firmas y estilo'),

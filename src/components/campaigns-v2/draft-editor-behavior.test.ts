@@ -218,6 +218,7 @@ test('rendered editors preserve edits across proposals/conflicts/overlapping sav
       'next/navigation': { useSearchParams: () => params, useRouter: () => ({ back() {}, replace: (href: string) => { replacement = href; } }) },
       '@/hooks/use-toast': { useToast: () => ({ toast() {} }) },
       '@/hooks/use-contactability': { useContactability: () => ({ loading: false, error: null, result: null }) },
+      '@/hooks/use-booking-link': { useBookingLink: () => null },
       '@/lib/campaign-qa': { assessCampaignQa: () => ({ status: 'passed', checks: [], reviewCount: 0 }) },
       '@/lib/email-utils': { extractPrimaryEmail: (lead: any) => ({ email: lead?.email || '' }) },
       '@/lib/lead-research-storage': { findReportForLead: () => report },

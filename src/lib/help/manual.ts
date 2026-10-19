@@ -18,7 +18,7 @@ export type HelpSection = {
   /** Paths whose «?» opens this section. */
   routes?: RegExp;
   /** Hidden when the feature is off for the person (same rules as the menu). */
-  feature?: 'opportunities' | 'admin';
+  feature?: 'opportunities' | 'admin' | 'cowork';
   /** What the screen is for, in one or two sentences. */
   summary: string;
   /** How to use it, in the order of the work. */
@@ -63,20 +63,72 @@ export const HELP_SECTIONS: HelpSection[] = [
     group: 'Empieza aquí',
     href: '/dashboard',
     routes: /^\/dashboard\/?$/,
-    summary: 'Tu inicio: lo que toca ahora, lo que falta para enviar y cómo va tu semana.',
+    summary: 'Tu inicio: lo que toca ahora, tus llamadas y LinkedIn, a quién retomar y tu resumen del día.',
     steps: [
       '«Lo primero hoy» muestra una sola acción, en este orden: responder a quien te respondió, resolver lo que impide enviar, un compromiso que vence hoy, escribir a tus contactos con correo, completar correos o buscar prospectos.',
       '«Lo que te espera» lista hasta 6 pendientes, los urgentes primero. Cada uno abre la conversación exacta.',
       '«Prepara tu cuenta» tiene cuatro pasos comprobados: perfil con empresa y oferta, correo conectado, primeros contactos y primer envío. Cada paso pendiente trae su enlace.',
       '«Para retomar» aparece cuando alguien vale la pena de nuevo: una conversación que cerraste «Sin acuerdo» o dejaste en «Lo retomo yo» hace 60 días, alguien que no respondió en 45 días, o una empresa con la que hablaste que ahora está contratando o publicó una licitación. «Retomar» prepara un correo nuevo con otro ángulo para que lo revises en «Redactar»; con «…» lo pospones 30 días o lo descartas.',
-      'Abajo están «Tu semana» (cifras y gráfico) y «Créditos y uso diario».',
+      '«Llamadas y LinkedIn» te recuerda llamar o invitar por LinkedIn a quien no respondió tu primer correo, el día que elijas: por defecto, LinkedIn el día 1 y la llamada el día 3. Se enciende con «Activar» y se cambia con «Ajustar». Si la persona responde, lo pendiente se cancela solo.',
+      'En cada fila, el botón llama al número o abre su LinkedIn. «Guion y resultado» prepara qué decir, el mensaje si no contesta o la nota de la invitación; marca qué pasó y pulsa «Guardar». Si hablaron, «Subir grabación» deja el resumen, los acuerdos y el próximo paso en el CRM.',
+      'Al lado, «Tu resumen de hoy» cuenta tus correos enviados, contactos, respuestas y guardados del día, con su gráfico, y «Tu cupo de hoy» dice cuánto te queda. Cómo fue la semana está en «Informe semanal».',
     ],
     faqs: [
       { q: '¿Por qué «Prepara tu cuenta» dice que mi correo no está conectado?', a: 'Mira si hay una conexión guardada de Gmail u Outlook. La sesión de Outlook abierta solo en el navegador no cuenta. Conéctalo en «Conexiones».' },
       { q: '¿Qué es un compromiso?', a: 'Una fecha o próximo paso acordado con un contacto, como una reunión. Cuando vence hoy o ya venció, aparece en «Lo que te espera».' },
+      { q: '¿Por qué no me toca llamar a alguien?', a: 'Solo se llama a quien tiene teléfono: pídelo al guardar el contacto, con «Correo + teléfono». Además, «Llamadas y LinkedIn» cuenta a quienes escribiste desde que lo activaste, hasta 45 días atrás, y cancela lo pendiente si la persona respondió, rebotó o pidió no recibir más correos.' },
+      { q: '¿Se graba la llamada?', a: 'Solo si tú la grabas, con la grabadora del teléfono o del computador, y pidiendo permiso al empezar. Al subir el audio lo transcribimos y resumimos para el CRM; el audio no se guarda.' },
+      { q: '¿Por qué hay un límite de LinkedIn al día?', a: 'LinkedIn restringe las cuentas que envían muchas invitaciones. Mostramos hasta 20 al día; las demás quedan para mañana. Una tarea que no haces se cierra sola una semana después de su día.' },
       { q: '¿Por qué no aparece alguien en «Para retomar»?', a: 'Nunca aparece quien cerraste como «No interesado» o «Ganado», quien pidió no recibir más correos, quien respondió que no o cuyo correo rebotó. Tampoco quien te respondió y espera tu respuesta: esa persona está en «Lo que te espera». Puedes cambiar los días de espera abajo en la tarjeta.' },
     ],
     related: ['primeros-pasos', 'creditos', 'conversaciones'],
+  },
+  {
+    id: 'cowork',
+    title: 'Cowork',
+    group: 'Empieza aquí',
+    href: '/cowork',
+    routes: /^\/cowork(\/.*)?$/,
+    feature: 'cowork',
+    summary: 'Tu asistente de ventas: le pides lo que necesitas con tus palabras y lo hace con tus contactos, tu oferta y tus correos. Lo que envía, guarda o gasta créditos espera tu aprobación.',
+    steps: [
+      'Escribe lo que necesitas, por ejemplo «¿Qué toca hoy?» o «Escribe a mis contactos de retail», o parte con una de las sugerencias de la portada. Con «/» ves los atajos y con «@» nombras a un contacto guardado.',
+      'Cowork busca, lee y prepara a la vista: te muestra lo que va haciendo y deja el resultado en la conversación, como una tabla de contactos, un correo, un gráfico o un informe.',
+      'Cuando propone algo que envía, guarda o gasta créditos, aparece una tarjeta con «Aprobar». Nada sale ni se guarda sin ese clic, y puedes editar antes de aprobar.',
+      'Tus conversaciones quedan en la lista de la izquierda. Puedes adjuntar archivos, como un Excel con contactos, y bajar tablas en Excel o CSV e informes en Word o PDF.',
+      'Si no sabes por dónde partir, pregunta «¿Qué puedes hacer?»: te muestra todo lo que hace, con ejemplos para probar.',
+    ],
+    tips: [
+      'Dile qué vendes en «Perfil» antes de empezar: Cowork escribe y busca a partir de tu oferta.',
+      'Una campaña que arma Cowork queda guardada sin enviar hasta que la actives.',
+    ],
+    faqs: [
+      { q: '¿Cowork envía correos sin preguntarme?', a: 'No. Cada envío, campaña, invitación de LinkedIn o búsqueda de correo aparece como una tarjeta que apruebas tú.' },
+      { q: '¿Cuánto puedo usarlo?', a: 'Hay un uso diario del asistente por persona. Si llegas al límite, Cowork te lo dice: se renueva a medianoche, hora de Chile, y lo hecho queda guardado.' },
+      { q: '¿Quién ve mis conversaciones?', a: 'Solo tú. Cowork trabaja con los contactos y datos que puedes ver en el workspace activo.' },
+    ],
+    related: ['hoy', 'buscar', 'campanas'],
+  },
+  {
+    id: 'informe-semanal',
+    title: 'Informe semanal',
+    group: 'Empieza aquí',
+    href: '/weekly-report',
+    routes: /^\/weekly-report\/?$/,
+    summary: 'Tu semana en un vistazo: cuánto escribiste, quién respondió, qué te espera y qué hacer en los próximos días. Puede llegarte por correo cada lunes.',
+    steps: [
+      'Arriba eliges «Esta semana» (de lunes a hoy) o «Semana pasada» (de lunes a domingo). Cada cifra se compara con los mismos días de la semana anterior.',
+      '«Tu semana» trae una frase con lo importante, tus correos enviados, las personas contactadas, las respuestas, las reuniones pedidas y «Para esta semana»: hasta tres cosas para hacer, con su enlace.',
+      'Si administras la organización, «Equipo» muestra lo mismo por persona, con quién tiene respuestas por atender.',
+      '«Oportunidades» muestra lo que llegó en la semana, lo que cierra en los próximos 7 días y lo que nadie tiene asignado. Lo ven los gestores de oportunidades que elija un administrador; mientras no haya, los administradores.',
+      'Abajo, «Recibirlo por correo cada lunes» te lo envía a las 8:00 con la semana anterior, desde tu Gmail u Outlook conectado y a tu propio correo. «Enviármelo ahora» te manda el que estás viendo.',
+    ],
+    faqs: [
+      { q: '¿Desde dónde sale el correo del informe?', a: 'Desde tu propia cuenta de Gmail u Outlook conectada en «Conexiones», hacia tu mismo correo. No lo recibe nadie más y no usa tu cupo de envíos.' },
+      { q: '¿Cómo nombro a un gestor de oportunidades?', a: 'Si administras la organización, en «Informe semanal» pulsa «Gestores de oportunidades», marca a las personas y guarda. Desde el lunes siguiente reciben la sección «Oportunidades».' },
+      { q: '¿Por qué mis cifras no coinciden con «Hoy»?', a: '«Hoy» cuenta solo el día. El informe cuenta la semana de lunes a domingo, en hora de Chile, y solo correos confirmados por tu proveedor.' },
+    ],
+    related: ['hoy', 'administracion', 'oportunidades'],
   },
   {
     id: 'buscar',
@@ -113,15 +165,16 @@ export const HELP_SECTIONS: HelpSection[] = [
     href: '/opportunities',
     routes: /^\/opportunities(\/.*)?$/,
     feature: 'opportunities',
-    summary: 'Empresas que están contratando para lo que ofreces, licitaciones y Compra Ágil que calzan con tu oferta y proyectos de inversión por partir, con la evidencia de cada una.',
+    summary: 'Licitaciones, Compra Ágil, empresas que están contratando y publicaciones de LinkedIn que calzan con tu oferta, con un informe de la IA para decidir, postular y ganar.',
     steps: [
-      'La primera vez, pulsa «Definir búsqueda»: lo que vendes sale de tu Perfil y las palabras para licitaciones se generan solas. Elige los cargos y regiones de la búsqueda diaria y pulsa «Guardar y buscar». Desde ahí se busca sola cada mañana.',
-      'En «Empresas contratando», «Buscar ahora» te deja elegir los cargos y las regiones en el momento, y busca también sus otras formas (por ejemplo, «cashier» para «cajero»). Agrupa los avisos por empresa y, antes de buscar, ves cuánto cuesta.',
-      'Desde una empresa, busca a sus decisores: la búsqueda se abre lista y, al guardarlos, eliges si buscar su correo.',
-      'En «Licitaciones y Compra Ágil», conecta tu ticket de Mercado Público (gratis, uno por persona) y pulsa «Buscar licitaciones»: revisamos todas las licitaciones abiertas y la IA deja las que sirven a lo que vendes, con el motivo. Después se actualiza sola cada mañana.',
-      'En «Proyectos de inversión», sube el archivo que descargas del mapa de proyectos del SEIA. Si pasan 30 días sin subir uno, la pestaña te lo recuerda.',
+      'La primera vez, quien administra pulsa «Confirmar oferta» y revisa qué vende la empresa: la IA prepara los criterios desde esa oferta, sin escribir palabras de búsqueda. Desde ahí buscamos cada mañana. En la misma ventana («Empresa del workspace») conectas tu ticket de Mercado Público.',
+      '«Embudo» muestra cuántas hay en cada etapa: Por revisar, Recomendadas, Asignadas, En preparación, Presentadas y Ganadas. Avanzan solas cuando el trabajo lo muestra (un equipo asignado, el informe listo, la oferta presentada), y «Revisar con IA» propone otros cambios que tú aceptas.',
+      '«Lista» trae primero las recomendadas, cada una con el motivo del calce, el cierre y el monto, y filtros para ver las demás. «Por dónde empezar» ordena las de mejor calce que cierran pronto. «Cargar oportunidad» suma una que recibiste por otro lado, con sus bases.',
+      '«Abrir y trabajar» abre el expediente. «Asignar equipo» elige quién la trabaja, e «Informe» dice si conviene postular, por qué y qué hacer ahora, con las fechas, los requisitos y los riesgos. Sube las bases en «Documentos»: la IA las lee y completa el informe. «Preguntar a la IA» responde con esas bases y cita de dónde lo sacó.',
+      'Si te asignan oportunidades, ves «Mis oportunidades»: lo nuevo, lo que gestionas y lo bloqueado, con la próxima acción de cada una.',
       'Con el informe listo, en «Cómo postular» pulsa «Preparar borrador de oferta»: la IA arma la carta, la oferta técnica por criterio de evaluación, el cumplimiento de requisitos y las líneas a cotizar. Completa los datos marcados entre corchetes, escribe los precios y descárgalo en Word.',
-      'Si administras Oportunidades, «Demanda futura» muestra lo que los organismos públicos planean comprar este año y calza con tu oferta, según su Plan Anual de Compras. «Seguir» agrega una compra a tus oportunidades para llegar antes de que la liciten.',
+      'En una licitación o Compra Ágil, «Cómo ganar» muestra lo que ese organismo compró antes que se parece, quién ganó, con cuántos oferentes y a qué precio frente al estimado, y lo que pagaron otros organismos. «Preparar estrategia» le pide a la IA un rango de precio apoyado en esos montos, qué destacar, los riesgos y a quién tendrás enfrente.',
+      'Si administras Oportunidades, «Mercado público» reúne tres vistas con datos de ChileCompra. «Demanda futura»: lo que los organismos planean comprar este año según su Plan Anual de Compras. «Contratos por vencer»: contratos que hoy tiene otra empresa, calzan con tu oferta y terminan pronto, con quién los tiene y por cuánto. «Competidores»: busca un proveedor por nombre o RUT, síguelo y ve lo que gana. En las dos primeras, «Seguir» lo agrega a tus oportunidades para llegar antes de que liciten.',
       'Si administras Oportunidades, completa la «Ficha para licitaciones» (junto a «Qué buscamos»): razón social, RUT, regiones, experiencia, certificaciones y garantías. «Completar con IA» la llena desde tu Perfil y tu sitio web. Con ella la IA no descarta una licitación por algo que sí tienes, y el borrador de oferta trae tus datos.',
       'En el informe de una licitación, cada requisito dice si cumples (✓), si falta un dato (⚠) o si no cumples (✗) según tu ficha. Responde las preguntas de «Falta un dato» con «Sí», «No» o en tus palabras: queda guardado en la ficha y la IA revisa de nuevo.',
       'En la ficha, «Documentos de la empresa» guarda el F30, la vigencia de la sociedad, los estados financieros y tus certificados con su vencimiento. Te avisamos 15 días antes de que venzan y la IA sabe cuáles tienes vigentes.',
@@ -129,11 +182,14 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
     faqs: [
       { q: '¿Para qué sirve saber que una empresa está contratando?', a: 'Es una razón concreta para escribirle: si busca personal, puede necesitar lo que ofreces.' },
-      { q: '¿Cómo consigo mi ticket de Mercado Público?', a: 'En chilecompra.cl/api pulsa «Pide tu ticket», ingresa con tu Clave Única y completa el formulario eligiendo «Solicitud de Ticket». El ticket llega a tu correo: pégalo en Oportunidades → «Licitaciones y Compra Ágil» (o en Conexiones) y pulsa «Probar y guardar». Es gratis.' },
-      { q: '¿Cómo elige la IA las licitaciones?', a: 'Lee todas las compras abiertas contra lo que vendes según tu Perfil y deja aquellas a las que podrías postular, con una frase que dice por qué. Si no alcanza a leer alguna, decide con tus palabras. Para cambiar lo que busca, actualiza tu oferta en Perfil.' },
+      { q: '¿Cómo consigo mi ticket de Mercado Público?', a: 'En chilecompra.cl/api pulsa «Pide tu ticket», ingresa con tu Clave Única y completa el formulario eligiendo «Solicitud de Ticket». El ticket llega a tu correo: pégalo en Oportunidades → «Empresa del workspace» (o en Conexiones) y pulsa «Probar y guardar». Es gratis.' },
+      { q: '¿Cómo elige la IA las licitaciones?', a: 'Lee todas las compras abiertas contra la oferta confirmada en «Empresa del workspace» y recomienda aquellas a las que podrías postular, con una frase que dice por qué. Las demás quedan en «No recomendadas» con su motivo. Para cambiar lo que busca, actualiza esa oferta.' },
       { q: '¿La IA inventa datos en el borrador de oferta?', a: 'No debería: usa solo lo que dicen las bases y tu Perfil, y lo que falta lo deja entre corchetes, como [RUT] o [años de experiencia], para que lo completes. Revisa cada dato con las bases antes de enviar; los precios los escribes tú.' },
       { q: '¿Qué pasa si dejo preguntas de la ficha en blanco?', a: 'La IA lo toma como «no sé», nunca como un no: no descarta una licitación por eso y, si importa, te dice qué dato falta. Puedes completarla cuando quieras; al guardar te ofrece revisar de nuevo las licitaciones descartadas por un requisito o por su tamaño.' },
       { q: '¿El Asistente ve todas las oportunidades del equipo?', a: 'Ve las mismas que tú en Oportunidades: si administras, todas; si no, las que te asignaron. Tus conversaciones son privadas. Para preguntas sobre los documentos de una licitación, usa su conversación: el Asistente te lleva a ella con un botón.' },
+      { q: '¿De dónde sale el historial de «Cómo ganar» y del radar de competidores?', a: 'De los datos abiertos de ChileCompra: cada licitación con sus ofertas y quién ganó. Guardamos todas las ofertas del último año, las ganadoras de los dos años anteriores y los contratos largos de hasta cuatro años, y los actualizamos cada mes. Son datos públicos; la estrategia es una sugerencia y el precio lo decides tú.' },
+      { q: '¿Por qué algunos competidores no muestran su RUT?', a: 'Cuando quien oferta es una persona natural, mostramos solo su nombre: su RUT es un dato personal, aunque ChileCompra lo publique. De las empresas sí ves el RUT.' },
+      { q: '¿Qué tan exacta es la fecha de «Contratos por vencer»?', a: 'Es estimada: la fecha de adjudicación más la duración del contrato que informó el organismo. Una prórroga, un trato directo o un contrato que empezó después pueden moverla. Úsala para preparar la conversación con tiempo, no como fecha de cierre.' },
       { q: '¿Qué tan seguro es lo que aparece en «Demanda futura»?', a: 'Es lo que cada organismo publicó en su Plan Anual de Compras, con el monto y el mes estimados. Es referencial: puede comprar menos, en otra fecha o por otro mecanismo. Sirve para presentarte antes de que publiquen la licitación.' },
       { q: '¿Por qué necesito mi propio ticket?', a: 'ChileCompra entrega un ticket por persona y cada uno tiene su límite diario de consultas. Con el tuyo, tus búsquedas no dependen de otra cuenta. Lo guardamos cifrado y solo mostramos sus últimos 4 caracteres.' },
     ],
@@ -294,11 +350,13 @@ export const HELP_SECTIONS: HelpSection[] = [
     group: 'Seguimiento',
     href: '/crm',
     routes: /^\/crm\/?$/,
-    summary: 'Ordena a tus contactos por etapa de venta y prioriza a quién mover.',
+    summary: 'Ordena a tus contactos por etapa de venta y por empresa, y prioriza a quién mover.',
     steps: [
       'Las etapas son: Nuevos, Calificado, Contactado, Interesado, Reunión, Negociación, Ganado y Perdido.',
       '«Panel» es tu tablero tipo CRM: cifras con su comparación contra el período anterior, el pipeline abierto por etapa, cuántos avanzan de una etapa a la siguiente, tus contactos por mes contra tu promedio y los leads nuevos de 13 meses. Arriba eliges el período, el responsable y el origen; toca una etapa para ver sus leads. Se actualiza solo.',
       'En «Tablero», arrastra cada tarjeta a su nueva etapa o usa «Cambiar etapa».',
+      '«Empresas» agrupa a tus contactos por empresa. Cada una muestra si conoces a quien decide, a quien usa lo que vendes y a quien paga. Abre una empresa para ver su cobertura por área y nivel; donde falta alguien, «Buscar» abre «Buscar prospectos» en esa empresa con los cargos ya escritos.',
+      'En una empresa, «Buscar empresas parecidas» encuentra empresas del mismo rubro y tamaño que aún no tienes, y la IA elige las más parecidas y dice por qué. Usa una búsqueda de tu cupo diario. «Ver personas» abre la búsqueda de esa empresa.',
       'Abre un contacto para ver su actividad, el responsable y la próxima acción registrada.',
       'Arriba aparecen las sugerencias de etapa: un envío propone Contactado; una respuesta con interés, Interesado; una reunión pedida, Reunión; un pedido de propuesta o precio, Negociación; una compra confirmada, Ganado; y un «no me interesa», Perdido. Acéptalas una por una o con «Aceptar todas». En «Panel», cada etapa marca cuántos cambios esperan tu confirmación.',
     ],
@@ -307,8 +365,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       { q: '¿Qué compara cada cifra del «Panel»?', a: 'Los leads nuevos, los contactados y la tasa de respuesta se comparan con el período anterior del mismo largo (por ejemplo, los 30 días anteriores). Las etapas son una foto de hoy. La «Lectura» resume en frases lo más importante y te lleva a la etapa donde hay leads detenidos.' },
       { q: '¿Las etapas cambian solas?', a: 'No. Los envíos y las respuestas proponen el cambio y tú lo aceptas. Nunca se mueve un contacto hacia atrás ni uno ya cerrado.' },
       { q: '¿Puedo asignar un responsable?', a: 'Sí, en el detalle del contacto, en «Colaboración».' },
+      { q: '¿Cómo sabe «Empresas» quién decide, quién usa y quién paga?', a: 'Por el cargo de cada contacto. Decide alguien de la alta dirección o un gerente de tu área; usa una jefatura o alguien del equipo de tu área; paga alguien de finanzas o compras, o el dueño en una empresa de menos de 200 personas. «Tu área» sale de «Cargos que buscas», en «Perfil».' },
+      { q: '¿Por qué una persona aparece en otra área?', a: 'El área y el nivel salen de las palabras del cargo y, si se buscaron sus datos, de lo que informa el proveedor. Un cargo que dice poco, como «Product Owner», queda en «Otras áreas».' },
     ],
-    related: ['conversaciones', 'hoy'],
+    related: ['conversaciones', 'hoy', 'buscar'],
   },
   {
     id: 'perfil',
@@ -368,7 +428,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     group: 'Configuración',
     href: '/settings/email-studio',
     routes: /^\/settings\/email-studio(\/.*)?$/,
-    summary: 'Tu firma va al final de cada correo que envías, y tus estilos le dicen a la IA cómo escribir tus borradores.',
+    summary: 'Tu firma va al final de cada correo que envías, tus estilos le dicen a la IA cómo escribir tus borradores y tu agenda es el enlace para que te pidan una reunión.',
     steps: [
       'En «Firma», elige un diseño (Clásica, Con logo, Compacta o Imagen) y completa tus datos: vienen de tu perfil. La vista previa muestra cómo se ve en un correo.',
       '¿Ya tienes una firma? Elige «Tu firma actual» y pégala desde Gmail u Outlook, o sube el archivo .htm de tu firma de Outlook.',
@@ -376,12 +436,16 @@ export const HELP_SECTIONS: HelpSection[] = [
       'En «Estilos», pulsa «Crear estilo» y sigue los 3 pasos: punto de partida, tono y largo, y «En tus palabras». Puedes pedir un «Ajuste con IA».',
       'En el asunto y el cuerpo, «Insertar» agrega datos de cada contacto, como {Nombre} o {Empresa}. Se reemplazan solos en cada correo.',
       'Guárdalo y márcalo como predeterminado para usarlo siempre. Duplicar, publicar para el equipo o archivar están en «Más».',
+      'En «Agenda», pega el enlace donde te piden una reunión (Calendly, Google Calendar, Microsoft Bookings, HubSpot u otro) y elige cuándo va: «Automático» lo agrega a la respuesta sugerida cuando alguien muestra interés o pide reunión; «Solo cuando lo pida» deja el botón «Insertar mi agenda» al escribir; «Nunca» no lo pone. Nunca va en un primer correo.',
+      'En «Agenda» también eliges después de cuántos días «Hoy» te avisa para retomar una conversación (30, 60, 90 o nunca).',
     ],
     faqs: [
       { q: '¿Dónde se usa mi estilo?', a: 'El predeterminado se usa solo en Redactar, en tus campañas y en Cowork. En Redactar puedes elegir otro en «Perfil de estilo».' },
       { q: '¿Tengo que agregar la firma en cada correo?', a: 'No. Con «Usar al enviar» encendido, se agrega sola al final de cada correo que envías desde la app, antes del enlace para darse de baja.' },
       { q: '¿Puedo usar la firma que ya tengo en Gmail u Outlook?', a: 'Sí. Elige «Tu firma actual», cópiala desde tu correo y pégala en el recuadro, o sube su archivo .htm. Se conservan el formato, los enlaces y las imágenes publicadas; si una imagen está solo en tu computador, la pantalla te lo dice.' },
       { q: '¿Puedo usar la imagen de firma que ya tengo?', a: 'Sí. Elige el diseño «Imagen» y súbela en PNG o JPG, hasta 2 MB.' },
+      { q: 'No tengo agenda en línea. ¿Cómo creo una?', a: 'En Google Calendar, en el computador: «Crear» → «Agenda de citas», elige duración y horarios, guarda y copia el enlace con «Compartir». Es gratis. Pégalo en «Agenda».' },
+      { q: '¿Por qué mi agenda no va en el primer correo?', a: 'Pedir que agenden antes de que te conozcan suele bajar las respuestas. La IA la ofrece cuando la persona ya mostró interés; tú puedes insertarla cuando quieras con «Insertar mi agenda».' },
     ],
     related: ['correo', 'perfil'],
   },
@@ -444,13 +508,15 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
-export type HelpVisibility = { opportunities: boolean; admin: boolean };
+/** `cowork`: whether the person has Cowork; unknown (undefined) shows it, since it is open to every account. */
+export type HelpVisibility = { opportunities: boolean; admin: boolean; cowork?: boolean };
 
 /** The sections this person can see: same rules as the menu. */
 export function visibleHelpSections(visibility: HelpVisibility, sections: HelpSection[] = HELP_SECTIONS): HelpSection[] {
   return sections.filter((section) => (
     (section.feature !== 'opportunities' || visibility.opportunities)
     && (section.feature !== 'admin' || visibility.admin)
+    && (section.feature !== 'cowork' || visibility.cowork !== false)
   ));
 }
 
@@ -480,11 +546,11 @@ export function helpSectionIdFrom(value: string | null | undefined) {
 }
 
 /** The icon of each section in the «Centro de ayuda» (keys of the help icon set, src/components/help/help-icons.tsx). */
-export type HelpIconKey = 'start' | 'today' | 'search' | 'opportunities' | 'contacts' | 'write' | 'mail' | 'companies' | 'table'
-  | 'conversations' | 'campaigns' | 'pipeline' | 'profile' | 'connections' | 'signature' | 'privacy' | 'credits' | 'admin';
+export type HelpIconKey = 'start' | 'today' | 'report' | 'search' | 'opportunities' | 'contacts' | 'write' | 'mail' | 'companies' | 'table'
+  | 'conversations' | 'campaigns' | 'pipeline' | 'profile' | 'connections' | 'signature' | 'privacy' | 'credits' | 'admin' | 'assistant';
 
 export const HELP_ICONS: Record<string, HelpIconKey> = {
-  'primeros-pasos': 'start', hoy: 'today', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
+  'primeros-pasos': 'start', hoy: 'today', 'informe-semanal': 'report', cowork: 'assistant', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
   'por-escribir': 'write', correo: 'mail', tabla: 'table', conversaciones: 'conversations',
   campanas: 'campaigns', pipeline: 'pipeline', perfil: 'profile', conexiones: 'connections', firmas: 'signature',
   privacidad: 'privacy', creditos: 'credits', administracion: 'admin',

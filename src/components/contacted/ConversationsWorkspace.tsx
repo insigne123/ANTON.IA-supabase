@@ -37,6 +37,8 @@ import { parseJsonResponse } from '@/lib/http/safe-json';
 import { formatDateTime, formatRelative } from '@/lib/dates';
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { cn } from '@/lib/utils';
+import { useBookingLink } from '@/hooks/use-booking-link';
+import { insertBookingLine } from '@/lib/booking-link';
 import type { ContactedLead } from '@/lib/types';
 
 type Message = { id: string; direction: string; from?: string; to?: string[]; receivedAt: string; subject?: string; text?: string; source: string };
@@ -55,6 +57,8 @@ async function json(response: Response) {
 }
 
 export default function ConversationsWorkspace() {
+  // «Insertar mi agenda» in the reply (Firmas y estilo › Agenda): only when the person saved a link.
+  const bookingUrl = useBookingLink();
   const [rows, setRows] = useState<ConversationRow[]>([]);
   const [touches, setTouches] = useState<PlannedTouch[]>([]);
   const [userId, setUserId] = useState('');
@@ -317,7 +321,7 @@ export default function ConversationsWorkspace() {
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={conversationTone(status)}>{status}</Badge>
-            <span className="text-xs text-foreground/70">{crmStageLabels[current.crm_stage || ''] || current.crm_stage || 'Sin fase comercial'} · {providerLabels[current.provider] || current.provider}</span>
+            <span className="text-xs text-foreground/70">{[crmStageLabels[current.crm_stage || ''] || current.crm_stage || 'Sin fase comercial', providerLabels[current.provider] || current.provider].filter(Boolean).join(' · ')}</span>
           </div>
           <p className="text-xs text-foreground/70">{current.reply_sync_error ? 'Actualización pendiente: revisa la conexión.' : current.reply_sync_succeeded_at ? `Última revisión: ${date(current.reply_sync_succeeded_at)}` : 'Sin revisión automática confirmada'}</p>
         </div>
@@ -335,7 +339,7 @@ export default function ConversationsWorkspace() {
           <Button disabled={draftingReply || detailLoading} onClick={startManualReply}>Responder</Button>
           <Button variant="outline" disabled={draftingReply || detailLoading} onClick={() => void prepareReply()}>{draftingReply ? 'Preparando…' : 'Sugerir con IA'}</Button>
         </div>}
-        {replyEditorOpen && <div ref={replyEditor} className="scroll-mb-4 space-y-3"><div><Label htmlFor="reply-subject">Asunto</Label><Input id="reply-subject" value={replySubject} onChange={event => { setReplySubject(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} disabled={replyBusy || Boolean(replyStatus)} /></div><div><Label htmlFor="reply-body">Tu respuesta</Label><textarea id="reply-body" value={replyBody} onChange={event => { setReplyBody(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} rows={7} maxLength={12000} disabled={replyBusy || Boolean(replyStatus)} className="flex w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60" /></div><label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={trackReplyActivity} onChange={event => setTrackReplyActivity(event.target.checked)} disabled={replyBusy || Boolean(replyStatus)} /><span>Registrar señales de apertura y clic <span className="block text-xs text-foreground/70">Opcional; una apertura no demuestra que la persona haya leído el correo.</span></span></label><p className="text-xs text-foreground/70">El correo incluirá la opción de dejar de recibir mensajes comerciales.</p><div className="flex flex-wrap gap-2"><Button disabled={replyBusy || !replyBody.trim() || !replySubject.trim()} onClick={() => void sendReply()}>{replyBusy ? 'Enviando…' : replyStatus ? 'Comprobar estado' : 'Enviar respuesta'}</Button><Button variant="ghost" disabled={replyBusy} onClick={() => { setReplyEditorOpen(false); setReplyBody(''); setReplyStatus(''); setReplyIdempotencyKey(''); }}>Cancelar</Button></div></div>}
+        {replyEditorOpen && <div ref={replyEditor} className="scroll-mb-4 space-y-3"><div><Label htmlFor="reply-subject">Asunto</Label><Input id="reply-subject" value={replySubject} onChange={event => { setReplySubject(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} disabled={replyBusy || Boolean(replyStatus)} /></div><div><Label htmlFor="reply-body">Tu respuesta</Label><textarea id="reply-body" value={replyBody} onChange={event => { setReplyBody(event.target.value); if (!replyBusy) setReplyIdempotencyKey(crypto.randomUUID()); }} rows={7} maxLength={12000} disabled={replyBusy || Boolean(replyStatus)} className="flex w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60" /></div><label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={trackReplyActivity} onChange={event => setTrackReplyActivity(event.target.checked)} disabled={replyBusy || Boolean(replyStatus)} /><span>Registrar señales de apertura y clic <span className="block text-xs text-foreground/70">Opcional; una apertura no demuestra que la persona haya leído el correo.</span></span></label><p className="text-xs text-foreground/70">El correo incluirá la opción de dejar de recibir mensajes comerciales.</p><div className="flex flex-wrap gap-2"><Button disabled={replyBusy || !replyBody.trim() || !replySubject.trim()} onClick={() => void sendReply()}>{replyBusy ? 'Enviando…' : replyStatus ? 'Comprobar estado' : 'Enviar respuesta'}</Button>{bookingUrl && <Button variant="outline" disabled={replyBusy || Boolean(replyStatus) || replyBody.includes(bookingUrl)} onClick={() => { setReplyBody(insertBookingLine(replyBody, bookingUrl)); setReplyIdempotencyKey(crypto.randomUUID()); }}>{replyBody.includes(bookingUrl) ? 'Agenda incluida' : 'Insertar mi agenda'}</Button>}<Button variant="ghost" disabled={replyBusy} onClick={() => { setReplyEditorOpen(false); setReplyBody(''); setReplyStatus(''); setReplyIdempotencyKey(''); }}>Cancelar</Button></div></div>}
         {replyError && <p role="alert" className="text-sm text-destructive">{replyError}</p>}{replyStatus && <p role="status" className="text-sm text-foreground/70">{replyStatus}</p>}
       </section>}
       {sentNotice && <p role="status" className="rounded-xl bg-cw-success-soft px-3 py-2 text-sm text-foreground">{sentNotice}</p>}
@@ -392,7 +396,7 @@ export default function ConversationsWorkspace() {
               <span className="flex items-baseline justify-between gap-2"><span className="truncate font-medium">{row.name || row.email}</span><span className="shrink-0 text-xs text-foreground/70">{formatRelative(row.replied_at || row.sent_at)}</span></span>
               <span className="block truncate text-sm text-foreground/70">{row.company || row.email}</span>
               <span className="flex min-w-0 items-center gap-2"><Badge variant={conversationTone(status)} className="shrink-0">{status}</Badge><span className="truncate text-xs text-foreground/70">{row.reply_preview || row.subject || 'Contacto registrado'}</span></span>
-              <span className="block text-xs text-foreground/70">{next ? `Seguimiento ${next.index + 1} · ${date(next.dueAt)}` : row.status === 'scheduled' ? `Programado · ${date(row.scheduled_at)}` : `${providerLabels[row.provider] || row.provider} · ${history.length} ${history.length === 1 ? 'registro' : 'registros'} · ${row.user_id === userId ? 'Mi cuenta' : 'Cuenta del equipo'}`}</span>
+              <span className="block text-xs text-foreground/70">{next ? `Seguimiento ${next.index + 1} · ${date(next.dueAt)}` : row.status === 'scheduled' ? `Programado · ${date(row.scheduled_at)}` : [providerLabels[row.provider] || row.provider, `${history.length} ${history.length === 1 ? 'registro' : 'registros'}`, row.user_id === userId ? 'Mi cuenta' : 'Cuenta del equipo'].filter(Boolean).join(' · ')}</span>
             </span>
           </button></li>;
         })}
