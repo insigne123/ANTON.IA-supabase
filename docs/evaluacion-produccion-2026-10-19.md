@@ -18,7 +18,7 @@
   - Mercado público fallaba con 500 porque las consultas tardaban más que el límite: #434 (índice de trigramas) y #435 (límite de 30 s del servidor y estado «no pudimos calcular» con «Reintentar»).
   - «Equipo» mostraba 31 filas en cero a un equipo que no escribe correos (#437).
   - «Firmas y estilo → Agenda» tardaba 7 s (#438).
-  - Diez videos no calzaban con la app (#436, #439).
+  - Diez videos no calzaban con la app (#436, #439). Ahora producción (build 005) sirve los 16 videos idénticos a los del repositorio, y la duración que muestra la ayuda calza con cada archivo.
 - **Lo que no depende del código:** la base del plan gratuito tiene unos 430 MB de memoria y hace swap. Cada consulta cuesta entre 0,2 y 0,9 s, y eso fija el piso de los tiempos (ver «Producción en el plan gratuito» en `docs/oportunidades-mercado-publico.md`).
   - También produce picos: en la pasada final, la verificación de sesión de Supabase (`/auth/v1/user`) llegó a 11,9 s y una carga de Empresas tardó 28 s. Minutos después, en teléfono, Empresas cargó a su ritmo normal.
 
