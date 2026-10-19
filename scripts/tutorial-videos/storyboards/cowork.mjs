@@ -9,13 +9,15 @@ export default {
       target: { label: 'Escribe tu mensaje' }, action: 'none', zoom: 1.4, arrow: true,
     },
     {
-      title: 'O parte de un ejemplo', text: 'Los ejemplos llenan el pedido; lo puedes cambiar antes de enviarlo.',
+      title: 'O parte de un ejemplo', text: 'Un clic lo envía. Si falta algo tuyo, como el correo a mejorar, espera en el cuadro.',
       say: 'O elige un ejemplo.',
-      target: { role: 'button', name: '¿A quién le escribo hoy?' }, zoom: 1.6, arrow: true,
+      // A starter ready as it is goes with one click; «Mejorar un correo» has a [placeholder], so it waits in the composer
+      // with that part selected, which is what the next scene shows.
+      target: { role: 'button', name: 'Mejorar un correo' }, zoom: 1.6, arrow: true,
     },
     {
-      title: 'Revisa y envía', text: '«Enviar» lo pone a andar. Ves cada paso mientras trabaja.',
-      say: 'Revisa el pedido y envíalo.',
+      title: 'Revisa y envía', text: 'Pega tu correo donde está marcado. «Enviar» lo pone a andar y ves cada paso.',
+      say: 'Completa el pedido y envíalo.',
       target: { role: 'button', name: 'Enviar mensaje' }, action: 'hover', zoomOn: { label: 'Escribe tu mensaje' }, zoom: 1.4, arrow: true,
     },
     {
@@ -32,7 +34,8 @@ export default {
     {
       title: 'Sigue la conversación', text: 'Pide un cambio o el paso siguiente, en el mismo trabajo.',
       say: 'Y sigue la conversación cuando quieras.',
-      target: { label: 'Escribe tu mensaje' }, action: 'none', zoom: 1.4, arrow: true,
+      // Typed, so the box shows a follow-up for this campaign and not the example still written from the home.
+      target: { label: 'Escribe tu mensaje' }, type: 'Agrega un seguimiento a los 3 días', zoom: 1.4, arrow: true,
     },
   ],
   outro: {
