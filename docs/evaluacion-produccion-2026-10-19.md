@@ -58,7 +58,9 @@
 - **Empresas y parecidas:**
   - 248 empresas en 3–4 s.
   - El detalle muestra quién decide, usa y paga, y ofrece «Buscar empresas parecidas» en las empresas con rubro.
-  - Esa búsqueda gasta 1 crédito de Apollo y queda para tu aprobación.
+  - «Buscar empresas parecidas», con tu aprobación del crédito, en «Organizacion de prueba» (no guarda nada):
+    - Desde CSI LTDA. (outsourcing) trajo 5 empresas en 8,6 s, cada una con su motivo: SSI Outsourcing, LatinHire, ATCOM Chile, GrupoExpro y Proyectum Chile.
+    - La búsqueda (`/api/leads/search`) y la elección de la IA (`/api/crm/companies/similar`) respondieron 200, sin errores de página.
 - **Informe semanal:**
   - «Tu semana», «Equipo» y «Oportunidades» funcionan, y se llega a «Semana pasada» con Tab y Enter, con foco visible.
   - Un equipo que no escribió ve una frase («Nadie del equipo envió correos esta semana») y «Ver Oportunidades», en lugar de 31 filas en cero.
@@ -80,7 +82,6 @@ En todas las pantallas, `/api/organizations` y `/api/quota/status` toman entre 0
 
 ## Lo que queda
 - **Rendimiento:** pasar la base a un plan con más memoria es la mejora de tiempos más grande que queda. Es una decisión de costo.
-- **Apollo:** probar «Buscar empresas parecidas» en producción gasta 1 crédito y espera tu confirmación.
 - **Cowork, primera visita en producción:**
   - Se verá cuando otra persona abra la app.
-  - Para probarlo antes con la cuenta QA hay que borrar su permiso, que es una escritura en producción y espera tu aprobación.
+  - Probarlo antes con la cuenta QA requiere borrar su permiso, y el borrado pide una confirmación manual en el conector de Supabase.
