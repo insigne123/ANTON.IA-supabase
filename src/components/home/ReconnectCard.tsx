@@ -105,9 +105,10 @@ export function ReconnectCard() {
         <ul className="space-y-2">
           {visible.map(alert => (
             <li key={alert.contactedId} className="rounded-xl border border-border/60 p-3">
-              <div className="flex items-start gap-3">
+              {/* On a phone the actions go under the reason, so the reason keeps the width of the row. */}
+              <div className="flex flex-wrap items-start gap-x-3 gap-y-2 sm:flex-nowrap">
                 <InitialsAvatar name={alert.name} size="sm" />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 basis-[calc(100%-2.5rem)] sm:basis-0">
                   <p className="text-sm font-medium">
                     <Link href={`/contacted?c=${encodeURIComponent(alert.contactedId)}`} className="rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       {alert.name}
@@ -119,9 +120,9 @@ export function ReconnectCard() {
                     <span>{alert.reason}</span>
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="ml-10 flex shrink-0 items-center gap-1 sm:ml-0">
                   <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void reconnect(alert)} aria-label={`Retomar con ${alert.name}`}>
-                    {busy === alert.contactedId ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Preparando…</> : 'Retomar'}
+                    {busy === alert.contactedId ? <><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Preparando…</> : 'Retomar'}
                   </Button>
                   {data.canPostpone ? (
                     <DropdownMenu>
