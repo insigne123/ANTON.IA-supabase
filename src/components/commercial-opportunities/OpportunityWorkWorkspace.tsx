@@ -10,7 +10,8 @@ import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
 import { SubmissionKit } from './SubmissionKit';
 import { OfferDraft } from './OfferDraft';
-import { PurchasePlanDemand } from './PurchasePlanDemand';
+import { PublicMarket } from './PublicMarket';
+import { WinPlan } from './WinPlan';
 import type { OfferPrices, SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
 import { PipelineBoard, type PipelineSuggestion } from './PipelineBoard';
 import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
@@ -39,6 +40,8 @@ type Detail = { item: WorkItem; work: WorkRecord | null; participants: Workspace
   marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null }; fit?: OpportunityFitView };
 /** The kinds with bases to answer with an offer (server/commercial-opportunities/workspace-offer.ts). */
 const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
+/** The kinds with a public buyer whose history ChileCompra keeps (server/commercial-opportunities/workspace-market.ts). */
+const MARKET_KINDS = ['tender', 'compra_agil'];
 const TYPES: Record<string, string> = { hiring: 'Ofertas laborales', linkedin_post: 'Publicación LinkedIn', tender: 'Licitación pública', compra_agil: 'Compra Ágil', private: 'Oportunidad privada', project: 'Proyecto' };
 const STATES: Record<string, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada', queued: 'En cola', running: 'En curso', waiting: 'Continuando', ready: 'Terminado', failed: 'No terminó' };
 const ACTIVE = ['queued', 'running', 'waiting'];
@@ -67,9 +70,9 @@ export function OpportunityWorkWorkspace() {
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
   const [download, setDownload] = useState('pdf');
   const [reconsider,setReconsider]=useState(false);
-  // The admin sees the pipeline first; «Lista» keeps the filters and cards; «Demanda futura» reads the Plan Anual de Compras;
-  // «Asistente» is the section's general conversation, for everyone.
-  const [view, setView] = useState<'pipeline' | 'list' | 'demand' | 'assistant'>('pipeline');
+  // The admin sees the pipeline first; «Lista» keeps the filters and cards; «Mercado público» reads ChileCompra (what the
+  // State plans to buy, the contracts that end, the competitors); «Asistente» is the section's general conversation, for everyone.
+  const [view, setView] = useState<'pipeline' | 'list' | 'market' | 'assistant'>('pipeline');
   const [assistantThread, setAssistantThread] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   // A question the assistant hands to one opportunity's chat: asked there once its expediente is open.
@@ -292,11 +295,11 @@ export function OpportunityWorkWorkspace() {
         <p className="min-w-0"><span className="font-medium">{overview.documentAlerts[0].text}</span>{overview.documentAlerts.length > 1 ? <span className="text-muted-foreground"> · y {overview.documentAlerts.length - 1} más por renovar</span> : null}</p>
         <Button size="sm" variant="outline" onClick={() => setProfileOpen(true)}>Ver documentos</Button></div> : null}
       {view !== 'assistant' && <TenderPrerequisites />}
-      <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{(admin ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['demand', 'Demanda futura'], ['assistant', 'Asistente']] as const : [['list', 'Mis oportunidades'], ['assistant', 'Asistente']] as const).map(([key, label]) => {
+      <div role="group" aria-label="Vista" className="inline-flex w-fit max-w-full flex-wrap rounded-xl bg-muted p-1">{(admin ? [['pipeline', 'Embudo'], ['list', 'Lista'], ['market', 'Mercado público'], ['assistant', 'Asistente']] as const : [['list', 'Mis oportunidades'], ['assistant', 'Asistente']] as const).map(([key, label]) => {
         const pressed = admin || key === 'assistant' ? view === key : view !== 'assistant';
-        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', pressed ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>; })}</div>
+        return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', pressed ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>; })}</div>
       {view === 'assistant' ? <OpportunityAssistant admin={admin} threadId={assistantThread} onThread={setAssistantThread} onOpen={open} onHandoff={continueIn} />
-        : admin && view === 'demand' ? <PurchasePlanDemand onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} />
+        : admin && view === 'market' ? <PublicMarket onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} onProfile={() => setProfileOpen(true)} />
         : admin && view === 'pipeline' ? (pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} members={overview.members} busy={busy}
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>) : <>
@@ -308,7 +311,7 @@ export function OpportunityWorkWorkspace() {
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
       </section>)}</div>}
       </>}
-      {!(admin && (view === 'pipeline' || view === 'demand')) && view !== 'assistant' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
+      {!(admin && (view === 'pipeline' || view === 'market')) && view !== 'assistant' && <div className="flex items-center justify-between gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Anterior</Button><p className="text-xs text-muted-foreground">Página {page + 1} · hasta 100 oportunidades</p><Button variant="outline" disabled={overview.items.length < 100} onClick={() => setPage(p => p + 1)}>Siguiente</Button></div>}
     </>}
     {selected && <>
       <Button variant="ghost" className="-ml-2 self-start" onClick={close}><ArrowLeft className="mr-2 h-4 w-4" />Oportunidades</Button>
@@ -334,7 +337,7 @@ export function OpportunityWorkWorkspace() {
           </div>
           {detail.work?.objective && <p className="text-sm">Objetivo: {detail.work.objective}</p>}
         </header>
-        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular']]), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
+        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular']]), ...(MARKET_KINDS.includes(item.kind) ? [['market', 'Cómo ganar']] : []), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
         {tab === 'summary' && <div className="space-y-5">
           {detail.participants.length ? <section aria-label="Equipo de trabajo" className="space-y-2"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">Equipo de trabajo</h2>{admin && <Button variant="ghost" size="sm" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}>Cambiar equipo</Button>}</div>
             <TeamOffice people={detail.participants} responsibleId={detail.work?.responsible_id} /></section> : null}
@@ -359,6 +362,7 @@ export function OpportunityWorkWorkspace() {
             downloadHref={`/api/commercial-opportunities/${selected}/export?doc=offer&format=docx`}
             budget={{ amount: latest.report.submission?.numbers.budget ?? item.amount, includesTax: latest.report.submission?.numbers.budgetIncludesTax ?? null }} /> : null}
           onDraft={latest ? title => ask(`Prepara el borrador de «${title}» tal como lo piden las bases, con los datos de mi empresa que conoces y espacios como [RUT] o [firma] para lo que falte, listo para copiar.`) : undefined} />}
+        {tab === 'market' && MARKET_KINDS.includes(item.kind) && <WinPlan id={selected} />}
         {tab === 'documents' && <section className="space-y-5">
           {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
           {signal && <p className="text-sm text-muted-foreground">Las señales de LinkedIn no tienen bases. Si recibiste algo de esta empresa (una invitación, un requerimiento), súbelo en <button type="button" className="underline" onClick={() => document.getElementById('op-document')?.click()}>Documentos</button>.</p>}
