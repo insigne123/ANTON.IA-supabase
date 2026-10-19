@@ -249,7 +249,10 @@ test('the month\'s reading is queued once with the daily search, a blocked one t
   await enqueueMonthlyDemand(client, admin, context, '2026-10-18');
   await enqueueMonthlyDemand(client, admin, context, '2026-10-18');
   assert.deepEqual(tables.opportunity_jobs.map(row => [row.dedupe_key, row.state]), [['demand:2026-10:1', 'queued']]);
-  Object.assign(tables.opportunity_jobs[0], { state: 'blocked', error: 'ChileCompra no deja descargar…' });
+  Object.assign(tables.opportunity_jobs[0], { state: 'blocked', error: 'ChileCompra no deja descargar…', updated_at: new Date(Date.now() - 60_000).toISOString() });
+  await enqueueMonthlyDemand(client, admin, context, '2026-10-19');
+  assert.equal(tables.opportunity_jobs[0].state, 'blocked', 'the search is asked every minute: not ChileCompra every minute');
+  Object.assign(tables.opportunity_jobs[0], { updated_at: new Date(Date.now() - 7 * 3600_000).toISOString() });
   await enqueueMonthlyDemand(client, admin, context, '2026-10-19');
   assert.deepEqual([tables.opportunity_jobs[0].state, tables.opportunity_jobs[0].error], ['queued', null]);
   Object.assign(tables.opportunity_jobs[0], { state: 'ready' });

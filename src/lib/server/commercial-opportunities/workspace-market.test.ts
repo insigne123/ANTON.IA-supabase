@@ -103,6 +103,30 @@ test('«Contratos por vencer» keeps only what the model chose from the batch, w
   // Out of time, it resumes in the next tick instead of losing the batches.
   assert.deepEqual(await runMarketContracts(client, job, context, Date.now() - 300_000), { waiting: true });
   await assert.rejects(runMarketContracts(client, job, { ...context, criteria: {}, services: [] }, Date.now()), /Faltan las palabras/);
+  // A history that is there but did not answer in time is not a history «not loaded yet».
+  await assert.rejects(runMarketContracts(memory().client, job, context, Date.now()), /Aún no cargamos el historial/);
+  const slow = { ...client, rpc: async () => ({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }) };
+  await assert.rejects(runMarketContracts(slow, job, context, Date.now()), (error: any) => /No pudimos leer el historial/.test(error.message) && error.status === 409);
+});
+
+test('the month\'s «Contratos por vencer» is queued once and, if it stopped blocked, again with the next search', async () => {
+  const { enqueueMonthlyContracts } = await load();
+  const { tables, client } = memory();
+  await enqueueMonthlyContracts(client, admin, context, '2026-10-19');
+  await enqueueMonthlyContracts(client, admin, context, '2026-10-19');
+  assert.deepEqual(tables.opportunity_jobs.map(job => [job.kind, job.dedupe_key, job.state]), [['contracts', 'contracts:2026-10:3', 'queued']]);
+  // The search is asked every minute: a reading that just stopped waits 6 hours before trying again.
+  Object.assign(tables.opportunity_jobs[0], { state: 'blocked', error: 'No pudimos leer el historial de ChileCompra ahora.', updated_at: new Date(Date.now() - 60_000).toISOString() });
+  await enqueueMonthlyContracts(client, admin, context, '2026-10-19');
+  assert.equal(tables.opportunity_jobs[0].state, 'blocked', 'not every minute');
+  Object.assign(tables.opportunity_jobs[0], { updated_at: new Date(Date.now() - 7 * 3600_000).toISOString() });
+  await enqueueMonthlyContracts(client, admin, context, '2026-10-20');
+  assert.deepEqual([tables.opportunity_jobs[0].state, tables.opportunity_jobs[0].error], ['queued', null]);
+  Object.assign(tables.opportunity_jobs[0], { state: 'ready' });
+  await enqueueMonthlyContracts(client, admin, context, '2026-10-21');
+  assert.equal(tables.opportunity_jobs[0].state, 'ready', 'a finished reading stays until next month');
+  await enqueueMonthlyContracts(client, admin, context, '2026-11-01');
+  assert.deepEqual(tables.opportunity_jobs.map(job => job.dedupe_key), ['contracts:2026-10:3', 'contracts:2026-11:3']);
 });
 
 test('«Seguir» a contract opens one opportunity per workspace, with who holds it and until when', async () => {

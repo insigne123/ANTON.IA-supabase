@@ -97,7 +97,8 @@ export async function readPurchasePlanCandidates(year: number, keywords: string[
 
 /**
  * The month's reading, queued with the daily search once the workspace has its words. Once a month (its key carries the
- * month); one that stopped blocked (ChileCompra blocking with no copy yet, no budget left) tries again with the next search.
+ * month); one that stopped blocked (ChileCompra blocking with no copy yet, no budget left) tries again with the search, at
+ * most every 6 hours.
  */
 export async function enqueueMonthlyDemand(client: SupabaseClient, scope: WorkScope, context: { revision: number; criteria?: any; services?: string[] | null }, day: string) {
   if (!planKeywords({ keywords: context.criteria?.keywords, services: context.services }).length) return;
@@ -107,8 +108,11 @@ export async function enqueueMonthlyDemand(client: SupabaseClient, scope: WorkSc
   // A database without the «demand» kind yet (its migration comes first) leaves the search of the day as it was.
   if (queued.error?.code === '23514') return;
   opportunityDb(queued);
-  opportunityDb(await client.from('opportunity_jobs').update({ state: 'queued', error: null })
-    .eq('organization_id', scope.organizationId).eq('dedupe_key', key).eq('state', 'blocked'));
+  // At most every 6 hours: the search is asked every minute, and a blocked ChileCompra should not be asked every minute.
+  const blocked = opportunityDb(await client.from('opportunity_jobs').select('id,updated_at').eq('organization_id', scope.organizationId)
+    .eq('dedupe_key', key).eq('state', 'blocked').maybeSingle());
+  if (blocked && !(Date.parse(blocked.updated_at) > Date.now() - 6 * 3600_000))
+    opportunityDb(await client.from('opportunity_jobs').update({ state: 'queued', error: null }).eq('id', blocked.id).eq('state', 'blocked'));
 }
 
 /** The year to read: this year, or the last one published (early in the year the new plan may not be out). */

@@ -16,6 +16,7 @@ import { loadCompanyForModel, loadTenderProfile } from './tender-profile-read';
 /** The kinds with a public buyer whose history ChileCompra keeps. */
 export const MARKET_KINDS = ['tender', 'compra_agil'];
 const ACTIVE = ['queued', 'running', 'waiting'];
+const BLOCKED_RETRY_MS = 6 * 3600_000;
 type JobRow = { id: string; state: string; error: string | null; created_at: string; updated_at: string; result: any };
 
 // ─── «Cómo ganar» (propuesta 9) ────────────────────────────────────────────────────────────────────────────────────
@@ -115,11 +116,18 @@ export async function runWinPlan(client: SupabaseClient, job: OpportunityJob) {
 export async function enqueueMonthlyContracts(client: SupabaseClient, scope: WorkScope, context: { revision: number; criteria?: any; services?: string[] | null }, day: string) {
   if (!planKeywords({ keywords: context.criteria?.keywords, services: context.services }).length) return;
   if (!(await readMarketCoverage(client)).available) return;
+  const key = `contracts:${day.slice(0, 7)}:${context.revision}`;
   const queued = await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'contracts',
-    dedupe_key: `contracts:${day.slice(0, 7)}:${context.revision}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true });
+    dedupe_key: key, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true });
   // A database without the «contracts» kind yet leaves the search of the day as it was.
   if (queued.error?.code === '23514') return;
   opportunityDb(queued);
+  // The month's reading that stopped blocked (the history did not answer) tries again, as «Demanda futura»: at most every 6
+  // hours, because the search is asked every minute and a history that keeps failing should not be read every minute.
+  const blocked = opportunityDb(await client.from('opportunity_jobs').select('id,updated_at').eq('organization_id', scope.organizationId)
+    .eq('dedupe_key', key).eq('state', 'blocked').maybeSingle());
+  if (blocked && !(Date.parse(blocked.updated_at) > Date.now() - BLOCKED_RETRY_MS))
+    opportunityDb(await client.from('opportunity_jobs').update({ state: 'queued', error: null }).eq('id', blocked.id).eq('state', 'blocked'));
 }
 
 /** «Actualizar»: a reading of its own each time it is asked, unless one is under way. */
@@ -149,7 +157,11 @@ export async function runMarketContracts(client: SupabaseClient, job: Opportunit
   if (!patterns.length) throw new AuthError('Faltan las palabras para compras públicas: revísalas en «Qué buscamos».', 409);
   const window = contractsWindow();
   const { data, error } = await client.rpc('public_procurement_expiring', { p_from: window.from, p_to: window.to, p_patterns: patterns, p_limit: 600 });
-  if (error) throw new AuthError('Aún no cargamos el historial de ChileCompra. Vuelve a intentarlo más tarde.', 409);
+  // Without the function the history was never set up; anything else (a timeout) passes. Either way the job stops blocked,
+  // and the next daily search runs it again (enqueueMonthlyContracts).
+  if (error) throw new AuthError(['PGRST202', '42883', '42P01'].includes(String(error.code))
+    ? 'Aún no cargamos el historial de ChileCompra. Vuelve a intentarlo más tarde.'
+    : 'No pudimos leer el historial de ChileCompra ahora. Vuelve a intentarlo en unos minutos.', 409);
   const rows = (data || []) as ExpiringRow[];
   const offer = { offer: String(context.offer || ''), services: context.services || [], exclusions: context.exclusions || [], territories: context.territories || [] };
   const kept = new Map<string, { fit: 'alta' | 'media'; reason: string }>();
@@ -257,7 +269,8 @@ export async function readCompetitorRadar(client: SupabaseClient, scope: WorkSco
     own: suggestion.own ? { ...suggestion.own, ...(activity.get(suggestion.own.id) || { bids: 0, wins: 0, awarded: 0, recent: [] }) } : null,
     ownRutMissing: !ownRut,
     followed: followed.map(row => ({ ...row, ...(activity.get(row.id) || { bids: 0, wins: 0, awarded: 0, recent: [] }) })),
-    suggestions: { basis: suggestion.basis, items: suggestion.items.filter(item => !followedIds.has(item.id) && item.id !== suggestion.own?.id).slice(0, 8) },
+    suggestions: { basis: suggestion.basis, items: suggestion.items.filter(item => !followedIds.has(item.id) && item.id !== suggestion.own?.id).slice(0, 8),
+      ...('unavailable' in suggestion ? { unavailable: true } : {}) },
   };
 }
 
