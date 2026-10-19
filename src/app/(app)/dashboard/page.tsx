@@ -12,13 +12,15 @@ import { HomeSummary } from '@/components/home/HomeSummary';
 import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 import { ReconnectCard } from '@/components/home/ReconnectCard';
+import { TouchesCard } from '@/components/home/TouchesCard';
 
 const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long',timeZone:'America/Santiago' });
 
 /**
  * «Hoy» (docs/inicio-hoy.md). The work first: the next step and what is waiting, in the main column. How the week goes,
- * the campaigns in progress and the credits sit beside it, so they never push the work down. «Para retomar» follows the
- * pending work when someone is due. On phones the order is step → pending → to reconnect → summary → recommended.
+ * the campaigns in progress and the credits sit beside it, so they never push the work down. «Llamadas y LinkedIn» and
+ * «Para retomar» follow the pending work when something is due. On phones the order is step → pending → calls and
+ * LinkedIn → to reconnect → summary → recommended.
  */
 export default function DashboardPage() {
   // The date is read in the browser: the page is prerendered, and the server's day may not be the person's.
@@ -48,6 +50,7 @@ export default function DashboardPage() {
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4 xl:col-start-1">
           <TodayPanel />
+          <TouchesCard />
           <ReconnectCard />
         </div>
 
