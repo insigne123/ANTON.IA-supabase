@@ -5,8 +5,8 @@
 --   * months 13 to 24: awarded tenders and their winning bids only, without their evaluation criteria;
 --   * months 25 to 48: awarded tenders with contracts of 18 months or more (for «Contratos por vencer»), winners only.
 -- scripts/load-public-procurement.mjs loads and ages the months; public_procurement_db_bytes() lets it stop before the
--- database grows too much. The 48 months take about 165 MB (measured on a local copy, oct 2026). Text is searched with
--- ILIKE '%…%' over the name and category, which no btree helps: there are no indexes for it.
+-- database grows too much. The 48 months take about 155 MB (measured on a local copy, oct 2026). Text is searched with
+-- LIKE '%…%' over the folded name and category, which no btree helps: there are no indexes for it.
 
 create table if not exists public.public_procurement_agencies (
   id integer primary key,                         -- CodigoOrganismo
@@ -84,6 +84,43 @@ returns bigint language sql stable security definer set search_path = '' as $$
   select pg_database_size(current_database());
 $$;
 
+-- Half the names carry accents and half do not («VERIFICACIÓN», «VERIFICACION»): text is compared folded, lowercase and
+-- without accents, and the patterns come folded the same way (src/lib/public-procurement/market.ts, likePatterns).
+-- Without «set search_path» (it would keep the planner from inlining it into each row) and with pg_catalog spelled out.
+create or replace function public.public_procurement_fold(p_text text)
+returns text language sql immutable parallel safe as $$
+  select pg_catalog.translate(pg_catalog.lower(coalesce(p_text, '')), 'áàâäãéèêëíìîïóòôöõúùûüñç', 'aaaaaeeeeiiiiooooouuuunc');
+$$;
+
+-- «Este organismo» and the market: the tenders whose name or category says one of the patterns, newest first, with their
+-- buyer and their bids, in one round trip.
+create or replace function public.public_procurement_search(p_patterns text[], p_agency_ids integer[], p_since date, p_limit integer default 300)
+returns table (id bigint, code text, name text, status text, kind text, currency text, estimated_amount bigint, awarded_amount bigint, bidders smallint,
+  published_on date, awarded_on date, duration_months numeric, category text, criteria text, agency text, bids jsonb)
+language sql stable security definer set search_path = '' as $$
+  select t.id, t.code, t.name, t.status, t.kind, t.currency, t.estimated_amount, t.awarded_amount, t.bidders, t.published_on, t.awarded_on,
+    t.duration_months, t.category, t.criteria, a.name,
+    coalesce((select jsonb_agg(jsonb_build_object('rut', s.rut, 'name', s.name, 'offered', b.offered_amount, 'awarded', b.awarded_amount, 'selected', b.selected))
+      from public.public_procurement_bids b join public.public_procurement_suppliers s on s.id = b.supplier_id where b.tender_id = t.id), '[]'::jsonb)
+  from public.public_procurement_tenders t
+  left join public.public_procurement_agencies a on a.id = t.agency_id
+  where t.published_on >= p_since
+    and (p_agency_ids is null or t.agency_id = any(p_agency_ids))
+    and (public.public_procurement_fold(t.name) like any(p_patterns) or public.public_procurement_fold(t.category) like any(p_patterns))
+  order by t.published_on desc
+  limit greatest(1, least(coalesce(p_limit, 300), 1000));
+$$;
+
+-- The radar's search by name, folded: «construcciones perez» finds «CONSTRUCCIONES PÉREZ LTDA».
+create or replace function public.public_procurement_find_suppliers(p_pattern text, p_limit integer default 20)
+returns table (id integer, rut text, name text)
+language sql stable security definer set search_path = '' as $$
+  select s.id, s.rut, s.name from public.public_procurement_suppliers s
+  where public.public_procurement_fold(s.name) like p_pattern
+  order by length(s.name), s.name
+  limit greatest(1, least(coalesce(p_limit, 20), 50));
+$$;
+
 -- «Contratos por vencer»: awarded contracts whose estimated end (awarded_on + duration) falls between two dates, whose
 -- name or category says one of the patterns (ILIKE, e.g. '%aseo%'), with who holds them.
 create or replace function public.public_procurement_expiring(p_from date, p_to date, p_patterns text[], p_limit integer default 400)
@@ -102,7 +139,7 @@ language sql stable security definer set search_path = '' as $$
   where t.status = 'adjudicada' and t.duration_months >= 6 and t.awarded_on is not null
     and t.awarded_on >= p_from - interval '61 months' and t.awarded_on <= p_to
     and (t.awarded_on + make_interval(months => floor(t.duration_months)::int, days => round((t.duration_months - floor(t.duration_months)) * 30.4375)::int))::date between p_from and p_to
-    and (t.name ilike any(p_patterns) or t.category ilike any(p_patterns))
+    and (public.public_procurement_fold(t.name) like any(p_patterns) or public.public_procurement_fold(t.category) like any(p_patterns))
   group by t.id, a.name
   order by ends_on
   limit greatest(1, least(coalesce(p_limit, 400), 1000));
@@ -131,7 +168,7 @@ language sql stable security definer set search_path = '' as $$
   from public.public_procurement_tenders t
   join public.public_procurement_bids b on b.tender_id = t.id
   join public.public_procurement_suppliers s on s.id = b.supplier_id
-  where t.published_on >= p_since and (t.name ilike any(p_patterns) or t.category ilike any(p_patterns))
+  where t.published_on >= p_since and (public.public_procurement_fold(t.name) like any(p_patterns) or public.public_procurement_fold(t.category) like any(p_patterns))
   group by s.id, s.rut, s.name
   having count(*) filter (where b.selected) > 0
   order by count(*) filter (where b.selected) desc, sum(b.awarded_amount) filter (where b.selected) desc nulls last
@@ -152,6 +189,12 @@ revoke all on sequence public.public_procurement_suppliers_id_seq from public, a
 grant usage, select on sequence public.public_procurement_suppliers_id_seq to service_role;
 revoke all on function public.public_procurement_db_bytes() from public, anon, authenticated;
 grant execute on function public.public_procurement_db_bytes() to service_role;
+revoke all on function public.public_procurement_fold(text) from public, anon, authenticated;
+grant execute on function public.public_procurement_fold(text) to service_role;
+revoke all on function public.public_procurement_search(text[], integer[], date, integer) from public, anon, authenticated;
+grant execute on function public.public_procurement_search(text[], integer[], date, integer) to service_role;
+revoke all on function public.public_procurement_find_suppliers(text, integer) from public, anon, authenticated;
+grant execute on function public.public_procurement_find_suppliers(text, integer) to service_role;
 revoke all on function public.public_procurement_expiring(date, date, text[], integer) from public, anon, authenticated;
 grant execute on function public.public_procurement_expiring(date, date, text[], integer) to service_role;
 revoke all on function public.public_procurement_cobidders(integer, date, integer) from public, anon, authenticated;

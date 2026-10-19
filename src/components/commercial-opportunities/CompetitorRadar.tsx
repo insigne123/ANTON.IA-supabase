@@ -127,7 +127,7 @@ export function CompetitorRadar({ onProfile }: { onProfile?: () => void }) {
 
       <section aria-labelledby="followed-title" className="space-y-3">
         <h3 id="followed-title" className="font-semibold">Los que sigues{data.followed?.length ? ` · ${data.followed.length}` : ''}</h3>
-        {!data.followed?.length ? <p className="rounded-2xl border p-5 text-sm leading-6 text-muted-foreground">Aún no sigues a nadie. Búscalos por nombre o RUT, o elige entre los sugeridos de abajo.</p>
+        {!data.followed?.length ? <p className="rounded-2xl border p-5 text-sm leading-6 text-muted-foreground">Aún no sigues a nadie. {data.suggestions?.items.length ? 'Búscalos por nombre o RUT, o elige entre los sugeridos de abajo.' : 'Búscalos por nombre o RUT: por ejemplo, la empresa que ganó la última licitación a la que postulaste.'}</p>
           : <ul className="grid gap-3 xl:grid-cols-2">{data.followed.map(item => <li key={item.id} className="space-y-3 rounded-2xl border bg-background p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0"><p className="text-sm font-semibold leading-6">{item.name}</p><p className="text-xs text-muted-foreground">RUT {formatRut(item.rut)}</p></div>

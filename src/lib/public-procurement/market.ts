@@ -221,12 +221,29 @@ export function contractEndsOn(awardedOn: string | null | undefined, durationMon
   return Number.isFinite(target.getTime()) ? target.toISOString().slice(0, 10) : null;
 }
 
-/** The ILIKE patterns of the workspace's words for the SQL functions: «%aseo%». Short and generic words are left out. */
+/** Lowercase and without accents, keeping the rest as written: how the SQL functions compare (public_procurement_fold). */
+export function foldForSearch(value: unknown) {
+  return String(value ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Little words a phrase keeps between its content words.
+const LINKS = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'y', 'e', 'o', 'u', 'en', 'para', 'por', 'con', 'a', 'al']);
+
+/**
+ * The LIKE patterns of the workspace's words for the SQL functions, folded as they fold the text: «%aseo%». Short and
+ * generic words are left out. A long phrase also searches by its first two content words, as tenders seldom write a
+ * phrase whole: «verificación de antecedentes judiciales» also finds «Servicios de verificación de antecedentes y
+ * evaluación psicológica».
+ */
 export function likePatterns(words: string[], max = 25) {
   const out = new Set<string>();
+  const add = (text: string) => { if (out.size < max && text.length >= 4 && !STOP.has(foldName(text))) out.add(`%${text}%`); };
   for (const word of words) {
-    const text = String(word || '').replace(/[%_\\]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
-    if (text.length >= 4 && !STOP.has(foldName(text))) out.add(`%${text}%`);
+    const text = foldForSearch(word).replace(/[%_\\]/g, ' ').replace(/\s+/g, ' ').trim();
+    add(text);
+    const parts = text.split(' ');
+    const content = parts.map((part, index) => ({ part, index })).filter(item => !LINKS.has(item.part) && item.part.length >= 3);
+    if (content.length >= 3) add(parts.slice(content[0].index, content[1].index + 1).join(' '));
     if (out.size >= max) break;
   }
   return [...out];
