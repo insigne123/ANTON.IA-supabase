@@ -321,7 +321,7 @@ export default function ConversationsWorkspace() {
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={conversationTone(status)}>{status}</Badge>
-            <span className="text-xs text-foreground/70">{crmStageLabels[current.crm_stage || ''] || current.crm_stage || 'Sin fase comercial'} · {providerLabels[current.provider] || current.provider}</span>
+            <span className="text-xs text-foreground/70">{[crmStageLabels[current.crm_stage || ''] || current.crm_stage || 'Sin fase comercial', providerLabels[current.provider] || current.provider].filter(Boolean).join(' · ')}</span>
           </div>
           <p className="text-xs text-foreground/70">{current.reply_sync_error ? 'Actualización pendiente: revisa la conexión.' : current.reply_sync_succeeded_at ? `Última revisión: ${date(current.reply_sync_succeeded_at)}` : 'Sin revisión automática confirmada'}</p>
         </div>
@@ -396,7 +396,7 @@ export default function ConversationsWorkspace() {
               <span className="flex items-baseline justify-between gap-2"><span className="truncate font-medium">{row.name || row.email}</span><span className="shrink-0 text-xs text-foreground/70">{formatRelative(row.replied_at || row.sent_at)}</span></span>
               <span className="block truncate text-sm text-foreground/70">{row.company || row.email}</span>
               <span className="flex min-w-0 items-center gap-2"><Badge variant={conversationTone(status)} className="shrink-0">{status}</Badge><span className="truncate text-xs text-foreground/70">{row.reply_preview || row.subject || 'Contacto registrado'}</span></span>
-              <span className="block text-xs text-foreground/70">{next ? `Seguimiento ${next.index + 1} · ${date(next.dueAt)}` : row.status === 'scheduled' ? `Programado · ${date(row.scheduled_at)}` : `${providerLabels[row.provider] || row.provider} · ${history.length} ${history.length === 1 ? 'registro' : 'registros'} · ${row.user_id === userId ? 'Mi cuenta' : 'Cuenta del equipo'}`}</span>
+              <span className="block text-xs text-foreground/70">{next ? `Seguimiento ${next.index + 1} · ${date(next.dueAt)}` : row.status === 'scheduled' ? `Programado · ${date(row.scheduled_at)}` : [providerLabels[row.provider] || row.provider, `${history.length} ${history.length === 1 ? 'registro' : 'registros'}`, row.user_id === userId ? 'Mi cuenta' : 'Cuenta del equipo'].filter(Boolean).join(' · ')}</span>
             </span>
           </button></li>;
         })}
