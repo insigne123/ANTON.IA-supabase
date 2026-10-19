@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
-import { buildCompanies, companyKey, coverageGrid, LEVELS, levelLabel, areaLabel, sizeBands, type Company, type CommitteeSlot } from '@/lib/companies/coverage';
+import { buildCompanies, companyKey, coverageGrid, industryLabel, LEVELS, levelLabel, areaLabel, sizeBands, type Company, type CommitteeSlot } from '@/lib/companies/coverage';
 import { PIPELINE_STAGES } from '@/lib/crm-types';
 import { searchCompanies } from '@/lib/leads-client';
 import { companySearchHref } from '@/lib/search/company-prefill';
@@ -141,7 +141,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
               <span className="font-medium">{item.name}</span>
               <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{stageLabel(item.stage)}</span>
             </span>
-            <span className="block text-xs text-muted-foreground">{[item.industry, `${item.people.length} ${item.people.length === 1 ? 'persona' : 'personas'}`].filter(Boolean).join(' · ')}</span>
+            <span className="block text-xs text-muted-foreground">{[industryLabel(item.industry), `${item.people.length} ${item.people.length === 1 ? 'persona' : 'personas'}`].filter(Boolean).join(' · ')}</span>
             <CommitteeMarks company={item} />
           </span>
         </button>
@@ -153,7 +153,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
         {company ? <>
           <SheetHeader>
             <SheetTitle>{company.name}</SheetTitle>
-            <SheetDescription>{[company.industry, sizeText(company.size), company.country, stageLabel(company.stage)].filter(Boolean).join(' · ')}</SheetDescription>
+            <SheetDescription>{[industryLabel(company.industry), sizeText(company.size), company.country, stageLabel(company.stage)].filter(Boolean).join(' · ')}</SheetDescription>
           </SheetHeader>
           <div className="mt-6 space-y-7">
             <section aria-labelledby="company-committee" className="space-y-2">
@@ -174,16 +174,16 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
             <section aria-labelledby="company-coverage" className="space-y-2">
               <h3 id="company-coverage" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Cobertura por área y nivel</h3>
               <div className="overflow-x-auto rounded-xl border">
-                <table className="w-full min-w-[22rem] text-xs">
+                <table className="w-full table-fixed text-xs">
                   <thead><tr className="border-b bg-muted/40 text-muted-foreground">
-                    <th scope="col" className="px-3 py-2 text-left font-medium">Área</th>
-                    {LEVELS.map(level => <th key={level.id} scope="col" className="px-2 py-2 text-left font-medium"><span title={level.label}>{level.short}</span></th>)}
+                    <th scope="col" className="w-[30%] px-3 py-2 text-left font-medium">Área</th>
+                    {LEVELS.map(level => <th key={level.id} scope="col" className="truncate px-1.5 py-2 text-left font-medium"><span title={level.label}>{level.short}</span></th>)}
                   </tr></thead>
                   <tbody>
                     {coverageGrid(company, main).map(row => <tr key={row.area} className="border-b last:border-0">
-                      <th scope="row" className="px-3 py-2 text-left font-normal">{row.label}</th>
-                      {row.cells.map((people, index) => <td key={LEVELS[index].id} className="px-2 py-2 align-top">
-                        {people.length ? <span className="flex flex-col gap-0.5">
+                      <th scope="row" className="break-words px-3 py-2 text-left font-normal">{row.label}</th>
+                      {row.cells.map((people, index) => <td key={LEVELS[index].id} className="min-w-0 px-1.5 py-2 align-top">
+                        {people.length ? <span className="flex min-w-0 flex-col gap-0.5">
                           {people.slice(0, 2).map(person => <span key={person.key} className="truncate font-medium" title={`${person.name}${person.title ? ` · ${person.title}` : ''}`}>{person.name.split(/\s+/)[0]}</span>)}
                           {people.length > 2 ? <span className="text-muted-foreground">+{people.length - 2}</span> : null}
                         </span> : <span className="text-muted-foreground/60" aria-label="Nadie">—</span>}
@@ -233,7 +233,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">{[item.industry, sizeText(item.size), item.city].filter(Boolean).join(' · ')}</p>
+                        <p className="text-xs text-muted-foreground">{[industryLabel(item.industry), sizeText(item.size), item.city].filter(Boolean).join(' · ')}</p>
                       </div>
                       <Button asChild size="sm" variant="ghost"><Link href={companySearchHref({ company: item.name, domain: item.domain, titles: startTitles(company) })}>Ver personas</Link></Button>
                     </div>

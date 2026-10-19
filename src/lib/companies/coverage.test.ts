@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
-import { buildCompanies, classifyRole, companyKey, coverageGrid, mainArea, sizeBands } from './coverage';
+import { buildCompanies, classifyRole, companyKey, coverageGrid, industryLabel, mainArea, sizeBands } from './coverage';
 
 const row = (patch: Partial<UnifiedRow>): UnifiedRow => ({ gid: `lead_saved|${Math.random()}`, sourceId: 'x', status: 'saved', kind: 'lead_saved', ...patch });
 
@@ -44,7 +44,7 @@ test('one company however it is written, one person however many times they were
     row({ name: 'Sin empresa', company: null }),
   ]);
   assert.deepEqual(companies.map(company => [company.name, company.people.length, company.stage]), [
-    ['Retail Sur S.A.', 2, 'meeting'], ['Logística Norte', 1, 'closed_won'],
+    ['Retail Sur', 2, 'meeting'], ['Logística Norte', 1, 'closed_won'],
   ], 'the open deal first, then the won one; opportunities and people without a company stay out');
   assert.equal(companies[0].size, 900);
   assert.equal(companies[0].industry, 'retail');
@@ -73,6 +73,17 @@ test('who decides, who uses and who pays, by the area you sell to', () => {
   const grid = coverageGrid(small, 'operaciones');
   assert.deepEqual(grid.map(item => item.area), ['general', 'operaciones', 'finanzas', 'compras'], 'the areas that matter, even when empty');
   assert.equal(grid[0].cells[0][0].name, 'Rosa Díaz');
+});
+
+test('the name it is written with most often and the rubro in Spanish', () => {
+  const { companies } = buildCompanies([
+    row({ name: 'A', company: 'Logística Norte SpA' }), row({ name: 'B', company: 'Logística Norte' }), row({ name: 'C', company: 'Logística Norte' }),
+  ]);
+  assert.equal(companies[0].name, 'Logística Norte');
+  assert.equal(industryLabel('logistics & supply chain'), 'Logística');
+  assert.equal(industryLabel('retail'), 'Retail');
+  assert.equal(industryLabel('servicios de aseo'), 'Servicios de aseo', 'what is not Apollo stays, with a capital');
+  assert.equal(industryLabel(''), null);
 });
 
 test('the sizes of companies like this one', () => {
