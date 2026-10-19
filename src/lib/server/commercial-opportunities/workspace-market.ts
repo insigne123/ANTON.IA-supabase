@@ -151,7 +151,7 @@ export async function runMarketContracts(client: SupabaseClient, job: Opportunit
   const { data, error } = await client.rpc('public_procurement_expiring', { p_from: window.from, p_to: window.to, p_patterns: patterns, p_limit: 600 });
   if (error) throw new AuthError('Aún no cargamos el historial de ChileCompra. Vuelve a intentarlo más tarde.', 409);
   const rows = (data || []) as ExpiringRow[];
-  const offer = { offer: String(context.offer || ''), services: context.services || [], exclusions: context.exclusions || [] };
+  const offer = { offer: String(context.offer || ''), services: context.services || [], exclusions: context.exclusions || [], territories: context.territories || [] };
   const kept = new Map<string, { fit: 'alta' | 'media'; reason: string }>();
   for (let offset = 0; offset < rows.length; offset += PLAN_SCREEN_BATCH) {
     if (Date.now() - started > 200_000) return { waiting: true as const };
@@ -159,7 +159,7 @@ export async function runMarketContracts(client: SupabaseClient, job: Opportunit
     const ids = new Set(batch.map(row => String(row.tender_id)));
     const step = `contracts:${createHash('sha256').update(batch.map(row => row.tender_id).join('|')).digest('hex').slice(0, 32)}`;
     const answer = await opportunityGenerate(client, job, { step, category: 'evaluation', role: 'screen', schema: contractsScreenSchema, output: 6000,
-      prompt: contractsScreenPrompt(offer, batch.map(row => ({ id: String(row.tender_id), name: row.name, agency: row.agency, category: row.category }))) });
+      prompt: contractsScreenPrompt(offer, batch.map(row => ({ id: String(row.tender_id), name: row.name, agency: row.agency, category: row.category, region: row.region }))) });
     for (const match of answer.matches) if (ids.has(match.id.trim())) kept.set(match.id.trim(), { fit: match.fit, reason: match.reason.replace(/\s+/g, ' ').trim().slice(0, 300) });
   }
   const contracts: ExpiringContract[] = rows.filter(row => kept.has(String(row.tender_id))).map(row => ({

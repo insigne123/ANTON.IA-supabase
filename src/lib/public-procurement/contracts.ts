@@ -16,13 +16,19 @@ export function contractsWindow(now = new Date()) {
   return { from: at(-1), to: at(15) };
 }
 
+/** The contract's total in pesos, or null: below $50.000 the file writes a unit price ($1 for contracts paid per unit). */
+export function contractTotal(contract: Pick<ExpiringContract, 'amount' | 'currency'>) {
+  if (contract.amount === null || !Number.isFinite(contract.amount)) return null;
+  return contract.currency && contract.currency !== 'CLP' ? contract.amount : contract.amount >= 50_000 ? contract.amount : null;
+}
+
 /** «15 de enero de 2025». */
 export const humanDay = (day: string | null | undefined) => day && /^\d{4}-\d{2}-\d{2}/.test(day)
   ? new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${day.slice(0, 10)}T12:00:00Z`)) : null;
 
 /** The opportunity to prepare the renewal: what is bought, who holds it, until when and for how much. */
 export function contractOpportunityDraft(contract: ExpiringContract) {
-  const amount = moneyLabel(contract.amount, contract.currency);
+  const amount = contractTotal(contract) === null ? null : moneyLabel(contract.amount, contract.currency);
   return {
     title: `Renovación: ${contract.name}`.slice(0, 500),
     company: (contract.agency || 'Organismo público').slice(0, 300),
@@ -33,6 +39,6 @@ export function contractOpportunityDraft(contract: ExpiringContract) {
       contract.reason ? `Por qué calza: ${contract.reason}` : '',
       'Conviene conversar antes con el área que usa el servicio y preparar la oferta. La fecha de término es estimada (adjudicación más duración del contrato) y puede cambiar con prórrogas.',
     ].filter(Boolean).join('\n'),
-    amount: contract.currency === 'CLP' || !contract.currency ? contract.amount : null, currency: 'CLP',
+    amount: contract.currency === 'CLP' || !contract.currency ? contractTotal(contract) : null, currency: 'CLP',
   };
 }
