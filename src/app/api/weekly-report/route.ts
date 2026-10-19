@@ -20,13 +20,15 @@ export async function GET(req: NextRequest) {
     const admin = getSupabaseAdminClient();
     const scope = { organizationId: auth.organizationId, userId: auth.user.id };
     const which = req.nextUrl.searchParams.get('week') === 'previous' ? 'previous' : 'current';
-    const { report, admin: isAdmin, managers } = await buildWeeklyReport(admin, scope, { which, canSeeOpportunities: () => canUseOpportunities(admin, auth.user as any, auth.organizationId) });
-    const [profile, mailbox, members] = await Promise.all([
+    // What goes below the report (the Monday email, the mailbox, who may be an opportunities manager) does not depend on
+    // it: read together with it. The members are read for everyone and returned only to admins.
+    const [{ report, admin: isAdmin, managers }, profile, mailbox, members] = await Promise.all([
+      buildWeeklyReport(admin, scope, { which, canSeeOpportunities: () => canUseOpportunities(admin, auth.user as any, auth.organizationId) }),
       admin.from('profiles').select('signatures').eq('id', auth.user.id).maybeSingle(),
       readMailSenderPreference(admin, auth.user.id),
-      isAdmin ? admin.from('organization_members').select('user_id,role').eq('organization_id', auth.organizationId) : Promise.resolve({ data: [], error: null }),
+      admin.from('organization_members').select('user_id').eq('organization_id', auth.organizationId),
     ]);
-    const memberIds = ((members as any).data || []).map((row: any) => String(row.user_id));
+    const memberIds = isAdmin ? ((members as any).data || []).map((row: any) => String(row.user_id)) : [];
     const names = memberIds.length ? await admin.from('profiles').select('id,full_name,email').in('id', memberIds) : { data: [] };
     return NextResponse.json({
       report, email: readReportEmail((profile as any).data?.signatures), mailbox: mailbox.resolved,

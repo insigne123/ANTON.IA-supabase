@@ -190,15 +190,21 @@ export async function readOpportunityManagers(client: Client, organizationId: st
  * to the admins while there are none, and only to whoever may see Oportunidades.
  */
 export async function reportRoles(client: Client, scope: ReportScope, canSeeOpportunities: () => Promise<boolean>) {
-  const member: any = await client.from('organization_members').select('role').eq('organization_id', scope.organizationId).eq('user_id', scope.userId).maybeSingle();
+  // The three reads do not depend on each other: asked together they cost one round trip, not three. Membership is still
+  // checked first, so a stranger hears «No perteneces» and not a failure of the managers.
+  const [member, managers, mayOpportunities]: [any, { value: string[] } | { error: unknown }, boolean] = await Promise.all([
+    client.from('organization_members').select('role').eq('organization_id', scope.organizationId).eq('user_id', scope.userId).maybeSingle(),
+    readOpportunityManagers(client, scope.organizationId).then(value => ({ value }), error => ({ error })),
+    canSeeOpportunities().catch(() => false),
+  ]);
   if (member.error) throw new WeeklyReportError('No pudimos comprobar tu rol.', 503);
   if (!member.data) throw new WeeklyReportError('No perteneces a esta organización.', 403);
+  if ('error' in managers) throw managers.error;
   const admin = ['owner', 'admin'].includes(String(member.data.role));
-  const managers = await readOpportunityManagers(client, scope.organizationId);
   const roles: ReportRole[] = ['personal'];
   if (admin) roles.push('team');
-  if ((managers.includes(scope.userId) || (admin && !managers.length)) && await canSeeOpportunities().catch(() => false)) roles.push('opportunities');
-  return { roles, admin, managers };
+  if ((managers.value.includes(scope.userId) || (admin && !managers.value.length)) && mayOpportunities) roles.push('opportunities');
+  return { roles, admin, managers: managers.value };
 }
 
 export async function buildWeeklyReport(client: Client, scope: ReportScope, options: { which: ReportWeek['which']; canSeeOpportunities: () => Promise<boolean>; now?: Date }) {
