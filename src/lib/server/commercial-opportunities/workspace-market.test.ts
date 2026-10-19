@@ -115,7 +115,11 @@ test('the month\'s «Contratos por vencer» is queued once and, if it stopped bl
   await enqueueMonthlyContracts(client, admin, context, '2026-10-19');
   await enqueueMonthlyContracts(client, admin, context, '2026-10-19');
   assert.deepEqual(tables.opportunity_jobs.map(job => [job.kind, job.dedupe_key, job.state]), [['contracts', 'contracts:2026-10:3', 'queued']]);
-  Object.assign(tables.opportunity_jobs[0], { state: 'blocked', error: 'No pudimos leer el historial de ChileCompra ahora.' });
+  // The search is asked every minute: a reading that just stopped waits 6 hours before trying again.
+  Object.assign(tables.opportunity_jobs[0], { state: 'blocked', error: 'No pudimos leer el historial de ChileCompra ahora.', updated_at: new Date(Date.now() - 60_000).toISOString() });
+  await enqueueMonthlyContracts(client, admin, context, '2026-10-19');
+  assert.equal(tables.opportunity_jobs[0].state, 'blocked', 'not every minute');
+  Object.assign(tables.opportunity_jobs[0], { updated_at: new Date(Date.now() - 7 * 3600_000).toISOString() });
   await enqueueMonthlyContracts(client, admin, context, '2026-10-20');
   assert.deepEqual([tables.opportunity_jobs[0].state, tables.opportunity_jobs[0].error], ['queued', null]);
   Object.assign(tables.opportunity_jobs[0], { state: 'ready' });

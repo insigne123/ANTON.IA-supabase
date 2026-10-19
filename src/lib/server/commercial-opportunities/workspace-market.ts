@@ -16,6 +16,7 @@ import { loadCompanyForModel, loadTenderProfile } from './tender-profile-read';
 /** The kinds with a public buyer whose history ChileCompra keeps. */
 export const MARKET_KINDS = ['tender', 'compra_agil'];
 const ACTIVE = ['queued', 'running', 'waiting'];
+const BLOCKED_RETRY_MS = 6 * 3600_000;
 type JobRow = { id: string; state: string; error: string | null; created_at: string; updated_at: string; result: any };
 
 // ─── «Cómo ganar» (propuesta 9) ────────────────────────────────────────────────────────────────────────────────────
@@ -121,9 +122,12 @@ export async function enqueueMonthlyContracts(client: SupabaseClient, scope: Wor
   // A database without the «contracts» kind yet leaves the search of the day as it was.
   if (queued.error?.code === '23514') return;
   opportunityDb(queued);
-  // The month's reading that stopped blocked (the history did not answer) tries again with the next search, as «Demanda futura».
-  opportunityDb(await client.from('opportunity_jobs').update({ state: 'queued', error: null })
-    .eq('organization_id', scope.organizationId).eq('dedupe_key', key).eq('state', 'blocked'));
+  // The month's reading that stopped blocked (the history did not answer) tries again, as «Demanda futura»: at most every 6
+  // hours, because the search is asked every minute and a history that keeps failing should not be read every minute.
+  const blocked = opportunityDb(await client.from('opportunity_jobs').select('id,updated_at').eq('organization_id', scope.organizationId)
+    .eq('dedupe_key', key).eq('state', 'blocked').maybeSingle());
+  if (blocked && !(Date.parse(blocked.updated_at) > Date.now() - BLOCKED_RETRY_MS))
+    opportunityDb(await client.from('opportunity_jobs').update({ state: 'queued', error: null }).eq('id', blocked.id).eq('state', 'blocked'));
 }
 
 /** «Actualizar»: a reading of its own each time it is asked, unless one is under way. */
