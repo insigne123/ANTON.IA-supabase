@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveSimilar, similarPrompt, similarRequestSchema } from './similar';
+import { resolveSimilar, similarPrompt, similarRequestSchema, similarSearchError } from './similar';
 
 const candidates = [
   { id: 'a1', name: 'Supermercados del Valle', industry: 'retail', size: 1200, city: 'Talca', country: 'Chile', description: 'Cadena regional de supermercados' },
@@ -31,4 +31,13 @@ test('only the companies the search returned, once each, with a clean «why»', 
     ['b2', 'Cadena de retail con alta rotación de cajeros'], ['a1', 'Supermercados regionales de tamaño parecido'],
   ]);
   assert.equal(picked[1].city, 'Talca', 'it keeps what the search said of the company');
+});
+
+test('a failed search reads as a sentence, never as the provider\'s code', () => {
+  const plain = 'No pudimos buscar empresas parecidas ahora. Inténtalo de nuevo en unos minutos.';
+  assert.equal(similarSearchError(new Error('APOLLO_PROVIDER_NOT_CONFIGURED')), plain);
+  assert.equal(similarSearchError(new Error('HTTP_502')), plain);
+  assert.equal(similarSearchError('boom'), plain);
+  assert.equal(similarSearchError(new Error('Alcanzaste el límite diario de búsquedas (50/50). Vuelve a intentarlo después del reinicio.')),
+    'Alcanzaste el límite diario de búsquedas (50/50). Vuelve a intentarlo después del reinicio.', 'Búsqueda\'s own sentences stay');
 });

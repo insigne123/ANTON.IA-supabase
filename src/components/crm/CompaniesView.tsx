@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { buildCompanies, companyKey, coverageGrid, industryLabel, LEVELS, levelLabel, areaLabel, sizeBands, type Company, type CommitteeSlot } from '@/lib/companies/coverage';
+import { similarSearchError } from '@/lib/companies/similar';
 import { PIPELINE_STAGES } from '@/lib/crm-types';
 import { searchCompanies } from '@/lib/leads-client';
 import { companySearchHref } from '@/lib/search/company-prefill';
@@ -100,7 +101,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
       setSimilar(current => ({ ...current, [base.key]: { status: 'ready', items: body.companies.map((item: Similar) => ({ ...item, domain: domainOf.get(item.id) ?? null })),
         ...(body.companies.length ? {} : { note: `La IA no encontró empresas claramente parecidas entre las ${candidates.length} que trajo la búsqueda.`, found: candidates.slice(0, 12) }) } }));
     } catch (error) {
-      setSimilar(current => ({ ...current, [base.key]: { status: 'error', text: error instanceof Error ? error.message : 'No pudimos buscar empresas parecidas.' } }));
+      setSimilar(current => ({ ...current, [base.key]: { status: 'error', text: similarSearchError(error) } }));
     }
   };
 

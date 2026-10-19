@@ -68,3 +68,9 @@ export function resolveSimilar(answer: SimilarAnswer, candidates: SimilarCandida
     return [{ ...candidate, why: pick.why.replace(/\s+/g, ' ').trim().replace(/[\s.]+$/, '').slice(0, 160) }];
   }).slice(0, SIMILAR_MAX_PICKS);
 }
+
+/** What the person reads when the search fails: Búsqueda's own sentences stay, its codes (APOLLO_…, HTTP_502) do not. */
+export function similarSearchError(error: unknown) {
+  const text = error instanceof Error ? error.message.trim() : '';
+  return !text || /^[A-Z0-9_:]+$/.test(text) ? 'No pudimos buscar empresas parecidas ahora. Inténtalo de nuevo en unos minutos.' : text;
+}
