@@ -41,7 +41,7 @@ function memory(seed: Record<string, any[]>) {
       const rows = tables[name];
       if (action.kind === 'upsert') {
         const clash = rows.find(row => row.organization_id === action.values.organization_id && row.dedupe_key === action.values.dedupe_key);
-        if (!clash) rows.push({ id: `job-${rows.length + 1}`, state: 'queued', ...action.values });
+        if (!clash) rows.push({ id: `job-${rows.length + 1}`, state: 'queued', updated_at: new Date().toISOString(), ...action.values });
         return { data: null, error: null };
       }
       let found = rows.filter(row => filters.every(filter => filter(row)));
@@ -54,6 +54,7 @@ function memory(seed: Record<string, any[]>) {
     const chain: any = {
       select: () => chain, eq: (key: string, value: unknown) => { filters.push(row => read(row, key) === value); return chain; },
       neq: (key: string, value: unknown) => { filters.push(row => read(row, key) !== value); return chain; },
+      gt: (key: string, value: any) => { filters.push(row => read(row, key) > value); return chain; },
       is: (key: string, value: unknown) => { filters.push(row => (read(row, key) ?? null) === value); return chain; },
       in: (key: string, values: unknown[]) => { filters.push(row => values.includes(read(row, key))); return chain; },
       or: () => chain, order: (key: string) => { order = key; return chain; }, limit: (count: number) => { limit = count; return chain; },
@@ -139,10 +140,29 @@ test('the pipeline queues one reading when cards lack their summary, and none wh
   const scope = { organizationId: 'org', userId: 'admin', role: 'admin' };
   assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, [{ data: { summary: { text: 'x' } } }, { data: { summary: { text: '' } } }]), 0);
   assert.equal(tables.opportunity_jobs.length, 0);
-  assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, [{ data: {} }, { data: null }]), 2);
+  assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, [{ id: 'x', data: {} }, { id: 'done', data: { summary: { text: 'y' } } }, { id: 'z', data: null }]), 2);
   assert.equal(tables.opportunity_jobs.length, 1);
-  assert.deepEqual({ kind: tables.opportunity_jobs[0].kind, payload: tables.opportunity_jobs[0].payload }, { kind: 'evaluate', payload: { summaries: true } });
+  assert.deepEqual({ kind: tables.opportunity_jobs[0].kind, payload: tables.opportunity_jobs[0].payload }, { kind: 'evaluate', payload: { summaries: true, ids: ['x', 'z'] } });
   tables.opportunity_jobs[0].dedupe_key = 'summaries:earlier';
-  await summaries.enqueueOpportunitySummaries(client, scope, [{ data: {} }]);
+  await summaries.enqueueOpportunitySummaries(client, scope, [{ id: 'x', data: {} }]);
   assert.equal(tables.opportunity_jobs.length, 1, 'the queued one is still to run');
+  // One that has not moved in 15 minutes (its attempts ran out) no longer holds back a new one.
+  Object.assign(tables.opportunity_jobs[0], { state: 'waiting', updated_at: new Date(Date.now() - 16 * 60_000).toISOString() });
+  await summaries.enqueueOpportunitySummaries(client, scope, [{ id: 'x', data: {} }]);
+  assert.equal(tables.opportunity_jobs.length, 2);
+});
+
+test('the reading takes the cards the pipeline showed, in its order, and none it did not show', async () => {
+  const summaries = await load();
+  const { tables, client } = memory({ commercial_opportunities: [
+    opportunity('high', { score: 95 }), opportunity('shown-last', { score: 10 }), opportunity('shown-first', { score: 40 }), opportunity('done', { data: { evaluation: 'review', summary: { text: 'Ya resumida.' } } }),
+  ] });
+  (globalThis as any).__answer = answer; (globalThis as any).__calls = [];
+  const result = await summaries.runOpportunitySummaries(client, { ...job, payload: { summaries: true, ids: ['shown-first', 'done', 'shown-last'] } }, Date.now(),
+    { resolveTicket: async () => null, getLicitacion: async () => { throw new Error('not asked'); } });
+  const asked = JSON.parse((globalThis as any).__calls[0].prompt.slice((globalThis as any).__calls[0].prompt.indexOf('['))).map((item: any) => item.id);
+  assert.deepEqual(asked, ['shown-first', 'shown-last']);
+  const byId = Object.fromEntries(tables.commercial_opportunities.map(row => [row.id, row]));
+  assert.equal(byId.high.data.summary, undefined, 'not on the pipeline the person saw');
+  assert.equal(result.waiting, false);
 });

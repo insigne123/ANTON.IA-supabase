@@ -17,8 +17,11 @@
   - Sin inventar montos, plazos, cantidades ni lugares, y sin expandir siglas dudosas.
   - Sin opinar si conviene postular: eso está en el motivo y en el informe.
 - **Cuándo corre:**
-  - Al leer el Embudo, si hay tarjetas sin resumen, se encola un trabajo `evaluate` con `payload.summaries`. Se encola a lo más uno cada 10 minutos, y ninguno si ya hay uno en curso.
-  - Cada pasada dura unos 50 s y toma hasta 24 oportunidades: primero las que están en curso, luego las recomendadas y por revisar abiertas, por puntaje.
+  - Al leer el Embudo, si hay tarjetas sin resumen, se encola un trabajo `evaluate` con `payload.summaries` y `payload.ids`: las tarjetas que mostró el Embudo, en su orden.
+    - El Embudo muestra las que están en curso, las 120 recomendadas y las 60 por revisar con más puntaje. Solo esas se resumen, aunque el workspace tenga cientos más abiertas (GrupoExpro tiene unas 990).
+    - Se encola a lo más uno cada 10 minutos, y ninguno si ya hay uno en curso.
+    - Un trabajo que lleva 15 minutos sin moverse, porque agotó sus intentos o se cayó su proceso, ya no frena uno nuevo.
+  - Cada pasada dura unos 50 s y toma hasta 24 oportunidades, en el orden del Embudo.
   - Si quedan más, el trabajo queda en espera y sigue en el próximo minuto.
   - Si el ticket está ocupado con la búsqueda diaria, esa licitación espera a la pasada siguiente.
   - Si no hay ticket, el resumen se hace con el nombre.

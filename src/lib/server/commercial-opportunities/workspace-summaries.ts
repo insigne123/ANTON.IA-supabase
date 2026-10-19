@@ -13,27 +13,45 @@ import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 // A short reading each time: the worker's tick also runs the searches and the reports of the workspace.
 const ITEMS_PER_RUN = 24;
 const RUN_MS = 50_000;
+// The cards one pipeline shows (in play, 120 recommended, 60 to review) fit; ids are read 100 at a time.
+const MAX_IDS = 400;
+const ID_CHUNK = 100;
+// A reading that has not moved in this long (its attempts ran out, its worker died) no longer holds back a new one.
+const STALE_MS = 15 * 60_000;
 const COLUMNS = 'id,kind,title,company_name,buyer_name,amount,currency,deadline_at,data,updated_at';
 type Row = { id: string; kind: string; title: string; company_name: string | null; buyer_name: string | null; amount: number | null; currency: string | null;
   deadline_at: string | null; data: Record<string, any> | null; updated_at: string };
 
 /**
- * The pipeline shows opportunities without their summary: one reading for the workspace is queued, unless one is under
- * way. It never stops the pipeline from loading; the count says how many cards are still waiting for theirs.
+ * The pipeline shows opportunities without their summary: one reading of those cards, in the order shown, is queued unless
+ * one is under way. It never stops the pipeline from loading; the count says how many cards are still waiting for theirs.
  */
-export async function enqueueOpportunitySummaries(client: SupabaseClient, scope: WorkScope, items: Array<{ data?: unknown }>) {
-  const missing = items.filter(item => !opportunitySummary(item.data) && !(item.data as any)?.summary).length;
-  if (!missing) return 0;
+export async function enqueueOpportunitySummaries(client: SupabaseClient, scope: WorkScope, items: Array<{ id?: string; data?: unknown }>) {
+  const missing = items.filter(item => !opportunitySummary(item.data) && !(item.data as any)?.summary);
+  if (!missing.length) return 0;
   const active = await client.from('opportunity_jobs').select('id').eq('organization_id', scope.organizationId).eq('kind', 'evaluate')
-    .in('state', ['queued', 'running', 'waiting']).eq('payload->>summaries', 'true').limit(1).maybeSingle();
-  if (active.error || active.data) return missing;
+    .in('state', ['queued', 'running', 'waiting']).eq('payload->>summaries', 'true').gt('updated_at', new Date(Date.now() - STALE_MS).toISOString())
+    .limit(1).maybeSingle();
+  if (active.error || active.data) return missing.length;
   // At most one new reading every ten minutes, whoever opens the pipeline.
+  const ids = missing.map(item => item.id).filter((id): id is string => Boolean(id)).slice(0, MAX_IDS);
   await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'evaluate',
-    dedupe_key: `summaries:${new Date().toISOString().slice(0, 15)}`, payload: { summaries: true } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true });
-  return missing;
+    dedupe_key: `summaries:${new Date().toISOString().slice(0, 15)}`, payload: { summaries: true, ids } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true });
+  return missing.length;
 }
 
-/** What the pipeline shows first: opportunities in play, then recommended and to review by score, open ones only. */
+/** The cards the pipeline showed, in its order, that still lack their summary. */
+async function shownCandidates(client: SupabaseClient, org: string, ids: string[]) {
+  const found: Row[] = [];
+  for (let start = 0; start < ids.length && found.length < ITEMS_PER_RUN; start += ID_CHUNK) {
+    const chunk = ids.slice(start, start + ID_CHUNK);
+    const rows = (opportunityDb(await client.from('commercial_opportunities').select(COLUMNS).eq('organization_id', org).in('id', chunk).is('data->summary', null)) || []) as Row[];
+    found.push(...rows.sort((a, b) => chunk.indexOf(a.id) - chunk.indexOf(b.id)));
+  }
+  return found.slice(0, ITEMS_PER_RUN);
+}
+
+/** Without the cards shown: opportunities in play, then recommended and to review by score, open ones only. */
 async function summaryCandidates(client: SupabaseClient, org: string) {
   const worked = (opportunityDb(await client.from('opportunity_work').select('opportunity_id').eq('organization_id', org).neq('state', 'unassigned').limit(1000)) || []) as Array<{ opportunity_id: string }>;
   const missing = () => client.from('commercial_opportunities').select(COLUMNS).eq('organization_id', org).is('data->summary', null);
@@ -77,7 +95,8 @@ async function save(client: SupabaseClient, org: string, before: Row, after: Row
  */
 export async function runOpportunitySummaries(client: SupabaseClient, job: OpportunityJob, started = Date.now(), dependencies = { getLicitacion, resolveTicket: resolveTicketForOrganization }) {
   const org = job.organization_id;
-  const candidates = await summaryCandidates(client, org);
+  const shown = Array.isArray(job.payload.ids) ? (job.payload.ids as unknown[]).filter((id): id is string => typeof id === 'string').slice(0, MAX_IDS) : null;
+  const candidates = shown ? await shownCandidates(client, org, shown) : await summaryCandidates(client, org);
   if (!candidates.length) return { waiting: false as const, summarized: 0, detailed: 0 };
   let ticket: string | null | undefined;
   let detailed = 0;
