@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, BarChart3, Focus, LayoutGrid, Loader2, RefreshCw, Sparkles, Workflow } from 'lucide-react';
+import { AlertCircle, BarChart3, Building2, Focus, LayoutGrid, Loader2, RefreshCw, Sparkles, Workflow } from 'lucide-react';
 
+import { CompaniesView } from '@/components/crm/CompaniesView';
 import { KanbanBoard } from '@/components/crm/KanbanBoard';
 import { PipelineDashboard } from '@/components/crm/PipelineDashboard';
 import { LeadDetailDrawer } from '@/components/crm/LeadDetailDrawer';
@@ -24,6 +25,8 @@ import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 import { loadUnifiedRows, unifiedFailureText } from '@/lib/unified-sheet-data';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
+type CrmView = 'panel' | 'board' | 'companies';
+
 export default function CRMPage() {
     const { toast } = useToast();
     // The value of each deal (Plan 11, PR 4c), behind CRM_DEAL_VALUES_ENABLED; null until the app knows.
@@ -41,16 +44,17 @@ export default function CRMPage() {
     const [suggestions, setSuggestions] = useState<CrmStageSuggestion[]>([]);
     const [deciding, setDeciding] = useState(false);
     // «Panel» is the CRM dashboard (Plan 11, PR 4a; it replaces the flow graph of Plan 5); «Tablero» is the board to move
-    // leads. The choice is remembered. null until it is read, so the toggle never shows «Panel» and then jumps to «Tablero».
-    const [view, setView] = useState<'panel' | 'board' | null>(null);
+    // leads; «Empresas» groups the people by company (propuestas 5 y 6). The choice is remembered. null until it is read,
+    // so the toggle never shows «Panel» and then jumps to another view.
+    const [view, setView] = useState<CrmView | null>(null);
     const [openStage, setOpenStage] = useState<PipelineStage | null>(null);
     const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
     useEffect(() => {
-        let stored: 'panel' | 'board' = 'panel';
-        try { if (window.localStorage.getItem('anton.crm.view') === 'board') stored = 'board'; } catch { /* storage unavailable */ }
+        let stored: CrmView = 'panel';
+        try { const saved = window.localStorage.getItem('anton.crm.view'); if (saved === 'board' || saved === 'companies') stored = saved; } catch { /* storage unavailable */ }
         setView(stored);
     }, []);
-    function chooseView(next: 'panel' | 'board') {
+    function chooseView(next: CrmView) {
         setView(next);
         try { window.localStorage.setItem('anton.crm.view', next); } catch { /* storage unavailable */ }
     }
@@ -200,6 +204,9 @@ export default function CRMPage() {
                             <Button size="sm" variant={view === 'board' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'board'} onClick={() => chooseView('board')}>
                                 <LayoutGrid className="h-4 w-4" /> Tablero
                             </Button>
+                            <Button size="sm" variant={view === 'companies' ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={view === 'companies'} onClick={() => chooseView('companies')}>
+                                <Building2 className="h-4 w-4" /> Empresas
+                            </Button>
                         </div>
                         {view === 'board' && <Button
                             variant={focusMode ? 'secondary' : 'outline'}
@@ -254,6 +261,10 @@ export default function CRMPage() {
                         description="Cuando guardes o contactes leads, aparecerán aquí para que organices su avance."
                         action={<div className="flex flex-wrap justify-center gap-2"><Button asChild size="sm"><Link href="/search">Buscar prospectos</Link></Button><Button asChild size="sm" variant="outline"><Link href="/saved/leads/enriched">Ir a «Por escribir»</Link></Button></div>}
                     />
+                ) : view === 'companies' ? (
+                    <div className="h-full overflow-y-auto">
+                        <CompaniesView rows={rows} onOpenPerson={setSelectedLeadId} />
+                    </div>
                 ) : view !== 'board' ? (
                     <div className="h-full overflow-y-auto">
                         <PipelineDashboard rows={rows} onOpenStage={setOpenStage} pending={pendingByStage} refreshedAt={refreshedAt} dealValues={dealValues === true} />

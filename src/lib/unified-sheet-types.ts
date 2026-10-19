@@ -19,6 +19,12 @@ export interface UnifiedRow {
   title?: string | null;
   linkedinUrl?: string | null;
   industry?: string | null;
+  /** What the enrichment knows of the person and the company: «Empresas» places people and finds companies like it. */
+  seniority?: string | null;
+  departments?: string[] | null;
+  companyDomain?: string | null;
+  companySize?: number | null;
+  country?: string | null;
 
   // Metadatos
   status: UnifiedStatus;

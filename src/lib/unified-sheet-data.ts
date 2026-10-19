@@ -97,6 +97,16 @@ function dealFields(custom: CustomData | undefined): Partial<UnifiedRow> {
   };
 }
 
+/** «https://www.retailsur.cl/contacto» → «retailsur.cl»; null when it is not a web address. */
+function websiteDomain(value: unknown) {
+  const text = normalizeStr(value as any);
+  if (!text) return null;
+  try {
+    const host = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`).hostname.toLowerCase().replace(/^www\./, '');
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(host) ? host : null;
+  } catch { return null; }
+}
+
 function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow | null {
   try {
     const idBase = l?.id ?? (l as any)?._id ?? (l as any)?.gid ?? safeUUID();
@@ -111,6 +121,8 @@ function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow
       company: normalizeStr(l?.company ?? (l as any)?.companyName) || null,
       title: normalizeStr(l?.title ?? (l as any)?.position) || null,
       industry: normalizeStr(l?.industry ?? (l as any)?.organization_industry) || null,
+      companyDomain: websiteDomain((l as any)?.companyWebsite ?? (l as any)?.company_website),
+      country: normalizeStr((l as any)?.country) || null,
       email,
       linkedinUrl: normalizeStr((l as any)?.linkedin_url ?? l?.linkedinUrl) || null,
       status: 'saved',
@@ -151,6 +163,11 @@ function mapEnrichedLead(e: any, customMap: Record<string, CustomData>): Unified
       company: normalizeStr(e?.company ?? e?.companyName) || null,
       title: normalizeStr(e?.title ?? (e as any)?.position) || null,
       industry: normalizeStr(e?.industry ?? e?.organizationIndustry ?? (e as any)?.organization_industry) || null,
+      seniority: normalizeStr(e?.seniority) || null,
+      departments: Array.isArray(e?.departments) ? e.departments.map((item: unknown) => String(item)).slice(0, 10) : null,
+      companyDomain: normalizeStr(e?.organizationDomain ?? e?.companyDomain) || null,
+      companySize: Number.isFinite(Number(e?.organizationSize)) && Number(e?.organizationSize) > 0 ? Number(e.organizationSize) : null,
+      country: normalizeStr(e?.country) || null,
       email,
       linkedinUrl: normalizeStr(e?.linkedinUrl ?? (e as any)?.linkedin_url) || null,
       status: 'enriched',
@@ -232,8 +249,10 @@ function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow
       sourceId: String(c?.id ?? (c as any)?._id ?? ''),
       name: normalizeStr(c?.name) || null,
       company: normalizeStr(c?.company) || null,
-      title: normalizeStr(c?.title) || null,
+      // A conversation keeps the cargo as «role».
+      title: normalizeStr(c?.title ?? c?.role) || null,
       industry: normalizeStr(c?.industry) || null,
+      country: normalizeStr(c?.country) || null,
       email,
       linkedinUrl: normalizeStr(c?.linkedinUrl) || null,
       status: replied ? 'replied' : ((normalizeStr(c?.status) as UnifiedRow['status']) ?? 'sent'),
