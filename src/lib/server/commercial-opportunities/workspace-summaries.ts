@@ -56,10 +56,18 @@ function withDetail(row: Row, detail: Tender): Row {
   };
 }
 
+// The screening rewrites these without touching updated_at (workspace-sources.ts): a verdict given meanwhile is not overwritten.
+const EVALUATION_FIELDS = ['evaluation', 'matchedService', 'profileRevision'] as const;
+
 /** Saved only if nobody changed the opportunity meanwhile (its row as saved, or null); otherwise the next reading takes it again. */
 async function save(client: SupabaseClient, org: string, before: Row, after: Row): Promise<Row | null> {
-  const saved = await client.from('commercial_opportunities').update({ buyer_name: after.buyer_name, amount: after.amount, currency: after.currency, data: after.data })
-    .eq('organization_id', org).eq('id', before.id).eq('updated_at', before.updated_at).select('updated_at').maybeSingle();
+  let query = client.from('commercial_opportunities').update({ buyer_name: after.buyer_name, amount: after.amount, currency: after.currency, data: after.data })
+    .eq('organization_id', org).eq('id', before.id).eq('updated_at', before.updated_at);
+  for (const field of EVALUATION_FIELDS) {
+    const value = before.data?.[field];
+    query = value === undefined || value === null ? query.is(`data->>${field}`, null) : query.eq(`data->>${field}`, String(value));
+  }
+  const saved = await query.select('updated_at').maybeSingle();
   return !saved.error && saved.data ? { ...after, updated_at: (saved.data as { updated_at?: string }).updated_at || before.updated_at } : null;
 }
 

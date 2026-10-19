@@ -24,7 +24,10 @@
   - Si no hay ticket, el resumen se hace con el nombre.
   - Si el modelo deja una oportunidad sin resumen, se guarda vacío para no pedirlo en cada pasada.
 - **Costo:** sale del presupuesto de evaluación del workspace (techo US$20/mes). Con Haiku, 140 tarjetas cuestan del orden de US$0,10.
-- **Concurrencia:** cada escritura exige el mismo `updated_at` que se leyó. Si alguien cambió la oportunidad mientras tanto, la pasada siguiente la vuelve a tomar.
+- **Concurrencia:**
+  - Cada escritura exige el mismo `updated_at` que se leyó.
+  - También exige el mismo veredicto, servicio y revisión de la oferta (`data.evaluation`, `matchedService`, `profileRevision`). La evaluación los reescribe sin cambiar `updated_at`, y así un veredicto nuevo no se pisa con el que se leyó.
+  - Si alguien cambió la oportunidad mientras tanto, la pasada siguiente la vuelve a tomar.
 
 ## «Cargar oportunidad» desde un documento
 
@@ -60,6 +63,6 @@
   - la ficha oficial antes del resumen;
   - el ticket ocupado;
   - sin ticket;
-  - los cambios hechos mientras tanto;
+  - los cambios hechos mientras tanto, también un veredicto que no cambia `updated_at`;
   - un solo trabajo encolado.
 - `src/components/commercial-opportunities/pipeline-ui.test.ts`: el resumen bajo el nombre, el organismo arriba, sin «—» y la línea tenue mientras se escriben.

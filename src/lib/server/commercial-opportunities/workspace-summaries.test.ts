@@ -124,6 +124,15 @@ test('without a ticket the name is enough; a change made meanwhile is not overwr
   assert.equal(b.data.summary, undefined, 'b changed while the model wrote: the next reading takes it');
 });
 
+test('a verdict the screening gives meanwhile, which keeps updated_at, is not overwritten with the one read', async () => {
+  const summaries = await load();
+  const { tables, client } = memory({ commercial_opportunities: [opportunity('a', { data: { evaluation: 'review', profileRevision: 3, description: 'Guardias para el recinto', observed: { code: 'a-1-LP26' } }, buyer_name: 'SAG' })] });
+  (globalThis as any).__answer = (input: any) => { const row = tables.commercial_opportunities[0]; row.data = { ...row.data, evaluation: 'recommended', matchedService: 'Guardias' }; return answer(input); };
+  await summaries.runOpportunitySummaries(client, job, Date.now(), { resolveTicket: async () => null, getLicitacion: async () => { throw new Error('not asked'); } });
+  const [a] = tables.commercial_opportunities;
+  assert.deepEqual({ evaluation: a.data.evaluation, matchedService: a.data.matchedService, summary: a.data.summary }, { evaluation: 'recommended', matchedService: 'Guardias', summary: undefined });
+});
+
 test('the pipeline queues one reading when cards lack their summary, and none while one is under way', async () => {
   const summaries = await load();
   const { tables, client } = memory({});
