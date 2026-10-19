@@ -45,7 +45,10 @@ end; $$;
 
 -- The rule lives in one place, closed.
 select has_table('public', 'cowork_access_policy', 'the access policy exists');
-select results_eq($$select open_to_grants from public.cowork_access_policy$$, $$values (false)$$, 'it starts closed, in one row');
+select results_eq($$select open_to_grants from public.cowork_access_policy$$, $$values (true)$$,
+  'one row, open since 20261019100000 (Cowork for every account)');
+-- The closed rule is still the fallback: close it here to check it as it was.
+update public.cowork_access_policy set open_to_grants = false, updated_at = now();
 select ok(not has_table_privilege('authenticated', 'public.cowork_access_policy', 'select')
   and not has_table_privilege('anon', 'public.cowork_access_policy', 'select')
   and not has_function_privilege('authenticated', 'public.cowork_open_access(text)', 'execute')

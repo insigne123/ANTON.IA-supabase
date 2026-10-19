@@ -1,21 +1,38 @@
 import { AuthError, requireAuth, type AuthContext } from '@/lib/server/auth-utils';
 import { isCoworkIdentityAllowed, type CoworkIdentity } from '@/lib/cowork/access';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+
+const coworkOpenToAll = () => process.env.COWORK_OPEN_TO_ALL === 'true';
 
 export function assertCoworkIdentity(user: CoworkIdentity | null | undefined) {
   if (!isCoworkIdentityAllowed(user, {
     enabled: process.env.COWORK_ENABLED,
     ownerId: process.env.COWORK_OWNER_USER_ID,
     allowedIds: process.env.COWORK_ALLOWED_USER_IDS,
+    openToAll: process.env.COWORK_OPEN_TO_ALL,
   })) throw new AuthError('Cowork no está disponible para esta cuenta.', 403);
+}
+
+/**
+ * With Cowork open to everyone (COWORK_OPEN_TO_ALL), a person's first visit creates their grant. An existing grant is
+ * left as it is: one an administrator turned off stays off.
+ */
+export async function ensureCoworkGrant(client: Pick<AuthContext['supabase'], 'from'>, userId: string) {
+  const { error } = await client.from('cowork_access_grants')
+    .upsert({ user_id: userId, enabled: true }, { onConflict: 'user_id', ignoreDuplicates: true });
+  if (error) throw new AuthError('Cowork no está disponible para esta cuenta.', 403);
 }
 
 /** No role, domain, browser flag or user-editable metadata grants access. */
 export async function requireCoworkAccess(): Promise<AuthContext> {
   const auth = await requireAuth();
   assertCoworkIdentity(auth.user);
-  const { data, error } = await auth.supabase.rpc('cowork_has_access', {
-    target_organization_id: auth.organizationId,
-  });
+  const check = () => auth.supabase.rpc('cowork_has_access', { target_organization_id: auth.organizationId });
+  let { data, error } = await check();
+  if (!error && data !== true && coworkOpenToAll()) {
+    await ensureCoworkGrant(getSupabaseAdminClient(), auth.user.id);
+    ({ data, error } = await check());
+  }
   if (error || data !== true) throw new AuthError('Cowork no está disponible para esta cuenta.', 403);
   return auth;
 }

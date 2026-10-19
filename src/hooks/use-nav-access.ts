@@ -3,7 +3,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 import { getBrowserStorage } from '@/lib/browser-storage';
-import { isCoworkEmailAllowed } from '@/lib/cowork/access';
 
 export type NavAccess = { cowork: boolean; opportunities: boolean };
 
@@ -37,7 +36,7 @@ const isRefusal = (status: number) => status === 401 || status === 403 || status
  * kept for this person and organization, so it does not grow under the cursor, and follows the server once it replies.
  * The server checks access again on every page and API; this only decides what the menu shows.
  */
-export function useNavAccess({ userId, email, organizationId }: {
+export function useNavAccess({ userId, organizationId }: {
   userId?: string | null;
   email?: string | null;
   organizationId?: string | null;
@@ -46,13 +45,13 @@ export function useNavAccess({ userId, email, organizationId }: {
   // Read while rendering: the user is unknown on the server and on the first render, so this never differs at hydration.
   const cached = useMemo(() => readCachedNavAccess(scope), [scope]);
   const [answers, setAnswers] = useState<{ scope: string; access: Partial<NavAccess> }>({ scope: '', access: {} });
-  // Only the accounts Cowork is open to ask the server; it still decides by id, grant and membership.
-  const isCoworkOwner = isCoworkEmailAllowed(email);
 
+  // Every account asks for both entries: Cowork is open to everyone since 19 Oct 2026, and the server decides by its
+  // configuration, the person's grant and the membership.
   useEffect(() => {
     if (!scope) return;
     const controller = new AbortController();
-    const known: Partial<NavAccess> = isCoworkOwner ? {} : { cowork: false };
+    const known: Partial<NavAccess> = {};
     const answer = (key: keyof NavAccess, value: boolean) => {
       if (controller.signal.aborted) return;
       known[key] = value;
@@ -68,19 +67,19 @@ export function useNavAccess({ userId, email, organizationId }: {
         .catch(() => {});
     };
 
-    if (isCoworkOwner) ask('/api/cowork/access', 'cowork', async () => true);
+    ask('/api/cowork/access', 'cowork', async () => true);
     // «Oportunidades» is for the accounts in OPPORTUNITIES_ALLOWED_EMAILS: the server answers, the menu only follows it.
     ask('/api/commercial-opportunities/access', 'opportunities', async (response) => {
       const data = await response.json().catch(() => null);
       return data?.available === true;
     });
     return () => controller.abort();
-  }, [scope, isCoworkOwner]);
+  }, [scope]);
 
   if (!scope) return NO_ACCESS;
   const answered = answers.scope === scope ? answers.access : {};
   return {
-    cowork: isCoworkOwner && (answered.cowork ?? cached.cowork),
+    cowork: answered.cowork ?? cached.cowork,
     opportunities: answered.opportunities ?? cached.opportunities,
   };
 }

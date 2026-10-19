@@ -18,7 +18,7 @@ export type HelpSection = {
   /** Paths whose «?» opens this section. */
   routes?: RegExp;
   /** Hidden when the feature is off for the person (same rules as the menu). */
-  feature?: 'opportunities' | 'admin';
+  feature?: 'opportunities' | 'admin' | 'cowork';
   /** What the screen is for, in one or two sentences. */
   summary: string;
   /** How to use it, in the order of the work. */
@@ -75,6 +75,32 @@ export const HELP_SECTIONS: HelpSection[] = [
       { q: '¿Qué es un compromiso?', a: 'Una fecha o próximo paso acordado con un contacto, como una reunión. Cuando vence hoy o ya venció, aparece en «Lo que te espera».' },
     ],
     related: ['primeros-pasos', 'creditos', 'conversaciones'],
+  },
+  {
+    id: 'cowork',
+    title: 'Cowork',
+    group: 'Empieza aquí',
+    href: '/cowork',
+    routes: /^\/cowork(\/.*)?$/,
+    feature: 'cowork',
+    summary: 'Tu asistente de ventas: le pides lo que necesitas con tus palabras y lo hace con tus contactos, tu oferta y tus correos. Lo que envía, guarda o gasta créditos espera tu aprobación.',
+    steps: [
+      'Escribe lo que necesitas, por ejemplo «¿Qué toca hoy?» o «Escribe a mis contactos de retail», o parte con una de las sugerencias de la portada. Con «/» ves los atajos y con «@» nombras a un contacto guardado.',
+      'Cowork busca, lee y prepara a la vista: te muestra lo que va haciendo y deja el resultado en la conversación, como una tabla de contactos, un correo, un gráfico o un informe.',
+      'Cuando propone algo que envía, guarda o gasta créditos, aparece una tarjeta con «Aprobar». Nada sale ni se guarda sin ese clic, y puedes editar antes de aprobar.',
+      'Tus conversaciones quedan en la lista de la izquierda. Puedes adjuntar archivos, como un Excel con contactos, y bajar tablas en Excel o CSV e informes en Word o PDF.',
+      'Si no sabes por dónde partir, pregunta «¿Qué puedes hacer?»: te muestra todo lo que hace, con ejemplos para probar.',
+    ],
+    tips: [
+      'Dile qué vendes en «Perfil» antes de empezar: Cowork escribe y busca a partir de tu oferta.',
+      'Una campaña que arma Cowork queda guardada sin enviar hasta que la actives.',
+    ],
+    faqs: [
+      { q: '¿Cowork envía correos sin preguntarme?', a: 'No. Cada envío, campaña, invitación de LinkedIn o búsqueda de correo aparece como una tarjeta que apruebas tú.' },
+      { q: '¿Cuánto puedo usarlo?', a: 'Hay un uso diario del asistente por persona. Si llegas al límite, Cowork te lo dice: se renueva a medianoche, hora de Chile, y lo hecho queda guardado.' },
+      { q: '¿Quién ve mis conversaciones?', a: 'Solo tú. Cowork trabaja con los contactos y datos que puedes ver en el workspace activo.' },
+    ],
+    related: ['hoy', 'buscar', 'campanas'],
   },
   {
     id: 'buscar',
@@ -442,13 +468,15 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
 ];
 
-export type HelpVisibility = { opportunities: boolean; admin: boolean };
+/** `cowork`: whether the person has Cowork; unknown (undefined) shows it, since it is open to every account. */
+export type HelpVisibility = { opportunities: boolean; admin: boolean; cowork?: boolean };
 
 /** The sections this person can see: same rules as the menu. */
 export function visibleHelpSections(visibility: HelpVisibility, sections: HelpSection[] = HELP_SECTIONS): HelpSection[] {
   return sections.filter((section) => (
     (section.feature !== 'opportunities' || visibility.opportunities)
     && (section.feature !== 'admin' || visibility.admin)
+    && (section.feature !== 'cowork' || visibility.cowork !== false)
   ));
 }
 
@@ -479,10 +507,10 @@ export function helpSectionIdFrom(value: string | null | undefined) {
 
 /** The icon of each section in the «Centro de ayuda» (keys of the help icon set, src/components/help/help-icons.tsx). */
 export type HelpIconKey = 'start' | 'today' | 'search' | 'opportunities' | 'contacts' | 'write' | 'mail' | 'companies' | 'table'
-  | 'conversations' | 'campaigns' | 'pipeline' | 'profile' | 'connections' | 'signature' | 'privacy' | 'credits' | 'admin';
+  | 'conversations' | 'campaigns' | 'pipeline' | 'profile' | 'connections' | 'signature' | 'privacy' | 'credits' | 'admin' | 'assistant';
 
 export const HELP_ICONS: Record<string, HelpIconKey> = {
-  'primeros-pasos': 'start', hoy: 'today', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
+  'primeros-pasos': 'start', hoy: 'today', cowork: 'assistant', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
   'por-escribir': 'write', correo: 'mail', tabla: 'table', conversaciones: 'conversations',
   campanas: 'campaigns', pipeline: 'pipeline', perfil: 'profile', conexiones: 'connections', firmas: 'signature',
   privacidad: 'privacy', creditos: 'credits', administracion: 'admin',
