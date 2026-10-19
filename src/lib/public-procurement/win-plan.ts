@@ -113,20 +113,29 @@ export function resolveWinPlan(answer: WinPlanAnswer, history: HistoryForPlan, e
   if (estimate && ((low !== null && low > estimate * 1.5) || (high !== null && high < estimate * 0.2))) { low = null; high = null; }
   const own = history.similar.map(awardRatio).filter((ratio): ratio is number => ratio !== null);
   const ratios = [...own, ...(history.market?.similar || []).map(awardRatio).filter((ratio): ratio is number => ratio !== null)];
-  // A single number is not a range: with an estimate and what was paid, the range is the middle half of the awards
-  // (the buyer's own when it has three, else the market's), at least 3 % on each side.
+  // A single number is not a range: with an estimate and what was paid, the range is the middle half of the awards (the
+  // buyer's own when it has three, else everyone's), at least 3 % on each side, 5 % with fewer than three cases. The
+  // explanation is then ours, so it never contradicts the numbers.
   if (estimate && (low === null || high === null || high - low < estimate * 0.02)) {
-    const base = own.length >= 3 ? own : ratios;
-    const q1 = quantile(base, 0.25); const q3 = quantile(base, 0.75);
-    if (q1 !== null && q3 !== null) {
-      const middle = median(base)!;
-      low = Math.round(estimate * Math.min(q1, middle - 0.03) / 100_000) * 100_000;
-      high = Math.round(estimate * Math.max(q3, middle + 0.03) / 100_000) * 100_000;
-      basis = `${basis.replace(/[.\s]+$/, '')}. Rango: entre el ${percentLabel(Math.min(q1, middle - 0.03))} y el ${percentLabel(Math.max(q3, middle + 0.03))} del estimado, la mitad central de lo adjudicado en ${base.length} licitaciones parecidas`;
+    const fromOwn = own.length >= 3;
+    const base = fromOwn ? own : ratios;
+    const q1 = quantile(base, 0.25); const q3 = quantile(base, 0.75); const middle = median(base);
+    if (q1 !== null && q3 !== null && middle !== null) {
+      const margin = base.length >= 3 ? 0.03 : 0.05;
+      const from = Math.min(q1, middle - margin); const to = Math.max(q3, middle + margin);
+      low = Math.round(estimate * from / 100_000) * 100_000;
+      high = Math.round(estimate * to / 100_000) * 100_000;
+      basis = base.length >= 3
+        ? `Entre el ${percentLabel(from)} y el ${percentLabel(to)} del monto estimado de ${moneyLabel(estimate)}: la mitad central de lo que se adjudicó en ${base.length} licitaciones parecidas${fromOwn ? ' de este organismo' : ''}.`
+        : `Entre el ${percentLabel(from)} y el ${percentLabel(to)} del monto estimado de ${moneyLabel(estimate)}, alrededor de lo que se adjudicó en ${base.length === 1 ? 'la única licitación parecida' : `${base.length} licitaciones parecidas`} con estimado publicado. Con tan pocos casos, tómalo como referencia.`;
     }
   }
+  // How much the history supports it: the buyer's own awards against the estimate, then the market's.
+  const supported: WinPlanAnswer['confidence'] = own.length >= 3 ? 'alta' : own.length >= 1 || ratios.length >= 3 || history.similar.length >= 3 ? 'media' : 'baja';
+  const order = ['baja', 'media', 'alta'] as const;
+  const confidence = order[Math.min(order.indexOf(answer.confidence), order.indexOf(supported))];
   return {
-    ...answer, price: { low, high, basis }, competitors,
+    ...answer, confidence, price: { low, high, basis }, competitors,
     evidence: { similar: history.similar.length, market: history.market?.similar.length || 0, medianAwardRatio: median(ratios) },
   };
 }

@@ -30,13 +30,22 @@ test('the strategy keeps only competitors from the history, with the name the da
 });
 
 test('a price range far from the estimate is a mistake of units, and a single number is not a range', () => {
-  const middleHalf = { low: 82_000_000, high: 88_000_000, basis: 'x. Rango: entre el 82 % y el 88 % del estimado, la mitad central de lo adjudicado en 2 licitaciones parecidas' };
+  const middleHalf = { low: 80_000_000, high: 90_000_000, basis: 'Entre el 80 % y el 90 % del monto estimado de $100 millones, alrededor de lo que se adjudicó en 2 licitaciones parecidas con estimado publicado. Con tan pocos casos, tómalo como referencia.' };
   assert.deepEqual(resolveWinPlan(answer({ price: { low: 800_000_000, high: 880_000_000, basis: 'x' } }), history, 100_000_000).price, middleHalf,
     'the wrong range gives way to what was paid');
   assert.deepEqual(resolveWinPlan(answer({ price: { low: 85_000_000, high: 85_000_000, basis: 'x.' } }), history, 100_000_000).price, middleHalf, 'a point becomes a range');
   assert.deepEqual(resolveWinPlan(answer({ price: { low: 800_000_000, high: 880_000_000, basis: 'x' } }), { ...history, similar: [] }, 100_000_000).price,
     { low: null, high: null, basis: 'x' }, 'without awards to lean on, no range');
   assert.deepEqual(resolveWinPlan(answer({ price: { low: 90, high: 80, basis: 'x' } }), history, null).price, { low: 80, high: 90, basis: 'x' }, 'ordered');
+  const many = { ...history, similar: [0.8, 0.82, 0.85, 0.9, 0.95].map((ratio, index) => ({ ...similar[0], id: index + 1, awardedAmount: ratio * 100_000_000 })) };
+  assert.deepEqual(resolveWinPlan(answer({ price: { low: 85_000_000, high: 85_000_000, basis: 'x' } }), many, 100_000_000).price,
+    { low: 82_000_000, high: 90_000_000, basis: 'Entre el 82 % y el 90 % del monto estimado de $100 millones: la mitad central de lo que se adjudicó en 5 licitaciones parecidas de este organismo.' });
+});
+
+test('the confidence never says more than the history supports', () => {
+  assert.equal(resolveWinPlan(answer({ confidence: 'alta' }), history, 100_000_000).confidence, 'media', 'two awards of the buyer are not three');
+  assert.equal(resolveWinPlan(answer({ confidence: 'alta' }), { ...history, similar: [] }, 100_000_000).confidence, 'baja');
+  assert.equal(resolveWinPlan(answer({ confidence: 'baja' }), history, 100_000_000).confidence, 'baja', 'nor more than the model said');
 });
 
 test('the prompt carries the history as data, with RUTs, prices against the estimate and criteria', () => {
