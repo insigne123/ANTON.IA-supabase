@@ -110,6 +110,27 @@ export const HELP_SECTIONS: HelpSection[] = [
     related: ['hoy', 'buscar', 'campanas'],
   },
   {
+    id: 'informe-semanal',
+    title: 'Informe semanal',
+    group: 'Empieza aquí',
+    href: '/weekly-report',
+    routes: /^\/weekly-report\/?$/,
+    summary: 'Tu semana en un vistazo: cuánto escribiste, quién respondió, qué te espera y qué hacer en los próximos días. Puede llegarte por correo cada lunes.',
+    steps: [
+      'Arriba eliges «Esta semana» (de lunes a hoy) o «Semana pasada» (de lunes a domingo). Cada cifra se compara con los mismos días de la semana anterior.',
+      '«Tu semana» trae una frase con lo importante, tus correos enviados, las personas contactadas, las respuestas, las reuniones pedidas y «Para esta semana»: hasta tres cosas para hacer, con su enlace.',
+      'Si administras la organización, «Equipo» muestra lo mismo por persona, con quién tiene respuestas por atender.',
+      '«Oportunidades» muestra lo que llegó en la semana, lo que cierra en los próximos 7 días y lo que nadie tiene asignado. Lo ven los gestores de oportunidades que elija un administrador; mientras no haya, los administradores.',
+      'Abajo, «Recibirlo por correo cada lunes» te lo envía a las 8:00 con la semana anterior, desde tu Gmail u Outlook conectado y a tu propio correo. «Enviármelo ahora» te manda el que estás viendo.',
+    ],
+    faqs: [
+      { q: '¿Desde dónde sale el correo del informe?', a: 'Desde tu propia cuenta de Gmail u Outlook conectada en «Conexiones», hacia tu mismo correo. No lo recibe nadie más y no usa tu cupo de envíos.' },
+      { q: '¿Cómo nombro a un gestor de oportunidades?', a: 'Si administras la organización, en «Informe semanal» pulsa «Gestores de oportunidades», marca a las personas y guarda. Desde el lunes siguiente reciben la sección «Oportunidades».' },
+      { q: '¿Por qué mis cifras no coinciden con «Hoy»?', a: '«Hoy» cuenta solo el día. El informe cuenta la semana de lunes a domingo, en hora de Chile, y solo correos confirmados por tu proveedor.' },
+    ],
+    related: ['hoy', 'administracion', 'oportunidades'],
+  },
+  {
     id: 'buscar',
     title: 'Buscar prospectos',
     group: 'Prospectar',
@@ -524,11 +545,11 @@ export function helpSectionIdFrom(value: string | null | undefined) {
 }
 
 /** The icon of each section in the «Centro de ayuda» (keys of the help icon set, src/components/help/help-icons.tsx). */
-export type HelpIconKey = 'start' | 'today' | 'search' | 'opportunities' | 'contacts' | 'write' | 'mail' | 'companies' | 'table'
+export type HelpIconKey = 'start' | 'today' | 'report' | 'search' | 'opportunities' | 'contacts' | 'write' | 'mail' | 'companies' | 'table'
   | 'conversations' | 'campaigns' | 'pipeline' | 'profile' | 'connections' | 'signature' | 'privacy' | 'credits' | 'admin' | 'assistant';
 
 export const HELP_ICONS: Record<string, HelpIconKey> = {
-  'primeros-pasos': 'start', hoy: 'today', cowork: 'assistant', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
+  'primeros-pasos': 'start', hoy: 'today', 'informe-semanal': 'report', cowork: 'assistant', buscar: 'search', oportunidades: 'opportunities', 'por-completar': 'contacts',
   'por-escribir': 'write', correo: 'mail', tabla: 'table', conversaciones: 'conversations',
   campanas: 'campaigns', pipeline: 'pipeline', perfil: 'profile', conexiones: 'connections', firmas: 'signature',
   privacidad: 'privacy', creditos: 'credits', administracion: 'admin',
