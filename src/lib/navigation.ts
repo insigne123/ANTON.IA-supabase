@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Bot, Briefcase, LayoutDashboard, LayoutGrid, Link2, MailCheck, Megaphone, Search, Send, Settings, Shield, ShieldCheck,
+  Bot, Briefcase, CalendarCheck2, LayoutDashboard, LayoutGrid, Link2, MailCheck, Megaphone, Search, Send, Settings, Shield, ShieldCheck,
   Table as TableIcon, User,
 } from 'lucide-react';
 
@@ -29,6 +29,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Centro de mando',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Hoy', tour: 'home' },
+      { href: '/weekly-report', icon: CalendarCheck2, label: 'Informe semanal' },
       { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork' },
     ],
   },

@@ -269,6 +269,18 @@ export const opportunityWorkspaceTick = functions.scheduler.onSchedule({
     await invokeFirebaseSchedulerBridge({ name: 'opportunity-workspace', path: '/api/cron/opportunity-workspace', method: 'POST' });
 });
 
+// «Informe semanal»: Mondays 8:00 to 10:30 in Chile; each run sends the next batch and skips what was already sent.
+export const weeklyReportsTick = functions.scheduler.onSchedule({
+    schedule: '0,30 8-10 * * 1',
+    timeZone: 'America/Santiago',
+    retryCount: 0,
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    await invokeFirebaseSchedulerBridge({ name: 'weekly-reports', path: '/api/cron/weekly-reports', method: 'POST' });
+});
+
 export const antoniaRollupsTick = functions.scheduler.onSchedule({
     schedule: '10 0 * * *',
     timeZone: 'Etc/UTC',
