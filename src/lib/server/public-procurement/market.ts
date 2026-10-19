@@ -1,25 +1,28 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  agencyKeyVariants, agencyTokens, bestAgencyMatch, likePatterns, marketStats, normalizeRut, pickSimilar, searchWords, topicTokens, type MarketStats, type MarketTender,
+  agencyKeyVariants, agencyTokens, bestAgencyMatch, foldForSearch, likePatterns, marketStats, normalizeRut, pickSimilar, searchWords, topicTokens, type MarketStats, type MarketTender,
 } from '@/lib/public-procurement/market';
 
 type Client = Pick<SupabaseClient, 'from' | 'rpc'>;
 
-const TENDER_COLUMNS = 'id,code,name,status,kind,currency,estimated_amount,awarded_amount,bidders,published_on,awarded_on,duration_months,category,criteria,'
-  + 'agency:public_procurement_agencies(name),bids:public_procurement_bids(selected,offered_amount,awarded_amount,supplier:public_procurement_suppliers(rut,name))';
-const MISSING = new Set(['42P01', 'PGRST205', 'PGRST200']);
+const MISSING = new Set(['42P01', 'PGRST205', 'PGRST200', 'PGRST202', '42883']);
 
+/** A row of public_procurement_search (or of the tables with their joins) as the pages and the model read it. */
 export function toMarketTender(row: any): MarketTender {
-  const bids = ((row.bids || []) as any[]).filter(bid => bid.supplier).map(bid => ({
-    rut: String(bid.supplier.rut), name: String(bid.supplier.name), offered: bid.offered_amount ?? null, selected: Boolean(bid.selected), awarded: bid.awarded_amount ?? null,
-  }));
+  const bids = ((row.bids || []) as any[]).map(bid => ({
+    rut: String(bid.rut ?? bid.supplier?.rut ?? ''), name: String(bid.name ?? bid.supplier?.name ?? ''), offered: bid.offered ?? bid.offered_amount ?? null,
+    selected: Boolean(bid.selected), awarded: bid.awarded ?? bid.awarded_amount ?? null,
+  })).filter(bid => bid.rut);
   return {
-    id: Number(row.id), code: String(row.code), name: String(row.name), agency: row.agency?.name ?? null, status: row.status, kind: row.kind ?? null,
-    currency: row.currency ?? null, estimatedAmount: row.estimated_amount ?? null, awardedAmount: row.awarded_amount ?? null, bidders: row.bidders ?? null,
+    id: Number(row.id), code: String(row.code), name: String(row.name), agency: (typeof row.agency === 'string' ? row.agency : row.agency?.name) ?? null, status: row.status, kind: row.kind ?? null,
+    currency: row.currency ?? null, estimatedAmount: row.estimated_amount === null || row.estimated_amount === undefined ? null : Number(row.estimated_amount),
+    awardedAmount: row.awarded_amount === null || row.awarded_amount === undefined ? null : Number(row.awarded_amount), bidders: row.bidders ?? null,
     publishedOn: row.published_on ?? null, awardedOn: row.awarded_on ?? null, durationMonths: row.duration_months === null || row.duration_months === undefined ? null : Number(row.duration_months),
     category: row.category ?? null, criteria: row.criteria ?? null,
-    winners: bids.filter(bid => bid.selected).map(bid => ({ rut: bid.rut, name: bid.name, amount: bid.awarded })).sort((a, b) => (b.amount || 0) - (a.amount || 0)),
-    bids: bids.map(({ awarded: _awarded, ...bid }) => bid).sort((a, b) => Number(b.selected) - Number(a.selected) || (a.offered ?? Infinity) - (b.offered ?? Infinity)),
+    winners: bids.filter(bid => bid.selected).map(bid => ({ rut: bid.rut, name: bid.name, amount: bid.awarded === null ? null : Number(bid.awarded) }))
+      .sort((a, b) => (b.amount || 0) - (a.amount || 0)),
+    bids: bids.map(({ awarded: _awarded, ...bid }) => ({ ...bid, offered: bid.offered === null ? null : Number(bid.offered) }))
+      .sort((a, b) => Number(b.selected) - Number(a.selected) || (a.offered ?? Infinity) - (b.offered ?? Infinity)),
   };
 }
 
@@ -63,15 +66,12 @@ export async function findAgency(client: Client, buyerName: string | null | unde
   return { ids: same.map(row => Number(row.id)), name: same[0].name, sector: same[0].sector };
 }
 
-/** The tenders whose name or category says one of the words, newest first. */
+/** The tenders whose name or category says one of the words (or one of their other ways of saying it), newest first. */
 async function tendersSaying(client: Client, words: string[], filter: { agencyIds?: number[]; since: string; limit: number }) {
   const patterns = likePatterns(searchWords(words), 10);
   if (!patterns.length) return [];
-  let query = client.from('public_procurement_tenders').select(TENDER_COLUMNS)
-    .or(patterns.flatMap(pattern => [`name.ilike.${pattern}`, `category.ilike.${pattern}`]).join(','))
-    .gte('published_on', filter.since);
-  if (filter.agencyIds?.length) query = query.in('agency_id', filter.agencyIds);
-  const { data, error } = await query.order('published_on', { ascending: false }).limit(filter.limit);
+  const { data, error } = await client.rpc('public_procurement_search', { p_patterns: patterns, p_agency_ids: filter.agencyIds?.length ? filter.agencyIds : null,
+    p_since: filter.since, p_limit: filter.limit });
   if (error) { if (MISSING.has(String(error.code))) return []; throw error; }
   return ((data || []) as any[]).map(toMarketTender);
 }
@@ -137,9 +137,9 @@ export async function searchSuppliers(client: Client, query: string) {
     const found = await findSupplier(client, rut);
     return found ? [found] : [];
   }
-  const text = query.replace(/[%_\\,()]/g, ' ').replace(/\s+/g, ' ').trim();
+  const text = foldForSearch(query).replace(/[%_\\]/g, ' ').replace(/\s+/g, ' ').trim();
   if (text.length < 3) return [];
-  const { data, error } = await client.from('public_procurement_suppliers').select('id,rut,name').ilike('name', `%${text}%`).order('name').limit(20);
+  const { data, error } = await client.rpc('public_procurement_find_suppliers', { p_pattern: `%${text}%`, p_limit: 20 });
   if (error) { if (MISSING.has(String(error.code))) return []; throw error; }
   return (data || []) as Array<{ id: number; rut: string; name: string }>;
 }

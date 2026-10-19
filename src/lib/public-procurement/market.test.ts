@@ -82,4 +82,6 @@ test('dates, money and RUTs read the Chilean way', () => {
   assert.equal(formatRut('76020266-5'), '76.020.266-5');
   assert.equal(normalizeRut('76.020.266-5'), '76020266-5');
   assert.deepEqual(likePatterns(['aseo', 'servicios', 'guardias de seguridad', 'TI', '50%']), ['%aseo%', '%guardias de seguridad%']);
+  assert.deepEqual(likePatterns(['Verificación de antecedentes judiciales', 'Fumigación']),
+    ['%verificacion de antecedentes judiciales%', '%verificacion de antecedentes%', '%fumigacion%'], 'folded, and a long phrase by its first words too');
 });
