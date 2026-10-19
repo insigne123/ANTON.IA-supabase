@@ -29,6 +29,9 @@ test('one sentence says the week, and the change against the week before reads p
   assert.equal(personalHeadline(personal(), 'previous'), 'La semana pasada escribiste a 30 personas y te respondieron 5 (17 %). Una pidió reunión.');
   assert.equal(personalHeadline(personal({ sent: { now: 0, before: 3 }, contacted: { now: 0, before: 3 }, replies: { now: 0, before: 0 }, meetings: 0,
     pending: [{ id: 'c1', name: 'Paula', company: null, repliedAt: '2026-10-20T12:00:00Z' }] }), 'current'), 'Esta semana no enviaste correos. Te espera una respuesta.');
+  assert.equal(personalHeadline(personal({ sent: { now: 0, before: 4 }, contacted: { now: 0, before: 4 }, replies: { now: 2, before: 0 } }), 'previous'),
+    'La semana pasada no enviaste correos, pero te respondieron 2. Una pidió reunión.', 'replies to the emails of the weeks before');
+  assert.equal(personalHeadline(personal({ replies: { now: 0, before: 0 }, meetings: 0 }), 'current'), 'Esta semana escribiste a 30 personas.');
   assert.equal(deltaText({ now: 34, before: 20 }), '+14 vs. la semana anterior');
   assert.equal(deltaText({ now: 3, before: 5 }), '−2 vs. la semana anterior');
   assert.equal(deltaText({ now: 4, before: 4 }), 'igual que la semana anterior');

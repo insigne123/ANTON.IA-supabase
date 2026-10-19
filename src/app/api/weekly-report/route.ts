@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     const names = memberIds.length ? await admin.from('profiles').select('id,full_name,email').in('id', memberIds) : { data: [] };
     return NextResponse.json({
       report, email: readReportEmail((profile as any).data?.signatures), mailbox: mailbox.resolved,
-      ...(isAdmin ? { managers, members: ((names as any).data || []).map((row: any) => ({ userId: String(row.id), name: String(row.full_name || String(row.email || '').split('@')[0] || 'Sin nombre') })) } : {}),
+      ...(isAdmin ? { managers, members: ((names as any).data || []).map((row: any) => ({ userId: String(row.id), name: String(row.full_name || String(row.email || '').split('@')[0] || 'Sin nombre'), email: row.email || null })) } : {}),
     }, { headers: noStore });
   } catch (error) {
     return handleAuthError(toAuthError(error));

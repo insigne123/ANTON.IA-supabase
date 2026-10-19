@@ -75,14 +75,14 @@ export function deltaText(counted: Counted) {
 /** One sentence with what matters of the week, for the top of the page and of the email. */
 export function personalHeadline(section: PersonalSection, which: ReportWeek['which']) {
   const when = which === 'previous' ? 'La semana pasada' : 'Esta semana';
-  if (!section.sent.now && !section.replies.now) {
-    return section.pending.length
-      ? `${when} no enviaste correos. Te ${section.pending.length === 1 ? 'espera una respuesta' : `esperan ${section.pending.length} respuestas`}.`
-      : `${when} no enviaste correos.`;
-  }
+  const answered = section.replies.now === 1 ? 'te respondió 1 persona' : `te respondieron ${section.replies.now.toLocaleString('es-CL')}`;
   const percent = rate(section.replies.now, section.contacted.now);
+  // Replies can come in a week without sends: they answer the emails of the weeks before.
+  const first = !section.contacted.now
+    ? `${when} no enviaste correos${section.replies.now ? `, pero ${answered}` : ''}.`
+    : `${when} escribiste a ${plural(section.contacted.now, 'persona', 'personas')}${section.replies.now ? ` y ${answered}${percent !== null ? ` (${percent} %)` : ''}` : ''}.`;
   return [
-    `${when} escribiste a ${plural(section.contacted.now, 'persona', 'personas')} y te ${section.replies.now === 1 ? 'respondió 1' : `respondieron ${section.replies.now.toLocaleString('es-CL')}`}${percent !== null && section.replies.now ? ` (${percent} %)` : ''}.`,
+    first,
     section.meetings ? `${section.meetings === 1 ? 'Una pidió' : `${section.meetings} pidieron`} reunión.` : '',
     section.pending.length ? `Te ${section.pending.length === 1 ? 'espera una respuesta' : `esperan ${section.pending.length} respuestas`}.` : '',
   ].filter(Boolean).join(' ');
