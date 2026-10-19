@@ -42,6 +42,8 @@ function report(which) {
       members: [
         { userId: 'demo-owner', name: 'Camila Torres', role: 'owner', sent: 24, replies: 5, meetings: 1, pending: 2 },
         { userId: 'demo-member', name: 'Diego Fuentes', role: 'member', sent: 0, replies: 1, meetings: 0, pending: 1 },
+        // Someone who did nothing in the week: counted in one line under the table, not as a row of zeros.
+        { userId: 'demo-member-2', name: 'Tomás Rivas', role: 'member', sent: 0, replies: 0, meetings: 0, pending: 0 },
       ],
       totals: { sent: { now: 24, before: 29 }, replies: { now: 6, before: 4 }, meetings: 1 },
     },
@@ -59,6 +61,7 @@ function report(which) {
 const MEMBERS = [
   { userId: 'demo-owner', name: 'Camila Torres', email: 'camila.torres@yago-qa.cl' },
   { userId: 'demo-member', name: 'Diego Fuentes', email: 'diego.fuentes@yago-qa.cl' },
+  { userId: 'demo-member-2', name: 'Tomás Rivas', email: 'tomas.rivas@yago-qa.cl' },
 ];
 let emailOn = false;
 
@@ -116,13 +119,13 @@ export default {
       waitFor: { text: /^La semana pasada escribiste/, exact: false },
     },
     {
-      title: 'Tu equipo', text: 'Si administras: los totales y una fila por persona.',
+      title: 'Tu equipo', text: 'Si administras: los totales y una fila por cada persona que tuvo actividad.',
       say: 'En «Equipo», cómo le fue a cada persona.', postit: 'Quien no envió nada aparece en gris, y «Para esta semana» te lo recuerda.',
       target: { role: 'button', name: 'Equipo', within: { role: 'group', name: 'Informe' } }, zoom: 1.6,
       waitFor: { role: 'table' },
     },
     {
-      title: 'Por persona', text: 'Enviados, respuestas, reuniones y lo que tiene por responder.',
+      title: 'Por persona', text: 'Enviados, respuestas, reuniones y lo que tiene por responder. Quien no hizo nada queda en una línea.',
       say: 'Enviados, respuestas y pendientes de cada uno.',
       target: { role: 'table' }, action: 'none', zoom: 1.3,
     },
