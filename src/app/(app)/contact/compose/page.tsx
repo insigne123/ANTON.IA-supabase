@@ -4,6 +4,9 @@ import Link from 'next/link';
 import { Suspense } from 'react';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { CalendarPlus } from 'lucide-react';
+import { useBookingLink } from '@/hooks/use-booking-link';
+import { insertBookingLine } from '@/lib/booking-link';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { Button } from '@/components/ui/button';
@@ -99,6 +102,8 @@ function ComposeInner() {
   const confirm = useConfirm();
   const router = useRouter();
   const sp = useSearchParams();
+  // «Insertar mi agenda» (Firmas y estilo › Agenda): only when the person saved a link.
+  const bookingUrl = useBookingLink();
   const id = sp.get('id') || '';
   const nativeDraftId = sp.get('draftId') || '';
   const campaignStepId = sp.get('campaignStepId') || '';
@@ -1399,6 +1404,13 @@ function ComposeInner() {
                   aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
                   disabled={Boolean(proposal) || followUpDirty || followUpBusy || nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
                 />
+                {bookingUrl ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground"
+                    disabled={Boolean(proposal) || followUpDirty || followUpBusy || nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked || body.includes(bookingUrl)}
+                    onClick={() => { const next = insertBookingLine(body, bookingUrl); editorTextRef.current = { ...editorTextRef.current, body: next }; setBody(next); }}>
+                    <CalendarPlus className="h-4 w-4" aria-hidden="true" />{body.includes(bookingUrl) ? 'Tu agenda ya está en el correo' : 'Insertar mi agenda'}
+                  </Button>
+                ) : null}
               </div>
             </CardContent>
           </Card>
