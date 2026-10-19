@@ -11,8 +11,9 @@ test('the help shows Oportunidades with the same rule as the menu, and the old p
   for (const file of ['src/app/(app)/ayuda/page.tsx', 'src/app/(app)/ayuda/[seccion]/page.tsx']) {
     const code = read(file);
     assert.doesNotMatch(code, /isOpportunitiesEnabled|lib\/opportunities\/access/, `${file} drops the old flag`);
-    assert.match(code, /const \{ opportunities \} = useSharedNavAccess\(\);/, `${file} reads the menu's answer`);
-    assert.match(code, /visibleHelpSections\(\{ opportunities, admin \}\), \[opportunities, admin\]/, `${file} follows it`);
+    // Cowork for everyone (#426): the help also hides what the menu hides for Cowork.
+    assert.match(code, /const \{ opportunities(, cowork)? \} = useSharedNavAccess\(\);/, `${file} reads the menu's answer`);
+    assert.match(code, /visibleHelpSections\(\{ opportunities, admin(, cowork)? \}\), \[opportunities, admin(, cowork)?\]/, `${file} follows it`);
   }
   assert.match(read('src/components/app-shell.tsx'), /<NavAccessProvider value=\{access\}>\{children\}<\/NavAccessProvider>/);
   const ask = read('src/app/api/help/ask/route.ts');
