@@ -36,3 +36,30 @@ export const searchMocks = [{
     return { leads, count: leads.length, leads_count: leads.length, organization_id: company.id, page: 1, per_page: 25, total_entries: leads.length, total_pages: 1 };
   },
 }, { url: '**/api/leads/search/checkpoint', method: 'PUT', respond: { ok: true } }];
+
+const fold = text => String(text || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+/** The full name behind a masked one from the search («Carolina Ib***z»), or the name as it came. */
+function unmask(name) {
+  const [first, masked = ''] = String(name || '').split(' ');
+  const hit = PEOPLE.find(person => {
+    const [f, l] = person.split(' ');
+    return f === first && masked.startsWith(l.slice(0, 2)) && masked.endsWith(l.slice(-1));
+  });
+  return hit || String(name || '');
+}
+
+/** «Buscar datos» (Buscar prospectos and «Por escribir»): a verified work email for each person, made up from the name. */
+export const enrichMock = {
+  url: '**/api/opportunities/enrich-apollo', method: 'POST',
+  respond: body => ({
+    enriched: (body?.leads || []).map(lead => {
+      const fullName = unmask(lead.fullName);
+      const domain = lead.companyDomain || `${fold(lead.companyName || 'empresa').replace(/[^a-z0-9]+/g, '')}.cl`;
+      return {
+        id: `demo-enriched-${lead.clientRef}`, clientRef: lead.clientRef, fullName, companyName: lead.companyName,
+        email: `${fold(fullName).split(/\s+/).slice(0, 2).join('.')}@${domain}`, emailStatus: 'verified', enrichmentStatus: 'completed',
+      };
+    }),
+    usage: { consumed: (body?.leads || []).length },
+  }),
+};

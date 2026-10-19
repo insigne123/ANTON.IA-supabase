@@ -170,7 +170,8 @@ const SEARCH = ['search-modes', 'search-starters', 'search-run'];
     cowork.doc.querySelector('[data-tour="page-help"]').click();
     await cowork.waitFor(() => cowork.panel(), 'the help panel of Cowork');
     assert.match(cowork.panel().textContent, /En video/);
-    assert.equal(Boolean(cowork.panel().querySelector('button[aria-label="Ver video: Cowork (0:50)"]')), true, 'its video, not loaded yet');
+    // Its length comes from src/lib/help/tutorial-videos.ts and changes with each recording.
+    assert.equal(Boolean(cowork.panel().querySelector('button[aria-label^="Ver video: Cowork ("]')), true, 'its video, not loaded yet');
     assert.equal(cowork.panel().querySelectorAll('video').length, 0, 'nothing plays until it is asked for');
     assert.ok(![...cowork.panel().querySelectorAll('button')].some((node) => node.textContent.includes('Ver guía de esta pantalla')), 'no guide to offer');
   } finally { cowork.close(); }
