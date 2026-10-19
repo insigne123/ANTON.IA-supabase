@@ -52,7 +52,8 @@ test('alone: «Sin acuerdo» resolves the conversation and moves the lead to Per
   assert.deepEqual(result, { outcome: 'no_deal', team: { status: null, changed: false }, stage: 'closed_lost', stageSaved: true });
   assert.equal(rpcs.length, 0);
   const resolved = log.find(op => op.table === 'contacted_leads' && op.action === 'update')!;
-  assert.deepEqual(resolved.payload, { conversation_resolved_at: '2026-10-01T12:00:00.000Z' });
+  assert.deepEqual(resolved.payload, { conversation_resolved_at: '2026-10-01T12:00:00.000Z', conversation_close_outcome: 'no_deal' },
+    'how it ended goes with when («Para retomar»)');
   assert.equal(filter(resolved, 'user_id'), 'user-ana', 'only the person\'s own conversation');
   const stage = log.find(op => op.action === 'upsert')!;
   assert.equal(stage.payload.id, 'lead_saved|lead-1');
@@ -117,4 +118,20 @@ test('the team lock the dialog reads', async () => {
   const mine = await readConversationTeamLock(fake(world({ team: true, thread: { id: 't', status: 'active', opened_by_user_id: 'user-ana' } })).client, scope, 'a@b.cl');
   assert.deepEqual(mine, { enabled: true, status: 'active', mine: true, threadId: 't' });
   assert.deepEqual(await readConversationTeamLock(fake(world({ team: true })).client, scope, 'a@b.cl'), { enabled: true, status: null, mine: false, threadId: null });
+});
+
+test('before the outcome column exists, closing still records when', async () => {
+  const base = world();
+  let attempts = 0;
+  const { client, log } = fake((op) => {
+    if (op.table === 'contacted_leads' && op.action === 'update' && 'conversation_close_outcome' in (op.payload || {})) {
+      attempts++;
+      return { data: null, error: { code: '42703', message: 'column does not exist' } };
+    }
+    return base(op);
+  });
+  const result = await closeContactedConversation(client, scope, { contactedId: 'contacted-1', outcome: 'keep', observedAt });
+  assert.equal(result.outcome, 'keep');
+  assert.equal(attempts, 1);
+  assert.deepEqual(log.filter(op => op.table === 'contacted_leads' && op.action === 'update').at(-1)!.payload, { conversation_resolved_at: '2026-10-01T12:00:00.000Z' });
 });

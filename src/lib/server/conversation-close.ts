@@ -54,8 +54,12 @@ export async function closeContactedConversation(client: Client, scope: Scope, i
     team = { status: String(closed.data?.status || lock.status), changed: true };
   }
 
-  const resolved = await client.from('contacted_leads').update({ conversation_resolved_at: new Date(input.observedAt).toISOString() })
+  // How it ended goes with when (conversation_close_outcome, «Para retomar»); before that column exists, only when.
+  const resolve = (values: Record<string, unknown>) => client.from('contacted_leads').update(values)
     .eq('id', input.contactedId).eq('organization_id', scope.organizationId).eq('user_id', scope.userId).select('id').maybeSingle();
+  const resolvedAt = new Date(input.observedAt).toISOString();
+  let resolved = await resolve({ conversation_resolved_at: resolvedAt, conversation_close_outcome: input.outcome });
+  if (resolved.error?.code === '42703') resolved = await resolve({ conversation_resolved_at: resolvedAt });
   if (resolved.error) throw resolved.error;
 
   if (option.doNotContact && row.data.email) {

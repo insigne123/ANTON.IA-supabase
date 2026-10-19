@@ -68,11 +68,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       '«Lo primero hoy» muestra una sola acción, en este orden: responder a quien te respondió, resolver lo que impide enviar, un compromiso que vence hoy, escribir a tus contactos con correo, completar correos o buscar prospectos.',
       '«Lo que te espera» lista hasta 6 pendientes, los urgentes primero. Cada uno abre la conversación exacta.',
       '«Prepara tu cuenta» tiene cuatro pasos comprobados: perfil con empresa y oferta, correo conectado, primeros contactos y primer envío. Cada paso pendiente trae su enlace.',
+      '«Para retomar» aparece cuando alguien vale la pena de nuevo: una conversación que cerraste «Sin acuerdo» o dejaste en «Lo retomo yo» hace 60 días, alguien que no respondió en 45 días, o una empresa con la que hablaste que ahora está contratando o publicó una licitación. «Retomar» prepara un correo nuevo con otro ángulo para que lo revises en «Redactar»; con «…» lo pospones 30 días o lo descartas.',
       'Abajo están «Tu semana» (cifras y gráfico) y «Créditos y uso diario».',
     ],
     faqs: [
       { q: '¿Por qué «Prepara tu cuenta» dice que mi correo no está conectado?', a: 'Mira si hay una conexión guardada de Gmail u Outlook. La sesión de Outlook abierta solo en el navegador no cuenta. Conéctalo en «Conexiones».' },
       { q: '¿Qué es un compromiso?', a: 'Una fecha o próximo paso acordado con un contacto, como una reunión. Cuando vence hoy o ya venció, aparece en «Lo que te espera».' },
+      { q: '¿Por qué no aparece alguien en «Para retomar»?', a: 'Nunca aparece quien cerraste como «No interesado» o «Ganado», quien pidió no recibir más correos, quien respondió que no o cuyo correo rebotó. Tampoco quien te respondió y espera tu respuesta: esa persona está en «Lo que te espera». Puedes cambiar los días de espera abajo en la tarjeta.' },
     ],
     related: ['primeros-pasos', 'creditos', 'conversaciones'],
   },
