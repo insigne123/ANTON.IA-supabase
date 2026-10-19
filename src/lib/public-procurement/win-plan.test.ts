@@ -29,8 +29,13 @@ test('the strategy keeps only competitors from the history, with the name the da
   assert.deepEqual(plan.evidence, { similar: 2, market: 0, medianAwardRatio: 0.85 });
 });
 
-test('a price range far from the estimate is a mistake of units, not a strategy', () => {
-  assert.deepEqual(resolveWinPlan(answer({ price: { low: 800_000_000, high: 880_000_000, basis: 'x' } }), history, 100_000_000).price, { low: null, high: null, basis: 'x' });
+test('a price range far from the estimate is a mistake of units, and a single number is not a range', () => {
+  const middleHalf = { low: 82_000_000, high: 88_000_000, basis: 'x. Rango: entre el 82 % y el 88 % del estimado, la mitad central de lo adjudicado en 2 licitaciones parecidas' };
+  assert.deepEqual(resolveWinPlan(answer({ price: { low: 800_000_000, high: 880_000_000, basis: 'x' } }), history, 100_000_000).price, middleHalf,
+    'the wrong range gives way to what was paid');
+  assert.deepEqual(resolveWinPlan(answer({ price: { low: 85_000_000, high: 85_000_000, basis: 'x.' } }), history, 100_000_000).price, middleHalf, 'a point becomes a range');
+  assert.deepEqual(resolveWinPlan(answer({ price: { low: 800_000_000, high: 880_000_000, basis: 'x' } }), { ...history, similar: [] }, 100_000_000).price,
+    { low: null, high: null, basis: 'x' }, 'without awards to lean on, no range');
   assert.deepEqual(resolveWinPlan(answer({ price: { low: 90, high: 80, basis: 'x' } }), history, null).price, { low: 80, high: 90, basis: 'x' }, 'ordered');
 });
 
@@ -49,8 +54,10 @@ test('the prompt carries the history as data, with RUTs, prices against the esti
 });
 
 test('the contracts screening lists each contract by id with its buyer and category', () => {
-  const prompt = contractsScreenPrompt({ offer: 'Aseo industrial', services: ['Aseo de oficinas'], exclusions: ['Venta de insumos'] },
-    [{ id: '123', name: 'Servicio de aseo edificio consistorial', agency: 'I MUNICIPALIDAD DE MAIPU', category: 'Servicios de limpieza' }]);
-  assert.match(prompt, /123 \| I MUNICIPALIDAD DE MAIPU \| Servicio de aseo edificio consistorial \| Servicios de limpieza/);
+  const prompt = contractsScreenPrompt({ offer: 'Aseo industrial', services: ['Aseo de oficinas'], exclusions: ['Venta de insumos'], territories: ['Chile', 'Región Metropolitana'] },
+    [{ id: '123', name: 'Servicio de aseo edificio consistorial', agency: 'I MUNICIPALIDAD DE MAIPU', category: 'Servicios de limpieza', region: 'Región Metropolitana de Santiago' }]);
+  assert.match(prompt, /123 \| I MUNICIPALIDAD DE MAIPU \| Región Metropolitana de Santiago \| Servicio de aseo edificio consistorial \| Servicios de limpieza/);
   assert.match(prompt, /No vende: Venta de insumos/);
+  assert.match(prompt, /Atiende solo en: Región Metropolitana\. Deja fuera/, '«Chile» says nothing about where it works');
+  assert.doesNotMatch(contractsScreenPrompt({ offer: 'x', services: [], territories: ['Chile'] }, []), /Atiende solo en/);
 });

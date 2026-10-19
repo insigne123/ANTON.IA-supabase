@@ -16,6 +16,9 @@ type ContractsView = {
 };
 const ACTIVE = ['queued', 'running', 'waiting'];
 const DAY = 86_400_000;
+const PAGE = 24;
+// Below this a «monto» is a unit price (the file writes $1 for contracts paid per unit), never the contract's total.
+const MIN_TOTAL = 50_000;
 const readDate = (at: string) => new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'long', timeZone: 'America/Santiago' }).format(new Date(at));
 const endLabel = (endsOn: string, now: number) => {
   const days = Math.round((Date.parse(`${endsOn}T12:00:00Z`) - now) / DAY);
@@ -33,6 +36,9 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
   const [busy, setBusy] = useState(false);
   const [following, setFollowing] = useState<number | null>(null);
   const [scope, setScope] = useState<'soon' | 'all'>('soon');
+  const [region, setRegion] = useState('');
+  const [onlyHigh, setOnlyHigh] = useState(false);
+  const [limit, setLimit] = useState(PAGE);
   // «Vence en 45 días» counts from when the list was read.
   const [now, setNow] = useState(() => Date.now());
   const load = useCallback(async () => {
@@ -61,10 +67,15 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo crear la oportunidad.'); }
     finally { setFollowing(null); }
   };
-  const shown = useMemo(() => {
+  const regions = useMemo(() => [...new Set((data?.contracts || []).map(item => item.region).filter((region): region is string => Boolean(region)))].sort((a, b) => a.localeCompare(b, 'es')), [data]);
+  const matching = useMemo(() => {
     const items = [...(data?.contracts || [])].sort((a, b) => String(a.endsOn).localeCompare(String(b.endsOn)));
-    return scope === 'all' ? items : items.filter(item => !item.endsOn || Date.parse(`${item.endsOn}T12:00:00Z`) - now <= 183 * DAY);
-  }, [data, scope, now]);
+    return items.filter(item => (scope === 'all' || !item.endsOn || Date.parse(`${item.endsOn}T12:00:00Z`) - now <= 183 * DAY)
+      && (!region || item.region === region) && (!onlyHigh || item.fit === 'alta'));
+  }, [data, scope, now, region, onlyHigh]);
+  // A few hundred contracts fit a common offer: they come 24 at a time.
+  useEffect(() => setLimit(PAGE), [scope, region, onlyHigh]);
+  const shown = matching.slice(0, limit);
   const failed = data?.job && ['failed', 'blocked'].includes(data.job.state) ? data.job : null;
 
   if (!data && !problem) return <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />Cargando los contratos por vencer…</div>;
@@ -99,15 +110,21 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
 
     {data?.contracts.length ? <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm"><span className="font-semibold tabular-nums">{shown.length}</span> {shown.length === 1 ? 'contrato' : 'contratos'}{scope === 'soon' ? ' vencen en los próximos 6 meses' : ' por vencer'}</p>
-        <div role="group" aria-label="Período" className="inline-flex rounded-xl bg-muted p-1">{([['soon', 'Próximos 6 meses'], ['all', 'Todos']] as const).map(([key, label]) =>
-          <button key={key} type="button" aria-pressed={scope === key} onClick={() => setScope(key)} className={cn('rounded-lg px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', scope === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>
+        <p className="text-sm"><span className="font-semibold tabular-nums">{matching.length}</span> {matching.length === 1 ? 'contrato' : 'contratos'}{scope === 'soon' ? ` ${matching.length === 1 ? 'vence' : 'vencen'} en los próximos 6 meses` : ' por vencer'}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {regions.length > 1 ? <><label htmlFor="contracts-region" className="sr-only">Región</label>
+            <select id="contracts-region" value={region} onChange={event => setRegion(event.target.value)} className="h-9 max-w-[16rem] rounded-lg border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <option value="">Todas las regiones</option>{regions.map(name => <option key={name} value={name}>{name}</option>)}</select></> : null}
+          <label className="flex h-9 items-center gap-2 rounded-lg px-2 text-sm"><input type="checkbox" checked={onlyHigh} onChange={event => setOnlyHigh(event.target.checked)} className="h-4 w-4 accent-primary" />Solo calce alto</label>
+          <div role="group" aria-label="Período" className="inline-flex rounded-xl bg-muted p-1">{([['soon', 'Próximos 6 meses'], ['all', 'Todos']] as const).map(([key, label]) =>
+            <button key={key} type="button" aria-pressed={scope === key} onClick={() => setScope(key)} className={cn('rounded-lg px-3 py-1 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', scope === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>
+        </div>
       </div>
-      {!shown.length ? <p className="rounded-2xl border p-5 text-sm text-muted-foreground">Ninguno vence en los próximos 6 meses. Mira «Todos» para ver los que vienen después.</p> : null}
+      {!matching.length ? <p className="rounded-2xl border p-5 text-sm text-muted-foreground">{region || onlyHigh ? 'Ningún contrato con esos filtros. Prueba con todas las regiones o sin «Solo calce alto».' : 'Ninguno vence en los próximos 6 meses. Mira «Todos» para ver los que vienen después.'}</p> : null}
       <ul className="grid gap-3 xl:grid-cols-2">
         {shown.map(contract => {
           const end = contract.endsOn ? endLabel(contract.endsOn, now) : null;
-          const amount = moneyLabel(contract.amount, contract.currency);
+          const amount = contract.amount !== null && (contract.currency !== 'CLP' || contract.amount >= MIN_TOTAL) ? moneyLabel(contract.amount, contract.currency) : null;
           return <li key={contract.tenderId} className="flex flex-col gap-3 rounded-2xl border bg-background p-5">
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {end ? <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5', end.soon ? 'bg-cw-warning-soft text-foreground' : 'bg-muted text-muted-foreground')}><CalendarClock className="h-3 w-3" aria-hidden="true" />{end.text}</span> : null}
@@ -119,7 +136,7 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
             </div>
             <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
               <div><dt className="text-xs text-muted-foreground">Lo tiene</dt><dd>{contract.winnerName || 'Sin dato'}{contract.winners > 1 ? ` y ${contract.winners - 1} más` : ''}{contract.winnerRut ? <span className="block text-xs text-muted-foreground">RUT {formatRut(contract.winnerRut)}</span> : null}</dd></div>
-              <div><dt className="text-xs text-muted-foreground">Monto y plazo</dt><dd className="tabular-nums">{amount || 'Sin monto'}{contract.durationMonths ? <span className="text-muted-foreground"> · {contract.durationMonths} meses</span> : null}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Monto y plazo</dt><dd className="tabular-nums">{amount || (contract.amount ? 'Precio por unidad' : 'Sin monto')}{contract.durationMonths ? <span className="text-muted-foreground"> · {contract.durationMonths} meses</span> : null}</dd></div>
             </dl>
             {contract.reason ? <p className="text-xs leading-5 text-muted-foreground">{contract.reason}</p> : null}
             <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
@@ -132,6 +149,7 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
           </li>;
         })}
       </ul>
+      {matching.length > shown.length ? <div className="flex justify-center"><Button variant="outline" onClick={() => setLimit(value => value + PAGE)}>Ver {Math.min(PAGE, matching.length - shown.length)} más</Button></div> : null}
       <p className="text-xs leading-5 text-muted-foreground">Fuente: datos abiertos de ChileCompra{data.coverage.to ? ` hasta ${new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${data.coverage.to}T12:00:00Z`))}` : ''}. El término es estimado (adjudicación más duración del contrato): una prórroga o un trato directo pueden moverlo. «Seguir» lo agrega a tus oportunidades para prepararte.</p>
     </> : null}
   </section>;

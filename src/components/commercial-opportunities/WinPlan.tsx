@@ -28,17 +28,22 @@ const SHOWN = 5;
 
 async function json(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error || 'No se pudo completar la acción.'); return value; }
 
+/** «8 parecidas · 0 desiertas · 4 oferentes (mediana) · 85 % del estimado», as one line the screen reader reads once. */
 function Stats({ stats, own }: { stats: MarketStats; own: boolean }) {
-  const items = [
+  const items: Array<[string | null, string]> = [
     [`${stats.tenders}`, stats.tenders === 1 ? 'parecida' : 'parecidas'],
-    ...(own ? [[`${stats.deserted}`, stats.deserted === 1 ? 'desierta' : 'desiertas']] : []),
-    [stats.medianBidders === null ? 's/i' : `${stats.medianBidders}`, 'oferentes (mediana)'],
-    [percentLabel(stats.medianAwardRatio) ?? 's/i', 'del estimado se adjudicó (mediana)'],
+    ...(own ? [[`${stats.deserted}`, stats.deserted === 1 ? 'desierta' : 'desiertas'] as [string, string]] : []),
+    [stats.medianBidders === null ? null : `${stats.medianBidders}`, 'oferentes (mediana)'],
+    stats.medianAwardRatio === null ? [null, 'sin estimado publicado para comparar precios'] : [percentLabel(stats.medianAwardRatio), 'del estimado se adjudicó (mediana)'],
   ];
-  return <dl className="flex flex-wrap gap-x-6 gap-y-2">{items.map(([value, label]) => <div key={label}><dt className="sr-only">{label}</dt><dd className="text-sm"><span className="font-semibold tabular-nums">{value}</span> <span className="text-muted-foreground">{label}</span></dd></div>)}</dl>;
+  const shown = items.filter(([value, label]) => value !== null || label.startsWith('sin'));
+  return <p className="flex flex-wrap gap-x-5 gap-y-1 text-sm">{shown.map(([value, label]) => <span key={label}>{value !== null ? <span className="font-semibold tabular-nums">{value} </span> : null}<span className="text-muted-foreground">{label}</span></span>)}</p>;
 }
 
-function TenderRow({ tender }: { tender: Similar }) {
+// The model writes sentences with or without a final period: the page adds one, once.
+const sentence = (text: string) => `${text.trim().replace(/[.\s]+$/, '')}.`;
+
+function TenderRow({ tender, showAgency }: { tender: Similar; showAgency: boolean }) {
   const winner = tender.winners[0];
   return <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0">
     <div className="min-w-0 flex-1 space-y-0.5">
@@ -47,7 +52,7 @@ function TenderRow({ tender }: { tender: Similar }) {
         <span>{monthLabel(tender.publishedOn)}</span>
         <span className={cn(tender.status === 'desierta' && 'text-foreground')}>{STATUS[tender.status] ?? tender.status}</span>
         {tender.bidders !== null ? <span className="tabular-nums">{tender.bidders} {tender.bidders === 1 ? 'oferente' : 'oferentes'}</span> : null}
-        {tender.agency ? <span className="min-w-0 truncate">{tender.agency}</span> : null}
+        {showAgency && tender.agency ? <span className="min-w-0 truncate">{tender.agency}</span> : null}
       </p>
       {winner ? <p className="text-xs leading-5"><Trophy className="mr-1 inline h-3 w-3 text-muted-foreground" aria-hidden="true" />Ganó {winner.name}{winner.amount ? <span className="tabular-nums"> por {moneyLabel(winner.amount, tender.currency)}</span> : null}
         {tender.estimatedAmount && tender.awardedAmount && tender.currency === 'CLP' ? <span className="text-muted-foreground"> · estimado {moneyLabel(tender.estimatedAmount)}</span> : null}</p> : null}
@@ -57,10 +62,10 @@ function TenderRow({ tender }: { tender: Similar }) {
   </li>;
 }
 
-function TenderList({ tenders, label }: { tenders: Similar[]; label: string }) {
+function TenderList({ tenders, label, showAgency = true }: { tenders: Similar[]; label: string; showAgency?: boolean }) {
   const [all, setAll] = useState(false);
   return <>
-    <ul aria-label={label} className="divide-y">{(all ? tenders : tenders.slice(0, SHOWN)).map(tender => <TenderRow key={tender.id} tender={tender} />)}</ul>
+    <ul aria-label={label} className="divide-y">{(all ? tenders : tenders.slice(0, SHOWN)).map(tender => <TenderRow key={tender.id} tender={tender} showAgency={showAgency} />)}</ul>
     {tenders.length > SHOWN ? <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" aria-expanded={all} onClick={() => setAll(value => !value)}>{all ? 'Ver menos' : `Ver ${tenders.length - SHOWN} más`}</Button> : null}
   </>;
 }
@@ -76,20 +81,20 @@ function Strategy({ data, onPrepare, busy }: { data: NonNullable<MarketView['pla
       </div>
       <Button variant="ghost" size="sm" onClick={onPrepare} disabled={busy}><RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />Preparar de nuevo</Button>
     </div>
-    <p className="max-w-3xl text-sm leading-6">{plan.summary}</p>
+    <p className="max-w-3xl text-sm leading-6">{sentence(plan.summary)}</p>
     <div className="rounded-2xl bg-muted/40 p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Rango de precio</p>
       <p className="mt-1 text-lg font-semibold tabular-nums">{range ?? 'Sin rango con estos datos'}</p>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">{plan.price.basis}</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{sentence(plan.price.basis)}</p>
     </div>
     <div className="grid gap-5 lg:grid-cols-2">
       {plan.highlights.length ? <div className="space-y-2"><h4 className="text-sm font-semibold">Qué destacar en tu oferta</h4>
-        <ul className="space-y-2">{plan.highlights.map(item => <li key={item.text} className="text-sm leading-6"><span className="font-medium">{item.text}.</span> <span className="text-muted-foreground">{item.why}</span></li>)}</ul></div> : null}
+        <ul className="space-y-2">{plan.highlights.map(item => <li key={item.text} className="text-sm leading-6"><span className="font-medium">{sentence(item.text)}</span> <span className="text-muted-foreground">{sentence(item.why)}</span></li>)}</ul></div> : null}
       {plan.risks.length ? <div className="space-y-2"><h4 className="text-sm font-semibold">Riesgos</h4>
-        <ul className="space-y-2">{plan.risks.map(risk => <li key={risk} className="flex gap-2 text-sm leading-6"><AlertTriangle className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{risk}</li>)}</ul></div> : null}
+        <ul className="space-y-2">{plan.risks.map(risk => <li key={risk} className="flex gap-2 text-sm leading-6"><AlertTriangle className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{sentence(risk)}</li>)}</ul></div> : null}
     </div>
     {plan.competitors.length ? <div className="space-y-2"><h4 className="text-sm font-semibold">A quién tendrás enfrente</h4>
-      <ul className="space-y-2">{plan.competitors.map(item => <li key={item.rut} className="text-sm leading-6"><span className="font-medium">{item.name}</span> <span className="text-xs text-muted-foreground">RUT {formatRut(item.rut)}{item.wins ? ` · ganó ${item.wins} de las parecidas` : ''}</span><br /><span className="text-muted-foreground">{item.why}</span></li>)}</ul></div> : null}
+      <ul className="space-y-2">{plan.competitors.map(item => <li key={item.rut} className="text-sm leading-6"><span className="font-medium">{item.name}</span> <span className="text-xs text-muted-foreground">RUT {formatRut(item.rut)}{item.wins ? ` · ganó ${item.wins} de las parecidas` : ''}</span><br /><span className="text-muted-foreground">{sentence(item.why)}</span></li>)}</ul></div> : null}
     <p className="text-xs leading-5 text-muted-foreground">Preparada el {new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'long', timeZone: 'America/Santiago' }).format(new Date(data.createdAt))}. Es una sugerencia sobre datos históricos: revisa las bases antes de decidir el precio.</p>
   </section>;
 }
@@ -151,14 +156,14 @@ export function WinPlan({ id }: { id: string }) {
         </div>
         {!history.agency ? <p className="rounded-2xl border p-5 text-sm text-muted-foreground">No encontramos a este comprador en los datos de ChileCompra con ese nombre. Abajo ves lo que pagaron otros organismos por lo mismo.</p>
           : !history.similar.length ? <p className="rounded-2xl border p-5 text-sm text-muted-foreground">En los últimos 3 años este organismo no licitó algo parecido. Abajo ves lo que pagaron otros por lo mismo.</p>
-            : <div className="space-y-4 rounded-2xl border p-5">{history.agencyStats ? <Stats stats={history.agencyStats} own /> : null}<TenderList tenders={history.similar} label="Licitaciones parecidas de este organismo" /></div>}
+            : <div className="space-y-4 rounded-2xl border p-5">{history.agencyStats ? <Stats stats={history.agencyStats} own /> : null}<TenderList tenders={history.similar} label="Licitaciones parecidas de este organismo" showAgency={false} /></div>}
       </section>
 
       {history.market ? <section aria-labelledby="others-title" className="space-y-3">
         <h3 id="others-title" className="font-semibold">Otros organismos, último año</h3>
         <div className="space-y-4 rounded-2xl border p-5">
           <Stats stats={history.market.stats} own={false} />
-          {history.market.stats.winners.length ? <p className="text-sm leading-6"><span className="text-muted-foreground">Los que más ganan: </span>{history.market.stats.winners.slice(0, 3).map(winner => `${winner.name} (${winner.wins})`).join(', ')}</p> : null}
+          {history.market.stats.winners.filter(winner => winner.wins >= 2).length ? <p className="text-sm leading-6"><span className="text-muted-foreground">Ganan seguido: </span>{history.market.stats.winners.filter(winner => winner.wins >= 2).slice(0, 3).map(winner => `${winner.name} (${winner.wins})`).join(', ')}</p> : null}
           <TenderList tenders={history.market.similar} label="Licitaciones parecidas de otros organismos" />
         </div>
       </section> : null}

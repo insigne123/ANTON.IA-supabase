@@ -167,6 +167,21 @@ export function median(values: number[]) {
   return Math.round((sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2) * 1000) / 1000;
 }
 
+/** The value below which a share of the values falls (0.25 → first quartile), to a thousandth; null without values. */
+export function quantile(values: number[], q: number) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const position = (sorted.length - 1) * Math.min(1, Math.max(0, q));
+  const low = Math.floor(position); const high = Math.ceil(position);
+  return Math.round((sorted[low] + (sorted[high] - sorted[low]) * (position - low)) * 1000) / 1000;
+}
+
+/** What a contract costs per month, in pesos: its award over its length; null without either. */
+export function monthlyAmount(tender: Pick<MarketTender, 'currency' | 'awardedAmount' | 'durationMonths' | 'status'>) {
+  if (tender.status !== 'adjudicada' || tender.currency !== 'CLP' || !tender.awardedAmount || !tender.durationMonths || tender.durationMonths < 1) return null;
+  return Math.round(tender.awardedAmount / tender.durationMonths);
+}
+
 /** Awarded against estimated, in pesos and within reason (a ratio outside 0.2–2 is usually a different unit or currency). */
 export function awardRatio(tender: Pick<MarketTender, 'currency' | 'estimatedAmount' | 'awardedAmount' | 'status'>) {
   if (tender.status !== 'adjudicada' || tender.currency !== 'CLP' || !tender.estimatedAmount || !tender.awardedAmount) return null;
