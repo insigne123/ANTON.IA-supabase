@@ -7,6 +7,7 @@ import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { addOpportunityActivity, opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
+import { enqueueOpportunitySummaries } from './workspace-summaries';
 
 /**
  * Moves the opportunity forward when the work shows it moved (pipeline.ts), with the same revision check as a person's
@@ -103,8 +104,12 @@ export async function readOpportunityPipeline(client: SupabaseClient, scope: Wor
   const notWorked = (result: unknown) => rows(result).filter(row => !workedIds.has(row.id));
   // What was found or recommended and already has a team counts in its work stage, not twice.
   const alreadyWorked = (evaluations: string[]) => inPlay.filter(row => evaluations.includes(String(row.data?.evaluation))).length;
+  const items = [...inPlay, ...notWorked(recommended), ...notWorked(found)];
+  // The cards without their line of summary ask for it (workspace-summaries.ts); the page reloads while some wait.
+  const waiting = await enqueueOpportunitySummaries(client, scope, items).catch(() => 0);
   return {
-    items: [...inPlay, ...notWorked(recommended), ...notWorked(found)], work: worked,
+    items, work: worked,
     totals: { found: Math.max(0, Number(foundCount.count || 0) - alreadyWorked(['review', 'pending'])), recommended: Math.max(0, Number(recommendedCount.count || 0) - alreadyWorked(['recommended'])) },
+    summaries: { waiting },
   };
 }

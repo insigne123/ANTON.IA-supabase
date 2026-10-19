@@ -7,6 +7,7 @@ import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
 import type { WorkItem, WorkRecord } from '@/lib/commercial-opportunities/workspace';
 import { PIPELINE_STAGES, WORK_STATE_LABELS, daysToClose, pipelineStage } from '@/lib/commercial-opportunities/pipeline';
+import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import { PipelineRoute, type PipelineStop } from './PipelineRoute';
 
 export type PipelineSuggestion = { id: string; move: WorkRecord['state'] | null; reason: string; nextAction: string };
@@ -17,13 +18,16 @@ const MOVES: Record<string, WorkRecord['state'][]> = {
 
 /**
  * The admin's pipeline: the stages as a road (PipelineRoute), the opportunities of the stage in view below it, and what the
- * AI suggests for each one. Moves the work shows happen on their own (pipeline.ts); here a person applies the rest.
+ * AI suggests for each one. Moves the work shows happen on their own (pipeline.ts); here a person applies the rest. Each
+ * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
-export function PipelineBoard({ items, work, totals, members, busy, suggestions, reviewing, onReview, onMove, onOpen }: {
+export function PipelineBoard({ items, work, totals, members, busy, suggestions, reviewing, summariesWaiting = false, onReview, onMove, onOpen }: {
   items: WorkItem[]; work: WorkRecord[]; members: Array<{ user_id: string; name: string }>; busy: boolean;
   /** Exact counts of what nobody works yet; the page lists only the best scored of them. */
   totals?: { found: number; recommended: number };
   suggestions: PipelineSuggestion[] | null; reviewing: boolean; onReview: () => void;
+  /** Some cards are still waiting for their line of summary. */
+  summariesWaiting?: boolean;
   onMove: (id: string, state: WorkRecord['state'], revision: number) => void; onOpen: (id: string) => void;
 }) {
   const now = Date.now();
@@ -76,13 +80,16 @@ export function PipelineBoard({ items, work, totals, members, busy, suggestions,
               const owner = members.find(m => m.user_id === record?.responsible_id);
               const tip = advice.get(item.id);
               const options = record ? MOVES[record.state] ?? [] : [];
+              const summary = opportunitySummary(item.data);
               return (
                 <li key={item.id} className="flex flex-col gap-3 rounded-2xl border bg-background p-4 shadow-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
                   style={{ animationDelay: `${Math.min(index, 8) * 50}ms`, animationFillMode: 'both' }}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0 space-y-1">
+                      {item.buyer_name || item.company_name ? <p className="truncate text-xs text-muted-foreground">{item.buyer_name || item.company_name}</p> : null}
                       <p className="line-clamp-2 font-medium leading-6">{item.title}</p>
-                      <p className="truncate text-sm text-muted-foreground">{item.buyer_name || item.company_name || '—'}</p>
+                      {summary ? <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">{summary}</p>
+                        : summariesWaiting && !(item.data as { summary?: unknown } | null)?.summary ? <span className="block space-y-2 pt-1" aria-hidden="true"><span className="block h-3 w-11/12 rounded-full bg-muted motion-safe:animate-pulse" /><span className="block h-3 w-2/3 rounded-full bg-muted motion-safe:animate-pulse" /></span> : null}
                     </div>
                     {owner ? <span title={`Responsable: ${owner.name}`}><InitialsAvatar name={owner.name} size="sm" /></span> : null}
                   </div>
