@@ -1,9 +1,5 @@
 import {
-<<<<<<< HEAD
-  BarChart3, Bot, Building2, CalendarCheck, Contact, CreditCard, FileSignature, KanbanSquare, Mail, MessagesSquare, PenLine,
-=======
-  BarChart3, Building2, CalendarCheck, CalendarCheck2, Contact, CreditCard, FileSignature, KanbanSquare, Mail, MessagesSquare, PenLine,
->>>>>>> claude/informe-semanal
+  BarChart3, Bot, Building2, CalendarCheck, CalendarCheck2, Contact, CreditCard, FileSignature, KanbanSquare, Mail, MessagesSquare, PenLine,
   Plug, Rocket, Search, Send, Shield, Sparkles, Table2, UserCircle, type LucideIcon,
 } from 'lucide-react';
 import { HELP_ICONS, type HelpIconKey } from '@/lib/help/manual';
