@@ -119,7 +119,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     steps: [
       'Arriba eliges «Esta semana» (de lunes a hoy) o «Semana pasada» (de lunes a domingo). Cada cifra se compara con los mismos días de la semana anterior.',
       '«Tu semana» trae una frase con lo importante, tus correos enviados, las personas contactadas, las respuestas, las reuniones pedidas y «Para esta semana»: hasta tres cosas para hacer, con su enlace.',
-      'Si administras la organización, «Equipo» muestra lo mismo por persona, con quién tiene respuestas por atender.',
+      'Si administras la organización, «Equipo» muestra lo mismo por persona, con quién tiene respuestas por atender. Quien no tuvo actividad en la semana queda contado en una línea, y «Ver» lo muestra; si nadie escribió, una frase lo dice.',
       '«Oportunidades» muestra lo que llegó en la semana, lo que cierra en los próximos 7 días y lo que nadie tiene asignado. Lo ven los gestores de oportunidades que elija un administrador; mientras no haya, los administradores.',
       'Abajo, «Recibirlo por correo cada lunes» te lo envía a las 8:00 con la semana anterior, desde tu Gmail u Outlook conectado y a tu propio correo. «Enviármelo ahora» te manda el que estás viendo.',
     ],

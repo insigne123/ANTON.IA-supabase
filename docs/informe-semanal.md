@@ -27,7 +27,10 @@ Una página, «Informe semanal», en «Centro de mando», con «Esta semana» (d
    - Llamadas y LinkedIn hechos, cuando esa función existe.
 2. **Equipo** (dueños y administradores):
    - totales con su cambio;
-   - una tabla por persona: enviados, respuestas, reuniones y por responder.
+   - una tabla con quienes tuvieron actividad en la semana (enviaron, les respondieron, pidieron reunión o tienen respuestas por contestar): enviados, respuestas, reuniones y por responder;
+   - el resto queda contado en una línea («3 personas sin actividad esta semana»), y «Ver» agrega sus filas;
+   - si nadie escribió, una frase lo dice en lugar de los totales y la tabla, y ofrece «Ver Oportunidades» a quien también lo recibe. Así un equipo que trabaja solo licitaciones no ve una fila de ceros por persona (en producción había uno con 31, oct 2026).
+   - En el correo del lunes es igual: hasta 8 personas con actividad, una línea con las demás, o «Nadie del equipo envió correos la semana pasada».
 3. **Oportunidades** (gestores, o los administradores mientras no haya gestores; solo para quien puede ver Oportunidades):
    - lo que llegó en la semana por tipo, sin las excluidas;
    - lo que cierra en los próximos 7 días, con «Sin asignar» cuando nadie lo tiene;

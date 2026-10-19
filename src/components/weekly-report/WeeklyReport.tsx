@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, Loader2, Mail, RefreshCw, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
-import { REPORT_ROLES, deltaText, nextActions, personalHeadline, rate, type ReportRole, type WeeklyReport as Report } from '@/lib/weekly-report';
+import { REPORT_ROLES, deltaText, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeeklyReport as Report } from '@/lib/weekly-report';
 
 type Response = { report: Report; email: boolean; mailbox: 'google' | 'outlook' | null; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
 
@@ -47,6 +47,8 @@ export function WeeklyReport() {
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [managersOpen, setManagersOpen] = useState(false);
   const [chosen, setChosen] = useState<string[]>([]);
+  const [idleShown, setIdleShown] = useState(false);
+  const idleId = useId();
 
   const call = useCallback((url: string, init?: RequestInit) => authenticatedApiFetch(url, {
     cache: 'no-store', ...init, headers: { 'Content-Type': 'application/json', ...(organizationId ? { 'x-organization-id': organizationId } : {}) },
@@ -78,6 +80,15 @@ export function WeeklyReport() {
   const report = data?.report;
   const roles = report?.roles ?? ['personal'];
   const shown: ReportRole = roles.includes(role) ? role : 'personal';
+  const team = report?.team ? teamActivity(report.team) : null;
+  const weekWord = report?.week.which === 'current' ? 'esta semana' : 'la semana pasada';
+  const memberRow = (member: TeamMember, idle = false) => <tr key={member.userId} className={cn('border-b last:border-0', idle && 'text-muted-foreground')}>
+    <th scope="row" className="max-w-[14rem] px-4 py-2.5 text-left font-normal"><span className="block truncate">{member.name}</span>{member.detail ? <span className="block truncate text-xs text-muted-foreground">{member.detail}</span> : null}</th>
+    <td className={cn('px-3 py-2.5 text-right tabular-nums', !member.sent && 'text-muted-foreground')}>{member.sent}</td>
+    <td className="px-3 py-2.5 text-right tabular-nums">{member.replies}</td>
+    <td className="px-3 py-2.5 text-right tabular-nums">{member.meetings}</td>
+    <td className={cn('px-4 py-2.5 text-right tabular-nums', member.pending ? 'font-medium' : 'text-muted-foreground')}>{member.pending}</td>
+  </tr>;
 
   return <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6">
     <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -133,33 +144,38 @@ export function WeeklyReport() {
         Además hiciste {report.personal.touches.calls} {report.personal.touches.calls === 1 ? 'llamada' : 'llamadas'} y {report.personal.touches.linkedin} {report.personal.touches.linkedin === 1 ? 'contacto' : 'contactos'} por LinkedIn.</p> : null}
     </div> : null}
 
-    {report?.team && shown === 'team' ? <div className={cn('space-y-6 transition-opacity', loading && 'opacity-60')}>
-      <p className="text-lg leading-7">
-        Tu equipo envió {report.team.totals.sent.now.toLocaleString('es-CL')} correos y recibió {report.team.totals.replies.now.toLocaleString('es-CL')} {report.team.totals.replies.now === 1 ? 'respuesta' : 'respuestas'}{report.team.totals.meetings ? `; ${report.team.totals.meetings} pidieron reunión` : ''}.
-      </p>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Stat label="Correos enviados" value={report.team.totals.sent.now.toLocaleString('es-CL')} note={deltaText(report.team.totals.sent)} />
-        <Stat label="Respuestas" value={report.team.totals.replies.now.toLocaleString('es-CL')} note={deltaText(report.team.totals.replies)} />
-        <Stat label="Reuniones pedidas" value={report.team.totals.meetings.toLocaleString('es-CL')} />
-      </div>
-      <Section title="Por persona">
-        <div className="overflow-x-auto rounded-2xl border">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b bg-muted/40 text-xs text-muted-foreground">
-              <th scope="col" className="px-4 py-2 text-left font-medium">Persona</th><th scope="col" className="px-3 py-2 text-right font-medium">Enviados</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Respuestas</th><th scope="col" className="px-3 py-2 text-right font-medium">Reuniones</th>
-              <th scope="col" className="px-4 py-2 text-right font-medium">Por responder</th></tr></thead>
-            <tbody>{report.team.members.map(member => <tr key={member.userId} className="border-b last:border-0">
-              <th scope="row" className="max-w-[14rem] px-4 py-2.5 text-left font-normal"><span className="block truncate">{member.name}</span>{member.detail ? <span className="block truncate text-xs text-muted-foreground">{member.detail}</span> : null}</th>
-              <td className={cn('px-3 py-2.5 text-right tabular-nums', !member.sent && 'text-muted-foreground')}>{member.sent}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{member.replies}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{member.meetings}</td>
-              <td className={cn('px-4 py-2.5 text-right tabular-nums', member.pending ? 'font-medium' : 'text-muted-foreground')}>{member.pending}</td>
-            </tr>)}</tbody>
-          </table>
+    {report?.team && team && shown === 'team' ? <div className={cn('space-y-6 transition-opacity', loading && 'opacity-60')}>
+      <p className="text-lg leading-7">{teamHeadline(report.team, report.week.which)}</p>
+      {/* Nobody wrote: one sentence instead of three zeros and a row of zeros per person. */}
+      {!team.active.length ? <div className="space-y-3">
+        <p className="text-sm leading-6 text-muted-foreground">Cuando escriban desde ANTON.IA, aquí verás quién envió, a quién le respondieron y quién tiene respuestas por contestar.</p>
+        {roles.includes('opportunities') ? <Button variant="outline" size="sm" onClick={() => setRole('opportunities')}>Ver Oportunidades<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" /></Button> : null}
+      </div> : <>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <Stat label="Correos enviados" value={report.team.totals.sent.now.toLocaleString('es-CL')} note={deltaText(report.team.totals.sent)} />
+          <Stat label="Respuestas" value={report.team.totals.replies.now.toLocaleString('es-CL')} note={deltaText(report.team.totals.replies)} />
+          <Stat label="Reuniones pedidas" value={report.team.totals.meetings.toLocaleString('es-CL')} />
         </div>
-        <p className="text-xs text-muted-foreground">El detalle por persona y por módulo está en <Link href="/dashboard/admin/usage" className="underline underline-offset-2">Administración</Link>.</p>
-      </Section>
+        <Section title="Por persona">
+          <div className="overflow-x-auto rounded-2xl border">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b bg-muted/40 text-xs text-muted-foreground">
+                <th scope="col" className="px-4 py-2 text-left font-medium">Persona</th><th scope="col" className="px-3 py-2 text-right font-medium">Enviados</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">Respuestas</th><th scope="col" className="px-3 py-2 text-right font-medium">Reuniones</th>
+                <th scope="col" className="px-4 py-2 text-right font-medium">Por responder</th></tr></thead>
+              <tbody>{team.active.map(member => memberRow(member))}</tbody>
+              {idleShown ? <tbody id={idleId} className="border-t">{team.idle.map(member => memberRow(member, true))}</tbody> : null}
+            </table>
+          </div>
+          {/* Who did nothing this week is counted in one line; their rows open on demand. */}
+          {team.idle.length ? <div className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+            <span>{team.idle.length === 1 ? `1 persona sin actividad ${weekWord}.` : `${team.idle.length} personas sin actividad ${weekWord}.`}</span>
+            <Button variant="link" size="sm" className="h-auto p-0" aria-expanded={idleShown} aria-controls={idleShown ? idleId : undefined} onClick={() => setIdleShown(value => !value)}>
+              {idleShown ? 'Ocultar' : 'Ver'}</Button>
+          </div> : null}
+          <p className="text-xs text-muted-foreground">El detalle por persona y por módulo está en <Link href="/dashboard/admin/usage" className="underline underline-offset-2">Administración</Link>.</p>
+        </Section>
+      </>}
     </div> : null}
 
     {report?.opportunities && shown === 'opportunities' ? <div className={cn('space-y-6 transition-opacity', loading && 'opacity-60')}>
