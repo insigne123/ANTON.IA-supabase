@@ -11,6 +11,8 @@ const data = () => opportunityData({ ORG: uid(1), OWNER: uid(11), MEMBER: uid(12
 
 export default {
   id: 'oportunidades', title: 'Oportunidades', start: '/dashboard',
+  // Two minutes of screens: a little more compression keeps it under 4 MB (tutorial-videos.test.ts).
+  crf: 32,
   intro: 'Licitaciones, Compra Ágil y empresas que están contratando, con un informe de la IA para decidir y ganar.',
   learn: ['Leer el embudo', 'Cargar una desde su documento', 'Abrir una licitación y su informe', 'Ver cómo ganarla'],
   mocks: [

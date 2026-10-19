@@ -386,7 +386,8 @@ async function recordVideo(browser, built, supabase, storyboard, ffmpeg) {
     execFileSync(ffmpeg, [
       '-y', '-hide_banner', '-loglevel', 'error', '-framerate', String(FPS), '-i', path.join(dir, '%05d.jpg'), '-i', music,
       '-filter_complex', '[1:a]volume=0.7[a]', '-map', '0:v', '-map', '[a]', '-shortest',
-      '-c:v', 'libx264', '-preset', 'slow', '-crf', '30', '-pix_fmt', 'yuv420p', '-g', String(FPS * 4),
+      // A long video may ask for a little more compression (storyboard.crf) to stay under the 4 MB the help serves.
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', String(storyboard.crf ?? 30), '-pix_fmt', 'yuv420p', '-g', String(FPS * 4),
       '-c:a', 'aac', '-b:a', '80k', '-ac', '2', '-movflags', '+faststart', video,
     ]);
     copyFileSync(path.join(dir, '00020.jpg'), path.join(outDir, `${storyboard.id}.jpg`));
