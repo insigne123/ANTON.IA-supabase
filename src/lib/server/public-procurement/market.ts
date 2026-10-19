@@ -122,8 +122,12 @@ export type SupplierProfile = {
   recent: Array<Pick<MarketTender, 'code' | 'name' | 'agency' | 'publishedOn' | 'status' | 'estimatedAmount' | 'currency'> & { offered: number | null; won: boolean }>;
 };
 
-export async function findSupplier(client: Client, value: string) {
-  const rut = normalizeRut(value);
+/**
+ * A supplier by its RUT, or by its id when given a number: an id is never read as a RUT («277942» is not «27794-2»),
+ * which left every profile opened from the radar at «No encontramos a ese proveedor».
+ */
+export async function findSupplier(client: Client, value: string | number) {
+  const rut = typeof value === 'number' ? null : normalizeRut(value);
   const query = client.from('public_procurement_suppliers').select('id,rut,name');
   const { data, error } = rut ? await query.eq('rut', rut).limit(1) : await query.eq('id', Number(value)).limit(1);
   if (error) { if (MISSING.has(String(error.code))) return null; throw error; }
@@ -146,7 +150,7 @@ export async function searchSuppliers(client: Client, query: string) {
 
 /** What a supplier did in public tenders in the data: where it bids, how much it wins and at what price. */
 export async function readSupplierProfile(client: Client, supplierId: number): Promise<SupplierProfile | null> {
-  const supplier = await findSupplier(client, String(supplierId));
+  const supplier = await findSupplier(client, supplierId);
   if (!supplier) return null;
   const { data, error } = await client.from('public_procurement_bids')
     .select('selected,offered_amount,awarded_amount,tender:public_procurement_tenders(code,name,status,currency,estimated_amount,published_on,category,agency:public_procurement_agencies(name))')
