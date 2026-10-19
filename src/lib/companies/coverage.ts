@@ -156,15 +156,19 @@ export function committeeFor(people: CompanyPerson[], main: Area | null, size: n
 
 /** The companies of the CRM, one per company and one person per person, the deals that moved furthest first. */
 export function buildCompanies(rows: UnifiedRow[], options: { targetRoles?: string[] } = {}): { companies: Company[]; main: Area | null } {
-  const groups = new Map<string, { name: string; rows: UnifiedRow[] }>();
+  const groups = new Map<string, { names: Map<string, number>; rows: UnifiedRow[] }>();
   for (const row of rows) {
     if (row.kind === 'opportunity') continue; // an opportunity is a company signal, not a person
     const key = companyKey(row.company);
     if (!key) continue;
-    const group = groups.get(key) || { name: String(row.company).trim(), rows: [] };
+    const group = groups.get(key) || { names: new Map<string, number>(), rows: [] as UnifiedRow[] };
+    const name = String(row.company).replace(/\s+/g, ' ').trim();
+    group.names.set(name, (group.names.get(name) || 0) + 1);
     group.rows.push(row);
     groups.set(key, group);
   }
+  // The name the company is written with most often; between equals, the shorter («Logística Norte», not «… SpA»).
+  const nameOf = (names: Map<string, number>) => [...names].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
   const peopleOf = (group: { rows: UnifiedRow[] }) => {
     const byPerson = new Map<string, CompanyPerson>();
     for (const row of group.rows) {
@@ -189,7 +193,7 @@ export function buildCompanies(rows: UnifiedRow[], options: { targetRoles?: stri
     const best = stages.reduce<PipelineStage>((top, stage) => rank(stage) > rank(top) ? stage : top, stages[0] ?? 'inbox');
     const committee = committeeFor(people, main, size);
     return {
-      key, name: group.name, industry: (first(row => row.industry) as string | null), domain: (first(row => row.companyDomain) as string | null),
+      key, name: nameOf(group.names), industry: (first(row => row.industry) as string | null), domain: (first(row => row.companyDomain) as string | null),
       size, country: (first(row => row.country) as string | null), people, stage: best,
       open: stages.some(stage => OPEN.includes(stage)),
       won: stages.includes('closed_won'), lost: stages.length > 0 && stages.every(stage => stage === 'closed_lost'),
@@ -210,6 +214,25 @@ export function coverageGrid(company: Company, main: Area | null) {
     area, label: areaLabel(area),
     cells: LEVELS.map(level => company.people.filter(person => person.area === area && person.level === level.id)),
   }));
+}
+
+const INDUSTRIES: Record<string, string> = {
+  retail: 'Retail', 'logistics & supply chain': 'Logística', 'hospital & health care': 'Salud', construction: 'Construcción',
+  'mining & metals': 'Minería', 'staffing & recruiting': 'Reclutamiento y personal', 'human resources': 'Recursos humanos',
+  'information technology & services': 'Tecnología', 'computer software': 'Software', 'financial services': 'Servicios financieros',
+  banking: 'Banca', 'food & beverages': 'Alimentos y bebidas', 'food production': 'Alimentos', 'transportation/trucking/railroad': 'Transporte',
+  'security & investigations': 'Seguridad', 'facilities services': 'Servicios generales', 'real estate': 'Inmobiliaria',
+  'education management': 'Educación', 'higher education': 'Educación superior', 'government administration': 'Sector público',
+  'oil & energy': 'Energía', utilities: 'Servicios básicos', telecommunications: 'Telecomunicaciones', automotive: 'Automotriz',
+  hospitality: 'Hotelería', 'consumer goods': 'Consumo masivo', insurance: 'Seguros', pharmaceuticals: 'Farmacéutica',
+  machinery: 'Maquinaria', farming: 'Agricultura', 'wine & spirits': 'Vinos y licores', 'environmental services': 'Medio ambiente',
+  'management consulting': 'Consultoría', 'marketing & advertising': 'Marketing y publicidad', 'legal services': 'Servicios legales',
+};
+/** The rubro as people in Chile say it: Apollo's industries are English («logistics & supply chain» → «Logística»). */
+export function industryLabel(industry: string | null | undefined) {
+  const text = String(industry || '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  return INDUSTRIES[text.toLowerCase()] ?? text.charAt(0).toLocaleUpperCase('es-CL') + text.slice(1);
 }
 
 /** Employee bands around a size, as Búsqueda's filters say them, for companies like this one. */
