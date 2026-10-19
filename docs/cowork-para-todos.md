@@ -21,6 +21,7 @@
   - Antes atendían solo a la lista fija.
   - Ahora toman también a quien inició una conversación en los últimos 30 días (`coworkWorkerUserIds` en `src/lib/server/cowork/worker-users.ts`). Esa lista se lee como máximo una vez por minuto.
   - Cada trabajo vuelve a revisar el permiso y la membresía antes de correr.
+- **Menú de los miembros:** la app pregunta en cada página si muestra «Administración». A quien no administra le responde «no» (200, `canView: false`), no un 403, para que no aparezca un error en cada página. El panel sigue respondiendo 404 a quien no administra.
 
 Lo demás no cambia:
 
@@ -45,4 +46,5 @@ Lo demás no cambia:
 - `src/lib/cowork/access.test.ts`: lista fija contra interruptor y correo sin confirmar.
 - `src/lib/server/cowork/worker-users.test.ts`: personas activas, la lectura una vez por minuto y el respaldo cuando la lectura falla.
 - `supabase/tests/database/cowork_access_policy.test.sql` y `cowork_qa_access.test.sql`: la política abierta sigue exigiendo permiso y membresía.
+- `src/lib/server/access-guards.test.ts`: la consulta del menú responde «no» a quien no administra, y el panel sigue cerrado.
 - Auditoría visual: `/cowork` ya no figura como página con lista de acceso, y el miembro de prueba entra (`scripts/visual-audit/routes.mjs`).
