@@ -14,7 +14,7 @@ import { InitialsAvatar } from '@/components/initials-avatar';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import {
-  DEFAULT_TOUCH_CADENCE, LINKEDIN_DAILY_CAP, RECORDING_EXTENSIONS, TOUCH_DAY_CHOICES, TOUCH_OUTCOMES,
+  DEFAULT_TOUCH_CADENCE, LINKEDIN_DAILY_CAP, RECORDING_EXTENSIONS, TOUCH_DAY_CHOICES, TOUCH_OUTCOMES, humanDue,
   type CallScript, type CallSummary, type LinkedinScript, type TouchCadence, type TouchChannel,
 } from '@/lib/touches';
 
@@ -71,7 +71,7 @@ export function TouchesCard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ id: string; text: string } | null>(null);
   const [outcome, setOutcome] = useState<Record<string, { value: string; note: string }>>({});
-  const [summaries, setSummaries] = useState<Record<string, CallSummary>>({});
+  const [summaries, setSummaries] = useState<Record<string, { summary: CallSummary; crm: boolean }>>({});
   const [settings, setSettings] = useState(false);
   const [draft, setDraft] = useState<{ call: { on: boolean; day: number }; linkedin: { on: boolean; day: number }; phone: string }>({ ...DEFAULT_TOUCH_CADENCE, phone: '' });
   const [saving, setSaving] = useState(false);
@@ -139,10 +139,13 @@ export function TouchesCard() {
         audio.onerror = () => { URL.revokeObjectURL(url); resolve(0); }; audio.src = url;
       });
       const form = new FormData(); form.append('file', file); if (duration) form.append('duration', String(Math.round(duration)));
+      const note = outcome[touchId]?.note?.trim(); if (note) form.append('note', note);
       const response = await call(`/api/touches/${touchId}/recording`, { method: 'POST', body: form });
       const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.error || 'No pudimos resumir la llamada.');
-      setSummaries(current => ({ ...current, [touchId]: result.summary }));
+      // The call is done with its summary: it leaves the list and its summary stays on top until the next visit.
+      setSummaries(current => ({ ...current, [touchId]: { summary: result.summary, crm: Boolean(result.crm) } }));
+      setOpen(null); await load();
     } catch (e) { setError({ id: touchId, text: e instanceof Error ? e.message : 'No pudimos resumir la llamada.' }); }
     finally { setBusy(null); }
   };
@@ -217,18 +220,19 @@ export function TouchesCard() {
         <input ref={fileInput} type="file" accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg" className="sr-only" tabIndex={-1} aria-hidden="true"
           onChange={event => { const file = event.target.files?.[0]; const id = recordingFor.current; event.target.value = ''; if (file && id) void upload(id, file); }} />
         {done.filter(id => !data.touches.some(touch => touch.id === id)).map(id => {
-          const summary = summaries[id];
+          const { summary, crm } = summaries[id];
+          const next = summary.nextSteps[0];
           return <div key={id} role="status" className="space-y-1 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
-            <p className="font-medium">Resumen de la llamada guardado en el CRM · {INTEREST[summary.interest]}</p>
+            <p className="font-medium">{crm ? 'Resumen de la llamada guardado en el CRM' : 'Resumen de la llamada guardado'} · {INTEREST[summary.interest]}</p>
             <p className="leading-6">{summary.summary}</p>
-            {summary.nextSteps[0] ? <p className="text-xs text-muted-foreground">Próximo paso: {summary.nextSteps[0].text}{summary.nextSteps[0].due ? ` (${summary.nextSteps[0].due})` : ''}</p> : null}
+            {next ? <p className="text-xs text-muted-foreground">Próximo paso: {next.text.replace(/[\s.]+$/, '')}{next.due ? ` (${humanDue(next.due)})` : ''}</p> : null}
           </div>;
         })}
         <ul className="space-y-2">
           {visible.map(touch => {
             const isOpen = open === touch.id;
             const pending = busy === touch.id;
-            const summary = summaries[touch.id] ?? touch.callSummary;
+            const summary = summaries[touch.id]?.summary ?? touch.callSummary;
             const chosen = outcome[touch.id]?.value ?? '';
             return <li key={touch.id} className={cn('rounded-xl border border-border/60 p-3 transition-colors', isOpen && 'border-primary/40 bg-primary/[0.03]')}>
               {/* The actions go under the text, so the name, the role and the email it follows are read whole in the narrow column. */}
@@ -260,7 +264,7 @@ export function TouchesCard() {
                 {touch.script ? <Script touch={touch} /> : pending ? <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Preparando qué decir…</p> : null}
                 {touch.script ? <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={pending} onClick={() => void prepare(touch, true)}><RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Otra versión</Button> : null}
                 {summary ? <div className="space-y-1 rounded-xl bg-muted/50 p-3 text-sm"><p className="font-medium">Resumen de la llamada · {INTEREST[summary.interest]}</p><p className="leading-6">{summary.summary}</p>
-                  {summary.nextSteps[0] ? <p className="text-xs text-muted-foreground">Próximo paso: {summary.nextSteps[0].text}{summary.nextSteps[0].due ? ` (${summary.nextSteps[0].due})` : ''}</p> : null}</div> : null}
+                  {summary.nextSteps[0] ? <p className="text-xs text-muted-foreground">Próximo paso: {summary.nextSteps[0].text.replace(/[\s.]+$/, '')}{summary.nextSteps[0].due ? ` (${humanDue(summary.nextSteps[0].due)})` : ''}</p> : null}</div> : null}
                 <fieldset className="space-y-2">
                   <legend className="text-xs font-medium uppercase tracking-wide text-muted-foreground">¿Qué pasó?</legend>
                   <div className="flex flex-wrap gap-2">{TOUCH_OUTCOMES[touch.channel].map(([value, label]) =>

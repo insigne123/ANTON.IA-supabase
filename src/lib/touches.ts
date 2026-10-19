@@ -185,7 +185,7 @@ export function touchScriptPrompt(input: TouchScriptInput) {
     ...shared,
     'opening: lo que dices al contestar, en 2 o 3 frases: quién eres, por qué llamas (el correo, en una línea) y una pregunta para seguir. Máximo 60 palabras.',
     'questions: 2 o 3 preguntas abiertas para entender si tiene el problema que resuelves; concretas a su cargo y empresa.',
-    'voicemail: el mensaje si no contesta, de 30 a 45 palabras, con tu nombre, la razón y que le escribirás de nuevo por correo. Sin dictar números de teléfono.',
+    'voicemail: el mensaje si no contesta, de 30 a 45 palabras, con tu nombre, la razón concreta en una frase y que le escribirás de nuevo por correo, nombrando el asunto de tu correo para que lo encuentre. Sin «hacer seguimiento», «retomar» ni «conversar sobre cómo»: di qué le ofreces o qué quieres saber. Sin dictar números de teléfono.',
   ].join('\n');
   return [
     'Prepara un contacto por LinkedIn con una persona que no respondió un correo.',
@@ -231,12 +231,24 @@ export function callSummaryPrompt(input: { transcript: string; seller: { name: s
   ].join('\n');
 }
 
-/** The note the call leaves in the CRM: the summary and what comes next, short. */
-export function callCrmNote(summary: Pick<CallSummary, 'summary' | 'agreements' | 'nextSteps'>, at: string) {
-  const day = new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short', timeZone: 'America/Santiago' }).format(new Date(at));
+/** A date the summary gives (AAAA-MM-DD) as people say it: «22 oct»; anything else as it came. */
+export function humanDue(due: string | null | undefined) {
+  if (!due) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return due;
+  return new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${due}T12:00:00Z`)).replace('.', '');
+}
+
+/** A step of the summary, said once: without its closing period, so the lists that join them read clean. */
+const clause = (text: string) => text.trim().replace(/[\s.;]+$/, '');
+
+/** The note the call leaves in the CRM: the summary, what they agreed, what comes next and the seller's own note. */
+export function callCrmNote(summary: Pick<CallSummary, 'summary' | 'agreements' | 'nextSteps'>, at: string, note?: string | null) {
+  const day = new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short', timeZone: 'America/Santiago' }).format(new Date(at)).replace('.', '');
+  const next = summary.nextSteps[0];
   return [
-    `Llamada (${day}): ${summary.summary}`,
-    summary.agreements.length ? `Acuerdos: ${summary.agreements.join('; ')}.` : '',
-    summary.nextSteps.length ? `Próximo paso: ${summary.nextSteps[0].text}${summary.nextSteps[0].due ? ` (${summary.nextSteps[0].due})` : ''}.` : '',
+    `Llamada (${day}): ${summary.summary.trim()}`,
+    summary.agreements.length ? `Acuerdos: ${summary.agreements.map(clause).join('; ')}.` : '',
+    next ? `Próximo paso: ${clause(next.text)}${next.due ? ` (${humanDue(next.due)})` : ''}.` : '',
+    note?.trim() ? `Tu nota: ${note.trim()}` : '',
   ].filter(Boolean).join('\n').slice(0, 2000);
 }

@@ -41,12 +41,19 @@ export async function transcribeRecording(file: { bytes: ArrayBuffer; name: stri
   return text.slice(0, TRANSCRIPT_MAX_CHARS);
 }
 
+/** The CRM note before the call, so the call's note goes on top of what the seller wrote instead of replacing it. */
+async function crmNotesBefore(client: SupabaseClient, organizationId: string, leadId: string) {
+  const result: any = await client.from('unified_crm_data').select('id,notes').eq('organization_id', organizationId)
+    .in('id', [`lead_saved|${leadId}`, `lead_enriched|${leadId}`]);
+  return String((result.data || []).map((row: any) => row.notes).find((notes: unknown) => typeof notes === 'string' && notes.trim()) || '').trim();
+}
+
 /**
- * The call's summary on its task, the task done as «Hablamos», and the CRM updated: the note, the next step with its
- * date and, if they agreed to meet, the suggestion of moving the deal to «Reunión».
+ * The call's summary on its task, the task done as «Hablamos», and the CRM updated: the note on top of the earlier
+ * ones, the next step with its date and, if they agreed to meet, the suggestion of moving the deal to «Reunión».
  */
 export async function attachCallRecording(client: SupabaseClient, scope: TouchScope, id: string,
-  file: { bytes: ArrayBuffer; name: string; type: string; durationSeconds?: number | null },
+  file: { bytes: ArrayBuffer; name: string; type: string; durationSeconds?: number | null; note?: string | null },
   deps: { fetch?: Fetch; env?: Record<string, string | undefined>; generate?: typeof generateStructured; now?: Date } = {}) {
   checkRecording({ name: file.name, type: file.type, size: file.bytes.byteLength });
   const touch = await readTouch(client, scope, id);
@@ -67,22 +74,25 @@ export async function attachCallRecording(client: SupabaseClient, scope: TouchSc
     throw new TouchError('Transcribimos la llamada, pero la IA no pudo resumirla. Intenta de nuevo.', 503);
   }
   const summary: CallSummary = { ...answer, transcript, durationSeconds: file.durationSeconds && file.durationSeconds > 0 ? Math.round(file.durationSeconds) : null, createdAt: now.toISOString() };
+  const note = file.note?.trim().slice(0, 2000) || null;
   const saved: any = await client.from('contact_touches').update({ call_summary: summary, updated_at: now.toISOString(),
-    ...(touch.state === 'open' ? { state: 'done', outcome: 'talked', done_at: now.toISOString() } : {}) })
+    ...(touch.state === 'open' ? { state: 'done', outcome: 'talked', done_at: now.toISOString(), ...(note ? { note } : {}) } : {}) })
     .eq('id', id).eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
   if (saved.error) throw new TouchError('No pudimos guardar el resumen.', 503);
+  let crm = false;
   if (contact.lead_id) {
     const next = summary.nextSteps[0];
     const due = next?.due && /^\d{4}-\d{2}-\d{2}$/.test(next.due) ? `${next.due}T12:00:00.000Z` : new Date(now.getTime() + 2 * 86_400_000).toISOString();
-    await syncLeadAutopilotToCrm(client, {
+    const before = await crmNotesBefore(client, scope.organizationId, contact.lead_id).catch(() => '');
+    crm = await syncLeadAutopilotToCrm(client, {
       organizationId: scope.organizationId, leadId: contact.lead_id,
-      notes: callCrmNote(summary, summary.createdAt),
-      nextAction: next?.text || (summary.interest === 'bajo' ? 'Cerrar o retomar más adelante' : 'Enviar el resumen de la llamada'),
-      nextActionType: summary.meetingAgreed ? 'meeting' : 'call_follow_up', nextActionDueAt: due,
+      notes: [callCrmNote(summary, summary.createdAt, note), before].filter(Boolean).join('\n\n').slice(0, 4000),
+      nextAction: next?.text.trim().replace(/[\s.;]+$/, '') || (summary.interest === 'bajo' ? 'Cerrar o retomar más adelante' : 'Enviar el resumen de la llamada'),
+      nextActionType: 'call_follow_up', nextActionDueAt: due,
       lastAutopilotEvent: summary.meetingAgreed ? 'call_meeting' : 'call_summary',
       // Events never move the stage by themselves: they leave a suggestion the person confirms in the pipeline.
       ...(summary.meetingAgreed ? { stage: 'meeting' } : summary.interest === 'alto' ? { stage: 'engaged' } : {}),
-    }).catch(() => undefined);
+    }).then(() => true, () => false);
   }
-  return { summary };
+  return { summary, crm };
 }
