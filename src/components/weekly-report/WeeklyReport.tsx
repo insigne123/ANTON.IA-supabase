@@ -150,7 +150,7 @@ export function WeeklyReport() {
               <th scope="col" className="px-3 py-2 text-right font-medium">Respuestas</th><th scope="col" className="px-3 py-2 text-right font-medium">Reuniones</th>
               <th scope="col" className="px-4 py-2 text-right font-medium">Por responder</th></tr></thead>
             <tbody>{report.team.members.map(member => <tr key={member.userId} className="border-b last:border-0">
-              <th scope="row" className="max-w-[12rem] truncate px-4 py-2.5 text-left font-normal">{member.name}</th>
+              <th scope="row" className="max-w-[14rem] px-4 py-2.5 text-left font-normal"><span className="block truncate">{member.name}</span>{member.detail ? <span className="block truncate text-xs text-muted-foreground">{member.detail}</span> : null}</th>
               <td className={cn('px-3 py-2.5 text-right tabular-nums', !member.sent && 'text-muted-foreground')}>{member.sent}</td>
               <td className="px-3 py-2.5 text-right tabular-nums">{member.replies}</td>
               <td className="px-3 py-2.5 text-right tabular-nums">{member.meetings}</td>

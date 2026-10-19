@@ -104,6 +104,16 @@ test('«Tu semana» counts confirmed sends, people and replies against the week 
   assert.equal(report.opportunities!.unassignedClosing, 1);
 });
 
+test('«Equipo»: two people with the same name are told apart by their email', async () => {
+  const data = seed();
+  data.organization_members.push({ organization_id: ORG, user_id: 'u-ana2', role: 'member' });
+  data.profiles.push({ id: 'u-ana2', full_name: 'ana soto', email: 'ana.soto@axis.cl', signatures: {} });
+  const { client } = memory(data, ['contact_touches']);
+  const { report } = await buildWeeklyReport(client, { organizationId: ORG, userId: 'u-admin' }, { which: 'previous', canSeeOpportunities: canSee, now: NOW });
+  assert.deepEqual(report.team!.members.map(member => [member.name, member.detail]),
+    [['Nicolás Yarur', null], ['Ana Soto', 'ana@axis.cl'], ['ana soto', 'ana.soto@axis.cl']], 'a name nobody else has keeps no detail');
+});
+
 test('the roles: a member has only their week; a named manager gets Oportunidades and the admins stop getting it', async () => {
   const { client, tables } = memory(seed());
   const member = await reportRoles(client, { organizationId: ORG, userId: 'u-ana' }, canSee);

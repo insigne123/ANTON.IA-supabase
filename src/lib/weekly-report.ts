@@ -45,7 +45,8 @@ export type PersonalSection = {
   sent: Counted; contacted: Counted; replies: Counted; meetings: number;
   pending: PendingReply[]; commitments: Commitment[]; touches: { calls: number; linkedin: number } | null;
 };
-export type TeamMember = { userId: string; name: string; role: string; sent: number; replies: number; meetings: number; pending: number };
+/** `detail` is the member's email, only when another member has the same name. */
+export type TeamMember = { userId: string; name: string; detail?: string | null; role: string; sent: number; replies: number; meetings: number; pending: number };
 export type TeamSection = { members: TeamMember[]; totals: { sent: Counted; replies: Counted; meetings: number } };
 export type ClosingOpportunity = { id: string; kind: string; title: string; buyer: string | null; deadlineAt: string; amount: number | null; currency: string | null; assigned: boolean };
 export type OpportunitiesSection = {
@@ -136,7 +137,7 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
   if (team) {
     section('Equipo');
     row(`${plural(team.totals.sent.now, 'correo enviado', 'correos enviados')} y ${plural(team.totals.replies.now, 'respuesta', 'respuestas')} entre ${plural(team.members.length, 'persona', 'personas')}`);
-    team.members.slice(0, 8).forEach(member => row(`${member.name}: ${member.sent} enviados, ${member.replies} respuestas${member.pending ? `, ${member.pending} por responder` : ''}`));
+    team.members.slice(0, 8).forEach(member => row(`${member.name}${member.detail ? ` (${member.detail})` : ''}: ${member.sent} enviados, ${member.replies} respuestas${member.pending ? `, ${member.pending} por responder` : ''}`));
   }
   if (opportunities) {
     section('Oportunidades');

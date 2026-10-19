@@ -58,13 +58,14 @@ test('the email: the same report in a few lines, escaped, without tracking or un
   const report: WeeklyReport = {
     week: reportWeek(new Date('2026-10-20T12:00:00.000Z'), 'previous'), roles: ['personal', 'team'], name: 'Nicolás',
     personal: personal({ pending: [{ id: 'c1', name: 'Paula <b>', company: null, repliedAt: '2026-10-17T12:00:00Z' }] }),
-    team: { members: [{ userId: 'u1', name: 'Ana & Co', role: 'member', sent: 10, replies: 2, meetings: 0, pending: 1 }], totals: { sent: { now: 10, before: 4 }, replies: { now: 2, before: 1 }, meetings: 0 } },
+    team: { members: [{ userId: 'u1', name: 'Ana & Co', role: 'member', sent: 10, replies: 2, meetings: 0, pending: 1 }, { userId: 'u2', name: 'Rosa', detail: 'rosa@axis.cl', role: 'member', sent: 0, replies: 0, meetings: 0, pending: 0 }], totals: { sent: { now: 10, before: 4 }, replies: { now: 2, before: 1 }, meetings: 0 } },
     opportunities: null,
   };
   const email = reportEmail(report, 'https://app.example/');
   assert.equal(email.subject, 'Tu informe semanal · 12–18 oct');
   assert.match(email.html, /Hola, Nicolás/);
   assert.match(email.html, /Ana &amp; Co: 10 enviados, 2 respuestas, 1 por responder/);
+  assert.match(email.html, /Rosa \(rosa@axis\.cl\): 0 enviados, 0 respuestas/, 'the email of a shared name goes next to it');
   assert.match(email.html, /href="https:\/\/app\.example\/contacted\/replied"/);
   assert.match(email.text, /Ver el informe completo: https:\/\/app\.example\/weekly-report/);
   assert.doesNotMatch(email.html, /<b>|unsubscribe|tracking|pixel/i);

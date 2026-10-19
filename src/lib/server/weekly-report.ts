@@ -127,12 +127,15 @@ export async function readTeam(client: Client, organizationId: string, week: Rep
   ]);
   if ((profiles as any).error) throw new WeeklyReportError('No pudimos leer el equipo.', 503);
   const names = new Map<string, string>(((profiles as any).data || []).map((row: any) => [String(row.id), String(row.full_name || String(row.email || '').split('@')[0] || 'Sin nombre').trim()]));
+  const emails = new Map<string, string>(((profiles as any).data || []).filter((row: any) => row.email).map((row: any) => [String(row.id), String(row.email)]));
+  const shared = (name: string) => ids.filter((id: string) => (names.get(id) || 'Sin nombre').toLocaleLowerCase('es') === name.toLocaleLowerCase('es')).length > 1;
   const of = (rows: any[], userId: string) => rows.filter(row => row.user_id === userId);
   const list: TeamMember[] = (members.data || []).map((member: any) => {
     const userId = String(member.user_id);
     const sent = countDispatches(of(dispatches, userId), week);
     const answered = countReplies(of(replies, userId), week);
-    return { userId, name: names.get(userId) || 'Sin nombre', role: String(member.role || 'member'), sent: sent.sent.now, replies: answered.replies.now,
+    const name = names.get(userId) || 'Sin nombre';
+    return { userId, name, detail: shared(name) ? emails.get(userId) || null : null, role: String(member.role || 'member'), sent: sent.sent.now, replies: answered.replies.now,
       meetings: answered.meetings, pending: pendingReplies(of(waiting, userId)).length };
   }).sort((a: TeamMember, b: TeamMember) => b.sent - a.sent || b.replies - a.replies || a.name.localeCompare(b.name, 'es'));
   const totalSent = countDispatches(dispatches, week);
