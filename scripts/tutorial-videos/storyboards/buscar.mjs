@@ -1,10 +1,10 @@
-import { searchMocks } from './demo-data.mjs';
+import { enrichMock, searchMocks } from './demo-data.mjs';
 
 export default {
   id: 'buscar', title: 'Buscar prospectos', persona: 'member', start: '/dashboard',
   intro: 'Encuentra a quién escribirle: primero las empresas que calzan contigo, después las personas dentro de ellas.',
-  learn: ['Partir de un punto de partida', 'Elegir empresas y buscar sus contactos', 'Guardar a quienes te sirven'],
-  mocks: searchMocks,
+  learn: ['Partir de un punto de partida', 'Elegir empresas y buscar sus contactos', 'Guardarlos con su correo'],
+  mocks: [...searchMocks, enrichMock],
   scenes: [
     {
       title: 'Entra a «Buscar prospectos»', text: 'Está en el menú, en «Prospectar».',
@@ -40,14 +40,25 @@ export default {
       target: { role: 'button', name: 'Marcar todos' }, zoom: 1.5, arrow: true,
     },
     {
-      title: 'Guárdalos', text: 'Quedan en «Por completar», donde buscas su correo.',
-      say: 'Y guárdalos con un clic.',
+      title: 'Guárdalos', text: 'Al guardar, te ofrecemos buscar su correo para que puedas escribirles.',
+      say: 'Guárdalos con un clic.',
       target: { role: 'button', name: /^Guardar \d+$/ }, zoom: 1.4, arrow: true,
-      waitFor: { text: /Guardaste \d+ contactos?/, exact: false },
+      waitFor: { role: 'dialog' },
+    },
+    {
+      title: 'Elige qué buscar', text: 'Solo el correo, o correo y teléfono. Para todos o persona por persona.',
+      say: 'Elige qué buscar: solo correo, o correo y teléfono.', postit: 'Cuesta 1 crédito por contacto, con o sin teléfono.',
+      target: { role: 'radiogroup', name: 'Qué buscar para todos', within: { role: 'dialog' } }, action: 'none', zoom: 1.4, arrow: true,
+    },
+    {
+      title: 'Busca sus datos', text: 'Quien tenga correo pasa directo a «Por escribir». «Guardar sin buscar» los deja esperando ahí.',
+      say: 'Pulsa «Buscar datos».',
+      target: { role: 'button', name: /^Buscar datos ·/, exact: false, within: { role: 'dialog' } }, zoom: 1.4, arrow: true,
+      waitFor: { text: 'Datos de contacto listos' },
     },
   ],
   outro: {
-    title: 'Ya tienes prospectos', text: 'Siguiente paso: buscar sus correos en «Por completar».',
-    items: ['Punto de partida → empresas → contactos', 'Guardar los deja en «Por completar»'],
+    title: 'Ya tienes prospectos', text: 'Con su correo, quedan en «Por escribir», listos para investigar y escribirles.',
+    items: ['Punto de partida → empresas → contactos', 'Guardar y buscar sus datos', 'Listos en «Por escribir»'],
   },
 };

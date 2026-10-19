@@ -4,12 +4,12 @@ import { fileURLToPath } from 'node:url';
 const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/mi-lista.csv');
 
 export default {
-  id: 'importar', title: 'Importar tu lista de contactos', dataset: 'empty', start: '/saved/leads',
+  id: 'importar', title: 'Importar tu lista de contactos', dataset: 'empty', start: '/saved/leads/enriched',
   intro: '¿Ya tienes tus prospectos en un Excel o CSV? Súbelos y quedan listos para escribirles.',
   learn: ['Subir un Excel o CSV', 'Revisar columnas y repetidos', 'Ver dónde queda cada persona'],
   scenes: [
     {
-      title: 'Importa tu lista', text: 'Está en «Por completar», en «Por escribir» y en «Buscar prospectos».',
+      title: 'Importa tu lista', text: 'Está en «Por escribir», en «Buscar prospectos» y en «Tabla de datos».',
       say: 'Pulsa «Importar lista».',
       target: { role: 'link', name: 'Importar lista' }, zoom: 1.6, arrow: true,
       waitFor: { role: 'button', name: 'Elegir archivo' },
@@ -32,11 +32,11 @@ export default {
       waitFor: { role: 'button', name: /^Importar \d+ contactos?$/, exact: false },
     },
     {
-      title: 'Importa', text: 'Quienes traen correo van a «Por escribir»; el resto, a «Por completar».',
+      title: 'Importa', text: 'Todos quedan en «Por escribir»; a quienes no traen correo se lo buscas desde ahí.',
       say: 'Importa: cada persona queda donde le toca.', postit: 'Una persona repetida en el archivo se importa una sola vez.',
       target: { role: 'button', name: /^Importar \d+ contactos?$/, exact: false }, zoom: 1.4, arrow: true,
       waitFor: { role: 'heading', name: /^Importaste/, exact: false },
     },
   ],
-  outro: { title: 'Tu lista ya está en la app', text: 'Sigue con «Escribirles» o con «Buscar sus correos».', items: ['Excel o CSV', 'Columnas automáticas', 'Repetidos, una sola vez'] },
+  outro: { title: 'Tu lista ya está en la app', text: 'Sigue en «Por escribir»: investiga y escribe, o busca los correos que faltan.', items: ['Excel o CSV', 'Columnas automáticas', 'Repetidos, una sola vez'] },
 };

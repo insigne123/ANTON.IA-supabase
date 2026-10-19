@@ -1,51 +1,37 @@
-const enrichMock = {
-  url: '**/api/opportunities/enrich-apollo', method: 'POST',
-  respond: body => ({
-    enriched: (body?.leads || []).map(lead => ({
-      id: `demo-enriched-${lead.clientRef}`, clientRef: lead.clientRef, fullName: lead.fullName, email: 'florencia.sepulveda@seguridadaustral.cl',
-      emailStatus: 'verified', title: 'Jefa de Reclutamiento Masivo', companyName: lead.companyName, enrichmentStatus: 'completed',
-    })),
-    usage: { consumed: (body?.leads || []).length },
-  }),
-};
+import { enrichMock } from './demo-data.mjs';
+
+// The research that «Investigar N» starts: the first lead running, the others in line. The status answer has the shape
+// the workspace reads ({ run: { id, status, items } }); with any other it shows «No pudimos leer el estado de la investigación».
+let researched = 1;
+const researchRun = () => ({ run: { id: 'demo-run-1', status: 'running', total_count: researched, completed_count: 0,
+  items: Array.from({ length: researched }, (_, position) => ({ position, status: position ? 'queued' : 'running' })) } });
 
 export default {
-  id: 'contactos', title: 'Por completar y Por escribir', start: '/saved/leads',
-  intro: 'De un contacto guardado a uno listo para escribirle: busca su correo e investígalo.',
-  learn: ['Buscar el correo de un contacto', 'Pasar a «Por escribir»', 'Investigar antes de escribir'],
+  id: 'contactos', title: 'Tus contactos', start: '/saved/leads/enriched',
+  intro: 'De un contacto guardado a uno listo para escribirle: busca su correo e investígalo, todo en «Por escribir».',
+  learn: ['Buscar el correo de quien aún no lo tiene', 'Investigar antes de escribir', 'Escribir cuando termina'],
   mocks: [
     enrichMock,
-    { url: '**/api/native-research/run', method: 'POST', respond: { runId: 'demo-run-1', items: [] } },
-    { url: '**/api/native-research/run/*', respond: { runId: 'demo-run-1', status: 'running', items: [] } },
+    { url: '**/api/native-research/run', method: 'POST', respond: body => { researched = Math.max(1, body?.leads?.length || 1); return { runId: 'demo-run-1', items: [] }; } },
+    { url: '**/api/native-research/run/*', respond: researchRun },
   ],
   scenes: [
     {
-      title: 'Por completar', text: 'Tus guardados sin correo. Los filtros arriba los separan.',
-      say: 'En «Por completar» están los contactos sin correo.',
-      target: { role: 'button', name: /^Sin buscar/, exact: false }, zoom: 1.6, arrow: true,
+      title: 'Los que aún no tienen correo', text: 'Tus guardados sin correo esperan aquí arriba, en un aviso.',
+      say: 'Arriba ves a quienes aún no tienen correo. Pulsa «Buscar sus datos».',
+      target: { role: 'button', name: 'Buscar sus datos' }, zoom: 1.5, arrow: true,
+      waitFor: { role: 'dialog' },
     },
     {
-      title: 'Elige a quién', text: 'Marca uno o varios.',
-      say: 'Marca a quienes quieras completar.',
-      target: { role: 'checkbox', name: 'Seleccionar a Florencia Sepúlveda' }, zoom: 1.6,
+      title: 'Elige qué buscar', text: 'Solo el correo, o correo y teléfono, para todos o persona por persona.',
+      say: 'Elige solo correo, o correo y teléfono.', postit: '1 crédito por contacto. Si no aparece un correo, queda marcado y no se cobra de nuevo.',
+      target: { role: 'radiogroup', name: 'Qué buscar para todos', within: { role: 'dialog' } }, action: 'none', zoom: 1.4, arrow: true,
     },
     {
-      title: 'Busca su correo', text: 'Usa un crédito por persona; antes de seguir te dice cuántos.',
-      say: 'Pulsa «Buscar correo».',
-      target: { role: 'button', name: /^Buscar correo \(\d+\)$/, exact: false }, zoom: 1.4, arrow: true,
-      waitFor: { role: 'button', name: 'Completar datos' },
-    },
-    {
-      title: 'Confirma', text: 'Buscamos su correo verificado. El teléfono es opcional.',
-      say: 'Confirma.', postit: 'Si no aparece un correo, queda marcado y no se cobra de nuevo.',
-      target: { role: 'button', name: 'Completar datos' }, zoom: 1.2,
-      waitFor: { text: 'Búsqueda de correo lista' },
-    },
-    {
-      title: 'Ya está en «Por escribir»', text: 'Los que tienen correo pasan aquí.',
-      say: 'Ahora está en «Por escribir».',
-      target: { role: 'link', name: 'Por escribir', within: { role: 'navigation', name: 'Navegación principal' } },
-      waitFor: { role: 'button', name: 'Investigar' },
+      title: 'Busca sus datos', text: 'Buscamos su correo verificado. Quien lo tiene queda listo en la lista.',
+      say: 'Pulsa «Buscar datos».',
+      target: { role: 'button', name: /^Buscar datos ·/, exact: false, within: { role: 'dialog' } }, zoom: 1.4, arrow: true,
+      waitFor: { text: 'Datos de contacto listos' },
     },
     {
       title: 'Investiga antes de escribir', text: 'La IA lee su empresa y su rol, para que el correo no sea genérico.',
@@ -60,5 +46,5 @@ export default {
       waitFor: { text: 'Investigación iniciada' },
     },
   ],
-  outro: { title: 'Listo para escribirle', text: 'Correo encontrado e investigación en curso.', items: ['«Buscar correo» en Por completar', '«Investigar» en Por escribir', '«Escribir» cuando termina'] },
+  outro: { title: 'Listo para escribirle', text: 'Correo encontrado e investigación en curso.', items: ['«Buscar sus datos» para quien no tiene correo', '«Investigar» antes de escribir', '«Escribir» cuando termina'] },
 };
