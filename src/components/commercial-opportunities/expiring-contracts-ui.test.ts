@@ -10,3 +10,9 @@ test('a reading of «Contratos por vencer» that did not finish says what to do,
   assert.equal(friendlyJobError('La evaluación no terminó. Conservamos los datos y el consumo observado.'), 'Tardó más de lo esperado. Vuelve a intentarlo: suele resolverse al segundo intento.');
   assert.equal(friendlyJobError('No pudimos leer el historial de ChileCompra ahora. Vuelve a intentarlo en unos minutos.'), 'No pudimos leer el historial de ChileCompra ahora. Vuelve a intentarlo en unos minutos.');
 });
+
+test('the count says when the list holds contracts that just ended, as their cards do', async () => {
+  const source = await readFile(new URL('./ExpiringContracts.tsx', import.meta.url), 'utf8');
+  assert.match(source, /o ' \+ \(matching\.length === 1 \? 'venció' : 'vencieron'\) \+ ' el último mes'/);
+  assert.match(source, /' por vencer o recién vencidos'/);
+});

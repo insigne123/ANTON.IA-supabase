@@ -77,6 +77,8 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
   // A few hundred contracts fit a common offer: they come 24 at a time.
   useEffect(() => setLimit(PAGE), [scope, region, onlyHigh]);
   const shown = matching.slice(0, limit);
+  // The reading starts a month back (contractsWindow): a contract that just ended is about to be tendered again.
+  const ended = matching.some(item => item.endsOn && Date.parse(`${item.endsOn}T12:00:00Z`) < now);
   const failed = data?.job && ['failed', 'blocked'].includes(data.job.state) ? data.job : null;
 
   if (!data && !problem) return <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />Cargando los contratos por vencer…</div>;
@@ -111,7 +113,7 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
 
     {data?.contracts.length ? <>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm"><span className="font-semibold tabular-nums">{matching.length}</span> {matching.length === 1 ? 'contrato' : 'contratos'}{scope === 'soon' ? ` ${matching.length === 1 ? 'vence' : 'vencen'} en los próximos 6 meses` : ' por vencer'}</p>
+        <p className="text-sm"><span className="font-semibold tabular-nums">{matching.length}</span> {matching.length === 1 ? 'contrato' : 'contratos'}{scope === 'soon' ? ` ${matching.length === 1 ? 'vence' : 'vencen'} en los próximos 6 meses${ended ? ' o ' + (matching.length === 1 ? 'venció' : 'vencieron') + ' el último mes' : ''}` : ended ? ' por vencer o recién vencidos' : ' por vencer'}</p>
         <div className="flex flex-wrap items-center gap-2">
           {regions.length > 1 ? <><label htmlFor="contracts-region" className="sr-only">Región</label>
             <select id="contracts-region" value={region} onChange={event => setRegion(event.target.value)} className="h-9 max-w-[16rem] rounded-lg border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
