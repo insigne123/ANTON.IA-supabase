@@ -14,6 +14,8 @@ import { runOpportunityAssistant } from './workspace-assistant';
 import { runTenderProfileSuggestion } from './workspace-tender-profile';
 import { enqueueFitAfterReport, runRequirementFit } from './workspace-fit';
 import { enqueueMonthlyContracts, runMarketContracts, runWinPlan } from './workspace-market';
+import { runOpportunitySummaries } from './workspace-summaries';
+import { runOpportunityPrefill } from './workspace-prefill';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -73,7 +75,8 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
   let result: any = null; let state = 'ready'; let error: string | null = null;
   try {
     const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', job.organization_id).maybeSingle());
-    if (!context) throw new AuthError('Falta la oferta compartida del workspace.', 409);
+    // Reading a document to fill the form needs no offer: an admin may load an opportunity before confirming it.
+    if (!context && !job.payload.prefill) throw new AuthError('Falta la oferta compartida del workspace.', 409);
     if (job.payload.revision && job.payload.revision !== context.revision) throw new AuthError('Los criterios cambiaron; se preparará una búsqueda actualizada.', 409);
     if (job.kind === 'criteria') {
       const criteria = await opportunityGenerate(client, job, { role: 'screen', category: 'evaluation', step: 'criteria', schema: criteriaSchema, output: 3000,
@@ -81,6 +84,12 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
       opportunityDb(await client.from('opportunity_company_context').update({ criteria }).eq('organization_id', job.organization_id).eq('revision', context.revision));
       result = { criteriaReady: true };
       if (context.automation && opportunityAutomationEnabled()) await enqueueOpportunityDiscovery(client, { organizationId: job.organization_id, userId: job.requested_by, role: 'admin' }, true);
+    } else if (job.kind === 'evaluate' && job.payload.summaries) {
+      const summaries = await runOpportunitySummaries(client, job);
+      if (summaries.waiting) state = 'waiting';
+      result = summaries;
+    } else if (job.kind === 'evaluate' && job.payload.prefill) {
+      result = await runOpportunityPrefill(client, job);
     } else if (job.kind === 'evaluate' && job.payload.pipeline) {
       result = await runPipelineReview(client, job);
     } else if (['tenders', 'hiring', 'posts', 'evaluate'].includes(job.kind)) {

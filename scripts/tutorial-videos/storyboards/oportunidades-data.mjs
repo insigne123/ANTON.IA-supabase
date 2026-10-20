@@ -18,22 +18,24 @@ export function opportunityData(ctx) {
     region: null, amount: null, currency: 'CLP', deadline_at: null, published_at: null, url: null, score: 0, reasons: [], status: 'new', claimed_by: null, signal_count: 0,
     first_seen_at: at(-3), last_seen_at: at(-1), data: { evaluation: 'recommended' }, created_at: at(-3), updated_at: at(-1), ...extra,
   });
+  // The line under each name (summaries.ts), as the AI writes it from the official file, the ads or the post.
+  const summary = text => ({ text, model: 'claude-haiku-5-5', basis: 'ficha', at: at(-1) });
   const items = [
     item('demo-op-1', 'tender', 'Servicio de verificación de antecedentes de postulantes', { buyer_name: 'Hospital Regional de Bahía Azul', region: 'Biobío', amount: 48_000_000,
       deadline_at: at(9), url: 'https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=4521-61-LE26', score: 91,
-      reasons: ['Piden revisar antecedentes laborales y judiciales de postulantes antes de contratar: es lo que vendes.'], data: { evaluation: 'recommended', observed: { code: '4521-61-LE26' } } }),
+      reasons: ['Piden revisar antecedentes laborales y judiciales de postulantes antes de contratar: es lo que vendes.'], data: { evaluation: 'recommended', observed: { code: '4521-61-LE26' }, summary: summary('Revisión de antecedentes laborales y judiciales de los postulantes que el hospital contratará, antes de su ingreso.') } }),
     item('demo-op-2', 'compra_agil', 'Evaluaciones psicolaborales para 40 cargos', { buyer_name: 'Municipalidad de Valle Verde', region: 'Maule', amount: 6_500_000, deadline_at: at(4), score: 84,
-      reasons: ['Evaluaciones antes de contratar, con plazo corto: calza con tu servicio.'] }),
+      reasons: ['Evaluaciones antes de contratar, con plazo corto: calza con tu servicio.'], data: { evaluation: 'recommended', summary: summary('Evaluaciones psicolaborales de candidatos para 40 cargos municipales de Valle Verde.') } }),
     item('demo-op-3', 'tender', 'Plataforma de reclutamiento y selección por 24 meses', { buyer_name: 'Universidad Regional del Sur', region: 'Los Lagos', amount: 72_000_000, deadline_at: at(21), score: 78,
-      reasons: ['Reclutamiento con revisión de candidatos; pide integración con su sistema de personal.'] }),
+      reasons: ['Reclutamiento con revisión de candidatos; pide integración con su sistema de personal.'], data: { evaluation: 'recommended', summary: summary('Plataforma para publicar cargos, recibir postulaciones y seleccionar candidatos en la universidad durante dos años.') } }),
     item('demo-op-4', 'hiring', 'Actividad de contratación: Retail Pacífico', { company_name: 'Retail Pacífico', company_domain: 'retailpacifico.cl', score: 75, signal_count: 12,
-      reasons: ['Publicó 12 avisos para cajeros y reponedores este mes.'] }),
+      reasons: ['Publicó 12 avisos para cajeros y reponedores este mes.'], data: { evaluation: 'recommended', summary: { ...summary('Retail Pacífico busca cajeros y reponedores para sus tiendas: está reforzando su dotación.'), basis: 'texto' } } }),
     item('demo-op-5', 'linkedin_post', 'Buscamos 30 conductores para nuestro nuevo centro de distribución', { company_name: 'Norte Sur Transportes', company_domain: 'nortesur.cl', score: 70,
-      reasons: ['Contratación masiva de conductores: necesitan revisar antecedentes rápido.'] }),
+      reasons: ['Contratación masiva de conductores: necesitan revisar antecedentes rápido.'], data: { evaluation: 'recommended', summary: { ...summary('Norte Sur Transportes busca 30 conductores para su nuevo centro de distribución.'), basis: 'texto' } } }),
     item('demo-op-6', 'tender', 'Evaluación de competencias para jefaturas', { buyer_name: 'Servicio de Salud Valle Central', region: 'Maule', amount: 19_000_000, deadline_at: at(-6), score: 72,
-      reasons: ['Evaluación de candidatos a jefaturas.'] }),
+      reasons: ['Evaluación de candidatos a jefaturas.'], data: { evaluation: 'recommended', summary: summary('Evaluación de competencias de los candidatos a jefaturas del Servicio de Salud Valle Central.') } }),
     item('demo-op-7', 'tender', 'Selección de personal transitorio para temporada alta', { buyer_name: 'Corporación Municipal de Puerto Claro', region: 'Valparaíso', amount: 15_000_000, deadline_at: at(-40), score: 80,
-      reasons: ['Selección de personal temporal.'] }),
+      reasons: ['Selección de personal temporal.'], data: { evaluation: 'recommended', summary: summary('Selección de personal transitorio para la temporada alta de los servicios municipales de Puerto Claro.') } }),
   ];
   const work = (opportunity_id, state, responsible_id = ctx.OWNER) => ({ organization_id: ORG, opportunity_id, revision: 2, state, team_id: null, responsible_id, assigned_by: ctx.OWNER,
     objective: state === 'working' ? 'Presentar la oferta antes del cierre' : '', due_at: state === 'working' ? at(7) : null, updated_at: at(-1) });
@@ -147,5 +149,12 @@ export function opportunityData(ctx) {
       },
     },
   };
-  return { overview, pipeline, detail, market, assistant: { available: true, threads: [], opportunities: [] } };
+  const closes = new Date(Date.now() + 6 * 86_400_000);
+  const prefill = {
+    fields: { title: 'Verificación de antecedentes para 120 operarios de temporada', company: 'Agrícola Valle Hermoso', url: '', kind: 'quote',
+      description: 'Piden cotizar la revisión de antecedentes laborales y judiciales de 120 operarios antes de la temporada de cosecha, con entrega por persona en 48 horas. La cotización se envía por correo al área de compras.',
+      deadline: `${closes.getFullYear()}-${String(closes.getMonth() + 1).padStart(2, '0')}-${String(closes.getDate()).padStart(2, '0')}T17:00`, amount: '', currency: 'CLP' },
+    missing: ['el monto'], partial: false,
+  };
+  return { overview, pipeline, detail, market, prefill, assistant: { available: true, threads: [], opportunities: [] } };
 }

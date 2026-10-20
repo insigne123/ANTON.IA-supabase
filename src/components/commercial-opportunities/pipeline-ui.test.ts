@@ -6,6 +6,7 @@ import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as pipeline from '@/lib/commercial-opportunities/pipeline';
+import * as summaries from '@/lib/commercial-opportunities/summaries';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -16,6 +17,7 @@ const dependencies: Record<string, unknown> = {
   '@/components/initials-avatar': { InitialsAvatar: ({ name }: { name: string }) => React.createElement('span', { 'data-avatar': name }) },
   '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
   '@/lib/commercial-opportunities/pipeline': pipeline,
+  '@/lib/commercial-opportunities/summaries': summaries,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./PipelineRoute'] = load(await compile('./PipelineRoute.tsx'));
@@ -46,4 +48,20 @@ test('the AI suggestion sits on its card with the move to apply, and the summary
   const html = render({ suggestions: [{ id: 'b', move: 'submitted', reason: 'La nota dice que se subió la oferta.', nextAction: 'Confirmar recepción con el comprador' }] });
   assert.match(text(html), /La IA revisó 1 oportunidad en curso: sugiere mover 1/);
   assert.match(text(html), /Revisar con IA/);
+});
+
+test('each card says what the opportunity is about under its name, with its buyer above and no dash when there is none', () => {
+  const withSummary = [{ ...item('a', 'Aseo hospital', 'recommended', soon), data: { evaluation: 'recommended', summary: { text: 'Aseo diario de pabellones y salas del hospital regional.' } } },
+    { ...item('e', 'SERVICIOS VIGILANCIA DSSA PP-65', 'recommended'), buyer_name: null }];
+  const html = render({ items: withSummary, work: [] });
+  assert.match(text(html), /Municipalidad Aseo hospital Aseo diario de pabellones y salas del hospital regional\./);
+  assert.doesNotMatch(text(html), /—/);
+  assert.doesNotMatch(html, /animate-pulse/, 'nothing is on its way');
+});
+
+test('while summaries are being written, the cards without one show a faint line instead of text', () => {
+  const html = render({ items: [item('a', 'Aseo hospital', 'recommended', soon)], work: [], summariesWaiting: true });
+  assert.match(html, /aria-hidden="true"><span class="block h-3 w-11\/12 rounded-full bg-muted motion-safe:animate-pulse"/);
+  const left = render({ items: [{ ...item('a', 'Aseo hospital', 'recommended'), data: { evaluation: 'recommended', summary: { text: '' } } }], work: [], summariesWaiting: true });
+  assert.doesNotMatch(left, /animate-pulse/, 'one the model left out shows no line');
 });
