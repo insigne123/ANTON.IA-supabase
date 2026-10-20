@@ -56,10 +56,10 @@ export function personChips(state: PersonState): PersonChip[] {
  */
 export function personNextStep(state: PersonState): NextStep | null {
   if (!state.saved && !state.enrichedReady) {
-    return { id: 'enrich', label: 'Enriquecer perfil', hint: 'Busca su correo y sus datos profesionales con los créditos de tu cuenta.' };
+    return { id: 'enrich', label: 'Buscar correo y guardar', hint: 'Usa 1 crédito. Queda en «Por escribir» con su correo, a la vista de tu equipo.' };
   }
-  if (!state.saved) return { id: 'save', label: 'Guardar lead', hint: 'Queda en los contactos de tu organización, a la vista de tu equipo.' };
-  if (!state.email) return { id: 'find-email', label: 'Buscar correo', hint: 'Usa créditos de tu cuenta. Sin correo puedes escribirle por LinkedIn.' };
+  if (!state.saved) return { id: 'save', label: 'Guardar contacto', hint: 'Queda en «Por escribir», a la vista de tu equipo. Sin correo puedes escribirle por LinkedIn.' };
+  if (!state.email) return { id: 'find-email', label: 'Buscar correo', hint: 'Usa 1 crédito. Sin correo puedes escribirle por LinkedIn.' };
   if (state.researchEnabled && !state.research) {
     return { id: 'research', label: 'Investigar lead', hint: 'Busca fuentes de su empresa y de su rol; sigue aunque cierres el panel.' };
   }

@@ -13,7 +13,7 @@ import { restoreProfileEdits } from './profile-cache';
 import { researchFindings } from './research-findings';
 import { presentReportBlock } from './report-blocks';
 import { personChips, personNextStep, researchSteps, type ChipTone, type NextStep } from './person-status';
-import { BATCH_LIMIT, availableResults, batchSummary, chosenProfiles, type ResultPresence, type SearchResult } from './search-batch';
+import { BATCH_LIMIT, OUTCOME_CHIP, availableResults, batchSummary, chosenProfiles, creditsNote, enrichSummary, type EnrichBatchResult, type ResultPresence, type SearchResult } from './search-batch';
 import { companyFacts, companyRequest, contactsHeading, emptyCompanyText, type CompanyPage, type CompanyView } from './company-card';
 import { activityNote, activityOpened, type ActivityRead } from './activity';
 
@@ -93,6 +93,12 @@ function App() {
   const [resultPresence, setResultPresence] = useState<Record<string, ResultPresence>>({});
   const [chosen, setChosen] = useState<string[]>([]);
   const [presenceRound, setPresenceRound] = useState(0);
+  // «Buscar correo» of a search (enrich-batch): the phone too or not, and what came back for each person.
+  const [batchPhone, setBatchPhone] = useState(false);
+  const [batchResult, setBatchResult] = useState<EnrichBatchResult | null>(null);
+  const batchOperation = useRef({ key: '', id: '' });
+  // The URL field stays folded behind «Pegar URL» once LinkedIn shows a profile or a search.
+  const [showUrl, setShowUrl] = useState(false);
   // The LinkedIn company open in the active tab (PR-4d): what its page shows, and what the organization has of it, per request.
   const [companyPage, setCompanyPage] = useState<CompanyPage | null>(null);
   const [companyRead, setCompanyRead] = useState<{ ask: string; view: CompanyView | null; error: string } | null>(null);
@@ -187,6 +193,7 @@ function App() {
   useEffect(() => {
     const urls = resultUrls ? resultUrls.split('\n') : [];
     setChosen(previous => previous.filter(url => urls.includes(url)));
+    setBatchResult(previous => (previous?.people.some(person => urls.includes(person.linkedinUrl)) ? previous : null));
     if (!connection || !urls.length) { setResultPresence({}); return; }
     let alive = true;
     rpc('PROSPECT_PRESENCE', { urls }).then(result => { if (alive) setResultPresence(result || {}); }).catch(() => { if (alive) setResultPresence({}); });
@@ -343,7 +350,7 @@ function App() {
     if (!valid()) return;
     const item = result.enriched?.find((item: any) => normalizeLinkedinProfileUrl(item.linkedinUrl || '').toLowerCase() === profile.linkedinUrl.toLowerCase());
     const lead = item ? { ...item, name: item.fullName, org_name: item.companyName, organization_domain: item.companyDomain, primary_phone: item.primaryPhone, email_status: item.emailStatus } : null;
-    if (!lead) { setNotice('No encontramos una coincidencia confirmada. Puedes guardar los datos del perfil.'); return; }
+    if (!lead) { setEnrichedReady(true); setNotice('No encontramos su correo. Puedes guardarlo igual y escribirle por LinkedIn.'); return; }
     const enriched = { ...profile, fullName: lead.name || [lead.first_name, lead.last_name].filter(Boolean).join(' ') || profile.fullName,
       title: lead.title || profile.title, companyName: lead.organization?.name || lead.org_name || profile.companyName,
       email: lead.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email) ? lead.email : profile.email,
@@ -355,9 +362,15 @@ function App() {
       const job = { id: item.id, profileUrl: profile.linkedinUrl };
       setPhoneJob(job); await chrome.storage.local.set({ [`prospect-phone:${scope}:${profile.linkedinUrl}`]: job });
     }
-    setNotice([lead.primary_phone ? `Teléfono: ${lead.primary_phone}.` : '', 'Datos encontrados. Guarda para actualizar el lead.',
-      ...(result.warnings || []).filter((item: unknown) => typeof item === 'string')].filter(Boolean).join(' '));
-  }).then(refreshCredits);
+    // One click: what was found is saved at once, so the contact reaches «Por escribir» with its email.
+    const stored = await api('save', { replaceFields: true }, enriched);
+    if (!valid()) return;
+    setProfile(fromRow(stored.lead)); profileRef.current = fromRow(stored.lead); dirty.current = false; setCachedEdits(null);
+    await chrome.storage.session.remove(`prospect-profile:${scope}:${enriched.linkedinUrl}`);
+    setSaved(stored.lead); setCampaigns(null); setCampaignId('');
+    setNotice([enriched.email ? `Correo encontrado: ${enriched.email}.` : 'Sin correo por ahora.', lead.primary_phone ? `Teléfono: ${lead.primary_phone}.` : '',
+      'Quedó guardado en «Por escribir».', ...(result.warnings || []).filter((item: unknown) => typeof item === 'string')].filter(Boolean).join(' '));
+  }).then(() => { void refreshCredits(); void refreshPresence(); });
   const investigate = () => run('Solicitando investigación…', async valid => {
     await api('research', { language, refreshResearch: ['insufficient_data', 'failed', 'partial'].includes(research?.status) }); if (!valid()) return;
     setResearch({ status: 'queued' }); setNotice('La investigación continuará aunque cierres el panel.');
@@ -500,26 +513,51 @@ function App() {
     setNotice(batchSummary(result));
     setPresenceRound(round => round + 1);
   });
+  // The chosen people saved and looked up in one go; a retry of the same choice reuses its operation and is not charged twice.
+  const enrichChosen = () => run(`Buscando ${chosen.length === 1 ? 'el correo de 1 persona' : `los correos de ${chosen.length} personas`}…`, async valid => {
+    const profiles = chosenProfiles(searchPage?.results || [], chosen);
+    const key = `${scope}:${profiles.map(item => item.linkedinUrl).sort().join('|')}:${batchPhone}`;
+    if (batchOperation.current.key !== key) batchOperation.current = { key, id: crypto.randomUUID() };
+    const result: EnrichBatchResult = await rpc('PROSPECT_API', { organizationId: connection!.session.organizationId, userId: connection!.session.userId,
+      body: { action: 'enrich-batch', profiles, revealPhone: batchPhone, operationId: batchOperation.current.id } });
+    if (!valid()) return;
+    setBatchResult(result);
+    setChosen([]);
+    setNotice(enrichSummary(result));
+    setPresenceRound(round => round + 1);
+  }).then(refreshCredits);
   const toggleChosen = (url: string, on: boolean) => setChosen(previous => on ? [...new Set([...previous, url])].slice(0, BATCH_LIMIT) : previous.filter(item => item !== url));
-  const searchCard = searchPage && <section className="panel-card" aria-labelledby="search-heading">
+  const searchCard = searchPage && <section className="panel-card search-card" aria-labelledby="search-heading">
     <div className="section-heading"><h2 id="search-heading">{searchPage.salesNavigator ? 'Búsqueda de Sales Navigator'
       : `${searchPage.results.length} ${searchPage.results.length === 1 ? 'persona' : 'personas'} ${companyPage?.people && companyPage.name ? `de ${companyPage.name} en pantalla` : 'en esta búsqueda'}`}</h2><Users size={16} aria-hidden="true" /></div>
     {searchPage.salesNavigator ? <p>Sales Navigator no muestra el perfil público de cada persona. Abre su perfil de LinkedIn para guardarla desde aquí.</p> : <>
+      <p>Elige a quiénes quieres contactar: Anton.IA los guarda y busca su correo.</p>
       <div className="row-actions">
         <button className="text-button" onClick={() => setChosen(availableResults(searchPage.results, resultPresence))}>Seleccionar disponibles</button>
-        {chosen.length > 0 && <button className="text-button" onClick={() => setChosen([])}>Quitar selección</button>}
+        {chosen.length > 0 && <button className="text-button" onClick={() => setChosen([])}>Quitar selección ({chosen.length})</button>}
       </div>
       <ul className="result-list">{searchPage.results.map(result => {
         const known = resultPresence[result.linkedinUrl];
+        const found = batchResult?.people.find(person => person.linkedinUrl === result.linkedinUrl);
+        const mark = found ? OUTCOME_CHIP[found.outcome] : known;
         const checked = chosen.includes(result.linkedinUrl);
         return <li key={result.linkedinUrl}><label className="result-row">
           <input type="checkbox" checked={checked} disabled={!!known?.blocks || (!checked && chosen.length >= BATCH_LIMIT)} onChange={event => toggleChosen(result.linkedinUrl, event.target.checked)} />
           <span className="result-text"><strong>{result.fullName || 'Perfil de LinkedIn'}</strong>{result.headline && <span>{result.headline}</span>}
-            {known && <span className={`chip chip-${known.tone}`}>{known.label}</span>}</span>
+            {found?.email && <span className="result-email"><Mail size={12} aria-hidden="true" />{found.email}</span>}
+            {mark && <span className={`chip chip-${mark.tone}`}>{mark.label}</span>}</span>
         </label></li>;
       })}</ul>
-      <button className="primary full" disabled={!chosen.length || !!busy} onClick={saveChosen}><Check size={16} aria-hidden="true" />{chosen.length ? `Guardar ${chosen.length} en Anton.IA` : 'Elige a quiénes guardar'}</button>
-      <p className="helper">Se guardan con lo que muestra LinkedIn: nombre, cargo y empresa, hasta {BATCH_LIMIT} por vez. Los que trabaja otra persona del equipo no se guardan. Después puedes buscar su correo o prepararlos en Cowork.</p>
+      <div className="batch-actions">
+        <button className="primary full" disabled={!chosen.length || !!busy || credits?.remaining === 0} onClick={() => void enrichChosen()}><Mail size={16} aria-hidden="true" />{chosen.length ? `Buscar correo de ${chosen.length}` : 'Elige a quiénes buscar'}</button>
+        <label className="check-line"><input type="checkbox" checked={batchPhone} onChange={event => setBatchPhone(event.target.checked)} />También su teléfono (llega en unos minutos)</label>
+        <p className="helper">{creditsNote(chosen.length, credits ? credits.remaining : null)}</p>
+        <button className="text-button" disabled={!chosen.length || !!busy} onClick={saveChosen}>Solo guardarlos, sin buscar correo</button>
+      </div>
+      {batchResult && <div className="callout batch-done" role="status">
+        <p>{enrichSummary(batchResult)}</p>
+        <button className="text-button" disabled={!!busy} onClick={() => openApp('/saved/leads/enriched')}>Ver en «Por escribir»<ExternalLink size={14} aria-hidden="true" /></button>
+      </div>}
     </>}
   </section>;
   const openApp = (path: string) => void run('Abriendo Anton.IA…', async () => { await rpc('PROSPECT_OPEN', { path }); });
@@ -556,7 +594,7 @@ function App() {
   const summary = <section aria-label="Datos del contacto" className="stack">
     {!saved && !enrichedReady ? <div className="panel-card">
       <h2>Qué buscar</h2>
-      <p>«Enriquecer perfil» trae sus datos profesionales y lo que marques aquí. La consulta usa los créditos disponibles de tu cuenta.</p>
+      <p>Además del correo puedes pedir su teléfono: llega en unos minutos.</p>
       <div className="checks"><label><input type="checkbox" checked={revealEmail} onChange={e => setRevealEmail(e.target.checked)} />Email</label><label><input type="checkbox" checked={revealPhone} onChange={e => setRevealPhone(e.target.checked)} />Teléfono</label></div>
       <button className="text-button" onClick={() => setEnrichedReady(true)}>Completar datos manualmente</button>
     </div> : <>
@@ -696,6 +734,10 @@ function App() {
   </section>;
 
   const panels: Record<View, React.ReactNode> = { summary, research: researchView, message: messageView, more: moreView };
+  const urlForm = <form className="url-form" onSubmit={event => { event.preventDefault(); setFollowProfile(false); setShowUrl(false); void selectProfile({ ...empty, linkedinUrl: url }); }}>
+    <label htmlFor="profile-url">URL de un perfil de LinkedIn</label>
+    <div className="input-action"><Link2 size={16} aria-hidden="true" /><input id="profile-url" value={url} onChange={event => setUrl(event.target.value)} placeholder="linkedin.com/in/nombre" disabled={!!busy} /><button className="icon-button" disabled={!!busy || !url.trim()} aria-label="Abrir perfil"><ArrowUpRight size={18} aria-hidden="true" /></button></div>
+  </form>;
 
   return <LazyMotion features={domAnimation} strict><MotionConfig reducedMotion="user"><div className="shell">
     <header className="topbar">
@@ -707,7 +749,8 @@ function App() {
         <button className="icon-button" aria-label="Desconectar cuenta" title="Desconectar cuenta" disabled={!!busy} onClick={disconnect}><LogOut size={17} aria-hidden="true" /></button>
       </div>}
     </header>
-    {connection && <div className="account-bar"><span className="dot" aria-hidden="true" /><span className="account" title={connection.session.email}>{connection.session.email}</span></div>}
+    {connection && <div className="account-bar"><span className="dot" aria-hidden="true" /><span className="account" title={connection.session.email}>{connection.session.email}</span>
+      <button className="account-action" aria-expanded={showUrl} onClick={() => setShowUrl(open => !open)}><Link2 size={13} aria-hidden="true" />Pegar URL</button></div>}
     {!online && <p className="banner banner-warning" role="status"><WifiOff size={15} aria-hidden="true" />Sin conexión a internet. Lo que hagas se reanuda al volver la conexión.</p>}
     <main>
       {stale ? <section className="state-card" role="alert">
@@ -717,8 +760,8 @@ function App() {
       </section> : booting ? <div className="skeleton-stack" aria-busy="true" aria-label="Abriendo tu espacio"><div className="skeleton skeleton-card" /><div className="skeleton skeleton-line" /><div className="skeleton skeleton-line short" /></div> : !connection ? <section className="welcome">
         {sessionLost && <p className="callout callout-warning" role="alert"><AlertTriangle size={16} aria-hidden="true" />Tu sesión de Anton.IA terminó o cambió de cuenta. Vuelve a conectar para seguir.</p>}
         <div className="welcome-symbol"><Sparkles size={28} aria-hidden="true" /></div>
-        <h1>Tu próximo contacto, con contexto.</h1><p>Guarda perfiles de LinkedIn, investiga qué les importa y escríbeles con tu oferta, sin salir de LinkedIn.</p>
-        <ul className="welcome-list"><li><UserRound size={16} aria-hidden="true" />Contactos guardados en tu organización</li><li><Search size={16} aria-hidden="true" />Investigación con fuentes</li><li><Sparkles size={16} aria-hidden="true" />Mensajes con contexto</li></ul>
+        <h1>De LinkedIn a tu lista, con su correo.</h1><p>Elige personas en una búsqueda de LinkedIn o abre un perfil: Anton.IA busca su correo, las guarda y te ayuda a escribirles.</p>
+        <ul className="welcome-list"><li><Mail size={16} aria-hidden="true" />Correo de varias personas en un clic</li><li><Search size={16} aria-hidden="true" />Investigación con fuentes</li><li><Sparkles size={16} aria-hidden="true" />Mensajes con contexto</li></ul>
         <button className="primary full" disabled={!!busy} onClick={() => void run('Abriendo Anton.IA…', async () => { await rpc('PROSPECT_CONNECT', { origin }); setConnecting(true); })}>Conectar Anton.IA<ArrowUpRight size={17} aria-hidden="true" /></button>
         {connecting && <p role="status" className="helper">Confirma «Conectar mi cuenta» en la pestaña de la app.</p>}
         <details className="disclosure"><summary>Dirección de la app</summary><label className="field">Servidor<select value={origin} onChange={event => setOrigin(event.target.value)}>
@@ -726,19 +769,13 @@ function App() {
           {chrome.runtime.getManifest().host_permissions.some((item: string) => item.includes('localhost')) && <><option value="http://localhost:9003">Local · puerto 9003</option><option value="http://localhost:3000">Local · puerto 3000</option></>}
         </select></label></details>
       </section> : <>
-        <div className="source">
-          <label className="check-line"><input type="checkbox" checked={followProfile} onChange={event => setFollowProfile(event.target.checked)} /> Seguir el perfil abierto en LinkedIn</label>
-          {differentProfile && <button className="context-switch" disabled={!!busy} onClick={() => { const { tabId: _tabId, ...selected } = candidate; void selectProfile(selected); }}>Usar perfil abierto: {candidate.fullName || 'LinkedIn'}<ChevronRight size={16} aria-hidden="true" /></button>}
-          <form className="url-form" onSubmit={event => { event.preventDefault(); setFollowProfile(false); void selectProfile({ ...empty, linkedinUrl: url }); }}>
-            <label htmlFor="profile-url">URL de LinkedIn</label>
-            <div className="input-action"><Link2 size={16} aria-hidden="true" /><input id="profile-url" value={url} onChange={event => setUrl(event.target.value)} placeholder="linkedin.com/in/nombre" disabled={!!busy} /><button className="icon-button" disabled={!!busy || !url.trim()} aria-label="Buscar perfil"><ArrowUpRight size={18} aria-hidden="true" /></button></div>
-          </form>
-        </div>
+        {differentProfile && !searchPage && !companyPage && <button className="context-switch" disabled={!!busy} onClick={() => { const { tabId: _tabId, ...selected } = candidate; setFollowProfile(true); setShowUrl(false); void selectProfile(selected); }}>Usar el perfil abierto: {candidate.fullName || 'LinkedIn'}<ChevronRight size={16} aria-hidden="true" /></button>}
+        {(showUrl || (!profile.linkedinUrl && !searchPage && !companyPage)) && urlForm}
         {companyCard}
         {searchCard}
-        {!profile.linkedinUrl ? searchPage || companyPage ? null : <section className="state-card">
-          <UserRound size={28} aria-hidden="true" /><h1>Empieza por una persona</h1>
-          <p>Abre su perfil de LinkedIn y el panel lo sigue solo, o pega su URL aquí arriba.</p>
+        {searchPage || companyPage ? null : !profile.linkedinUrl ? <section className="state-card">
+          <UserRound size={28} aria-hidden="true" /><h1>Empieza en LinkedIn</h1>
+          <p>Abre una búsqueda de personas para elegir varias, o el perfil de alguien: el panel lo sigue solo y busca su correo.</p>
         </section> : <>
           <section className="person-card" aria-labelledby="person-name">
             <div className="person-head">

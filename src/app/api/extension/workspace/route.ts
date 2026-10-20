@@ -54,6 +54,28 @@ export async function POST(req: NextRequest) {
       const { saveExtensionBatch } = await import('@/lib/server/extension-batch');
       return json(await saveExtensionBatch(auth, body.profiles || []));
     }
+    if (body.action === 'enrich-batch') {
+      // The people chosen from a LinkedIn search, saved and looked up in one go: the lookup of «Buscar correo» in «Por
+      // escribir», with its credits and daily allowance, written onto each saved contact.
+      const { enrichExtensionBatch, lookupErrorMessage } = await import('@/lib/server/extension-enrich-batch');
+      const { saveExtensionBatch } = await import('@/lib/server/extension-batch');
+      const { POST: lookUp } = await import('@/app/api/opportunities/enrich-apollo/route');
+      return json(await enrichExtensionBatch(auth, { profiles: body.profiles || [], revealPhone: body.revealPhone }, {
+        saveBatch: saveExtensionBatch, findLead: findExtensionLead,
+        lookUp: async (leads, revealPhone) => {
+          const response = await lookUp(new NextRequest(new URL('/api/opportunities/enrich-apollo', req.url), {
+            method: 'POST', headers: req.headers,
+            body: JSON.stringify({ tableName: 'enriched_leads', operationId: body.operationId, revealEmail: true, revealPhone,
+              leads: leads.map(lead => ({ existingRecordId: lead.id, fullName: lead.fullName, linkedinUrl: lead.linkedinUrl,
+                companyName: lead.companyName || undefined, title: lead.title || undefined })) }),
+          }));
+          const payload = await response.json().catch(() => ({}));
+          const enriched = Array.isArray(payload.enriched) ? payload.enriched : [];
+          const consumed = Number(payload.usage?.consumed ?? 0) || 0;
+          return response.ok || response.status === 202 ? { enriched, consumed } : { enriched, consumed, error: lookupErrorMessage(payload) };
+        },
+      }));
+    }
     if (body.action === 'company') {
       // The LinkedIn company on screen: its saved contacts, the search for its decision makers and, for the pilot, its opportunity.
       const { readExtensionCompany } = await import('@/lib/server/extension-company');
