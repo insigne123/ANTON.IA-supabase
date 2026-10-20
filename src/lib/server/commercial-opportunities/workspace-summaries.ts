@@ -30,15 +30,18 @@ const toWrite = (row: { data?: unknown; kind?: string; title?: string }) => !opp
  * The pipeline shows opportunities without their summary: one reading of those cards, in the order shown, is queued unless
  * one is under way. It never stops the pipeline from loading; the count says how many cards are still waiting for theirs.
  */
-export async function enqueueOpportunitySummaries(client: SupabaseClient, scope: WorkScope, items: Array<{ id?: string; kind?: string; title?: string; buyer_name?: string | null; data?: unknown }>) {
+export async function enqueueOpportunitySummaries(client: SupabaseClient, scope: WorkScope, items: Array<{ id?: string; kind?: string; title?: string; buyer_name?: string | null;
+  deadline_at?: string | null; data?: unknown }>) {
   const missing = items.filter(toWrite);
   if (!missing.length) return 0;
   const active = await client.from('opportunity_jobs').select('id').eq('organization_id', scope.organizationId).eq('kind', 'evaluate')
     .in('state', ['queued', 'running', 'waiting']).eq('payload->>summaries', 'true').gt('updated_at', new Date(Date.now() - STALE_MS).toISOString())
     .limit(1).maybeSingle();
   if (active.error || active.data) return missing.length;
-  // At most one new reading every ten minutes, whoever opens the pipeline.
-  const ids = missing.map(item => item.id).filter((id): id is string => Boolean(id)).slice(0, MAX_IDS);
+  // At most one new reading every ten minutes, whoever opens the pipeline. The board shows the nearest deadlines first
+  // (PipelineBoard.tsx): those cards get theirs first, the ones without a deadline last.
+  const closes = (item: { deadline_at?: string | null }) => (item.deadline_at ? Date.parse(item.deadline_at) : NaN) || Infinity;
+  const ids = [...missing].sort((a, b) => closes(a) - closes(b)).map(item => item.id).filter((id): id is string => Boolean(id)).slice(0, MAX_IDS);
   await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId, kind: 'evaluate',
     dedupe_key: `summaries:${new Date().toISOString().slice(0, 15)}`, payload: { summaries: true, ids } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true });
   return missing.length;

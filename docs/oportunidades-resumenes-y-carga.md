@@ -26,7 +26,7 @@
     - El Embudo muestra las que están en curso, las 120 recomendadas y las 60 por revisar con más puntaje. Solo esas se resumen, aunque el workspace tenga cientos más abiertas (GrupoExpro tiene unas 990).
     - Se encola a lo más uno cada 10 minutos, y ninguno si ya hay uno en curso.
     - Un trabajo que lleva 15 minutos sin moverse, porque agotó sus intentos o se cayó su proceso, ya no frena uno nuevo.
-  - Cada pasada dura unos 50 s y toma hasta 24 oportunidades, en el orden del Embudo.
+  - Cada pasada dura unos 50 s y toma hasta 24 oportunidades, en el orden en que el tablero las muestra: primero las que cierran antes y al final las sin fecha. En la primera medición, las tarjetas que cerraban al día siguiente quedaban para el final.
   - Si quedan más, el trabajo queda en espera y sigue en el próximo minuto.
   - Si el ticket está ocupado con la búsqueda diaria, esa licitación espera a la pasada siguiente.
   - Si no hay ticket, la ficha no existe o Mercado Público la rechaza, el resumen se hace con lo que hay. La licitación queda marcada (`data.detail.found = false`) para no volver a pedir su ficha.

@@ -191,7 +191,7 @@ test('the pipeline queues one reading when cards lack their summary, and none wh
   assert.equal(tables.opportunity_jobs.length, 0);
   assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, [{ id: 'x', data: {} }, { id: 'done', data: { summary: { text: 'y' } } }, { id: 'z', data: null }]), 2);
   assert.equal(tables.opportunity_jobs.length, 1);
-  assert.deepEqual({ kind: tables.opportunity_jobs[0].kind, payload: tables.opportunity_jobs[0].payload }, { kind: 'evaluate', payload: { summaries: true, ids: ['x', 'z'] } });
+  assert.deepEqual({ kind: tables.opportunity_jobs[0].kind, payload: tables.opportunity_jobs[0].payload }, { kind: 'evaluate', payload: { summaries: true, ids: ['x', 'z'] } }, 'without deadlines, as shown');
   tables.opportunity_jobs[0].dedupe_key = 'summaries:earlier';
   await summaries.enqueueOpportunitySummaries(client, scope, [{ id: 'x', data: {} }]);
   assert.equal(tables.opportunity_jobs.length, 1, 'the queued one is still to run');
@@ -199,6 +199,15 @@ test('the pipeline queues one reading when cards lack their summary, and none wh
   Object.assign(tables.opportunity_jobs[0], { state: 'waiting', updated_at: new Date(Date.now() - 16 * 60_000).toISOString() });
   await summaries.enqueueOpportunitySummaries(client, scope, [{ id: 'x', data: {} }]);
   assert.equal(tables.opportunity_jobs.length, 2);
+});
+
+test('the reading follows the board: the nearest deadlines first, the cards without one last', async () => {
+  const summaries = await load();
+  const { tables, client } = memory({});
+  await summaries.enqueueOpportunitySummaries(client, { organizationId: 'org', userId: 'admin', role: 'admin' }, [
+    { id: 'none', data: {} }, { id: 'later', deadline_at: '2026-11-20T15:00:00Z', data: {} }, { id: 'tomorrow', deadline_at: '2026-10-21T15:00:00Z', data: {} },
+  ]);
+  assert.deepEqual(tables.opportunity_jobs[0].payload.ids, ['tomorrow', 'later', 'none']);
 });
 
 test('the reading takes the cards the pipeline showed, in its order, and none it did not show', async () => {
