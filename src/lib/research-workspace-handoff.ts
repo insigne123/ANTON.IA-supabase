@@ -13,6 +13,8 @@ export type ResearchWorkspaceHandoff = {
   source: ResearchWorkspaceHandoffSource;
   leadIds: string[];
   refresh: boolean;
+  /** «Investigar a este contacto» and «Investigar y escribirle»: the person already chose, so the research starts on arrival. */
+  start: boolean;
   createdAt: number;
 };
 
@@ -20,6 +22,7 @@ type HandoffInput = {
   source: ResearchWorkspaceHandoffSource;
   leadIds: readonly string[];
   refresh?: boolean;
+  start?: boolean;
   createdAt?: number;
 };
 
@@ -72,6 +75,7 @@ export function createResearchWorkspaceHandoff(input: HandoffInput): ResearchWor
       source: input.source,
       leadIds: normalizedIds,
       refresh: input.refresh === true,
+      start: input.start === true,
       createdAt,
     },
   };
@@ -124,6 +128,7 @@ export function readResearchWorkspaceHandoff(): ResearchWorkspaceHandoffResult |
       source: parsed.source as ResearchWorkspaceHandoffSource,
       leadIds: Array.isArray(parsed.leadIds) ? parsed.leadIds : [],
       refresh: parsed.refresh === true,
+      start: parsed.start === true,
       createdAt: parsed.createdAt,
     });
     if (!result.ok) throw new Error('invalid selection');
@@ -146,4 +151,12 @@ export function clearResearchWorkspaceHandoff() {
   } catch {
     // The handoff is temporary; there is nothing else to do when cleanup is unavailable.
   }
+}
+
+/**
+ * Whether a handoff starts the research by itself: only when asked (`start`) and when none of its contacts has research yet
+ * or one in flight. Otherwise the workspace opens as always, with the selection to review or the research to read.
+ */
+export function startsOnArrival(handoff: Pick<ResearchWorkspaceHandoff, 'start'> | null, pending: number, total: number) {
+  return Boolean(handoff?.start) && pending > 0 && pending === total;
 }

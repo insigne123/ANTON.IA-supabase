@@ -109,8 +109,9 @@ test('opened from «Hoy», today\'s contact is made with its steps in view, then
     await act(async () => { save.dispatchEvent(new page.dom.window.MouseEvent('click', { bubbles: true })); });
     await page.settle();
     assert.equal(calls.at(-1), 'POST /api/lead-drops/drop-1');
-    assert.match(page.text(), /Quedó en «Por escribir», con su correo\. Ya puedes escribirle\./);
-    assert.match(document.querySelector('a[href^="/contact/compose?id=e-1"]')?.textContent || '', /Escribirle/);
+    assert.match(page.text(), /Quedó en «Por escribir», con su correo\. Para enviarle desde ANTON\.IA, lo investigamos a fondo/);
+    // What ANTON.IA sends comes from a full research: «Por escribir» opens it and starts it.
+    assert.equal(document.querySelector('a[href="/saved/leads/enriched?investigar=e-1&empezar=1"]')?.textContent, 'Investigar y escribirle');
   } finally { await close(page); }
 });
 

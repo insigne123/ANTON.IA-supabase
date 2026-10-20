@@ -51,8 +51,9 @@ function Steps({ step }: { step: number }) {
  * «Contacto del día» in «Buscar prospectos» (src/lib/lead-drops.ts), opened from the morning email or from «Hoy»: the
  * search that found it, played back in a moment (or at once with reduced motion, or with «Ver ahora»), then the contact
  * with why it fits, a brief research and a first email. Saving it puts it in «Por escribir» with its email, without
- * credits; then «Escribirle» opens the draft. With `nuevo` (from «Hoy», for whoever gets no email) today's drop is made
- * first, for real. A drop with more than one contact (DROP_SIZE) shows them as a list.
+ * credits; then «Investigar y escribirle» starts its full research there, the way to an email that is reviewed and sent
+ * from ANTON.IA (the suggested one stays here, with «Copiar»). With `nuevo` (from «Hoy», for whoever gets no email) today's
+ * drop is made first, for real. A drop with more than one contact (DROP_SIZE) shows them as a list.
  */
 export function LeadDropFlow({ dropId }: { dropId: string }) {
   const { organizationId } = useAuth();
@@ -136,7 +137,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
       setDrop(current => current && { ...current, items: body.items });
       setNotice(body.expired ? { ok: false, text: one ? 'Este contacto venció: pasaron más de 30 días desde que lo encontramos.'
         : `${body.expired === 1 ? 'Un contacto venció' : `${body.expired} contactos vencieron`}: pasaron más de 30 días. Los demás quedaron en «Por escribir».` }
-        : { ok: true, text: one ? 'Quedó en «Por escribir», con su correo. Ya puedes escribirle.' : body.saved === 1 ? 'Quedó en «Por escribir», con su correo.' : `Quedaron ${body.saved} en «Por escribir», con su correo.` });
+        : { ok: true, text: one ? 'Quedó en «Por escribir», con su correo. Para enviarle desde ANTON.IA, lo investigamos a fondo (uno o dos minutos) y luego revisas el correo.'
+          : body.saved === 1 ? 'Quedó en «Por escribir», con su correo.' : `Quedaron ${body.saved} en «Por escribir», con su correo.` });
     } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
     finally { setSaving(false); }
   };
@@ -157,8 +159,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
       URL.revokeObjectURL(url);
     } catch { setNotice({ ok: false, text: 'No pudimos descargar el PDF. Inténtalo de nuevo.' }); }
   };
-  const composeHref = (item: DropItem) => `/contact/compose?id=${encodeURIComponent(item.savedLeadId || '')}${item.draft
-    ? `&subject=${encodeURIComponent(item.draft.subject)}&body=${encodeURIComponent(item.draft.body)}` : ''}`;
+  // What ANTON.IA sends goes out from a full research, reviewed: «Por escribir» opens it and starts it (empezar=1).
+  const writeHref = (item: DropItem) => `/saved/leads/enriched?investigar=${encodeURIComponent(item.savedLeadId || '')}&empezar=1`;
   const badges = (item: DropItem) => <div className="flex flex-wrap gap-1.5 pt-1">
     <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />Correo verificado</span>
     {item.hasPhone ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Phone className="h-3 w-3" aria-hidden="true" />Teléfono</span> : null}
@@ -232,7 +234,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
             <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{one.name}</h2>
             <p className="text-sm text-muted-foreground">{[one.title, one.company].filter(Boolean).join(' · ')}</p>
           </div>
-          {one.savedLeadId ? <Button asChild size="lg"><Link href={composeHref(one)}>Escribirle<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
+          {one.savedLeadId ? <Button asChild size="lg"><Link href={writeHref(one)}>Investigar y escribirle<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
             : <Button size="lg" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}
         </div>
@@ -274,7 +276,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
                   {badges(item)}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
-                  {item.savedLeadId ? <Button asChild size="sm" variant="outline"><Link href={composeHref(item)}>Escribirle</Link></Button>
+                  {item.savedLeadId ? <Button asChild size="sm" variant="outline"><Link href={writeHref(item)}>Investigar y escribirle</Link></Button>
                     : <Button size="sm" variant="outline" disabled={saving} onClick={() => void save([item.leadId])}>Guardar</Button>}
                 </div>
               </div>
