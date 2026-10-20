@@ -2,7 +2,11 @@
  * Mercado Público hands the bases and annexes as one ZIP («Descargar todos»). The browser opens it and sends each document
  * inside on its own, through the same upload as a file chosen by hand: the server checks every one as usual.
  */
-export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.txt', '.md', '.csv'];
+export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.txt', '.md', '.csv', '.html', '.htm',
+  // Read as text on the server (document-files.ts): the macro and template versions of Word and Excel, LibreOffice, PowerPoint and RTF.
+  '.docm', '.dotx', '.xlsm', '.xltx', '.xlsb', '.odt', '.ods', '.odp', '.pptx', '.rtf'];
+const IMAGES = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.tif', '.tiff', '.bmp', '.heic'];
+const ARCHIVES = ['.rar', '.7z', '.tar', '.gz', '.tgz'];
 const MAX_FILE = 20 * 1024 * 1024;
 const MAX_FILES = 40;
 const MAX_TOTAL = 150 * 1024 * 1024;
@@ -47,7 +51,30 @@ export function decodeZipName(bytes: Uint8Array | ArrayLike<number> | string) {
   return spanishScore(ansi) > spanishScore(oem) ? ansi : oem;
 }
 
-/** Each picked file as it goes up: documents as they are, and the documents inside each ZIP, with a note for what was left out. */
+type Left = { name: string; why: 'image' | 'archive' | 'other' | 'large' | 'over' };
+/** «a», «b» y «c» (y 2 más). */
+const names = (list: Left[]) => {
+  const shown = list.slice(0, 3).map(item => `«${item.name}»`);
+  const rest = list.length - shown.length;
+  return rest ? `${shown.join(', ')} y ${rest} más` : shown.length > 1 ? `${shown.slice(0, -1).join(', ')} y ${shown.at(-1)}` : shown[0];
+};
+/** What was left out of a ZIP and why, by name, so the person knows which file to open on their own. */
+function leftOut(left: Left[]) {
+  const of = (why: Left['why']) => left.filter(item => item.why === why);
+  const one = (list: Left[]) => list.length === 1;
+  return [
+    of('image').length && `${names(of('image'))} ${one(of('image')) ? 'es una imagen' : 'son imágenes'}: la IA lee texto, ${one(of('image')) ? 'ábrela' : 'ábrelas'} en Mercado Público`,
+    of('archive').length && `${names(of('archive'))} ${one(of('archive')) ? 'es otro comprimido' : 'son otros comprimidos'} (RAR o 7z): descomprímelo y sube lo que trae`,
+    of('other').length && `${names(of('other'))} no ${one(of('other')) ? 'es un formato' : 'son formatos'} que podamos leer`,
+    of('large').length && `${names(of('large'))} ${one(of('large')) ? 'supera' : 'superan'} 20 MB`,
+    of('over').length && `${of('over').length} ${one(of('over')) ? 'quedó' : 'quedaron'} fuera por el máximo de ${MAX_FILES} archivos por ZIP`,
+  ].filter(Boolean).join('; ');
+}
+
+/**
+ * Each picked file as it goes up: documents as they are, and the documents inside each ZIP (and inside a ZIP within it),
+ * with a note that names what was left out and why.
+ */
 export async function expandZipUploads(picked: File[], load: (data: ArrayBuffer) => Promise<{ files: Record<string, ZipEntry> }> = defaultLoad) {
   const files: File[] = [];
   const notes: ZipNote[] = [];
@@ -56,25 +83,34 @@ export async function expandZipUploads(picked: File[], load: (data: ArrayBuffer)
     if (!isZip(file)) { files.push(file); continue; }
     let zip;
     try { zip = await load(await file.arrayBuffer()); } catch { notes.push({ name: file.name, message: 'No pudimos abrir este ZIP. Descomprímelo y sube los archivos uno por uno.' }); continue; }
-    const entries = Object.values(zip.files).filter(entry => !entry.dir && !/(^|\/)(__MACOSX|\.)/.test(entry.name));
-    let added = 0; let other = 0; let large = 0; let over = 0;
-    for (const entry of entries) {
-      const name = entry.name.split('/').pop() || entry.name;
-      if (!DOCUMENT_EXTENSIONS.includes(extension(name))) { other++; continue; }
-      if (added >= MAX_FILES) { over++; continue; }
-      // The declared size first, so a ZIP bomb is not inflated in memory to find out.
-      const declared = Number(entry._data?.uncompressedSize);
-      if (Number.isFinite(declared) && declared > MAX_FILE) { large++; continue; }
-      const blob = await entry.async('blob');
-      if (blob.size > MAX_FILE) { large++; continue; }
-      if (total + blob.size > MAX_TOTAL) { over++; continue; }
-      total += blob.size; added++;
-      files.push(new File([blob], name, { type: blob.type }));
-    }
-    const left = [other && `${other} ${other === 1 ? 'archivo no es' : 'archivos no son'} PDF, Word, Excel ni texto`,
-      large && `${large} ${large === 1 ? 'supera' : 'superan'} 20 MB`, over && `${over} ${over === 1 ? 'quedó' : 'quedaron'} fuera por el máximo de ${MAX_FILES} archivos por ZIP`].filter(Boolean);
-    if (!added) notes.push({ name: file.name, message: `El ZIP no trae bases ni anexos que podamos leer${left.length ? ` (${left.join('; ')})` : ''}.` });
-    else if (left.length) notes.push({ name: file.name, message: `Del ZIP tomamos ${added} ${added === 1 ? 'documento' : 'documentos'}; ${left.join('; ')}.` });
+    let added = 0;
+    const left: Left[] = [];
+    const take = async (opened: { files: Record<string, ZipEntry> }, depth: number) => {
+      const entries = Object.values(opened.files).filter(entry => !entry.dir && !/(^|\/)(__MACOSX|\.)/.test(entry.name));
+      for (const entry of entries) {
+        const name = entry.name.split('/').pop() || entry.name;
+        const ext = extension(name);
+        // A ZIP inside the ZIP (annexes grouped by the buyer) is opened once; deeper ones are left out.
+        if (ext === '.zip' && depth === 0) {
+          try { await take(await load(await (await entry.async('blob')).arrayBuffer()), 1); } catch { left.push({ name, why: 'archive' }); }
+          continue;
+        }
+        if (!DOCUMENT_EXTENSIONS.includes(ext)) { left.push({ name, why: IMAGES.includes(ext) ? 'image' : ARCHIVES.includes(ext) || ext === '.zip' ? 'archive' : 'other' }); continue; }
+        if (added >= MAX_FILES) { left.push({ name, why: 'over' }); continue; }
+        // The declared size first, so a ZIP bomb is not inflated in memory to find out.
+        const declared = Number(entry._data?.uncompressedSize);
+        if (Number.isFinite(declared) && declared > MAX_FILE) { left.push({ name, why: 'large' }); continue; }
+        const blob = await entry.async('blob');
+        if (blob.size > MAX_FILE) { left.push({ name, why: 'large' }); continue; }
+        if (total + blob.size > MAX_TOTAL) { left.push({ name, why: 'over' }); continue; }
+        total += blob.size; added++;
+        files.push(new File([blob], name, { type: blob.type }));
+      }
+    };
+    await take(zip, 0);
+    const why = leftOut(left);
+    if (!added) notes.push({ name: file.name, message: `El ZIP no trae bases ni anexos que podamos leer${why ? `: ${why}` : ''}.` });
+    else if (why) notes.push({ name: file.name, message: `Del ZIP tomamos ${added} ${added === 1 ? 'documento' : 'documentos'}. ${why.charAt(0).toUpperCase()}${why.slice(1)}.` });
   }
   return { files, notes };
 }

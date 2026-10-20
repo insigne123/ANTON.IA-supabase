@@ -471,7 +471,7 @@ export function OpportunityWorkWorkspace() {
               <span className="max-w-md space-y-1"><span className="block font-medium">{prefill.status === 'reading' ? `Leyendo «${prefill.name}»…` : 'Sube la invitación, las bases o el correo'}</span>
                 <span className="block text-sm leading-6 text-muted-foreground">{prefill.status === 'reading' ? 'La IA está completando el formulario. Tarda unos segundos.' : 'La IA lee el documento y completa el formulario. Tú lo revisas antes de guardar.'}</span></span>
               {prefill.status !== 'reading' ? <span className="inline-flex h-9 items-center rounded-md border bg-background px-4 text-sm font-medium shadow-sm">Elegir documento</span> : null}
-              <input id="op-prefill-file" type="file" className="sr-only" accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html" disabled={prefill.status === 'reading'} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void readDocument(file); }} />
+              <input id="op-prefill-file" type="file" className="sr-only" accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html,.htm,.docm,.dotx,.xlsm,.xltx,.odt,.ods,.pptx,.rtf" disabled={prefill.status === 'reading'} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void readDocument(file); }} />
             </label>
             {prefill.status === 'reading' ? <p role="status" className="sr-only">Leyendo el documento</p> : null}
             {prefill.status === 'error' ? <p role="alert" className="text-sm text-destructive">{prefill.message}</p> : null}

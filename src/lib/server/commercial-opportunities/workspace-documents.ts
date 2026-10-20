@@ -12,7 +12,7 @@ export { opportunityLegacyAsText, opportunityStorageName };
 
 export type ExtractedOpportunityFile = { status: 'read' | 'partial' | 'scan' | 'damaged'; total: number | null; read: number; sections: Array<{ locator: string; text: string }> };
 export const opportunityMime = (name: string) => ({ pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', html: 'text/html' }[name.toLowerCase().split('.').pop() || '']);
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', html: 'text/html', htm: 'text/html' }[name.toLowerCase().split('.').pop() || '']);
 export async function extractOpportunityFile(name: string, bytes: Uint8Array): Promise<ExtractedOpportunityFile> {
   const ext = name.toLowerCase().split('.').pop();
   if (ext === 'pdf') {
@@ -52,8 +52,9 @@ export async function extractOpportunityFile(name: string, bytes: Uint8Array): P
     return { status: partial ? 'partial' : 'read', total: null, read: 0, sections };
   }
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  const plain=ext==='html'?coworkHtmlToText(webPageBody(text)):text;
-  return { status:plain.trim()?'read':'damaged', total: null, read: 0, sections: [{ locator: ext === 'html' ? 'Página web' : 'Texto recibido', text: plain }] };
+  const page = ext === 'html' || ext === 'htm';
+  const plain=page?coworkHtmlToText(webPageBody(text)):text;
+  return { status:plain.trim()?'read':'damaged', total: null, read: 0, sections: [{ locator: page ? 'Página web' : 'Texto recibido', text: plain }] };
 }
 /**
  * What a captured web page says, without what the browser runs or draws: its head, scripts, styles, comments, SVG and

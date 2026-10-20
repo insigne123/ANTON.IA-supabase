@@ -9,7 +9,7 @@ import { friendlyJobError, statusLabel } from '@/lib/commercial-opportunities/re
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { ReportOffice } from './ReportOffice';
 
-export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.zip';
+export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html,.htm,.docm,.dotx,.xlsm,.xltx,.xlsb,.odt,.ods,.odp,.pptx,.rtf,.zip';
 export type ExpedientDocument = { id: string; name: string; extraction_status: string; source_kind: string; source_url: string | null; pages_read: number | null; pages_total: number | null; created_at: string };
 export type PublicLinks = { ficha: string; attachments: string | null; forum: string | null; forms: number; code: string | null } | null;
 type Upload = { name: string; state: 'uploading' | 'done' | 'error'; message?: string };
