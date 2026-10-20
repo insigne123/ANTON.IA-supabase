@@ -18,6 +18,9 @@ test('the next step follows the order a contact gets ready', () => {
     [{ ...base, saved: true, email: 'ana@acme.cl', researchEnabled: false }, 'write'],
   ];
   for (const [state, id] of steps) assert.equal(personNextStep(state)?.id, id, JSON.stringify(state));
+  // One click looks the email up and saves; who has no email can still be saved.
+  assert.equal(personNextStep(base).label, 'Buscar correo y guardar');
+  assert.equal(personNextStep({ ...base, enrichedReady: true }).label, 'Guardar contacto');
   assert.equal(personNextStep({ ...base, saved: true, email: 'a@b.cl', research: ready }).label, 'Escribir mensaje');
   assert.equal(personNextStep({ ...base, saved: true, email: 'a@b.cl', research: ready, hasMessage: true }).label, 'Revisar el mensaje');
 });

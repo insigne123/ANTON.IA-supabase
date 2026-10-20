@@ -281,7 +281,7 @@ async function prospectHandle(request, sender) {
     const { organizationId, userId } = connection.session;
     if (request.organizationId !== organizationId || request.userId !== userId) throw new Error('La sesión cambió. Actualiza el panel.');
     const result = await prospectRequest(connection, { ...request.body, organizationId, userId });
-    if (['save', 'save-batch'].includes(request.body?.action)) void presenceChanged();
+    if (['save', 'save-batch', 'enrich-batch', 'enrich'].includes(request.body?.action)) void presenceChanged();
     return result;
   }
   throw new Error('Acción no disponible.');
