@@ -30,6 +30,8 @@ const SLOT_HINT: Record<CommitteeSlot['role'], string> = {
   paga: 'Nadie de finanzas o compras',
 };
 const sizeText = (size: number | null | undefined) => size ? `${size.toLocaleString('es-CL')} empleados` : null;
+/** Up to three names and how many more: the full list is in «Personas». */
+const namesText = (names: string[]) => names.length > 3 ? `${names.slice(0, 3).join(', ')} y ${names.length - 3} más` : names.join(', ');
 const peopleText = (count: number) => `${count} ${count === 1 ? 'contacto' : 'contactos'}`;
 /** One section of the company's panel: its title and, under it, what it shows in a sentence. */
 function SectionTitle({ id, title, hint }: { id: string; title: string; hint: string }) {
@@ -197,7 +199,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
                 {company.committee.map(slot => <li key={slot.role} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3">
                   <span className="min-w-0">
                     <span className="block text-sm font-medium">{slot.label}</span>
-                    <span className="block text-xs text-muted-foreground">{slot.people.length ? slot.people.map(person => person.name).join(', ') : `${SLOT_HINT[slot.role]}: ${slot.titles.slice(0, 3).join(', ')}`}</span>
+                    <span className="block text-xs text-muted-foreground">{slot.people.length ? namesText(slot.people.map(person => person.name)) : `${SLOT_HINT[slot.role]}: ${slot.titles.slice(0, 3).join(', ')}`}</span>
                   </span>
                   {slot.people.length ? <Check role="img" className="h-4 w-4 text-primary" aria-label="Cubierto" />
                     : <Button asChild size="sm" variant="outline"><Link href={companySearchHref({ company: company.name, domain: company.domain, titles: slot.titles })}>Buscar</Link></Button>}

@@ -19,9 +19,10 @@ function allow(userId: string, now = Date.now()) {
 }
 
 /**
- * What a company of «Empresas» does (src/lib/companies/about.ts): its home page read with the research's reader (public
- * domains only, the DNS answer checked against private ranges, redirects within the company, ten seconds at most), then one
- * or two sentences by the model; the site's own description when the model cannot. Nothing is saved.
+ * What a company of «Empresas» does (src/lib/companies/about.ts): its site read with the reader of «Perfil» (public domains
+ * only, the DNS answer checked against private ranges, a brand that moved followed once, the country page and «Quiénes
+ * somos» read too, 14 seconds at most), then one or two sentences by the model; the site's own description when the model
+ * cannot. Nothing is saved.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -31,22 +32,24 @@ export async function GET(req: NextRequest) {
     const name = String(params.get('name') || '').slice(0, 160);
     if (!domain) throw new AuthError('Dominio no válido.', 400);
     if (!allow(auth.user.id)) throw new AuthError('Leíste muchos sitios en poco tiempo. Intenta en un rato.', 429);
-    const { fetchOfficialSite } = await import('@/lib/server/native-research');
-    const { value: site } = await fetchOfficialSite({ domain, maxPages: 1 });
+    const { fetchCompanyProfileSite } = await import('@/lib/server/native-research');
+    const { pages } = await fetchCompanyProfileSite({ domain, maxPages: 3 });
+    const home = pages[0];
     // The answer stays in the browser for a day; a site that did not answer is asked again in an hour.
-    if (!site) return NextResponse.json({ domain, website: `https://${domain}`, about: null }, { headers: { 'Cache-Control': 'private, max-age=3600' } });
+    if (!home) return NextResponse.json({ domain, website: `https://${domain}`, about: null }, { headers: { 'Cache-Control': 'private, max-age=3600' } });
+    const described = pages.find(page => page.description)?.description ?? null;
     let about = '';
     try {
       const answer = await generateStructured({
         schema: aboutAnswerSchema, systemPrompt: 'Describes empresas para un CRM. Responde JSON conforme al contrato.',
-        prompt: aboutPrompt({ name: name || domain, domain, title: site.title, description: site.description, text: site.text }),
+        prompt: aboutPrompt({ name: name || domain, domain, title: home.title, description: described, text: pages.map(page => page.text).join('\n\n') }),
         openAiModel: companiesModel(), allowDefaultModelFallback: false, reasoningEffort: 'low', maxAttempts: 1, timeoutMs: 20_000, maxOutputTokens: 300,
       });
       about = cleanAbout(answer.about);
     } catch (error) {
       if (error instanceof AuthError) throw error;
     }
-    return NextResponse.json({ domain, website: site.url, about: about || cleanAbout(site.description) || null },
+    return NextResponse.json({ domain, website: home.url, about: about || cleanAbout(described) || null },
       { headers: { 'Cache-Control': 'private, max-age=86400' } });
   } catch (error) {
     return handleAuthError(error);

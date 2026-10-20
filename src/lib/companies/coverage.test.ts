@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
-import { buildCompanies, classifyRole, companyDomainOf, companyKey, coverageGrid, industryLabel, mainArea, sizeBands } from './coverage';
+import { buildCompanies, classifyRole, companyDomainOf, companyInitials, companyKey, coverageGrid, industryLabel, mainArea, sizeBands } from './coverage';
 
 const row = (patch: Partial<UnifiedRow>): UnifiedRow => ({ gid: `lead_saved|${Math.random()}`, sourceId: 'x', status: 'saved', kind: 'lead_saved', ...patch });
 
@@ -98,4 +98,11 @@ test('the company domain comes from the enrichment, else from the work emails of
   assert.equal(companyDomainOf([{ email: 'ana@gmail.com' }, { email: null }]), null);
   const { companies } = buildCompanies([row({ company: 'Grupo Expro', email: 'luis@grupoexpro.cl', title: 'Gerente General' })]);
   assert.equal(companies[0].domain, 'grupoexpro.cl');
+});
+
+test('a company without a logo shows the initials of its name, not of its linking words', () => {
+  assert.equal(companyInitials('Ministerio de Obras Públicas'), 'MO');
+  assert.equal(companyInitials('Grupo Siglo Outsourcing'), 'GS');
+  assert.equal(companyInitials('SONDA'), 'SO');
+  assert.equal(companyInitials('Cencosud S.A.'), 'CS');
 });
