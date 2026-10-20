@@ -156,3 +156,33 @@ test('visible company signals are balanced by kind with bounded depth caps', () 
   assert.equal(nativeResearchInternals.visibleSignalLimit('standard'), 9);
   assert.equal(nativeResearchInternals.visibleSignalLimit('deep'), 12);
 });
+
+test('optional sources never leave a research with a sound company profile partial; missing company context does', () => {
+  const lead = NativeResearchLeadSchema.parse({
+    id: 'lead-ada', fullName: 'Ada Lovelace', email: 'ada@acme.example', title: 'Directora de Operaciones',
+    companyName: 'Acme', companyDomain: 'acme.example',
+  });
+  const page = {
+    url: 'https://acme.example/about', title: 'Acme', description: null,
+    text: 'Acme coordina operaciones para equipos empresariales y ofrece soporte especializado para organizaciones regionales.',
+  };
+  const build = (official: unknown, warnings: string[]) => nativeResearchInternals.buildSnapshot({
+    jobId: 'job-1', reportId: 'report-1', requestIdempotencyKey: 'request-1',
+    access: { organizationId: 'org-1', userId: 'user-1' },
+    lead,
+    options: NativeResearchOptionsSchema.parse({ depth: 'standard', language: 'es', refresh: false }),
+    company: { domain: 'acme.example', official, whois: null, brand: null, fetchedAt: '2026-08-24T18:00:00.000Z' },
+    profile: {}, news: {}, jobs: {}, mentions: {}, similarweb: {},
+    person: { query: null, provider: 'serper', fetchedAt: '2026-08-24T18:00:00.000Z', items: [], warnings: ['person_public_evidence_missing'] },
+    warnings,
+  } as any);
+
+  const complete = build({ ...page, pages: [page] }, ['company_news_unavailable', 'hiring_signals_unavailable', 'person_public_evidence_missing']);
+  assert.equal(complete.snapshot.lifecycle.status, 'completed');
+  assert.ok(complete.result.warnings.includes('company_news_unavailable'), 'the gaps stay as notes in the report');
+  assert.ok(complete.result.warnings.includes('person_public_evidence_missing'));
+
+  const withoutCompany = build(null, ['official_site_fetch_failed', 'company_news_unavailable']);
+  assert.notEqual(withoutCompany.snapshot.lifecycle.status, 'completed');
+  assert.ok(withoutCompany.result.warnings.includes('company_context_missing'));
+});

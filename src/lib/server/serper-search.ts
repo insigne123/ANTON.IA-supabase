@@ -60,6 +60,11 @@ export type SerperSearchResult = {
 
 type SerperSearchDependencies = {
   fetch?: typeof fetch;
+  /**
+   * Try a timed-out or dropped search once more. Off by default: a timeout may already be billed and someone may be
+   * waiting. Background research turns it on: in Oct 2026 every «noticias no disponibles» was a single 6 s timeout.
+   */
+  retryTimeouts?: boolean;
   timeoutMs?: number;
   maxRetries?: number;
   retryDelayMs?: number;
@@ -322,7 +327,13 @@ export async function searchSerper(
     const sleep = dependencies.sleep || ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-      const response = await fetchOnce(input, apiKey, timeoutMs, fetchImpl);
+      const response = await fetchOnce(input, apiKey, timeoutMs, fetchImpl).catch(async (error: unknown) => {
+        const transient = error instanceof SerperSearchError && (error.code === 'SERPER_TIMEOUT' || error.code === 'SERPER_NETWORK_ERROR');
+        if (!transient || !dependencies.retryTimeouts || attempt >= maxRetries) throw error;
+        await sleep(retryDelayMs);
+        return null;
+      });
+      if (!response) continue;
       if (response.ok) {
         const payload = await response.json().catch(() => {
           throw new SerperSearchError('SERPER_INVALID_RESPONSE');

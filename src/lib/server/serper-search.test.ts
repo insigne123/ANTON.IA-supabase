@@ -186,3 +186,37 @@ test('aborts a timeout without retrying an ambiguous provider request', async ()
     assert.equal(aborted, true);
   });
 });
+
+test('background research tries a timed-out search once more; nothing else does', async () => {
+  await withSerperApiKey('serper-test-key', async () => {
+    let calls = 0;
+    const fetchImpl = ((_: string, init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+        });
+      }
+      return Promise.resolve(new Response(JSON.stringify({ organic: [{ title: 'Acme', link: 'https://acme.example', snippet: 'Acme hoy' }] }), { status: 200 }));
+    }) as typeof fetch;
+
+    const result = await searchSerper({ organizationId: 'org-a', kind: 'organic', query: 'Acme' }, {
+      fetch: fetchImpl, timeoutMs: 5, maxRetries: 1, retryDelayMs: 0, retryTimeouts: true,
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.items[0]?.link, 'https://acme.example');
+
+    calls = 0;
+    const alwaysSlow = ((_: string, init?: RequestInit) => {
+      calls += 1;
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+      });
+    }) as typeof fetch;
+    await assert.rejects(
+      searchSerper({ organizationId: 'org-a', kind: 'organic', query: 'Acme' }, { fetch: alwaysSlow, timeoutMs: 5, maxRetries: 1, retryDelayMs: 0, retryTimeouts: true }),
+      (error: any) => error instanceof SerperSearchError && error.code === 'SERPER_TIMEOUT',
+    );
+    assert.equal(calls, 2, 'one more try, not a loop');
+  });
+});

@@ -104,7 +104,11 @@ test('does not silently accept malformed organization ICP settings', async () =>
   );
 });
 
-test('rollout mode remains default-off for unknown values', () => {
+test('rollout mode: the current report without a setting, an explicit choice wins, unknown values stay off', () => {
+  assert.equal(sellerProfileInternals.reportV2Mode(undefined), 'visible');
+  assert.equal(sellerProfileInternals.reportV2Mode(''), 'visible');
+  assert.equal(sellerProfileInternals.reportV2Mode('off'), 'off');
+  assert.equal(sellerProfileInternals.reportV2Mode('shadow'), 'shadow');
   assert.equal(sellerProfileInternals.reportV2Mode('enabled'), 'off');
   assert.equal(sellerProfileInternals.reportQuestionnaireMode('enabled'), 'off');
   assert.equal(sellerProfileInternals.reportQuestionnaireMode(undefined), 'off');

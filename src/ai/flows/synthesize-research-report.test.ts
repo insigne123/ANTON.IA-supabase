@@ -321,6 +321,33 @@ test('rejects unsupported market-leadership prose', async () => {
   assert.equal(result.metadata.status, 'partial');
 });
 
+test('a paragraph that fails a check is dropped and the rest of its section stays', async () => {
+  const snapshot = draftSnapshotFixture();
+  const generatedAt = '2026-08-24T18:24:00.000Z';
+
+  const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
+    generate: async (input) => {
+      const section = sectionFromPrompt(input.prompt);
+      if (section === 'companyProfile') {
+        const valid = validOutputFor(section).paragraphs[0];
+        return {
+          data: { paragraphs: [valid, { text: 'Acme lidera el mercado mundial.', claimIds: ['claim-acme-overview'] }] },
+          telemetry: { modelName: 'test-model' },
+        };
+      }
+      return { data: validOutputFor(section), telemetry: { modelName: 'test-model' } };
+    },
+  });
+
+  assert.equal(result.document.narrative?.companyProfile.length, 1);
+  assert.equal(
+    result.document.narrative?.companyProfile[0].text,
+    'La propuesta de Acme pone el foco en reducir trabajo manual dentro de las operaciones.',
+  );
+  assert.doesNotMatch(JSON.stringify(result.document.narrative), /lidera el mercado/);
+  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result.document, snapshot));
+});
+
 test('one analyst rejection omits only that section and marks model synthesis partial', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:25:00.000Z';

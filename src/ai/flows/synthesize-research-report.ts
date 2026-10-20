@@ -1029,9 +1029,9 @@ export async function synthesizeResearchReportDocumentV1(
         seller,
         generatedAt,
       });
-      if (normalized.length !== output.paragraphs.length || normalized.length === 0) {
-        throw new Error('SECTION_HAS_INVALID_OR_MISSING_PARAGRAPHS');
-      }
+      // A paragraph that fails a check is dropped, not its whole section: before 20 oct 2026 one bad sentence emptied the
+      // section, and with every section emptied the report failed (7 of 36 for PSOL in 45 days).
+      if (normalized.length === 0) throw new Error('SECTION_HAS_INVALID_OR_MISSING_PARAGRAPHS');
       narrative[request.section] = normalized;
       validModelSectionCount += 1;
       modelNames.add(modelName);

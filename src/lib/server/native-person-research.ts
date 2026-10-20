@@ -43,6 +43,46 @@ function quoted(value: unknown) {
   return `"${text(value).replace(/"/g, '').slice(0, 180)}"`;
 }
 
+// Legal forms that public pages leave out: «Constructora Andes SpA» is «Constructora Andes» on LinkedIn and in the press.
+// Compared on normalized tokens («S.A.» is «s a»).
+const LEGAL_FORMS = ['s a c', 's a s', 's p a', 's r l', 'e i r l', 's a', 'sa', 'spa', 'sac', 'sas', 'srl', 'eirl', 'ltda', 'limitada',
+  'y cia', 'cia', 'inc', 'llc', 'ltd', 'gmbh', 'corp'];
+
+/** The company name without its legal form, when it differs and is long enough not to name half the market. */
+function companyBrand(value: unknown) {
+  let name = normalizeIdentityText(value);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const form of LEGAL_FORMS) {
+      if (name.endsWith(` ${form}`)) {
+        name = name.slice(0, -form.length - 1).trim();
+        changed = true;
+      }
+    }
+  }
+  return name && name !== normalizeIdentityText(value) && name.replace(/\s/g, '').length >= 4 ? name : '';
+}
+
+/**
+ * «Juan Pérez» for «Juan Andrés Pérez González» or «Juan Pérez González»: first name and paternal surname, the way most
+ * Chilean profiles and press notes name a person. Only for names with three or more words.
+ */
+function shortPersonName(value: unknown) {
+  const tokens = text(value).split(' ').filter(Boolean);
+  return tokens.length >= 3 ? `${tokens[0]} ${tokens[tokens.length - 2]}` : '';
+}
+
+function linkedinProfileSlug(value: unknown) {
+  try {
+    const url = new URL(text(value));
+    if (!/(^|\.)linkedin\.com$/i.test(url.hostname)) return '';
+    const match = url.pathname.match(/^\/in\/([^/]+)/i);
+    return match ? decodeURIComponent(match[1]).toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
 function containsExactTokenSequence(value: string, expected: string) {
   const valueTokens = normalizeIdentityText(value).split(' ').filter(Boolean);
   const expectedTokens = normalizeIdentityText(expected).split(' ').filter(Boolean);
@@ -76,10 +116,15 @@ export function buildPublicPersonSearchQueries(lead: NativeResearchLead) {
       [quoted(first), quoted(company), 'linkedin'].join(' '),
     ])];
   }
+  const brand = companyBrand(lead.companyName);
+  const short = shortPersonName(fullName);
   return [...new Set([
     [quoted(fullName), quoted(company), role ? quoted(role) : ''].filter(Boolean).join(' '),
     [quoted(fullName), quoted(company)].join(' '),
     domain ? [quoted(fullName), quoted(domain)].join(' ') : '',
+    // Fallbacks, only spent when the exact name found too little: the brand without its legal form, then the short name.
+    brand ? [quoted(fullName), quoted(brand)].join(' ') : '',
+    short ? [quoted(short), quoted(brand || company), role ? quoted(role) : ''].filter(Boolean).join(' ') : '',
   ].filter(Boolean))];
 }
 
@@ -97,19 +142,31 @@ export function scorePublicPersonIdentityMatch(input: {
   if (!fullName || (!companyName && !companyDomain)) return 0;
 
   const statement = normalizeIdentityText(rawStatement);
+  const masked = isMaskedName(input.lead.fullName);
   // A hidden surname matches a word with the same visible ends («Durán» for «Du***n»); a complete name, its exact tokens.
-  const namesPerson = isMaskedName(input.lead.fullName)
+  const fullNameMatches = masked
     ? textNamesPerson(rawStatement, input.lead.fullName)
     : containsExactTokenSequence(statement, fullName);
-  if (!namesPerson) return 0;
+  const short = masked ? '' : normalizeIdentityText(shortPersonName(input.lead.fullName));
+  const shortNameMatches = Boolean(short && containsExactTokenSequence(statement, short));
+  // The person's own LinkedIn profile is the person, even when it names them shorter or shows a newer employer.
+  const leadProfile = linkedinProfileSlug(input.lead.linkedinUrl);
+  const ownProfile = Boolean(leadProfile && linkedinProfileSlug(input.item.link) === leadProfile);
+  if (!fullNameMatches && !shortNameMatches) return 0;
   const resultDomain = normalizeDomain(input.item.link);
-  const companyNameMatches = Boolean(companyName && containsExactTokenSequence(statement, companyName));
+  const brand = companyBrand(input.lead.companyName);
+  const companyNameMatches = Boolean(companyName && containsExactTokenSequence(statement, companyName))
+    || Boolean(brand && containsExactTokenSequence(statement, brand));
   const companySiteMatches = Boolean(companyDomain && (resultDomain === companyDomain || resultDomain.endsWith(`.${companyDomain}`)));
   const companyDomainMatches = Boolean(companyDomain && containsExactTokenSequence(statement, companyDomain));
-  if (!companyNameMatches && !companySiteMatches && !companyDomainMatches) return 0;
+  const companyMatches = companyNameMatches || companySiteMatches || companyDomainMatches;
+  if (!companyMatches && !ownProfile) return 0;
 
   const roleMatches = Boolean(role && containsExactTokenSequence(statement, role));
-  return 10 + (companyNameMatches ? 3 : 0) + (companySiteMatches ? 3 : 0) + (companyDomainMatches ? 2 : 0) + (roleMatches ? 2 : 0);
+  // A short name is common: with the company it still needs the role or the person's own profile to be this person.
+  if (!fullNameMatches && !roleMatches && !ownProfile) return 0;
+  return 10 + (companyNameMatches ? 3 : 0) + (companySiteMatches ? 3 : 0) + (companyDomainMatches ? 2 : 0) + (roleMatches ? 2 : 0)
+    + (ownProfile ? 4 : 0) - (fullNameMatches ? 0 : 1);
 }
 
 export function isStrictPublicPersonIdentityMatch(input: {
@@ -151,7 +208,7 @@ export async function collectPublicPersonEvidence(input: {
     };
   }
 
-  const search = input.search || searchSerper;
+  const search = input.search || ((request: Parameters<typeof searchSerper>[0]) => searchSerper(request, { retryTimeouts: true }));
   const matched = new Map<string, { item: SerperSearchItem; score: number; queryIndex: number }>();
   let completedSearches = 0;
   for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {

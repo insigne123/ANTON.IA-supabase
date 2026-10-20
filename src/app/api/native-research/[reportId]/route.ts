@@ -15,19 +15,69 @@ import {
   loadResearchReportDocumentV2,
   researchReportDocumentV2Metadata,
 } from '@/lib/server/research-report-v2-documents';
-import { processResearchReportSynthesisQueue } from '@/lib/server/research-report-worker';
+import { processResearchReportSynthesisQueue, queueResearchReportV1Fallback } from '@/lib/server/research-report-worker';
 import { loadReportV2SellerConfiguration } from '@/lib/server/seller-profile';
+import { RESEARCH_REPORT_V2_RUNTIME_VERSION } from '@/lib/server/research-report-v2-documents';
 import {
   RESEARCH_REPORT_V1_SCHEMA_VERSION,
   RESEARCH_REPORT_V2_SCHEMA_VERSION,
+  enqueueResearchReportSynthesis,
   loadResearchReportSynthesisState,
   publicResearchReportSynthesisState,
   retryResearchReportSynthesis,
+  type ResearchReportSynthesisState,
 } from '@/lib/server/research-report-synthesis-state';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
+
+/**
+ * The report the screen shows. A visible V2 workspace reads V2, except where V2 failed for good and V1 stepped in, and
+ * where an older V1 report already exists without V2 (research written before the workspace moved to V2).
+ */
+function preferredReportSchema(input: { visible: boolean; v1: ResearchReportSynthesisState | null; v1Document: boolean; v2: ResearchReportSynthesisState | null }) {
+  if (!input.visible) return RESEARCH_REPORT_V1_SCHEMA_VERSION;
+  if (input.v2?.status === 'failed_permanent' && (input.v1 || input.v1Document)) return RESEARCH_REPORT_V1_SCHEMA_VERSION;
+  return input.v2 || !input.v1Document ? RESEARCH_REPORT_V2_SCHEMA_VERSION : RESEARCH_REPORT_V1_SCHEMA_VERSION;
+}
+
+/**
+ * Research opened in a visible V2 workspace that has no report to show yet gets one queued: V2 when it was never
+ * written (research from before 20 oct 2026, when V2 became the default), V1 when V2 failed for good.
+ */
+async function queueMissingReport(input: {
+  snapshotId: string;
+  organizationId: string;
+  userId: string;
+  synthesisContextHash: string;
+  v1: ResearchReportSynthesisState | null;
+  v1Document: boolean;
+  v2: ResearchReportSynthesisState | null;
+}) {
+  try {
+    if (!input.v2 && !input.v1Document) {
+      return {
+        v2: await enqueueResearchReportSynthesis({
+          researchSnapshotId: input.snapshotId,
+          schemaVersion: RESEARCH_REPORT_V2_SCHEMA_VERSION,
+          promptVersion: RESEARCH_REPORT_V2_RUNTIME_VERSION,
+          sellerProfileHash: input.synthesisContextHash,
+        }),
+        v1: input.v1,
+      };
+    }
+    if (input.v2?.status === 'failed_permanent' && !input.v1Document && (!input.v1 || input.v1.errorCode === 'report_v1_superseded')) {
+      return {
+        v2: input.v2,
+        v1: await queueResearchReportV1Fallback({ researchSnapshotId: input.snapshotId, organizationId: input.organizationId, userId: input.userId }),
+      };
+    }
+  } catch (error) {
+    console.error('[native-research] missing report enqueue failed:', error instanceof Error ? error.message : String(error));
+  }
+  return null;
+}
 
 export async function GET(_req: NextRequest, context: { params: Promise<{ reportId: string }> }) {
   try {
@@ -45,7 +95,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ report
       : null;
     const snapshot = snapshotRow?.payload ? ResearchSnapshotV1Schema.parse(snapshotRow.payload) : null;
     const configuration = snapshot ? await loadReportV2SellerConfiguration({ organizationId: job.organizationId, userId: job.userId }) : null;
-    const [reportSynthesisState, reportSynthesisStateV2] = snapshot
+    let [reportSynthesisState, reportSynthesisStateV2] = snapshot
       ? await Promise.all([
         loadResearchReportSynthesisState({
           researchSnapshotId: snapshot.id,
@@ -77,6 +127,18 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ report
           : Promise.resolve(null),
       ])
       : [null, null];
+    if (snapshot && configuration?.mode === 'visible') {
+      const queued = await queueMissingReport({
+        snapshotId: snapshot.id, organizationId: job.organizationId, userId: job.userId,
+        synthesisContextHash: configuration.synthesisContextHash,
+        v1: reportSynthesisState, v1Document: Boolean(reportDocument), v2: reportSynthesisStateV2,
+      });
+      if (queued) {
+        [reportSynthesisState, reportSynthesisStateV2] = [queued.v1, queued.v2];
+        void processResearchReportSynthesisQueue({ limit: 1, organizationId: job.organizationId, userId: job.userId })
+          .catch((error) => console.error('[native-research] missing report worker failed:', error));
+      }
+    }
     const reportDocuments = [
       ...(reportDocument ? [{
         schemaVersion: RESEARCH_REPORT_V1_SCHEMA_VERSION,
@@ -108,9 +170,9 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ report
       reportDocuments,
       reportSyntheses,
       questionnaireEnabled: configuration?.questionnaireMode === 'visible',
-      preferredReportSchemaVersion: configuration?.mode === 'visible' && (reportSynthesisStateV2 || !reportDocument)
-        ? RESEARCH_REPORT_V2_SCHEMA_VERSION
-        : RESEARCH_REPORT_V1_SCHEMA_VERSION,
+      preferredReportSchemaVersion: preferredReportSchema({
+        visible: configuration?.mode === 'visible', v1: reportSynthesisState, v1Document: Boolean(reportDocument), v2: reportSynthesisStateV2,
+      }),
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);
@@ -134,7 +196,12 @@ export async function POST(_req: NextRequest, context: { params: Promise<{ repor
       loadResearchReportSynthesisState({ researchSnapshotId: job.researchSnapshotId, schemaVersion: RESEARCH_REPORT_V1_SCHEMA_VERSION, access }),
     ]);
     const configuration = await loadReportV2SellerConfiguration({ organizationId: job.organizationId, userId: job.userId });
-    const preferredState = configuration.mode === 'visible' && states[0] ? states[0] : states[1];
+    const v1Document = states[1]?.reportDocumentId
+      ? Boolean(await loadResearchReportDocument({ researchSnapshotId: job.researchSnapshotId, reportDocumentId: states[1].reportDocumentId, access }))
+      : false;
+    const preferredState = preferredReportSchema({ visible: configuration.mode === 'visible', v1: states[1], v1Document, v2: states[0] }) === RESEARCH_REPORT_V2_SCHEMA_VERSION
+      ? states[0]
+      : states[1];
     const target = preferredState?.status === 'failed_permanent' ? preferredState : null;
     if (!target) return NextResponse.json({ error: 'REPORT_SYNTHESIS_NOT_RETRYABLE' }, { status: 409 });
     await retryResearchReportSynthesis({
