@@ -4,7 +4,7 @@ import { AuthError, handleAuthError, requireAuth } from '@/lib/server/auth-utils
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
-import { sendSelfEmail } from '@/lib/server/self-email';
+import { reportSender, sendReportEmail } from '@/lib/server/self-email';
 import { WeeklyReportError, buildWeeklyReport, readReportEmail, saveOpportunityManagers, saveReportEmail } from '@/lib/server/weekly-report';
 import { reportEmail } from '@/lib/weekly-report';
 
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     const memberIds = isAdmin ? ((members as any).data || []).map((row: any) => String(row.user_id)) : [];
     const names = memberIds.length ? await admin.from('profiles').select('id,full_name,email').in('id', memberIds) : { data: [] };
     return NextResponse.json({
-      report, email: readReportEmail((profile as any).data?.signatures), mailbox: mailbox.resolved,
+      report, email: readReportEmail((profile as any).data?.signatures), mailbox: mailbox.resolved, sender: Boolean(reportSender()),
       ...(isAdmin ? { managers, members: ((names as any).data || []).map((row: any) => ({ userId: String(row.id), name: String(row.full_name || String(row.email || '').split('@')[0] || 'Sin nombre'), email: row.email || null })) } : {}),
     }, { headers: noStore });
   } catch (error) {
@@ -54,9 +54,9 @@ export async function POST(req: NextRequest) {
     const scope = { organizationId: auth.organizationId, userId: auth.user.id };
     if (body.data.action === 'email') return NextResponse.json(await saveReportEmail(admin, auth.user.id, body.data.on), { headers: noStore });
     if (body.data.action === 'managers') return NextResponse.json(await saveOpportunityManagers(admin, scope, body.data.userIds), { headers: noStore });
-    // «Enviármelo ahora»: the report on screen, to the person's own address, from their own mailbox.
+    // «Enviármelo ahora»: the report on screen, to the person's own address, from their own mailbox or the reports mailbox.
     const { report } = await buildWeeklyReport(admin, scope, { which: body.data.week, canSeeOpportunities: () => canUseOpportunities(admin, auth.user as any, auth.organizationId) });
-    const sent = await sendSelfEmail(admin, { userId: auth.user.id, to: String(auth.user.email || ''), ...reportEmail(report, appUrl()) });
+    const sent = await sendReportEmail(admin, { userId: auth.user.id, to: String(auth.user.email || ''), ...reportEmail(report, appUrl()) });
     if (!sent.ok) throw new AuthError(sent.error, 409);
     return NextResponse.json({ sent: true, to: auth.user.email }, { headers: noStore });
   } catch (error) {

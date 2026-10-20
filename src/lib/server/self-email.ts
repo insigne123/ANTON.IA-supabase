@@ -8,7 +8,8 @@ import { tokenService } from '@/lib/services/token-service';
 /**
  * An email the person sends to themselves from their own connected mailbox (the Monday «Informe semanal»). It is not
  * prospecting: no unsubscribe link, no tracking and no do-not-contact header, which would list the person's own address.
- * WEEKLY_REPORTS_EMAIL=off stops every send.
+ * WEEKLY_REPORTS_EMAIL=off stops every send. Whoever has no mailbox connected gets it from the reports mailbox
+ * (sendReportEmail).
  */
 type Fetch = typeof fetch;
 export type SelfEmail = { userId: string; to: string; subject: string; html: string; text: string };
@@ -33,7 +34,7 @@ export async function sendSelfEmail(client: SupabaseClient, input: SelfEmail, de
   const to = input.to.trim();
   if (!EMAIL.test(to)) return { ok: false as const, error: 'Tu cuenta no tiene un correo válido.' };
   const { resolved } = await readMailSenderPreference(client, input.userId);
-  if (!resolved) return { ok: false as const, error: 'Conecta Gmail u Outlook en «Conexiones» para recibirlo por correo.' };
+  if (!resolved) return { ok: false as const, noMailbox: true as const, error: 'Conecta Gmail u Outlook en «Conexiones» para recibirlo por correo.' };
   try {
     const token = await tokenService.getToken(client, input.userId, resolved);
     if (!token?.refresh_token) return { ok: false as const, error: 'Reconecta tu correo en «Conexiones».' };
@@ -54,4 +55,18 @@ export async function sendSelfEmail(client: SupabaseClient, input: SelfEmail, de
   } catch {
     return { ok: false as const, error: 'Reconecta tu correo en «Conexiones».' };
   }
+}
+
+/** The account whose connected mailbox sends the report to whoever has none (WEEKLY_REPORTS_SENDER_USER_ID). */
+export const reportSender = (env: Record<string, string | undefined> = process.env) => String(env.WEEKLY_REPORTS_SENDER_USER_ID || '').trim() || null;
+
+/**
+ * The «Informe semanal» for everyone: from the person's own Gmail or Outlook when they connected one, and otherwise from
+ * the reports mailbox, still to the person's own address. A mailbox that fails is not replaced: its error is the answer.
+ */
+export async function sendReportEmail(client: SupabaseClient, input: SelfEmail, deps: { fetch?: Fetch; env?: Record<string, string | undefined> } = {}) {
+  const own = await sendSelfEmail(client, input, deps);
+  const sender = reportSender(deps.env ?? process.env);
+  if (own.ok || !('noMailbox' in own) || !sender || sender === input.userId) return own;
+  return sendSelfEmail(client, { ...input, userId: sender }, deps);
 }

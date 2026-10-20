@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { dayInZone } from '@/lib/admin/chile-time';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
-import { sendSelfEmail } from '@/lib/server/self-email';
+import { sendReportEmail } from '@/lib/server/self-email';
 import { deliverWeeklyReport } from '@/lib/server/weekly-report';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 
@@ -13,7 +13,8 @@ const BATCH = 40;
 
 /**
  * Monday's «Informe semanal» (functions/index.ts, weeklyReportsTick, Mondays 8:00 to 10:30 in Chile): last week's report
- * for each person who turned on the email, in each of their organizations, sent from their own mailbox. Every run takes
+ * for each person with the email on, in each of their organizations, sent from their own mailbox or, without one, from
+ * the reports mailbox (sendReportEmail). Every run takes
  * the next batch; what was already sent this week is skipped, so the later runs only finish what is left.
  */
 export async function POST(request: Request) {
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     try {
       const outcome = await deliverWeeklyReport(admin, scope, {
         appUrl, now,
-        send: input => sendSelfEmail(admin, input),
+        send: input => sendReportEmail(admin, input),
         canSeeOpportunities: async () => {
           const { data } = await admin.auth.admin.getUserById(scope.userId);
           return Boolean(data?.user && await canUseOpportunities(admin, data.user as any, scope.organizationId));

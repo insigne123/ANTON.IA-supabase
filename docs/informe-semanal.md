@@ -48,9 +48,15 @@ Una página, «Informe semanal», en «Centro de mando», con «Esta semana» (d
 
 ## Por correo, cada lunes
 
-- **Activación:** «Recibirlo por correo cada lunes» queda apagado hasta que la persona lo enciende.
+- **Activación:** desde el 20 de octubre de 2026 está activado para todos los usuarios de los clientes, excepto las cuentas internas y de prueba. Cada persona lo apaga en la misma página. Una cuenta nueva lo enciende ahí.
 - **Cuándo:** a las 8:00 de Chile llega el informe de la semana anterior.
-- **Desde dónde:** sale desde **su propio Gmail u Outlook conectado, hacia su mismo correo**. No hay proveedor de correo nuevo ni costo, y no usa el cupo de envíos.
+- **Desde dónde:**
+  - sale desde **su propio Gmail u Outlook conectado, hacia su mismo correo**;
+  - si la persona no conectó ninguno y está configurado `WEEKLY_REPORTS_SENDER_USER_ID`, sale desde **el correo de informes**, hacia su correo;
+  - el correo de informes es una cuenta con Gmail u Outlook conectado;
+  - sin esa variable, quien no tiene correo conectado ve el informe en «Hoy» y no lo recibe por correo;
+  - si el correo propio falla, no se reemplaza: el error queda en `weekly_reports.email_error`;
+  - no hay proveedor de correo nuevo ni costo, y no usa el cupo de envíos.
 - **Contenido:** a diferencia de la prospección, no lleva enlace de baja, seguimiento ni la cabecera de baja con un clic, que agregaría la propia dirección a la lista de no contactar. Se apaga en la misma página.
 - **«Enviármelo ahora»:** manda el informe que está en pantalla.
 - **Gestores:** un administrador elige a los gestores de oportunidades en «Gestores de oportunidades».
