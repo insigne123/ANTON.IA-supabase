@@ -1661,7 +1661,10 @@ function buildSnapshot(input: {
   }
 
   const hasUsefulClaim = claims.length > 0;
-  const status: NativeResearchStatus = companyFactEvidence.length > 0 && reportWarnings.length === 0
+  // Only missing company context leaves the research partial. News, hiring, mentions, digital presence and the person's
+  // public trail add color: when one is missing the report says so (the warnings below), but the research is complete.
+  // Before 20 oct 2026 any warning made it partial: 47 of 73 in 45 days, most with a sound company profile.
+  const status: NativeResearchStatus = companyFactEvidence.length > 0
     ? 'completed'
     : hasUsefulClaim ? 'partial' : 'insufficient_data';
   const lifecycleErrors = reportWarnings.map((warning) => createError({

@@ -42,8 +42,14 @@ function list(value: unknown) {
   return [...new Set(values.map(text).filter(Boolean))].slice(0, 50);
 }
 
+/**
+ * The research report each workspace sees. Without a setting it is the current report (V2, visible) since 20 oct 2026:
+ * V1 never ended complete for PSOL (29 partial and 7 failed in 45 days) and Cowork reads only V2. An explicit «off» or
+ * «shadow» still wins; an unknown value stays off.
+ */
 function reportV2Mode(value: unknown): ReportV2Mode {
   const mode = text(value).toLowerCase();
+  if (!mode) return 'visible';
   return mode === 'shadow' || mode === 'visible' ? mode : 'off';
 }
 
