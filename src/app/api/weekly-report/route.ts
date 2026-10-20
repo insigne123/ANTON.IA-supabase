@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { DailyAlertsError, readAlertsEmail, saveAlertsEmail } from '@/lib/server/daily-alerts';
 import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
-import { reportSender, sendReportEmail } from '@/lib/server/self-email';
+import { canEmailEveryone, sendReportEmail } from '@/lib/server/self-email';
 import { WeeklyReportError, buildWeeklyReport, readReportEmail, saveOpportunityManagers, saveReportEmail } from '@/lib/server/weekly-report';
 import { reportEmail } from '@/lib/weekly-report';
 
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const memberIds = isAdmin ? ((members as any).data || []).map((row: any) => String(row.user_id)) : [];
     const names = memberIds.length ? await admin.from('profiles').select('id,full_name,email').in('id', memberIds) : { data: [] };
     return NextResponse.json({
-      report, email: readReportEmail((profile as any).data?.signatures), alerts: readAlertsEmail((profile as any).data?.signatures), mailbox: mailbox.resolved, sender: Boolean(reportSender()),
+      report, email: readReportEmail((profile as any).data?.signatures), alerts: readAlertsEmail((profile as any).data?.signatures), mailbox: mailbox.resolved, sender: canEmailEveryone(),
       ...(isAdmin ? { managers, members: ((names as any).data || []).map((row: any) => ({ userId: String(row.id), name: String(row.full_name || String(row.email || '').split('@')[0] || 'Sin nombre'), email: row.email || null })) } : {}),
     }, { headers: noStore });
   } catch (error) {

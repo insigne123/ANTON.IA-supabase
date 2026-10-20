@@ -331,6 +331,11 @@ env:
   - variable: LEADS_FINDER_MAX_RUN_USD
     value: "0.50"
     availability: [RUNTIME]
+  # The app's own emails (weekly report, alerts, contact of the day) go out from this Yago address through Resend once
+  # the RESEND_API_KEY secret exists and is referenced here (docs/informe-semanal.md, «Activar Resend»).
+  - variable: REPORTS_FROM_EMAIL
+    value: "ANTON.IA <avisos@yago.cl>"
+    availability: [RUNTIME]
   # Activation authorized 12 Oct. Production SQL versions 20261012142946 and
   # 20261012143054 verified; fixed caps USD1.50/run, USD20/month/workspace.
   # Worker microworldsSearchTick is published before this rollout receives traffic.

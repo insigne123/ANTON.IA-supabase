@@ -4,7 +4,7 @@ import { alertDay } from '@/lib/daily-alerts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { deliverDailyAlert, readAlertsEmail } from '@/lib/server/daily-alerts';
-import { reportSender, sendReportEmail } from '@/lib/server/self-email';
+import { canEmailEveryone, isTestAddress, sendReportEmail } from '@/lib/server/self-email';
 import { readOpportunityManagers } from '@/lib/server/weekly-report';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 
@@ -17,8 +17,8 @@ const PARALLEL = 4;
 /**
  * The morning «Avisos» (functions/index.ts, dailyAlertsTick, Tuesday to Friday from 8:00 to 9:30 in Chile): for each
  * person with the alerts on, in each of their organizations, the day's alert when there is something concrete to do,
- * from their own mailbox or the reports mailbox (sendReportEmail). Whoever has neither is skipped: their alert would only
- * be written to fail. Every run takes the next batch; what already has an alert today is skipped. DAILY_ALERTS=off stops them.
+ * from the Yago address through Resend, their own mailbox or the reports mailbox (sendReportEmail). Whoever cannot get it
+ * is skipped, and so are test addresses: their alert would only be written to fail. Every run takes the next batch; what already has an alert today is skipped. DAILY_ALERTS=off stops them.
  */
 export async function POST(request: Request) {
   if (!isFirebaseSchedulerRequest(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -35,13 +35,13 @@ export async function POST(request: Request) {
   ]);
   if (members.error || done.error || tokens.error) return NextResponse.json({ error: 'No pudimos leer a quién avisar.' }, { status: 503, headers });
   const mailbox = new Set((tokens.data || []).map((row: any) => String(row.user_id)));
-  const sender = Boolean(reportSender());
+  const sender = canEmailEveryone();
   const ids = [...new Set<string>((members.data || []).map((row: any) => String(row.user_id)))].filter(id => sender || mailbox.has(id));
   const on = new Set<string>();
   for (let start = 0; start < ids.length; start += 200) {
     const profiles: any = await admin.from('profiles').select('id,email,signatures').in('id', ids.slice(start, start + 200));
     if (profiles.error) return NextResponse.json({ error: 'No pudimos leer a quién avisar.' }, { status: 503, headers });
-    for (const row of profiles.data || []) if (String(row.email || '').trim() && readAlertsEmail(row.signatures)) on.add(String(row.id));
+    for (const row of profiles.data || []) if (String(row.email || '').trim() && !isTestAddress(row.email) && readAlertsEmail(row.signatures)) on.add(String(row.id));
   }
   const alerted = new Set((done.data || []).map((row: any) => `${row.organization_id}:${row.user_id}`));
   // Whoever belongs to several workspaces hears about a goal that is behind from the first one they joined.

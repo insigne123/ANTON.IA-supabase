@@ -51,12 +51,18 @@ Una página, «Informe semanal», en «Centro de mando», con «Esta semana» (d
 - **Activación:** desde el 20 de octubre de 2026 está activado para todos los usuarios de los clientes, excepto las cuentas internas y de prueba. Cada persona lo apaga en la misma página. Una cuenta nueva lo enciende ahí.
 - **Cuándo:** a las 8:00 de Chile llega el informe de la semana anterior.
 - **Desde dónde:**
-  - sale desde **su propio Gmail u Outlook conectado, hacia su mismo correo**;
-  - si la persona no conectó ninguno y está configurado `WEEKLY_REPORTS_SENDER_USER_ID`, sale desde **el correo de informes**, hacia su correo;
-  - el correo de informes es una cuenta con Gmail u Outlook conectado;
-  - sin esa variable, quien no tiene correo conectado ve el informe en «Hoy» y no lo recibe por correo;
-  - si el correo propio falla, no se reemplaza: el error queda en `weekly_reports.email_error`;
-  - no hay proveedor de correo nuevo ni costo, y no usa el cupo de envíos.
+  - **con Resend** (`RESEND_API_KEY`), sale desde **una dirección de Yago** (`REPORTS_FROM_EMAIL`, por defecto `ANTON.IA <avisos@yago.cl>`), hacia el correo de la persona, tenga o no su correo conectado. Si Resend responde 429, espera y reintenta dos veces;
+  - sin Resend, sale desde **su propio Gmail u Outlook conectado, hacia su mismo correo**;
+  - si la persona no conectó ninguno y está configurado `WEEKLY_REPORTS_SENDER_USER_ID`, sale desde **el correo de informes**, una cuenta con Gmail u Outlook conectado;
+  - sin ninguno de los dos, quien no tiene correo conectado ve el informe en «Hoy» y no lo recibe por correo;
+  - si el correo falla, no se reemplaza: el error queda en `weekly_reports.email_error`;
+  - una dirección de prueba (example.com, `.test`, `.local`…) nunca recibe un correo automático;
+  - no usa el cupo de envíos.
+- **Activar Resend** (lo hace quien administra Yago; la clave nunca pasa por el chat ni por el repositorio):
+  1. En resend.com, agregar el dominio `yago.cl` y poner en su DNS los registros que pide (SPF y DKIM, en el subdominio `send`).
+  2. Crear una clave de envío y guardarla como secreto de App Hosting: `firebase apphosting:secrets:set RESEND_API_KEY --project leadflowai-3yjcy`, y dar acceso al backend `studio` cuando lo pregunte.
+  3. Agregar en `apphosting.yaml` la variable `RESEND_API_KEY` con `secret: RESEND_API_KEY` y publicar. Desde ese momento, informe, avisos y contacto del día salen por Resend.
+  - El plan gratuito de Resend permite 100 correos al día y 3.000 al mes; hoy alcanza para los 35 usuarios de clientes.
 - **Contenido:** a diferencia de la prospección, no lleva enlace de baja, seguimiento ni la cabecera de baja con un clic, que agregaría la propia dirección a la lista de no contactar. Se apaga en la misma página.
 - **«Enviármelo ahora»:** manda el informe que está en pantalla.
 - **Gestores:** un administrador elige a los gestores de oportunidades en «Gestores de oportunidades».

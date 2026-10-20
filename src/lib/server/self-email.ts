@@ -6,10 +6,10 @@ import { readMailSenderPreference } from '@/lib/server/mail-sender-preference';
 import { tokenService } from '@/lib/services/token-service';
 
 /**
- * An email the person sends to themselves from their own connected mailbox (the Monday «Informe semanal»). It is not
- * prospecting: no unsubscribe link, no tracking and no do-not-contact header, which would list the person's own address.
- * WEEKLY_REPORTS_EMAIL=off stops every send. Whoever has no mailbox connected gets it from the reports mailbox
- * (sendReportEmail).
+ * The app's own emails to a person: the Monday «Informe semanal», the morning «Avisos» and «Contacto del día». With
+ * RESEND_API_KEY they go out from a Yago address through Resend (REPORTS_FROM_EMAIL); without it, from the person's own
+ * connected mailbox or the reports mailbox (sendReportEmail). They are not prospecting: no unsubscribe link, no tracking
+ * and no do-not-contact header. WEEKLY_REPORTS_EMAIL=off stops every send, and test addresses never get one.
  */
 type Fetch = typeof fetch;
 export type SelfAttachment = { filename: string; contentType: string; content: Buffer };
@@ -78,13 +78,58 @@ export async function sendSelfEmail(client: SupabaseClient, input: SelfEmail, de
 /** The account whose connected mailbox sends the report to whoever has none (WEEKLY_REPORTS_SENDER_USER_ID). */
 export const reportSender = (env: Record<string, string | undefined> = process.env) => String(env.WEEKLY_REPORTS_SENDER_USER_ID || '').trim() || null;
 
+/** The Yago address the app's emails go out from through Resend, when RESEND_API_KEY is set. */
+export function resendSender(env: Record<string, string | undefined> = process.env) {
+  const apiKey = String(env.RESEND_API_KEY || '').trim();
+  if (!apiKey) return null;
+  return { apiKey, from: String(env.REPORTS_FROM_EMAIL || '').trim() || 'ANTON.IA <avisos@yago.cl>', replyTo: String(env.REPORTS_REPLY_TO || '').trim() || null };
+}
+
+/** Whether the app's emails reach people without a mailbox of their own: through Resend or the reports mailbox. */
+export const canEmailEveryone = (env: Record<string, string | undefined> = process.env) => Boolean(resendSender(env) || reportSender(env));
+
+/** Reserved test domains (example.com, *.test, …): automated emails there would only bounce and hurt the sender. */
+export function isTestAddress(email: string | null | undefined) {
+  const domain = String(email || '').trim().toLowerCase().split('@')[1] || '';
+  return /^example\.(com|net|org)$/.test(domain) || /\.(test|example|invalid|localhost|local)$/.test(domain) || domain === 'localhost';
+}
+
+type Resend = NonNullable<ReturnType<typeof resendSender>>;
+/** One email through Resend; a 429 (two per second) waits and tries again, twice at most. */
+async function sendWithResend(input: SelfEmail, resend: Resend, request: Fetch, wait: (ms: number) => Promise<void>) {
+  const body = JSON.stringify({
+    from: resend.from, to: [input.to.trim()], subject: input.subject, html: input.html, text: input.text,
+    ...(resend.replyTo ? { reply_to: resend.replyTo } : {}),
+    ...(input.attachments?.length ? { attachments: input.attachments.map(file => ({ filename: file.filename, content: file.content.toString('base64') })) } : {}),
+  });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await request('https://api.resend.com/emails', {
+        method: 'POST', headers: { Authorization: `Bearer ${resend.apiKey}`, 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(30_000),
+      });
+      if (response.ok) return { ok: true as const };
+      if (response.status !== 429 || attempt >= 2) return { ok: false as const, error: `Resend no aceptó el correo (${response.status}).` };
+    } catch {
+      return { ok: false as const, error: 'No pudimos conectar con Resend.' };
+    }
+    await wait(1000 * (attempt + 1));
+  }
+}
+
 /**
- * The «Informe semanal» for everyone: from the person's own Gmail or Outlook when they connected one, and otherwise from
- * the reports mailbox, still to the person's own address. A mailbox that fails is not replaced: its error is the answer.
+ * The app's emails for everyone: through Resend from the Yago address when it is set up; otherwise from the person's own
+ * Gmail or Outlook when they connected one, and else from the reports mailbox, always to the person's own address. A
+ * mailbox that fails is not replaced: its error is the answer.
  */
-export async function sendReportEmail(client: SupabaseClient, input: SelfEmail, deps: { fetch?: Fetch; env?: Record<string, string | undefined> } = {}) {
+export async function sendReportEmail(client: SupabaseClient, input: SelfEmail, deps: { fetch?: Fetch; env?: Record<string, string | undefined>; wait?: (ms: number) => Promise<void> } = {}) {
+  const env = deps.env ?? process.env;
+  if (env.WEEKLY_REPORTS_EMAIL === 'off') return { ok: false as const, error: 'El envío de informes está apagado.' };
+  if (!EMAIL.test(input.to.trim())) return { ok: false as const, error: 'Tu cuenta no tiene un correo válido.' };
+  if (isTestAddress(input.to)) return { ok: false as const, error: 'Es una dirección de prueba: no recibe correos automáticos.' };
+  const resend = resendSender(env);
+  if (resend) return sendWithResend(input, resend, deps.fetch ?? fetch, deps.wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms))));
   const own = await sendSelfEmail(client, input, deps);
-  const sender = reportSender(deps.env ?? process.env);
+  const sender = reportSender(env);
   if (own.ok || !('noMailbox' in own) || !sender || sender === input.userId) return own;
   return sendSelfEmail(client, { ...input, userId: sender }, deps);
 }

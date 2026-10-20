@@ -124,11 +124,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       '«Tu semana» trae una frase con lo importante, tus correos enviados, las personas contactadas, las respuestas, las reuniones pedidas y «Para esta semana»: hasta tres cosas para hacer, con su enlace.',
       'Si administras la organización, «Equipo» muestra lo mismo por persona, con quién tiene respuestas por atender. Quien no tuvo actividad en la semana queda contado en una línea, y «Ver» lo muestra; si nadie escribió, una frase lo dice.',
       '«Oportunidades» muestra lo que llegó en la semana, lo que cierra en los próximos 7 días y lo que nadie tiene asignado. Lo ven los gestores de oportunidades que elija un administrador; mientras no haya, los administradores.',
-      'Abajo, «Recibirlo por correo cada lunes» te lo envía a las 8:00 con la semana anterior, a tu correo, desde tu Gmail u Outlook conectado. Viene activado y lo apagas ahí mismo. «Enviármelo ahora» te manda el que estás viendo.',
+      'Abajo, «Recibirlo por correo cada lunes» te lo envía a las 8:00 con la semana anterior, a tu correo. Viene activado y lo apagas ahí mismo. «Enviármelo ahora» te manda el que estás viendo.',
       '«Avisos por correo» te escribe de martes a viernes en la mañana, solo cuando hay algo que hacer: alguien respondió, vence un compromiso, cierra una oportunidad o tu meta va atrasada. Se apaga ahí mismo.',
     ],
     faqs: [
-      { q: '¿Desde dónde sale el correo del informe?', a: 'Desde tu propia cuenta de Gmail u Outlook conectada en «Conexiones», hacia tu mismo correo. No lo recibe nadie más y no usa tu cupo de envíos.' },
+      { q: '¿Desde dónde sale el correo del informe?', a: 'Desde una dirección de Yago, o desde tu Gmail u Outlook conectado si esa aún no está activa, hacia tu mismo correo. No lo recibe nadie más y no usa tu cupo de envíos.' },
       { q: '¿Quién pone las metas?', a: 'Un administrador, en «Equipo» → «Metas del equipo»: la del equipo y, si alguien necesita otra, la suya. Sin nada configurado, la meta es contactar a 10 personas y sumar 15 contactos con correo por semana.' },
       { q: '¿Cómo nombro a un gestor de oportunidades?', a: 'Si administras la organización, en «Informe semanal» pulsa «Gestores de oportunidades», marca a las personas y guarda. Desde el lunes siguiente reciben la sección «Oportunidades».' },
       { q: '¿Por qué mis cifras no coinciden con «Hoy»?', a: '«Hoy» cuenta solo el día. El informe cuenta la semana de lunes a domingo, en hora de Chile, y solo correos confirmados por tu proveedor.' },

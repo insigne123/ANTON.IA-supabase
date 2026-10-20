@@ -85,3 +85,40 @@ test('whoever has no mailbox gets it from the reports mailbox, to their own addr
   assert.equal(calls.length, 2);
   (globalThis as any).__mailboxes = undefined;
 });
+
+test('with RESEND_API_KEY everything goes out from the Yago address through Resend, with its files; a 429 waits and retries', async () => {
+  const { sendReportEmail, canEmailEveryone } = await load();
+  const calls: any[] = [];
+  let answers = [200];
+  const fetcher = (async (url: string, init: any) => { calls.push({ url, init }); return new Response('{}', { status: answers.shift() ?? 200 }); }) as any;
+  const waits: number[] = [];
+  const wait = async (ms: number) => { waits.push(ms); };
+  const env = { RESEND_API_KEY: 're_test', REPORTS_FROM_EMAIL: 'ANTON.IA <avisos@yago.cl>' };
+  (globalThis as any).__mailboxes = { 'u-1': 'google' };
+  const file = { filename: 'contacto-del-dia-2026-10-21.pdf', contentType: 'application/pdf', content: Buffer.from('%PDF') };
+  assert.deepEqual(await sendReportEmail({} as any, { ...email, attachments: [file] }, { fetch: fetcher, env, wait }), { ok: true });
+  assert.equal(calls[0].url, 'https://api.resend.com/emails', 'not the person\'s own mailbox');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer re_test');
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual([body.from, body.to, body.subject, body.text], ['ANTON.IA <avisos@yago.cl>', ['nico@axis.cl'], email.subject, 'Hola']);
+  assert.deepEqual(body.attachments, [{ filename: 'contacto-del-dia-2026-10-21.pdf', content: Buffer.from('%PDF').toString('base64') }]);
+  answers = [429, 200];
+  assert.deepEqual(await sendReportEmail({} as any, email, { fetch: fetcher, env, wait }), { ok: true });
+  assert.deepEqual(waits, [1000]);
+  answers = [500];
+  assert.match((await sendReportEmail({} as any, email, { fetch: fetcher, env, wait })).error, /Resend no aceptó el correo \(500\)/);
+  const before = calls.length;
+  assert.match((await sendReportEmail({} as any, { ...email, to: 'smoke+1@example.com' }, { fetch: fetcher, env, wait })).error, /dirección de prueba/);
+  assert.match((await sendReportEmail({} as any, email, { fetch: fetcher, env: { ...env, WEEKLY_REPORTS_EMAIL: 'off' }, wait })).error, /apagado/);
+  assert.equal(calls.length, before, 'nothing goes to a test address or with the emails off');
+  assert.equal(canEmailEveryone(env), true);
+  assert.equal(canEmailEveryone({ WEEKLY_REPORTS_SENDER_USER_ID: 'sender' }), true);
+  assert.equal(canEmailEveryone({}), false);
+  (globalThis as any).__mailboxes = undefined;
+});
+
+test('test addresses are the reserved ones, not a customer\'s', async () => {
+  const { isTestAddress } = await load();
+  for (const address of ['a@example.com', 'smoke+2@example.org', 'e2e@local.test', 'x@foo.localhost', 'y@app.invalid']) assert.equal(isTestAddress(address), true, address);
+  for (const address of ['ana@grupoexpro.com', 'jefa@psol-latam.cl', 'nico@yago.cl', 'p@examples.com', '']) assert.equal(isTestAddress(address), false, address);
+});

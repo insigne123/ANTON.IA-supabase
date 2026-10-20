@@ -4,7 +4,7 @@ import { dayInZone } from '@/lib/admin/chile-time';
 import { dropDay } from '@/lib/lead-drops';
 import { readAlertsEmail } from '@/lib/server/daily-alerts';
 import { dropsEnabled, dropsMonthlyUsd, monthSpend, planOrganizationDrops, writeDrop } from '@/lib/server/lead-drops';
-import { reportSender } from '@/lib/server/self-email';
+import { canEmailEveryone, isTestAddress } from '@/lib/server/self-email';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 
@@ -66,14 +66,14 @@ export async function POST(request: Request) {
       if (members.error || existing.error || tokens.error) return NextResponse.json({ error: 'No pudimos leer a quién preparar.' }, { status: 503, headers });
       const done = new Set((existing.data || []).map((row: any) => String(row.user_id)));
       const mailbox = new Set((tokens.data || []).map((row: any) => String(row.user_id)));
-      const sender = Boolean(reportSender());
+      const sender = canEmailEveryone();
       const ids = [...new Set<string>((members.data || []).map((row: any) => String(row.user_id)))]
         .filter(id => !done.has(id) && (only ? only.has(id) : sender || mailbox.has(id)));
       const reachable = new Set<string>();
       for (let start = 0; start < ids.length; start += 200) {
         const profiles: any = await admin.from('profiles').select('id,email,signatures').in('id', ids.slice(start, start + 200));
         if (profiles.error) return NextResponse.json({ error: 'No pudimos leer a quién preparar.' }, { status: 503, headers });
-        for (const row of profiles.data || []) if (only || (String(row.email || '').trim() && readAlertsEmail(row.signatures))) reachable.add(String(row.id));
+        for (const row of profiles.data || []) if (only || (String(row.email || '').trim() && !isTestAddress(row.email) && readAlertsEmail(row.signatures))) reachable.add(String(row.id));
       }
       // One drop per person, in the workspace of their team: the one with most people, or the first they joined.
       const size = new Map<string, number>();
