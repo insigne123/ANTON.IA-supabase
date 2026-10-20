@@ -159,7 +159,7 @@ test('all metered resources use the same user-scoped atomic credit boundary', ()
   assert.match(sharedCreditsSql, /revoke all on function public\.consume_suplia_research_tool_credit_v1\(uuid, uuid, uuid\)[\s\S]*from public, anon, authenticated;/);
   assert.match(sharedCreditsSql, /grant execute on function public\.consume_suplia_research_tool_credit_v1\(uuid, uuid, uuid\)[\s\S]*to service_role;/);
   assert.match(supliaResearch, /if \(!context\.consumeResearchCredit\) throw new Error\('RESEARCH_CREDIT_RESERVATION_REQUIRED'\)/);
-  assert.match(supliaResearch, /needEnv\('SERPER_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*await searchSerper\(search\)/);
+  assert.match(supliaResearch, /needEnv\('SERPER_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*await searchSerper\(search(?:, \{[^}]*\})?\)/);
   assert.match(supliaResearch, /needEnv\('BRANDDEV_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*fetchJsonWithTimeout/);
 });
 
