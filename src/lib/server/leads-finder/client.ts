@@ -15,6 +15,11 @@ export const leadsFinderUsdPerLead = (env: Record<string, string | undefined> = 
   const value = Number(env.LEADS_FINDER_USD_PER_LEAD);
   return Number.isFinite(value) && value > 0 && value < 1 ? value : 0.002;
 };
+/** LEADS_FINDER_MAX_RUN_USD: the most one run may charge (US$0.50 by default, at most 5). Apify refuses caps under its minimum. */
+export const leadsFinderMaxRunUsd = (env: Record<string, string | undefined> = process.env) => {
+  const value = Number(env.LEADS_FINDER_MAX_RUN_USD);
+  return Number.isFinite(value) && value > 0 ? Math.min(value, 5) : 0.5;
+};
 
 export type LeadsFinderContact = {
   fullName: string; firstName: string; lastName: string; email: string | null; personalEmail: string | null;

@@ -105,7 +105,31 @@ const INDUSTRY_ALIASES: Record<string, string> = {
   telecomunicaciones: 'telecommunications', consultoria: 'management consulting', legal: 'legal services', abogados: 'law practice',
   hoteleria: 'hospitality', turismo: 'leisure, travel & tourism', retail: 'retail', manufactura: 'machinery', manufacturing: 'machinery',
   fabricacion: 'machinery', 'gobierno': 'government administration', aseo: 'facilities services', 'servicios generales': 'facilities services',
+  // How Chilean customers write their market in «Perfil» (20 oct 2026).
+  'seguridad privada': 'security & investigations', 'servicios transitorios': 'staffing & recruiting', supermercados: 'supermarkets',
+  supermercado: 'supermarkets', automotriz: 'automotive', bancos: 'banking', banco: 'banking', mayorista: 'wholesale',
+  distribucion: 'wholesale', bodegaje: 'warehousing', almacenamiento: 'warehousing', 'call center': 'outsourcing/offshoring',
+  restaurantes: 'restaurants', gastronomia: 'restaurants', vestuario: 'apparel & fashion', moda: 'apparel & fashion',
+  agroindustria: 'farming', agricola: 'farming', pesca: 'fishery', acuicultura: 'fishery', vinas: 'wine & spirits', vino: 'wine & spirits',
+  quimica: 'chemicals', ingenieria: 'civil engineering', 'medio ambiente': 'environmental services', contabilidad: 'accounting',
+  marketing: 'marketing & advertising', publicidad: 'marketing & advertising', cosmetica: 'cosmetics', clinicas: 'hospital & health care',
+  hospitales: 'hospital & health care', universidades: 'higher education', municipalidades: 'government administration',
+  'sector publico': 'government administration', 'servicios basicos': 'utilities', envases: 'packaging & containers',
+  empaque: 'packaging & containers', courier: 'package/freight delivery',
 };
+
+/**
+ * An industry as the actor names it, from how people write it: its own name, an alias, or an alias among its words
+ * («seguridad privada y vigilancia» → security & investigations). Null when nothing fits.
+ */
+export function leadsFinderIndustry(value: string) {
+  const key = fold(value);
+  const exact = INDUSTRY_ALIASES[key] || (INDUSTRIES.has(key) ? INDUSTRIES.get(key) : undefined);
+  if (exact) return exact;
+  const padded = ` ${key} `;
+  const alias = Object.keys(INDUSTRY_ALIASES).find(name => padded.includes(` ${name} `));
+  return alias ? INDUSTRY_ALIASES[alias] : null;
+}
 
 const clean = (values: string[], max = 20) => [...new Set(values.map(value => value.replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, max);
 

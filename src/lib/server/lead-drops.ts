@@ -11,7 +11,8 @@ import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
-import { leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
+import { leadsFinderMaxRunUsd, leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
+import { leadsFinderIndustry } from '@/lib/server/leads-finder/input';
 import { enrichedLeadRow } from '@/lib/server/leads-finder/reveal';
 import { forgetInVault, readFromVault, storeInVault, type VaultEntry } from '@/lib/server/leads-finder/vault';
 
@@ -82,10 +83,15 @@ function candidateOf(entry: VaultEntry): DropCandidate {
   };
 }
 
-const searchInput = (criteria: DropCriteria, count: number): LeadSearchInput => ({
+/**
+ * The search for a customer. Its industries go as the actor names them; one it does not know is left out, because as a
+ * company keyword it would leave almost nobody («seguridad privada» next to «retail»). `broad`: the titles and places only.
+ */
+const searchInput = (criteria: DropCriteria, count: number, broad = false): LeadSearchInput => ({
   provider: 'apollo' as LeadSearchInput['provider'], searchMode: 'batch', revealEmail: false, revealPhone: false, organizationDomains: [],
-  titles: criteria.titles, seniorities: [], industryKeywords: criteria.industries, companyKeywords: [], companyLocations: [],
-  personLocations: criteria.locations, employeeRanges: criteria.sizes, includeSimilarTitles: true, maxResults: count,
+  titles: criteria.titles, seniorities: [], companyKeywords: [], companyLocations: [],
+  industryKeywords: broad ? [] : [...new Set(criteria.industries.map(leadsFinderIndustry).filter((value): value is string => Boolean(value)))],
+  personLocations: criteria.locations, employeeRanges: broad ? [] : criteria.sizes, includeSimilarTitles: true, maxResults: count,
 });
 
 /** What a customer is chosen from: the team, admins first (their customer speaks for the team when a person has none), and what it saved. */
@@ -114,6 +120,7 @@ const searchCount = (people: number) => Math.max(10, Math.min(100, people * DROP
 const NO_CUSTOMER = 'Sin cliente ideal en «Perfil» ni contactos guardados para inferirlo.';
 const NO_BUDGET = 'Se acabó el presupuesto del mes para el contacto del día.';
 const TOO_FEW = 'La búsqueda no trajo contactos nuevos con correo.';
+const NOBODY = 'La búsqueda no encontró personas con correo verificado para ese cliente ideal.';
 /** A drop that came empty for lack of a customer: nothing was searched, so it is made again once there is one. */
 const withoutCustomer = (drop: { status: string; criteria?: unknown }) => drop.status === 'empty' && !Array.isArray((drop.criteria as DropCriteria | null)?.titles);
 
@@ -156,7 +163,16 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     }
     let found: Awaited<ReturnType<Search>>;
     try {
-      found = await search(searchInput(criteria, count), { fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: Math.min(1, count * usdPerLead * 1.5) });
+      // The run's cap, not its cost (that comes from what it returns): one person's search is too small for a cap of its
+      // own, which Apify refuses under its minimum, so never below an ordinary search's (leadsFinderMaxRunUsd).
+      const deps = { fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: Math.max(leadsFinderMaxRunUsd(), Math.min(1, count * usdPerLead * 1.5)) };
+      const narrow = searchInput(criteria, count);
+      found = await search(narrow, deps);
+      // Nobody with those industries or sizes: once more with the titles and places only.
+      if (!found.results.length && (narrow.industryKeywords.length || narrow.employeeRanges.length)) {
+        const broad = await search(searchInput(criteria, count, true), deps);
+        found = { ...broad, costUsd: found.costUsd + broad.costUsd };
+      }
     } catch (error) {
       for (const userId of members) results.push({ userId, status: 'empty', error: `La búsqueda falló: ${text((error as Error)?.message, 200)}`, criteria: own.get(userId) });
       continue;
@@ -168,7 +184,7 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     for (const userId of members) {
       const picks = assigned.get(userId) || [];
       const mine = own.get(userId) || criteria;
-      if (!picks.length) { results.push({ userId, status: 'empty', error: TOO_FEW, cost: share, criteria: mine }); continue; }
+      if (!picks.length) { results.push({ userId, status: 'empty', error: found.results.length ? TOO_FEW : NOBODY, cost: share, criteria: mine }); continue; }
       for (const pick of picks) { known.leadIds.add(pick.leadId); if (pick.emailKey) known.emails.add(pick.emailKey); }
       await storeInVault(client, { organizationId, userId, entries: picks.map(pick => entries.get(pick.leadId)!).filter(Boolean), now: deps.now.getTime() });
       results.push({ userId, status: 'pending', cost: share, criteria: mine, items: picks.map(pick => ({
@@ -320,6 +336,7 @@ export function emptyReason(error: string | null, now: Date): { title: string; t
   if (error === NO_CUSTOMER) return { title: 'Falta tu cliente ideal', text: 'Con él elegimos tu contacto: a quién le vendes, en qué rubro y dónde. Toma un minuto en «Perfil».', profile: 'Completar mi cliente ideal' };
   if (error === NO_BUDGET) return { title: 'Por este mes no quedan contactos', text: 'Este mes ya se usaron todos los contactos del día: vuelven el próximo mes. Mientras, puedes buscar con tus filtros.', profile: null };
   if (error === TOO_FEW) return { title: 'Esta vez no hubo un contacto nuevo', text: 'Tu equipo ya tiene a muchos de los que calzan con tu cliente ideal. Sumar cargos, rubros o lugares trae contactos nuevos.', profile: 'Ampliar mi cliente ideal' };
+  if (error === NOBODY) return { title: 'Esta vez no encontramos a nadie', text: 'Con tu cliente ideal no encontramos personas con correo verificado. Sumar cargos o lugares en «Perfil» ayuda.', profile: 'Ampliar mi cliente ideal' };
   return { title: 'La búsqueda no respondió', text: `Esta vez no pudimos traer tu contacto. El próximo llega ${nextDropDay(now)}; mientras, puedes buscar con tus filtros.`, profile: null };
 }
 

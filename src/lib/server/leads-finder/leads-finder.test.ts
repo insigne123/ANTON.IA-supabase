@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { LEADS_FINDER_ENUMS } from './actor-enums';
 import { LeadsFinderError, maskLastName, searchLeadsFinder, splitLeadsFinderItems } from './client';
-import { leadsFinderInput, sizeBrackets } from './input';
+import { leadsFinderIndustry, leadsFinderInput, sizeBrackets } from './input';
 
 const search = (patch: Partial<LeadSearchInput> = {}): LeadSearchInput => ({
   provider: 'apollo', searchMode: 'batch', revealEmail: false, revealPhone: false, organizationDomains: [], titles: [], seniorities: [],
@@ -150,4 +150,15 @@ test('the actor does not echo the email status: an email from a validated-only s
   assert.equal(splitLeadsFinderItems([withoutStatus])[0].contact.emailStatus, null);
   assert.equal(splitLeadsFinderItems([{ ...withoutStatus, email: null }], ['validated'])[0].contact.emailStatus, null);
   assert.equal(splitLeadsFinderItems([{ ...withoutStatus, email_status: 'not_validated' }], ['validated'])[0].contact.emailStatus, 'not_validated');
+});
+
+test('industries as people write them map to the actor\'s, even inside longer names; nothing when none fits', () => {
+  const cases: Array<[string, string | null]> = [['Retail', 'retail'], ['Logística', 'logistics & supply chain'], ['Seguridad privada', 'security & investigations'],
+    ['Empresas de servicios transitorios', 'staffing & recruiting'], ['Supermercados', 'supermarkets'], ['construction', 'construction'], ['Cosas varias', null]];
+  for (const [value, expected] of cases) assert.equal(leadsFinderIndustry(value), expected, value);
+  // Every alias names an industry the actor accepts: a wrong one would make Apify reject the run.
+  const names = ['seguridad privada', 'servicios transitorios', 'supermercados', 'automotriz', 'bancos', 'mayorista', 'bodegaje', 'call center',
+    'restaurantes', 'vestuario', 'agroindustria', 'pesca', 'vinas', 'quimica', 'ingenieria', 'medio ambiente', 'contabilidad', 'publicidad',
+    'cosmetica', 'clinicas', 'universidades', 'municipalidades', 'sector publico', 'servicios basicos', 'envases', 'courier'];
+  for (const name of names) assert.ok((LEADS_FINDER_ENUMS.company_industry as readonly string[]).includes(leadsFinderIndustry(name)!), name);
 });
