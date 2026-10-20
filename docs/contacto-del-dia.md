@@ -20,13 +20,14 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 ## Cómo funciona
 
 1. **Preparación** (`leadDropsTick`, martes, miércoles y viernes de 06:00 a 07:40 de Chile, cada 20 minutos, `/api/cron/lead-drops`):
-   - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos, una dirección y su Gmail u Outlook conectado (o el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
+   - **Para quién:** quien recibirá el correo. Es decir, quien tiene los avisos encendidos y una dirección que no es de prueba, y a quien le llega el correo: con Resend, a todos; sin Resend, a quien tiene su Gmail u Outlook conectado (o con el correo de informes configurado). Una vez por persona, en el workspace de su equipo: el que tiene más personas.
    - **A quién buscar:**
      - el «Cliente ideal» de su «Perfil»;
      - si no lo tiene, el de un compañero (los administradores primero);
      - si nadie lo tiene, los cargos y rubros que más se repiten entre los contactos que guardó el equipo.
 
      Sin nada de eso no hay contacto, y queda dicho por qué (`status = empty`).
+   - **Cliente ideal completado por ANTON.IA:** el 20 de octubre se completó el de las 31 personas de clientes que no lo tenían. A quien guardó 5 contactos o más, con los cargos y rubros de esos contactos; al resto, con uno por empresa (GrupoExpro: personal externo y RR. HH.; PSOL: selección). Queda marcado (`profile_extended.icpSource = 'anton'`) y «Perfil» lo avisa hasta que la persona lo guarda.
    - **Una búsqueda por cliente ideal:** Leads Finder (Apify, `code_crafter/leads-finder`) busca solo correos validados. Trae el doble de lo que el grupo necesita más cinco, con un mínimo de diez.
      - El tope de cada corrida nunca baja del de una búsqueda normal (`LEADS_FINDER_MAX_RUN_USD`, US$0,50). Apify rechaza topes bajo su mínimo (`max-total-charge-usd-below-minimum`), y uno de US$0,03 hizo fallar la primera prueba real (20 oct). Es solo el límite: el costo sale de los resultados que trae.
      - **Rubros:** van con el nombre que usa el actor (`leadsFinderIndustry`: «Seguridad privada» → *security & investigations*, «Logística» → *logistics & supply chain*). Un rubro que no reconoce se omite. En la búsqueda normal pasaría como palabra clave de la empresa, y junto a otro rubro casi nadie calza: así salió vacía la segunda prueba real.

@@ -72,9 +72,13 @@ El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su en
 
 ### Desde dónde se envían
 
-- **Remitente:** igual que el informe semanal (`sendReportEmail`). Sale desde el Gmail u Outlook conectado de la persona, hacia su mismo correo.
-- **Sin correo conectado:** sale desde el correo de informes, si está configurado `WEEKLY_REPORTS_SENDER_USER_ID`. Sin esa cuenta, a esa persona no se le prepara aviso.
-- **En producción, al 20 de octubre:** solo 3 de 53 usuarios tienen correo conectado, así que **el correo de informes es lo que hace que los avisos lleguen**. Es una aprobación pendiente.
+- **Remitente:** igual que el informe semanal (`sendReportEmail`).
+  - **Con Resend** (`RESEND_API_KEY`), todos los correos de la app salen desde una dirección de Yago (`REPORTS_FROM_EMAIL`, por defecto `ANTON.IA <avisos@yago.cl>`), hacia el correo de cada persona. Así le llegan a todos, tengan o no su correo conectado. Ver «Activar Resend» en `docs/informe-semanal.md`.
+  - **Sin Resend**, salen desde el Gmail u Outlook conectado de la persona o desde el correo de informes (`WEEKLY_REPORTS_SENDER_USER_ID`). Sin ninguno de los dos, a esa persona no se le prepara aviso.
+- **Quiénes no los reciben:**
+  - **cuentas internas y de prueba:** el 20 de octubre se les apagaron a las 18 que no son de clientes (`daily_alerts.email = false` e `internal = true`). Se usan solo para probar;
+  - **direcciones de prueba** (example.com, `.test`, `.local`…): nunca reciben un correo automático (`isTestAddress`).
+- **En producción, al 20 de octubre:** solo 3 de 53 usuarios tienen correo conectado, así que **Resend es lo que hace que los avisos lleguen a todos**.
 
 ### Cómo se apagan
 

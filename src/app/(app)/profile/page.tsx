@@ -22,6 +22,7 @@ import {
   buildProfileUpdate,
   createEmptyProfileForm,
   getDefaultSuggestionSelection,
+  icpFilledByAnton,
   mapProfileToForm,
   normalizeCompanyWebsite,
   websiteFromWorkEmail,
@@ -96,6 +97,7 @@ export default function ProfilePage() {
   const [suggestion, setSuggestion] = useState<AutofillSuggestion | null>(null);
   const [suggestionSelection, setSuggestionSelection] = useState<ProfileSuggestionSelection | null>(null);
   const [workspaceOffer, setWorkspaceOffer] = useState<WorkspaceOffer | null>(null);
+  const [icpSuggested, setIcpSuggested] = useState(false);
   const { opportunities } = useSharedNavAccess();
   const { toast } = useToast();
   const isDirty = !isLoading && savedProfile !== null && !sameProfile(savedProfile, profile);
@@ -110,6 +112,7 @@ export default function ProfilePage() {
         const form = mapProfileToForm(data);
         setProfile(form);
         setSavedProfile(form);
+        setIcpSuggested(icpFilledByAnton(data));
       } catch (error) {
         console.error('Error loading profile:', error);
         setLoadError('No pudimos cargar tu perfil guardado. Recarga la página antes de editar para evitar perder cambios.');
@@ -194,6 +197,7 @@ export default function ProfilePage() {
       const saved = mapProfileToForm(updated);
       setProfile(saved);
       setSavedProfile(saved);
+      setIcpSuggested(false);
       toast({ title: 'Perfil guardado', description: 'Desde ahora, la IA usa estos datos para buscar, investigar y escribir.' });
     } catch (error) {
       console.error('Error saving profile:', error);
@@ -383,6 +387,10 @@ export default function ProfilePage() {
                   </Section>
 
                   <Section id="icp" icon={Target} title="Tu cliente ideal" description="A quién le vendes. «Buscar prospectos» parte de aquí." data-tour="profile-icp">
+                    {icpSuggested ? <p className="flex items-start gap-2 rounded-xl bg-primary/5 px-3 py-2.5 text-sm text-muted-foreground">
+                      <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                      <span>Lo completamos por ti con lo que vende tu empresa y los contactos que guardaste. Revísalo y guarda: con él elegimos tu contacto del día.</span>
+                    </p> : null}
                     <div className="grid gap-4 md:grid-cols-2">
                       <Field id="targetRoles" label="Cargos que buscas" hint="Separados por coma, como aparecen en LinkedIn.">
                         <Input id="targetRoles" value={profile.targetRoles} onChange={handleInputChange} aria-describedby="targetRoles-help" placeholder="Ej. Gerente de Personas, Jefe de Operaciones" className={`h-11 ${FIELD_CLASS}`} />

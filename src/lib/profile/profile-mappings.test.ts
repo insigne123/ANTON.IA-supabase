@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   applyProfileSuggestion,
   buildProfileUpdate,
+  icpFilledByAnton,
   createEmptyProfileForm,
   getDefaultSuggestionSelection,
   mapProfileToForm,
@@ -79,6 +80,18 @@ test('buildProfileUpdate preserves every outer and nested signature key', () => 
     '25% menos tiempo de gestion',
     '40 equipos implementados',
   ]);
+});
+
+test('a customer ANTON.IA filled in is marked until the person saves their profile', () => {
+  const filled = { signatures: { profile_extended: { targetRoles: ['Gerente de Personas'], icpSource: 'anton', icpFilledAt: '2026-10-20' } } };
+  assert.equal(icpFilledByAnton(filled), true);
+  assert.equal(icpFilledByAnton({ signatures: { profile_extended: { targetRoles: ['Gerente de Personas'] } } }), false);
+  assert.equal(icpFilledByAnton(null), false);
+  const update = buildProfileUpdate({ ...createEmptyProfileForm(), name: 'Ana', targetRoles: 'Gerente de Personas' }, filled);
+  const extended = update.signatures.profile_extended as Record<string, unknown>;
+  assert.deepEqual(extended.targetRoles, ['Gerente de Personas']);
+  assert.equal('icpSource' in extended || 'icpFilledAt' in extended, false);
+  assert.equal(icpFilledByAnton(update), false);
 });
 
 test('AI suggestions select empty fields only and never apply empty values', () => {

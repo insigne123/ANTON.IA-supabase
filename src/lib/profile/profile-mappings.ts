@@ -207,9 +207,15 @@ export function mapProfileToForm(profile?: ProfileLike | null): ProfileFormValue
   };
 }
 
+/** A customer ANTON.IA filled in for the person (from what their company sells and what they saved), not yet reviewed. */
+export function icpFilledByAnton(profile?: ProfileLike | null) {
+  return asRecord(asRecord(profile?.signatures).profile_extended).icpSource === 'anton';
+}
+
 export function buildProfileUpdate(form: ProfileFormValues, currentProfile?: ProfileLike | null): ProfileUpdate {
   const signatures = asRecord(currentProfile?.signatures);
-  const extended = asRecord(signatures.profile_extended);
+  // Saving is the review: the customer ANTON.IA filled in becomes the person's own.
+  const { icpSource: _icpSource, icpFilledAt: _icpFilledAt, ...extended } = asRecord(signatures.profile_extended);
   const normalizedWebsite = normalizeCompanyWebsite(form.website);
   const added: Record<string, unknown> = {};
   const keep = (key: string, value: unknown, empty: boolean) => {
