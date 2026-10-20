@@ -51,6 +51,7 @@ import {
 import {
   clearResearchWorkspaceHandoff,
   readResearchWorkspaceHandoff,
+  startsOnArrival,
   type ResearchWorkspaceHandoff,
 } from '@/lib/research-workspace-handoff';
 import { getEnrichedLeads } from '@/lib/services/enriched-leads-service';
@@ -690,12 +691,22 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     if (pending.length > 0) setSelectedKeys((current) => Array.from(new Set([...current, ...pending])));
     setHandoffSelectionKeys([]);
     setHandoffError('');
+    // Asked from «Investigar a este contacto» or «Investigar y escribirle», for people never researched: it starts now.
+    // If starting fails, the selection stays for «Investigar».
+    const neverResearched = pending.filter((key) => !itemByLeadKey.get(key));
+    if (startsOnArrival(handoff, neverResearched.length, handoffSelectionKeys.length) && !researchUnavailable) {
+      setHandoffNotice('');
+      void startResearchFor(selectableQueueLeads.filter((lead) => neverResearched.includes(lead.key)));
+      return;
+    }
     setHandoffNotice(pending.length === 0
       ? 'Este contacto ya tiene una investigación. Puedes leerla y preparar tu correo aquí.'
       : alreadyResearching > 0
         ? `${pending.length} por investigar; ${alreadyResearching} con investigación disponible en la lista.`
         : `${pending.length} seleccionados para investigar. Revisa la selección antes de comenzar.`);
-  }, [activeRunBlocksNewBatch, handoffSelectionKeys, loadingLeads, persistedItemsLoading, selectableQueueLeads]);
+  // startResearchFor is the render's own; this runs once for each handoff (its keys are cleared above).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRunBlocksNewBatch, handoff, handoffSelectionKeys, itemByLeadKey, loadingLeads, persistedItemsLoading, researchUnavailable, selectableQueueLeads]);
 
   useEffect(() => {
     const availableKeys = new Set([

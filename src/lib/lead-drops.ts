@@ -91,9 +91,9 @@ export type DropCandidate = Omit<DropItem, 'why' | 'research' | 'draft' | 'saved
 export type KnownPeople = { emails: Set<string>; linkedins: Set<string>; leadIds: Set<string> };
 
 /**
- * Five contacts for each person of a group, different for each: only people with an email, none the team already has or
- * got in an earlier drop, one per company for each person and, while there are enough, a company nobody else in the
- * group got. People with a phone and with a title closer to the criteria go first.
+ * `size` contacts (DROP_SIZE) for each person of a group, different for each: only people with an email, none the team
+ * already has or got in an earlier drop, one per company for each person and, while there are enough, a company nobody
+ * else in the group got. People with a phone and with a title closer to the criteria go first.
  */
 export function assignDrops(candidates: DropCandidate[], people: string[], known: KnownPeople, criteria: DropCriteria, size = DROP_SIZE) {
   const titleWords = criteria.titles.map(title => new Set(fold(title).split(' ').filter(word => word.length > 2)));
@@ -123,6 +123,21 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
     }
   }
   return out;
+}
+
+// The linking words LinkedIn titles often capitalize («Jefe De Reclutamiento Y Selección»).
+const LINKING = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'y', 'e', 'o', 'u', 'en', 'a', 'al', 'para', 'por', 'con']);
+/** A title as people write it: «Jefe De Ventas Y Marketing» → «Jefe de Ventas y Marketing». One in capitals stays as it is. */
+export function tidyTitle(title: string | null | undefined) {
+  const value = String(title || '').replace(/\s+/g, ' ').trim();
+  if (!/\p{Ll}/u.test(value)) return value || null;
+  return value.split(' ').map((word, index) => index && LINKING.has(word.toLowerCase()) && /^\p{Lu}\p{Ll}*$/u.test(word) ? word.toLowerCase() : word).join(' ');
+}
+
+/** A company with its legal form as Chile writes it: «Logistica S.a.» → «Logistica S.A.», «Rutas Spa» → «Rutas SpA». */
+export function tidyCompany(name: string | null | undefined) {
+  const value = String(name || '').replace(/\s+/g, ' ').trim();
+  return value.replace(/\bS\.\s?A\.?$/i, 'S.A.').replace(/\bSpa$/i, 'SpA').replace(/\bLtda\.?$/i, 'Ltda.').replace(/\bE\.?I\.?R\.?L\.?$/i, 'EIRL') || null;
 }
 
 /** «Gerente de Personas en retail, en Santiago»: why the contact fits, from what matched. */

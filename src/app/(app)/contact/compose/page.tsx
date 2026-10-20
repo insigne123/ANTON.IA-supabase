@@ -1052,9 +1052,10 @@ function ComposeInner() {
     const snapshotId = String(report?.raw?.research_snapshot_id || report?.raw?.researchSnapshotId || '').trim();
     const leadIdForResearch = String((lead as any)?.id || '');
     // Contacts from the retired «Empresas guardadas» section have no research page of their own: they open in «Por escribir».
+    // «Investigar a este contacto» starts it there (&empezar=1) unless it already has one.
     const researchHref = lead?._sourceTable === 'opportunities'
       ? '/saved/leads/enriched'
-      : `/saved/leads/enriched${leadIdForResearch ? `?investigar=${encodeURIComponent(leadIdForResearch)}` : ''}`;
+      : `/saved/leads/enriched${leadIdForResearch ? `?investigar=${encodeURIComponent(leadIdForResearch)}&empezar=1` : ''}`;
     const createDraft = async () => {
       if (!snapshotId || creatingDraft) return;
       setCreatingDraft(true);
@@ -1077,7 +1078,7 @@ function ComposeInner() {
         <h1 className="text-2xl font-semibold tracking-tight">Preparar correo</h1>
         <Card><CardHeader><CardTitle className="text-base">{lead.fullName || 'Contacto'}</CardTitle><CardDescription>{composeEmail || 'Sin email disponible'}</CardDescription></CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm leading-6 text-muted-foreground">{snapshotId ? 'Crea un borrador desde la investigación guardada. Después podrás editarlo, revisarlo y decidir si enviarlo.' : 'Este contacto necesita una investigación actualizada antes de crear el correo. «Investigar a este contacto» la abre directo, sin buscarlo en la lista.'} Nada se enviará desde este paso.</p>
+            <p className="text-sm leading-6 text-muted-foreground">{snapshotId ? 'Crea un borrador desde la investigación guardada. Después podrás editarlo, revisarlo y decidir si enviarlo.' : 'Este contacto necesita una investigación actualizada antes de crear el correo. «Investigar a este contacto» la abre directo y, si aún no tiene una, la empieza.'} Nada se enviará desde este paso.</p>
             {creationError ? <Alert variant="destructive"><AlertTitle>No se pudo preparar</AlertTitle><AlertDescription>{creationError}</AlertDescription></Alert> : null}
             <div className="flex flex-col gap-2 sm:flex-row">
               {snapshotId ? <Button disabled={creatingDraft || !composeEmail} onClick={() => void createDraft()}>{creatingDraft ? 'Creando borrador…' : 'Crear borrador para revisar'}</Button> : null}
