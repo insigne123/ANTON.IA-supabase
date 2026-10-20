@@ -1,0 +1,109 @@
+# «Metas semanales» y «Avisos»: volver a la app con algo concreto
+
+**Fecha:** 20 de octubre de 2026.
+
+Son las ideas 3 y 4 de la lista para que los usuarios vuelvan a usar la app:
+
+- **Idea 3, avisos que traen de vuelta:** «Te respondió Juan Pérez», «2 licitaciones que te sirven cierran el viernes», «Tus 12 contactos de ayer ya tienen correo». Solo cuando hay algo real que hacer.
+- **Idea 4, los jefes como motor:** una meta semanal simple por vendedor, que el jefe revisa en su reunión.
+
+## Metas semanales
+
+### Qué se mide
+
+Cada persona tiene dos metas por semana, de lunes a domingo, hora de Chile:
+
+1. **Personas contactadas** (la principal). Cuenta cada persona una vez, por cualquiera de estas vías:
+   - un correo confirmado como enviado (`outbound_dispatches`, el mismo dato del informe semanal);
+   - un mensaje de LinkedIn hecho;
+   - una llamada hecha («Llamadas y LinkedIn»).
+
+   Si a alguien se le escribió y también se le llamó, cuenta una vez.
+2. **Contactos nuevos con correo:** contactos guardados en la semana que ya tienen correo, uno por dirección.
+
+### Quién las pone
+
+- **Por defecto:** sin nada configurado, la meta es **10 personas contactadas y 15 contactos nuevos con correo** (`DEFAULT_GOALS`).
+- **Administradores y dueños:** cambian la meta del equipo y, para quien necesite otra, la de esa persona.
+  - Se hace en «Tu semana» → «Equipo» → «Metas del equipo», o desde «Cambiar las metas del equipo» en la tarjeta de «Hoy».
+  - Una persona en blanco sigue la meta del equipo.
+  - Con 0 en ambas, el equipo no usa metas: no se muestran ni se mencionan en los correos.
+- **Límites:** cada meta es un número entero de 0 a 500.
+
+### Dónde se ven
+
+- **«Hoy»,** tarjeta «Meta de la semana», arriba de la columna derecha. Muestra:
+  - el avance de cada meta con su barra;
+  - una línea con el ritmo, contado en días hábiles: «Vas al día. Para seguir así, contacta hoy a 2 personas», «Para ir al día, contacta hoy a 3 personas» o «Cumpliste tu meta de la semana»;
+  - un solo paso: «Escribe a tus contactos listos» si hay contactos con correo sin escribir y aún faltan personas por contactar; si no, «Busca contactos nuevos».
+- **«Tu semana»:**
+  - Bloque «Meta de la semana», o «Meta de la semana pasada» si se mira la semana anterior.
+  - En «Equipo», la columna «Meta» con las personas contactadas de cada uno contra su meta. Quien sumó contactos o hizo llamadas ya no aparece «sin actividad».
+- **El correo del lunes («Informe semanal»):**
+  - en «Tu semana», cómo cerró la meta;
+  - en «Equipo», «meta 4 de 10» junto a cada persona.
+- **Los avisos de la mañana:** el avance de la semana, con el siguiente paso.
+
+## Avisos
+
+### Cuándo llegan
+
+- **Cuándo:** de martes a viernes, entre 8:00 y 9:30 de Chile (`dailyAlertsTick`). El lunes no hay aviso: ese día llega el informe semanal.
+- **Cuántos:** como máximo un correo por persona, workspace y día.
+- **Solo con algo concreto que hacer.** Lo que no cumple esta regla se guarda como «quiet» y no se envía.
+
+### Qué dice
+
+El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su enlace. Este es el orden:
+
+1. **Respuestas nuevas** desde el aviso anterior, con la regla de «Por responder». Asunto: «Te respondió Juan Pérez», «Te respondieron Ana y Pedro» o «Te respondieron Ana y 4 personas más».
+2. **Compromisos** que vencen hoy o ya vencieron: «Hoy: Enviar propuesta con Rosa Díaz (Logística Norte)», o «Vencido: …».
+3. **Oportunidades que cierran** desde hoy hasta el fin del tercer día (el martes, hasta el viernes en la noche). Ejemplos: «2 licitaciones que te sirven cierran el viernes», «Una licitación a tu cargo cierra mañana: …».
+   - Las que la persona tiene a cargo.
+   - Si administra o gestiona Oportunidades: además las recomendadas que nadie tiene.
+   - Solo para quien puede ver Oportunidades.
+4. **Investigaciones listas** desde el aviso anterior: «Lista la investigación de Pedro Rojas». El enlace abre la investigación en «Por escribir».
+5. **Contactos que ya tienen correo:** los guardados desde el aviso anterior, con correo y sin escribir. Ejemplo: «Tus 12 contactos de ayer ya tienen correo». Dice «de ayer» cuando todos son de ayer.
+6. **Respuestas de días anteriores** que aún esperan. Solo acompañan a otro motivo; nunca son motivo por sí solas.
+7. **La meta de la semana,** con el siguiente paso.
+   - Una meta atrasada es motivo suficiente solo **miércoles y viernes**.
+   - Quien está en varios workspaces recibe ese recordatorio solo del primero al que entró.
+
+### Desde dónde se envían
+
+- **Remitente:** igual que el informe semanal (`sendReportEmail`). Sale desde el Gmail u Outlook conectado de la persona, hacia su mismo correo.
+- **Sin correo conectado:** sale desde el correo de informes, si está configurado `WEEKLY_REPORTS_SENDER_USER_ID`. Sin esa cuenta, el aviso se guarda con el error y no se envía.
+- **En producción, al 20 de octubre:** solo 3 de 53 usuarios tienen correo conectado, así que **el correo de informes es lo que hace que los avisos lleguen**. Es una aprobación pendiente.
+
+### Cómo se apagan
+
+- **Por persona:** «Avisos por correo» en «Tu semana», al final de la página. Vienen encendidos (`profiles.signatures.daily_alerts.email`).
+- **Para todos:** `DAILY_ALERTS=off` los detiene.
+
+## Datos
+
+La migración `20261020170000_weekly_goals_and_daily_alerts.sql` crea dos tablas, solo para el servidor: RLS activo, sin permisos para `anon` ni `authenticated`, y todos para `service_role`.
+
+- **`weekly_goals`:** la meta del equipo (`user_id` nulo) y las personales. Única por (`organization_id`, `user_id`), con nulos iguales (`nulls not distinct`).
+- **`daily_alerts`:** el aviso de cada persona, workspace y día. Única por (`organization_id`, `user_id`, `alert_date`).
+  - **Estado:**
+    - `quiet`: sin nada que decir;
+    - `stored`: con avisos apagados o sin dirección;
+    - `sent`: enviado;
+    - `failed`: no se pudo enviar.
+  - **Contenido:** guarda las líneas enviadas y la ventana usada.
+  - **Una sola vez:** dos pasadas a la vez no envían dos correos, porque el segundo insert falla por la clave única.
+
+## Código
+
+| Pieza | Archivo |
+| --- | --- |
+| Metas (puro) | `src/lib/weekly-goals.ts` |
+| Metas (lecturas y guardado) | `src/lib/server/weekly-goals.ts` |
+| Avisos (puro: qué decir y el correo) | `src/lib/daily-alerts.ts` |
+| Avisos (lecturas y envío) | `src/lib/server/daily-alerts.ts` |
+| API de metas | `src/app/api/weekly-goals/route.ts` |
+| Interruptor de avisos | `src/app/api/weekly-report/route.ts` (acción `alerts`) |
+| Cron | `src/app/api/cron/daily-alerts/route.ts`, `functions/index.ts` (`dailyAlertsTick`) |
+| Tarjeta de «Hoy» | `src/components/home/WeeklyGoalCard.tsx` |
+| Editor de metas | `src/components/weekly-goals/GoalsEditor.tsx` |

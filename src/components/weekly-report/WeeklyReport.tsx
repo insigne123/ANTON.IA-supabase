@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Loader2, Mail, RefreshCw, Users } from 'lucide-react';
+import { BellRing, ChevronRight, Loader2, Mail, RefreshCw, Target, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,11 +10,16 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { GoalProgressRows } from '@/components/weekly-goals/GoalProgressRows';
+import { GoalsEditor } from '@/components/weekly-goals/GoalsEditor';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
-import { REPORT_ROLES, deltaText, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeeklyReport as Report } from '@/lib/weekly-report';
+import { goalSentence, paceSentence } from '@/lib/weekly-goals';
+import { REPORT_ROLES, activeGoal, deltaText, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeeklyReport as Report } from '@/lib/weekly-report';
 
-type Response = { report: Report; email: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
+type Response = { report: Report; email: boolean; alerts?: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
+/** ?informe=equipo opens «Equipo»; ?metas=1 also opens the goals editor, for an admin (the link from «Meta de la semana»). */
+const fromUrl = (key: string) => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get(key) : null;
 
 const MAILBOX: Record<string, string> = { google: 'Gmail', outlook: 'Outlook' };
 const dateLabel = (at: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('es-CL', { ...options, timeZone: 'America/Santiago' }).format(new Date(at)).replace(/\./g, '');
@@ -40,7 +45,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) {
   const { organizationId } = useAuth();
   const [week, setWeek] = useState<'current' | 'previous'>('current');
-  const [role, setRole] = useState<ReportRole>('personal');
+  const [role, setRole] = useState<ReportRole>(() => fromUrl('informe') === 'equipo' ? 'team' : 'personal');
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  const [goalsAsked, setGoalsAsked] = useState(() => fromUrl('metas') === '1');
   const [data, setData] = useState<Response | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -66,6 +73,8 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
     finally { setLoading(false); }
   }, [call, organizationId, week]);
   useEffect(() => { void load(); }, [load]);
+  // The link from «Hoy» opens the editor once the report says the person is an admin.
+  useEffect(() => { if (goalsAsked && data) { setGoalsAsked(false); if (data.members) setGoalsOpen(true); } }, [goalsAsked, data]);
 
   const post = async (key: string, body: Record<string, unknown>) => {
     setSaving(key); setNotice(null);
@@ -88,8 +97,15 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
     <td className={cn('px-3 py-2.5 text-right tabular-nums', !member.sent && 'text-muted-foreground')}>{member.sent}</td>
     <td className="px-3 py-2.5 text-right tabular-nums">{member.replies}</td>
     <td className="px-3 py-2.5 text-right tabular-nums">{member.meetings}</td>
-    <td className={cn('px-4 py-2.5 text-right tabular-nums', member.pending ? 'font-medium' : 'text-muted-foreground')}>{member.pending}</td>
+    <td className={cn('px-3 py-2.5 text-right tabular-nums', member.pending ? 'font-medium' : 'text-muted-foreground')}>{member.pending}</td>
+    <td className="px-4 py-2.5 text-right tabular-nums">{goalCell(member)}</td>
   </tr>;
+  const goalCell = (member: TeamMember) => {
+    const goal = activeGoal(member.goal);
+    if (!goal?.targets.contacted) return <span className="text-muted-foreground">—</span>;
+    const met = goal.counts.contacted >= goal.targets.contacted;
+    return <span className={met ? 'font-medium text-primary' : undefined}>{goal.counts.contacted}<span className="text-muted-foreground">/{goal.targets.contacted}</span>{met ? <span className="sr-only"> (cumplida)</span> : null}</span>;
+  };
 
   return <div className={embedded ? 'w-full max-w-3xl space-y-6' : 'mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6'}>
     <header className={cn('flex flex-col gap-4 sm:flex-row sm:justify-between', embedded ? 'sm:items-center' : 'sm:items-end')}>
@@ -115,6 +131,14 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
 
     {report && shown === 'personal' ? <div className={cn('space-y-8 transition-opacity', loading && 'opacity-60')}>
       <p className="text-lg leading-7">{personalHeadline(report.personal, report.week.which)}</p>
+      {activeGoal(report.goal) ? <section aria-labelledby="weekly-goal-title" className="space-y-3 rounded-2xl border p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="weekly-goal-title" className="flex items-center gap-1.5 text-sm font-medium"><Target className="h-4 w-4 text-primary" aria-hidden="true" />{report.week.which === 'current' ? 'Meta de la semana' : 'Meta de la semana pasada'}</h2>
+          {data?.members ? <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setGoalsOpen(true)}>Cambiar metas</Button> : null}
+        </div>
+        <GoalProgressRows goal={activeGoal(report.goal)!} />
+        <p className="text-sm text-muted-foreground">{report.week.which === 'current' ? paceSentence(activeGoal(report.goal)!, new Date()) : goalSentence(activeGoal(report.goal)!, 'previous')}</p>
+      </section> : null}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Correos enviados" value={report.personal.sent.now.toLocaleString('es-CL')} note={deltaText(report.personal.sent)} />
         <Stat label="Personas contactadas" value={report.personal.contacted.now.toLocaleString('es-CL')} note={deltaText(report.personal.contacted)} />
@@ -149,8 +173,11 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
       <p className="text-lg leading-7">{teamHeadline(report.team, report.week.which)}</p>
       {/* Nobody wrote: one sentence instead of three zeros and a row of zeros per person. */}
       {!team.active.length ? <div className="space-y-3">
-        <p className="text-sm leading-6 text-muted-foreground">Cuando escriban desde ANTON.IA, aquí verás quién envió, a quién le respondieron y quién tiene respuestas por contestar.</p>
-        {roles.includes('opportunities') ? <Button variant="outline" size="sm" onClick={() => setRole('opportunities')}>Ver Oportunidades<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" /></Button> : null}
+        <p className="text-sm leading-6 text-muted-foreground">Cuando escriban desde ANTON.IA, aquí verás quién envió, a quién le respondieron, quién tiene respuestas por contestar y cómo va cada uno con su meta.</p>
+        <div className="flex flex-wrap gap-2">
+          {data?.members ? <Button variant="outline" size="sm" onClick={() => setGoalsOpen(true)}><Target className="mr-1.5 h-4 w-4" aria-hidden="true" />Metas del equipo</Button> : null}
+          {roles.includes('opportunities') ? <Button variant="ghost" size="sm" onClick={() => setRole('opportunities')}>Ver Oportunidades<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" /></Button> : null}
+        </div>
       </div> : <>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Stat label="Correos enviados" value={report.team.totals.sent.now.toLocaleString('es-CL')} note={deltaText(report.team.totals.sent)} />
@@ -163,7 +190,8 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
               <thead><tr className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <th scope="col" className="px-4 py-2 text-left font-medium">Persona</th><th scope="col" className="px-3 py-2 text-right font-medium">Enviados</th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Respuestas</th><th scope="col" className="px-3 py-2 text-right font-medium">Reuniones</th>
-                <th scope="col" className="px-4 py-2 text-right font-medium">Por responder</th></tr></thead>
+                <th scope="col" className="px-3 py-2 text-right font-medium">Por responder</th>
+                <th scope="col" className="px-4 py-2 text-right font-medium"><abbr title="Personas contactadas de la meta semanal" className="no-underline">Meta</abbr></th></tr></thead>
               <tbody>{team.active.map(member => memberRow(member))}</tbody>
               {idleShown ? <tbody id={idleId} className="border-t">{team.idle.map(member => memberRow(member, true))}</tbody> : null}
             </table>
@@ -174,7 +202,10 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
             <Button variant="link" size="sm" className="h-auto p-0" aria-expanded={idleShown} aria-controls={idleShown ? idleId : undefined} onClick={() => setIdleShown(value => !value)}>
               {idleShown ? 'Ocultar' : 'Ver'}</Button>
           </div> : null}
-          <p className="text-xs text-muted-foreground">El detalle por persona y por módulo está en <Link href="/dashboard/admin/usage" className="underline underline-offset-2">Administración</Link>.</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">«Meta»: personas contactadas de su meta semanal. El detalle por módulo está en <Link href="/dashboard/admin/usage" className="underline underline-offset-2">Administración</Link>.</p>
+            {data?.members ? <Button variant="outline" size="sm" onClick={() => setGoalsOpen(true)}><Target className="mr-1.5 h-4 w-4" aria-hidden="true" />Metas del equipo</Button> : null}
+          </div>
         </Section>
       </>}
     </div> : null}
@@ -210,6 +241,14 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
           <Switch id="weekly-email" checked={data.email} disabled={(!data.mailbox && !data.sender) || saving === 'email'}
             onCheckedChange={on => { void post('email', { action: 'email', on }).then(result => { if (result) setData(current => current && { ...current, email: result.email }); }); }} />
         </div>
+        <div className="flex items-start justify-between gap-4 border-t pt-4">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="daily-alerts" className="flex items-center gap-1.5 text-sm font-medium"><BellRing className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Avisos por correo</Label>
+            <p className="text-xs leading-5 text-muted-foreground">De martes a viernes en la mañana, solo cuando hay algo que hacer: alguien te respondió, vence un compromiso, cierra una oportunidad o tu meta va atrasada.{!data.mailbox && !data.sender ? ' Conecta Gmail u Outlook en «Conexiones» para recibirlos.' : ''}</p>
+          </div>
+          <Switch id="daily-alerts" checked={data.alerts !== false} disabled={(!data.mailbox && !data.sender) || saving === 'alerts'}
+            onCheckedChange={on => { void post('alerts', { action: 'alerts', on }).then(result => { if (result) setData(current => current && { ...current, alerts: result.alerts }); }); }} />
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" disabled={(!data.mailbox && !data.sender) || saving === 'send'}
             onClick={() => { void post('send', { action: 'send', week }).then(result => { if (result) setNotice({ ok: true, text: `Te lo enviamos a ${result.to}.` }); }); }}>
@@ -220,6 +259,8 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
       </CardContent>
     </Card> : null}
+
+    {data?.members ? <GoalsEditor open={goalsOpen} onOpenChange={setGoalsOpen} onSaved={() => { setNotice({ ok: true, text: 'Guardamos las metas del equipo.' }); void load(); }} /> : null}
 
     <Sheet open={managersOpen} onOpenChange={value => { if (!saving) setManagersOpen(value); }}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">

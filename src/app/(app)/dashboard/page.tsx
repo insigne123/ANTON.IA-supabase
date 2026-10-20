@@ -13,6 +13,7 @@ import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 import { ReconnectCard } from '@/components/home/ReconnectCard';
 import { TouchesCard } from '@/components/home/TouchesCard';
+import { WeeklyGoalCard } from '@/components/home/WeeklyGoalCard';
 import { WeeklyReport } from '@/components/weekly-report/WeeklyReport';
 import { cn } from '@/lib/utils';
 
@@ -22,10 +23,10 @@ const viewInUrl = (): View => typeof window !== 'undefined' && new URLSearchPara
 const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long',timeZone:'America/Santiago' });
 
 /**
- * «Hoy» (docs/inicio-hoy.md). The work first: the next step and what is waiting, in the main column. How the week goes,
- * the campaigns in progress and the credits sit beside it, so they never push the work down. «Llamadas y LinkedIn» and
+ * «Hoy» (docs/inicio-hoy.md). The work first: the next step and what is waiting, in the main column. The week's goal,
+ * how the day goes and the credits sit beside it, so they never push the work down. «Llamadas y LinkedIn» and
  * «Para retomar» follow the pending work when something is due. On phones the order is step → pending → calls and
- * LinkedIn → to reconnect → summary → recommended.
+ * LinkedIn → to reconnect → goal → summary → recommended.
  */
 export default function DashboardPage() {
   const [view, setView] = useState<View>('hoy');
@@ -71,6 +72,7 @@ export default function DashboardPage() {
         </div>
 
         <aside aria-label="Tu actividad de hoy" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
+          <WeeklyGoalCard />
           <HomeSummary />
           <PersonalCredits />
         </aside>

@@ -281,6 +281,19 @@ export const weeklyReportsTick = functions.scheduler.onSchedule({
     await invokeFirebaseSchedulerBridge({ name: 'weekly-reports', path: '/api/cron/weekly-reports', method: 'POST' });
 });
 
+// «Avisos»: Tuesday to Friday in the morning, one email per person and day only when there is something to do. The
+// later runs finish what the first left.
+export const dailyAlertsTick = functions.scheduler.onSchedule({
+    schedule: '0,30 8-9 * * 2-5',
+    timeZone: 'America/Santiago',
+    retryCount: 0,
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    await invokeFirebaseSchedulerBridge({ name: 'daily-alerts', path: '/api/cron/daily-alerts', method: 'POST' });
+});
+
 export const antoniaRollupsTick = functions.scheduler.onSchedule({
     schedule: '10 0 * * *',
     timeZone: 'Etc/UTC',

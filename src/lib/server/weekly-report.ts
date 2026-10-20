@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { replyNeedsAnswer } from '@/lib/home/today';
+import { readPersonGoal, readTeamGoals } from '@/lib/server/weekly-goals';
 import { preferredFullName } from '@/lib/lead-name';
 import {
   OPPORTUNITY_KINDS, reportEmail, reportWeek, type ClosingOpportunity, type Commitment, type OpportunitiesSection, type PendingReply,
@@ -211,14 +212,19 @@ export async function buildWeeklyReport(client: Client, scope: ReportScope, opti
   const now = options.now ?? new Date();
   const week = reportWeek(now, options.which);
   const { roles, admin, managers } = await reportRoles(client, scope, options.canSeeOpportunities);
-  const [profile, personal, team, opportunities] = await Promise.all([
+  // The goals are an addition: when they cannot be read, the report goes on without them.
+  const range = { from: week.from, to: week.to };
+  const [profile, personal, team, opportunities, goal, teamGoals] = await Promise.all([
     client.from('profiles').select('full_name').eq('id', scope.userId).maybeSingle(),
     readPersonal(client, scope, week, now),
     roles.includes('team') ? readTeam(client, scope.organizationId, week) : Promise.resolve(null),
     roles.includes('opportunities') ? readOpportunities(client, scope.organizationId, week, now) : Promise.resolve(null),
+    readPersonGoal(client, scope, range).catch(() => null),
+    roles.includes('team') ? readTeamGoals(client, scope.organizationId, range).catch(() => null) : Promise.resolve(null),
   ]);
+  if (team && teamGoals) for (const member of team.members) member.goal = teamGoals(member.userId);
   const name = String((profile as any).data?.full_name || '').trim().split(/\s+/)[0] || '';
-  const report: WeeklyReport = { week, roles, name, personal, team, opportunities };
+  const report: WeeklyReport = { week, roles, name, personal, team, opportunities, goal };
   return { report, admin, managers };
 }
 
