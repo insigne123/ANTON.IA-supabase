@@ -73,7 +73,7 @@ El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su en
 ### Desde dónde se envían
 
 - **Remitente:** igual que el informe semanal (`sendReportEmail`). Sale desde el Gmail u Outlook conectado de la persona, hacia su mismo correo.
-- **Sin correo conectado:** sale desde el correo de informes, si está configurado `WEEKLY_REPORTS_SENDER_USER_ID`. Sin esa cuenta, el aviso se guarda con el error y no se envía.
+- **Sin correo conectado:** sale desde el correo de informes, si está configurado `WEEKLY_REPORTS_SENDER_USER_ID`. Sin esa cuenta, a esa persona no se le prepara aviso.
 - **En producción, al 20 de octubre:** solo 3 de 53 usuarios tienen correo conectado, así que **el correo de informes es lo que hace que los avisos lleguen**. Es una aprobación pendiente.
 
 ### Cómo se apagan
