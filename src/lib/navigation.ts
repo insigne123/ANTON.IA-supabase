@@ -82,7 +82,7 @@ const SCREEN_LABELS: Array<{ href: string; label: string }> = [
   { href: '/contact/compose', label: 'Redactar correo' },
   { href: '/contact/sequence', label: 'Secuencia' },
   { href: '/research', label: 'Investigación' },
-  { href: '/extension/connect', label: 'Extensión' },
+  { href: '/extension', label: 'Extensión' },
   { href: '/ayuda', label: 'Centro de ayuda' },
 ];
 

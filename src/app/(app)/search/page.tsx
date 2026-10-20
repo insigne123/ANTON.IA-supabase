@@ -1906,6 +1906,7 @@ export default function SearchPage() {
           required
         />
         <p className="text-xs text-foreground/70">Pega la dirección que empieza con linkedin.com/in/. No sirven las de Sales Navigator ni las páginas de empresas.</p>
+        <p className="text-xs text-foreground/70">¿Trabajas desde LinkedIn? Con la <Link className="font-medium text-primary underline-offset-4 hover:underline" href="/extension">extensión</Link> eliges varias personas de una búsqueda y buscas sus correos en un clic.</p>
       </div>
       <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
         <CollapsibleTrigger asChild>
