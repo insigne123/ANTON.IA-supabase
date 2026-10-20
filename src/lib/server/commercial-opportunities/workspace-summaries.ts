@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { opportunityModel } from '@/lib/commercial-opportunities/model-policy';
-import { SUMMARY_BATCH, cleanSummary, needsTenderDetail, opportunitySummary, summaryAnswerSchema, summaryBasis, summaryCase, summaryPrompt,
+import { SUMMARY_BATCH, cleanSummary, needsTenderDetail, opportunitySummary, summaryAnswerSchema, summaryBasis, summaryCase, summaryFromNameOnly, summaryPrompt,
   type OpportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import type { Tender } from '@/lib/commercial-opportunities/tenders';
 import { getLicitacion, isMercadoPublicoBusy } from './mercado-publico';
@@ -22,12 +22,16 @@ const COLUMNS = 'id,kind,title,company_name,buyer_name,amount,currency,deadline_
 type Row = { id: string; kind: string; title: string; company_name: string | null; buyer_name: string | null; amount: number | null; currency: string | null;
   deadline_at: string | null; data: Record<string, any> | null; updated_at: string };
 
+/** A card to (re)write: no summary yet, or one from the name alone of a tender whose official file was never read. */
+const toWrite = (row: { data?: unknown; kind?: string; title?: string }) => !opportunitySummary(row.data) && !(row.data as any)?.summary
+  || summaryFromNameOnly({ id: '', kind: String(row.kind ?? ''), title: String(row.title ?? ''), ...(row as object), data: row.data as Record<string, any> | null });
+
 /**
  * The pipeline shows opportunities without their summary: one reading of those cards, in the order shown, is queued unless
  * one is under way. It never stops the pipeline from loading; the count says how many cards are still waiting for theirs.
  */
-export async function enqueueOpportunitySummaries(client: SupabaseClient, scope: WorkScope, items: Array<{ id?: string; data?: unknown }>) {
-  const missing = items.filter(item => !opportunitySummary(item.data) && !(item.data as any)?.summary);
+export async function enqueueOpportunitySummaries(client: SupabaseClient, scope: WorkScope, items: Array<{ id?: string; kind?: string; title?: string; buyer_name?: string | null; data?: unknown }>) {
+  const missing = items.filter(toWrite);
   if (!missing.length) return 0;
   const active = await client.from('opportunity_jobs').select('id').eq('organization_id', scope.organizationId).eq('kind', 'evaluate')
     .in('state', ['queued', 'running', 'waiting']).eq('payload->>summaries', 'true').gt('updated_at', new Date(Date.now() - STALE_MS).toISOString())
@@ -40,13 +44,13 @@ export async function enqueueOpportunitySummaries(client: SupabaseClient, scope:
   return missing.length;
 }
 
-/** The cards the pipeline showed, in its order, that still lack their summary. */
+/** The cards the pipeline showed, in its order, that still lack their summary (or have one from the name alone). */
 async function shownCandidates(client: SupabaseClient, org: string, ids: string[]) {
   const found: Row[] = [];
   for (let start = 0; start < ids.length && found.length < ITEMS_PER_RUN; start += ID_CHUNK) {
     const chunk = ids.slice(start, start + ID_CHUNK);
-    const rows = (opportunityDb(await client.from('commercial_opportunities').select(COLUMNS).eq('organization_id', org).in('id', chunk).is('data->summary', null)) || []) as Row[];
-    found.push(...rows.sort((a, b) => chunk.indexOf(a.id) - chunk.indexOf(b.id)));
+    const rows = (opportunityDb(await client.from('commercial_opportunities').select(COLUMNS).eq('organization_id', org).in('id', chunk)) || []) as Row[];
+    found.push(...rows.filter(toWrite).sort((a, b) => chunk.indexOf(a.id) - chunk.indexOf(b.id)));
   }
   return found.slice(0, ITEMS_PER_RUN);
 }
@@ -72,6 +76,23 @@ function withDetail(row: Row, detail: Tender): Row {
       observed: { ...(data.observed || {}), region: data.observed?.region || detail.region, items: data.observed?.items?.length ? data.observed.items : detail.items },
       detail: { at: new Date().toISOString() } },
   };
+}
+
+/** A tender whose official file could not be read (no ticket, not found, refused): asked once, the name is what there is. */
+const withoutDetail = (row: Row): Row => ({ ...row, data: { ...(row.data || {}), detail: { at: new Date().toISOString(), found: false } } });
+
+type ResolveTicket = typeof resolveTicketForOrganization;
+/**
+ * The workspace's Mercado Público ticket: the one of whoever opened the pipeline, else the one the daily search uses, which
+ * reads as the admin who confirmed the offer (a shared ticket is given by person, MERCADO_PUBLICO_SHARED_TICKET_EMAILS).
+ */
+async function workspaceTicket(client: SupabaseClient, job: OpportunityJob, resolve: ResolveTicket) {
+  const ask = (creatorId: string) => resolve(client, { organizationId: job.organization_id, creatorId }).then(found => found?.ticket ?? null, () => null);
+  const own = await ask(job.requested_by);
+  if (own) return own;
+  const context = await client.from('opportunity_company_context').select('approved_by').eq('organization_id', job.organization_id).maybeSingle();
+  const approver = (context.data as { approved_by?: string | null } | null)?.approved_by;
+  return approver && approver !== job.requested_by ? ask(approver) : null;
 }
 
 // The screening rewrites these without touching updated_at (workspace-sources.ts): a verdict given meanwhile is not overwritten.
@@ -104,17 +125,18 @@ export async function runOpportunitySummaries(client: SupabaseClient, job: Oppor
   for (const row of candidates) {
     if (!needsTenderDetail(row)) { ready.push(row); continue; }
     if (Date.now() - started > RUN_MS / 2) break;
-    if (ticket === undefined) ticket = (await dependencies.resolveTicket(client, { organizationId: org, creatorId: job.requested_by }).catch(() => null))?.ticket ?? null;
-    if (!ticket) { ready.push(row); continue; }
+    if (ticket === undefined) ticket = await workspaceTicket(client, job, dependencies.resolveTicket);
     let detail: Tender | null = null;
-    try {
-      detail = await dependencies.getLicitacion(row.data!.observed.code, { fetch: globalThis.fetch, ticket });
-    } catch (error) {
-      // The ticket is busy with the daily search: this one waits for the next reading. Any other failure: the name is enough.
-      if (isMercadoPublicoBusy(error)) continue;
-      ticket = null;
+    if (ticket) {
+      try {
+        detail = await dependencies.getLicitacion(row.data!.observed.code, { fetch: globalThis.fetch, ticket });
+      } catch (error) {
+        // The ticket is busy with the daily search: this one waits for the next reading. Any other failure: the name is enough.
+        if (isMercadoPublicoBusy(error)) continue;
+        ticket = null;
+      }
     }
-    if (!detail) { ready.push(row); continue; }
+    if (!detail) { ready.push(withoutDetail(row)); continue; }
     const saved = await save(client, org, row, withDetail(row, detail));
     if (saved) { detailed++; ready.push(saved); }
   }

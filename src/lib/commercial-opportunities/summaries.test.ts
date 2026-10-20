@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cleanSummary, needsTenderDetail, opportunitySummary, summaryBasis, summaryCase, summaryPrompt } from './summaries';
+import { cleanSummary, needsTenderDetail, opportunitySummary, summaryBasis, summaryCase, summaryFromNameOnly, summaryPrompt } from './summaries';
 
 const tender = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ id: 't1', kind: 'tender', title: 'SERVICIO DE VIGILANCIA SAG AEROPUERTO', buyer_name: null,
   company_name: null, amount: null, currency: null, deadline_at: null, data, ...extra });
@@ -35,6 +35,8 @@ test('the prompt asks for one or two sentences without invented facts or advice'
   assert.match(prompt, /máximo 200 caracteres/);
   assert.match(prompt, /Nunca inventes montos, plazos, cantidades ni lugares/);
   assert.match(prompt, /No opines si conviene postular/);
+  assert.match(prompt, /Nunca comentes de dónde sale lo que dices ni lo que falta/);
+  assert.match(prompt, /sin «Se requiere», «Se busca» ni «Se necesita»/);
   assert.match(prompt, /"id":"t1"/);
 });
 
@@ -45,6 +47,24 @@ test('a summary is one line, without quotes, ending in a period and cut at a wor
   assert.ok(long.length <= 220, String(long.length));
   assert.match(long, /…$/);
   assert.doesNotMatch(long, / …$/);
+});
+
+test('what the model says about its sources or what is missing does not reach the card', () => {
+  assert.equal(cleanSummary('Se requiere un servicio de guardias; el nombre no indica lugar ni detalles adicionales.'), 'Se requiere un servicio de guardias.');
+  assert.equal(cleanSummary('Aseo de oficinas en Tocopilla, según el nombre de la oportunidad.'), 'Aseo de oficinas en Tocopilla.');
+  assert.equal(cleanSummary('Mantención de aires acondicionados. Solo consta el nombre de la licitación, sin más detalles.'), 'Mantención de aires acondicionados.');
+  assert.equal(cleanSummary('Aseo y retiro de residuos para establecimientos. Solo consta el nombre de la licitación, que aparece truncado.'), 'Aseo y retiro de residuos para establecimientos.');
+  assert.equal(cleanSummary('Traslado de insumos y bienes. Solo consta el nombre; no hay organismo ni región informados.'), 'Traslado de insumos y bienes.');
+  assert.equal(cleanSummary('Guardias 24/7 para el recinto del SAG en el aeropuerto de Santiago.'), 'Guardias 24/7 para el recinto del SAG en el aeropuerto de Santiago.', 'a plain summary stays');
+  assert.equal(cleanSummary('Solo consta el nombre de la licitación.'), '', 'nothing left: no line');
+});
+
+test('a summary from the name alone of a tender never read is written again; a file found missing ends it', () => {
+  const nameOnly = { evaluation: 'review', description: 'SERVICIO DE VIGILANCIA SAG AEROPUERTO', observed: { code: '1234-5-LP26' }, summary: { text: 'x', basis: 'nombre' } };
+  assert.equal(summaryFromNameOnly(tender(nameOnly)), true);
+  assert.equal(summaryFromNameOnly(tender({ ...nameOnly, detail: { at: 'x', found: false } })), false);
+  assert.equal(summaryFromNameOnly(tender({ ...nameOnly, summary: { text: 'x', basis: 'ficha' } })), false);
+  assert.equal(summaryBasis(tender({ description: 'SERVICIO DE VIGILANCIA SAG AEROPUERTO', detail: { at: 'x', found: false } })), 'nombre', 'a file not found is not a file');
 });
 
 test('the saved summary is read only when it has text', () => {

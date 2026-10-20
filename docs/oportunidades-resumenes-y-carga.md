@@ -8,14 +8,19 @@
   - Mientras la IA escribe los resúmenes, las tarjetas que esperan muestran una línea tenue. La página se vuelve a leer cada 20 segundos, durante cinco minutos como máximo.
 - **De dónde sale:**
   - La búsqueda diaria de licitaciones guarda solo el nombre de cada una. El trabajo de resúmenes lee primero la **ficha oficial** en Mercado Público con el ticket del workspace: organismo, unidad, descripción, región, monto estimado y líneas.
+  - **El ticket:** primero el de quien abrió el Embudo; si no tiene, el que usa la búsqueda diaria, que lee como el administrador que confirmó la oferta (`opportunity_company_context.approved_by`).
+    - El ticket compartido se entrega por persona (`MERCADO_PUBLICO_SHARED_TICKET_EMAILS`).
+    - En GrupoExpro nadie tiene ticket propio. La primera versión lo pedía solo para quien abrió el Embudo y escribió todos los resúmenes con el nombre (20 oct).
   - Guarda esa ficha en la oportunidad (`buyer_name`, `amount`, `data.description`, `data.observed`, `data.detail`) sin tocar `contentHash`. La búsqueda del día siguiente la reconoce como la misma y no la reescribe.
   - Después, Haiku 5.5 (rol `screen`, `OPPORTUNITIES_SCREEN_MODEL`) escribe los resúmenes en lotes de 12.
   - Avisos de trabajo, publicaciones y oportunidades cargadas a mano se resumen con su propio texto.
   - Cada resumen se guarda en `data.summary`: `{ text, model, basis: 'ficha' | 'texto' | 'nombre', at }`.
 - **Reglas del texto:**
   - Máximo 200 caracteres, en español de Chile.
-  - Sin inventar montos, plazos, cantidades ni lugares, y sin expandir siglas dudosas.
+  - Empieza directo por lo que se compra («Guardias para…», «Aseo diario de…»), sin «Se requiere» ni «Se busca».
+  - Sin inventar montos, plazos, cantidades ni lugares, y sin expandir siglas dudosas: quedan tal cual.
   - Sin opinar si conviene postular: eso está en el motivo y en el informe.
+  - Sin comentar de dónde sale ni qué falta. `cleanSummary` quita las frases que Haiku agrega igual: «según el nombre», «solo consta el nombre», «sin más detalles», «no hay organismo ni región».
 - **Cuándo corre:**
   - Al leer el Embudo, si hay tarjetas sin resumen, se encola un trabajo `evaluate` con `payload.summaries` y `payload.ids`: las tarjetas que mostró el Embudo, en su orden.
     - El Embudo muestra las que están en curso, las 120 recomendadas y las 60 por revisar con más puntaje. Solo esas se resumen, aunque el workspace tenga cientos más abiertas (GrupoExpro tiene unas 990).
@@ -24,7 +29,8 @@
   - Cada pasada dura unos 50 s y toma hasta 24 oportunidades, en el orden del Embudo.
   - Si quedan más, el trabajo queda en espera y sigue en el próximo minuto.
   - Si el ticket está ocupado con la búsqueda diaria, esa licitación espera a la pasada siguiente.
-  - Si no hay ticket, el resumen se hace con el nombre.
+  - Si no hay ticket, la ficha no existe o Mercado Público la rechaza, el resumen se hace con lo que hay. La licitación queda marcada (`data.detail.found = false`) para no volver a pedir su ficha.
+  - Un resumen escrito solo con el nombre de una licitación cuya ficha nunca se pidió se vuelve a escribir una vez, ya con la ficha (`summaryFromNameOnly`).
   - Si el modelo deja una oportunidad sin resumen, se guarda vacío para no pedirlo en cada pasada.
 - **Costo:** sale del presupuesto de evaluación del workspace (techo US$20/mes). Con Haiku, 140 tarjetas cuestan del orden de US$0,10.
 - **Concurrencia:**
