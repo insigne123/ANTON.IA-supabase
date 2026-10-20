@@ -1,18 +1,26 @@
 import { dayInZone } from '@/lib/admin/chile-time';
 
 /**
- * «Contactos de la semana» (idea del dueño, 20 oct 2026): on Tuesdays and Fridays each person gets five new contacts that
- * fit their customer, found with Apify (Leads Finder), not with Apollo's credits, each with a brief research and a first
- * email by Cowork's Writer. The morning alert carries them: a table in its body, a PDF with the research and the drafts,
- * and a link to «Buscar prospectos» in a mode that shows them as a search that already found them (dropHref), with their email ready:
- * saving them to «Por escribir» costs nothing. Pure: the server prepares and saves them (server/lead-drops.ts).
+ * «Contacto del día» (idea del dueño, 20 oct 2026): on Tuesdays, Wednesdays and Fridays each person gets one new contact
+ * that fits their customer, found with Apify (Leads Finder), not with Apollo's credits, with a brief research and a first
+ * email by Cowork's Writer. The morning alert carries it: a table in its body, a PDF with the research and the draft, and
+ * a link to «Buscar prospectos» in a mode that shows it as a search that already found it (dropHref), with its email ready:
+ * saving it to «Por escribir» costs nothing. Whoever gets no email opens it in «Hoy». Pure: the server prepares and saves
+ * them (server/lead-drops.ts). The code calls each day's contacts a drop.
  */
 
-export const DROP_SIZE = 5;
-/** Tuesday and Friday, in Chile. */
-export const DROP_WEEKDAYS = [2, 5];
+export const DROP_SIZE = 1;
+/** Tuesday, Wednesday and Friday, in Chile: days of the morning alert, which carries it (Monday is the weekly report's). */
+export const DROP_WEEKDAYS = [2, 3, 5];
 const weekdayOf = (day: string) => new Date(`${day}T12:00:00.000Z`).getUTCDay();
 export const dropDay = (now: Date) => DROP_WEEKDAYS.includes(weekdayOf(dayInZone(now)));
+const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+/** «mañana», «el martes»: when the next drop comes, after today's. */
+export function nextDropDay(now: Date) {
+  const today = weekdayOf(dayInZone(now));
+  const ahead = [1, 2, 3, 4, 5, 6, 7].find(days => DROP_WEEKDAYS.includes((today + days) % 7)) ?? 7;
+  return ahead === 1 ? 'mañana' : `el ${WEEKDAYS[(today + ahead) % 7]}`;
+}
 
 /** Who the contacts are for: from the person's «Perfil», a teammate's, or the contacts the team already saved. */
 export type DropCriteria = { titles: string[]; industries: string[]; locations: string[]; sizes: string[]; source: 'perfil' | 'equipo' | 'contactos' };
@@ -143,24 +151,32 @@ export const dropHref = (dropId: string) => `/search/contactos/${encodeURICompon
 /** The drop's part of the email: a few lines of text and a table (name, role, company, why) with the link to see them. */
 export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string) {
   const link = `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
+  const one = items.length === 1;
+  const lead = one ? 'Tu contacto de hoy, con su correo listo' : `${items.length} contactos nuevos para ti, con su correo listo`;
+  const research = one ? 'En el PDF adjunto va una breve investigación y un primer correo sugerido.' : 'En el PDF adjunto va una breve investigación de cada uno y un primer correo sugerido.';
   const text = [
-    `${items.length === 1 ? 'Un contacto nuevo' : `${items.length} contactos nuevos`} para ti, con su correo listo:`,
+    `${lead}:`,
     ...items.map(item => `- ${item.name}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${item.why}`),
-    `Míralos y guárdalos sin costo: ${link}`,
-    'En el PDF adjunto va una breve investigación de cada uno y un primer correo sugerido.',
+    `${one ? 'Míralo y guárdalo' : 'Míralos y guárdalos'} sin costo: ${link}`,
+    research,
   ].join('\n');
   const cell = 'padding:10px 8px;border-top:1px solid #e5e7eb;font-size:14px;line-height:20px;vertical-align:top';
   const rows = items.map(item => `<tr><td style="${cell};color:#111827;font-weight:600">${escape(item.name)}</td>`
     + `<td style="${cell};color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</td>`
     + `<td style="${cell};color:#6b7280">${escape(item.why)}</td></tr>`).join('');
-  const html = `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contactos de la semana</h2>`
-    + `<p style="margin:0 0 8px;font-size:15px;line-height:22px;color:#111827">${items.length === 1 ? 'Un contacto nuevo' : `${items.length} contactos nuevos`} para ti, con su correo listo.</p>`
+  const html = `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
+    + `<p style="margin:0 0 8px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>`
     + `<table role="presentation" style="width:100%;border-collapse:collapse;border-bottom:1px solid #e5e7eb"><thead><tr>`
     + ['Nombre', 'Cargo y empresa', 'Por qué'].map(head => `<th style="padding:6px 8px;text-align:left;font-size:12px;font-weight:500;color:#6b7280">${head}</th>`).join('')
     + `</tr></thead><tbody>${rows}</tbody></table>`
-    + `<p style="margin:16px 0 0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">Ver y guardar los ${items.length}</a></p>`
-    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">Guardarlos no gasta créditos. En el PDF adjunto va una breve investigación de cada uno y un primer correo sugerido.</p>`;
+    + `<p style="margin:16px 0 0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`}</a></p>`
+    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${one ? 'Guardarlo' : 'Guardarlos'} no gasta créditos. ${research}</p>`;
   return { text, html, link };
 }
 
-export const dropSubject = (count: number) => count === 1 ? 'Un contacto nuevo para ti' : `${count} contactos nuevos para ti`;
+/** «Tu contacto de hoy: Gerente de Personas en Ripley»; with more than one, how many. */
+export function dropSubject(items: Array<Pick<DropItem, 'title' | 'company'>>) {
+  if (items.length !== 1) return `${items.length} contactos nuevos para ti`;
+  const who = [items[0].title, items[0].company].filter(Boolean).join(' en ');
+  return who ? `Tu contacto de hoy: ${who}`.slice(0, 120) : 'Tu contacto de hoy';
+}

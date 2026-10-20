@@ -16,9 +16,9 @@ const WORK_MS = 240_000;
 const PARALLEL = 3;
 
 /**
- * «Contactos de la semana» (functions/index.ts, leadDropsTick, Tuesdays and Fridays from 6:00 to 7:40 in Chile): first
- * finishes the drops an earlier run planned, then plans the missing ones, organization by organization, and writes them
- * while there is time. Only for whoever will get them by email (the alerts on, an address, and their own mailbox or the
+ * «Contacto del día» (functions/index.ts, leadDropsTick, Tuesdays, Wednesdays and Fridays from 6:00 to 7:40 in Chile):
+ * first finishes the drops an earlier run planned, then plans the missing ones, organization by organization, and writes
+ * them while there is time. Only for whoever will get them by email (the alerts on, an address, and their own mailbox or the
  * reports mailbox), one drop per person in their team's workspace. The morning alert (8:00) carries what is ready.
  * LEAD_DROPS_ENABLED=off stops it; LEAD_DROPS_MONTHLY_USD caps what Apify may spend in the month.
  * A manual run (same secret) may name `userIds` in its body: only they are prepared, whether or not they get emails, so
@@ -45,7 +45,8 @@ export async function POST(request: Request) {
   const writePending = async () => {
     const pending: any = await admin.from('lead_drops').select('id,organization_id,user_id,items').eq('drop_date', today).eq('status', 'pending').limit(60);
     if (pending.error) throw new Error('pending');
-    const rows = (pending.data || []) as any[];
+    // A row without contacts is being searched from «Hoy» (pullDrop): that request completes it.
+    const rows = ((pending.data || []) as any[]).filter(row => Array.isArray(row.items) && row.items.length);
     for (let start = 0; start < rows.length && timeLeft() > 60_000; start += PARALLEL) {
       await Promise.all(rows.slice(start, start + PARALLEL).map(async row => {
         try { await writeDrop(admin, row, { generate, now }); result.written++; }
@@ -97,7 +98,7 @@ export async function POST(request: Request) {
       await writePending();
     }
   } catch {
-    return NextResponse.json({ error: 'No pudimos preparar los contactos de la semana.', ...result }, { status: 503, headers });
+    return NextResponse.json({ error: 'No pudimos preparar los contactos del día.', ...result }, { status: 503, headers });
   }
   return NextResponse.json({ ...result, spentUsd: Math.round(result.spentUsd * 10_000) / 10_000 }, { headers });
 }

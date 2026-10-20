@@ -134,7 +134,7 @@ async function readClosing(client: Client, scope: AlertScope, now: Date, manager
   }).slice(0, 10);
 }
 
-/** Today's «Contactos de la semana» of the person, once ready; nothing before the migration or while they are being written. */
+/** Today's «Contacto del día» of the person, once ready; nothing before the migration or while it is being written. */
 async function readTodayDrop(client: Client, scope: AlertScope, today: string): Promise<{ id: string; items: DropItem[] } | null> {
   const result: any = await client.from('lead_drops').select('id,items').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
     .eq('drop_date', today).eq('status', 'ready').maybeSingle();
@@ -180,7 +180,7 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const to = String(profile.data?.email || '').trim();
   if (!readAlertsEmail(profile.data?.signatures) || !to) return { status: 'stored' as const };
   // Today's contacts go in the same email, with their research and first emails in a PDF.
-  const attachments = drop ? [{ filename: `contactos-de-la-semana-${today}.pdf`, contentType: 'application/pdf',
+  const attachments = drop ? [{ filename: `contacto-del-dia-${today}.pdf`, contentType: 'application/pdf',
     content: await dropPdf(drop.items, { name: facts.name, date: today, link: `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
   const sent = await deps.send({ userId: scope.userId, to, ...alertEmail(alert, facts.name, deps.appUrl, drop), ...(attachments ? { attachments } : {}) });
   const at = new Date().toISOString();

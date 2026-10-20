@@ -1,7 +1,8 @@
 /**
  * The tables in memory, with the query methods «Metas semanales» and «Avisos» use (server/weekly-goals.ts and
  * server/daily-alerts.ts). A table listed in `missing` answers as not created yet; `unique` names the columns of a
- * table's unique key, so a second insert answers 23505 as Postgres does.
+ * table's unique key, so a second insert answers 23505 as Postgres does. An update followed by `select` answers the rows
+ * it changed, as PostgREST does.
  */
 export function memory(seed: Record<string, any[]>, options: { missing?: string[]; unique?: Record<string, string[]> } = {}) {
   const tables: Record<string, any[]> = { weekly_goals: [], daily_alerts: [], ...seed };
@@ -11,7 +12,7 @@ export function memory(seed: Record<string, any[]>, options: { missing?: string[
   const from = (name: string) => {
     const filters: Array<(row: any) => boolean> = [];
     let action: { kind: string; values?: any; conflict?: string[] } = { kind: 'select' };
-    let one: 'single' | 'maybe' | null = null; let limit = Infinity; let range: [number, number] | null = null;
+    let one: 'single' | 'maybe' | null = null; let limit = Infinity; let range: [number, number] | null = null; let returning = false;
     const run = () => {
       if (options.missing?.includes(name)) return { data: null, error: { code: '42P01', message: 'missing' } };
       const rows = tables[name] ||= [];
@@ -29,7 +30,7 @@ export function memory(seed: Record<string, any[]>, options: { missing?: string[
         return { data: one ? written[0] ?? null : written, error: null };
       }
       const found = rows.filter(row => filters.every(filter => filter(row)));
-      if (action.kind === 'update') { found.forEach(row => Object.assign(row, action.values)); return { data: null, error: null }; }
+      if (action.kind === 'update') { found.forEach(row => Object.assign(row, action.values)); return { data: returning ? found : null, error: null }; }
       if (action.kind === 'delete') { tables[name] = rows.filter(row => !found.includes(row)); return { data: null, error: null }; }
       const page = range ? found.slice(range[0], range[1] + 1) : found.slice(0, limit);
       if (one === 'single') return page.length ? { data: page[0], error: null } : { data: null, error: { code: 'PGRST116' } };
@@ -38,7 +39,7 @@ export function memory(seed: Record<string, any[]>, options: { missing?: string[
     };
     const time = (at: unknown) => Date.parse(String(at));
     const chain: any = {
-      select: () => chain,
+      select: () => { if (action.kind === 'update') returning = true; return chain; },
       insert: (values: any) => { action = { kind: 'insert', values }; return chain; },
       upsert: (values: any, upsertOptions: any) => { action = { kind: 'upsert', values, conflict: upsertOptions?.onConflict?.split(',') }; return chain; },
       update: (values: any) => { action = { kind: 'update', values }; return chain; },

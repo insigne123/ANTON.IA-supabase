@@ -11,7 +11,7 @@ const noStore = { 'Cache-Control': 'private, no-store' };
 const failure = (error: unknown) => requestAuthErrorResponse(error) || handleAuthError(error instanceof LeadDropsError ? new AuthError(error.message, error.status) : error);
 const Id = z.string().uuid();
 
-/** «Contactos de la semana» (src/lib/lead-drops.ts) of the signed-in person: never the email or the phone before they save them. */
+/** «Contacto del día» (src/lib/lead-drops.ts) of the signed-in person: never the email or the phone before they save it. */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { organizationId, user } = await requireHomeAuth(request);

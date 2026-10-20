@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assignDrops, criteriaKey, dropCriteria, dropDay, dropEmailSection, dropHref, inferCriteria, researchFacts, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
+import { assignDrops, criteriaKey, dropCriteria, dropDay, dropEmailSection, dropHref, dropSubject, inferCriteria, nextDropDay, researchFacts, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -10,12 +10,12 @@ const candidate = (id: string, company: string, extra: Partial<DropCandidate> = 
 });
 const none = () => ({ emails: new Set<string>(), linkedins: new Set<string>(), leadIds: new Set<string>() });
 
-test('drops go out on Tuesdays and Fridays, in Chile', () => {
-  assert.equal(dropDay(new Date('2026-10-20T12:00:00.000Z')), true);
-  assert.equal(dropDay(new Date('2026-10-21T12:00:00.000Z')), false);
-  assert.equal(dropDay(new Date('2026-10-23T12:00:00.000Z')), true);
+test('the contact of the day goes out on Tuesdays, Wednesdays and Fridays, in Chile', () => {
+  assert.deepEqual(['19', '20', '21', '22', '23'].map(day => dropDay(new Date(`2026-10-${day}T12:00:00.000Z`))), [false, true, true, false, true]);
   // Saturday 00:30 in Chile is still Friday 03:30Z: the day is Chile's.
   assert.equal(dropDay(new Date('2026-10-24T03:30:00.000Z')), false);
+  assert.deepEqual(['20', '21', '22', '23', '24', '26'].map(day => nextDropDay(new Date(`2026-10-${day}T15:00:00.000Z`))),
+    ['mañana', 'el viernes', 'mañana', 'el martes', 'el martes', 'mañana']);
 });
 
 test('the customer comes from the person, a teammate, or what the team saved', () => {
@@ -42,7 +42,7 @@ test('each person gets different contacts, one per company, never someone the te
     candidate('11', 'Corona', { hasEmail: false }), candidate('12', 'Sodimac', { emailKey: 'known@sodimac.cl' }), candidate('13', 'Easy'),
   ];
   const known = { ...none(), emails: new Set(['known@sodimac.cl']) };
-  const out = assignDrops(pool, ['ana', 'leo'], known, criteria);
+  const out = assignDrops(pool, ['ana', 'leo'], known, criteria, 5);
   const ana = out.get('ana')!, leo = out.get('leo')!;
   assert.equal(ana.length, 5);
   assert.equal(leo.length, 5);
@@ -56,9 +56,11 @@ test('each person gets different contacts, one per company, never someone the te
   assert.equal(new Set(companies).size, 10, 'while there are enough, a company for one person only');
 });
 
-test('with few contacts, everyone gets some', () => {
-  const out = assignDrops([candidate('1', 'A'), candidate('2', 'B'), candidate('3', 'C')], ['ana', 'leo'], none(), criteria);
+test('with few contacts, everyone gets some; by default, one each', () => {
+  const out = assignDrops([candidate('1', 'A'), candidate('2', 'B'), candidate('3', 'C')], ['ana', 'leo'], none(), criteria, 5);
   assert.deepEqual([out.get('ana')!.length, out.get('leo')!.length], [2, 1]);
+  const daily = assignDrops([candidate('1', 'A'), candidate('2', 'A', { hasPhone: true }), candidate('3', 'B')], ['ana', 'leo'], none(), criteria);
+  assert.deepEqual([...daily.values()].map(picks => picks.map(item => item.company)), [['A'], ['B']], 'one contact of the day each, at different companies');
 });
 
 test('why a contact fits, and the facts of its company', () => {
@@ -74,5 +76,9 @@ test('the email table escapes what came from outside and links to the drop', () 
   assert.match(section.html, /Ana &lt;b&gt;/);
   assert.match(section.html, /R&amp;R/);
   assert.doesNotMatch(section.html, /Ana <b>/);
-  assert.match(section.text, /Un contacto nuevo para ti/);
+  assert.match(section.text, /^Tu contacto de hoy, con su correo listo:/);
+  assert.match(section.html, />Ver y guardar</);
+  assert.equal(dropSubject([item]), 'Tu contacto de hoy: Gerente en R&R');
+  assert.equal(dropSubject([{ title: null, company: null }]), 'Tu contacto de hoy');
+  assert.equal(dropSubject([item, item]), '2 contactos nuevos para ti');
 });
