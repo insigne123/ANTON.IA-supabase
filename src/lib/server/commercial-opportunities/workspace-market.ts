@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
-import { PLAN_SCREEN_BATCH, planKeywords } from '@/lib/commercial-opportunities/purchase-plan';
+import { planKeywords } from '@/lib/commercial-opportunities/purchase-plan';
 import { opportunityLocalClock, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { contractEndsOn, likePatterns, normalizeRut, tenderUrl } from '@/lib/public-procurement/market';
 import { contractOpportunityDraft, contractsWindow, humanDay, type ExpiringContract } from '@/lib/public-procurement/contracts';
-import { contractsScreenPrompt, contractsScreenSchema, resolveWinPlan, winPlanPrompt, winPlanSchema, type WinPlan } from '@/lib/public-procurement/win-plan';
+import { CONTRACTS_SCREEN_BATCH, contractsScreenPrompt, contractsScreenSchema, resolveWinPlan, winPlanPrompt, winPlanSchema, type WinPlan } from '@/lib/public-procurement/win-plan';
 import { readAgencyHistory, readMarketCoverage, readSupplierProfile, searchSuppliers, suggestCompetitors, type AgencyHistory } from '@/lib/server/public-procurement/market';
 import { assertOpportunityAdmin, assertOpportunityRead } from './workspace-access';
 import { addOpportunityActivity, createPrivateOpportunity, opportunityDb } from './workspace-store';
@@ -165,9 +165,9 @@ export async function runMarketContracts(client: SupabaseClient, job: Opportunit
   const rows = (data || []) as ExpiringRow[];
   const offer = { offer: String(context.offer || ''), services: context.services || [], exclusions: context.exclusions || [], territories: context.territories || [] };
   const kept = new Map<string, { fit: 'alta' | 'media'; reason: string }>();
-  for (let offset = 0; offset < rows.length; offset += PLAN_SCREEN_BATCH) {
+  for (let offset = 0; offset < rows.length; offset += CONTRACTS_SCREEN_BATCH) {
     if (Date.now() - started > 200_000) return { waiting: true as const };
-    const batch = rows.slice(offset, offset + PLAN_SCREEN_BATCH);
+    const batch = rows.slice(offset, offset + CONTRACTS_SCREEN_BATCH);
     const ids = new Set(batch.map(row => String(row.tender_id)));
     const step = `contracts:${createHash('sha256').update(batch.map(row => row.tender_id).join('|')).digest('hex').slice(0, 32)}`;
     const answer = await opportunityGenerate(client, job, { step, category: 'evaluation', role: 'screen', schema: contractsScreenSchema, output: 6000,

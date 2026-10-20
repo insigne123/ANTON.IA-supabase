@@ -33,7 +33,7 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'conversaciones', title: 'Conversaciones', summary: 'Quién te respondió primero, el hilo completo y tu respuesta en el mismo hilo.', seconds: 53, sections: ['conversaciones'] },
   { id: 'pipeline', title: 'Pipeline', summary: 'El panel con tus cifras y etapas, y cómo mover un lead en el tablero.', seconds: 84, sections: ['pipeline'] },
   { id: 'empresas', title: 'Empresas', summary: 'Quién decide, quién lo usa y quién paga en cada empresa, a quién buscar y empresas parecidas.', seconds: 62, sections: ['pipeline'] },
-  { id: 'oportunidades', title: 'Oportunidades', summary: 'El embudo, la lista, el informe de la IA y «Cómo ganar» con el historial del organismo.', seconds: 93, sections: ['oportunidades'], feature: 'opportunities' },
+  { id: 'oportunidades', title: 'Oportunidades', summary: 'El embudo con un resumen de cada una, cargar una desde su documento, el informe de la IA y «Cómo ganar».', seconds: 123, sections: ['oportunidades'], feature: 'opportunities' },
   { id: 'mercado-publico', title: 'Mercado público', summary: 'Lo que el Estado planea comprar, los contratos que se licitarán de nuevo y tus competidores.', seconds: 83, sections: ['oportunidades'], feature: 'opportunities' },
   { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus conversaciones guardadas.', seconds: 53, sections: ['cowork', 'primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
   { id: 'conexiones', title: 'Conexiones', summary: 'Conecta tu correo, elige la cuenta que envía y consigue tu ticket de Mercado Público.', seconds: 61, sections: ['conexiones'] },
