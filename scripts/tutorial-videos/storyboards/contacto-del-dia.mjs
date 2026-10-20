@@ -65,7 +65,7 @@ export default {
       waitFor: { text: 'Quedó en «Por escribir», con su correo.', exact: false },
     },
     {
-      title: 'Investígalo y escríbele', text: '«Investigar y escribirle» lo investiga a fondo en «Por escribir», en uno o dos minutos. Luego «Preparar correos» deja el correo listo para revisarlo y enviarlo.',
+      title: 'Investígalo y escríbele', text: '«Investigar y escribirle» lo investiga a fondo en «Por escribir», en unos minutos. Luego «Preparar correos» deja el correo listo para revisarlo y enviarlo.',
       say: 'Y con un clic lo investigamos a fondo, para escribirle desde la app.', postit: 'El correo sugerido sigue aquí, con «Copiar».',
       target: { role: 'link', name: 'Investigar y escribirle' }, action: 'hover', zoom: 1.4, arrow: true,
     },

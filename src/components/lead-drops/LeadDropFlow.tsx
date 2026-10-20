@@ -137,7 +137,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
       setDrop(current => current && { ...current, items: body.items });
       setNotice(body.expired ? { ok: false, text: one ? 'Este contacto venció: pasaron más de 30 días desde que lo encontramos.'
         : `${body.expired === 1 ? 'Un contacto venció' : `${body.expired} contactos vencieron`}: pasaron más de 30 días. Los demás quedaron en «Por escribir».` }
-        : { ok: true, text: one ? 'Quedó en «Por escribir», con su correo. Para enviarle desde ANTON.IA, lo investigamos a fondo (uno o dos minutos) y luego revisas el correo.'
+        : { ok: true, text: one ? 'Quedó en «Por escribir», con su correo. Para enviarle desde ANTON.IA, lo investigamos a fondo (toma unos minutos) y luego revisas el correo.'
           : body.saved === 1 ? 'Quedó en «Por escribir», con su correo.' : `Quedaron ${body.saved} en «Por escribir», con su correo.` });
     } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
     finally { setSaving(false); }
