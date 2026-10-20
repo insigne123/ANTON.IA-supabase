@@ -22,7 +22,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const origin = new URL(request.url).origin;
     const pdf = await dropPdf(drop.items, { name: String(profile.data?.full_name || '').trim().split(/\s+/)[0] || '', date: drop.drop_date, link: `${origin}${dropHref(drop.id)}` });
     return new NextResponse(new Uint8Array(pdf), { headers: {
-      'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="contactos-de-la-semana-${drop.drop_date}.pdf"`, 'Cache-Control': 'private, no-store',
+      'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="contacto-del-dia-${drop.drop_date}.pdf"`, 'Cache-Control': 'private, no-store',
     } });
   } catch (error) {
     return requestAuthErrorResponse(error) || handleAuthError(error instanceof LeadDropsError ? new AuthError(error.message, error.status) : error);

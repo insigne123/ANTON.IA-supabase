@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Check, ChevronDown, Copy, Download, Loader2, MailCheck, Phone, RefreshCw, Search } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -8,14 +8,19 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
-import type { DropCriteria, DropItem } from '@/lib/lead-drops';
+import { dropHref, type DropCriteria, type DropItem } from '@/lib/lead-drops';
 import { cn } from '@/lib/utils';
 
 type Drop = { id: string; date: string; criteria: DropCriteria; items: DropItem[] };
+/** Why there are no contacts this time (src/lib/server/lead-drops.ts, emptyReason), with the button to «Perfil» when it helps. */
+type Empty = { title: string; text: string; profile: string | null };
 
-/** The steps a search goes through, shown in order while the drop opens: the person sees how these contacts were found. */
-const STEPS = ['Buscando personas con tus filtros', 'Revisando que tengan correo verificado', 'Quitando a quienes tu equipo ya tiene', 'Escribiendo un primer correo para cada uno'];
+/** The steps a search goes through, shown in order while the drop opens: the person sees how the contact was found. */
+const STEPS = ['Buscando personas con tus filtros', 'Revisando que tengan correo verificado', 'Quitando a quienes tu equipo ya tiene', 'Escribiendo un primer correo'];
 const STEP_MS = 550;
+/** While today's drop is made (`nuevo`, a minute or two), the steps advance at the pace of the real work, short of the last. */
+const MAKING_STEP_MS = 9000;
+const MAKING_WAIT_MS = 6000;
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 const SOURCE: Record<DropCriteria['source'], string> = { perfil: 'Tu cliente ideal, de «Perfil»', equipo: 'El cliente ideal de tu equipo', contactos: 'Parecidos a los contactos que guarda tu equipo' };
@@ -28,13 +33,32 @@ function Filter({ label, values }: { label: string; values: string[] }) {
   </div>;
 }
 
+function Steps({ step }: { step: number }) {
+  return <ol aria-live="polite" className="mt-5 space-y-2">
+    {STEPS.map((label, index) => {
+      const done = step > index, current = step === index;
+      return <li key={label} className={cn('flex items-center gap-2.5 text-sm transition-opacity motion-reduce:transition-none', !done && !current && 'opacity-40')}>
+        <span className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded-full', done ? 'bg-primary text-primary-foreground' : 'border')}>
+          {done ? <Check className="h-3 w-3" aria-hidden="true" /> : current ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
+        </span>
+        <span>{label}{done ? <span className="sr-only"> (listo)</span> : null}</span>
+      </li>;
+    })}
+  </ol>;
+}
+
 /**
- * «Contactos de la semana» in «Buscar prospectos» (src/lib/lead-drops.ts), opened from the morning email: the search
- * that found them, played back in a moment (or at once with reduced motion, or with «Ver ahora»), then the contacts with
- * why they fit, a brief research and a first email. Saving them puts them in «Por escribir» with their email, without credits.
+ * «Contacto del día» in «Buscar prospectos» (src/lib/lead-drops.ts), opened from the morning email or from «Hoy»: the
+ * search that found it, played back in a moment (or at once with reduced motion, or with «Ver ahora»), then the contact
+ * with why it fits, a brief research and a first email. Saving it puts it in «Por escribir» with its email, without
+ * credits; then «Escribirle» opens the draft. With `nuevo` (from «Hoy», for whoever gets no email) today's drop is made
+ * first, for real. A drop with more than one contact (DROP_SIZE) shows them as a list.
  */
 export function LeadDropFlow({ dropId }: { dropId: string }) {
   const { organizationId } = useAuth();
+  const [id, setId] = useState<string | null>(dropId === 'nuevo' ? null : dropId);
+  const [making, setMaking] = useState(dropId === 'nuevo');
+  const [empty, setEmpty] = useState<Empty | null>(null);
   const [drop, setDrop] = useState<Drop | null>(null);
   const [error, setError] = useState('');
   const [step, setStep] = useState(0);
@@ -42,42 +66,78 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const started = useRef(false);
   const listId = useId();
 
   const call = useCallback((path: string, init?: RequestInit) => authenticatedApiFetch(path, {
     cache: 'no-store', ...init, headers: { 'Content-Type': 'application/json', ...(organizationId ? { 'x-organization-id': organizationId } : {}) },
   }), [organizationId]);
   const load = useCallback(async () => {
-    if (!organizationId) return;
+    if (!organizationId || !id) return;
     setError('');
     try {
-      const response = await call(`/api/lead-drops/${encodeURIComponent(dropId)}`);
+      const response = await call(`/api/lead-drops/${encodeURIComponent(id)}`);
       const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(body?.error || 'No pudimos abrir tus contactos.');
+      if (!response.ok) throw new Error(body?.error || 'No pudimos abrir tu contacto.');
       setDrop(body);
-    } catch (e) { setError(e instanceof Error ? e.message : 'No pudimos abrir tus contactos.'); }
-  }, [call, dropId, organizationId]);
+    } catch (e) { setError(e instanceof Error ? e.message : 'No pudimos abrir tu contacto.'); }
+  }, [call, id, organizationId]);
   useEffect(() => { void load(); }, [load]);
-  // The playback: one step at a time once the contacts arrived; with reduced motion, straight to them.
+  // Today's drop, made now: another request may be writing it («pending»), so ask again until it is ready or says why not.
+  const make = useCallback(async () => {
+    setError(''); setEmpty(null); setMaking(true); setStep(0);
+    try {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const response = await call('/api/lead-drops/now', { method: 'POST' });
+        const body = await response.json().catch(() => null);
+        // Not a drop day or none left this month: said as such, without a retry that would answer the same.
+        if (response.status === 409) { setEmpty({ title: 'Hoy no te toca un contacto nuevo', text: body?.error || 'Tu próximo contacto llega pronto.', profile: null }); return; }
+        if (!response.ok) throw new Error(body?.error || 'No pudimos preparar tu contacto.');
+        if (body?.status === 'pending') { await new Promise(resolve => setTimeout(resolve, MAKING_WAIT_MS)); continue; }
+        if (body?.status === 'empty') { setEmpty(body.reason || { title: 'Esta vez no hubo un contacto nuevo', text: 'Inténtalo de nuevo más tarde.', profile: null }); return; }
+        if (!body?.id || !['ready', 'sent'].includes(body.status)) throw new Error('No pudimos preparar tu contacto.');
+        window.history.replaceState(null, '', dropHref(body.id));
+        setId(body.id);
+        return;
+      }
+      throw new Error('Tu contacto tarda más de lo normal. Vuelve en unos minutos: te esperará en «Hoy».');
+    } catch (e) { setError(e instanceof Error ? e.message : 'No pudimos preparar tu contacto.'); }
+    finally { setMaking(false); }
+  }, [call]);
   useEffect(() => {
+    if (dropId !== 'nuevo' || !organizationId || started.current) return;
+    started.current = true;
+    void make();
+  }, [dropId, organizationId, make]);
+  // The playback: one step at a time once the contacts arrived; with reduced motion, straight to them. While the drop is
+  // being made, at the pace of the work (a status, not an animation), short of the last step.
+  useEffect(() => {
+    if (making) {
+      if (step >= STEPS.length - 1) return;
+      const timer = setTimeout(() => setStep(value => Math.min(value + 1, STEPS.length - 1)), MAKING_STEP_MS);
+      return () => clearTimeout(timer);
+    }
     if (!drop) return;
     if (reducedMotion()) { setStep(STEPS.length); return; }
     if (step >= STEPS.length) return;
     const timer = setTimeout(() => setStep(value => value + 1), STEP_MS);
     return () => clearTimeout(timer);
-  }, [drop, step]);
+  }, [making, drop, step]);
 
   const left = drop?.items.filter(item => !item.savedLeadId) ?? [];
+  const one = drop?.items.length === 1 ? drop.items[0] : null;
   const save = async (leadIds?: string[]) => {
+    if (!id) return;
     setSaving(true); setNotice(null);
     try {
-      const response = await call(`/api/lead-drops/${encodeURIComponent(dropId)}`, { method: 'POST', body: JSON.stringify({ action: 'save', ...(leadIds ? { leadIds } : {}) }) });
+      const response = await call(`/api/lead-drops/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify({ action: 'save', ...(leadIds ? { leadIds } : {}) }) });
       const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(body?.error || 'No pudimos guardarlos.');
+      if (!response.ok) throw new Error(body?.error || 'No pudimos guardarlo.');
       setDrop(current => current && { ...current, items: body.items });
-      setNotice(body.expired ? { ok: false, text: `${body.expired === 1 ? 'Un contacto venció' : `${body.expired} contactos vencieron`}: pasaron más de 30 días. Los demás quedaron en «Por escribir».` }
-        : { ok: true, text: body.saved === 1 ? 'Quedó en «Por escribir», con su correo.' : `Quedaron ${body.saved} en «Por escribir», con su correo.` });
-    } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlos.' }); }
+      setNotice(body.expired ? { ok: false, text: one ? 'Este contacto venció: pasaron más de 30 días desde que lo encontramos.'
+        : `${body.expired === 1 ? 'Un contacto venció' : `${body.expired} contactos vencieron`}: pasaron más de 30 días. Los demás quedaron en «Por escribir».` }
+        : { ok: true, text: one ? 'Quedó en «Por escribir», con su correo. Ya puedes escribirle.' : body.saved === 1 ? 'Quedó en «Por escribir», con su correo.' : `Quedaron ${body.saved} en «Por escribir», con su correo.` });
+    } catch (e) { setNotice({ ok: false, text: e instanceof Error ? e.message : 'No pudimos guardarlo.' }); }
     finally { setSaving(false); }
   };
   const copy = async (item: DropItem) => {
@@ -87,33 +147,74 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     catch { setNotice({ ok: false, text: 'No pudimos copiar. Selecciona el texto y cópialo.' }); }
   };
   const downloadPdf = async () => {
+    if (!id) return;
     try {
-      const response = await call(`/api/lead-drops/${encodeURIComponent(dropId)}/pdf`);
+      const response = await call(`/api/lead-drops/${encodeURIComponent(id)}/pdf`);
       if (!response.ok) throw new Error();
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement('a');
-      link.href = url; link.download = `contactos-de-la-semana-${drop?.date || ''}.pdf`; link.click();
+      link.href = url; link.download = `contacto-del-dia-${drop?.date || ''}.pdf`; link.click();
       URL.revokeObjectURL(url);
     } catch { setNotice({ ok: false, text: 'No pudimos descargar el PDF. Inténtalo de nuevo.' }); }
   };
   const composeHref = (item: DropItem) => `/contact/compose?id=${encodeURIComponent(item.savedLeadId || '')}${item.draft
     ? `&subject=${encodeURIComponent(item.draft.subject)}&body=${encodeURIComponent(item.draft.body)}` : ''}`;
+  const badges = (item: DropItem) => <div className="flex flex-wrap gap-1.5 pt-1">
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />Correo verificado</span>
+    {item.hasPhone ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Phone className="h-3 w-3" aria-hidden="true" />Teléfono</span> : null}
+    {item.savedLeadId ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
+  </div>;
+  // The brief research and the first email, with «Copiar».
+  const details = (item: DropItem, panel?: string) => <div id={panel} className="space-y-4 rounded-xl bg-muted/40 p-4">
+    {item.research.length ? <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Breve investigación</p>
+      <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm">{item.research.map(fact => <li key={fact}>{fact}</li>)}</ul></div> : null}
+    {item.draft ? <div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Primer correo sugerido</p>
+        <Button variant="ghost" size="sm" className="h-7" onClick={() => void copy(item)}>
+          {copied === item.leadId ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}
+          {copied === item.leadId ? 'Copiado' : 'Copiar'}</Button>
+      </div>
+      <p className="mt-1.5 text-sm font-medium">{item.draft.subject}</p>
+      <p className="mt-1 whitespace-pre-line text-sm leading-6">{item.draft.body}</p>
+    </div> : null}
+  </div>;
 
   const playing = Boolean(drop) && step < STEPS.length;
+  const searched = one || making ? 'Así lo buscamos' : 'Así los buscamos';
   return <div className="mx-auto w-full max-w-3xl">
-    <PageHeader title="Buscar prospectos" eyebrow="Contactos de la semana" back={{ href: '/search', label: 'Búsqueda normal' }}
-      description={drop ? `Encontrados el ${dayLabel(drop.date)} para ti. Ya tienen su correo verificado: guardarlos no gasta créditos.` : 'Tus contactos nuevos de esta semana.'} />
+    <PageHeader title="Buscar prospectos" eyebrow="Contacto del día" back={{ href: '/search', label: 'Búsqueda normal' }}
+      description={drop ? (one ? `Encontrado el ${dayLabel(drop.date)} para ti. Ya tiene su correo verificado: guardarlo no gasta créditos.`
+        : `Encontrados el ${dayLabel(drop.date)} para ti. Ya tienen su correo verificado: guardarlos no gasta créditos.`)
+        : making ? 'Elegimos un contacto nuevo para ti, con una breve investigación y un primer correo.' : 'Tu contacto nuevo, con su correo verificado.'} />
 
     {error ? <Card className="rounded-2xl"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
       <p role="alert" className="text-sm text-muted-foreground">{error}</p>
-      <Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>
+      <Button variant="outline" size="sm" onClick={() => void (id ? load() : make())}><RefreshCw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reintentar</Button>
     </CardContent></Card> : null}
-    {!drop && !error ? <p role="status" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Abriendo tus contactos…</p> : null}
+    {!drop && !error && !making && !empty ? <p role="status" className="flex items-center gap-2 py-12 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Abriendo tu contacto…</p> : null}
+
+    {making ? <section aria-labelledby="drop-making" className="rounded-2xl border p-4 sm:p-5">
+      <h2 id="drop-making" className="flex items-center gap-2 text-sm font-medium"><Search className="h-4 w-4 text-primary" aria-hidden="true" />{searched}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Con tu cliente ideal, como lo haría una búsqueda tuya. Toma uno o dos minutos; si sales, te espera en «Hoy».</p>
+      <Steps step={step} />
+    </section> : null}
+
+    {empty ? <Card className="rounded-2xl"><CardContent className="space-y-4 p-5 sm:p-6">
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold">{empty.title}</h2>
+        <p className="text-sm text-muted-foreground">{empty.text}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {empty.profile ? <Button asChild><Link href="/profile#icp-heading">{empty.profile}</Link></Button> : null}
+        <Button asChild variant={empty.profile ? 'outline' : 'default'}><Link href="/search">Buscar con mis filtros</Link></Button>
+      </div>
+    </CardContent></Card> : null}
 
     {drop ? <div className="space-y-6">
       <section aria-labelledby="drop-filters" className="rounded-2xl border p-4 sm:p-5">
         <div className="flex items-center justify-between gap-3">
-          <h2 id="drop-filters" className="flex items-center gap-2 text-sm font-medium"><Search className="h-4 w-4 text-primary" aria-hidden="true" />Así los buscamos</h2>
+          <h2 id="drop-filters" className="flex items-center gap-2 text-sm font-medium"><Search className="h-4 w-4 text-primary" aria-hidden="true" />{searched}</h2>
           <span className="text-xs text-muted-foreground">{SOURCE[drop.criteria.source] || 'Tu cliente ideal'}</span>
         </div>
         <dl className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -121,24 +222,36 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           <Filter label="Rubro" values={drop.criteria.industries || []} />
           <Filter label="Lugar" values={drop.criteria.locations || []} />
         </dl>
-        <ol aria-live="polite" className="mt-5 space-y-2">
-          {STEPS.map((label, index) => {
-            const done = step > index, current = step === index;
-            return <li key={label} className={cn('flex items-center gap-2.5 text-sm transition-opacity motion-reduce:transition-none', !done && !current && 'opacity-40')}>
-              <span className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded-full', done ? 'bg-primary text-primary-foreground' : 'border')}>
-                {done ? <Check className="h-3 w-3" aria-hidden="true" /> : current ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
-              </span>
-              <span>{label}{done ? <span className="sr-only"> (listo)</span> : null}</span>
-            </li>;
-          })}
-        </ol>
+        <Steps step={step} />
         {playing ? <Button variant="link" size="sm" className="mt-2 h-auto p-0" onClick={() => setStep(STEPS.length)}>Ver ahora</Button> : null}
       </section>
 
-      {!playing ? <section aria-labelledby="drop-results" className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
+      {!playing && one ? <section aria-labelledby="drop-results" className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{one.name}</h2>
+            <p className="text-sm text-muted-foreground">{[one.title, one.company].filter(Boolean).join(' · ')}</p>
+          </div>
+          {one.savedLeadId ? <Button asChild size="lg"><Link href={composeHref(one)}>Escribirle<ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link></Button>
+            : <Button size="lg" disabled={saving} onClick={() => void save()}>
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}Guardar en «Por escribir»</Button>}
+        </div>
+        {notice ? <p role={notice.ok ? 'status' : 'alert'} className={cn('text-sm', notice.ok ? 'text-muted-foreground' : 'text-destructive')}>{notice.text}</p> : null}
+        <div className="space-y-3 rounded-2xl border p-4 sm:p-5">
+          <p className="text-sm">{one.why}</p>
+          {badges(one)}
+          {one.research.length || one.draft ? details(one) : null}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+          <Button variant="ghost" size="sm" className="-ml-2" onClick={() => void downloadPdf()}><Download className="mr-1.5 h-4 w-4" aria-hidden="true" />Descargar PDF</Button>
+          <Link href="/search" className="underline underline-offset-2 hover:text-foreground">¿Quieres más? Busca con tus propios filtros</Link>
+        </div>
+      </section> : null}
+
+      {!playing && !one ? <section aria-labelledby="drop-results" className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
-            <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{drop.items.length === 1 ? 'Un contacto nuevo' : `${drop.items.length} contactos nuevos`}</h2>
+            <h2 id="drop-results" className="text-xl font-semibold tracking-tight">{`${drop.items.length} contactos nuevos`}</h2>
             <p className="text-sm text-muted-foreground">{left.length ? 'Cada uno trae por qué te sirve, una breve investigación y un primer correo.' : 'Ya están todos en «Por escribir».'}</p>
           </div>
           {left.length ? <Button size="lg" disabled={saving} onClick={() => void save()}>
@@ -158,11 +271,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
                   <p className="font-medium">{item.name}</p>
                   <p className="text-sm text-muted-foreground">{[item.title, item.company].filter(Boolean).join(' · ')}</p>
                   <p className="text-sm">{item.why}</p>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"><MailCheck className="h-3 w-3" aria-hidden="true" />Correo verificado</span>
-                    {item.hasPhone ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Phone className="h-3 w-3" aria-hidden="true" />Teléfono</span> : null}
-                    {item.savedLeadId ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs"><Check className="h-3 w-3" aria-hidden="true" />En «Por escribir»</span> : null}
-                  </div>
+                  {badges(item)}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   {item.savedLeadId ? <Button asChild size="sm" variant="outline"><Link href={composeHref(item)}>Escribirle</Link></Button>
@@ -173,20 +282,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
                 onClick={() => setOpen(expanded ? null : item.leadId)}>
                 <ChevronDown className={cn('mr-1 h-4 w-4 transition-transform motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden="true" />
                 Investigación y primer correo</Button> : null}
-              {expanded ? <div id={panel} className="mt-2 space-y-4 rounded-xl bg-muted/40 p-4">
-                {item.research.length ? <div><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Breve investigación</p>
-                  <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm">{item.research.map(fact => <li key={fact}>{fact}</li>)}</ul></div> : null}
-                {item.draft ? <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Primer correo sugerido</p>
-                    <Button variant="ghost" size="sm" className="h-7" onClick={() => void copy(item)}>
-                      {copied === item.leadId ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}
-                      {copied === item.leadId ? 'Copiado' : 'Copiar'}</Button>
-                  </div>
-                  <p className="mt-1.5 text-sm font-medium">{item.draft.subject}</p>
-                  <p className="mt-1 whitespace-pre-line text-sm leading-6">{item.draft.body}</p>
-                </div> : null}
-              </div> : null}
+              {expanded ? <div className="mt-2">{details(item, panel)}</div> : null}
             </li>;
           })}
         </ul>

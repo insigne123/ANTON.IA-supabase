@@ -3,11 +3,12 @@ import test from 'node:test';
 
 import { deliverDailyAlert } from './daily-alerts';
 import { memory } from './goals-alerts-test-fixtures';
-import { dropPdf, latestDrop, pdfSafe, planOrganizationDrops, saveDropLeads, writeDrop } from './lead-drops';
+import { dropPdf, homeDrop, latestDrop, pdfSafe, planOrganizationDrops, pullDrop, pullStatus, saveDropLeads, writeDrop } from './lead-drops';
 import { splitLeadsFinderItems } from './leads-finder/client';
 
 const ORG = 'org-1';
 const TUESDAY = new Date('2026-10-20T10:00:00.000Z'); // 07:00 in Chile
+const WEDNESDAY_MORNING = new Date('2026-10-21T10:00:00.000Z');
 const actorItem = (n: number, company: string, extra: Record<string, unknown> = {}) => ({
   first_name: `Nombre${n}`, last_name: `Apellido${n}`, full_name: `Nombre${n} Apellido${n}`, email: `p${n}@${company.toLowerCase()}.cl`,
   job_title: 'Gerente de Personas', company_name: company, company_domain: `${company.toLowerCase()}.cl`, industry: 'Retail', company_size: '500',
@@ -88,42 +89,42 @@ test('writing a drop: what each company does and a first email by the Writer', a
   assert.match(saved.items[0].draft.body, /^Hola Nombre\d+,/);
 });
 
-test('saving puts the contacts in «Por escribir» with their email, once, and the vault forgets them', async () => {
+test('saving puts the contact in «Por escribir» with its email, once, and the vault forgets it', async () => {
   const { client, tables } = memory(seed(), { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
   await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0 });
   await writeDrop(client, tables.lead_drops[0], { generate: fakeGenerate, now: TUESDAY });
   const scope = { organizationId: ORG, userId: 'u-ana' };
   const drop = tables.lead_drops[0];
+  assert.equal(drop.items.length, 1, 'one contact a day');
   await assert.rejects(saveDropLeads(client, { organizationId: ORG, userId: 'u-leo' }, drop.id), { status: 404 }, 'never another person\'s drop');
-  const first = drop.items[0].leadId;
-  const one = await saveDropLeads(client, scope, drop.id, [first]);
-  assert.equal(one.saved.length, 1);
-  const row = tables.enriched_leads.find(lead => lead.id === one.saved[0].savedLeadId);
+  const { name, company, why } = drop.items[0];
+  assert.deepEqual(await latestDrop(client, scope, TUESDAY), { id: drop.id, dropDate: '2026-10-20', total: 1, left: 1, next: { name, company, why } });
+  const saved = await saveDropLeads(client, scope, drop.id, [drop.items[0].leadId]);
+  assert.equal(saved.saved.length, 1);
+  const row = tables.enriched_leads.find(lead => lead.id === saved.saved[0].savedLeadId);
   assert.ok(row.email && row.email.endsWith('.cl'));
   assert.equal(row.source_provider, 'leads_finder');
   assert.equal(row.data.leadDrop.dropId, drop.id);
   assert.equal(row.data.leadDrop.draft.subject, 'Ingresos en temporada alta');
-  assert.equal(tables.lead_search_vault.length, drop.items.length - 1);
-  assert.deepEqual(await latestDrop(client, scope, TUESDAY), { id: drop.id, dropDate: '2026-10-20', total: drop.items.length, left: drop.items.length - 1 });
-  const rest = await saveDropLeads(client, scope, drop.id);
-  assert.equal(rest.saved.length, drop.items.length - 1);
-  assert.equal(await latestDrop(client, scope, TUESDAY), null, 'nothing left to save');
   assert.equal(tables.lead_search_vault.length, 0);
+  assert.equal(await latestDrop(client, scope, TUESDAY), null, 'nothing left to save');
+  assert.equal((await saveDropLeads(client, scope, drop.id)).saved.length, 0, 'saving again saves nobody twice');
 });
 
-test('the morning alert carries the ready drop, with its PDF, and marks it sent', async () => {
+test('the morning alert carries the ready contact of the day, with its PDF, and marks it sent', async () => {
   const data = seed();
   const { client, tables } = memory(data, { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'], daily_alerts: ['organization_id', 'user_id', 'alert_date'] } });
-  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0 });
-  await writeDrop(client, tables.lead_drops[0], { generate: fakeGenerate, now: TUESDAY });
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: WEDNESDAY_MORNING, search: fakeSearch as any, budgetUsd: 3, spentUsd: 0 });
+  await writeDrop(client, tables.lead_drops[0], { generate: fakeGenerate, now: WEDNESDAY_MORNING });
   const sent: any[] = [];
   const outcome = await deliverDailyAlert(client, { organizationId: ORG, userId: 'u-ana' }, {
-    send: async (input: any) => { sent.push(input); return { ok: true as const }; }, appUrl: 'https://app.antonia.ai', now: new Date('2026-10-20T11:30:00.000Z'),
+    send: async (input: any) => { sent.push(input); return { ok: true as const }; }, appUrl: 'https://app.antonia.ai', now: new Date('2026-10-21T11:30:00.000Z'),
     opportunities: 'none', goalReminders: false,
   });
   assert.deepEqual(outcome, { status: 'sent' });
-  assert.equal(sent[0].subject, `${tables.lead_drops[0].items.length} contactos nuevos para ti`);
-  assert.match(sent[0].html, /Contactos de la semana/);
+  assert.equal(sent[0].subject, `Tu contacto de hoy: Gerente de Personas en ${tables.lead_drops[0].items[0].company}`);
+  assert.match(sent[0].html, /Contacto del día/);
+  assert.equal(sent[0].attachments[0].filename, 'contacto-del-dia-2026-10-21.pdf');
   assert.match(sent[0].html, /\/search\/contactos\//);
   assert.equal(sent[0].attachments[0].contentType, 'application/pdf');
   assert.equal(sent[0].attachments[0].content.subarray(0, 4).toString(), '%PDF');
@@ -135,4 +136,135 @@ test('the PDF draws plain Latin text', async () => {
   const pdf = await dropPdf([{ leadId: 'lf_1', name: 'Ana Pérez', title: 'Gerente', company: 'Ripley', domain: null, industry: null, size: null, city: null,
     hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana,\n\n¿Cuántos?' } }], { name: 'Ana', date: '2026-10-20', link: 'https://app.antonia.ai/x' });
   assert.equal(pdf.subarray(0, 4).toString(), '%PDF');
+});
+
+// ─── From «Hoy», for whoever gets no email ─────────────────────────────────────────────────────────────────────────
+
+const WEDNESDAY = new Date('2026-10-21T15:00:00.000Z');
+const THURSDAY = new Date('2026-10-22T15:00:00.000Z');
+const FRIDAY = new Date('2026-10-23T15:00:00.000Z');
+const SATURDAY = new Date('2026-10-24T15:00:00.000Z');
+const ANA = { organizationId: ORG, userId: 'u-ana' };
+const dropRow = (extra: Record<string, unknown>) => ({ id: 'drop-old', organization_id: ORG, user_id: 'u-ana', drop_date: '2026-10-20', status: 'ready',
+  criteria: { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' }, items: [], cost_usd: 0.02, error: null,
+  created_at: '2026-10-20T10:00:00.000Z', updated_at: '2026-10-20T10:05:00.000Z', ...extra });
+const withoutCustomer = () => {
+  const data = seed();
+  data.profiles = [profile('u-ana'), profile('u-leo'), profile('u-sin')];
+  data.enriched_leads = [];
+  return data;
+};
+const unique = { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } };
+const contact = { leadId: 'lf_1', name: 'Nombre1 Apellido1', title: 'Gerente de Personas', company: 'Ripley', domain: 'ripley.cl', industry: 'Retail', size: 500,
+  city: 'Santiago', hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Retail.'], draft: null };
+
+test('«Hoy» offers the first contact any day, then on Tuesdays, Wednesdays and Fridays, and the way back while it is written', async () => {
+  assert.equal(await pullStatus(memory(seed(), unique).client, ANA, THURSDAY), 'first');
+  const after = (row: Record<string, unknown>, now: Date) => {
+    const data = seed();
+    data.lead_drops = [dropRow(row)];
+    return pullStatus(memory(data, unique).client, ANA, now);
+  };
+  assert.equal(await after({}, WEDNESDAY), 'today', 'after Tuesday\'s, Wednesday\'s');
+  assert.equal(await after({ drop_date: '2026-10-21' }, THURSDAY), null, 'nothing on Thursday');
+  assert.equal(await after({ drop_date: '2026-10-21', status: 'pending' }, WEDNESDAY), 'preparing');
+  assert.equal(await after({ drop_date: '2026-10-21' }, WEDNESDAY), null, 'today\'s is done');
+  assert.equal(await after({ drop_date: '2026-10-21', status: 'empty', error: 'Se acabó el presupuesto del mes para el contacto del día.' }, WEDNESDAY), null);
+  // One that came empty for lack of a customer is made again as soon as there is one, any day.
+  assert.equal(await after({ status: 'empty', criteria: {}, cost_usd: 0 }, THURSDAY), 'first');
+  assert.equal(await pullStatus(memory(withoutCustomer(), unique).client, ANA, THURSDAY), 'profile');
+  // Nothing when the month's budget would not pay a search, or when drops are off.
+  const broke = seed();
+  broke.lead_drops = [dropRow({ organization_id: 'org-otra', user_id: 'u-otro', cost_usd: 3 })];
+  assert.equal(await pullStatus(memory(broke, unique).client, ANA, THURSDAY), null);
+  process.env.LEAD_DROPS_ENABLED = 'off';
+  try { assert.equal(await pullStatus(memory(seed(), unique).client, ANA, THURSDAY), null); }
+  finally { delete process.env.LEAD_DROPS_ENABLED; }
+});
+
+test('opening it from «Hoy» makes today\'s contact once: one search, its first email, and the same contact after', async () => {
+  searchCalls.length = 0;
+  const { client, tables } = memory(seed(), unique);
+  const made = await pullDrop(client, ANA, { now: THURSDAY, generate: fakeGenerate, search: fakeSearch as any });
+  assert.equal(made.status, 'ready');
+  assert.equal(made.reason, null);
+  assert.equal(searchCalls.length, 1);
+  assert.equal(searchCalls[0].maxResults, 10, 'a small search for one person');
+  const drop = tables.lead_drops.find(row => row.id === made.id);
+  assert.equal(drop.drop_date, '2026-10-22');
+  assert.equal(drop.items.length, 1);
+  assert.equal(drop.items[0].draft.subject, 'Ingresos en temporada alta');
+  assert.deepEqual(await pullDrop(client, ANA, { now: THURSDAY, generate: fakeGenerate, search: fakeSearch as any }), made);
+  assert.equal(searchCalls.length, 1, 'never searched twice');
+  assert.equal(await pullStatus(client, ANA, THURSDAY), null);
+  await assert.rejects(pullDrop(client, ANA, { now: SATURDAY, generate: fakeGenerate, search: fakeSearch as any }),
+    { status: 409, message: 'Tu próximo contacto llega el martes.' }, 'Saturday, after Thursday\'s first one');
+});
+
+test('without a customer nothing is searched nor kept; once there is one, today\'s is made', async () => {
+  searchCalls.length = 0;
+  const { client, tables } = memory(withoutCustomer(), unique);
+  const none = await pullDrop(client, ANA, { now: THURSDAY, generate: fakeGenerate, search: fakeSearch as any });
+  assert.equal(none.id, null);
+  assert.equal(none.status, 'empty');
+  assert.equal(none.reason?.profile, 'Completar mi cliente ideal');
+  assert.equal(searchCalls.length, 0);
+  assert.equal(tables.lead_drops.length, 0);
+  // The morning run left an empty one for lack of a customer; Ana fills «Perfil» and opens it again the same day.
+  const data = seed();
+  data.lead_drops = [dropRow({ id: 'drop-empty', drop_date: '2026-10-21', status: 'empty', criteria: {}, cost_usd: 0, error: 'Sin cliente ideal en «Perfil» ni contactos guardados para inferirlo.' })];
+  const filled = memory(data, unique);
+  const made = await pullDrop(filled.client, ANA, { now: WEDNESDAY, generate: fakeGenerate, search: fakeSearch as any });
+  assert.equal(made.status, 'ready');
+  assert.notEqual(made.id, 'drop-empty');
+  assert.deepEqual(filled.tables.lead_drops.map(row => row.status), ['ready'], 'the empty one is replaced');
+});
+
+test('an empty drop says why; one being written answers «pending», and one left half written is finished', async () => {
+  searchCalls.length = 0;
+  const broke = seed();
+  broke.lead_drops = [dropRow({ drop_date: '2026-10-21', status: 'empty', error: 'Se acabó el presupuesto del mes para el contacto del día.' })];
+  const empty = await pullDrop(memory(broke, unique).client, ANA, { now: WEDNESDAY, generate: fakeGenerate, search: fakeSearch as any });
+  assert.equal(empty.status, 'empty');
+  assert.equal(empty.reason?.title, 'Por este mes no quedan contactos');
+  assert.equal(empty.reason?.profile, null);
+  const failed = seed();
+  failed.lead_drops = [dropRow({ drop_date: '2026-10-21', status: 'empty', error: 'La búsqueda falló: timeout' })];
+  assert.match((await pullDrop(memory(failed, unique).client, ANA, { now: WEDNESDAY, generate: fakeGenerate, search: fakeSearch as any })).reason!.text, /El próximo llega el viernes/);
+  const writing = seed();
+  writing.lead_drops = [dropRow({ drop_date: '2026-10-21', status: 'pending', items: [contact], updated_at: '2026-10-21T14:59:00.000Z' })];
+  assert.deepEqual(await pullDrop(memory(writing, unique).client, ANA, { now: WEDNESDAY, generate: fakeGenerate, search: fakeSearch as any }),
+    { id: 'drop-old', status: 'pending', reason: null });
+  const stalled = seed();
+  stalled.lead_drops = [dropRow({ drop_date: '2026-10-21', status: 'pending', items: [contact], updated_at: '2026-10-21T14:00:00.000Z' })];
+  const finished = memory(stalled, unique);
+  assert.equal((await pullDrop(finished.client, ANA, { now: WEDNESDAY, generate: fakeGenerate, search: fakeSearch as any })).status, 'ready');
+  assert.equal(finished.tables.lead_drops[0].items[0].draft.subject, 'Ingresos en temporada alta');
+  assert.equal(searchCalls.length, 0, 'none of them searched');
+});
+
+test('today\'s row is taken before searching: a second request waits, and a search that died is made again', async () => {
+  searchCalls.length = 0;
+  const searching = seed();
+  searching.lead_drops = [dropRow({ id: 'drop-claim', drop_date: '2026-10-21', status: 'pending', criteria: {}, items: [], cost_usd: 0, updated_at: '2026-10-21T14:59:00.000Z' })];
+  const busy = memory(searching, unique);
+  assert.equal(await pullStatus(busy.client, ANA, WEDNESDAY), 'preparing');
+  assert.deepEqual(await pullDrop(busy.client, ANA, { now: WEDNESDAY, generate: fakeGenerate, search: fakeSearch as any }), { id: 'drop-claim', status: 'pending', reason: null });
+  assert.equal(searchCalls.length, 0, 'the first request is searching');
+  const died = seed();
+  died.lead_drops = [dropRow({ id: 'drop-claim', drop_date: '2026-10-21', status: 'pending', criteria: {}, items: [], cost_usd: 0, updated_at: '2026-10-21T14:00:00.000Z' })];
+  const again = memory(died, unique);
+  const made = await pullDrop(again.client, ANA, { now: WEDNESDAY, generate: fakeGenerate, search: fakeSearch as any });
+  assert.deepEqual([made.id, made.status], ['drop-claim', 'ready']);
+  assert.equal(searchCalls.length, 1);
+  assert.equal(again.tables.lead_drops[0].items.length, 1);
+});
+
+test('«Hoy» keeps the contact left to save, until a new one is due', async () => {
+  const data = seed();
+  data.lead_drops = [dropRow({ status: 'sent', items: [contact] })];
+  const { client } = memory(data, unique);
+  assert.deepEqual(await homeDrop(client, ANA, THURSDAY),
+    { drop: { id: 'drop-old', dropDate: '2026-10-20', total: 1, left: 1, next: { name: 'Nombre1 Apellido1', company: 'Ripley', why: 'Calza.' } }, pull: null });
+  assert.deepEqual(await homeDrop(client, ANA, FRIDAY), { drop: null, pull: 'today' }, 'the new one does not wait for the old one to be saved');
 });

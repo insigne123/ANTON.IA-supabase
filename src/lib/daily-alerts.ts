@@ -6,7 +6,7 @@ import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } fro
  * «Avisos» (idea 3): one email in the morning, from Tuesday to Friday, only when there is something concrete to do. It
  * names it: «Te respondió Juan Pérez», «2 licitaciones que te sirven cierran el viernes», «Tus 12 contactos de ayer ya
  * tienen correo». A goal that is behind is reason enough on Wednesdays and Fridays; any other day it only rides along.
- * On Tuesdays and Fridays it also brings «Contactos de la semana» (src/lib/lead-drops.ts): one email a day, never two.
+ * On Tuesdays, Wednesdays and Fridays it also brings «Contacto del día» (src/lib/lead-drops.ts): one email a day, never two.
  * Mondays belong to the weekly report. Pure: the server reads the facts (server/daily-alerts.ts).
  */
 
@@ -29,7 +29,7 @@ export type AlertFacts = {
   /** Opportunities of the person, or recommended and nobody's when they manage them, closing within three days. */
   closing: AlertOpportunity[];
   goal: GoalProgress | null;
-  /** Today's «Contactos de la semana», when they are ready. */
+  /** Today's «Contacto del día», when it is ready. */
   drop?: { id: string; items: DropItem[] } | null;
 };
 export type AlertKind = 'reply' | 'pending' | 'commitment' | 'closing' | 'drop' | 'research' | 'ready' | 'goal';
@@ -106,8 +106,9 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
 
   if (facts.drop?.items.length) {
     const count = facts.drop.items.length;
-    lead(dropSubject(count));
-    lines.push({ kind: 'drop', text: `${count === 1 ? 'Un contacto nuevo' : `${count} contactos nuevos`} para ti, con su correo listo: guárdalos sin gastar créditos`, href: dropHref(facts.drop.id) });
+    lead(dropSubject(facts.drop.items));
+    lines.push({ kind: 'drop', text: count === 1 ? 'Tu contacto de hoy, con su correo listo: guárdalo sin gastar créditos'
+      : `${count} contactos nuevos para ti, con su correo listo: guárdalos sin gastar créditos`, href: dropHref(facts.drop.id) });
   }
 
   if (facts.research.length) {
