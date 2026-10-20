@@ -5,7 +5,7 @@ import hoy from './hoy.mjs';
 import informeSemanal from './informe-semanal.mjs';
 import perfil from './perfil.mjs';
 import buscar from './buscar.mjs';
-import contactosDeLaSemana from './contactos-de-la-semana.mjs';
+import contactoDelDia from './contacto-del-dia.mjs';
 import importar from './importar.mjs';
 import contactos from './contactos.mjs';
 import firmas from './firmas.mjs';
@@ -20,5 +20,5 @@ import conexiones from './conexiones.mjs';
 import administracion from './administracion.mjs';
 
 export function STORYBOARDS() {
-  return [hoy, informeSemanal, perfil, buscar, contactosDeLaSemana, importar, contactos, firmas, campanas, conversaciones, pipeline, empresas, oportunidades, mercadoPublico, cowork, conexiones, administracion];
+  return [hoy, informeSemanal, perfil, buscar, contactoDelDia, importar, contactos, firmas, campanas, conversaciones, pipeline, empresas, oportunidades, mercadoPublico, cowork, conexiones, administracion];
 }

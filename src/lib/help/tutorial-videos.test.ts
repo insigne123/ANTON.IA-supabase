@@ -31,7 +31,7 @@ test('the files of each video are in public/, small enough to serve as they are'
       }
     }
   }
-  // 17 videos since 20 Oct 2026 («Contactos de la semana»; «Hoy» and «Informe semanal» grew with the goal and the alerts):
+  // 17 videos since 20 Oct 2026 («Contacto del día»; «Hoy» and «Informe semanal» grew with the goal and the alerts):
   // about 2,6 MB each, 44,8 MB in all.
   assert.ok(total <= 45 * MB, `los videos pesan ${(total / MB).toFixed(1)} MB`);
 });

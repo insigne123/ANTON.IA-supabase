@@ -44,19 +44,22 @@ const REMINDERS = [
 let done = new Set();
 let scripted = new Set();
 
-// «Meta de la semana» and «Contactos de la semana» read the clock and tables the bench has no rows in: same shapes as
+// «Meta de la semana» and «Contacto del día» read the clock and tables the bench has no rows in: same shapes as
 // GET /api/weekly-goals and /api/lead-drops/latest.
 const GOAL = { targets: { contacted: 10, found: 15 }, counts: { contacted: 6, found: 11 }, source: 'team' };
 
 export default {
   id: 'hoy', title: 'Hoy', start: '/dashboard',
+  // Nine scenes: a little more compression keeps it under the 4 MB the help serves.
+  crf: 31,
   intro: 'Tu punto de partida cada día: lo más importante primero, tus llamadas y LinkedIn, a quién volver a escribir y tu meta de la semana.',
-  learn: ['Ver lo más urgente', 'Llamar con un guion y dejar el resumen en el CRM', 'Tu meta y tus contactos de la semana'],
+  learn: ['Ver lo más urgente', 'Llamar con un guion y dejar el resumen en el CRM', 'Tu meta y tu contacto del día'],
   mocks: [
     { url: '**/api/weekly-goals', method: 'GET', respond: (_body, request) => ({ scope: homeScope(request), week: thisWeek(), goal: GOAL, ready: 4, admin: true }) },
     {
       url: '**/api/lead-drops/latest', method: 'GET',
-      respond: (_body, request) => ({ scope: homeScope(request), drop: { id: '00000000-0000-4000-8000-000000000901', dropDate: chileDay(), total: 5, left: 5 } }),
+      respond: (_body, request) => ({ scope: homeScope(request), pull: null, drop: { id: '00000000-0000-4000-8000-000000000901', dropDate: chileDay(), total: 1, left: 1,
+        next: { name: 'Fernanda Rojas', company: 'Retail Austral', why: 'Gerente de Personas en retail en Santiago: calza con tu cliente ideal.' } } }),
     },
     {
       url: /\/api\/touches$/, method: 'GET',
@@ -130,9 +133,9 @@ export default {
       target: { role: 'button', name: 'Retomar con Martina Valenzuela' }, zoomOn: { css: '[aria-labelledby="reconnect-title"]' }, action: 'hover', zoom: 1.25, arrow: true,
     },
     {
-      title: 'Contactos de la semana', text: 'Martes y viernes, cinco contactos nuevos con correo verificado, elegidos para ti.',
-      say: 'Martes y viernes te esperan cinco contactos nuevos.', postit: 'Guardarlos no gasta créditos: ya traen su correo.',
-      target: { role: 'link', name: 'Ver y guardar' }, zoomOn: { text: 'Contactos de la semana' }, action: 'hover', zoom: 1.3, arrow: true,
+      title: 'Contacto del día', text: 'Martes, miércoles y viernes, un contacto nuevo con correo verificado, elegido para ti.',
+      say: 'Martes, miércoles y viernes te espera un contacto nuevo.', postit: 'Guardarlo no gasta créditos: ya trae su correo.',
+      target: { role: 'link', name: 'Ver y guardar' }, zoomOn: { text: 'Contacto del día' }, action: 'hover', zoom: 1.3, arrow: true,
     },
     {
       title: 'Tu meta de la semana', text: 'A cuántas personas contactar y cuántos contactos nuevos con correo sumar, y si vas al día.',
