@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=extensions,public,pg_catalog;
-select plan(18);
+select plan(21);
 insert into auth.users(id,email) values
  ('d1000000-0000-4000-8000-000000000001','op-admin@antonia.test'),('d1000000-0000-4000-8000-000000000002','op-member@antonia.test'),('d1000000-0000-4000-8000-000000000003','op-other@antonia.test');
 insert into organizations(id,name) values('d2000000-0000-4000-8000-000000000001','Opportunity test'),('d2000000-0000-4000-8000-000000000002','Other opportunity test');
@@ -20,6 +20,9 @@ select throws_ok($$select opportunity_assign('d2000000-0000-4000-8000-0000000000
 select ok(not opportunity_can_read('d2000000-0000-4000-8000-000000000002','d1000000-0000-4000-8000-000000000003','d3000000-0000-4000-8000-000000000001'),'other tenant admin cannot read');
 select is(opportunity_assign('d2000000-0000-4000-8000-000000000001','d1000000-0000-4000-8000-000000000001','d3000000-0000-4000-8000-000000000001',1,null,'{}'::uuid[],null,'',null),2::bigint,'unassign completes');
 select is((select count(*)::int from opportunity_workspace_list('d2000000-0000-4000-8000-000000000001','d1000000-0000-4000-8000-000000000002','all','',0)),0,'revoked member list empty');
+select is((select count(*)::int from opportunity_workspace_list_kinds('d2000000-0000-4000-8000-000000000001','d1000000-0000-4000-8000-000000000001','all','',0,array['private'])),1,'source filter keeps its kind');
+select is((select count(*)::int from opportunity_workspace_list_kinds('d2000000-0000-4000-8000-000000000001','d1000000-0000-4000-8000-000000000001','all','',0,array['tender','compra_agil'])),0,'source filter leaves out other kinds');
+select is((select count(*)::int from opportunity_workspace_list_kinds('d2000000-0000-4000-8000-000000000001','d1000000-0000-4000-8000-000000000002','all','',0,array['private'])),0,'source filter keeps the read rules');
 select ok(not has_table_privilege('authenticated','opportunity_documents','select'),'no direct browser read');
 select ok(not has_function_privilege('authenticated','opportunity_assign(uuid,uuid,uuid,bigint,uuid,uuid[],uuid,text,timestamptz)','execute'),'no direct browser assignment');
 select ok((select bool_and(relrowsecurity) from pg_class where relname like 'opportunity_%' and relkind='r'),'all new tables have RLS');

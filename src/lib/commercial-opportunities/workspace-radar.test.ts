@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { EXCLUSION_MOTIVES, TENDER_PREREQUISITES, byClosing, bySource, closesLabel, exclusionGroups, startHere, workAdvice } from './workspace-radar';
+import { EXCLUSION_MOTIVES, OPPORTUNITY_SOURCES, TENDER_PREREQUISITES, byClosing, bySource, closesLabel, exclusionGroups, searchTerm, sourceKinds, startHere, workAdvice } from './workspace-radar';
 
 const NOW = Date.parse('2026-10-14T12:00:00Z');
 const at = (days: number) => new Date(NOW + days * 86_400_000).toISOString();
@@ -66,8 +66,9 @@ test('the evaluation asks why an excluded one was left out and keeps it next to 
   assert.match(sources, /excludedMotive: answer\.verdict === 'excluded' \? answer\.motive \?\? null : null/);
   const page = readFileSync('src/components/commercial-opportunities/OpportunityWorkWorkspace.tsx', 'utf8');
   assert.match(page, /<AdvicePill item=\{item\} \/>/);
-  assert.match(page, /filter === 'recommended' && !query && <StartHere/);
+  assert.match(page, /filter === 'recommended' && !search && source === 'all' && <StartHere/);
   assert.match(page, /bySource\(items\)\.map\(group =>/);
+  assert.match(page, /listGroups\.map\(group =>/);
   assert.match(page, /filter === 'excluded' \? <ExclusionGroups items=\{group\.items\}/);
   assert.match(page, /<TenderPrerequisites \/>/);
   assert.ok(TENDER_PREREQUISITES.length >= 4 && TENDER_PREREQUISITES.every(block => block.items.length >= 3));
@@ -85,4 +86,19 @@ test('each view is split in Licitaciones and LinkedIn, the open ones by nearest 
     [['Licitaciones', ['soon', 'received', 'later', 'none', 'closed']], ['LinkedIn', ['post-high', 'ad-low']]]);
   assert.deepEqual(bySource([item('a', 'review', at(3))], NOW).map(g => g.key), ['tenders'], 'an empty group is not shown');
   assert.deepEqual(byClosing([item('old', null, at(-9)), item('recent', null, at(-1))], NOW).map(i => i.id), ['recent', 'old']);
+});
+
+test('the sources say which kinds each one holds, and every kind the radar finds has one', () => {
+  assert.deepEqual(OPPORTUNITY_SOURCES.map(source => source.label), ['Todas las fuentes', 'Licitaciones', 'Compra Ágil', 'LinkedIn', 'Recibidas']);
+  assert.deepEqual(sourceKinds('linkedin'), ['hiring', 'linkedin_post']);
+  assert.deepEqual(sourceKinds('all'), []);
+  assert.deepEqual(sourceKinds('otra'), [], 'an unknown source filters nothing');
+  for (const kind of ['tender', 'compra_agil', 'hiring', 'linkedin_post', 'private']) assert.ok(OPPORTUNITY_SOURCES.some(source => (source.kinds as readonly string[]).includes(kind)), kind);
+});
+
+test('what a person types is searched without what would end a PostgREST filter', () => {
+  assert.equal(searchTerm('aseo, (hospital)*'), 'aseo hospital');
+  assert.equal(searchTerm('RR.HH. 100%_'), 'RR.HH. 100');
+  assert.equal(searchTerm('  '), '');
+  assert.equal(searchTerm('a'.repeat(300)).length, 100);
 });

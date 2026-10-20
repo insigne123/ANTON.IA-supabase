@@ -11,7 +11,18 @@ import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import { PipelineRoute, type PipelineStop } from './PipelineRoute';
 
 export type PipelineSuggestion = { id: string; move: WorkRecord['state'] | null; reason: string; nextAction: string };
+/** Where each card came from, now that a stage can mix them (and the filter can narrow them). */
+const SOURCE_LABELS: Record<string, string> = { tender: 'Licitación', compra_agil: 'Compra Ágil', hiring: 'Avisos en LinkedIn', linkedin_post: 'Publicación en LinkedIn', private: 'Recibida', project: 'Proyecto' };
 const ICONS = { found: <Inbox />, recommended: <Star />, assigned: <UserPlus />, working: <Wrench />, submitted: <Send />, won: <Award /> };
+/** Out of the road, under it: what was lost, put aside or left out by the AI, each one a click away. */
+const CLOSED_STAGES = [
+  { id: 'lost', label: 'Perdidas', hint: 'Se presentaron y no se ganaron.' },
+  { id: 'archived', label: 'Archivadas', hint: 'Se dejaron de trabajar o cerraron sin presentarse.' },
+  { id: 'excluded', label: 'No recomendadas', hint: 'La IA las dejó fuera porque no calzan con tu oferta. Ábrelas para ver por qué o reconsiderarlas.' },
+] as const;
+/** The stages the page loads by pages (readOpportunityPipeline): what nobody works yet. */
+export type PagedStage = 'found' | 'recommended' | 'excluded';
+const PAGED: string[] = ['found', 'recommended', 'excluded'];
 const MOVES: Record<string, WorkRecord['state'][]> = {
   assigned: ['working', 'blocked', 'archived'], working: ['submitted', 'blocked', 'archived'], submitted: ['won', 'lost'], won: [], blocked: ['working', 'archived'],
 };
@@ -21,10 +32,16 @@ const MOVES: Record<string, WorkRecord['state'][]> = {
  * AI suggests for each one. Moves the work shows happen on their own (pipeline.ts); here a person applies the rest. Each
  * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
-export function PipelineBoard({ items, work, totals, members, busy, suggestions, reviewing, summariesWaiting = false, onReview, onMove, onOpen }: {
+export function PipelineBoard({ items, work, totals, limits, members, busy, suggestions, reviewing, summariesWaiting = false, filtered = false, loadingMore = null, refreshing = false,
+  onReview, onMove, onOpen, onMore, onClearFilters }: {
   items: WorkItem[]; work: WorkRecord[]; members: Array<{ user_id: string; name: string }>; busy: boolean;
   /** Exact counts of what nobody works yet; the page lists only the best scored of them. */
-  totals?: { found: number; recommended: number };
+  totals?: { found: number; recommended: number; excluded?: number };
+  /** How many of each of those the page asked for: «Cargar más» asks for more until the most the server gives. */
+  limits?: Partial<Record<PagedStage, number>>;
+  /** A search or a source is on: an empty stage says so. */
+  filtered?: boolean; loadingMore?: string | null; refreshing?: boolean;
+  onMore?: (stage: PagedStage) => void; onClearFilters?: () => void;
   suggestions: PipelineSuggestion[] | null; reviewing: boolean; onReview: () => void;
   /** Some cards are still waiting for their line of summary. */
   summariesWaiting?: boolean;
@@ -43,10 +60,24 @@ export function PipelineBoard({ items, work, totals, members, busy, suggestions,
     return { id: stage.id, label: stage.label, hint: stage.hint, count, icon: ICONS[stage.id],
       urgent: stage.id === 'won' || stage.id === 'submitted' ? 0 : inStage.filter(p => p.days !== null && p.days >= 0 && p.days < 7).length };
   });
-  const closed = { lost: placed.filter(p => p.stage === 'lost').length, archived: placed.filter(p => p.stage === 'archived').length, excluded: placed.filter(p => p.stage === 'excluded').length };
-  const stage = PIPELINE_STAGES.find(s => s.id === selected) ?? PIPELINE_STAGES[0];
+  const closed = CLOSED_STAGES.map(stage => {
+    const inStage = placed.filter(p => p.stage === stage.id).length;
+    return { ...stage, count: stage.id === 'excluded' ? Math.max(totals?.excluded ?? 0, inStage) : inStage, loaded: inStage };
+  });
+  const stage = [...PIPELINE_STAGES, ...CLOSED_STAGES].find(s => s.id === selected) ?? PIPELINE_STAGES[0];
   const shown = placed.filter(p => p.stage === selected).sort((a, b) => (a.days ?? 9999) - (b.days ?? 9999));
+  const count = stops.find(s => s.id === stage.id)?.count ?? closed.find(s => s.id === stage.id)?.count ?? shown.length;
+  const paged = PAGED.includes(stage.id) ? stage.id as PagedStage : null;
+  // Another page while there are more and the server gives them (PIPELINE_MAX); beyond that, the search narrows them.
+  const more = paged && count > shown.length ? ((limits?.[paged] ?? 0) < 600 ? Math.min(60, count - shown.length) : 0) : 0;
+  const select = (id: string) => {
+    setSelected(id);
+    // What the AI left out loads only when someone opens it.
+    if (id === 'excluded' && !closed.find(s => s.id === 'excluded')?.loaded) onMore?.('excluded');
+  };
   const advice = new Map((suggestions || []).map(s => [s.id, s]));
+  // What the AI reviews (runPipelineReview): the opportunities a team already works. Without any, there is nothing to ask.
+  const inProgress = work.filter(w => ['assigned', 'working', 'blocked', 'submitted'].includes(w.state)).length;
   const moves = suggestions?.filter(s => s.move).length ?? 0;
 
   return (
@@ -54,27 +85,36 @@ export function PipelineBoard({ items, work, totals, members, busy, suggestions,
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id="pipeline-title" className="text-lg font-semibold">Embudo de oportunidades</h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Las oportunidades avanzan solas cuando el trabajo lo muestra: al asignar un equipo, al quedar listo el informe o al marcar que se presentó. La IA te sugiere el resto.</p>
+          <p className="mt-1 max-w-xl text-sm text-muted-foreground">Avanzan solas al asignar un equipo, al quedar listo el informe o al marcar que se presentó.</p>
         </div>
-        <Button type="button" variant="outline" onClick={onReview} disabled={reviewing || busy}>
+        {inProgress ? <Button type="button" variant="outline" onClick={onReview} disabled={reviewing || busy}
+          title={`La IA revisa ${inProgress === 1 ? 'la oportunidad en curso' : `las ${inProgress} oportunidades en curso`}: propone a qué etapa moverlas y qué hacer después. Nada cambia sin que lo aceptes.`}>
           {reviewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="mr-2 h-4 w-4" aria-hidden="true" />}
-          {reviewing ? 'Revisando…' : 'Revisar con IA'}
-        </Button>
+          {reviewing ? 'Revisando…' : 'Sugerir próximos pasos'}
+        </Button> : null}
       </div>
       {suggestions && <p role="status" className="rounded-xl bg-primary/5 px-3 py-2 text-sm">
         {suggestions.length ? `La IA revisó ${suggestions.length} ${suggestions.length === 1 ? 'oportunidad' : 'oportunidades'} en curso: ${moves ? `sugiere mover ${moves}` : 'ninguna necesita cambiar de etapa'} y deja una próxima acción para cada una.` : 'No hay oportunidades en curso para revisar.'}
       </p>}
-      <PipelineRoute stops={stops} selected={selected} onSelect={setSelected} />
-      {(closed.lost || closed.archived || closed.excluded) ? <p className="text-center text-xs text-muted-foreground">
-        {[closed.lost && `${closed.lost} perdidas`, closed.archived && `${closed.archived} archivadas`, closed.excluded && `${closed.excluded} no recomendadas`].filter(Boolean).join(' · ')}
-      </p> : null}
+      <PipelineRoute stops={stops} selected={selected} onSelect={select} />
+      {closed.some(s => s.count) ? <div role="group" aria-label="Fuera del embudo" className="flex flex-wrap items-center justify-center gap-1.5">
+        {closed.filter(s => s.count).map(s => <button key={s.id} type="button" aria-pressed={selected === s.id} onClick={() => select(s.id)}
+          className={cn('rounded-full px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            selected === s.id ? 'bg-foreground font-medium text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>
+          {s.label} <span className="tabular-nums">{s.count}</span></button>)}
+      </div> : null}
 
-      <div className="space-y-3" aria-live="polite">
+      <div className={cn('space-y-3 transition-opacity', refreshing && 'opacity-60')} aria-live="polite" aria-busy={refreshing || loadingMore === stage.id}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-base font-semibold">{stage.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{stops.find(s => s.id === stage.id)?.count ?? shown.length}</span></h3>
-          <p className="text-xs text-muted-foreground">{stage.hint}{(stops.find(s => s.id === stage.id)?.count ?? 0) > shown.length ? (shown.length === 1 ? ' Se muestra la de más puntaje.' : ` Se muestran las ${shown.length} con más puntaje.`) : ''}</p>
+          <h3 className="text-base font-semibold">{stage.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{count}</span></h3>
+          <p className="text-xs text-muted-foreground">{stage.hint}{count > shown.length && shown.length ? ` ${shown.length === 1 ? 'Se muestra 1' : `Se muestran ${shown.length}`} de ${count}, las de más puntaje.` : ''}</p>
         </div>
-        {!shown.length ? <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">No hay oportunidades en esta etapa.</p> : (
+        {!shown.length ? (loadingMore === stage.id ? <p role="status" className="flex items-center justify-center gap-2 rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Cargando…</p>
+          : <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+            <p>{filtered ? 'Ninguna oportunidad de esta etapa coincide con la búsqueda o la fuente elegida.' : 'No hay oportunidades en esta etapa.'}</p>
+            {filtered && onClearFilters ? <Button type="button" variant="link" size="sm" className="mt-1 h-auto p-0" onClick={onClearFilters}>Quitar filtros</Button> : null}
+          </div>) : (
           <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {shown.map(({ item, record, days }, index) => {
               const owner = members.find(m => m.user_id === record?.responsible_id);
@@ -93,7 +133,9 @@ export function PipelineBoard({ items, work, totals, members, busy, suggestions,
                     </div>
                     {owner ? <span title={`Responsable: ${owner.name}`}><InitialsAvatar name={owner.name} size="sm" /></span> : null}
                   </div>
+                  {record ? null : item.data?.evaluation === 'excluded' && item.reasons?.[0] ? <p className="text-xs leading-5 text-muted-foreground">Por qué no: {item.reasons[0]}</p> : null}
                   <div className="flex flex-wrap items-center gap-2 text-xs">
+                    {SOURCE_LABELS[item.kind] ? <span className="rounded-full border px-2 py-0.5 text-muted-foreground">{SOURCE_LABELS[item.kind]}</span> : null}
                     {days !== null ? <span className={cn('rounded-full px-2 py-0.5 font-medium', days < 0 ? 'bg-muted text-muted-foreground' : days < 7 ? 'bg-destructive/10 text-destructive' : 'bg-muted text-foreground/80')}>
                       {days < 0 ? 'Cerrada' : days === 0 ? 'Cierra hoy' : `Cierra en ${days} ${days === 1 ? 'día' : 'días'}`}</span> : null}
                     {record?.state === 'blocked' ? <span className="rounded-full bg-cw-warning-soft px-2 py-0.5 font-medium text-cw-warning">Bloqueada</span> : null}
@@ -109,7 +151,7 @@ export function PipelineBoard({ items, work, totals, members, busy, suggestions,
                         className="h-8 rounded-md border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <option value="">Elegir…</option>
                         {options.map(state => <option key={state} value={state}>{WORK_STATE_LABELS[state]}</option>)}
-                      </select></label> : <span className="text-xs text-muted-foreground">{record ? '' : 'Asígnale un equipo para empezar'}</span>}
+                      </select></label> : <span className="text-xs text-muted-foreground">{record || item.data?.evaluation === 'excluded' ? '' : 'Asígnale un equipo para empezar'}</span>}
                     <Button type="button" size="sm" variant="outline" onClick={() => onOpen(item.id)}>Abrir</Button>
                   </div>
                 </li>
@@ -117,6 +159,13 @@ export function PipelineBoard({ items, work, totals, members, busy, suggestions,
             })}
           </ul>
         )}
+        {more && paged ? <div className="flex flex-col items-center gap-1.5 pt-1">
+          <Button type="button" variant="outline" className="rounded-full" disabled={loadingMore === paged} onClick={() => onMore?.(paged)}>
+            {loadingMore === paged ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
+            {loadingMore === paged ? 'Cargando…' : `Cargar ${more} más`}
+          </Button>
+          <p className="text-xs text-muted-foreground">Quedan {count - shown.length} en esta etapa.</p>
+        </div> : paged && count > shown.length && shown.length ? <p className="text-center text-xs text-muted-foreground">Para ver las demás, búscalas por nombre o elige una fuente.</p> : null}
       </div>
     </section>
   );

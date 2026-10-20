@@ -37,17 +37,47 @@ test('the road has one stop per stage with its count, exact totals for what nobo
   const html = render();
   for (const [label, count] of [['Por revisar', 40], ['Recomendadas', 12], ['Asignadas', 0], ['En preparación', 1], ['Presentadas', 1], ['Ganadas', 0]] as const)
     assert.match(html, new RegExp(`aria-label="${label}: ${count}"`), label);
-  assert.match(html, /title="1 cierran en menos de 7 días"/, 'Aseo hospital closes in 3 days');
+  assert.match(text(html), /Recomendadas 1 cierra en menos de 7 días/, 'Aseo hospital closes in 3 days: said in words under the stop');
+  assert.doesNotMatch(html, /bg-destructive px-1/, 'no red bubble without a meaning');
   assert.match(html, /<nav aria-label="Etapas de las oportunidades">/);
   // The first stage with opportunities is open below: its cards, closest closing first.
   assert.match(text(html), /Por revisar 40/);
-  assert.match(text(html), /Se muestra la de más puntaje\./);
+  assert.match(text(html), /Se muestra 1 de 40, las de más puntaje\./);
+  assert.match(text(html), /Licitación Cierra en/, 'each card says where it came from');
+});
+
+test('a stage with more than the page shows loads the next page, up to the most the server gives; then the search narrows it', () => {
+  const html = render({ limits: { found: 60, recommended: 60 } });
+  assert.match(text(html), /Cargar 39 más Quedan 39 en esta etapa\./);
+  const atMost = render({ limits: { found: 600, recommended: 60 } });
+  assert.doesNotMatch(text(atMost), /Cargar \d+ más/);
+  assert.match(text(atMost), /Para ver las demás, búscalas por nombre o elige una fuente\./);
+});
+
+test('what is out of the road is a click away: lost, archived and the ones the AI left out, with their counts', () => {
+  const html = render({ totals: { found: 40, recommended: 12, excluded: 340 } });
+  assert.match(html, /<div role="group" aria-label="Fuera del embudo"/);
+  assert.match(text(html), /No recomendadas 340/);
+  assert.doesNotMatch(text(html), /Perdidas|Archivadas/, 'only the ones with something');
+});
+
+test('with a search or a source on, an empty stage says the filters left it empty and offers to clear them', () => {
+  const html = render({ items: [], work: [], totals: { found: 0, recommended: 0 }, filtered: true, onClearFilters: () => {} });
+  assert.match(text(html), /Ninguna oportunidad de esta etapa coincide con la búsqueda o la fuente elegida\. Quitar filtros/);
+  assert.match(text(render({ items: [], work: [], totals: { found: 0, recommended: 0 } })), /No hay oportunidades en esta etapa\./);
 });
 
 test('the AI suggestion sits on its card with the move to apply, and the summary says how many it moves', () => {
   const html = render({ suggestions: [{ id: 'b', move: 'submitted', reason: 'La nota dice que se subió la oferta.', nextAction: 'Confirmar recepción con el comprador' }] });
   assert.match(text(html), /La IA revisó 1 oportunidad en curso: sugiere mover 1/);
-  assert.match(text(html), /Revisar con IA/);
+  assert.match(text(html), /Sugerir próximos pasos/);
+  assert.match(html, /title="La IA revisa las 2 oportunidades en curso: propone a qué etapa moverlas y qué hacer después\. Nada cambia sin que lo aceptes\."/);
+});
+
+test('with nothing in progress there is nothing for the AI to review: no button; an empty stage stays quiet', () => {
+  const html = render({ work: [] });
+  assert.doesNotMatch(text(html), /Sugerir próximos pasos|Revisar con IA/);
+  assert.match(html, /aria-label="Asignadas: 0" class="[^"]*bg-background text-muted-foreground ring-border/);
 });
 
 test('each card says what the opportunity is about under its name, with its buyer above and no dash when there is none', () => {

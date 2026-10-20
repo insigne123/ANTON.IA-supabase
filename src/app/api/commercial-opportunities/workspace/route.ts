@@ -5,7 +5,8 @@ import { criteriaSchema } from '@/lib/server/commercial-opportunities/workspace-
 import { companyContextSchema, privateOpportunitySchema } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityDiscovery, runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
-import { readOpportunityPipeline } from '@/lib/server/commercial-opportunities/workspace-pipeline';
+import { PIPELINE_MAX, readOpportunityPipeline } from '@/lib/server/commercial-opportunities/workspace-pipeline';
+import { OPPORTUNITY_SOURCES, sourceKinds, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { AuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
@@ -13,10 +14,17 @@ export async function GET(request: Request) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth);
     const params = new URL(request.url).searchParams;
-    if (params.get('view') === 'pipeline') { assertOpportunityAdmin(scope); return opportunitiesJson(await readOpportunityPipeline(auth.admin, scope)); }
+    // Where they came from (licitaciones, Compra Ágil, LinkedIn, recibidas) and the words searched: the pipeline and the list alike.
+    const source = z.enum(OPPORTUNITY_SOURCES.map(item => item.id) as [OpportunitySource, ...OpportunitySource[]]).catch('all').parse(params.get('source') || 'all');
+    if (params.get('view') === 'pipeline') {
+      assertOpportunityAdmin(scope);
+      const limit = z.coerce.number().int().min(0).max(PIPELINE_MAX).optional().catch(undefined);
+      return opportunitiesJson(await readOpportunityPipeline(auth.admin, scope, { kinds: sourceKinds(source), query: z.string().max(200).catch('').parse(params.get('query') || ''),
+        limits: { found: limit.parse(params.get('found') ?? undefined), recommended: limit.parse(params.get('recommended') ?? undefined), excluded: limit.parse(params.get('excluded') ?? undefined) } }));
+    }
     const options = z.object({ view: z.enum(['all','recommended','review','excluded','pending','assigned','working','blocked','submitted','won','lost','archived']), query: z.string().max(200), page: z.coerce.number().int().min(0).max(1000) })
       .parse({ view: params.get('view') || 'all', query: params.get('query') || '', page: params.get('page') || '0' });
-    const overview = await readWorkspaceOverview(auth.admin, scope, options);
+    const overview = await readWorkspaceOverview(auth.admin, scope, { ...options, kinds: sourceKinds(source) });
     // The company offer is confirmed by its admin, never borrowed from the operator's personal profile.
     return opportunitiesJson({ ...overview, suggestion: null });
   } catch (error) { return opportunitiesError(error); }

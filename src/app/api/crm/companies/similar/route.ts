@@ -3,18 +3,12 @@ import { generateStructured } from '@/ai/openai-json';
 import { AuthError, handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
+import { companiesModel } from '@/lib/server/companies-model';
 import { resolveSimilar, similarAnswerSchema, similarPrompt, similarRequestSchema } from '@/lib/companies/similar';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 const noStore = { 'Cache-Control': 'private, no-store' };
-
-/** The model that picks the companies: Haiku by default; COMPANIES_MODEL can name another allowed one. */
-function companiesModel(env: Record<string, string | undefined> = process.env) {
-  const wanted = env.COMPANIES_MODEL || 'claude-haiku-5-5';
-  if (!['claude-haiku-5-5', 'claude-sonnet-5-5', 'gpt-6-luna'].includes(wanted)) throw new AuthError('El modelo configurado no está permitido.', 503);
-  return wanted;
-}
 
 /**
  * «Empresas parecidas» (src/lib/companies/similar.ts): the browser already ran Búsqueda's company search (its quota and

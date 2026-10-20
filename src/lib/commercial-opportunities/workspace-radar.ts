@@ -113,6 +113,27 @@ export const TENDER_PREREQUISITES: Array<{ title: string; items: string[] }> = [
 export const LINKEDIN_KINDS = ['hiring', 'linkedin_post'] as const;
 export const isLinkedIn = (kind: string) => (LINKEDIN_KINDS as readonly string[]).includes(kind);
 
+/** Where an opportunity came from, as the filter of the pipeline and the list says it, with the kinds of each. */
+export const OPPORTUNITY_SOURCES = [
+  { id: 'all', label: 'Todas las fuentes', kinds: [] },
+  { id: 'tender', label: 'Licitaciones', kinds: ['tender'] },
+  { id: 'compra_agil', label: 'Compra Ágil', kinds: ['compra_agil'] },
+  { id: 'linkedin', label: 'LinkedIn', kinds: [...LINKEDIN_KINDS] },
+  { id: 'private', label: 'Recibidas', kinds: ['private', 'project'] },
+] as const;
+export type OpportunitySource = typeof OPPORTUNITY_SOURCES[number]['id'];
+export const isOpportunitySource = (value: unknown): value is OpportunitySource => OPPORTUNITY_SOURCES.some(source => source.id === value);
+/** The kinds of a source; none means every kind. */
+export const sourceKinds = (source: string): string[] => [...(OPPORTUNITY_SOURCES.find(item => item.id === source)?.kinds ?? [])];
+
+/**
+ * What a person typed, safe inside a PostgREST filter: without its wildcards and the commas, parentheses and quotes that
+ * would end the filter. Empty when nothing searchable is left.
+ */
+export function searchTerm(query: string | null | undefined) {
+  return String(query || '').replace(/[%_*,()\\:"']/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+}
+
 /**
  * By deadline: the open ones first, the nearest closing first; then the ones without a deadline, best match first; the
  * closed ones last, the most recently closed first.

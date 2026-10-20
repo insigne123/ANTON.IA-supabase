@@ -35,8 +35,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 /**
  * «Informe semanal» (propuesta 2): the person's week, their team's when they run it and Oportunidades' when they manage
  * it, with what to do next. Monday's email carries the same, from the person's own mailbox, when they turn it on.
+ * `embedded`: inside «Hoy» («Tu semana»), whose header names the page; here only the week and its range.
  */
-export function WeeklyReport() {
+export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) {
   const { organizationId } = useAuth();
   const [week, setWeek] = useState<'current' | 'previous'>('current');
   const [role, setRole] = useState<ReportRole>('personal');
@@ -90,11 +91,11 @@ export function WeeklyReport() {
     <td className={cn('px-4 py-2.5 text-right tabular-nums', member.pending ? 'font-medium' : 'text-muted-foreground')}>{member.pending}</td>
   </tr>;
 
-  return <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6">
-    <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+  return <div className={embedded ? 'w-full max-w-3xl space-y-6' : 'mx-auto w-full max-w-3xl space-y-6 px-4 py-6 sm:px-6'}>
+    <header className={cn('flex flex-col gap-4 sm:flex-row sm:justify-between', embedded ? 'sm:items-center' : 'sm:items-end')}>
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight">Informe semanal</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{report ? `${report.week.which === 'current' ? 'Esta semana' : 'La semana pasada'} · ${report.week.label}` : 'Tu semana en un vistazo.'}</p>
+        {embedded ? null : <h1 className="text-2xl font-semibold tracking-tight">Informe semanal</h1>}
+        <p className={cn('text-sm text-muted-foreground', !embedded && 'mt-1')}>{report ? `${report.week.which === 'current' ? 'Esta semana' : 'La semana pasada'} · ${report.week.label}` : 'Tu semana en un vistazo.'}</p>
       </div>
       <div role="group" aria-label="Semana" className="flex self-start rounded-full border p-0.5">
         {(['current', 'previous'] as const).map(value => <Button key={value} size="sm" variant={week === value ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={week === value} onClick={() => setWeek(value)}>

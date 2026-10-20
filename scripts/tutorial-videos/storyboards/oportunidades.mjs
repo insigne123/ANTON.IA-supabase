@@ -45,9 +45,9 @@ export default {
       target: { role: 'heading', name: 'Embudo de oportunidades' }, zoomOn: { css: 'section[aria-labelledby="pipeline-title"]' }, action: 'none', zoom: 1.1, highlight: false,
     },
     {
-      title: 'Revisar con IA', text: 'La IA propone qué mover de etapa. Nada cambia sin que lo aceptes.',
-      say: 'La IA te sugiere qué mover.',
-      target: { role: 'button', name: 'Revisar con IA' }, action: 'hover', zoom: 1.6, arrow: true,
+      title: 'Sugerir próximos pasos', text: 'Con oportunidades en curso, la IA propone a qué etapa moverlas y qué hacer después. Nada cambia sin que lo aceptes.',
+      say: 'La IA te sugiere los próximos pasos.',
+      target: { role: 'button', name: 'Sugerir próximos pasos' }, action: 'hover', zoom: 1.6, arrow: true,
     },
     {
       title: 'De qué se trata', text: 'Bajo cada nombre, la IA resume la oportunidad en una frase.',
