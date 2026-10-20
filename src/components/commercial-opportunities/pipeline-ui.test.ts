@@ -59,6 +59,13 @@ test('each card says what the opportunity is about under its name, with its buye
   assert.doesNotMatch(html, /animate-pulse/, 'nothing is on its way');
 });
 
+test('on a phone the cards fit the screen: the column can shrink below a long buyer name, which is cut with an ellipsis', () => {
+  const html = render({ items: [{ ...item('a', 'SERVICIOS DE VIGILANCIA-GUARDIAS DRT VALPARAÍSO', 'recommended', soon), buyer_name: 'CORPORACION ADMINISTRATIVA DEL PODER JUDICIAL DE LA REGION' }], work: [] });
+  assert.match(html, /<ul class="grid grid-cols-1 gap-3 lg:grid-cols-2">/);
+  assert.match(html, /<li class="flex min-w-0 flex-col/);
+  assert.match(html, /class="truncate text-xs text-muted-foreground">CORPORACION ADMINISTRATIVA/);
+});
+
 test('while summaries are being written, the cards without one show a faint line instead of text', () => {
   const html = render({ items: [item('a', 'Aseo hospital', 'recommended', soon)], work: [], summariesWaiting: true });
   assert.match(html, /aria-hidden="true"><span class="block h-3 w-11\/12 rounded-full bg-muted motion-safe:animate-pulse"/);

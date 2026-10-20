@@ -75,14 +75,14 @@ export function PipelineBoard({ items, work, totals, members, busy, suggestions,
           <p className="text-xs text-muted-foreground">{stage.hint}{(stops.find(s => s.id === stage.id)?.count ?? 0) > shown.length ? (shown.length === 1 ? ' Se muestra la de más puntaje.' : ` Se muestran las ${shown.length} con más puntaje.`) : ''}</p>
         </div>
         {!shown.length ? <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">No hay oportunidades en esta etapa.</p> : (
-          <ul className="grid gap-3 lg:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {shown.map(({ item, record, days }, index) => {
               const owner = members.find(m => m.user_id === record?.responsible_id);
               const tip = advice.get(item.id);
               const options = record ? MOVES[record.state] ?? [] : [];
               const summary = opportunitySummary(item.data);
               return (
-                <li key={item.id} className="flex flex-col gap-3 rounded-2xl border bg-background p-4 shadow-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
+                <li key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border bg-background p-4 shadow-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
                   style={{ animationDelay: `${Math.min(index, 8) * 50}ms`, animationFillMode: 'both' }}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
