@@ -104,6 +104,7 @@ test('visible V2 suppresses legacy retries without V1 model or seller calls', as
   const result = await processResearchReportSynthesisQueue({}, {
     admin: adminFixture([candidate('research-report-document/v1'), candidate('research-report-document/v2')]),
     loadV2Configuration: (async () => ({ mode: 'visible', sellerProfile: { products: [] }, icpRules: null, synthesisContextHash: 'a'.repeat(64) })) as any,
+    loadV2State: async () => ({ status: 'running' }),
     loadV1SellerProfile: async () => { throw new Error('V1 seller must not load'); },
     processV1: async () => { throw new Error('V1 must not generate'); },
     processV2: (async (input: any) => {
@@ -152,18 +153,51 @@ test('pre-claim snapshot failures consume a durable non-retryable candidate atte
   assert.equal(rejection?.retryable, false);
 });
 
-test('a tick starts at most one expensive V2 report and leaves the rest unclaimed', async () => {
-  let processed = 0;
+test('a tick writes up to three V2 reports at once and leaves the rest unclaimed', async () => {
+  let running = 0;
+  let mostAtOnce = 0;
   let rejected = 0;
   const result = await processResearchReportSynthesisQueue({}, {
-    admin: adminFixture([candidate('research-report-document/v2'), { ...candidate('research-report-document/v2'), id: 'second-state' }]),
+    admin: adminFixture(['a', 'b', 'c', 'd'].map((id) => ({ ...candidate('research-report-document/v2'), id }))),
     loadV2Configuration: (async () => ({ mode: 'shadow', sellerProfile: { products: [] }, icpRules: null, synthesisContextHash: 'a'.repeat(64) })) as any,
-    processV2: (async () => { processed += 1; return { document: {}, synthesis: { status: 'completed', retryable: false }, metrics: null }; }) as any,
+    processV2: (async () => {
+      running += 1;
+      mostAtOnce = Math.max(mostAtOnce, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      return { document: {}, synthesis: { status: 'completed', retryable: false }, metrics: null };
+    }) as any,
     rejectCandidate: async () => { rejected += 1; return null; },
   });
-  assert.equal(processed, 1);
+  assert.equal(mostAtOnce, 3, 'written together, not one after the other');
   assert.equal(rejected, 0);
-  assert.equal(result.skipped, 1);
+  assert.deepEqual(result, { claimed: 4, completed: 3, failed: 0, skipped: 1 });
+});
+
+test('a V2 report that fails for good queues the V1 report, which then writes it', async () => {
+  const fallbacks: string[] = [];
+  const visible = (async () => ({ mode: 'visible', sellerProfile: { products: [] }, icpRules: null, synthesisContextHash: 'a'.repeat(64) })) as any;
+  const failedV2 = await processResearchReportSynthesisQueue({}, {
+    admin: adminFixture([candidate('research-report-document/v2')]),
+    loadV2Configuration: visible,
+    processV2: (async () => ({ document: null, synthesis: { status: 'failed_permanent', retryable: false }, metrics: null })) as any,
+    enqueueV1Fallback: async (value) => { fallbacks.push(value.research_snapshot_id); },
+    rejectCandidate: async () => null,
+  });
+  assert.deepEqual(fallbacks, [draftSnapshotFixture().id]);
+  assert.equal(failedV2.failed, 1);
+
+  let v1Written = 0;
+  const fallback = await processResearchReportSynthesisQueue({}, {
+    admin: adminFixture([candidate('research-report-document/v1')]),
+    loadV2Configuration: visible,
+    loadV2State: async () => ({ status: 'failed_permanent' }),
+    loadV1SellerProfile: (async () => ({ companyName: 'Northstar' })) as any,
+    processV1: (async () => { v1Written += 1; return { document: {}, synthesis: { status: 'partial', retryable: false } }; }) as any,
+    rejectCandidate: async () => { throw new Error('the fallback must not be set aside'); },
+  });
+  assert.equal(v1Written, 1);
+  assert.equal(fallback.completed, 1);
 });
 
 test('editorial retry policy allows one retry then exposes an actionable task', () => {

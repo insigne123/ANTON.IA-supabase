@@ -189,3 +189,31 @@ test('a hidden surname is searched by first name, company and role, and still ne
     'another Rafael of the same company is not this person');
   assert.equal(isStrictPublicPersonIdentityMatch({ lead: masked, item: item('Rafael Durán - Otra Empresa') }), false, 'the company still has to match');
 });
+
+test('the brand without its legal form, the short name with the role, and the person\'s own LinkedIn profile identify them', () => {
+  const chilean = {
+    fullName: 'Juan Andrés Pérez González',
+    title: 'Gerente Comercial',
+    companyName: 'Constructora Andes SpA',
+    companyDomain: 'andes.example',
+    linkedinUrl: 'https://www.linkedin.com/in/juanperez-g',
+  };
+  assert.deepEqual(buildPublicPersonSearchQueries(chilean), [
+    '"Juan Andrés Pérez González" "Constructora Andes SpA" "Gerente Comercial"',
+    '"Juan Andrés Pérez González" "Constructora Andes SpA"',
+    '"Juan Andrés Pérez González" "andes.example"',
+    '"Juan Andrés Pérez González" "constructora andes"',
+    '"Juan Pérez" "constructora andes" "Gerente Comercial"',
+  ]);
+  const item = (title: string, link = 'https://press.example/nota') => ({ title, snippet: '', link, source: null, date: null, position: 1 });
+  const matches = (title: string, link?: string) => isStrictPublicPersonIdentityMatch({ lead: chilean, item: item(title, link) });
+  assert.equal(matches('Juan Andrés Pérez González, de Constructora Andes'), true, 'the brand as the press writes it');
+  assert.equal(matches('Juan Pérez - Gerente Comercial - Constructora Andes | LinkedIn'), true, 'short name, brand and role');
+  assert.equal(matches('Juan Pérez - Supervisor de obra - Constructora Andes'), false, 'another Juan Pérez of the same company');
+  assert.equal(matches('Juan Pérez - Gerente Comercial - Otra Constructora'), false, 'short name and role elsewhere is someone else');
+  assert.equal(matches('Juan Pérez - Gerente Comercial - Nueva Empresa | LinkedIn', 'https://cl.linkedin.com/in/juanperez-g'), true,
+    'the person\'s own profile, even with a newer employer');
+  assert.equal(matches('Pedro Soto - Constructora Andes', 'https://cl.linkedin.com/in/juanperez-g'), false, 'the profile still has to name them');
+  assert.equal(isStrictPublicPersonIdentityMatch({ lead: { ...chilean, companyName: 'AB SpA', companyDomain: null }, item: item('Juan Andrés Pérez González en AB') }), false,
+    'a two-letter brand is too short to identify a company');
+});

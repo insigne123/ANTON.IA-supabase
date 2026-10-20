@@ -56,6 +56,8 @@ export type ResearchToolContext = {
   auth: AuthContext;
   conversationId?: string;
   consumeResearchCredit?: () => Promise<void>;
+  /** Background research, with nobody waiting: a timed-out search is tried once more. */
+  retrySlowSearches?: boolean;
 };
 
 function getResearchOrganizationId(context: ResearchToolContext | undefined) {
@@ -336,7 +338,7 @@ async function researchSerp(input: Record<string, unknown>, context: ResearchToo
 
   needEnv('SERPER_API_KEY');
   await consumePremiumResearchCredit(context);
-  const result = await searchSerper(search);
+  const result = await searchSerper(search, { retryTimeouts: context.retrySlowSearches === true });
   const output = {
     status: 'completed',
     source: 'serper',

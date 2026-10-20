@@ -13,5 +13,6 @@ export function nativeResearchSearchContext(organizationId: string, leadId: stri
     },
     conversationId: 'native-research',
     consumeResearchCredit: async () => {},
+    retrySlowSearches: true,
   } as any;
 }
