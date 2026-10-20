@@ -9,6 +9,7 @@ import { opportunityDb } from './workspace-store';
 import { runOpportunitySpecialists } from './workspace-specialists';
 import { opportunityGenerate, opportunityGenerateReport, type OpportunityJob } from './workspace-ai';
 import { saveOpportunityDocument } from './workspace-documents';
+import { activeDocumentScans } from './workspace-scans';
 import { downloadOpportunitySource, opportunityAttachmentLinks } from './workspace-download';
 import { resolveTicketForOrganization } from './tickets';
 import { MERCADO_PUBLICO_BASE } from './mercado-publico';
@@ -120,6 +121,15 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
     opportunityDb(await client.from('opportunity_jobs').update({payload:job.payload}).eq('id',job.id).eq('lease_token',job.lease_token));
   }
   warnings.push(...job.payload.publicWarnings||[]);
+  // Images and scanned pages are read by their own jobs (workspace-scans.ts): the report waits for their text, up to ten minutes.
+  if (!job.payload.manifestHash && await activeDocumentScans(client, job.organization_id, id)) {
+    job.payload.scanWaitSince ||= new Date().toISOString();
+    if (Date.now() - Date.parse(job.payload.scanWaitSince) < 10 * 60_000) {
+      opportunityDb(await client.from('opportunity_jobs').update({ payload: job.payload }).eq('id', job.id).eq('lease_token', job.lease_token));
+      return { waiting: true as const };
+    }
+    warnings.push('Un documento escaneado o una imagen aún se estaba leyendo y el informe no lo considera.');
+  }
   const documents = opportunityDb(await client.from('opportunity_documents').select('*').eq('organization_id', job.organization_id).eq('opportunity_id', id).order('id')) || [];
   const manifest=documents.map(d=>({id:d.id,hash:d.sha256,status:d.extraction_status}));
   const manifestHash=createHash('sha256').update(JSON.stringify(manifest)).digest('hex');

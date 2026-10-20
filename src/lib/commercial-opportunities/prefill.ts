@@ -21,6 +21,9 @@ export const prefillAnswerSchema = z.object({
 export type PrefillAnswer = z.infer<typeof prefillAnswerSchema>;
 export type PrefillFields = { title: string; company: string; url: string; kind: typeof PREFILL_KINDS[number]; description: string; deadline: string; amount: string; currency: string };
 
+/** What the prompt says in place of the text when the document is a scan or a photo, attached for the model to read. */
+export const PREFILL_SCANNED = '(El documento no tiene texto digital: va adjunto como imagen o PDF escaneado. Léelo ahí; lo que no se lea con seguridad va null.)';
+
 export function prefillPrompt(input: { name: string; text: string; today: string }) {
   return `Lee el documento que recibió el equipo comercial (una invitación, unas bases, una solicitud de propuesta o cotización, o un correo) y completa el formulario para cargar la oportunidad. La persona revisará cada campo antes de guardar.
 

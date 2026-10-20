@@ -9,7 +9,7 @@ import { friendlyJobError, statusLabel } from '@/lib/commercial-opportunities/re
 import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { ReportOffice } from './ReportOffice';
 
-export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html,.htm,.docm,.dotx,.xlsm,.xltx,.xlsb,.odt,.ods,.odp,.pptx,.rtf,.zip';
+export const ACCEPTED_FILES = '.pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html,.htm,.docm,.dotx,.xlsm,.xltx,.xlsb,.odt,.ods,.odp,.pptx,.rtf,.jpg,.jpeg,.png,.webp,.gif,.zip';
 export type ExpedientDocument = { id: string; name: string; extraction_status: string; source_kind: string; source_url: string | null; pages_read: number | null; pages_total: number | null; created_at: string };
 export type PublicLinks = { ficha: string; attachments: string | null; forum: string | null; forms: number; code: string | null } | null;
 type Upload = { name: string; state: 'uploading' | 'done' | 'error'; message?: string };
@@ -42,7 +42,7 @@ export function DocumentDrop({ onUpload, disabled, compact }: { onUpload: (files
         compact ? 'px-4 py-5' : 'px-6 py-8', over ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40', disabled && 'cursor-not-allowed opacity-60')}>
       <UploadCloud className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
       <p className="text-sm font-medium">Arrastra aquí las bases y anexos</p>
-      <p className="text-xs text-muted-foreground">o haz clic para elegirlos · PDF, Word, Excel o el ZIP de Mercado Público, hasta 20 MB cada documento</p>
+      <p className="text-xs text-muted-foreground">o haz clic para elegirlos · PDF, Word, Excel, fotos o el ZIP de Mercado Público, hasta 20 MB cada documento</p>
     </div>
     <input ref={input} id="op-document" type="file" multiple accept={ACCEPTED_FILES} className="sr-only" onChange={e => void send(e.target.files)} />
     {uploads.length > 0 && <ul className="mt-3 space-y-1.5 text-sm" aria-live="polite">{uploads.map((u, i) => <li key={i} className="flex items-start gap-2">
@@ -109,8 +109,9 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
 const sourceGroups = (kind?: string): Array<[string, string]> => [['upload', 'Subidos por tu equipo'],
   ['official', kind === 'tender' || kind === 'compra_agil' ? 'Traídos de Mercado Público' : kind === 'hiring' || kind === 'linkedin_post' ? 'Datos de la señal' : 'Traídos de la fuente'],
   ['public_web', 'Traídos de la web'], ['pasted', 'Texto recibido']];
-/** The documents of the expediente, grouped by where they came from, with how much was read. */
-export function DocumentList({ id, documents, kind }: { id: string; documents: ExpedientDocument[]; kind?: string }) {
+/** The documents of the expediente, grouped by where they came from, with how much was read. `scanning`: the images and scans
+ * the AI is reading right now. */
+export function DocumentList({ id, documents, kind, scanning = [] }: { id: string; documents: ExpedientDocument[]; kind?: string; scanning?: string[] }) {
   if (!documents.length) return <p className="rounded-2xl border p-5 text-sm text-muted-foreground">Todavía no hay documentos. Los que subas o traigamos de Mercado Público aparecerán aquí.</p>;
   return <div className="space-y-5">{sourceGroups(kind).map(([source, label]) => {
     const list = documents.filter(d => d.source_kind === source); if (!list.length) return null;
@@ -118,7 +119,8 @@ export function DocumentList({ id, documents, kind }: { id: string; documents: E
       <ul className="divide-y rounded-2xl border">{list.map(d => <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
         <span className="flex min-w-0 items-start gap-2"><FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0"><span className="block break-words text-sm font-medium">{d.name}</span>
-            <span className={cn('text-xs', d.extraction_status === 'read' ? 'text-muted-foreground' : 'text-cw-warning')}>{statusLabel(d.extraction_status)}{d.pages_total ? ` · ${d.pages_read} de ${d.pages_total} páginas` : ''}</span></span></span>
+            {scanning.includes(d.id) ? <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />La IA lo está leyendo…</span>
+              : <span className={cn('text-xs', d.extraction_status === 'read' ? 'text-muted-foreground' : 'text-cw-warning')}>{statusLabel(d.extraction_status)}{d.pages_total ? ` · ${d.pages_read} de ${d.pages_total} páginas` : ''}</span>}</span></span>
         <span className="flex gap-2">
           {d.source_kind === 'official' && d.source_url && /\(texto del (Word|Excel)\)/.test(d.name) && <Button asChild variant="ghost" size="sm"><a href={d.source_url} target="_blank" rel="noopener noreferrer">Original</a></Button>}
           <Button asChild variant="outline" size="sm"><a href={`/api/commercial-opportunities/${id}/documents?document=${d.id}`}><Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Descargar</a></Button>

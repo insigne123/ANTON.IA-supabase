@@ -12,7 +12,7 @@ GrupoExpro subió el ZIP de «Descargar todos» de la licitación 4620-4-LP26 (g
 ## Qué cambia
 
 1. **El aviso nombra lo que quedó fuera y dice por qué:**
-   - **Imágenes** (.jpg, .png…): «la IA lee texto, ábrela en Mercado Público».
+   - **Imágenes que la IA no lee** (.tif, .bmp, .heic): «guárdala como JPG o PNG y súbela». Desde el 20 de octubre las fotos y capturas .jpg, .png, .webp y .gif sí suben y la IA las lee (ver `docs/oportunidades-imagenes-y-escaneados.md`).
    - **Otros comprimidos** (RAR, 7z): «descomprímelo y sube lo que trae».
    - **Formatos que no se leen:** por ejemplo, planos .dwg.
    - **Tamaño:** archivos de más de 20 MB.
@@ -20,7 +20,7 @@ GrupoExpro subió el ZIP de «Descargar todos» de la licitación 4620-4-LP26 (g
 
    Muestra hasta tres nombres y cuántos más hay.
 
-   Con el ZIP real: «Del ZIP tomamos 9 documentos. «5-Captura_CM.png» es una imagen: la IA lee texto, ábrela en Mercado Público.»
+   Con el ZIP real, antes de la lectura de imágenes: «Del ZIP tomamos 9 documentos. «5-Captura_CM.png» es una imagen: la IA lee texto, ábrela en Mercado Público.» Ahora entran los 10.
 2. **Un ZIP dentro del ZIP se abre** (un nivel), por ejemplo cuando el comprador agrupa sus anexos.
 3. **Más formatos se leen.** El almacenamiento guarda PDF, Word, Excel y texto. Los demás formatos se guardan como el texto que contienen, en un .txt que dice qué eran («Anexo N°4 (texto del Excel).txt»), igual que ya pasaba con Word y Excel 97-2003:
 
@@ -45,7 +45,7 @@ GrupoExpro subió el ZIP de «Descargar todos» de la licitación 4620-4-LP26 (g
 
 ## Límites
 
-Las imágenes y los PDF escaneados siguen sin leerse: no tienen texto. Leerlos con la IA (visión) es el paso siguiente posible.
+Las fotos, las capturas y los PDF escaneados de hasta 25 páginas los lee la IA con visión: ver `docs/oportunidades-imagenes-y-escaneados.md`.
 
 ## Pruebas
 

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { z } from 'zod';
 
 import {
-  claudeEffort, claudeFormatFits, claudeJsonSchema, claudeJsonText, claudeReadJsonText, claudeRequest, claudeSchemaPlan, claudeUsage, generateClaudeStructured, isClaudeModel, type ClaudeClient,
+  claudeContent, claudeEffort, claudeFormatFits, claudeJsonSchema, claudeJsonText, claudeReadJsonText, claudeRequest, claudeSchemaPlan, claudeUsage, generateClaudeStructured, isClaudeModel, type ClaudeClient,
 } from './anthropic-json';
 import { generateStructuredWithTelemetry, isProviderQuotaExhausted, openAiReasoningEffort } from './openai-json';
 import { coworkModelUsage } from '@/lib/server/cowork/model-usage';
@@ -194,4 +194,19 @@ test('an answer without the format that misses the schema gets one correction, t
     finalMessage: async () => ({ model: 'claude-haiku-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: '{"action":null,"query":null}' }], usage: { input_tokens: 100, output_tokens: 10 } }) }) } };
   await assert.rejects(generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema: wide }, twice),
     (error: unknown) => (error as { structuredTelemetry?: { usage: { prompt_tokens: number } } }).structuredTelemetry?.usage.prompt_tokens === 200);
+});
+
+test('images and PDFs go before the prompt, the last one cached; without them the prompt stays a plain string', () => {
+  assert.equal(claudeContent('Hola'), 'Hola');
+  assert.equal(claudeContent('Hola', []), 'Hola');
+  const content = claudeContent('Transcribe', [{ kind: 'image', mediaType: 'image/png', data: 'iVBO' }, { kind: 'pdf', mediaType: 'application/pdf', data: 'JVBE' }]);
+  assert.deepEqual(content, [
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBO' } },
+    { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBE' }, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'Transcribe' },
+  ]);
+  const request = claudeRequest({ model: 'claude-haiku-5-5', prompt: 'Transcribe', schema, attachments: [{ kind: 'image', mediaType: 'image/jpeg', data: '/9j/' }] },
+    { previous: '{}', problem: 'falta reply' });
+  assert.equal((request.messages[0].content as any[])[0].type, 'image', 'the correction keeps the image in the first turn');
+  assert.equal(request.messages.length, 3);
 });

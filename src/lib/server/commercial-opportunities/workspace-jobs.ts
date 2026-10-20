@@ -16,6 +16,8 @@ import { enqueueFitAfterReport, runRequirementFit } from './workspace-fit';
 import { enqueueMonthlyContracts, runMarketContracts, runWinPlan } from './workspace-market';
 import { runOpportunitySummaries } from './workspace-summaries';
 import { runOpportunityPrefill } from './workspace-prefill';
+import { runDocumentScan } from './workspace-scans';
+import type { ClaudeAttachment } from '@/ai/anthropic-json';
 
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -63,20 +65,24 @@ export async function answerOpportunityChatNow(client: SupabaseClient, organizat
   const done = await runQueuedOpportunityJobNow(client, organizationId, dedupeKey, 'chat');
   return done?.processed === 1 && done.state === 'ready';
 }
-/** A queued job taken in the same request, only while still queued: a worker that took it first keeps it. */
-export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant' | 'profile' | 'fit') {
+/**
+ * A queued job taken in the same request, only while still queued: a worker that took it first keeps it. The files a scanned
+ * document's prefill reads stay in this request's memory, never in the job.
+ */
+export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant' | 'profile' | 'fit',
+  attachments?: ClaudeAttachment[]) {
   const job = opportunityDb(await client.from('opportunity_jobs')
     .update({ state: 'running', lease_token: randomUUID(), lease_until: new Date(Date.now() + 5 * 60_000).toISOString(), attempts: 1, updated_at: new Date().toISOString() })
     .eq('organization_id', organizationId).eq('dedupe_key', dedupeKey).eq('kind', kind).eq('state', 'queued').select('*').maybeSingle()) as OpportunityJob | null;
-  return job ? runOpportunityJob(client, job) : null;
+  return job ? runOpportunityJob(client, job, attachments) : null;
 }
 /** One claimed job, run and committed with its lease: the worker's tick and the chat answered now share it. */
-export async function runOpportunityJob(client: SupabaseClient, job: OpportunityJob) {
+export async function runOpportunityJob(client: SupabaseClient, job: OpportunityJob, attachments?: ClaudeAttachment[]) {
   let result: any = null; let state = 'ready'; let error: string | null = null;
   try {
     const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', job.organization_id).maybeSingle());
-    // Reading a document to fill the form needs no offer: an admin may load an opportunity before confirming it.
-    if (!context && !job.payload.prefill) throw new AuthError('Falta la oferta compartida del workspace.', 409);
+    // Reading a document (to fill the form, or an image's text) needs no offer: an admin may load an opportunity before confirming it.
+    if (!context && !job.payload.prefill && !job.payload.scan) throw new AuthError('Falta la oferta compartida del workspace.', 409);
     if (job.payload.revision && job.payload.revision !== context.revision) throw new AuthError('Los criterios cambiaron; se preparará una búsqueda actualizada.', 409);
     if (job.kind === 'criteria') {
       const criteria = await opportunityGenerate(client, job, { role: 'screen', category: 'evaluation', step: 'criteria', schema: criteriaSchema, output: 3000,
@@ -89,7 +95,11 @@ export async function runOpportunityJob(client: SupabaseClient, job: Opportunity
       if (summaries.waiting) state = 'waiting';
       result = summaries;
     } else if (job.kind === 'evaluate' && job.payload.prefill) {
-      result = await runOpportunityPrefill(client, job);
+      result = await runOpportunityPrefill(client, job, attachments);
+    } else if (job.kind === 'evaluate' && job.payload.scan) {
+      const scan = await runDocumentScan(client, job);
+      if ('waiting' in scan) state = 'waiting';
+      result = scan;
     } else if (job.kind === 'evaluate' && job.payload.pipeline) {
       result = await runPipelineReview(client, job);
     } else if (['tenders', 'hiring', 'posts', 'evaluate'].includes(job.kind)) {
