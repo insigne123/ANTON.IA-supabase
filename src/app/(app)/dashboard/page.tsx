@@ -36,6 +36,8 @@ export default function DashboardPage() {
     setView(next);
     if (viewInUrl() !== next) window.history.pushState(null, '', next === 'semana' ? '/dashboard?vista=semana' : '/dashboard');
   };
+  // A link inside «Hoy» to «Tu semana» with its own parameters (the goals editor): the address first, so «Tu semana» reads them.
+  const open = (href: string) => { window.history.pushState(null, '', href); setView(viewInUrl()); window.scrollTo({ top: 0 }); };
   // The date is read in the browser: the page is prerendered, and the server's day may not be the person's.
   const [today, setToday] = useState('');
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function DashboardPage() {
 
         <aside aria-label="Tu actividad de hoy" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
           <LeadDropBanner />
-          <WeeklyGoalCard />
+          <WeeklyGoalCard onEditGoals={open} />
           <HomeSummary />
           <PersonalCredits />
         </aside>

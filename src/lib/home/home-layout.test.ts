@@ -41,6 +41,15 @@ test('a labelled chart is an image for assistive tech, which fixes axe aria-proh
   assert.match(chart, /role=\{role \?\? \(props\["aria-label"\] \? "img" : undefined\)\}/);
 });
 
+test('«Cambiar las metas del equipo» opens the editor from «Hoy» without leaving the page', () => {
+  // A link to /dashboard with other parameters changed only the address: «Hoy» reads its view once (20 oct 2026).
+  const card = readFileSync('src/components/home/WeeklyGoalCard.tsx', 'utf8');
+  assert.match(page, /<WeeklyGoalCard onEditGoals=\{open\} \/>/);
+  assert.match(page, /const open = \(href: string\) => \{ window\.history\.pushState\(null, '', href\); setView\(viewInUrl\(\)\);/);
+  assert.match(card, /event\.preventDefault\(\); onEditGoals\(EDIT_GOALS\);/);
+  assert.match(card, /EDIT_GOALS = '\/dashboard\?vista=semana&informe=equipo&metas=1'/);
+});
+
 test('the three readers of the quota on «Hoy» share one request', () => {
   for (const file of ['src/components/quota/quota-sync.tsx', 'src/components/quota/daily-quota-progress.tsx', 'src/components/dashboard/UserCreditsCard.tsx']) {
     const source = readFileSync(file, 'utf8');
