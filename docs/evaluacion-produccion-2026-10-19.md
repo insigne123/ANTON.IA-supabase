@@ -13,7 +13,7 @@
   - build-2026-10-20-001 (#440: resúmenes, carga desde documento y «Empresa del workspace»), build-2026-10-20-002 (#441: «Contratos por vencer») y build-2026-10-20-003 (#442: resúmenes con la ficha oficial), build-2026-10-20-004 (#443: resúmenes por cierre) y build-2026-10-20-005 (#444: tarjetas en teléfono), la pasada final de estas funciones.
 
 ## Resumen
-- **Promedio 4,65 en las 11 funciones. Ninguna queda bajo 4,5.**
+- **Promedio 4,65 en las 11 funciones. Ninguna queda bajo 4,5.** Las 5 del 20 de octubre (abajo) promedian 4,7, también todas sobre 4,5.
 - **Pasada final (build 005), en escritorio y en teléfono:** 14 pantallas por modo, sin errores de página ni peticiones fallidas, y desborde horizontal 0. La pasada del build 002 dio lo mismo.
 - **Lo que encontró la evaluación y quedó arreglado hoy:**
   - Mercado público fallaba con 500 porque las consultas tardaban más que el límite: #434 (índice de trigramas) y #435 (límite de 30 s del servidor y estado «no pudimos calcular» con «Reintentar»).
@@ -42,6 +42,51 @@
 | Carga desde un documento | 5 | 5 | 4,5 | 4,5 | 4,5 | 4,7 |
 | «Empresa del workspace» | 4,5 | 5 | 4,5 | 5 | 4,5 | 4,7 |
 | Resumen bajo el nombre | 5 | 5 | 4,5 | 4,5 | 4,5 | 4,7 |
+
+## 20 oct: Embudo con búsqueda y fuente, «Tu semana» en Hoy y Empresas con logos (#447, #448)
+
+**Cómo se midió:**
+- **Builds:** build-2026-10-20-008 (#447) y build-2026-10-20-009 (#448).
+- **Cuenta y pauta:** la misma cuenta QA y la misma pauta, en escritorio claro y teléfono oscuro.
+- **Solo lecturas:** «Empresa del workspace» se abrió y se cerró con «Cancelar».
+- **Lecturas con costo:** abrir «No recomendadas» pidió el resumen de sus 60 tarjetas, como hace la página para cualquiera. Abrir una empresa leyó su sitio público una vez.
+
+| Función | Utilidad | Facilidad | Claridad | Robustez | Tel/oscuro/teclado | Nota |
+|---|---|---|---|---|---|---|
+| Embudo con búsqueda, fuente y «Cargar más» | 5 | 4,5 | 4,5 | 4,5 | 4,5 | 4,6 |
+| «Sugerir próximos pasos» (antes «Revisar con IA») | 4,5 | 5 | 5 | 4,5 | 4,5 | 4,7 |
+| «Empresa del workspace» en grupos | 4,5 | 5 | 5 | 5 | 4,5 | 4,8 |
+| «Tu semana» en Hoy | 5 | 5 | 5 | 4,5 | 4,5 | 4,8 |
+| Empresas con logo, datos y qué hace | 5 | 4,5 | 5 | 4 | 4,5 | 4,6 |
+
+**Evidencia:**
+- **Embudo:**
+  - Abre en 7,8 s (8,0 s en teléfono), con 913 por revisar, 76 recomendadas y «No recomendadas 3347» bajo el camino.
+  - Elegir «Compra Ágil» tarda 1,8 s: quedan 28 por revisar, todas con la etiqueta «Compra Ágil». «LinkedIn» deja 35 y 2.
+  - Buscar «aseo» tarda 2,1 s y da 51 y 31, con títulos de aseo.
+  - «Cargar 16 más» tarda 1,6 s (de 60 a 76 recomendadas).
+  - «No recomendadas» abre en 1,9 s con 60 tarjetas, cada una con su «Por qué no».
+  - La Lista con «LinkedIn» muestra el grupo «LinkedIn 2».
+  - Sin errores de página y sin desborde horizontal.
+- **«Sugerir próximos pasos»:** el workspace no tiene oportunidades en curso, así que el botón no aparece, que es lo diseñado. Con trabajo en curso lo cubren las pruebas de la UI. Funciona igual que antes: la IA revisa hasta 25 oportunidades y nada cambia sin que lo aceptes.
+- **«Empresa del workspace»:**
+  - Los cuatro grupos se ven en oscuro: «Qué vende tu empresa» (13 servicios), «Alcance», «Búsqueda diaria» y «Mercado Público».
+  - Al llegar al final, los botones siguen a la vista.
+- **«Tu semana»:**
+  - Abre en 1,9 s, en `/dashboard?vista=semana`, con «Tu semana», «Equipo» y «Oportunidades».
+  - «Informe semanal» ya no está en el menú, y `/weekly-report` lleva a la misma vista.
+- **Empresas:**
+  - 249 empresas sin desborde.
+  - El logo sale del sitio (GrupoExpro, Manelsa, ARIS); sin logo, las iniciales.
+  - «Qué hace» de GrupoExpro llega en 13,8 s, con una línea de carga mientras tanto: «Ofrece outsourcing de recursos humanos y de procesos, además de servicios de hunting, reclutamiento y selección de personal.»
+- **Lo que se arregló en la misma pasada (#448):**
+  - La primera versión leía solo la portada, y la de GrupoExpro únicamente pide elegir país; ahora se usa el lector de «Perfil».
+  - Las iniciales tomaban «de» («MD» → «MO»).
+  - «Usa» listaba 23 nombres; ahora muestra tres y «y 22 más».
+- **Por qué robustez 4 en Empresas:**
+  - leer el sitio y escribir la frase toma de 3 a 14 s (el navegador lo guarda un día);
+  - un dominio que no existe (mop.gov.cl, sin DNS) queda sin descripción;
+  - el ícono que falta deja un 404 en la consola del navegador, sin efecto en la pantalla.
 
 ## Evidencia por función
 - **Cowork para todos:**
