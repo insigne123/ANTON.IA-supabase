@@ -12,7 +12,7 @@ const data = () => opportunityData({ ORG: uid(1), OWNER: uid(11), MEMBER: uid(12
 export default {
   id: 'oportunidades', title: 'Oportunidades', start: '/dashboard',
   // Two minutes of screens: a little more compression keeps it under 4 MB (tutorial-videos.test.ts).
-  crf: 32,
+  crf: 33,
   intro: 'Licitaciones, Compra Ágil y empresas que están contratando, con un informe de la IA para decidir y ganar.',
   learn: ['Leer el embudo', 'Cargar una desde su documento', 'Abrir una licitación y su informe', 'Ver cómo ganarla'],
   mocks: [
@@ -43,6 +43,11 @@ export default {
       title: 'El embudo', text: 'De «Por revisar» a «Ganadas». Cada oportunidad avanza sola cuando el trabajo lo muestra.',
       say: 'El embudo te dice dónde está cada oportunidad.',
       target: { role: 'heading', name: 'Embudo de oportunidades' }, zoomOn: { css: 'section[aria-labelledby="pipeline-title"]' }, action: 'none', zoom: 1.1, highlight: false,
+    },
+    {
+      title: 'Busca y filtra', text: 'Por nombre, organismo o empresa, y por fuente: licitaciones, Compra Ágil, LinkedIn o recibidas. «Cargar más» trae las siguientes.',
+      say: 'Busca y elige la fuente.',
+      target: { role: 'group', name: 'Fuente' }, action: 'none', zoom: 1.5, arrow: true,
     },
     {
       title: 'Sugerir próximos pasos', text: 'Con oportunidades en curso, la IA propone a qué etapa moverlas y qué hacer después. Nada cambia sin que lo aceptes.',

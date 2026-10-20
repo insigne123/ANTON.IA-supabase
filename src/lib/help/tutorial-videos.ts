@@ -23,7 +23,7 @@ export type TutorialVideo = {
 
 export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'hoy', title: 'Hoy', summary: 'Lo más urgente primero, tus llamadas y LinkedIn con guion, a quién retomar y tu día en cifras.', seconds: 92, sections: ['hoy', 'primeros-pasos'] },
-  { id: 'informe-semanal', title: 'Informe semanal', summary: 'Tu semana en una frase, tu equipo, lo que cierra en Oportunidades y el correo de cada lunes.', seconds: 86, sections: ['informe-semanal'] },
+  { id: 'informe-semanal', title: 'Informe semanal', summary: 'En «Hoy», tu semana en una frase, tu equipo, lo que cierra en Oportunidades y el correo de cada lunes.', seconds: 87, sections: ['informe-semanal'] },
   { id: 'perfil', title: 'Perfil', summary: 'Cuenta qué vendes: tu oferta y tu cliente ideal guían la búsqueda y los correos.', seconds: 48, sections: ['perfil'] },
   { id: 'buscar', title: 'Buscar prospectos', summary: 'De un punto de partida a las empresas y sus contactos, y al guardarlos, sus correos.', seconds: 76, sections: ['buscar'] },
   { id: 'importar', title: 'Importar tu lista', summary: 'Sube tu Excel o CSV, revisa las columnas y los repetidos, e impórtala.', seconds: 42, sections: ['tabla', 'por-completar'] },
@@ -32,8 +32,8 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'campanas', title: 'Campañas', summary: 'Elige a quiénes, escribe el correo y los seguimientos, revisa y aprueba.', seconds: 115, sections: ['campanas'] },
   { id: 'conversaciones', title: 'Conversaciones', summary: 'Quién te respondió primero, el hilo completo y tu respuesta en el mismo hilo.', seconds: 53, sections: ['conversaciones'] },
   { id: 'pipeline', title: 'Pipeline', summary: 'El panel con tus cifras y etapas, y cómo mover un lead en el tablero.', seconds: 84, sections: ['pipeline'] },
-  { id: 'empresas', title: 'Empresas', summary: 'Quién decide, quién lo usa y quién paga en cada empresa, a quién buscar y empresas parecidas.', seconds: 62, sections: ['pipeline'] },
-  { id: 'oportunidades', title: 'Oportunidades', summary: 'El embudo con un resumen de cada una, cargar una desde su documento, el informe de la IA y «Cómo ganar».', seconds: 123, sections: ['oportunidades'], feature: 'opportunities' },
+  { id: 'empresas', title: 'Empresas', summary: 'Qué hace cada empresa, quién decide, quién lo usa y quién paga, a quién buscar y empresas parecidas.', seconds: 63, sections: ['pipeline'] },
+  { id: 'oportunidades', title: 'Oportunidades', summary: 'El embudo con búsqueda y fuentes, cargar una desde su documento, el informe de la IA y «Cómo ganar».', seconds: 129, sections: ['oportunidades'], feature: 'opportunities' },
   { id: 'mercado-publico', title: 'Mercado público', summary: 'Lo que el Estado planea comprar, los contratos que se licitarán de nuevo y tus competidores.', seconds: 83, sections: ['oportunidades'], feature: 'opportunities' },
   { id: 'cowork', title: 'Cowork', summary: 'Pídele lo que necesitas con tus palabras y retoma tus conversaciones guardadas.', seconds: 53, sections: ['cowork', 'primeros-pasos'], routes: /^\/cowork(\/.*)?$/ },
   { id: 'conexiones', title: 'Conexiones', summary: 'Conecta tu correo, elige la cuenta que envía y consigue tu ticket de Mercado Público.', seconds: 61, sections: ['conexiones'] },
