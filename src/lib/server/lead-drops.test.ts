@@ -193,6 +193,7 @@ test('opening it from «Hoy» makes today\'s contact once: one search, its first
   assert.equal(searchCalls.length, 1);
   assert.equal(searchCalls[0].maxResults, 10, 'a small search for one person');
   assert.equal(searchCaps.at(-1), 0.5, 'its cap is an ordinary search\'s: Apify refuses one of US$0.03');
+  assert.deepEqual(searchCalls[0].industryKeywords, ['retail'], 'industries as the actor names them');
   const drop = tables.lead_drops.find(row => row.id === made.id);
   assert.equal(drop.drop_date, '2026-10-22');
   assert.equal(drop.items.length, 1);
@@ -270,4 +271,27 @@ test('«Hoy» keeps the contact left to save, until a new one is due', async () 
   assert.deepEqual(await homeDrop(client, ANA, THURSDAY),
     { drop: { id: 'drop-old', dropDate: '2026-10-20', total: 1, left: 1, next: { name: 'Nombre1 Apellido1', company: 'Ripley', why: 'Calza.' } }, pull: null });
   assert.deepEqual(await homeDrop(client, ANA, FRIDAY), { drop: null, pull: 'today' }, 'the new one does not wait for the old one to be saved');
+});
+
+test('an industry the actor does not know is left out, and nobody found means one broader search, then saying so', async () => {
+  const data = seed();
+  data.profiles = [profile('u-ana', { targetRoles: 'Gerente de Personas', targetIndustries: 'Retail, Seguridad privada, Cosas varias', targetCompanySize: '51-200' }), profile('u-leo'), profile('u-sin')];
+  const calls: any[] = [];
+  const picky = async (input: any) => {
+    calls.push(input);
+    if (input.industryKeywords.length || input.employeeRanges.length) return { results: [], fetched: 0, notApplied: [], costUsd: 0 };
+    return fakeSearch(input);
+  };
+  const { client, tables } = memory(data, unique);
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: picky as any, budgetUsd: 3, spentUsd: 0 });
+  assert.deepEqual(calls[0].industryKeywords, ['retail', 'security & investigations'], '«Cosas varias» is left out instead of searching as a keyword');
+  assert.deepEqual(calls[0].companyKeywords, []);
+  assert.deepEqual([calls.length, calls[1].industryKeywords, calls[1].employeeRanges], [2, [], []], 'then the titles and places only');
+  assert.equal(tables.lead_drops[0].status, 'pending');
+  const nobody = memory(seed(), unique);
+  await planOrganizationDrops(nobody.client, ORG, ['u-ana'], { now: TUESDAY, search: (async () => ({ results: [], fetched: 0, notApplied: [], costUsd: 0 })) as any, budgetUsd: 3, spentUsd: 0 });
+  const drop = nobody.tables.lead_drops[0];
+  assert.equal(drop.status, 'empty');
+  assert.equal((await pullDrop(nobody.client, ANA, { now: new Date('2026-10-20T15:00:00.000Z'), generate: fakeGenerate, search: fakeSearch as any })).reason?.title,
+    'Esta vez no encontramos a nadie', 'not «tu equipo ya los tiene» when the search found nobody');
 });
