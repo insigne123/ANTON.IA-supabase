@@ -27,7 +27,7 @@ async function load() {
 
 /** The tables in memory, with the filters the module uses (JSON paths included). */
 function memory(seed: Record<string, any[]>) {
-  const tables: Record<string, any[]> = { opportunity_jobs: [], opportunity_work: [], commercial_opportunities: [], ...seed };
+  const tables: Record<string, any[]> = { opportunity_jobs: [], opportunity_work: [], commercial_opportunities: [], opportunity_company_context: [], ...seed };
   const read = (row: any, path: string) => {
     const [column, ...rest] = path.split(/->>?/);
     let value = row[column];
@@ -121,6 +121,7 @@ test('without a ticket the name is enough; a change made meanwhile is not overwr
   await summaries.runOpportunitySummaries(client, job, Date.now(), { resolveTicket: async () => null, getLicitacion: async () => { throw new Error('not asked'); } });
   const [a, b] = tables.commercial_opportunities;
   assert.equal(a.data.summary.basis, 'nombre');
+  assert.equal(a.data.detail.found, false, 'asked once: without a ticket there is no file to read');
   assert.equal(a.buyer_name, null);
   assert.equal(b.data.summary, undefined, 'b changed while the model wrote: the next reading takes it');
 });
@@ -132,6 +133,54 @@ test('a verdict the screening gives meanwhile, which keeps updated_at, is not ov
   await summaries.runOpportunitySummaries(client, job, Date.now(), { resolveTicket: async () => null, getLicitacion: async () => { throw new Error('not asked'); } });
   const [a] = tables.commercial_opportunities;
   assert.deepEqual({ evaluation: a.data.evaluation, matchedService: a.data.matchedService, summary: a.data.summary }, { evaluation: 'recommended', matchedService: 'Guardias', summary: undefined });
+});
+
+const tender = (code: string) => async () => ({ source: 'mercado_publico', code, name: 'x', description: 'Guardias para el recinto', buyer: 'Servicio Agrícola y Ganadero',
+  buyerUnit: null, region: 'Región de Valparaíso', amount: null, currency: null, publishedAt: null, closesAt: null, status: 'publicada', items: [] });
+
+test('without a ticket of its own, the reading uses the one of the daily search: the admin who confirmed the offer', async () => {
+  const summaries = await load();
+  const { tables, client } = memory({ commercial_opportunities: [opportunity('a')], opportunity_company_context: [{ organization_id: 'org', approved_by: 'approver' }] });
+  (globalThis as any).__answer = answer;
+  const asked: string[] = [];
+  await summaries.runOpportunitySummaries(client, job, Date.now(), {
+    resolveTicket: async (_: unknown, input: any) => { asked.push(input.creatorId); return input.creatorId === 'approver' ? { ticket: 't' } : null; },
+    getLicitacion: tender('a-1-LP26'),
+  });
+  assert.deepEqual(asked, ['admin', 'approver']);
+  const [a] = tables.commercial_opportunities;
+  assert.equal(a.buyer_name, 'Servicio Agrícola y Ganadero');
+  assert.equal(a.data.summary.basis, 'ficha');
+});
+
+test('a summary from the name alone is written again once, with the official file; then it is left as it is', async () => {
+  const summaries = await load();
+  const nameOnly = opportunity('a', { data: { evaluation: 'review', description: 'LICITACIÓN a', observed: { code: 'a-1-LP26' }, summary: { text: 'Servicio, según el nombre.', basis: 'nombre' } } });
+  const { tables, client } = memory({ commercial_opportunities: [nameOnly] });
+  const scope = { organizationId: 'org', userId: 'admin', role: 'admin' };
+  assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, tables.commercial_opportunities), 1, 'the pipeline asks for it again');
+  (globalThis as any).__answer = answer; (globalThis as any).__calls = [];
+  const reading = { ...job, payload: { summaries: true, ids: ['a'] } };
+  await summaries.runOpportunitySummaries(client, reading, Date.now(), { resolveTicket: async () => ({ ticket: 't' }), getLicitacion: tender('a-1-LP26') });
+  const [a] = tables.commercial_opportunities;
+  assert.equal(a.data.summary.basis, 'ficha');
+  assert.match(a.data.summary.text, /Servicio Agrícola y Ganadero/);
+  await summaries.runOpportunitySummaries(client, reading, Date.now(), { resolveTicket: async () => ({ ticket: 't' }), getLicitacion: tender('a-1-LP26') });
+  assert.equal((globalThis as any).__calls.length, 1, 'read once');
+  assert.equal(await summaries.enqueueOpportunitySummaries(client, scope, tables.commercial_opportunities), 0);
+});
+
+test('without any ticket, a summary from the name alone is rewritten once and marked, not asked again every reading', async () => {
+  const summaries = await load();
+  const nameOnly = opportunity('a', { data: { evaluation: 'review', description: 'LICITACIÓN a', observed: { code: 'a-1-LP26' }, summary: { text: 'Viejo.', basis: 'nombre' } } });
+  const { tables, client } = memory({ commercial_opportunities: [nameOnly] });
+  (globalThis as any).__answer = answer; (globalThis as any).__calls = [];
+  const reading = { ...job, payload: { summaries: true, ids: ['a'] } };
+  const none = { resolveTicket: async () => null, getLicitacion: async () => { throw new Error('not asked'); } };
+  await summaries.runOpportunitySummaries(client, reading, Date.now(), none);
+  const result = await summaries.runOpportunitySummaries(client, reading, Date.now(), none);
+  const [a] = tables.commercial_opportunities;
+  assert.deepEqual({ found: a.data.detail.found, basis: a.data.summary.basis, calls: (globalThis as any).__calls.length, waiting: result.waiting }, { found: false, basis: 'nombre', calls: 1, waiting: false });
 });
 
 test('the pipeline queues one reading when cards lack their summary, and none while one is under way', async () => {
