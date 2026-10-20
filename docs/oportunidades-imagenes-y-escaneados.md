@@ -67,4 +67,21 @@ Costo aproximado con Haiku 5.5: un PDF escaneado de 20 páginas cuesta unos US$0
 - `src/lib/commercial-opportunities/zip-uploads.test.ts`: las fotos del ZIP suben; un .tif queda fuera y el aviso lo explica.
 - **Con archivos reales:** «5-Captura_CM.png» del ZIP de 4620-4-LP26 y un PDF escaneado de 2 páginas se detectan como «scan» y se encolan.
 
-Falta la prueba con la IA real en producción, que se hará después del despliegue.
+## Prueba real en producción (20 de octubre de 2026)
+
+Se hizo con la cuenta QA y archivos de prueba:
+
+- **«Cargar oportunidad» desde una foto de unas bases (7 s):**
+  - completó el nombre, el cierre (14-11-2026 15:00), el monto (48.600.000) y la descripción;
+  - dejó vacío el cliente, que la foto no nombra.
+- **Lectura del expediente (30 s en total):**
+
+  | Archivo | Resultado |
+  |---|---|
+  | La foto | Texto completo. |
+  | PDF escaneado de 2 páginas | Texto exacto, con plazos, montos, porcentajes y la tabla de turnos fila por fila. |
+  | «5-Captura_CM.png» (la captura de Convenio Marco) | Una línea que dice qué muestra y la lista de convenios con sus ID. |
+
+  Los tres quedaron «Leído completo».
+- **Costo:** US$0,0035 por las cuatro llamadas (Haiku 5.5).
+- **Corrección:** en la página 1 del PDF, una línea de firma vacía se escribió como «[Firma]». La instrucción ahora pide copiar vacío lo que está vacío y escribir [Firma] o [Timbre] solo cuando se ven, porque que un documento esté firmado es un dato que importa.
