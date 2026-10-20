@@ -60,6 +60,13 @@ Idea del dueño para que los usuarios vuelvan: a cada persona, cinco contactos n
   - el resumen de empresas usa `LEAD_DROPS_RESEARCH_MODEL` (Haiku 5.5 por defecto).
 - **Apagar:** `LEAD_DROPS_ENABLED=off` lo detiene.
 
+## Probar con una cuenta de prueba
+
+Una corrida manual, con el mismo secreto del scheduler, prepara el lote solo para quienes se nombran, reciban o no correos: `POST /api/cron/lead-drops` con `{ "userIds": ["…"], "organizationId": "…" }`.
+
+- **`organizationId` fija el workspace:** el lote se hace ahí y solo para sus miembros. Así, una cuenta de prueba que también está en el workspace de un cliente nunca escribe en él.
+- **Días:** como la corrida programada, solo martes y viernes.
+
 ## Datos
 
 La migración `20261020180000_lead_drops.sql` crea la tabla `lead_drops`, solo para el servidor: RLS activo y sin permisos para `anon` ni `authenticated`.

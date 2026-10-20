@@ -22,7 +22,8 @@ const PARALLEL = 3;
  * reports mailbox), one drop per person in their team's workspace. The morning alert (8:00) carries what is ready.
  * LEAD_DROPS_ENABLED=off stops it; LEAD_DROPS_MONTHLY_USD caps what Apify may spend in the month.
  * A manual run (same secret) may name `userIds` in its body: only they are prepared, whether or not they get emails, so
- * a drop can be tried with a test account before anyone receives one.
+ * a drop can be tried with a test account before anyone receives one. With `organizationId` too, their drop is made in
+ * that workspace (only for its members), so a test account that also belongs to a customer's never writes there.
  */
 export async function POST(request: Request) {
   if (!isFirebaseSchedulerRequest(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -30,8 +31,9 @@ export async function POST(request: Request) {
   const now = new Date();
   if (!dropsEnabled()) return NextResponse.json({ skipped: 'off' }, { headers });
   if (!dropDay(now)) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
-  const body = await request.json().catch(() => null) as { userIds?: unknown } | null;
+  const body = await request.json().catch(() => null) as { userIds?: unknown; organizationId?: unknown } | null;
   const only = Array.isArray(body?.userIds) ? new Set(body!.userIds.filter((id): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)).slice(0, 20)) : null;
+  const pinned = only && typeof body?.organizationId === 'string' && /^[0-9a-f-]{36}$/i.test(body.organizationId) ? body.organizationId : null;
   const started = Date.now();
   const timeLeft = () => WORK_MS - (Date.now() - started);
   const admin = getSupabaseAdminClient();
@@ -79,6 +81,7 @@ export async function POST(request: Request) {
       for (const row of members.data || []) {
         const userId = String(row.user_id), org = String(row.organization_id);
         if (!reachable.has(userId)) continue;
+        if (pinned) { if (org === pinned) home.set(userId, org); continue; }
         const current = home.get(userId);
         if (!current || (size.get(org) || 0) > (size.get(current) || 0)) home.set(userId, org);
       }
