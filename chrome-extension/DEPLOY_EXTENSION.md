@@ -1,4 +1,4 @@
-# Anton.IA — LinkedIn Workspace 4.1.1
+# Anton.IA — LinkedIn Workspace 4.2.0
 
 ## Compilar e instalar
 
@@ -17,6 +17,18 @@ npm run extension:build
 La aplicación elegida debe incluir `/extension/connect` y `/api/extension/workspace` de esta versión. Instalar solo la extensión contra una app anterior no habilita los nuevos flujos. Para probar localmente, inicia `npm run dev` y elige **Local · puerto 9003** en «Dirección de la app».
 
 Después de actualizar la extensión, recarga las pestañas de LinkedIn y conexión. Chrome no reemplaza los scripts ya inyectados.
+
+## Cambios de 4.2.0
+
+- **Correo de varias personas en un clic:** en una búsqueda de personas de LinkedIn (o en la pestaña «Personas» de una empresa), «Buscar correo de N» guarda a los elegidos y busca su correo, y el teléfono si se marca. Usa la misma búsqueda, los mismos créditos y el mismo cupo diario que «Buscar correo» en «Por escribir» (acción `enrich-batch` de `/api/extension/workspace`).
+  - Cada persona muestra lo que obtuvo: correo, teléfono en camino, sin correo, ya tenía correo, contacto de un compañero o trabajado por el equipo.
+  - Quien ya tenía correo, o es contacto de otra persona del equipo, no gasta créditos. Antes la búsqueda solo guardaba; el correo había que pedirlo perfil por perfil.
+- **Un clic en el perfil:** «Buscar correo y guardar» busca y guarda de una vez; sin coincidencia, ofrece guardarlo igual.
+- **Panel más limpio:**
+  - Sin la casilla «Seguir el perfil» ni el campo de URL fijo: la URL se pega con «Pegar URL».
+  - En una búsqueda o una empresa, esa es la superficie: no queda abajo la ficha del último perfil.
+- La app ofrece la extensión en `/extension` (descarga e instalación), con un acceso desde «Buscar» → «Perfil».
+- Sin permisos nuevos.
 
 ## Cambios de 4.1.1
 

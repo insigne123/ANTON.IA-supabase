@@ -35,7 +35,7 @@ export type ExtensionCompany = z.infer<typeof ExtensionCompanySchema>;
 
 export const ExtensionRequestSchema = z.object({
   action: z.enum(['session', 'lookup', 'save', 'enrich', 'research', 'research-status', 'research-retry', 'phone-status', 'message', 'email-draft', 'sequence', 'campaigns', 'campaign-add', 'send-claim', 'send-result',
-    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota', 'presence', 'save-batch', 'company']),
+    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report', 'quota', 'presence', 'save-batch', 'enrich-batch', 'company']),
   jobId: z.string().uuid().optional(),
   jobResult: z.object({
     jobId: z.string().uuid(), claimToken: z.string().uuid(),
@@ -74,7 +74,7 @@ export const ExtensionRequestSchema = z.object({
   profile: ExtensionProfileSchema.optional(),
   /** presence: the LinkedIn profiles on screen (a profile, or one page of search results). */
   linkedinUrls: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
-  /** save-batch: the people chosen from a LinkedIn search, with what the results show. */
+  /** save-batch and enrich-batch: the people chosen from a LinkedIn search, with what the results show. */
   profiles: z.array(ExtensionProfileSchema).min(1).max(25).optional(),
   /** company: the company page on screen. */
   company: ExtensionCompanySchema.optional(),
@@ -103,7 +103,7 @@ export const ExtensionRequestSchema = z.object({
   const profileless = body.action === 'session' || body.action === 'linkedin-jobs-pending'
     || body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result'
     || body.action === 'network-report' || body.action === 'inbox-report' || body.action === 'quota' || body.action === 'presence'
-    || body.action === 'save-batch' || body.action === 'company';
+    || body.action === 'save-batch' || body.action === 'enrich-batch' || body.action === 'company';
   if (!profileless && (!body.organizationId || !body.userId || !body.profile)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta y selecciona un perfil.' });
   }
@@ -112,8 +112,11 @@ export const ExtensionRequestSchema = z.object({
   if (profileless && body.action !== 'session' && (!body.organizationId || !body.userId)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta antes de continuar.' });
   }
-  if (body.action === 'save-batch' && !body.profiles?.length) {
+  if ((body.action === 'save-batch' || body.action === 'enrich-batch') && !body.profiles?.length) {
     ctx.addIssue({ code: 'custom', message: 'Elige al menos una persona para guardar.' });
+  }
+  if (body.action === 'enrich-batch' && !body.operationId) {
+    ctx.addIssue({ code: 'custom', message: 'Actualiza la extensión para buscar correos en lote.' });
   }
   if (body.action === 'company' && !body.company) {
     ctx.addIssue({ code: 'custom', message: 'Abre la página de una empresa en LinkedIn.' });
