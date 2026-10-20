@@ -114,9 +114,11 @@ test('a question opens a conversation named by it, is saved before its answer an
 
 test('the answer reads what the person can see, the conversation so far and no future demand for a member; it keeps only real opportunities', async () => {
   const { askOpportunityAssistant, runOpportunityAssistant } = await load();
+  // The order reads the real clock: the open ones close one and two days from now, whenever the test runs.
+  const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
   const list = (args: any) => {
-    if (args.p_query === 'camaras') return [opportunity('o2', 'Cámaras de seguridad Castro', { deadline_at: '2026-10-21T18:00:00Z' })];
-    if (args.p_view === 'recommended') return [opportunity('o1', 'Aseo Hospital de Castro', { deadline_at: '2026-10-20T18:00:00Z' }), opportunity('o2', 'Cámaras de seguridad Castro')];
+    if (args.p_query === 'camaras') return [opportunity('o2', 'Cámaras de seguridad Castro', { deadline_at: inDays(2) })];
+    if (args.p_view === 'recommended') return [opportunity('o1', 'Aseo Hospital de Castro', { deadline_at: inDays(1) }), opportunity('o2', 'Cámaras de seguridad Castro')];
     return [opportunity('o3', 'Guardias Puerto Montt', { deadline_at: '2026-09-01T18:00:00Z' })];
   };
   const { tables, rpcs, client } = memory({
