@@ -5,6 +5,7 @@
 - **Qué ve la persona:**
   - Bajo el nombre de cada oportunidad hay una o dos frases que dicen de qué se trata: qué se compra o se necesita, y para quién o dónde.
   - Arriba del nombre, en letra pequeña, va el organismo o la empresa, si se conoce. Ya no aparece «—» cuando falta.
+  - En teléfono, cada tarjeta ocupa el ancho de la pantalla. Un organismo largo se corta con «…» y el nombre baja de línea (#444: la columna es `grid-cols-1` y la tarjeta `min-w-0`).
   - Mientras la IA escribe los resúmenes, las tarjetas que esperan muestran una línea tenue. La página se vuelve a leer cada 20 segundos, durante cinco minutos como máximo.
 - **De dónde sale:**
   - La búsqueda diaria de licitaciones guarda solo el nombre de cada una. El trabajo de resúmenes lee primero la **ficha oficial** en Mercado Público con el ticket del workspace: organismo, unidad, descripción, región, monto estimado y líneas.
