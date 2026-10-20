@@ -34,6 +34,14 @@ export function needsTenderDetail(row: SummaryRow) {
   return !row.buyer_name || !clip(row.data?.description, 10) || same(String(row.data?.description), row.title);
 }
 
+/**
+ * A summary written from the name alone, of a tender whose official file was never read (no ticket at the time): it is
+ * written again once, with the file if it can be read. The file read, or found missing, ends it.
+ */
+export function summaryFromNameOnly(row: SummaryRow) {
+  return row.data?.summary?.basis === 'nombre' && needsTenderDetail(row);
+}
+
 /** What the model reads of one opportunity: only what it says, short. */
 export function summaryCase(row: SummaryRow) {
   const data = row.data || {};
@@ -56,7 +64,7 @@ export function summaryCase(row: SummaryRow) {
 /** Whether the model had more than the name to go on: the card says nothing about it, the data keeps it. */
 export function summaryBasis(row: SummaryRow): OpportunitySummary['basis'] {
   const read = summaryCase(row);
-  if (row.data?.detail) return 'ficha';
+  if (row.data?.detail && row.data.detail.found !== false) return 'ficha';
   return read.descripcion || read.lineas ? 'texto' : 'nombre';
 }
 
@@ -70,10 +78,10 @@ export function summaryPrompt(cases: ReturnType<typeof summaryCase>[]) {
 Reglas:
 - Una o dos frases, máximo 200 caracteres en total. Español de Chile, tono neutro.
 - Di qué se compra o se necesita y para quién o dónde, con lo que dicen los datos: nombre, organismo o empresa, descripción, líneas, región, avisos.
-- Empieza por lo que se compra o se necesita, sin repetir el tipo («Licitación de…», «Esta oportunidad…») ni copiar el nombre tal cual.
-- Nunca inventes montos, plazos, cantidades ni lugares que no estén en los datos. No expandas siglas si no estás seguro de qué significan.
+- Empieza directo por lo que se compra o se necesita («Guardias para…», «Aseo diario de…»), sin «Se requiere», «Se busca» ni «Se necesita», sin repetir el tipo («Licitación de…», «Esta oportunidad…») y sin copiar el nombre tal cual.
+- Nunca inventes montos, plazos, cantidades ni lugares que no estén en los datos. No expandas siglas si no estás seguro de qué significan: déjalas tal cual («para el FEH»), sin explicarlas.
 - No opines si conviene postular: solo de qué se trata.
-- Si solo tienes el nombre, di en palabras simples qué se pide según ese nombre, sin agregar detalles.
+- Nunca comentes de dónde sale lo que dices ni lo que falta: nada de «según el nombre», «solo consta el nombre», «sin más detalles» o «no se informa el organismo». Si solo tienes el nombre, escribe una frase corta con lo que se pide, en palabras simples.
 - En avisos de trabajo, di qué cargos busca la empresa y dónde, y qué necesidad revela (por ejemplo, reforzar dotación).
 
 Devuelve un resumen por id, con el mismo id.
@@ -82,9 +90,15 @@ Oportunidades:
 ${JSON.stringify(cases)}`;
 }
 
-/** One line, without quotes or a trailing list, cut at a word when it runs long. */
+// What the model says about its own sources or what is missing: the card has no use for it.
+const ABOUT_SOURCES = /seg[uú]n (?:el|su) nombre|s[oó]lo (?:consta|se conoce|aparece|hay|tenemos|se tiene) (?:el|su) nombre|sin m[aá]s (?:detalles|datos|informaci[oó]n)|no (?:hay|entrega|indica|informa|da|aporta|se informan?|se indican?) (?:m[aá]s |otros )?(?:detalles|datos|informaci[oó]n|organismo|regi[oó]n|lugar)|(?:aparece|est[aá]) truncad[oa]/i;
+
+/** One line, without quotes, without remarks about its sources, cut at a word when it runs long. */
 export function cleanSummary(text: string) {
   let line = text.replace(/\s+/g, ' ').replace(/^["«“']+|["»”']+$/g, '').trim();
+  // Sentences and clauses that only talk about the data go; a clause «según el nombre» goes from the sentence it closes.
+  line = line.split(/(?<=[.;])\s+/).map(part => part.replace(/,?\s*seg[uú]n (?:el|su) nombre(?: de la (?:licitaci[oó]n|oportunidad))?/gi, ''))
+    .filter(part => !ABOUT_SOURCES.test(part)).join(' ').replace(/[;,:\s]+$/, '').trim();
   if (line.length > MAX_CHARS) {
     const cut = line.slice(0, MAX_CHARS - 1);
     line = `${cut.slice(0, Math.max(cut.lastIndexOf(' '), MAX_CHARS - 40)).replace(/[,;:.\s]+$/, '')}…`;
