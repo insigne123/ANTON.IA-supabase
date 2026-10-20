@@ -37,6 +37,7 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
    - **Dónde queda:**
      - el correo y el teléfono, cifrados en `lead_search_vault` (30 días);
      - lo visible, en `lead_drops.items`: nombre, cargo, empresa, por qué calza y los datos de la empresa.
+     - El cargo va con «de» e «y» en minúscula («Jefe de Reclutamiento y Selección»), y el rubro en español, como lo dice «Empresas» del CRM (`industryLabel`): «logistics & supply chain» es «Logística».
 2. **Redacción**, en la misma pasada o la siguiente:
    - Haiku resume en una frase qué hace la empresa, solo con la descripción que trajo la búsqueda.
    - La **Redactora de Cowork**, con sus mismas reglas, sus chequeos y la Revisora, escribe el primer correo. Usa la oferta, las pruebas y la firma de «Perfil» (o la oferta del workspace).
@@ -51,7 +52,9 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
    - **El contacto:** su nombre como título, cargo y empresa, por qué calza, «Correo verificado» y «Teléfono» si lo hay. La investigación y el primer correo, con «Copiar», están a la vista.
    - **Una acción a la vez:**
      - «Guardar en «Por escribir»» usa el correo y el teléfono de la bóveda, **sin créditos ni otra búsqueda**. Si ya estaba en «Por escribir» con ese correo, se enlaza sin duplicarse. La investigación y el borrador quedan en `enriched_leads.data.leadDrop`.
-     - Después, «Escribirle» abre «Redactar» con el borrador puesto.
+     - Después, «Investigar y escribirle» abre «Por escribir» con su investigación completa ya en marcha (`?investigar=<id>&empezar=1`). Toma uno o dos minutos; luego «Preparar correos» deja el correo listo para revisarlo y enviarlo desde ANTON.IA.
+     - **Por qué no se envía el correo sugerido tal cual:** en ANTON.IA todo lo que se envía sale de una investigación completa, con sus chequeos y revisión. El sugerido sirve para decidir y se puede copiar con «Copiar»; «Redactar» sin investigación solo ofrece investigar.
+     - «Investigar a este contacto», en «Redactar», también la deja en marcha. Si el contacto ya tiene una investigación, o una en curso, se abre para leerla y no se repite.
    - **Teléfono:** si falta, se busca desde «Por escribir» como siempre.
    - **«Hoy»:** la tarjeta «Contacto del día» muestra su nombre, su empresa y por qué calza, con «Ver y guardar», hasta que se guarda. Un día de contacto, el nuevo va antes que el que quedó sin guardar (`homeDrop`). Si no hay contacto por guardar, ver la sección siguiente.
 

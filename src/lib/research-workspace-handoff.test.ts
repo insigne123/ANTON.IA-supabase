@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
+import { createResearchWorkspaceHandoff, startsOnArrival } from '@/lib/research-workspace-handoff';
 
 test('creates a bounded handoff with lead identifiers only', () => {
   const result = createResearchWorkspaceHandoff({
@@ -17,6 +17,7 @@ test('creates a bounded handoff with lead identifiers only', () => {
       source: 'enriched-leads',
       leadIds: ['lead-ana', 'lead-bruno'],
       refresh: false,
+      start: false,
       createdAt: 1_700_000_000_000,
     },
   });
@@ -46,4 +47,17 @@ test('rejects oversized or duplicate handoffs instead of dropping selected leads
 
   assert.equal(tooMany.ok, false);
   assert.equal(duplicate.ok, false);
+});
+
+test('«Investigar a este contacto» starts the research on arrival, only for people never researched', () => {
+  const asked = createResearchWorkspaceHandoff({ source: 'enriched-leads', leadIds: ['lead-ana'], start: true });
+  assert.equal(asked.ok, true);
+  if (!asked.ok) return;
+  assert.equal(asked.handoff.start, true);
+  assert.equal(startsOnArrival(asked.handoff, 1, 1), true);
+  assert.equal(startsOnArrival(asked.handoff, 0, 1), false, 'already researched or in flight: it opens to read it');
+  assert.equal(startsOnArrival(asked.handoff, 1, 2), false, 'some of them researched: the selection is reviewed first');
+  const chosen = createResearchWorkspaceHandoff({ source: 'enriched-leads', leadIds: ['lead-ana'] });
+  assert.equal(chosen.ok && startsOnArrival(chosen.handoff, 1, 1), false, 'from the list: the person starts it');
+  assert.equal(startsOnArrival(null, 1, 1), false);
 });

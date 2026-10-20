@@ -64,6 +64,17 @@ test('one search for people with the same customer; each gets different contacts
   assert.equal(tables.lead_drops.length, 3);
 });
 
+test('the title, the company and the industry as people say them: linking words in lower case, «S.A.», the industry in Spanish', async () => {
+  const { client, tables } = memory(seed(), { unique: { lead_drops: ['organization_id', 'user_id', 'drop_date'] } });
+  const person = actorItem(1, 'Rutas', { job_title: 'Jefe De Reclutamiento Y Selección', industry: 'logistics & supply chain', company_name: 'Rutas S.a.' });
+  const search = async () => ({ results: splitLeadsFinderItems([person], ['validated']), fetched: 1, notApplied: [], costUsd: 0.01 });
+  await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: search as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
+  const [item] = tables.lead_drops[0].items;
+  assert.deepEqual([item.title, item.company, item.industry], ['Jefe de Reclutamiento y Selección', 'Rutas S.A.', 'Logística']);
+  assert.equal(item.why, 'Jefe de Reclutamiento y Selección en logística en Santiago: calza con tu cliente ideal.');
+  assert.deepEqual(item.research, ['Logística · 500 personas · Santiago']);
+});
+
 test('without a customer to go by, or without budget, the drop is empty and says why', async () => {
   const data = seed();
   data.profiles = [profile('u-ana'), profile('u-leo'), profile('u-sin')];

@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { dayInZone } from '@/lib/admin/chile-time';
+import { industryLabel } from '@/lib/companies/coverage';
 import { coworkWriterBlocks, runCoworkWriter, type CoworkWriteBrief } from '@/lib/cowork/writer';
 import {
-  DROP_SIZE, assignDrops, criteriaKey, dropCriteria, dropDay, nextDropDay, researchFacts, whyText,
+  DROP_SIZE, assignDrops, criteriaKey, dropCriteria, dropDay, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText,
   type DropCandidate, type DropCriteria, type DropItem, type IcpDeclared, type KnownPeople,
 } from '@/lib/lead-drops';
 import { mapProfileToForm } from '@/lib/profile/profile-mappings';
@@ -70,13 +71,17 @@ async function knownPeople(client: Client, organizationId: string, now: Date): P
   };
 }
 
-/** A Leads Finder result as a candidate: what the screen may show, and the email and LinkedIn only as keys to skip known people. */
+/**
+ * A Leads Finder result as a candidate: what the screen may show, and the email and LinkedIn only as keys to skip known
+ * people. The title with its linking words in lower case, the company with its legal form («S.A.») and the industry in
+ * Spanish («logistics & supply chain» → «Logística»), as the screen, the email and the PDF say them.
+ */
 function candidateOf(entry: VaultEntry): DropCandidate {
   const { lead, contact } = entry;
   return {
-    leadId: lead.id, name: text(contact.fullName, 200) || text(lead.name, 200), title: text(lead.title, 160) || null,
-    company: text(lead.organization_name, 200) || null, domain: text(lead.organization_domain, 253) || null,
-    industry: text(lead.organization_industry, 160) || null, size: typeof lead.organization_size === 'number' ? lead.organization_size : null,
+    leadId: lead.id, name: text(contact.fullName, 200) || text(lead.name, 200), title: tidyTitle(text(lead.title, 160)),
+    company: tidyCompany(text(lead.organization_name, 200)), domain: text(lead.organization_domain, 253) || null,
+    industry: industryLabel(text(lead.organization_industry, 160)), size: typeof lead.organization_size === 'number' ? lead.organization_size : null,
     city: text(lead.city, 160) || null, hasEmail: Boolean(contact.email), hasPhone: Boolean(contact.mobileNumber),
     emailKey: contact.email ? contact.email.toLowerCase() : null, linkedinKey: contact.linkedinUrl ? contact.linkedinUrl.toLowerCase().replace(/\/$/, '') : null,
     about: text(lead.organization?.short_description, 600) || null,

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assignDrops, criteriaKey, dropCriteria, dropDay, dropEmailSection, dropHref, dropSubject, inferCriteria, nextDropDay, researchFacts, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
+import { assignDrops, criteriaKey, dropCriteria, dropDay, dropEmailSection, dropHref, dropSubject, inferCriteria, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -67,6 +67,27 @@ test('why a contact fits, and the facts of its company', () => {
   assert.equal(whyText({ title: 'Gerente de Personas', industry: 'Retail', city: 'Santiago' }, criteria), 'Gerente de Personas en retail en Santiago: calza con tu cliente ideal.');
   assert.equal(whyText({ title: null, industry: null, city: null }, { ...criteria, source: 'contactos' }), 'Calza con los contactos que guarda tu equipo.');
   assert.deepEqual(researchFacts({ company: 'Ripley', industry: 'Retail', size: 12000, city: 'Santiago', about: 'Vende ropa y hogar.' }), ['Vende ropa y hogar.', 'Retail · 12.000 personas · Santiago']);
+});
+
+test('a title as people write it: the linking words in lower case, one in capitals as it is', () => {
+  assert.equal(tidyTitle('Jefe De Reclutamiento Y Selección'), 'Jefe de Reclutamiento y Selección');
+  assert.equal(tidyTitle('Gerente  General De Operaciones E Innovación'), 'Gerente General de Operaciones e Innovación');
+  assert.equal(tidyTitle('De la Fuente Consultores'), 'De la Fuente Consultores', 'the first word stays');
+  assert.equal(tidyTitle('JEFE DE VENTAS'), 'JEFE DE VENTAS');
+  assert.equal(tidyTitle('Head Of People'), 'Head Of People');
+  assert.equal(tidyTitle('Subgerente de RR.HH.'), 'Subgerente de RR.HH.');
+  assert.equal(tidyTitle(''), null);
+  assert.equal(tidyTitle(null), null);
+});
+
+test('a company with its legal form as Chile writes it', () => {
+  assert.equal(tidyCompany('Logistica S.a.'), 'Logistica S.A.');
+  assert.equal(tidyCompany('Transportes Rutas Spa'), 'Transportes Rutas SpA');
+  assert.equal(tidyCompany('Servicios Norte Ltda'), 'Servicios Norte Ltda.');
+  assert.equal(tidyCompany('Aseo Sur Eirl'), 'Aseo Sur EIRL');
+  assert.equal(tidyCompany('Casa Spa Termal'), 'Casa Spa Termal', 'only at the end');
+  assert.equal(tidyCompany('Mesa'), 'Mesa');
+  assert.equal(tidyCompany(' '), null);
 });
 
 test('the email table escapes what came from outside and links to the drop', () => {

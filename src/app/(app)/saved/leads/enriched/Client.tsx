@@ -795,7 +795,7 @@ export default function EnrichedLeadsClient() {
 
   const openResearchWorkspace = (
     leadIds: Iterable<string> = selected,
-    options: { refresh?: boolean } = {},
+    options: { refresh?: boolean; start?: boolean } = {},
   ) => {
     if (!nativeResearchStatusKnown) return;
     const selectedIds = Array.from(leadIds);
@@ -815,6 +815,7 @@ export default function EnrichedLeadsClient() {
       source: 'enriched-leads',
       leadIds: selectedIds,
       refresh: options.refresh === true,
+      start: options.start === true,
     });
     if (!handoff.ok) {
       toast({ variant: 'destructive', title: 'No pudimos abrir la investigación', description: handoff.message });
@@ -825,13 +826,15 @@ export default function EnrichedLeadsClient() {
   };
 
   // Compose sends here a contact that still needs research (?investigar=<id>): open its research directly, once, instead of
-  // asking the person to find and select it in the list again.
+  // asking the person to find and select it in the list again. With &empezar=1 («Investigar a este contacto», «Investigar y
+  // escribirle» in «Contacto del día») it also starts, if it was never researched.
   const deepLinkedResearch = useRef(false);
   useEffect(() => {
     if (deepLinkedResearch.current || loadingLeads || !nativeResearchStatusKnown) return;
-    const target = new URLSearchParams(window.location.search).get('investigar');
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get('investigar');
     deepLinkedResearch.current = true;
-    if (target && enriched.some((lead) => lead.id === target)) openResearchWorkspace([target]);
+    if (target && enriched.some((lead) => lead.id === target)) openResearchWorkspace([target], { start: params.get('empezar') === '1' });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingLeads, nativeResearchStatusKnown, enriched]);
 
