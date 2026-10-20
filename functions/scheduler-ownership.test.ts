@@ -64,7 +64,7 @@ test('Firebase owns all production scheduler bridges and Vercel schedules nothin
         ['opportunityWorkspaceTick', 'every 1 minutes', '/api/cron/opportunity-workspace'],
         ['weeklyReportsTick', '0,30 8-10 * * 1', '/api/cron/weekly-reports'],
         ['dailyAlertsTick', '0,30 8-9 * * 2-5', '/api/cron/daily-alerts'],
-        ['leadDropsTick', '0,20,40 6-7 * * 2,5', '/api/cron/lead-drops'],
+        ['leadDropsTick', '0,20,40 6-7 * * 2,3,5', '/api/cron/lead-drops'],
     ];
     for (const [name, cadence, path] of schedules) {
         const start = functionsSource.indexOf(`export const ${name} =`);

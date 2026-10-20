@@ -294,10 +294,10 @@ export const dailyAlertsTick = functions.scheduler.onSchedule({
     await invokeFirebaseSchedulerBridge({ name: 'daily-alerts', path: '/api/cron/daily-alerts', method: 'POST' });
 });
 
-// «Contactos de la semana»: Tuesdays and Fridays before the alerts, which carry what is ready. Each run finishes what the
-// previous one left.
+// «Contacto del día»: Tuesdays, Wednesdays and Fridays before the alerts, which carry what is ready. Each run finishes
+// what the previous one left.
 export const leadDropsTick = functions.scheduler.onSchedule({
-    schedule: '0,20,40 6-7 * * 2,5',
+    schedule: '0,20,40 6-7 * * 2,3,5',
     timeZone: 'America/Santiago',
     retryCount: 0,
     timeoutSeconds: 300,
