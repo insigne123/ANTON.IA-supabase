@@ -62,7 +62,7 @@ export default {
       title: 'Guárdalo sin créditos', text: 'Ya trae su correo verificado: pasa a «Por escribir» sin gastar créditos.',
       say: 'Guárdalo en Por escribir, sin gastar créditos.',
       target: { role: 'button', name: 'Guardar en «Por escribir»' }, zoom: 1.4, arrow: true,
-      waitFor: { text: 'Quedó en «Por escribir», con su correo.' },
+      waitFor: { text: 'Quedó en «Por escribir», con su correo.', exact: false },
     },
     {
       title: 'Investígalo y escríbele', text: '«Investigar y escribirle» lo investiga a fondo en «Por escribir», en uno o dos minutos. Luego «Preparar correos» deja el correo listo para revisarlo y enviarlo.',

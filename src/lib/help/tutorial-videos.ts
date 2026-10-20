@@ -26,7 +26,7 @@ export const TUTORIAL_VIDEOS: TutorialVideo[] = [
   { id: 'informe-semanal', title: 'Informe semanal', summary: 'En «Hoy», tu semana en una frase, tu meta, tu equipo y sus metas, lo que cierra en Oportunidades, el correo del lunes y los avisos.', seconds: 128, sections: ['informe-semanal'] },
   { id: 'perfil', title: 'Perfil', summary: 'Cuenta qué vendes: tu oferta y tu cliente ideal guían la búsqueda y los correos.', seconds: 48, sections: ['perfil'] },
   { id: 'buscar', title: 'Buscar prospectos', summary: 'De un punto de partida a las empresas y sus contactos, y al guardarlos, sus correos.', seconds: 76, sections: ['buscar'] },
-  { id: 'contacto-del-dia', title: 'Contacto del día', summary: 'Un contacto con correo, tres días a la semana: por qué te sirve, una investigación breve y un primer correo, y guardarlo sin créditos.', seconds: 52, sections: ['buscar', 'hoy'] },
+  { id: 'contacto-del-dia', title: 'Contacto del día', summary: 'Un contacto con correo, tres días a la semana: por qué te sirve, una investigación breve y un primer correo, y guardarlo sin créditos.', seconds: 54, sections: ['buscar', 'hoy'] },
   { id: 'importar', title: 'Importar tu lista', summary: 'Sube tu Excel o CSV, revisa las columnas y los repetidos, e impórtala.', seconds: 42, sections: ['tabla', 'por-completar'] },
   { id: 'contactos', title: 'Tus contactos', summary: 'Busca sus correos, investiga a quienes eliges y escríbeles.', seconds: 47, sections: ['por-completar', 'por-escribir', 'correo'] },
   { id: 'firmas', title: 'Firmas y estilo', summary: 'Arma tu firma, crea estilos de correo que la IA usa al escribir y suma tu enlace para agendar.', seconds: 103, sections: ['firmas', 'correo'] },
