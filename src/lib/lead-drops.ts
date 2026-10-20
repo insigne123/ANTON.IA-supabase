@@ -1,0 +1,166 @@
+import { dayInZone } from '@/lib/admin/chile-time';
+
+/**
+ * «Contactos de la semana» (idea del dueño, 20 oct 2026): on Tuesdays and Fridays each person gets five new contacts that
+ * fit their customer, found with Apify (Leads Finder), not with Apollo's credits, each with a brief research and a first
+ * email by Cowork's Writer. The morning alert carries them: a table in its body, a PDF with the research and the drafts,
+ * and a link to «Buscar prospectos» in a mode that shows them as a search that already found them (dropHref), with their email ready:
+ * saving them to «Por escribir» costs nothing. Pure: the server prepares and saves them (server/lead-drops.ts).
+ */
+
+export const DROP_SIZE = 5;
+/** Tuesday and Friday, in Chile. */
+export const DROP_WEEKDAYS = [2, 5];
+const weekdayOf = (day: string) => new Date(`${day}T12:00:00.000Z`).getUTCDay();
+export const dropDay = (now: Date) => DROP_WEEKDAYS.includes(weekdayOf(dayInZone(now)));
+
+/** Who the contacts are for: from the person's «Perfil», a teammate's, or the contacts the team already saved. */
+export type DropCriteria = { titles: string[]; industries: string[]; locations: string[]; sizes: string[]; source: 'perfil' | 'equipo' | 'contactos' };
+export type IcpDeclared = { roles?: string | null; industries?: string | null; locations?: string | null; size?: string | null };
+
+/** One contact of a drop, as the person sees it before saving it: never the email or the phone, which stay in the vault. */
+export type DropItem = {
+  leadId: string;
+  name: string;
+  title: string | null;
+  company: string | null;
+  domain: string | null;
+  industry: string | null;
+  size: number | null;
+  city: string | null;
+  hasEmail: boolean;
+  hasPhone: boolean;
+  /** Why it fits, from the criteria it matched. */
+  why: string;
+  /** Two or three short facts about the company. */
+  research: string[];
+  draft: { subject: string; body: string } | null;
+  /** The contact in «Por escribir» once saved. */
+  savedLeadId?: string | null;
+};
+
+const PROFILE_SIZES: Record<string, string> = {
+  '1-10': '1,10', '11-50': '11,50', '51-200': '51,200', '201-500': '201,500', '501-1000': '501,1000', '1001-5000': '1001,5000', '5001+': '5001,1000000',
+};
+const list = (value: string | null | undefined, max: number) => [...new Set(String(value || '').split(/[,;\n]/).map(item => item.replace(/\s+/g, ' ').trim()).filter(Boolean))].slice(0, max);
+const fold = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+function fromDeclared(declared: IcpDeclared | null | undefined, source: DropCriteria['source']): DropCriteria | null {
+  const titles = list(declared?.roles, 5), industries = list(declared?.industries, 5);
+  if (!titles.length && !industries.length) return null;
+  const size = PROFILE_SIZES[String(declared?.size || '').trim()];
+  return { titles, industries, locations: list(declared?.locations, 3).length ? list(declared?.locations, 3) : ['Chile'], sizes: size ? [size] : [], source };
+}
+
+/** The most repeated titles and industries among the contacts the team saved: what they look for, said by what they keep. */
+export function inferCriteria(saved: Array<{ title?: string | null; industry?: string | null }>): DropCriteria | null {
+  const top = (values: Array<string | null | undefined>, max: number) => {
+    const counts = new Map<string, { label: string; count: number }>();
+    for (const raw of values) {
+      const label = String(raw || '').replace(/\s+/g, ' ').trim();
+      if (label.length < 3 || label.length > 80) continue;
+      const key = fold(label);
+      const known = counts.get(key);
+      if (known) known.count++; else counts.set(key, { label, count: 1 });
+    }
+    return [...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'es')).slice(0, max).map(item => item.label);
+  };
+  const withTitle = saved.filter(row => String(row.title || '').trim());
+  if (withTitle.length < 5) return null;
+  return { titles: top(saved.map(row => row.title), 4), industries: top(saved.map(row => row.industry), 3), locations: ['Chile'], sizes: [], source: 'contactos' };
+}
+
+/** The person's customer, else a teammate's, else what the team saved; null when there is nothing to go by. */
+export function dropCriteria(person: IcpDeclared | null, team: IcpDeclared[], saved: Array<{ title?: string | null; industry?: string | null }>) {
+  return fromDeclared(person, 'perfil') ?? team.map(item => fromDeclared(item, 'equipo')).find(Boolean) ?? inferCriteria(saved);
+}
+
+/** A key that groups people with the same customer, so one search serves all of them. */
+export const criteriaKey = (criteria: DropCriteria) => JSON.stringify([criteria.titles, criteria.industries, criteria.locations, criteria.sizes].map(values => values.map(fold).sort()));
+
+/** A contact found, with what the server needs to choose (the email and LinkedIn only as keys to skip known people). */
+export type DropCandidate = Omit<DropItem, 'why' | 'research' | 'draft' | 'savedLeadId'> & { emailKey: string | null; linkedinKey: string | null; about: string | null };
+export type KnownPeople = { emails: Set<string>; linkedins: Set<string>; leadIds: Set<string> };
+
+/**
+ * Five contacts for each person of a group, different for each: only people with an email, none the team already has or
+ * got in an earlier drop, one per company for each person and, while there are enough, a company nobody else in the
+ * group got. People with a phone and with a title closer to the criteria go first.
+ */
+export function assignDrops(candidates: DropCandidate[], people: string[], known: KnownPeople, criteria: DropCriteria, size = DROP_SIZE) {
+  const titleWords = criteria.titles.map(title => new Set(fold(title).split(' ').filter(word => word.length > 2)));
+  const closeness = (title: string | null) => {
+    const words = new Set(fold(title || '').split(' '));
+    return Math.max(0, ...titleWords.map(set => [...set].filter(word => words.has(word)).length / Math.max(1, set.size)));
+  };
+  const usable = candidates.filter(item => item.hasEmail
+    && !known.leadIds.has(item.leadId)
+    && !(item.emailKey && known.emails.has(item.emailKey))
+    && !(item.linkedinKey && known.linkedins.has(item.linkedinKey)))
+    .sort((a, b) => Number(b.hasPhone) - Number(a.hasPhone) || closeness(b.title) - closeness(a.title) || a.leadId.localeCompare(b.leadId));
+  const companyOf = (item: DropCandidate) => fold(item.domain || item.company || item.leadId);
+  const taken = new Set<string>(), usedCompanies = new Set<string>();
+  const out = new Map<string, DropCandidate[]>(people.map(person => [person, []]));
+  // Round robin: each person takes one at a time, so the best contacts are shared out instead of going to the first person.
+  for (const strict of [true, false]) {
+    for (let round = 0; round < size; round++) {
+      for (const person of people) {
+        const mine = out.get(person)!;
+        if (mine.length > round) continue;
+        const companies = new Set(mine.map(companyOf));
+        const pick = usable.find(item => !taken.has(item.leadId) && !companies.has(companyOf(item)) && (!strict || !usedCompanies.has(companyOf(item))));
+        if (!pick) continue;
+        taken.add(pick.leadId); usedCompanies.add(companyOf(pick)); mine.push(pick);
+      }
+    }
+  }
+  return out;
+}
+
+/** «Gerente de Personas en retail, en Santiago»: why the contact fits, from what matched. */
+export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city'>, criteria: DropCriteria) {
+  const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo' : 'los contactos que guarda tu equipo';
+  const parts = [item.title, item.industry ? `en ${item.industry.toLowerCase()}` : null, item.city ? `en ${item.city}` : null].filter(Boolean);
+  return parts.length ? `${parts.join(' ')}: calza con ${source}.` : `Calza con ${source}.`;
+}
+
+/** The facts the research starts from: what the company does (the actor's description, summarized when there is one), size and place. */
+export function researchFacts(item: Pick<DropCandidate, 'company' | 'industry' | 'size' | 'city' | 'about'>) {
+  const facts: string[] = [];
+  if (item.about) facts.push(item.about);
+  const size = item.size ? `${item.size.toLocaleString('es-CL')} personas` : null;
+  const where = [item.industry, size, item.city].filter(Boolean).join(' · ');
+  if (where) facts.push(where);
+  return facts.slice(0, 3);
+}
+
+// ─── In the morning alert: a table, the link and the PDF ────────────────────────────────────────────────────────────
+
+const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+/** «Buscar prospectos» in the drop's mode: the search that found them, with the contacts ready. */
+export const dropHref = (dropId: string) => `/search/contactos/${encodeURIComponent(dropId)}`;
+
+/** The drop's part of the email: a few lines of text and a table (name, role, company, why) with the link to see them. */
+export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string) {
+  const link = `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
+  const text = [
+    `${items.length === 1 ? 'Un contacto nuevo' : `${items.length} contactos nuevos`} para ti, con su correo listo:`,
+    ...items.map(item => `- ${item.name}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${item.why}`),
+    `Míralos y guárdalos sin costo: ${link}`,
+    'En el PDF adjunto va una breve investigación de cada uno y un primer correo sugerido.',
+  ].join('\n');
+  const cell = 'padding:10px 8px;border-top:1px solid #e5e7eb;font-size:14px;line-height:20px;vertical-align:top';
+  const rows = items.map(item => `<tr><td style="${cell};color:#111827;font-weight:600">${escape(item.name)}</td>`
+    + `<td style="${cell};color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</td>`
+    + `<td style="${cell};color:#6b7280">${escape(item.why)}</td></tr>`).join('');
+  const html = `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contactos de la semana</h2>`
+    + `<p style="margin:0 0 8px;font-size:15px;line-height:22px;color:#111827">${items.length === 1 ? 'Un contacto nuevo' : `${items.length} contactos nuevos`} para ti, con su correo listo.</p>`
+    + `<table role="presentation" style="width:100%;border-collapse:collapse;border-bottom:1px solid #e5e7eb"><thead><tr>`
+    + ['Nombre', 'Cargo y empresa', 'Por qué'].map(head => `<th style="padding:6px 8px;text-align:left;font-size:12px;font-weight:500;color:#6b7280">${head}</th>`).join('')
+    + `</tr></thead><tbody>${rows}</tbody></table>`
+    + `<p style="margin:16px 0 0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">Ver y guardar los ${items.length}</a></p>`
+    + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">Guardarlos no gasta créditos. En el PDF adjunto va una breve investigación de cada uno y un primer correo sugerido.</p>`;
+  return { text, html, link };
+}
+
+export const dropSubject = (count: number) => count === 1 ? 'Un contacto nuevo para ti' : `${count} contactos nuevos para ti`;

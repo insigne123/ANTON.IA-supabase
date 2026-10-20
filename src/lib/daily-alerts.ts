@@ -1,10 +1,12 @@
 import { dayInZone, shiftDay } from '@/lib/admin/chile-time';
+import { dropEmailSection, dropHref, dropSubject, type DropItem } from '@/lib/lead-drops';
 import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } from '@/lib/weekly-goals';
 
 /**
  * «Avisos» (idea 3): one email in the morning, from Tuesday to Friday, only when there is something concrete to do. It
  * names it: «Te respondió Juan Pérez», «2 licitaciones que te sirven cierran el viernes», «Tus 12 contactos de ayer ya
  * tienen correo». A goal that is behind is reason enough on Wednesdays and Fridays; any other day it only rides along.
+ * On Tuesdays and Fridays it also brings «Contactos de la semana» (src/lib/lead-drops.ts): one email a day, never two.
  * Mondays belong to the weekly report. Pure: the server reads the facts (server/daily-alerts.ts).
  */
 
@@ -27,8 +29,10 @@ export type AlertFacts = {
   /** Opportunities of the person, or recommended and nobody's when they manage them, closing within three days. */
   closing: AlertOpportunity[];
   goal: GoalProgress | null;
+  /** Today's «Contactos de la semana», when they are ready. */
+  drop?: { id: string; items: DropItem[] } | null;
 };
-export type AlertKind = 'reply' | 'pending' | 'commitment' | 'closing' | 'research' | 'ready' | 'goal';
+export type AlertKind = 'reply' | 'pending' | 'commitment' | 'closing' | 'drop' | 'research' | 'ready' | 'goal';
 export type AlertLine = { kind: AlertKind; text: string; href: string };
 export type DailyAlert = { subject: string; lines: AlertLine[] };
 
@@ -100,6 +104,12 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     lines.push({ kind: 'closing', text, href: facts.closing.length === 1 ? `/opportunities?op=${encodeURIComponent(facts.closing[0].id)}` : '/opportunities' });
   }
 
+  if (facts.drop?.items.length) {
+    const count = facts.drop.items.length;
+    lead(dropSubject(count));
+    lines.push({ kind: 'drop', text: `${count === 1 ? 'Un contacto nuevo' : `${count} contactos nuevos`} para ti, con su correo listo: guárdalos sin gastar créditos`, href: dropHref(facts.drop.id) });
+  }
+
   if (facts.research.length) {
     const [first] = facts.research;
     const text = facts.research.length === 1 ? `Lista la investigación de ${first.name}` : `Listas ${facts.research.length} investigaciones: ${facts.research.slice(0, 3).map(item => item.name).join(', ')}${facts.research.length > 3 ? '…' : ''}`;
@@ -131,14 +141,17 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 
-export function alertEmail(alert: DailyAlert, name: string, appUrl: string) {
+/** The email; with today's drop, its table and link go after the lines (the PDF is attached by the server). */
+export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop?: AlertFacts['drop']) {
   const base = appUrl.replace(/\/$/, '');
   const link = (href: string) => `${base}${href}`;
   const settings = link('/dashboard?vista=semana');
   const greeting = name ? `Hola, ${name}` : 'Hola';
+  const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base) : null;
   const text = [
     `${greeting}. Esto te espera hoy en ANTON.IA:`, '',
     ...alert.lines.map(line => `- ${line.text} (${link(line.href)})`), '',
+    ...(section ? [section.text, ''] : []),
     `Abrir ANTON.IA: ${link('/dashboard')}`,
     `Te avisamos solo cuando hay algo que hacer. Los apagas en «Tu semana»: ${settings}`,
   ].join('\n');
@@ -148,6 +161,7 @@ export function alertEmail(alert: DailyAlert, name: string, appUrl: string) {
     + `<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
     + `<p style="margin:0 0 16px;font-size:15px;line-height:22px;color:#6b7280">Esto te espera hoy en ANTON.IA.</p>`
     + `<div style="border-bottom:1px solid #e5e7eb">${rows}</div>`
+    + (section ? section.html : '')
     + `<p style="margin:24px 0 0"><a href="${escape(link('/dashboard'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Abrir ANTON.IA</a></p>`
     + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p></div>`;
   return { subject: alert.subject, text, html };

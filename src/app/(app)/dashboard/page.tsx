@@ -14,6 +14,7 @@ import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 import { ReconnectCard } from '@/components/home/ReconnectCard';
 import { TouchesCard } from '@/components/home/TouchesCard';
 import { WeeklyGoalCard } from '@/components/home/WeeklyGoalCard';
+import { LeadDropBanner } from '@/components/home/LeadDropBanner';
 import { WeeklyReport } from '@/components/weekly-report/WeeklyReport';
 import { cn } from '@/lib/utils';
 
@@ -72,6 +73,7 @@ export default function DashboardPage() {
         </div>
 
         <aside aria-label="Tu actividad de hoy" className="min-w-0 space-y-4 xl:col-start-2 xl:row-span-2 xl:row-start-1">
+          <LeadDropBanner />
           <WeeklyGoalCard />
           <HomeSummary />
           <PersonalCredits />

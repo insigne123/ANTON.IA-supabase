@@ -62,10 +62,11 @@ El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su en
    - Las que la persona tiene a cargo.
    - Si administra o gestiona Oportunidades: además las recomendadas que nadie tiene.
    - Solo para quien puede ver Oportunidades.
-4. **Investigaciones listas** desde el aviso anterior: «Lista la investigación de Pedro Rojas». El enlace abre la investigación en «Por escribir».
-5. **Contactos que ya tienen correo:** los guardados desde el aviso anterior, con correo y sin escribir. Ejemplo: «Tus 12 contactos de ayer ya tienen correo». Dice «de ayer» cuando todos son de ayer.
-6. **Respuestas de días anteriores** que aún esperan. Solo acompañan a otro motivo; nunca son motivo por sí solas.
-7. **La meta de la semana,** con el siguiente paso.
+4. **«Contactos de la semana»**, martes y viernes: cinco contactos nuevos con correo, con una tabla en el cuerpo y un PDF adjunto (`docs/contactos-de-la-semana.md`). Asunto: «5 contactos nuevos para ti», si no hay algo más urgente.
+5. **Investigaciones listas** desde el aviso anterior: «Lista la investigación de Pedro Rojas». El enlace abre la investigación en «Por escribir».
+6. **Contactos que ya tienen correo:** los guardados desde el aviso anterior, con correo y sin escribir. Ejemplo: «Tus 12 contactos de ayer ya tienen correo». Dice «de ayer» cuando todos son de ayer.
+7. **Respuestas de días anteriores** que aún esperan. Solo acompañan a otro motivo; nunca son motivo por sí solas.
+8. **La meta de la semana,** con el siguiente paso.
    - Una meta atrasada es motivo suficiente solo **miércoles y viernes**.
    - Quien está en varios workspaces recibe ese recordatorio solo del primero al que entró.
 

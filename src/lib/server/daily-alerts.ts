@@ -2,8 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
 import { alertEmail, composeAlert, type AlertFacts, type AlertOpportunity, type AlertPerson } from '@/lib/daily-alerts';
 import { commitmentDueToday, replyNeedsAnswer } from '@/lib/home/today';
+import { dropDay, dropHref, type DropItem } from '@/lib/lead-drops';
 import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
+import { dropPdf } from '@/lib/server/lead-drops';
 import { readPersonGoal } from '@/lib/server/weekly-goals';
 import type { SendSelf } from '@/lib/server/weekly-report';
 
@@ -132,6 +134,14 @@ async function readClosing(client: Client, scope: AlertScope, now: Date, manager
   }).slice(0, 10);
 }
 
+/** Today's «Contactos de la semana» of the person, once ready; nothing before the migration or while they are being written. */
+async function readTodayDrop(client: Client, scope: AlertScope, today: string): Promise<{ id: string; items: DropItem[] } | null> {
+  const result: any = await client.from('lead_drops').select('id,items').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+    .eq('drop_date', today).eq('status', 'ready').maybeSingle();
+  const items = (result.error ? [] : result.data?.items || []) as DropItem[];
+  return result.data && items.length ? { id: String(result.data.id), items } : null;
+}
+
 /**
  * One person's alert of today, kept once per organization and day and sent once: a second run the same day finds the row
  * and does nothing. Nothing to say is kept as «quiet» and not sent. The window starts at the last alert (at most four days
@@ -148,7 +158,11 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   if (last.data?.alert_date === today) return { status: 'already_sent' as const };
   const floor = now.getTime() - 4 * 86_400_000;
   const since = new Date(last.data ? Math.max(Date.parse(last.data.created_at), floor) : now.getTime() - 86_400_000).toISOString();
-  const facts = await readAlertFacts(client, scope, { now, since, opportunities: deps.opportunities });
+  const [facts, drop] = await Promise.all([
+    readAlertFacts(client, scope, { now, since, opportunities: deps.opportunities }),
+    dropDay(now) ? readTodayDrop(client, scope, today) : Promise.resolve(null),
+  ]);
+  facts.drop = drop;
   // A goal that is behind alone is worth an email in one workspace only: whoever belongs to several gets it from one.
   const alert = composeAlert(facts, now, { goalReminders: deps.goalReminders });
   const row = { organization_id: scope.organizationId, user_id: scope.userId, alert_date: today };
@@ -165,7 +179,12 @@ export async function deliverDailyAlert(client: Client, scope: AlertScope, deps:
   const profile: any = await client.from('profiles').select('email,signatures').eq('id', scope.userId).maybeSingle();
   const to = String(profile.data?.email || '').trim();
   if (!readAlertsEmail(profile.data?.signatures) || !to) return { status: 'stored' as const };
-  const sent = await deps.send({ userId: scope.userId, to, ...alertEmail(alert, facts.name, deps.appUrl) });
-  await client.from('daily_alerts').update(sent.ok ? { status: 'sent', emailed_at: new Date().toISOString(), email_error: null } : { status: 'failed', email_error: sent.error.slice(0, 300) }).eq('id', stored.data.id);
+  // Today's contacts go in the same email, with their research and first emails in a PDF.
+  const attachments = drop ? [{ filename: `contactos-de-la-semana-${today}.pdf`, contentType: 'application/pdf',
+    content: await dropPdf(drop.items, { name: facts.name, date: today, link: `${deps.appUrl.replace(/\/$/, '')}${dropHref(drop.id)}` }) }] : undefined;
+  const sent = await deps.send({ userId: scope.userId, to, ...alertEmail(alert, facts.name, deps.appUrl, drop), ...(attachments ? { attachments } : {}) });
+  const at = new Date().toISOString();
+  await client.from('daily_alerts').update(sent.ok ? { status: 'sent', emailed_at: at, email_error: null } : { status: 'failed', email_error: sent.error.slice(0, 300) }).eq('id', stored.data.id);
+  if (sent.ok && drop) await client.from('lead_drops').update({ status: 'sent', emailed_at: at, updated_at: at }).eq('id', drop.id).eq('status', 'ready');
   return { status: sent.ok ? 'sent' as const : 'failed' as const };
 }
