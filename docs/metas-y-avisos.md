@@ -62,17 +62,18 @@ El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su en
    - Las que la persona tiene a cargo.
    - Si administra o gestiona Oportunidades: además las recomendadas que nadie tiene.
    - Solo para quien puede ver Oportunidades.
-4. **Investigaciones listas** desde el aviso anterior: «Lista la investigación de Pedro Rojas». El enlace abre la investigación en «Por escribir».
-5. **Contactos que ya tienen correo:** los guardados desde el aviso anterior, con correo y sin escribir. Ejemplo: «Tus 12 contactos de ayer ya tienen correo». Dice «de ayer» cuando todos son de ayer.
-6. **Respuestas de días anteriores** que aún esperan. Solo acompañan a otro motivo; nunca son motivo por sí solas.
-7. **La meta de la semana,** con el siguiente paso.
+4. **«Contactos de la semana»**, martes y viernes: cinco contactos nuevos con correo, con una tabla en el cuerpo y un PDF adjunto (`docs/contactos-de-la-semana.md`). Asunto: «5 contactos nuevos para ti», si no hay algo más urgente.
+5. **Investigaciones listas** desde el aviso anterior: «Lista la investigación de Pedro Rojas». El enlace abre la investigación en «Por escribir».
+6. **Contactos que ya tienen correo:** los guardados desde el aviso anterior, con correo y sin escribir. Ejemplo: «Tus 12 contactos de ayer ya tienen correo». Dice «de ayer» cuando todos son de ayer.
+7. **Respuestas de días anteriores** que aún esperan. Solo acompañan a otro motivo; nunca son motivo por sí solas.
+8. **La meta de la semana,** con el siguiente paso.
    - Una meta atrasada es motivo suficiente solo **miércoles y viernes**.
    - Quien está en varios workspaces recibe ese recordatorio solo del primero al que entró.
 
 ### Desde dónde se envían
 
 - **Remitente:** igual que el informe semanal (`sendReportEmail`). Sale desde el Gmail u Outlook conectado de la persona, hacia su mismo correo.
-- **Sin correo conectado:** sale desde el correo de informes, si está configurado `WEEKLY_REPORTS_SENDER_USER_ID`. Sin esa cuenta, el aviso se guarda con el error y no se envía.
+- **Sin correo conectado:** sale desde el correo de informes, si está configurado `WEEKLY_REPORTS_SENDER_USER_ID`. Sin esa cuenta, a esa persona no se le prepara aviso.
 - **En producción, al 20 de octubre:** solo 3 de 53 usuarios tienen correo conectado, así que **el correo de informes es lo que hace que los avisos lleguen**. Es una aprobación pendiente.
 
 ### Cómo se apagan

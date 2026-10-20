@@ -12,18 +12,34 @@ import { tokenService } from '@/lib/services/token-service';
  * (sendReportEmail).
  */
 type Fetch = typeof fetch;
-export type SelfEmail = { userId: string; to: string; subject: string; html: string; text: string };
+export type SelfAttachment = { filename: string; contentType: string; content: Buffer };
+export type SelfEmail = { userId: string; to: string; subject: string; html: string; text: string; attachments?: SelfAttachment[] };
 
 const EMAIL = /^[^\s@<>()",;:\\[\]]+@[^\s@<>()",;:\\[\]]+\.[^\s@<>()",;:\\[\]]{2,}$/;
 const base64Lines = (text: string) => Buffer.from(text, 'utf8').toString('base64').replace(/.{1,76}/g, line => `${line}\r\n`).trimEnd();
 
-/** The message as Gmail's API takes it: multipart/alternative, UTF-8, the subject encoded. */
-export function selfMime(input: Pick<SelfEmail, 'to' | 'subject' | 'html' | 'text'>, boundary = `anton-${randomUUID()}`) {
-  return [
-    `To: ${input.to}`, `Subject: ${encodeHeaderRFC2047(input.subject)}`, 'MIME-Version: 1.0', `Content-Type: multipart/alternative; boundary="${boundary}"`, '',
+const base64Bytes = (content: Buffer) => content.toString('base64').replace(/.{1,76}/g, line => `${line}\r\n`).trimEnd();
+/** A file name for a MIME header: plain ASCII, without quotes or line breaks. */
+const mimeName = (name: string) => name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.\- ]/g, '').trim().slice(0, 120) || 'adjunto';
+
+/** The message as Gmail's API takes it: multipart/alternative, UTF-8, the subject encoded; inside multipart/mixed when it carries files. */
+export function selfMime(input: Pick<SelfEmail, 'to' | 'subject' | 'html' | 'text' | 'attachments'>, boundary = `anton-${randomUUID()}`) {
+  const alternative = [
     `--${boundary}`, 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', base64Lines(input.text),
     `--${boundary}`, 'Content-Type: text/html; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', base64Lines(input.html),
-    `--${boundary}--`, '',
+    `--${boundary}--`,
+  ];
+  const head = [`To: ${input.to}`, `Subject: ${encodeHeaderRFC2047(input.subject)}`, 'MIME-Version: 1.0'];
+  if (!input.attachments?.length) return [...head, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alternative, ''].join('\r\n');
+  const mixed = `${boundary}-mixed`;
+  return [
+    ...head, `Content-Type: multipart/mixed; boundary="${mixed}"`, '',
+    `--${mixed}`, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alternative,
+    ...input.attachments.flatMap(file => [
+      `--${mixed}`, `Content-Type: ${file.contentType}; name="${mimeName(file.filename)}"`, `Content-Disposition: attachment; filename="${mimeName(file.filename)}"`,
+      'Content-Transfer-Encoding: base64', '', base64Bytes(file.content),
+    ]),
+    `--${mixed}--`, '',
   ].join('\r\n');
 }
 
@@ -49,7 +65,9 @@ export async function sendSelfEmail(client: SupabaseClient, input: SelfEmail, de
     const { access_token } = await refreshMicrosoftToken(token.refresh_token, env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!, env.AZURE_AD_CLIENT_SECRET!, env.NEXT_PUBLIC_AZURE_AD_TENANT_ID!);
     const response = await request('https://graph.microsoft.com/v1.0/me/sendMail', {
       method: 'POST', headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30_000),
-      body: JSON.stringify({ message: { subject: input.subject, body: { contentType: 'HTML', content: input.html }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: false }),
+      body: JSON.stringify({ message: { subject: input.subject, body: { contentType: 'HTML', content: input.html }, toRecipients: [{ emailAddress: { address: to } }],
+        ...(input.attachments?.length ? { attachments: input.attachments.map(file => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: file.filename,
+          contentType: file.contentType, contentBytes: file.content.toString('base64') })) } : {}) }, saveToSentItems: false }),
     });
     return response.ok ? { ok: true as const } : { ok: false as const, error: `Outlook no aceptó el correo (${response.status}).` };
   } catch {

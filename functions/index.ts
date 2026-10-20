@@ -294,6 +294,19 @@ export const dailyAlertsTick = functions.scheduler.onSchedule({
     await invokeFirebaseSchedulerBridge({ name: 'daily-alerts', path: '/api/cron/daily-alerts', method: 'POST' });
 });
 
+// «Contactos de la semana»: Tuesdays and Fridays before the alerts, which carry what is ready. Each run finishes what the
+// previous one left.
+export const leadDropsTick = functions.scheduler.onSchedule({
+    schedule: '0,20,40 6-7 * * 2,5',
+    timeZone: 'America/Santiago',
+    retryCount: 0,
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    await invokeFirebaseSchedulerBridge({ name: 'lead-drops', path: '/api/cron/lead-drops', method: 'POST' });
+});
+
 export const antoniaRollupsTick = functions.scheduler.onSchedule({
     schedule: '10 0 * * *',
     timeZone: 'Etc/UTC',
