@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { z } from 'zod';
 
 import { identityFromProvider } from '@/lib/server/lead-identity';
-import { LEADS_FINDER_PROVIDER, LeadsFinderError, splitLeadsFinderItems } from '@/lib/server/leads-finder/client';
+import { LEADS_FINDER_PROVIDER, LeadsFinderError, leadsFinderMaxRunUsd, splitLeadsFinderItems } from '@/lib/server/leads-finder/client';
 import * as reveal from '@/lib/server/leads-finder/reveal';
 import { isLeadsFinderId, LeadsFinderVaultError } from '@/lib/server/leads-finder/vault';
 
@@ -62,7 +62,7 @@ function searchRoute(options: { email?: string; source?: string; vaultDown?: boo
       checkAndConsumeDailyQuota: async () => { calls.quota++; return { allowed: true, count: 3, limit: 50 }; },
     },
     '@/lib/server/leads-finder/client': {
-      LEADS_FINDER_PROVIDER, LeadsFinderError,
+      LEADS_FINDER_PROVIDER, LeadsFinderError, leadsFinderMaxRunUsd,
       searchLeadsFinder: async (input: unknown, deps: unknown) => {
         calls.searches.push({ input, deps });
         if (options.failure) throw options.failure;

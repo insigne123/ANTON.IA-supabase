@@ -6,7 +6,7 @@ import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { hasLeadsFinderUserAccess } from '@/lib/server/leads-finder/access';
 import {readCompanyScope} from '@/lib/server/leads-finder/company-scope';
-import { LEADS_FINDER_PROVIDER, LeadsFinderError, searchLeadsFinder } from '@/lib/server/leads-finder/client';
+import { LEADS_FINDER_PROVIDER, LeadsFinderError, leadsFinderMaxRunUsd, searchLeadsFinder } from '@/lib/server/leads-finder/client';
 import { LEADS_FINDER_MAX_PER_RUN,leadsFinderInput } from '@/lib/server/leads-finder/input';
 import { LeadsFinderVaultError, storeInVault } from '@/lib/server/leads-finder/vault';
 import { requestAuthErrorResponse, requireSessionOrTrustedInternalRequest } from '@/lib/server/request-auth';
@@ -41,10 +41,6 @@ const noStore = { 'Cache-Control': 'private, no-store, max-age=0' };
 const json = (body: Record<string, unknown>, status = 200, headers: Record<string, string> = {}) =>
   NextResponse.json(body, { status, headers: { ...noStore, ...headers } });
 
-function maxRunUsd() {
-  const value = Number(process.env.LEADS_FINDER_MAX_RUN_USD);
-  return Number.isFinite(value) && value > 0 ? Math.min(value, 5) : 0.5;
-}
 
 /** People of this search already saved by the organization are left out, as the Apollo search does. */
 async function alreadySaved(admin: any, organizationId: string, ids: string[]) {
@@ -118,7 +114,7 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let found: Awaited<ReturnType<typeof searchLeadsFinder>>;
   try {
-    found = await searchLeadsFinder(input, { fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: maxRunUsd() });
+    found = await searchLeadsFinder(input, { fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: leadsFinderMaxRunUsd() });
   } catch (error) {
     if (error instanceof LeadsFinderError) {
       await safeAppendAntoniaEvent({

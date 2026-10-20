@@ -11,7 +11,7 @@ import { mapProfileToForm } from '@/lib/profile/profile-mappings';
 import type { LeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '@/lib/server/cowork/writer-run';
-import { leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
+import { leadsFinderMaxRunUsd, leadsFinderUsdPerLead, searchLeadsFinder } from '@/lib/server/leads-finder/client';
 import { enrichedLeadRow } from '@/lib/server/leads-finder/reveal';
 import { forgetInVault, readFromVault, storeInVault, type VaultEntry } from '@/lib/server/leads-finder/vault';
 
@@ -156,7 +156,10 @@ export async function planOrganizationDrops(client: Client, organizationId: stri
     }
     let found: Awaited<ReturnType<Search>>;
     try {
-      found = await search(searchInput(criteria, count), { fetch: globalThis.fetch, token: process.env.APIFY_TOKEN, maxRunUsd: Math.min(1, count * usdPerLead * 1.5) });
+      // The run's cap, not its cost (that comes from what it returns): one person's search is too small for a cap of its
+      // own, which Apify refuses under its minimum, so never below an ordinary search's (leadsFinderMaxRunUsd).
+      found = await search(searchInput(criteria, count), { fetch: globalThis.fetch, token: process.env.APIFY_TOKEN,
+        maxRunUsd: Math.max(leadsFinderMaxRunUsd(), Math.min(1, count * usdPerLead * 1.5)) });
     } catch (error) {
       for (const userId of members) results.push({ userId, status: 'empty', error: `La búsqueda falló: ${text((error as Error)?.message, 200)}`, criteria: own.get(userId) });
       continue;

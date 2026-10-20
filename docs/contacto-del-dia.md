@@ -28,6 +28,7 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
 
      Sin nada de eso no hay contacto, y queda dicho por qué (`status = empty`).
    - **Una búsqueda por cliente ideal:** Leads Finder (Apify, `code_crafter/leads-finder`) busca solo correos validados. Trae el doble de lo que el grupo necesita más cinco, con un mínimo de diez.
+     - El tope de cada corrida nunca baja del de una búsqueda normal (`LEADS_FINDER_MAX_RUN_USD`, US$0,50). Apify rechaza topes bajo su mínimo (`max-total-charge-usd-below-minimum`), y uno de US$0,03 hizo fallar la primera prueba real (20 oct). Es solo el límite: el costo sale de los resultados que trae.
    - **Reparto:** un contacto por persona (`DROP_SIZE`), distinto entre compañeros y, mientras alcancen, de una empresa que nadie más del equipo recibió.
      - Primero quienes tienen teléfono y un cargo más cercano.
      - Nunca alguien que el equipo ya tiene en «Por escribir» o «Conversaciones», ni quien llegó otro día de los últimos 180.
