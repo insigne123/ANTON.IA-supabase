@@ -52,7 +52,7 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
    - **El contacto:** su nombre como título, cargo y empresa, por qué calza, «Correo verificado» y «Teléfono» si lo hay. La investigación y el primer correo, con «Copiar», están a la vista.
    - **Una acción a la vez:**
      - «Guardar en «Por escribir»» usa el correo y el teléfono de la bóveda, **sin créditos ni otra búsqueda**. Si ya estaba en «Por escribir» con ese correo, se enlaza sin duplicarse. La investigación y el borrador quedan en `enriched_leads.data.leadDrop`.
-     - Después, «Investigar y escribirle» abre «Por escribir» con su investigación completa ya en marcha (`?investigar=<id>&empezar=1`). Toma uno o dos minutos; luego «Preparar correos» deja el correo listo para revisarlo y enviarlo desde ANTON.IA.
+     - Después, «Investigar y escribirle» abre «Por escribir» con su investigación completa ya en marcha (`?investigar=<id>&empezar=1`). Toma unos minutos (3 en la prueba real del 20 de octubre); luego «Preparar correos» deja el correo listo para revisarlo y enviarlo desde ANTON.IA.
      - **Por qué no se envía el correo sugerido tal cual:** en ANTON.IA todo lo que se envía sale de una investigación completa, con sus chequeos y revisión. El sugerido sirve para decidir y se puede copiar con «Copiar»; «Redactar» sin investigación solo ofrece investigar.
      - «Investigar a este contacto», en «Redactar», también la deja en marcha. Si el contacto ya tiene una investigación, o una en curso, se abre para leerla y no se repite.
    - **Teléfono:** si falta, se busca desde «Por escribir» como siempre.

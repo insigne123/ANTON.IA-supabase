@@ -12,7 +12,7 @@ Graba un video por módulo sobre la app real, con datos de demostración y sin r
 Sale un MP4 H.264 con su póster (`.jpg`) y los subtítulos en WebVTT (`.vtt`).
 
 ```bash
-npm run tutorial:videos                                  # los 16 videos, en public/tutorial-videos/
+npm run tutorial:videos                                  # los 17 videos, en public/tutorial-videos/
 npm run tutorial:videos -- --videos=buscar,pipeline      # solo esos
 npm run tutorial:videos -- --skip-build --out=/tmp/videos --keep-frames
 ```

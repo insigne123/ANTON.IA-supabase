@@ -14,6 +14,7 @@
 
 ## Resumen
 - **Promedio 4,65 en las 11 funciones. Ninguna queda bajo 4,5.** Las 5 del 20 de octubre (abajo) promedian 4,7, también todas sobre 4,5.
+- **Metas, avisos, «Contacto del día» y extensión de LinkedIn (20 oct, abajo):** promedian 4,65 (4,7, 4,7, 4,6 y 4,6).
 - **Pasada final (build 005), en escritorio y en teléfono:** 14 pantallas por modo, sin errores de página ni peticiones fallidas, y desborde horizontal 0. La pasada del build 002 dio lo mismo.
 - **Lo que encontró la evaluación y quedó arreglado hoy:**
   - Mercado público fallaba con 500 porque las consultas tardaban más que el límite: #434 (índice de trigramas) y #435 (límite de 30 s del servidor y estado «no pudimos calcular» con «Reintentar»).
@@ -87,6 +88,48 @@
   - leer el sitio y escribir la frase toma de 3 a 14 s (el navegador lo guarda un día);
   - un dominio que no existe (mop.gov.cl, sin DNS) queda sin descripción;
   - el ícono que falta deja un 404 en la consola del navegador, sin efecto en la pantalla.
+
+## 20 oct: metas, avisos, «Contacto del día» y extensión de LinkedIn (#454 a #463)
+
+**Cómo se midió:** la misma pauta y la cuenta QA, esta vez en su propio workspace de pruebas (sin otras personas), para poder guardar y gastar sin tocar el de un cliente. Antes de cada escritura se comprobó que el workspace activo fuera el de pruebas.
+
+| Función | Utilidad | Facilidad | Claridad | Robustez | Tel/oscuro/teclado | Nota |
+|---|---|---|---|---|---|---|
+| Meta de la semana (Hoy, «Tu semana» y editor del equipo) | 5 | 4,5 | 5 | 4,5 | 4,5 | 4,7 |
+| Avisos por correo | 5 | 5 | 4,5 | 4,5 | 4,5 | 4,7 |
+| Contacto del día | 5 | 4,5 | 4,5 | 4,5 | 4,5 | 4,6 |
+| Extensión de LinkedIn | 5 | 4,5 | 4,5 | 4,5 | — | 4,6 |
+
+**Evidencia:**
+- **Meta de la semana:**
+  - «Hoy» muestra «19–25 oct · Personas contactadas 0 de 10 · Contactos nuevos con correo 0 de 15», el paso del día («Para ir al día, contacta hoy a 4 personas») y su botón.
+  - El editor del equipo guardó 8 y 12 («Guardamos las metas del equipo»), y «Hoy» pasó a decir «Meta de tu equipo» con esas cifras, en escritorio y en teléfono oscuro.
+  - **Lo que encontró el teclado y quedó arreglado (#457):** «Cambiar las metas del equipo» no abría el editor desde «Hoy». Ahora lo abre, con el foco dentro y Escape para cerrar.
+  - Sin errores de página ni desborde.
+- **Avisos:**
+  - El correo de muestra, armado con el código real, nombra cada cosa con su enlace exacto: quién respondió, el compromiso de hoy, la licitación que cierra, la investigación lista, los contactos con correo y la meta.
+  - Se ve en escritorio, en teléfono y en oscuro sin desborde.
+  - El interruptor «Avisos por correo» está en «Tu semana».
+  - La primera corrida real es el miércoles 21 a las 8:00. Hoy solo 2 personas pueden recibirlo: tienen su correo conectado y una dirección. Para el resto falta el buzón de envío (aprobación pendiente).
+- **Contacto del día** (prueba real del 20 oct, con gasto real de Apify y de IA en el workspace de pruebas):
+  - «Hoy» mostró la tarjeta con «Ver mi primer contacto». El contacto se armó en 53 s con los pasos a la vista: un jefe de reclutamiento de una empresa de logística, con correo verificado, una breve investigación y un primer correo.
+  - El PDF se descargó (6,5 KB), y «Guardar en «Por escribir»» no gastó créditos. El contacto costó US$0,034.
+  - **«Investigar y escribirle»** (#463):
+    - la investigación empezó sola al llegar (8 s) y quedó lista a los 199 s, con 8 fuentes y «Lista para redactar»;
+    - «Preparar borradores» abrió la secuencia de 4 correos. A los 4 minutos había 3 guardados y el cuarto en curso;
+    - no se envió nada.
+  - En teléfono oscuro (390 px), sin desborde. Sin errores de página.
+  - **Lo que encontró la prueba y quedó arreglado el mismo día:**
+    - Apify rechazaba la búsqueda porque el tope de cobro quedaba bajo su mínimo (#461).
+    - Un rubro que el buscador no conoce («Seguridad privada») dejaba la búsqueda sin nadie (#462).
+    - «Escribirle» terminaba en «Redactar» pidiendo una investigación (#463).
+    - El rubro salía en inglés, el cargo con «De» e «Y» en mayúscula y la empresa como «S.a.» (#463).
+  - **Lo que queda:** la preparación de la madrugada del miércoles espera que se publique la función con su horario nuevo (aprobación pendiente). Mientras, cada persona lo abre desde «Hoy».
+- **Extensión de LinkedIn (#455):**
+  - Se probó de verdad: buscar y enriquecer personas desde LinkedIn, con el panel rediseñado.
+  - Pasan sus 102 pruebas.
+  - Lo menor que queda: el aviso flotante repite lo que ya dice el panel.
+  - Publicarla en Chrome Web Store es una aprobación pendiente. En teléfono no aplica.
 
 ## Evidencia por función
 - **Cowork para todos:**
