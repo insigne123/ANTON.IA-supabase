@@ -4,8 +4,11 @@
  */
 export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.txt', '.md', '.csv', '.html', '.htm',
   // Read as text on the server (document-files.ts): the macro and template versions of Word and Excel, LibreOffice, PowerPoint and RTF.
-  '.docm', '.dotx', '.xlsm', '.xltx', '.xlsb', '.odt', '.ods', '.odp', '.pptx', '.rtf'];
-const IMAGES = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.tif', '.tiff', '.bmp', '.heic'];
+  '.docm', '.dotx', '.xlsm', '.xltx', '.xlsb', '.odt', '.ods', '.odp', '.pptx', '.rtf',
+  // Photos and screenshots: the AI reads them as images (document-scans.ts).
+  '.jpg', '.jpeg', '.png', '.gif', '.webp'];
+/** Images in formats the AI does not read. */
+const IMAGES = ['.tif', '.tiff', '.bmp', '.heic'];
 const ARCHIVES = ['.rar', '.7z', '.tar', '.gz', '.tgz'];
 const MAX_FILE = 20 * 1024 * 1024;
 const MAX_FILES = 40;
@@ -63,7 +66,7 @@ function leftOut(left: Left[]) {
   const of = (why: Left['why']) => left.filter(item => item.why === why);
   const one = (list: Left[]) => list.length === 1;
   return [
-    of('image').length && `${names(of('image'))} ${one(of('image')) ? 'es una imagen' : 'son imágenes'}: la IA lee texto, ${one(of('image')) ? 'ábrela' : 'ábrelas'} en Mercado Público`,
+    of('image').length && `${names(of('image'))} ${one(of('image')) ? 'es una imagen' : 'son imágenes'} en un formato que la IA no lee: ${one(of('image')) ? 'guárdala' : 'guárdalas'} como JPG o PNG y ${one(of('image')) ? 'súbela' : 'súbelas'}`,
     of('archive').length && `${names(of('archive'))} ${one(of('archive')) ? 'es otro comprimido' : 'son otros comprimidos'} (RAR o 7z): descomprímelo y sube lo que trae`,
     of('other').length && `${names(of('other'))} no ${one(of('other')) ? 'es un formato' : 'son formatos'} que podamos leer`,
     of('large').length && `${names(of('large'))} ${one(of('large')) ? 'supera' : 'superan'} 20 MB`,

@@ -6,15 +6,19 @@ import { coworkHtmlToText, coworkExcelTable } from '@/lib/server/cowork/file-bin
 import { coworkZipGuard } from '@/lib/cowork/zip-guard';
 import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
-import { DocumentFileError, opportunityLegacyAsText, opportunityStorageName } from './document-files';
+import { DocumentFileError, opportunityLegacyAsText, opportunityStorageName, opportunityTextChunks } from './document-files';
+import { SCAN_IMAGE_TYPES, isScanImage, scanPages } from '@/lib/commercial-opportunities/document-scans';
 
-export { opportunityLegacyAsText, opportunityStorageName };
+export { opportunityLegacyAsText, opportunityStorageName, opportunityTextChunks };
 
 export type ExtractedOpportunityFile = { status: 'read' | 'partial' | 'scan' | 'damaged'; total: number | null; read: number; sections: Array<{ locator: string; text: string }> };
 export const opportunityMime = (name: string) => ({ pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', html: 'text/html', htm: 'text/html' }[name.toLowerCase().split('.').pop() || '']);
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', html: 'text/html', htm: 'text/html',
+  ...SCAN_IMAGE_TYPES } as Record<string, string>)[name.toLowerCase().split('.').pop() || ''];
 export async function extractOpportunityFile(name: string, bytes: Uint8Array): Promise<ExtractedOpportunityFile> {
   const ext = name.toLowerCase().split('.').pop();
+  // An image has no text layer: the AI reads it after it is saved (workspace-scans.ts).
+  if (isScanImage(name)) return { status: 'scan', total: null, read: 0, sections: [] };
   if (ext === 'pdf') {
     const { getDocumentProxy } = await import('unpdf');
     const pdf = await getDocumentProxy(new Uint8Array(bytes));
@@ -68,14 +72,6 @@ export function webPageBody(html: string) {
     .replace(/<(script|style|noscript|template|svg|iframe|object)\b[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<(script|style|link|meta|input)\b[^>]*\/?>/gi, ' ');
 }
-export function opportunityTextChunks(sections: ExtractedOpportunityFile['sections']) {
-  let ordinal = 0;
-  return sections.flatMap(section => {
-    const parts = [];
-    for (let i = 0; i < section.text.length; i += 6000) parts.push({ id: randomUUID(), ordinal: ordinal++, locator: `${section.locator}${section.text.length > 6000 ? ` · bloque ${Math.floor(i / 6000) + 1}` : ''}`, content: section.text.slice(i, i + 6000) });
-    return parts;
-  });
-}
 export async function saveOpportunityDocument(client: SupabaseClient, scope: WorkScope, id: string, input: {
   name: string; bytes: Uint8Array; sourceKind: 'upload' | 'pasted' | 'official' | 'public_web'; sourceUrl?: string;
 }) {
@@ -85,7 +81,7 @@ export async function saveOpportunityDocument(client: SupabaseClient, scope: Wor
   if (legacy) input = { ...input, ...legacy };
   const name = input.name.replace(/[\u0000-\u001f\\/]/g, '_').slice(0, 300);
   const mime = opportunityMime(name);
-  if (!mime) throw new AuthError(`«${name.slice(0, 120)}»: usa PDF, Word, Excel o texto.`, 400);
+  if (!mime) throw new AuthError(`«${name.slice(0, 120)}»: usa PDF, Word, Excel, texto o una imagen JPG o PNG.`, 400);
   const sha = createHash('sha256').update(input.bytes).digest('hex');
   const existing = opportunityDb(await client.from('opportunity_documents').select('id').eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('sha256', sha).maybeSingle());
   if (existing) return existing.id;
@@ -111,5 +107,9 @@ export async function saveOpportunityDocument(client: SupabaseClient, scope: Wor
     await client.from('opportunity_documents').update({ extraction_status: 'partial' }).eq('id', docId).eq('organization_id', scope.organizationId);
     throw error;
   }
+  // An image, or pages without text: the AI reads them in the next tick, and a report waits for it (workspace-scans.ts).
+  const pages = scanPages({ name, bytes: input.bytes.length, status: extracted.status, pagesTotal: extracted.total, sections: extracted.sections });
+  if (pages) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, opportunity_id: id, requested_by: scope.userId,
+    kind: 'evaluate', dedupe_key: `scan:${docId}`, payload: { scan: true, documentId: docId, pages } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
   return docId;
 }

@@ -139,7 +139,7 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
     scoped('opportunity_tasks').order('due_at', { ascending: true }), scoped('opportunity_documents').order('created_at'),
     scoped('opportunity_reports').order('created_at', { ascending: false }).limit(5),
     client.from('opportunity_jobs').select('id,kind,state,error,created_at,updated_at,requested_by,payload').eq('organization_id',scope.organizationId).eq('opportunity_id',id)
-      .or(`kind.neq.chat,requested_by.eq.${scope.userId}`).order('created_at',{ascending:false}).limit(20), scoped('opportunity_contact_links'),
+      .or(`kind.neq.chat,requested_by.eq.${scope.userId}`).order('created_at',{ascending:false}).limit(40), scoped('opportunity_contact_links'),
     readOpportunityReportMarks(client, scope, id),
   ]);
   const people = opportunityDb(participants) || [];
@@ -150,5 +150,7 @@ export async function readOpportunityDetail(client: SupabaseClient, scope: WorkS
     activity: opportunityDb(activity), tasks: opportunityDb(tasks), documents: opportunityDb(documents)?.map(({ storage_path, ...doc }) => doc),
     reports: opportunityDb(reports), contacts: opportunityDb(contacts), marks,
     // A report's progress for the page's «oficina»; the payload itself never leaves the server.
-    jobs: (opportunityDb(jobs) || []).map(({ payload, ...job }) => job.kind === 'research' ? { ...job, progress: reportJobProgress(job.state, payload) } : job) };
+    jobs: (opportunityDb(jobs) || []).map(({ payload, ...job }) => job.kind === 'research' ? { ...job, progress: reportJobProgress(job.state, payload) }
+      // Which document an image or scan reading is about, so the expediente can say «La IA lo está leyendo».
+      : payload?.scan && typeof payload.documentId === 'string' ? { ...job, documentId: payload.documentId } : job) };
 }

@@ -46,7 +46,7 @@ test('warnings: missing bases first, unreadable documents explained, system note
     ['La investigación web del cliente no está conectada con una tarifa confirmada.', 'Fecha límite figura como null en la ficha.', 'Fechas de cierre contradictorias.'],
     [{ name: 'Bases.pdf', extraction_status: 'read' }, { name: 'Anexo escaneado.pdf', extraction_status: 'scan' }], true);
   assert.match(warnings[0], /^Faltan las bases y anexos de Mercado Público/);
-  assert.match(warnings[1], /«Anexo escaneado\.pdf» es una imagen escaneada/);
+  assert.match(warnings[1], /«Anexo escaneado\.pdf» es una imagen o un escaneo que la IA no alcanzó a leer/);
   assert.ok(!warnings.some(w => /tarifa confirmada|\bnull\b/.test(w)));
   assert.ok(warnings.includes('Fecha límite figura como sin dato en la ficha.'));
   assert.equal(opportunityReportWarnings([], [], false).length, 0);

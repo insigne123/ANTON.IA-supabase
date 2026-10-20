@@ -150,9 +150,14 @@ export function claudeUsage(usage: ClaudeUsage | null | undefined) {
   };
 }
 
+/** An image or a PDF the model reads with the prompt (vision): its bytes in base64. */
+export type ClaudeAttachment = { kind: 'image' | 'pdf'; mediaType: string; data: string };
+
 export type ClaudeStructuredOptions<T extends z.ZodTypeAny> = {
   model: string;
   prompt: string;
+  /** Images and PDFs read before the prompt; the last one is cached, so a corrected answer does not pay for it twice. */
+  attachments?: ClaudeAttachment[];
   systemPrompt?: string;
   schema: T;
   maxOutputTokens?: number;
@@ -162,12 +167,27 @@ export type ClaudeStructuredOptions<T extends z.ZodTypeAny> = {
   onPartial?: (content: string) => void;
 };
 
-/** The request: the JSON format, the effort and room for thinking. Thinking stays as the model has it by default
- * (adaptive on the current models); no sampling parameters, which they reject. The system prompt (a role's fixed rules) is
- * cached: the correction and the next turns read it at a tenth of the price. */
+/** The user turn: the prompt alone, or the images and PDFs first and then the prompt that says what to do with them. */
+export function claudeContent(prompt: string, attachments?: ClaudeAttachment[]) {
+  if (!attachments?.length) return prompt;
+  const last = attachments.length - 1;
+  return [
+    ...attachments.map((file, index) => {
+      const cache = index === last ? { cache_control: { type: 'ephemeral' as const } } : {};
+      return file.kind === 'pdf'
+        ? { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: file.data }, ...cache }
+        : { type: 'image' as const, source: { type: 'base64' as const, media_type: file.mediaType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp', data: file.data }, ...cache };
+    }),
+    { type: 'text' as const, text: prompt },
+  ];
+}
+
 /** A correction of an answer that did not fit the schema: what it wrote and what was wrong. */
 export type ClaudeRepair = { previous: string; problem: string };
 
+/** The request: the JSON format, the effort and room for thinking. Thinking stays as the model has it by default
+ * (adaptive on the current models); no sampling parameters, which they reject. The system prompt (a role's fixed rules) is
+ * cached: the correction and the next turns read it at a tenth of the price. */
 export function claudeRequest<T extends z.ZodTypeAny>(opts: ClaudeStructuredOptions<T>, repair?: ClaudeRepair) {
   const effort = claudeEffort(opts.reasoningEffort);
   const schema = claudeJsonSchema(opts.schema);
@@ -180,7 +200,7 @@ export function claudeRequest<T extends z.ZodTypeAny>(opts: ClaudeStructuredOpti
     model: opts.model,
     max_tokens: (opts.maxOutputTokens ?? 6000) + THINKING_ROOM[effort],
     ...(system ? { system: [{ type: 'text' as const, text: system, cache_control: { type: 'ephemeral' as const } }] } : {}),
-    messages: [{ role: 'user' as const, content: opts.prompt }, ...correction],
+    messages: [{ role: 'user' as const, content: claudeContent(opts.prompt, opts.attachments) }, ...correction],
     output_config: fits ? { effort, format: { type: 'json_schema' as const, schema } } : { effort },
   };
 }

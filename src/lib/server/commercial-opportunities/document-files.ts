@@ -1,4 +1,5 @@
 // File names and legacy formats of the expediente's documents. Pure: no database, no request context.
+import { randomUUID } from 'node:crypto';
 import { coworkZipGuard } from '@/lib/cowork/zip-guard';
 
 /** A file the person sent that cannot be read; the message says why and what to do. */
@@ -120,4 +121,14 @@ export async function opportunityLegacyAsText(name: string, bytes: Uint8Array): 
   } catch { throw new DocumentFileError(`No pudimos leer «${short}». Guárdalo como PDF o Word (.docx) y vuelve a subirlo.`); }
   if (!text.trim()) throw new DocumentFileError(`«${short}» no tiene texto legible.`);
   return { name: `${name.replace(/\.[^.]+$/, '')} (texto ${TEXT_OF[ext]}).txt`, bytes: new TextEncoder().encode(text.replace(/\r\n?/g, '\n')) };
+}
+
+/** A document's text as the fragments the report and the chat cite: up to 6,000 characters each, in reading order. */
+export function opportunityTextChunks(sections: Array<{ locator: string; text: string }>) {
+  let ordinal = 0;
+  return sections.flatMap(section => {
+    const parts = [];
+    for (let i = 0; i < section.text.length; i += 6000) parts.push({ id: randomUUID(), ordinal: ordinal++, locator: `${section.locator}${section.text.length > 6000 ? ` · bloque ${Math.floor(i / 6000) + 1}` : ''}`, content: section.text.slice(i, i + 6000) });
+    return parts;
+  });
 }

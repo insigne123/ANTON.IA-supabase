@@ -39,10 +39,11 @@ test('names written by Windows keep their accents, in Windows-1252 or code page 
 });
 
 test('LibreOffice, PowerPoint, RTF and the macro versions of Word and Excel go up; a ZIP inside is opened; what stays out is named', async () => {
-  const inner = new JSZip(); inner.file('Anexo 7.odt', 'odt'); inner.file('foto.png', 'png');
+  const inner = new JSZip(); inner.file('Anexo 7.odt', 'odt'); inner.file('foto.png', 'png'); inner.file('escaneo.tif', 'tif');
   const zip = await zipFile({ '1-Bases.pdf': '%PDF', '5-ANEXO_N°4_FORMULARIO.xlsm': 'xlsm', '6-Presentación.pptx': 'pptx', '7-Carta.rtf': '{\\rtf1}',
     '8-Anexos.zip': await inner.generateAsync({ type: 'uint8array' }), '9-PLANO_OFICINAS.jpg': 'jpg', '10-Respaldo.rar': 'rar' });
   const { files, notes } = await expandZipUploads([zip], load);
-  assert.deepEqual(files.map(f => f.name).sort(), ['1-Bases.pdf', '5-ANEXO_N°4_FORMULARIO.xlsm', '6-Presentación.pptx', '7-Carta.rtf', 'Anexo 7.odt']);
-  assert.equal(notes[0].message, 'Del ZIP tomamos 5 documentos. «foto.png» y «9-PLANO_OFICINAS.jpg» son imágenes: la IA lee texto, ábrelas en Mercado Público; «10-Respaldo.rar» es otro comprimido (RAR o 7z): descomprímelo y sube lo que trae.');
+  assert.deepEqual(files.map(f => f.name).sort(), ['1-Bases.pdf', '5-ANEXO_N°4_FORMULARIO.xlsm', '6-Presentación.pptx', '7-Carta.rtf', '9-PLANO_OFICINAS.jpg', 'Anexo 7.odt', 'foto.png'],
+    'photos and screenshots go up: the AI reads them');
+  assert.equal(notes[0].message, 'Del ZIP tomamos 7 documentos. «escaneo.tif» es una imagen en un formato que la IA no lee: guárdala como JPG o PNG y súbela; «10-Respaldo.rar» es otro comprimido (RAR o 7z): descomprímelo y sube lo que trae.');
 });

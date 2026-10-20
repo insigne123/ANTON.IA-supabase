@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path=extensions,public,pg_catalog;
-select plan(21);
+select plan(22);
 insert into auth.users(id,email) values
  ('d1000000-0000-4000-8000-000000000001','op-admin@antonia.test'),('d1000000-0000-4000-8000-000000000002','op-member@antonia.test'),('d1000000-0000-4000-8000-000000000003','op-other@antonia.test');
 insert into organizations(id,name) values('d2000000-0000-4000-8000-000000000001','Opportunity test'),('d2000000-0000-4000-8000-000000000002','Other opportunity test');
@@ -27,6 +27,7 @@ select ok(not has_table_privilege('authenticated','opportunity_documents','selec
 select ok(not has_function_privilege('authenticated','opportunity_assign(uuid,uuid,uuid,bigint,uuid,uuid[],uuid,text,timestamptz)','execute'),'no direct browser assignment');
 select ok((select bool_and(relrowsecurity) from pg_class where relname like 'opportunity_%' and relkind='r'),'all new tables have RLS');
 select ok(not (select public from storage.buckets where id='opportunity-documents'),'documents bucket private');
+select ok((select array['image/png','image/jpeg']<@allowed_mime_types from storage.buckets where id='opportunity-documents'),'documents bucket takes photos and screenshots the AI reads');
 insert into opportunity_jobs(id,organization_id,requested_by,kind,dedupe_key,state,lease_token,lease_until)
  values('d4000000-0000-4000-8000-000000000001','d2000000-0000-4000-8000-000000000001','d1000000-0000-4000-8000-000000000001','criteria','budget-test','running','d5000000-0000-4000-8000-000000000001',now()+interval '5 minutes');
 select ok((opportunity_budget_reserve('d2000000-0000-4000-8000-000000000001','d4000000-0000-4000-8000-000000000001','one','evaluation',10000,'d5000000-0000-4000-8000-000000000001')->>'fresh')::boolean,'fresh reservation before spend');

@@ -1,10 +1,12 @@
 import timers from 'node:timers/promises';
 import { z } from 'genkit';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { generateClaudeStructured, isClaudeModel, type StructuredEffort } from '@/ai/anthropic-json';
+import { generateClaudeStructured, isClaudeModel, type ClaudeAttachment, type StructuredEffort } from '@/ai/anthropic-json';
 
 type StructuredOptions<T extends z.ZodTypeAny> = {
   prompt: string;
+  /** Claude only: images and PDFs read with the prompt. A model of another provider cannot take them. */
+  attachments?: ClaudeAttachment[];
   systemPrompt?: string;
   schema: T;
   temperature?: number;
@@ -404,8 +406,9 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
   const attempts = Math.max(1, Math.min(3, opts.maxAttempts ?? 3));
   for (const model of models) {
     try {
+      if (opts.attachments?.length && !isClaudeModel(model)) throw new Error(`${model} cannot read images or PDFs here.`);
       if (isClaudeModel(model)) {
-        return await withRetries(() => generateClaudeStructured({ model, prompt: opts.prompt, systemPrompt: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        return await withRetries(() => generateClaudeStructured({ model, prompt: opts.prompt, attachments: opts.attachments, systemPrompt: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
           schema: opts.schema, maxOutputTokens: opts.maxOutputTokens, reasoningEffort: opts.reasoningEffort, timeoutMs: opts.timeoutMs,
           signal: opts.signal, onPartial: opts.onPartial }), opts.signal, attempts);
       }

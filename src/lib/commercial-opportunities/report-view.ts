@@ -20,7 +20,7 @@ export const reportDecision = (report: Pick<OpportunityReport, 'recommendation' 
 export const STATUS_LABELS: Record<string, string> = {
   supported: 'Exigido en las bases', pending: 'Por preparar', blocked: 'Bloquea la postulación', unknown: 'Por confirmar',
   documented: 'Según los documentos', calculated: 'Calculado', proposed: 'Sugerido', read: 'Leído completo', partial: 'Leído en parte',
-  scan: 'Escaneado, sin texto', damaged: 'No se pudo leer', unavailable: 'No disponible', pending_read: 'Leyendo',
+  scan: 'Escaneado, sin leer', damaged: 'No se pudo leer', unavailable: 'No disponible', pending_read: 'Leyendo',
 };
 export const IMPACT_LABELS: Record<string, string> = { high: 'Impacto alto', medium: 'Impacto medio', low: 'Impacto bajo' };
 export const statusLabel = (value: string) => STATUS_LABELS[value] ?? value;
@@ -80,7 +80,7 @@ const SUBSUMED: Array<[RegExp, RegExp]> = [[/^una fuente p[uú]blica no pudo lee
  */
 export function opportunityReportWarnings(warnings: string[], documents: Array<{ name: string; extraction_status: string }>, basesMissing: boolean) {
   const reading = documents.filter(d => d.extraction_status !== 'read').map(d =>
-    d.extraction_status === 'scan' ? `«${d.name}» es una imagen escaneada: súbelo como PDF con texto o Word para leerlo.`
+    d.extraction_status === 'scan' ? `«${d.name}» es una imagen o un escaneo que la IA no alcanzó a leer: súbelo como PDF con texto o Word, o en partes de hasta 25 páginas.`
       : d.extraction_status === 'partial' ? `«${d.name}» se leyó solo en parte.`
         : `«${d.name}» no se pudo leer: vuelve a subirlo como PDF o Word.`);
   const bases = basesMissing ? ['Faltan las bases y anexos de Mercado Público: descárgalos desde «Ver anexos» y súbelos en Documentos para un informe completo.'] : [];

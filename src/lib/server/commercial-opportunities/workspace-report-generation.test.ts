@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 
 const entry = await build({
-  stdin: { contents: `export {opportunityGenerateReport} from './src/lib/server/commercial-opportunities/workspace-ai';`, loader: 'ts', resolveDir: process.cwd() },
+  stdin: { contents: `export {opportunityGenerate, opportunityGenerateReport} from './src/lib/server/commercial-opportunities/workspace-ai';`, loader: 'ts', resolveDir: process.cwd() },
   bundle: true, write: false, format: 'cjs', platform: 'node', packages: 'external',
   plugins: [{ name: 'isolated-report-services', setup(builder) {
     builder.onResolve({ filter: /auth-utils|workspace-store|ai\/openai-json/ }, args => ({ path: args.path, namespace: 'fixture' }));
@@ -17,7 +17,7 @@ const entry = await build({
 });
 const compiled: { exports: any } = { exports: {} };
 new Function('require', 'module', 'exports', entry.outputFiles[0].text)(createRequire(import.meta.url), compiled, compiled.exports);
-const { opportunityGenerateReport } = compiled.exports;
+const { opportunityGenerate, opportunityGenerateReport } = compiled.exports;
 const previous = { key: process.env.ANTHROPIC_API_KEY, model: process.env.OPPORTUNITIES_REPORT_MODEL };
 before(() => { process.env.ANTHROPIC_API_KEY = 'synthetic-not-a-credential'; process.env.OPPORTUNITIES_REPORT_MODEL = 'claude-sonnet-5-5'; });
 after(() => {
@@ -107,5 +107,35 @@ test('lease or budget refusal stops before contacting the provider', async () =>
     const f = fixture(); f.state[field] = false;
     await assert.rejects(opportunityGenerateReport(f.client, f.job, f.input, f.generate));
     assert.equal(f.requests.length, 0); assert.equal(f.settlements.length, 0);
+  }
+});
+
+test('an image or a scanned PDF goes with the call, and its pages are reserved at the cache-write price', async () => {
+  const f = fixture();
+  const { z } = await import('zod');
+  const schema = z.object({ pages: z.array(z.object({ page: z.number(), text: z.string() })) });
+  const generate = async (options: any) => { f.requests.push(options);
+    return { data: { pages: [{ page: 1, text: '[Captura de la tienda]' }] }, telemetry: { modelName: 'claude-haiku-5-5', durationMs: 1,
+      usage: { prompt_tokens: 2000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 0 } } } }; };
+  const attachments = [{ kind: 'pdf', mediaType: 'application/pdf', data: 'JVBERi0=' }];
+  const plain = fixture();
+  await opportunityGenerate(plain.client, plain.job, { step: 'scan:plain', category: 'research', role: 'extract', schema, prompt: 'Transcribe', output: 3000 }, generate);
+  await opportunityGenerate(f.client, f.job, { step: 'scan:doc:1', category: 'research', role: 'extract', schema, prompt: 'Transcribe', output: 3000,
+    attachments, attachmentTokens: 75_000 }, generate);
+  assert.deepEqual(f.requests.at(-1).attachments, attachments, 'the file reaches the model');
+  assert.equal('attachments' in f.requests[0] ? f.requests[0].attachments : undefined, undefined, 'a call without files sends none');
+  // Haiku: 0.2 USD per million tokens written to the cache.
+  assert.equal(f.reservations[0].p_micro - plain.reservations[0].p_micro, 75_000 * 0.2);
+  await assert.rejects(opportunityGenerate(fixture().client, f.job, { step: 'scan:big', category: 'research', role: 'extract', schema, prompt: 'Transcribe',
+    attachments, attachmentTokens: 100_000 }, generate), /dividirse/, 'Haiku stays under its 100k input threshold');
+  const previous = { model: process.env.OPPORTUNITIES_EXTRACT_MODEL, key: process.env.OPENAI_API_KEY };
+  process.env.OPPORTUNITIES_EXTRACT_MODEL = 'gpt-6-luna'; process.env.OPENAI_API_KEY = 'synthetic-not-a-credential';
+  try {
+    await assert.rejects(opportunityGenerate(fixture().client, f.job, { step: 'scan:luna', category: 'research', role: 'extract', schema, prompt: 'Transcribe',
+      attachments, attachmentTokens: 3000 }, generate), /no lee imágenes/);
+  } finally {
+    for (const [name, value] of Object.entries({ OPPORTUNITIES_EXTRACT_MODEL: previous.model, OPENAI_API_KEY: previous.key })) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
   }
 });
