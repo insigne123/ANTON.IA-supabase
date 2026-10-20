@@ -99,3 +99,20 @@ test('a team where nobody wrote reads as one sentence, on screen and in the emai
   assert.doesNotMatch(email.text, /Persona \d+: 0 enviados/);
   assert.doesNotMatch(email.text, /Revisa con/, 'no one to single out when nobody wrote');
 });
+
+test('the goal rides in «Tu semana» and next to each person, and counts as activity', () => {
+  const goal = (contacted: number, found: number) => ({ targets: { contacted: 10, found: 15 }, counts: { contacted, found }, source: 'team' as const });
+  const team: TeamSection = { members: [member('Ana', { sent: 4, goal: goal(4, 6) }), member('Beto', { goal: goal(0, 9) }), member('Caro', { goal: goal(0, 0) })],
+    totals: { sent: { now: 4, before: 0 }, replies: { now: 0, before: 0 }, meetings: 0 } };
+  assert.deepEqual(teamActivity(team).active.map(item => item.name), ['Ana', 'Beto'], 'finding contacts is work too');
+  const quiet: TeamSection = { ...team, members: [member('Beto', { goal: goal(0, 9) })], totals: { sent: { now: 0, before: 0 }, replies: { now: 0, before: 0 }, meetings: 0 } };
+  assert.equal(teamHeadline(quiet, 'previous'), 'Nadie del equipo envió correos la semana pasada, pero sumaron 9 contactos nuevos.');
+  const email = reportEmail({ week: reportWeek(new Date('2026-10-20T12:00:00.000Z'), 'previous'), roles: ['personal', 'team'], name: 'Gonzalo',
+    personal: personal(), team, opportunities: null, goal: goal(12, 15) }, 'https://app.example');
+  assert.match(email.text, /TU SEMANA\n- Cumpliste tu meta de la semana pasada: 12 de 10 personas contactadas · 15 de 15 contactos nuevos con correo\./);
+  assert.match(email.text, /Ana: 4 enviados, 0 respuestas · meta 4 de 10/);
+  // A team without goals, or a report stored before them, reads as before.
+  const off = reportEmail({ week: reportWeek(new Date('2026-10-20T12:00:00.000Z'), 'previous'), roles: ['personal'], name: 'Gonzalo',
+    personal: personal(), team: null, opportunities: null, goal: { ...goal(0, 0), targets: { contacted: 0, found: 0 } } }, 'https://app.example');
+  assert.doesNotMatch(off.text, /meta/i);
+});

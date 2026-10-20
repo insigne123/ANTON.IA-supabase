@@ -1,0 +1,92 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { alertDay, alertEmail, closingText, composeAlert, dayWord, type AlertFacts } from './daily-alerts';
+import { DEFAULT_GOALS } from './weekly-goals';
+
+// Chile is UTC−3 in October: 12:00Z is 09:00 there.
+const TUESDAY = new Date('2026-10-20T12:00:00.000Z');
+const WEDNESDAY = new Date('2026-10-21T12:00:00.000Z');
+const facts = (extra: Partial<AlertFacts> = {}): AlertFacts => ({
+  name: 'Ana', newReplies: [], olderPending: 0, commitments: [], newReady: { count: 0, yesterday: false }, ready: 0, research: [], closing: [],
+  goal: { targets: DEFAULT_GOALS, counts: { contacted: 0, found: 0 }, source: 'default' }, ...extra,
+});
+
+test('alerts go from Tuesday to Friday, in Chile', () => {
+  assert.equal(alertDay(new Date('2026-10-19T12:00:00.000Z')), false); // Monday: the weekly report
+  assert.equal(alertDay(TUESDAY), true);
+  assert.equal(alertDay(new Date('2026-10-23T12:00:00.000Z')), true);
+  assert.equal(alertDay(new Date('2026-10-24T12:00:00.000Z')), false);
+  // Tuesday 00:30 in Chile is still Monday 03:30Z: the day is Chile's.
+  assert.equal(alertDay(new Date('2026-10-21T02:30:00.000Z')), true);
+});
+
+test('days are said the way a person says them', () => {
+  assert.equal(dayWord('2026-10-20T20:00:00.000Z', TUESDAY), 'hoy');
+  assert.equal(dayWord('2026-10-21T20:00:00.000Z', TUESDAY), 'mañana');
+  assert.equal(dayWord('2026-10-23T20:00:00.000Z', TUESDAY), 'el viernes');
+});
+
+test('opportunities closing are named by kind and by why they matter', () => {
+  const tender = (id: string, at: string, extra = {}) => ({ id, kind: 'tender', title: `Licitación ${id}`, deadlineAt: at, recommended: true, mine: false, ...extra });
+  assert.equal(closingText([tender('a', '2026-10-23T18:00:00Z'), tender('b', '2026-10-23T19:00:00Z')], TUESDAY), '2 licitaciones que te sirven cierran el viernes');
+  assert.equal(closingText([tender('a', '2026-10-21T18:00:00Z', { mine: true })], TUESDAY), 'Una licitación a tu cargo cierra mañana: Licitación a');
+  assert.equal(closingText([tender('a', '2026-10-21T18:00:00Z'), { ...tender('b', '2026-10-22T18:00:00Z'), kind: 'compra_agil', recommended: false }], TUESDAY),
+    '2 oportunidades cierran en los próximos días');
+});
+
+test('nothing concrete to do is no alert', () => {
+  assert.equal(composeAlert(facts(), TUESDAY), null);
+  // A goal that is behind is not enough on Tuesday…
+  assert.equal(composeAlert(facts({ olderPending: 3 }), TUESDAY), null);
+  // …and old replies alone do not start one either.
+  assert.equal(composeAlert(facts({ olderPending: 3, goal: null }), WEDNESDAY), null);
+});
+
+test('a reply names the person in the subject and links to the conversation', () => {
+  const alert = composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Juan Pérez', company: 'Retail Sur' }], olderPending: 2 }), TUESDAY)!;
+  assert.equal(alert.subject, 'Te respondió Juan Pérez');
+  assert.deepEqual(alert.lines.map(line => line.kind), ['reply', 'pending', 'goal']);
+  assert.deepEqual(alert.lines[0], { kind: 'reply', text: 'Juan Pérez (Retail Sur) te respondió', href: '/contacted?c=c-1' });
+  assert.equal(alert.lines[1].text, 'Te esperan 2 respuestas de días anteriores');
+  assert.equal(alert.lines[2].text, 'Meta de la semana: 0 de 10 personas contactadas · 0 de 15 contactos nuevos con correo. Busca contactos nuevos');
+  const many = composeAlert(facts({ newReplies: ['a', 'b', 'c', 'd', 'e'].map(id => ({ id, name: `Persona ${id}`, company: null })) }), TUESDAY)!;
+  assert.equal(many.subject, 'Te respondieron Persona a y 4 personas más');
+  assert.equal(many.lines.filter(line => line.kind === 'reply').length, 4);
+  assert.equal(many.lines[3].text, 'Y 2 respuestas más');
+});
+
+test('commitments, research and new contacts lead in that order', () => {
+  const alert = composeAlert(facts({
+    commitments: [{ id: 'k1', name: 'Rosa Díaz', company: 'Logística Norte', title: 'Enviar propuesta', dueAt: '2026-10-19T13:00:00Z' }],
+    research: [{ leadId: 'lead-1', name: 'Pedro Rojas' }],
+    newReady: { count: 12, yesterday: true }, ready: 12,
+  }), TUESDAY)!;
+  assert.equal(alert.subject, 'Vencido: Enviar propuesta con Rosa Díaz (Logística Norte)');
+  assert.deepEqual(alert.lines.map(line => line.kind), ['commitment', 'research', 'ready', 'goal']);
+  assert.deepEqual(alert.lines[1], { kind: 'research', text: 'Lista la investigación de Pedro Rojas', href: '/saved/leads/enriched?investigar=lead-1' });
+  assert.equal(alert.lines[2].text, 'Tus 12 contactos de ayer ya tienen correo: escríbeles desde «Por escribir»');
+  assert.equal(alert.lines[3].href, '/saved/leads/enriched');
+  const ready = composeAlert(facts({ newReady: { count: 1, yesterday: false } }), TUESDAY)!;
+  assert.equal(ready.subject, 'Tu contacto nuevo ya tiene correo');
+});
+
+test('a goal that is behind is reason enough on Wednesdays and Fridays, in one workspace only', () => {
+  const alert = composeAlert(facts(), WEDNESDAY)!;
+  assert.equal(alert.subject, 'Vas 0 de 10 en tu meta de la semana');
+  assert.deepEqual(alert.lines.map(line => line.kind), ['goal']);
+  assert.equal(composeAlert(facts(), WEDNESDAY, { goalReminders: false }), null);
+  assert.equal(composeAlert(facts({ goal: { targets: DEFAULT_GOALS, counts: { contacted: 4, found: 6 }, source: 'team' } }), WEDNESDAY), null);
+  assert.equal(composeAlert(facts({ goal: { targets: { contacted: 0, found: 0 }, counts: { contacted: 0, found: 0 }, source: 'team' } }), WEDNESDAY), null);
+});
+
+test('the email lists each line as a link and escapes what people wrote', () => {
+  const alert = composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana <b>', company: null }] }), TUESDAY)!;
+  const email = alertEmail(alert, 'Ana', 'https://app.antonia.ai/');
+  assert.equal(email.subject, 'Te respondió Ana <b>');
+  assert.match(email.text, /^Hola, Ana\. Esto te espera hoy en ANTON\.IA:/);
+  assert.match(email.text, /- Ana <b> te respondió \(https:\/\/app\.antonia\.ai\/contacted\?c=c-1\)/);
+  assert.match(email.html, /Ana &lt;b&gt; te respondió/);
+  assert.doesNotMatch(email.html, /Ana <b>/);
+  assert.match(email.html, /href="https:\/\/app\.antonia\.ai\/dashboard\?vista=semana"/);
+});

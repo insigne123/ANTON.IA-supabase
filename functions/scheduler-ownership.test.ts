@@ -22,6 +22,7 @@ const firebaseBridgeRoutes = [
     'commercial-opportunities',
     'opportunity-workspace',
     'weekly-reports',
+    'daily-alerts',
 ].map((route) => ({
     route,
     source: readFileSync(`src/app/api/cron/${route}/route.ts`, 'utf8'),
@@ -61,6 +62,7 @@ test('Firebase owns all production scheduler bridges and Vercel schedules nothin
         ['commercialOpportunitiesTick', '15 * * * *', '/api/cron/commercial-opportunities'],
         ['opportunityWorkspaceTick', 'every 1 minutes', '/api/cron/opportunity-workspace'],
         ['weeklyReportsTick', '0,30 8-10 * * 1', '/api/cron/weekly-reports'],
+        ['dailyAlertsTick', '0,30 8-9 * * 2-5', '/api/cron/daily-alerts'],
     ];
     for (const [name, cadence, path] of schedules) {
         const start = functionsSource.indexOf(`export const ${name} =`);
