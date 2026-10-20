@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Award, Inbox, Loader2, Send, Sparkles, Star, UserPlus, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { InitialsAvatar } from '@/components/initials-avatar';
@@ -70,11 +70,10 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   const paged = PAGED.includes(stage.id) ? stage.id as PagedStage : null;
   // Another page while there are more and the server gives them (PIPELINE_MAX); beyond that, the search narrows them.
   const more = paged && count > shown.length ? ((limits?.[paged] ?? 0) < 600 ? Math.min(60, count - shown.length) : 0) : 0;
-  const select = (id: string) => {
-    setSelected(id);
-    // What the AI left out loads only when someone opens it.
-    if (id === 'excluded' && !closed.find(s => s.id === 'excluded')?.loaded) onMore?.('excluded');
-  };
+  // What the AI left out loads only when someone opens it, and again after a new search or source left none loaded.
+  const excludedWaiting = selected === 'excluded' && count > 0 && !shown.length && !limits?.excluded && loadingMore !== 'excluded';
+  useEffect(() => { if (excludedWaiting) onMore?.('excluded'); }, [excludedWaiting, onMore]);
+  const select = (id: string) => setSelected(id);
   const advice = new Map((suggestions || []).map(s => [s.id, s]));
   // What the AI reviews (runPipelineReview): the opportunities a team already works. Without any, there is nothing to ask.
   const inProgress = work.filter(w => ['assigned', 'working', 'blocked', 'submitted'].includes(w.state)).length;
@@ -109,7 +108,7 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
           <h3 className="text-base font-semibold">{stage.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{count}</span></h3>
           <p className="text-xs text-muted-foreground">{stage.hint}{count > shown.length && shown.length ? ` ${shown.length === 1 ? 'Se muestra 1' : `Se muestran ${shown.length}`} de ${count}, las de más puntaje.` : ''}</p>
         </div>
-        {!shown.length ? (loadingMore === stage.id ? <p role="status" className="flex items-center justify-center gap-2 rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+        {!shown.length ? (loadingMore === stage.id || excludedWaiting ? <p role="status" className="flex items-center justify-center gap-2 rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Cargando…</p>
           : <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
             <p>{filtered ? 'Ninguna oportunidad de esta etapa coincide con la búsqueda o la fuente elegida.' : 'No hay oportunidades en esta etapa.'}</p>

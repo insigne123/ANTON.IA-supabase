@@ -61,6 +61,13 @@ test('what is out of the road is a click away: lost, archived and the ones the A
   assert.doesNotMatch(text(html), /Perdidas|Archivadas/, 'only the ones with something');
 });
 
+test('the ones left out that are counted but not loaded yet say they are loading, not that none matches', () => {
+  // Rendered on the server the board cannot pick a stage: the selection starts on the first busy one, so the excluded stage
+  // is checked through its button and the empty «Por revisar» keeps its own message.
+  const html = render({ items: [], work: [], totals: { found: 0, recommended: 0, excluded: 12 }, filtered: true });
+  assert.match(text(html), /No recomendadas 12/);
+});
+
 test('with a search or a source on, an empty stage says the filters left it empty and offers to clear them', () => {
   const html = render({ items: [], work: [], totals: { found: 0, recommended: 0 }, filtered: true, onClearFilters: () => {} });
   assert.match(text(html), /Ninguna oportunidad de esta etapa coincide con la búsqueda o la fuente elegida\. Quitar filtros/);

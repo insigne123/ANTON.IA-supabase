@@ -171,7 +171,7 @@ export function OpportunityWorkWorkspace() {
     catch (e) { if (request === pipelineRequest.current) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar el embudo.'); setPipelineFor(key); } }
     finally { if (request === pipelineRequest.current) setLoadingMore(null); }
   }, [source, search, limits]);
-  const loadMore = (stage: PagedStage) => { setLoadingMore(stage); setPaging({ key: filterKey, limits: { ...limits, [stage]: Math.min(600, limits[stage] + PAGE) } }); };
+  const loadMore = useCallback((stage: PagedStage) => { setLoadingMore(stage); setPaging({ key: filterKey, limits: { ...limits, [stage]: Math.min(600, limits[stage] + PAGE) } }); }, [filterKey, limits]);
   const clearFilters = () => { setQuery(''); setSearch(''); setSource('all'); };
   useEffect(() => { if (admin && view === 'pipeline' && !selected) void loadPipeline(); }, [admin, view, selected, loadPipeline]);
   // Cards still waiting for their line of summary: the pipeline is read again every 20 seconds, for five minutes at most.
