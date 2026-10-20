@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { moneyLabel, rutLabel, tenderUrl } from '@/lib/public-procurement/market';
 import type { ExpiringContract } from '@/lib/public-procurement/contracts';
+import { friendlyJobError } from '@/lib/commercial-opportunities/report-view';
 
 type ContractsView = {
   available: boolean; coverage: { available: boolean; to: string | null }; updatedAt: string | null; read: number;
@@ -96,7 +97,7 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
     {data?.available && reading ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Revisando los contratos que vencen y eligiendo los que calzan con tu oferta. Tarda unos minutos.</p> : null}
 
     {failed && !reading ? <p role="alert" className="flex gap-2 rounded-2xl bg-destructive/5 p-4 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-      {data?.contracts.length ? `La última revisión no terminó: ${failed.error || 'intenta de nuevo.'} Sigues viendo la anterior${data.updatedAt ? `, del ${readDate(data.updatedAt)}` : ''}.` : failed.error || 'La revisión no terminó. Intenta de nuevo.'}</p> : null}
+      {data?.contracts.length ? `La última revisión no terminó. ${friendlyJobError(failed.error)} Sigues viendo la anterior${data.updatedAt ? `, del ${readDate(data.updatedAt)}` : ''}.` : friendlyJobError(failed.error)}</p> : null}
 
     {data?.available && !data.contracts.length && !reading ? <div className="space-y-3 rounded-3xl border p-6">
       {data.updatedAt

@@ -165,6 +165,9 @@ export function contractsScreenPrompt(offer: { offer: string; services: string[]
   ].filter(Boolean).join('\n');
 }
 
+// Where the offer is the market's daily bread (guards, cleaning), almost every contract of a batch fits: 120 per call gave
+// more than the 100 matches the answer allows, or ran out of room, and the month's reading failed. 40 always fit.
+export const CONTRACTS_SCREEN_BATCH = 40;
 export const contractsScreenSchema = z.object({
   matches: z.array(z.object({ id: z.string().max(40), fit: z.enum(['alta', 'media']), reason: z.string().max(300) })).max(100),
 });

@@ -89,6 +89,17 @@ const expiring = (id: number, values: Record<string, unknown> = {}) => ({ tender
   region: 'Región Metropolitana', category: 'Servicios de limpieza', awarded_on: '2024-12-01', duration_months: '24.0', ends_on: '2026-12-01', amount: 90_000_000,
   currency: 'CLP', winner_rut: '76020266-5', winner_name: 'Aseo Norte SpA', winners: 1, ...values });
 
+test('«Contratos por vencer» asks the model 40 contracts at a time, so a market where almost all fit stays within the answer', async () => {
+  const { runMarketContracts } = await load();
+  const { client } = memory({}, { public_procurement_expiring: () => Array.from({ length: 100 }, (_, i) => expiring(i + 1)) });
+  (globalThis as any).__calls = [];
+  // Every contract fits, as the guards and cleaning of a big workspace do.
+  (globalThis as any).__answer = (input: any) => ({ matches: input.prompt.split('\n').filter((line: string) => /^\d+ \| /.test(line)).map((line: string) => ({ id: line.split(' | ')[0], fit: 'alta', reason: 'Aseo' })) });
+  const result = await runMarketContracts(client, { id: 'job-1', organization_id: 'org-1', requested_by: 'u-1', payload: { revision: 3 } }, context, Date.now());
+  assert.deepEqual((globalThis as any).__calls.map((call: any) => call.prompt.split('\n').filter((line: string) => /^\d+ \| /.test(line)).length), [40, 40, 20]);
+  assert.equal(result.contracts.length, 100);
+});
+
 test('«Contratos por vencer» keeps only what the model chose from the batch, with its reason', async () => {
   const { runMarketContracts } = await load();
   const seen: any[] = [];
