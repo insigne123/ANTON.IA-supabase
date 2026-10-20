@@ -1,4 +1,3 @@
-const NAV = { role: 'navigation', name: 'Navegación principal' };
 const DAY = 86_400_000;
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sept', 'oct', 'nov', 'dic'];
 
@@ -86,11 +85,11 @@ export default {
   ],
   scenes: [
     {
-      title: 'Abre el Informe semanal', text: 'Está en el menú, justo después de «Hoy».',
-      say: 'Abre el Informe semanal desde el menú.',
+      title: 'Abre «Tu semana»', text: 'Está en «Hoy», arriba a la derecha: tu informe semanal.',
+      say: 'En Hoy, abre Tu semana.',
       before: async () => { emailOn = false; },
-      target: { role: 'link', name: 'Informe semanal', within: NAV },
-      waitFor: { role: 'heading', name: 'Informe semanal' },
+      target: { role: 'button', name: 'Tu semana', within: { role: 'group', name: 'Vista de Hoy' } }, zoom: 1.6, arrow: true,
+      waitFor: { role: 'heading', name: 'Tu semana' },
     },
     {
       title: 'Tu semana en una frase', text: 'A cuántas personas escribiste, cuántas respondieron y quién pidió reunión.',

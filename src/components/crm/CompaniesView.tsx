@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Building2, Check, Loader2, Search, Sparkles } from 'lucide-react';
+import { Building2, Check, ChevronRight, ExternalLink, Loader2, Search, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { InitialsAvatar } from '@/components/initials-avatar';
+import { CompanyLogo } from './CompanyLogo';
 import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { buildCompanies, companyKey, coverageGrid, industryLabel, LEVELS, levelLabel, areaLabel, sizeBands, type Company, type CommitteeSlot } from '@/lib/companies/coverage';
 import { similarSearchError } from '@/lib/companies/similar';
@@ -19,6 +20,8 @@ import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
 type Similar = { id: string; name: string; industry?: string | null; size?: number | null; city?: string | null; country?: string | null; domain?: string | null; why?: string };
 type SimilarState = { status: 'loading' } | { status: 'ready'; items: Similar[]; note?: string; found?: Similar[] } | { status: 'error'; text: string };
+/** What the company does, from its own website (api/crm/companies/about): read once per company opened. */
+type About = { status: 'loading' } | { status: 'ready'; text: string | null; website: string };
 
 const stageLabel = (stage: string) => PIPELINE_STAGES.find(item => item.id === stage)?.label ?? 'Nuevos';
 const SLOT_HINT: Record<CommitteeSlot['role'], string> = {
@@ -26,7 +29,12 @@ const SLOT_HINT: Record<CommitteeSlot['role'], string> = {
   usa: 'Nadie que lo use en el día a día',
   paga: 'Nadie de finanzas o compras',
 };
-const sizeText = (size: number | null | undefined) => size ? `${size.toLocaleString('es-CL')} personas` : null;
+const sizeText = (size: number | null | undefined) => size ? `${size.toLocaleString('es-CL')} empleados` : null;
+const peopleText = (count: number) => `${count} ${count === 1 ? 'contacto' : 'contactos'}`;
+/** One section of the company's panel: its title and, under it, what it shows in a sentence. */
+function SectionTitle({ id, title, hint }: { id: string; title: string; hint: string }) {
+  return <div className="space-y-0.5"><h3 id={id} className="text-sm font-semibold">{title}</h3><p className="text-xs leading-5 text-muted-foreground">{hint}</p></div>;
+}
 
 function targetRolesOf(signatures: any): string[] {
   const roles = signatures?.profile_extended?.targetRoles;
@@ -53,6 +61,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
   const [selected, setSelected] = useState<string | null>(null);
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [similar, setSimilar] = useState<Record<string, SimilarState>>({});
+  const [about, setAbout] = useState<Record<string, About>>({});
 
   useEffect(() => {
     let alive = true;
@@ -67,6 +76,16 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
   }, [companies, query]);
   const company = companies.find(item => item.key === selected) ?? null;
   const missing = companies.filter(item => item.open && item.covered < item.committee.length).length;
+  // Opening a company reads what it does from its website, once per company and session (the browser keeps it a day).
+  const aboutKey = company?.domain || null;
+  useEffect(() => {
+    if (!aboutKey || about[aboutKey]) return;
+    setAbout(current => ({ ...current, [aboutKey]: { status: 'loading' } }));
+    authenticatedApiFetch(`/api/crm/companies/about?${new URLSearchParams({ domain: aboutKey, name: company?.name || '' })}`)
+      .then(async response => { const body = await response.json().catch(() => null); return response.ok ? body : null; }).catch(() => null)
+      .then(body => setAbout(current => ({ ...current, [aboutKey]: { status: 'ready', text: typeof body?.about === 'string' ? body.about : null, website: typeof body?.website === 'string' ? body.website : `https://${aboutKey}` } })));
+  }, [aboutKey, about, company?.name]);
+  const companyAbout = aboutKey ? about[aboutKey] : undefined;
 
   const findSimilar = async (base: Company) => {
     setSimilar(current => ({ ...current, [base.key]: { status: 'loading' } }));
@@ -122,7 +141,7 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
       <div className="min-w-0">
         <h2 className="text-base font-semibold">Empresas</h2>
         <p className="text-sm text-muted-foreground">
-          A quién conoces en cada empresa. Una venta suele necesitar a quien decide, a quien lo usa y a quien paga.
+          A quién conoces en cada empresa. Una venta suele necesitar a quien <span className="font-medium text-foreground">decide</span>, a quien lo <span className="font-medium text-foreground">usa</span> y a quien <span className="font-medium text-foreground">paga</span>; con ✓ ya conoces a alguien en ese rol.
           {missing ? ` En ${missing} ${missing === 1 ? 'negocio abierto falta' : 'negocios abiertos falta'} alguien.` : ''}
         </p>
       </div>
@@ -135,16 +154,17 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
     {visible.length ? <ul className="divide-y rounded-2xl border">
       {visible.map(item => <li key={item.key}>
         <button type="button" onClick={() => setSelected(item.key)}
-          className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-          <InitialsAvatar name={item.name} size="md" />
+          className="flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          <CompanyLogo name={item.name} domain={item.domain} />
           <span className="min-w-0 flex-1 space-y-1.5">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-medium">{item.name}</span>
               <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{stageLabel(item.stage)}</span>
             </span>
-            <span className="block text-xs text-muted-foreground">{[industryLabel(item.industry), `${item.people.length} ${item.people.length === 1 ? 'persona' : 'personas'}`].filter(Boolean).join(' · ')}</span>
+            <span className="block truncate text-xs text-muted-foreground">{[industryLabel(item.industry), peopleText(item.people.length), sizeText(item.size), item.country, item.domain].filter(Boolean).join(' · ')}</span>
             <CommitteeMarks company={item} />
           </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         </button>
       </li>)}
     </ul> : <p className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">Ninguna empresa coincide con «{query}».</p>}
@@ -152,13 +172,27 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
     <Sheet open={Boolean(company)} onOpenChange={open => { if (!open) setSelected(null); }}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
         {company ? <>
-          <SheetHeader>
-            <SheetTitle>{company.name}</SheetTitle>
-            <SheetDescription>{[industryLabel(company.industry), sizeText(company.size), company.country, stageLabel(company.stage)].filter(Boolean).join(' · ')}</SheetDescription>
+          <SheetHeader className="space-y-3 text-left">
+            <div className="flex items-center gap-3.5 pr-6">
+              <CompanyLogo name={company.name} domain={company.domain} size="lg" />
+              <div className="min-w-0">
+                <SheetTitle className="break-words">{company.name}</SheetTitle>
+                <SheetDescription>{[industryLabel(company.industry), sizeText(company.size), company.country].filter(Boolean).join(' · ') || peopleText(company.people.length)}</SheetDescription>
+              </div>
+            </div>
+            {companyAbout?.status === 'loading' ? <span className="block space-y-2" aria-hidden="true"><span className="block h-3 w-11/12 rounded-full bg-muted motion-safe:animate-pulse" /><span className="block h-3 w-2/3 rounded-full bg-muted motion-safe:animate-pulse" /></span>
+              : companyAbout?.status === 'ready' && companyAbout.text ? <p className="text-sm leading-6">{companyAbout.text}</p> : null}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="rounded-full bg-muted px-2 py-0.5">{stageLabel(company.stage)}</span>
+              <span>{peopleText(company.people.length)}</span>
+              {company.domain ? <a href={companyAbout?.status === 'ready' ? companyAbout.website : `https://${company.domain}`} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {company.domain}<ExternalLink className="h-3 w-3" aria-hidden="true" /><span className="sr-only">(abre su sitio en otra pestaña)</span></a> : null}
+            </div>
           </SheetHeader>
           <div className="mt-6 space-y-7">
-            <section aria-labelledby="company-committee" className="space-y-2">
-              <h3 id="company-committee" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Para esta venta</h3>
+            <section aria-labelledby="company-committee" className="space-y-3">
+              <SectionTitle id="company-committee" title="Para esta venta" hint="Las tres personas que suele necesitar una venta: quien decide la compra, quien usará lo que vendes y quien aprueba el pago. Si falta alguien, «Buscar» abre Buscar prospectos con los cargos que conviene encontrar aquí." />
               <ul className="space-y-2">
                 {company.committee.map(slot => <li key={slot.role} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3">
                   <span className="min-w-0">
@@ -172,8 +206,8 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
               {main ? null : <p className="text-xs leading-5 text-muted-foreground">Completa «Cargos que buscas» en «Perfil» para saber quién usa lo que vendes.</p>}
             </section>
 
-            <section aria-labelledby="company-coverage" className="space-y-2">
-              <h3 id="company-coverage" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Cobertura por área y nivel</h3>
+            <section aria-labelledby="company-coverage" className="space-y-3">
+              <SectionTitle id="company-coverage" title="Dónde conoces gente" hint="Cada fila es un área de la empresa y cada columna, el nivel del cargo. Un nombre es alguien que ya tienes; «—», un lugar donde aún no conoces a nadie." />
               <div className="overflow-x-auto rounded-xl border">
                 <table className="w-full table-fixed text-xs">
                   <thead><tr className="border-b bg-muted/40 text-muted-foreground">
@@ -195,8 +229,8 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
               </div>
             </section>
 
-            <section aria-labelledby="company-people" className="space-y-2">
-              <h3 id="company-people" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Personas</h3>
+            <section aria-labelledby="company-people" className="space-y-3">
+              <SectionTitle id="company-people" title="Personas" hint="Tus contactos en esta empresa, del cargo más alto al más bajo, con la etapa de cada uno. Toca uno para abrir su ficha." />
               <ul className="space-y-1.5">
                 {company.people.map(person => <li key={person.key}>
                   <button type="button" onClick={() => { setSelected(null); onOpenPerson(person.gid); }}
@@ -232,9 +266,12 @@ export function CompaniesView({ rows, onOpenPerson }: { rows: UnifiedRow[]; onOp
                 <ul className="space-y-2">
                   {state.items.map(item => <li key={item.id} className="rounded-xl border p-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <CompanyLogo name={item.name} domain={item.domain} />
+                        <div className="min-w-0">
                         <p className="text-sm font-medium">{item.name}</p>
                         <p className="text-xs text-muted-foreground">{[industryLabel(item.industry), sizeText(item.size), item.city].filter(Boolean).join(' · ')}</p>
+                        </div>
                       </div>
                       <Button asChild size="sm" variant="ghost"><Link href={companySearchHref({ company: item.name, domain: item.domain, titles: startTitles(company) })}>Ver personas</Link></Button>
                     </div>

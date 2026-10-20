@@ -49,6 +49,18 @@ El Pipeline ordenaba personas y no empresas. Una venta B2B rara vez la decide un
   - **No guarda nada.**
 - **Corrección de paso:** las conversaciones guardan el cargo en `role` y el Pipeline lo leía como `title`, así que esas filas quedaban sin cargo. Ahora lo leen.
 
+## Logos, datos y qué hace cada empresa (20 de octubre de 2026)
+
+- **Logo:** sale del dominio de la empresa, del ícono que publica su propio sitio, servido por el servicio de favicons de Google (`CompanyLogo.tsx`). Va sobre un fondo blanco para verse igual en modo claro y oscuro. Sin dominio, o si el sitio solo tiene el globo por defecto (16 px), muestra las iniciales. Solo sale del navegador el dominio público de la empresa, nunca el nombre de una persona.
+- **Dominio:** el que trajo el enriquecimiento. Si no hay, el que más usan sus contactos en el correo (`ana@retailsur.cl` → `retailsur.cl`), nunca uno gratuito como Gmail (`companyDomainOf`).
+- **Fila de la lista:** rubro, contactos, empleados, país y dominio en una línea. Un rubro escrito como «—» ya no se muestra.
+- **Qué hace:** al abrir una empresa, `GET /api/crm/companies/about` lee su portada con el lector de la investigación (solo dominios públicos, DNS revisado contra rangos privados, redirecciones dentro de la empresa, 10 s como máximo). Haiku escribe una o dos frases de qué hace y a quién le vende. Si la IA falla, usa la descripción del propio sitio. No guarda nada. El navegador recuerda la respuesta por un día, y cada persona puede leer hasta 60 sitios por hora.
+- **Cada sección del panel dice qué muestra:**
+  - **«Para esta venta»:** las tres personas que suele necesitar una venta.
+  - **«Dónde conoces gente»** (antes «Cobertura por área y nivel»): filas de áreas y columnas de niveles; «—» marca donde aún no conoces a nadie.
+  - **«Personas»:** tus contactos en la empresa, con su etapa.
+- **Arriba del panel:** la etapa, el número de contactos y un enlace al sitio.
+
 ## Límites
 
 - El área y el nivel se deducen del cargo. Un cargo ambiguo («Product Owner») queda en «Otras áreas» y nivel «Equipo».

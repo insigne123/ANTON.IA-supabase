@@ -1,6 +1,7 @@
 import { FLOW_STAGES, flowStage } from '@/lib/pipeline-flow';
 import type { PipelineStage } from '@/lib/crm-types';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
+import { normalizeCompanyWebsite, websiteFromWorkEmail } from '@/lib/profile/profile-mappings';
 
 /**
  * «Empresas» in the Pipeline (propuesta 5): the people of the CRM by company, where each one sits (area and level) and the
@@ -154,6 +155,18 @@ export function committeeFor(people: CompanyPerson[], main: Area | null, size: n
   return slots;
 }
 
+/**
+ * The company's web domain: the one the enrichment found, else the one most of its people write from (ana@retailsur.cl →
+ * retailsur.cl), never a free mailbox. It draws the logo and opens the website.
+ */
+export function companyDomainOf(rows: Array<Pick<UnifiedRow, 'companyDomain' | 'email'>>) {
+  const known = rows.map(row => normalizeCompanyWebsite(row.companyDomain).domain).find(Boolean);
+  if (known) return known;
+  const counts = new Map<string, number>();
+  for (const row of rows) { const domain = websiteFromWorkEmail(row.email); if (domain) counts.set(domain, (counts.get(domain) || 0) + 1); }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+}
+
 /** The companies of the CRM, one per company and one person per person, the deals that moved furthest first. */
 export function buildCompanies(rows: UnifiedRow[], options: { targetRoles?: string[] } = {}): { companies: Company[]; main: Area | null } {
   const groups = new Map<string, { names: Map<string, number>; rows: UnifiedRow[] }>();
@@ -193,7 +206,7 @@ export function buildCompanies(rows: UnifiedRow[], options: { targetRoles?: stri
     const best = stages.reduce<PipelineStage>((top, stage) => rank(stage) > rank(top) ? stage : top, stages[0] ?? 'inbox');
     const committee = committeeFor(people, main, size);
     return {
-      key, name: nameOf(group.names), industry: (first(row => row.industry) as string | null), domain: (first(row => row.companyDomain) as string | null),
+      key, name: nameOf(group.names), industry: (first(row => row.industry) as string | null), domain: companyDomainOf(group.rows),
       size, country: (first(row => row.country) as string | null), people, stage: best,
       open: stages.some(stage => OPEN.includes(stage)),
       won: stages.includes('closed_won'), lost: stages.length > 0 && stages.every(stage => stage === 'closed_lost'),
@@ -231,7 +244,8 @@ const INDUSTRIES: Record<string, string> = {
 /** The rubro as people in Chile say it: Apollo's industries are English («logistics & supply chain» → «Logística»). */
 export function industryLabel(industry: string | null | undefined) {
   const text = String(industry || '').replace(/\s+/g, ' ').trim();
-  if (!text) return null;
+  // A dash is how some imports write «no rubro»: it says nothing.
+  if (!text || /^[-–—.\s]+$/.test(text)) return null;
   return INDUSTRIES[text.toLowerCase()] ?? text.charAt(0).toLocaleUpperCase('es-CL') + text.slice(1);
 }
 

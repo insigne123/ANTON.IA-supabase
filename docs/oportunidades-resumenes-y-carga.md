@@ -62,9 +62,14 @@
 
 ## «Empresa del workspace»
 
-- Los campos de la oferta son más altos (9, 6, 2 y 4 líneas) y se pueden agrandar.
+- Los campos de la oferta son más altos y se pueden agrandar.
 - El diálogo es más ancho y cada etiqueta queda junto a su campo, con el mismo espacio entre campos.
-- La búsqueda diaria y su hora quedan en una fila.
+- **Desde el 20 de octubre de 2026** se ordena en grupos (`WorkspaceCompanyFields.tsx`), cada uno con un ícono, una línea que explica para qué sirve y sus campos sobre una superficie suave:
+  - **«Qué vende tu empresa»:** la oferta y los servicios, con un contador de servicios.
+  - **«Alcance»:** dónde trabajas y qué no ofreces, lado a lado.
+  - **«Búsqueda diaria»:** un interruptor, la hora (00:00 a 23:00) y, para LinkedIn, qué va primero.
+  - **«Mercado Público»:** el ticket, con «Conectado» cuando ya hay uno. Enter conecta el ticket y no envía el formulario.
+- Los botones quedan fijos abajo, visibles al hacer scroll. Ver `docs/oportunidades-embudo-filtros.md`.
 
 ## Pruebas
 

@@ -60,3 +60,11 @@ test('someone who is not an admin gets the assigned view without the admin reads
   assert.deepEqual([overview.members, overview.groups, overview.context], [[], [], null]);
   assert.deepEqual(state.order.filter(name => /reporting_groups|company_context|budget|members|profiles/.test(name)), []);
 });
+
+test('a source picked reads the list with its kinds; without one, the list as it always was', async () => {
+  const { state, client } = slowClient();
+  rows.opportunity_workspace_list_kinds = [{ id: 'op2', title: 'Avisos de guardias' }];
+  const filtered = await readWorkspaceOverview(client, { organizationId: 'org', userId: 'u1', role: 'admin' }, { view: 'all', kinds: ['hiring', 'linkedin_post'] });
+  assert.deepEqual(filtered.items, [{ id: 'op2', title: 'Avisos de guardias' }]);
+  assert.ok(state.order.includes('opportunity_workspace_list_kinds') && !state.order.includes('opportunity_workspace_list'));
+});

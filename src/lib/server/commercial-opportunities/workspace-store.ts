@@ -23,14 +23,17 @@ export async function workspaceMembers(client: SupabaseClient, scope: WorkScope)
   const names = new Map(profiles.map(p => [p.id, p.full_name]));
   return rows.map(row => ({ user_id: row.user_id, role: row.role, name: String(names.get(row.user_id) || 'Integrante') }));
 }
-export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkScope, options: { view?: string; query?: string; page?: number } = {}): Promise<WorkspaceOverview> {
+export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkScope, options: { view?: string; query?: string; page?: number; kinds?: string[] } = {}): Promise<WorkspaceOverview> {
   const admin = isOpportunityAdmin(scope.role);
   const period = new Date().toISOString().slice(0, 7) + '-01';
   // The reads do not depend on each other, so they go together (one after another they took ~2.7 s of the page's load);
   // only the work records wait for the list.
   const [ids, items, notifications, groups, context, budget, members, documentAlerts] = await Promise.all([
     readableOpportunityIds(client, scope),
-    client.rpc('opportunity_workspace_list', { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0 })
+    // A source picked reads with its kinds (opportunity_workspace_list_kinds); without one, the list as it always was.
+    (options.kinds?.length
+      ? client.rpc('opportunity_workspace_list_kinds', { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0, p_kinds: options.kinds })
+      : client.rpc('opportunity_workspace_list', { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0 }))
       .then(result => (opportunityDb(result) as WorkItem[]) || []),
     client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).order('created_at', { ascending: false }).limit(100).then(result => opportunityDb(result) || []),

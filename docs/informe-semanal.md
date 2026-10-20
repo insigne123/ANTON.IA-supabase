@@ -4,6 +4,16 @@
 
 **Propuesta 2** de la comparación con otras apps: informe semanal automático para jefaturas (LicitaLAB, Apollo), ampliado a cada rol y con «Gestor de oportunidades».
 
+## Actualización del 20 de octubre de 2026: vive en «Hoy»
+
+- **Dónde está:** el informe ya no es una página del menú. Es la segunda vista de «Hoy»: arriba a la derecha, «Hoy | Tu semana». La dirección `/dashboard?vista=semana` la abre directo.
+- **Enlaces antiguos:** `/weekly-report` redirige ahí, así que los enlaces viejos siguen funcionando. El correo de los lunes ya enlaza directo.
+- **Quién ve qué:**
+  - **«Tu semana»:** todas las personas, cada una con lo suyo.
+  - **«Equipo»:** dueños y administradores.
+  - **«Oportunidades»:** los gestores de oportunidades que nombre un administrador; mientras no haya ninguno, los administradores.
+- **Sin cambios:** el contenido, el envío del lunes y los permisos.
+
 ## Por qué
 
 «Hoy» dice qué hacer en el día. Nadie decía cómo fue la semana: cuánto se escribió, quién respondió y qué quedó pendiente. Tampoco cómo iba el equipo, ni qué cerraba pronto en Oportunidades. Los informes semanales de Diego (PSOL) y Gonzalo (GrupoExpro) se armaron a mano en PDF. Este informe los reemplaza y llega a cada persona según su rol.

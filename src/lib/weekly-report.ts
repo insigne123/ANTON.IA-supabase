@@ -165,9 +165,9 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
     row(`${plural(opportunities.found.total, 'oportunidad nueva', 'oportunidades nuevas')}${opportunities.found.recommended ? `, ${opportunities.found.recommended} recomendadas` : ''}`, '/opportunities');
     opportunities.closing.slice(0, 5).forEach(item => row(`Cierra el ${closingDay(item.deadlineAt)}: ${item.title}${item.buyer ? ` · ${item.buyer}` : ''}${money(item.amount, item.currency) ? ` · ${money(item.amount, item.currency)}` : ''}${item.assigned ? '' : ' · sin asignar'}`, `/opportunities?op=${item.id}`));
   }
-  lines.push('', `Ver el informe completo: ${link('/weekly-report')}`, 'Lo recibes porque lo activaste en «Informe semanal». Lo apagas en la misma página.');
-  html.push(`<p style="margin:28px 0 0"><a href="${escape(link('/weekly-report'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Ver el informe completo</a></p>`,
-    '<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Lo recibes porque lo activaste en «Informe semanal» de ANTON.IA. Lo apagas en la misma página.</p>');
+  lines.push('', `Ver el informe completo: ${link('/dashboard?vista=semana')}`, 'Lo recibes porque lo activaste en «Tu semana», en «Hoy». Lo apagas en la misma página.');
+  html.push(`<p style="margin:28px 0 0"><a href="${escape(link('/dashboard?vista=semana'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Ver el informe completo</a></p>`,
+    '<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Lo recibes porque lo activaste en «Tu semana», en «Hoy» de ANTON.IA. Lo apagas en la misma página.</p>');
   return {
     subject: `Tu informe semanal · ${week.label}`,
     text: lines.join('\n'),

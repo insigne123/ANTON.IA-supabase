@@ -13,6 +13,13 @@ export default {
   intro: 'Tus contactos agrupados por empresa: a quién conoces, quién falta para cada venta y empresas parecidas.',
   learn: ['Ver quién decide, quién lo usa y quién paga', 'Buscar a quien falta', 'Encontrar empresas parecidas'],
   mocks: [...searchMocks, {
+    // What the company does, as GET /api/crm/companies/about answers it from the company's website.
+    url: '**/api/crm/companies/about?*', method: 'GET',
+    respond: (_body, request) => {
+      const domain = new URL(request.url()).searchParams.get('domain') || 'retailandino.cl';
+      return { domain, website: `https://${domain}`, about: 'Cadena de tiendas de vestuario y hogar con locales en el norte de Chile y venta en línea.' };
+    },
+  }, {
     url: '**/api/crm/companies/similar', method: 'POST',
     respond: body => {
       const picks = (body?.candidates || []).filter(candidate => WHY[candidate.name]).map(candidate => ({ ...candidate, why: WHY[candidate.name] }));
@@ -38,7 +45,7 @@ export default {
       target: { role: 'button', name: /Retail Andino/, exact: false }, action: 'none', zoom: 1.4, arrow: true,
     },
     {
-      title: 'Abre una empresa', text: 'Su gente, lo que falta para la venta y empresas parecidas.',
+      title: 'Abre una empresa', text: 'Qué hace según su sitio web, su gente, lo que falta para la venta y empresas parecidas.',
       say: 'Ábrela para ver el detalle.',
       target: { role: 'button', name: /Retail Andino/, exact: false }, zoom: 1.4,
       waitFor: { role: 'dialog', name: 'Retail Andino' },
@@ -49,9 +56,9 @@ export default {
       target: { role: 'heading', name: 'Para esta venta' }, zoomOn: { css: 'section[aria-labelledby="company-committee"]' }, action: 'none', zoom: 1.3,
     },
     {
-      title: 'Cobertura por área y nivel', text: 'Qué áreas y niveles conoces en la empresa, de un vistazo.',
-      say: 'Y qué áreas y niveles conoces.',
-      target: { role: 'heading', name: 'Cobertura por área y nivel' }, zoomOn: { css: 'section[aria-labelledby="company-coverage"]' }, action: 'none', zoom: 1.3,
+      title: 'Dónde conoces gente', text: 'Cada fila es un área y cada columna un nivel: «—» es donde aún no conoces a nadie.',
+      say: 'Y en qué áreas y niveles conoces gente.',
+      target: { role: 'heading', name: 'Dónde conoces gente' }, zoomOn: { css: 'section[aria-labelledby="company-coverage"]' }, action: 'none', zoom: 1.3,
     },
     {
       title: 'Empresas parecidas', text: 'Del mismo rubro y tamaño, que aún no están en tu CRM. La IA dice por qué se parecen.',

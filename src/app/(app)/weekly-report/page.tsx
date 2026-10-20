@@ -1,12 +1,6 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { DocumentTitle } from '@/components/document-title';
-import { WeeklyReport } from '@/components/weekly-report/WeeklyReport';
-
-/** «Informe semanal» (src/components/weekly-report/WeeklyReport.tsx). */
+/** «Informe semanal» lives in «Hoy» as «Tu semana» (src/app/(app)/dashboard/page.tsx); old links and emails land there. */
 export default function WeeklyReportPage() {
-  return <>
-    <DocumentTitle title="Informe semanal" />
-    <WeeklyReport />
-  </>;
+  redirect('/dashboard?vista=semana');
 }

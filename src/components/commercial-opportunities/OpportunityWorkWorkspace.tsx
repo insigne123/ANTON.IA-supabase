@@ -13,7 +13,8 @@ import { OfferDraft } from './OfferDraft';
 import { PublicMarket } from './PublicMarket';
 import { WinPlan } from './WinPlan';
 import type { OfferPrices, SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
-import { PipelineBoard, type PipelineSuggestion } from './PipelineBoard';
+import { PipelineBoard, type PagedStage, type PipelineSuggestion } from './PipelineBoard';
+import { OpportunityFilters } from './OpportunityFilters';
 import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
 import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import type { MarkChange } from './ReportMarks';
@@ -25,12 +26,13 @@ import { TenderProfileSheet } from './TenderProfileSheet';
 import type { OpportunityFitView } from './RequirementFit';
 import { TeamOffice, TeamPicker } from './TeamOffice';
 import { InitialsAvatar } from '@/components/initials-avatar';
-import {OpportunityTicketConnection} from './OpportunityTicketConnection';
+import { OpportunityTicketConnection } from './OpportunityTicketConnection';
+import { WorkspaceCompanyFields } from './WorkspaceCompanyFields';
 import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
 import { AdvicePill, ExclusionGroups, NewsList, StartHere, TenderPrerequisites } from './OpportunityRadar';
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
-import { bySource, closesLabel, workAdvice } from '@/lib/commercial-opportunities/workspace-radar';
+import { OPPORTUNITY_SOURCES, bySource, closesLabel, sourceKinds, workAdvice, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@/lib/commercial-opportunities/workspace';
@@ -59,13 +61,19 @@ const listEs = (items: string[]) => items.length > 1 ? `${items.slice(0, -1).joi
 async function json(response: Response) { const value = await response.json(); if (!response.ok) throw new Error(value.error || 'No se pudo completar la acción.'); return value; }
 /** Each opportunity has its own address (?op=…): the browser's back button returns to the list and a teammate can open the same link. */
 const opportunityInUrl = () => typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('op');
+/** The pipeline's first page of each stage nobody works yet, and the size of «Cargar más» (workspace-pipeline.ts). */
+const PAGE = 60;
+const FIRST_PAGE: Record<PagedStage, number> = { found: PAGE, recommended: PAGE, excluded: 0 };
 
 export function OpportunityWorkWorkspace() {
   const [overview, setOverview] = useState<(WorkspaceOverview & { suggestion?: any }) | null>(null);
   const [problem, setProblem] = useState(''); const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState(''); const [filter, setFilter] = useState('recommended');
+  // The pipeline and the list share the words searched (read 300 ms after the last key) and the source picked.
+  const [search, setSearch] = useState(''); const [source, setSource] = useState<OpportunitySource>('all');
+  useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 300); return () => clearTimeout(timer); }, [query]);
   const [page, setPage] = useState(0);
-  useEffect(() => setPage(0), [query, filter]);
+  useEffect(() => setPage(0), [search, filter, source]);
   const [selected, setSelected] = useState<string | null>(null); const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState('summary'); const [modal, setModal] = useState<'create' | 'context' | 'assign' | 'task' | 'criteria' | null>(null);
   const [draft, setDraft] = useState<Record<string, any>>({}); const [files, setFiles] = useState<File[]>([]);
@@ -80,7 +88,15 @@ export function OpportunityWorkWorkspace() {
   const [profileOpen, setProfileOpen] = useState(false);
   // A question the assistant hands to one opportunity's chat: asked there once its expediente is open.
   const handoff = useRef<{ id: string; question: string | null } | null>(null);
-  const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number }; summaries?: { waiting: number } } | null>(null);
+  const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number; excluded?: number };
+    limits?: Partial<Record<PagedStage, number>>; summaries?: { waiting: number } } | null>(null);
+  // How many of each stage nobody works yet the pipeline asks for: «Cargar más» adds a page; a new search starts over.
+  const filterKey = `${source}|${search}`;
+  const [paging, setPaging] = useState<{ key: string; limits: Record<PagedStage, number> }>({ key: '', limits: FIRST_PAGE });
+  const limits = paging.key === filterKey ? paging.limits : FIRST_PAGE;
+  const [loadingMore, setLoadingMore] = useState<PagedStage | null>(null);
+  // Which search and source the pipeline on screen answers: while a new one loads, the old cards fade.
+  const [pipelineFor, setPipelineFor] = useState(filterKey);
   // «Cargar oportunidad»: from a document the AI reads (prefill.ts) or typed, and what the reading found.
   const [createMode, setCreateMode] = useState<'upload' | 'write'>('upload');
   const [prefill, setPrefill] = useState<{ status: 'idle' | 'reading' | 'done' | 'error'; name?: string; missing?: string[]; partial?: boolean; message?: string }>({ status: 'idle' });
@@ -89,11 +105,14 @@ export function OpportunityWorkWorkspace() {
   const watching = useRef<string | null>(null);
   useEffect(() => { if (!feedback) return; const timer = setTimeout(() => setFeedback(''), 6000); return () => clearTimeout(timer); }, [feedback]);
   useEffect(() => { const read = () => setSelected(opportunityInUrl()); read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read); }, []);
+  // The list reads with the search and source only while it is on screen: typing in the pipeline does not read the list too.
+  const listShown = view === 'list' || overview?.mode !== 'management';
+  const listSearch = listShown ? search : ''; const listSource = listShown ? source : 'all';
   const load = useCallback(async (signal?: AbortSignal) => {
-    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: filter, query, page: String(page) })}`, { cache: 'no-store', signal }));
+    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: filter, query: listSearch, page: String(page), source: listSource })}`, { cache: 'no-store', signal }));
       if (!signal?.aborted) { setOverview(result); setProblem(''); }
     } catch (e) { if (!signal?.aborted) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar.'); setOverview(null); } }
-  }, [filter, query, page]);
+  }, [filter, listSearch, page, listSource]);
   // The list is read again every minute while it is on view; an open opportunity or a hidden tab does not ask for it.
   useEffect(() => {
     const controller = new AbortController(); void load(controller.signal);
@@ -140,10 +159,20 @@ export function OpportunityWorkWorkspace() {
     if (watching.current === research.id && research.state === 'ready') { watching.current = null; setTab('summary'); setFeedback(isSignalKind(detail?.item.kind) ? 'La ficha comercial está lista.' : 'Tu informe está listo.'); }
   }, [research, detail?.item.kind]);
   const admin = overview?.mode === 'management';
+  // Only the latest reading lands: a search typed while another one loads does not get overwritten by the older answer.
+  const pipelineRequest = useRef(0);
   const loadPipeline = useCallback(async () => {
-    try { setPipeline(await json(await fetch('/api/commercial-opportunities/workspace?view=pipeline', { cache: 'no-store' }))); }
-    catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar el embudo.'); }
-  }, []);
+    const request = ++pipelineRequest.current; const key = `${source}|${search}`;
+    try {
+      const params = new URLSearchParams({ view: 'pipeline', source, query: search, found: String(limits.found), recommended: String(limits.recommended), excluded: String(limits.excluded) });
+      const result = await json(await fetch(`/api/commercial-opportunities/workspace?${params}`, { cache: 'no-store' }));
+      if (request === pipelineRequest.current) { setPipeline(result); setPipelineFor(key); }
+    }
+    catch (e) { if (request === pipelineRequest.current) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar el embudo.'); setPipelineFor(key); } }
+    finally { if (request === pipelineRequest.current) setLoadingMore(null); }
+  }, [source, search, limits]);
+  const loadMore = useCallback((stage: PagedStage) => { setLoadingMore(stage); setPaging({ key: filterKey, limits: { ...limits, [stage]: Math.min(600, limits[stage] + PAGE) } }); }, [filterKey, limits]);
+  const clearFilters = () => { setQuery(''); setSearch(''); setSource('all'); };
   useEffect(() => { if (admin && view === 'pipeline' && !selected) void loadPipeline(); }, [admin, view, selected, loadPipeline]);
   // Cards still waiting for their line of summary: the pipeline is read again every 20 seconds, for five minutes at most.
   const summaryReloads = useRef(0);
@@ -285,13 +314,17 @@ export function OpportunityWorkWorkspace() {
     if (result) { setModal(null); setFiles([]); }
   };
   const filters = admin ? [['recommended', 'Recomendadas'], ['review', 'Por revisar'], ['assigned', 'Asignadas'], ['excluded', 'No recomendadas'], ['pending', 'Por evaluar'], ['all', 'Todas']] : [['all', 'Mi trabajo'], ['assigned', 'Nuevas asignaciones'], ['working', 'En gestión'], ['blocked', 'Bloqueadas']];
+  const kinds = sourceKinds(source);
   const items = (overview?.items || []).filter(item => {
     const work = overview?.work.find(w => w.opportunity_id === item.id);
-    if (query && !`${item.title} ${item.company_name || item.buyer_name || ''}`.toLowerCase().includes(query.toLowerCase())) return false;
+    if (kinds.length && !kinds.includes(item.kind)) return false;
+    if (search && ![item.title, item.company_name, item.buyer_name].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
     if (!admin) return filter === 'recommended' || filter === 'all' || (work?.state || 'assigned') === filter;
     if (filter === 'assigned') return Boolean(work && work.state !== 'unassigned');
     return filter === 'all' || (item.data.evaluation || (item.kind === 'private' ? 'review' : 'pending')) === filter;
   });
+  // With a source picked, its group is called by it («Compra Ágil», «Recibidas»), not by the family it belongs to.
+  const listGroups = bySource(items).map(group => source === 'all' ? group : { ...group, label: OPPORTUNITY_SOURCES.find(item => item.id === source)?.label ?? group.label });
   const card = (item: WorkItem) => { const work = overview?.work.find(w => w.opportunity_id === item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id); return <article key={item.id} className="rounded-xl border bg-background p-5"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="flex flex-wrap items-center gap-2"><span>{TYPES[item.kind]}</span><AdvicePill item={item} /></span><span>{STATES[work?.state || 'unassigned']}</span></div><h3 className="mt-2 text-base font-semibold">{item.title}</h3>{opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}<p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p><p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>{work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}<Button variant="outline" size="sm" className="mt-4" onClick={() => open(item.id)}>Abrir y trabajar</Button></article>; };
   const title = admin ? 'Gestionar oportunidades' : 'Mis oportunidades asignadas';
   const item = detail?.item;
@@ -327,13 +360,19 @@ export function OpportunityWorkWorkspace() {
         return <button key={key} type="button" aria-pressed={pressed} onClick={() => setView(key)} className={cn('rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', pressed ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>; })}</div>
       {view === 'assistant' ? <OpportunityAssistant admin={admin} threadId={assistantThread} onThread={setAssistantThread} onOpen={open} onHandoff={continueIn} />
         : admin && view === 'market' ? <PublicMarket onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} onProfile={() => setProfileOpen(true)} />
-        : admin && view === 'pipeline' ? (pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting)}
-        suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} />
-        : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>) : <>
-      <div className="flex flex-wrap gap-3"><div className="flex min-w-0 flex-1 flex-wrap gap-1" aria-label="Filtrar oportunidades">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar en las oportunidades" aria-label="Buscar en las oportunidades" className="w-full sm:w-72" /></div>
-      {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{query ? 'Prueba otro texto o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p></section>}
-      {admin && filter === 'recommended' && !query && <StartHere items={items} onOpen={open} />}
-      {items.length > 0 && <div className="space-y-8">{bySource(items).map(group => <section key={group.key} aria-labelledby={`source-${group.key}`} className="space-y-3">
+        : admin && view === 'pipeline' ? <>
+        <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} />
+        {pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} limits={pipeline.limits} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting)}
+        suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open}
+        filtered={Boolean(search) || source !== 'all'} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} onMore={loadMore} onClearFilters={clearFilters} />
+        : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
+      <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} showSources={admin}>
+        <div role="group" aria-label="Filtrar oportunidades" className="flex flex-wrap gap-1">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div>
+      </OpportunityFilters>
+      {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{search || source !== 'all' ? 'Prueba otro texto, otra fuente o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p>
+        {search || source !== 'all' ? <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Quitar filtros</Button> : null}</section>}
+      {admin && filter === 'recommended' && !search && source === 'all' && <StartHere items={items} onOpen={open} />}
+      {items.length > 0 && <div className="space-y-8">{listGroups.map(group => <section key={group.key} aria-labelledby={`source-${group.key}`} className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><h2 id={`source-${group.key}`} className="text-lg font-semibold">{group.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{group.items.length}</span></h2><p className="text-xs text-muted-foreground">{group.note}</p></div>
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}
       </section>)}</div>}
@@ -406,12 +445,11 @@ export function OpportunityWorkWorkspace() {
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
-    <Dialog open={modal !== null} onOpenChange={open => { if (!open && !busy) setModal(null); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Empresa del workspace' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? 'Asignar equipo de trabajo' : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Cuéntale a la IA qué vende tu empresa. Con eso busca licitaciones y señales de LinkedIn y decide cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
+    <Dialog open={modal !== null} onOpenChange={open => { if (!open && !busy) setModal(null); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Empresa del workspace' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? 'Asignar equipo de trabajo' : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>
-          {([['offer', 'Qué ofrece la empresa', 'Ej.: Automatizamos la consulta de causas judiciales de postulantes para empresas que contratan en volumen. Entregamos un reporte por persona en menos de 24 horas.', 9], ['services', 'Servicios o productos · uno por línea', 'Ej.:\nVerificación de antecedentes de postulantes\nMonitoreo de causas laborales', 6], ['territories', 'Territorios atendidos · opcional', 'Ej.: Chile', 2], ['exclusions', 'Qué no ofrece · opcional', 'Ej.: No hacemos reclutamiento ni vendemos software de terceros', 4]] as const).map(([key, label, placeholder, rows]) => <div key={key} className="space-y-2"><Label htmlFor={`op-${key}`}>{label}</Label><Textarea id={`op-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} placeholder={placeholder} rows={rows} className="resize-y leading-6" required={key === 'offer' || key === 'services'} /></div>)}
-          <div className="space-y-2"><Label htmlFor="op-priority">Prioridad de señales de LinkedIn</Label><select id="op-priority" value={draft.priority} onChange={e => field('priority', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="hiring">Ofertas laborales primero</option><option value="posts">Publicaciones comerciales primero</option><option value="balanced">Ambas por igual</option></select></div>
-          <div className="grid gap-4 sm:grid-cols-2 sm:items-end"><label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={Boolean(draft.automation)} onChange={e => field('automation', e.target.checked)} />Buscar oportunidades nuevas cada día</label><div className="space-y-2"><Label htmlFor="op-hour">Hora de la búsqueda diaria (Chile)</Label><Input id="op-hour" type="number" min={0} max={23} value={draft.hour} onChange={e => field('hour', e.target.value)} /></div></div>
+          <WorkspaceCompanyFields draft={draft} field={field} />
+          <OpportunityTicketConnection />
         </>
         : modal === 'criteria' ? <>{([['roles', 'Cargos en avisos de trabajo que revelan una necesidad'], ['keywords', 'Palabras para licitaciones y compras públicas'], ['postQueries', 'Búsquedas de publicaciones en LinkedIn'], ['decisionMakerTitles', 'Cargos de quienes deciden la compra']] as const).map(([key, label]) => <div key={key}><Label htmlFor={`op-criteria-${key}`}>{label}</Label><Textarea id={`op-criteria-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} rows={key === 'postQueries' ? 5 : 4} required={key === 'postQueries'} /></div>)}</>
         : modal === 'assign' ? <>
@@ -449,9 +487,8 @@ export function OpportunityWorkWorkspace() {
               <p className="text-xs text-muted-foreground">PDF, Word o Excel, hasta 20 MB cada uno. También puedes subirlos después en Documentos.</p></div>
           </>}
         </>}
-        {problem && modal && <p role="alert" className="text-sm text-destructive">{problem}</p>}<div className="flex justify-end gap-2"><Button variant="outline" type="button" disabled={busy} onClick={() => setModal(null)}>Cancelar</Button>{modal === 'create' && createMode === 'upload' ? null : <Button type="submit" disabled={busy || prefill.status === 'reading'}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{modal === 'context' ? 'Confirmar oferta' : modal === 'criteria' ? 'Guardar' : modal === 'assign' ? 'Asignar y notificar' : 'Guardar'}</Button>}</div>
+        {problem && modal && <p role="alert" className="text-sm text-destructive">{problem}</p>}<div className="sticky bottom-0 -mx-6 -mb-6 flex justify-end gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="outline" type="button" disabled={busy} onClick={() => setModal(null)}>Cancelar</Button>{modal === 'create' && createMode === 'upload' ? null : <Button type="submit" disabled={busy || prefill.status === 'reading'}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{modal === 'context' ? 'Confirmar oferta' : modal === 'criteria' ? 'Guardar' : modal === 'assign' ? 'Asignar y notificar' : 'Guardar'}</Button>}</div>
       </form>
-      {modal === 'context' && <div className="border-t pt-4"><OpportunityTicketConnection/></div>}
     </DialogContent></Dialog>
   </div>;
 }

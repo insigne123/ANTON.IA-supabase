@@ -13,7 +13,12 @@ import { TodayPanel } from '@/components/home/TodayPanel';
 import { RecommendedLeads } from '@/components/home/RecommendedLeads';
 import { ReconnectCard } from '@/components/home/ReconnectCard';
 import { TouchesCard } from '@/components/home/TouchesCard';
+import { WeeklyReport } from '@/components/weekly-report/WeeklyReport';
+import { cn } from '@/lib/utils';
 
+/** «Hoy» or «Tu semana» (the weekly report, which lived on its own page until Oct 2026): ?vista=semana opens the second. */
+type View = 'hoy' | 'semana';
+const viewInUrl = (): View => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('vista') === 'semana' ? 'semana' : 'hoy';
 const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long',timeZone:'America/Santiago' });
 
 /**
@@ -23,6 +28,12 @@ const TODAY = new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric'
  * LinkedIn → to reconnect → summary → recommended.
  */
 export default function DashboardPage() {
+  const [view, setView] = useState<View>('hoy');
+  useEffect(() => { const read = () => setView(viewInUrl()); read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read); }, []);
+  const show = (next: View) => {
+    setView(next);
+    if (viewInUrl() !== next) window.history.pushState(null, '', next === 'semana' ? '/dashboard?vista=semana' : '/dashboard');
+  };
   // The date is read in the browser: the page is prerendered, and the server's day may not be the person's.
   const [today, setToday] = useState('');
   useEffect(() => {
@@ -34,10 +45,14 @@ export default function DashboardPage() {
   return (
     <div>
       <PageHeader
-        title="Hoy"
+        title={view === 'semana' ? 'Tu semana' : 'Hoy'}
         eyebrow={today || undefined}
-        description="Tu actividad de hoy y tus pendientes en este workspace."
+        description={view === 'semana' ? 'Cómo te fue, comparado con la semana anterior, y qué hacer después.' : 'Tu actividad de hoy y tus pendientes en este workspace.'}
       >
+        <div role="group" aria-label="Vista de Hoy" className="inline-flex rounded-full bg-muted p-1">
+          {([['hoy', 'Hoy'], ['semana', 'Tu semana']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={view === key} onClick={() => show(key)}
+            className={cn('rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}
+        </div>
         <Button asChild variant="ghost" className="flex-1 text-muted-foreground sm:flex-none">
           <Link href="/search">
             <Search aria-hidden="true" />
@@ -46,7 +61,8 @@ export default function DashboardPage() {
         </Button>
       </PageHeader>
 
-      {/* items-start at every width: a stretched grid item would turn a card's h-full into the whole column. */}
+      {view === 'semana' ? <WeeklyReport embedded /> : (
+      /* items-start at every width: a stretched grid item would turn a card's h-full into the whole column. */
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4 xl:col-start-1">
           <TodayPanel />
@@ -62,7 +78,7 @@ export default function DashboardPage() {
         <div className="min-w-0 xl:col-start-1">
           <RecommendedLeads />
         </div>
-      </div>
+      </div>)}
     </div>
   );
 }

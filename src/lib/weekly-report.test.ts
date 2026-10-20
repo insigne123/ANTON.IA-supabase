@@ -71,7 +71,7 @@ test('the email: the same report in a few lines, escaped, without tracking or un
   assert.match(email.html, /Revisa con Tomás por qué no envió correos/, 'though the action to talk with them stays');
   assert.match(email.html, /1 persona sin actividad/);
   assert.match(email.html, /href="https:\/\/app\.example\/contacted\/replied"/);
-  assert.match(email.text, /Ver el informe completo: https:\/\/app\.example\/weekly-report/);
+  assert.match(email.text, /Ver el informe completo: https:\/\/app\.example\/dashboard\?vista=semana/);
   assert.doesNotMatch(email.html, /<b>|unsubscribe|tracking|pixel/i);
 });
 

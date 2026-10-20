@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
-import { buildCompanies, classifyRole, companyKey, coverageGrid, industryLabel, mainArea, sizeBands } from './coverage';
+import { buildCompanies, classifyRole, companyDomainOf, companyKey, coverageGrid, industryLabel, mainArea, sizeBands } from './coverage';
 
 const row = (patch: Partial<UnifiedRow>): UnifiedRow => ({ gid: `lead_saved|${Math.random()}`, sourceId: 'x', status: 'saved', kind: 'lead_saved', ...patch });
 
@@ -90,4 +90,12 @@ test('the sizes of companies like this one', () => {
   assert.deepEqual(sizeBands(900), ['201-500', '501-1000', '1001-5000']);
   assert.deepEqual(sizeBands(8), ['1-10', '11-50']);
   assert.deepEqual(sizeBands(null), []);
+});
+
+test('the company domain comes from the enrichment, else from the work emails of its people, never from a free mailbox', () => {
+  assert.equal(companyDomainOf([{ companyDomain: 'https://www.RetailSur.cl/', email: 'ana@otra.cl' }]), 'retailsur.cl');
+  assert.equal(companyDomainOf([{ email: 'ana@gmail.com' }, { email: 'luis@grupoexpro.cl' }, { email: 'eva@grupoexpro.cl' }, { email: 'jo@expro-rrhh.cl' }]), 'grupoexpro.cl');
+  assert.equal(companyDomainOf([{ email: 'ana@gmail.com' }, { email: null }]), null);
+  const { companies } = buildCompanies([row({ company: 'Grupo Expro', email: 'luis@grupoexpro.cl', title: 'Gerente General' })]);
+  assert.equal(companies[0].domain, 'grupoexpro.cl');
 });
