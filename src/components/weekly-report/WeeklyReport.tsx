@@ -14,7 +14,7 @@ import { authenticatedApiFetch } from '@/lib/authenticated-api-fetch';
 import { cn } from '@/lib/utils';
 import { REPORT_ROLES, deltaText, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeeklyReport as Report } from '@/lib/weekly-report';
 
-type Response = { report: Report; email: boolean; mailbox: 'google' | 'outlook' | null; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
+type Response = { report: Report; email: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
 
 const MAILBOX: Record<string, string> = { google: 'Gmail', outlook: 'Outlook' };
 const dateLabel = (at: string, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('es-CL', { ...options, timeZone: 'America/Santiago' }).format(new Date(at)).replace(/\./g, '');
@@ -34,7 +34,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /**
  * «Informe semanal» (propuesta 2): the person's week, their team's when they run it and Oportunidades' when they manage
- * it, with what to do next. Monday's email carries the same, from the person's own mailbox, when they turn it on.
+ * it, with what to do next. Monday's email carries the same, from the person's own mailbox or the reports mailbox.
  * `embedded`: inside «Hoy» («Tu semana»), whose header names the page; here only the week and its range.
  */
 export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) {
@@ -204,13 +204,14 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
             <Label htmlFor="weekly-email" className="text-sm font-medium">Recibirlo por correo cada lunes</Label>
             <p className="text-xs leading-5 text-muted-foreground">{data.mailbox
               ? `A las 8:00, con la semana anterior. Te lo envías tú mismo desde tu ${MAILBOX[data.mailbox]} conectado, a tu propio correo.`
-              : 'Conecta Gmail u Outlook en «Conexiones» para recibirlo por correo: sale desde tu cuenta, hacia ti.'}</p>
+              : data.sender ? 'A las 8:00, con la semana anterior, a tu correo. Si conectas Gmail u Outlook en «Conexiones», sale desde tu cuenta.'
+                : 'Conecta Gmail u Outlook en «Conexiones» para recibirlo por correo: sale desde tu cuenta, hacia ti.'}</p>
           </div>
-          <Switch id="weekly-email" checked={data.email} disabled={!data.mailbox || saving === 'email'}
+          <Switch id="weekly-email" checked={data.email} disabled={(!data.mailbox && !data.sender) || saving === 'email'}
             onCheckedChange={on => { void post('email', { action: 'email', on }).then(result => { if (result) setData(current => current && { ...current, email: result.email }); }); }} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" disabled={!data.mailbox || saving === 'send'}
+          <Button variant="outline" size="sm" disabled={(!data.mailbox && !data.sender) || saving === 'send'}
             onClick={() => { void post('send', { action: 'send', week }).then(result => { if (result) setNotice({ ok: true, text: `Te lo enviamos a ${result.to}.` }); }); }}>
             {saving === 'send' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Mail className="mr-1.5 h-4 w-4" aria-hidden="true" />}Enviármelo ahora</Button>
           {data.members ? <Button variant="ghost" size="sm" onClick={() => { setChosen(data.managers || []); setManagersOpen(true); }}>

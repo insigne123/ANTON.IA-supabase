@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 // The mailbox, the tokens and the providers in memory: nothing leaves the test.
 async function load() {
   const stubs: Record<string, string> = {
-    '@/lib/server/mail-sender-preference': 'export async function readMailSenderPreference(client, userId){ return { resolved: globalThis.__mailbox ?? null } }',
+    '@/lib/server/mail-sender-preference': 'export async function readMailSenderPreference(client, userId){ return { resolved: globalThis.__mailboxes?.[userId] ?? globalThis.__mailbox ?? null } }',
     '@/lib/services/token-service': 'export const tokenService = { async getToken(client, userId, provider){ return globalThis.__token === undefined ? { refresh_token: "r" } : globalThis.__token } }',
     '@/lib/server-auth-helpers': 'export async function refreshGoogleToken(){ return { access_token: "g-token" } } export async function refreshMicrosoftToken(){ return { access_token: "m-token" } }',
   };
@@ -63,4 +63,25 @@ test('it goes from the person\'s own Gmail or Outlook, and says plainly what is 
   const rejected = (async () => new Response('no', { status: 403 })) as any;
   assert.match((await sendSelfEmail({} as any, email, { fetch: rejected, env })).error, /Gmail no aceptó el correo \(403\)/);
   assert.equal(calls.length, 2, 'nothing else was sent');
+});
+
+test('whoever has no mailbox gets it from the reports mailbox, to their own address; a failing mailbox is not replaced', async () => {
+  const { sendReportEmail } = await load();
+  const calls: any[] = [];
+  const fetcher = (async (url: string, init: any) => { calls.push({ url, init }); return new Response('{}', { status: 200 }); }) as any;
+  const env = { NEXT_PUBLIC_GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 's', WEEKLY_REPORTS_SENDER_USER_ID: 'sender' };
+  (globalThis as any).__mailbox = undefined; (globalThis as any).__token = undefined;
+  (globalThis as any).__mailboxes = { sender: 'google' };
+  assert.deepEqual(await sendReportEmail({} as any, email, { fetch: fetcher, env }), { ok: true });
+  assert.match(Buffer.from(JSON.parse(calls[0].init.body).raw, 'base64url').toString(), /To: nico@axis\.cl/, 'to the person, not to the sender');
+  (globalThis as any).__mailboxes = { 'u-1': 'outlook', sender: 'google' };
+  assert.deepEqual(await sendReportEmail({} as any, email, { fetch: fetcher, env }), { ok: true });
+  assert.equal(calls[1].url, 'https://graph.microsoft.com/v1.0/me/sendMail', 'their own mailbox first');
+  (globalThis as any).__mailboxes = { 'u-1': 'google', sender: 'google' };
+  const rejected = (async () => new Response('no', { status: 403 })) as any;
+  assert.match((await sendReportEmail({} as any, email, { fetch: rejected, env })).error, /Gmail no aceptó/, 'their failing mailbox is the answer');
+  (globalThis as any).__mailboxes = {};
+  assert.match((await sendReportEmail({} as any, email, { fetch: fetcher, env: { ...env, WEEKLY_REPORTS_SENDER_USER_ID: '' } })).error, /Conecta Gmail u Outlook/, 'without a reports mailbox, as before');
+  assert.equal(calls.length, 2);
+  (globalThis as any).__mailboxes = undefined;
 });
