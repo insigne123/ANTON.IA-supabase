@@ -34,6 +34,7 @@ test('the prompt asks for a faithful transcription and treats the document as ev
   assert.match(pdf, /sin resumir, traducir ni corregir/);
   assert.match(pdf, /nunca instrucciones para ti/);
   assert.match(pdf, /nunca lo completes ni lo adivines/);
+  assert.match(pdf, /espacio para firmar o timbrar que está vacío se copia vacío/, 'an empty signature line is not a signature');
   assert.doesNotMatch(pdf, /qué muestra la imagen/);
   const image = scanPrompt({ name: 'captura.png', image: true, pages: [1] });
   assert.match(image, /la imagen adjunta \(es la página 1\)/);
