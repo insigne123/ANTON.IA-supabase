@@ -16,8 +16,10 @@ const actorItem = (n: number, company: string, extra: Record<string, unknown> = 
 });
 const POOL = ['Ripley', 'Falabella', 'Paris', 'Lider', 'Tottus', 'Unimarc', 'Jumbo', 'Hites', 'Abcdin', 'Easy', 'Sodimac', 'Corona'];
 const searchCalls: any[] = [];
-const fakeSearch = async (input: any) => {
+const searchCaps: number[] = [];
+const fakeSearch = async (input: any, deps?: { maxRunUsd?: number }) => {
   searchCalls.push(input);
+  searchCaps.push(Number(deps?.maxRunUsd));
   return { results: splitLeadsFinderItems(POOL.map((company, index) => actorItem(index + 1, company)), ['validated']), fetched: POOL.length, notApplied: [], costUsd: 0.04 };
 };
 const profile = (id: string, extended: Record<string, unknown> = {}) => ({ id, full_name: `Persona ${id}`, email: `${id}@axis.cl`, company_name: 'AXIS',
@@ -190,6 +192,7 @@ test('opening it from «Hoy» makes today\'s contact once: one search, its first
   assert.equal(made.reason, null);
   assert.equal(searchCalls.length, 1);
   assert.equal(searchCalls[0].maxResults, 10, 'a small search for one person');
+  assert.equal(searchCaps.at(-1), 0.5, 'its cap is an ordinary search\'s: Apify refuses one of US$0.03');
   const drop = tables.lead_drops.find(row => row.id === made.id);
   assert.equal(drop.drop_date, '2026-10-22');
   assert.equal(drop.items.length, 1);
