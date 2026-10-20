@@ -256,3 +256,14 @@ export function sizeBands(size: number | null) {
   const index = size <= 10 ? 0 : size <= 50 ? 1 : size <= 200 ? 2 : size <= 500 ? 3 : size <= 1000 ? 4 : size <= 5000 ? 5 : 6;
   return bands.slice(Math.max(0, index - 1), index + 2);
 }
+
+// Words that are not the name: «Ministerio de Obras Públicas» is «MO», not «MD».
+const LINKING = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'y', 'e', 'en', 'of', 'the', 'and', '&']);
+
+/** The two letters of a company («Grupo Siglo Outsourcing» → «GS»), drawn when it has no logo. */
+export function companyInitials(name: string) {
+  const all = name.replace(/[^\p{L}\p{N}\s&]/gu, ' ').split(/\s+/).filter(Boolean);
+  const words = all.filter(word => !LINKING.has(word.toLowerCase())).length ? all.filter(word => !LINKING.has(word.toLowerCase())) : all;
+  if (!words.length) return '?';
+  return (words.length === 1 ? words[0].slice(0, 2) : `${words[0][0]}${words[1][0]}`).toLocaleUpperCase('es-CL');
+}
