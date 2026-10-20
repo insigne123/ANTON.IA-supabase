@@ -21,6 +21,8 @@ const PARALLEL = 3;
  * while there is time. Only for whoever will get them by email (the alerts on, an address, and their own mailbox or the
  * reports mailbox), one drop per person in their team's workspace. The morning alert (8:00) carries what is ready.
  * LEAD_DROPS_ENABLED=off stops it; LEAD_DROPS_MONTHLY_USD caps what Apify may spend in the month.
+ * A manual run (same secret) may name `userIds` in its body: only they are prepared, whether or not they get emails, so
+ * a drop can be tried with a test account before anyone receives one.
  */
 export async function POST(request: Request) {
   if (!isFirebaseSchedulerRequest(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -28,6 +30,8 @@ export async function POST(request: Request) {
   const now = new Date();
   if (!dropsEnabled()) return NextResponse.json({ skipped: 'off' }, { headers });
   if (!dropDay(now)) return NextResponse.json({ skipped: 'not_drop_day' }, { headers });
+  const body = await request.json().catch(() => null) as { userIds?: unknown } | null;
+  const only = Array.isArray(body?.userIds) ? new Set(body!.userIds.filter((id): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)).slice(0, 20)) : null;
   const started = Date.now();
   const timeLeft = () => WORK_MS - (Date.now() - started);
   const admin = getSupabaseAdminClient();
@@ -60,12 +64,13 @@ export async function POST(request: Request) {
       const done = new Set((existing.data || []).map((row: any) => String(row.user_id)));
       const mailbox = new Set((tokens.data || []).map((row: any) => String(row.user_id)));
       const sender = Boolean(reportSender());
-      const ids = [...new Set<string>((members.data || []).map((row: any) => String(row.user_id)))].filter(id => !done.has(id) && (sender || mailbox.has(id)));
+      const ids = [...new Set<string>((members.data || []).map((row: any) => String(row.user_id)))]
+        .filter(id => !done.has(id) && (only ? only.has(id) : sender || mailbox.has(id)));
       const reachable = new Set<string>();
       for (let start = 0; start < ids.length; start += 200) {
         const profiles: any = await admin.from('profiles').select('id,email,signatures').in('id', ids.slice(start, start + 200));
         if (profiles.error) return NextResponse.json({ error: 'No pudimos leer a quién preparar.' }, { status: 503, headers });
-        for (const row of profiles.data || []) if (String(row.email || '').trim() && readAlertsEmail(row.signatures)) reachable.add(String(row.id));
+        for (const row of profiles.data || []) if (only || (String(row.email || '').trim() && readAlertsEmail(row.signatures))) reachable.add(String(row.id));
       }
       // One drop per person, in the workspace of their team: the one with most people, or the first they joined.
       const size = new Map<string, number>();
