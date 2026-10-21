@@ -90,10 +90,39 @@ export const criteriaKey = (criteria: DropCriteria) => JSON.stringify([criteria.
 export type DropCandidate = Omit<DropItem, 'why' | 'research' | 'draft' | 'savedLeadId'> & { emailKey: string | null; linkedinKey: string | null; about: string | null };
 export type KnownPeople = { emails: Set<string>; linkedins: Set<string>; leadIds: Set<string> };
 
+// The country domains of the places a team may search in (and of its neighbours): the search filters by where the PERSON is,
+// so a Mexican company with someone in Santiago («gou.mx») came out as a contact «en Santiago».
+const COUNTRIES: Array<{ domain: string; names: string[] }> = [
+  { domain: 'cl', names: ['chile'] }, { domain: 'mx', names: ['mexico'] }, { domain: 'ar', names: ['argentina'] }, { domain: 'pe', names: ['peru'] },
+  { domain: 'br', names: ['brasil', 'brazil'] }, { domain: 'uy', names: ['uruguay'] }, { domain: 'py', names: ['paraguay'] }, { domain: 'bo', names: ['bolivia'] },
+  { domain: 'ec', names: ['ecuador'] }, { domain: 've', names: ['venezuela'] }, { domain: 'co', names: ['colombia'] }, { domain: 'es', names: ['espana', 'spain'] },
+  { domain: 'pt', names: ['portugal'] }, { domain: 'gt', names: ['guatemala'] }, { domain: 'cr', names: ['costa rica'] }, { domain: 'pa', names: ['panama'] },
+  { domain: 'do', names: ['republica dominicana'] },
+];
+/** The country a company domain belongs to (`.mx`, `.com.ar`), when it says one; `.co` alone is how many startups end, so only `.com.co` and the like are Colombian. */
+function domainCountry(domain: string | null | undefined) {
+  const labels = fold(String(domain || '')).split('.').filter(Boolean);
+  const tld = labels[labels.length - 1];
+  if (!tld) return null;
+  if (tld === 'co') return labels.length > 2 && ['com', 'net', 'org', 'gov', 'edu'].includes(labels[labels.length - 2]) ? 'co' : null;
+  return COUNTRIES.some(country => country.domain === tld) ? tld : null;
+}
+/**
+ * A company whose domain belongs to a country the search did not ask for («gou.mx» for «Chile»). Only when the places name a country
+ * we know («Chile», «Perú»): «Santiago» alone, or a `.com`, says nothing, and nothing is left out for that.
+ */
+export function foreignDomain(domain: string | null | undefined, locations: string[]) {
+  const own = domainCountry(domain);
+  if (!own) return false;
+  const asked = new Set(COUNTRIES.filter(country => locations.some(place => country.names.some(name => ` ${fold(place)} `.includes(` ${name} `)))).map(country => country.domain));
+  return asked.size > 0 && !asked.has(own);
+}
+
 /**
  * `size` contacts (DROP_SIZE) for each person of a group, different for each: only people with an email, none the team
- * already has or got in an earlier drop, one per company for each person and, while there are enough, a company nobody
- * else in the group got. People with a phone and with a title closer to the criteria go first.
+ * already has or got in an earlier drop, no company from another country than the one asked, one per company for each person
+ * and, while there are enough, a company nobody else in the group got. People with a phone and with a title closer to the
+ * criteria go first.
  */
 export function assignDrops(candidates: DropCandidate[], people: string[], known: KnownPeople, criteria: DropCriteria, size = DROP_SIZE) {
   const titleWords = criteria.titles.map(title => new Set(fold(title).split(' ').filter(word => word.length > 2)));
@@ -102,6 +131,7 @@ export function assignDrops(candidates: DropCandidate[], people: string[], known
     return Math.max(0, ...titleWords.map(set => [...set].filter(word => words.has(word)).length / Math.max(1, set.size)));
   };
   const usable = candidates.filter(item => item.hasEmail
+    && !foreignDomain(item.domain, criteria.locations)
     && !known.leadIds.has(item.leadId)
     && !(item.emailKey && known.emails.has(item.emailKey))
     && !(item.linkedinKey && known.linkedins.has(item.linkedinKey)))

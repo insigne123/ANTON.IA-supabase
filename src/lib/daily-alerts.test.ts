@@ -65,10 +65,22 @@ test('commitments, research and new contacts lead in that order', () => {
   assert.equal(alert.subject, 'Vencido: Enviar propuesta con Rosa Díaz (Logística Norte)');
   assert.deepEqual(alert.lines.map(line => line.kind), ['commitment', 'research', 'ready', 'goal']);
   assert.deepEqual(alert.lines[1], { kind: 'research', text: 'Lista la investigación de Pedro Rojas', href: '/saved/leads/enriched?investigar=lead-1' });
-  assert.equal(alert.lines[2].text, 'Tus 12 contactos de ayer ya tienen correo: escríbeles desde «Por escribir»');
+  assert.equal(alert.lines[2].text, 'Los 12 contactos que guardaste ayer ya tienen correo: escríbeles desde «Por escribir»');
   assert.equal(alert.lines[3].href, '/saved/leads/enriched');
   const ready = composeAlert(facts({ newReady: { count: 1, yesterday: false } }), TUESDAY)!;
-  assert.equal(ready.subject, 'Tu contacto nuevo ya tiene correo');
+  assert.equal(ready.subject, 'El contacto que guardaste ya tiene correo');
+  assert.equal(ready.lines[0].text, 'El contacto que guardaste ya tiene correo: escríbele desde «Por escribir»');
+});
+
+test('the contacts you saved are never worded as the contact of the day (Rodrigo read «Tus 3 contactos» and looked for three)', () => {
+  const item = { leadId: 'lf_1', name: 'Enrique Ruiz', title: 'Gerente de Personas', company: 'Gou', domain: 'gou.cl', industry: null, size: null, city: 'Santiago', hasEmail: true, hasPhone: false,
+    why: 'Calza con tu cliente ideal por su cargo.', research: [], draft: null, savedLeadId: null };
+  const drop = { id: 'd-1', items: [item] };
+  const alert = composeAlert(facts({ newReady: { count: 3, yesterday: true }, ready: 3, drop }), WEDNESDAY)!;
+  const email = alertEmail(alert, 'Rodrigo', 'https://app.antonia.ai/', drop);
+  assert.match(email.text, /Los 3 contactos que guardaste ayer ya tienen correo/);
+  assert.match(email.text, /Tu contacto de hoy, con su correo listo/);
+  for (const copy of [alert.subject, ...alert.lines.map(line => line.text), email.text, email.html]) assert.doesNotMatch(copy, /Tus 3 contactos/);
 });
 
 test('a goal that is behind is reason enough on Wednesdays and Fridays, in one workspace only', () => {
