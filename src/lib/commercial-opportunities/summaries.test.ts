@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cleanSummary, needsTenderDetail, opportunitySummary, summaryBasis, summaryCase, summaryFromNameOnly, summaryPrompt } from './summaries';
+import { cleanSummary, fallbackLine, needsTenderDetail, opportunitySummary, summaryBasis, summaryCase, summaryFromNameOnly, summaryPrompt } from './summaries';
 
 const tender = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ id: 't1', kind: 'tender', title: 'SERVICIO DE VIGILANCIA SAG AEROPUERTO', buyer_name: null,
   company_name: null, amount: null, currency: null, deadline_at: null, data, ...extra });
@@ -72,4 +72,27 @@ test('the saved summary is read only when it has text', () => {
   assert.equal(opportunitySummary({ summary: { text: '' } }), null);
   assert.equal(opportunitySummary({}), null);
   assert.equal(opportunitySummary(null), null);
+});
+
+test('a LinkedIn card with no summary yet says what the screening already found: why it matters, or else the jobs or the post', () => {
+  const hiring = (reasons: unknown, description: string, kind = 'hiring') => ({ kind, title: 'Actividad de contratación: Assetplan', reasons, data: { description } });
+  const jobs = 'Guardia de Seguridad Part Time · Santiago, Región Metropolitana, Chile · https://cl.linkedin.com/jobs/view/a\nGuardia 4x4 Edificios · Providencia, Chile · https://cl.linkedin.com/jobs/view/b\nConserje Nocturno · Ñuñoa · https://cl.linkedin.com/jobs/view/c';
+  const why = 'Búsqueda de guardias part time y 4x4 para edificios residenciales; señal de dotación de seguridad, pero no se sabe si se externalizará.';
+  assert.equal(fallbackLine(hiring([why], jobs)), why, 'the screening reason first');
+  assert.equal(fallbackLine(hiring(['Pendiente de evaluación de afinidad'], jobs)), 'Busca Guardia de Seguridad Part Time, Guardia 4x4 Edificios y 1 más.', 'a generic reason says nothing: the jobs do');
+  assert.equal(fallbackLine(hiring([], jobs.split('\n').slice(0, 2).join('\n'))), 'Busca Guardia de Seguridad Part Time y Guardia 4x4 Edificios.');
+  assert.equal(fallbackLine(hiring([], 'Operador de Grúa Horquilla · Santiago · https://x')), 'Busca Operador de Grúa Horquilla.');
+  assert.equal(fallbackLine(hiring([], 'Operador · A\nOperador · B\nVendedor · C')), 'Busca Operador y Vendedor.', 'the same job posted twice counts once');
+  assert.equal(fallbackLine(hiring(['Pendiente de evaluación'], '')), null, 'nothing to say: nothing shown');
+  assert.equal(fallbackLine(hiring(undefined, '')), null);
+  assert.equal(fallbackLine(hiring('not a list' as any, jobs)), 'Busca Guardia de Seguridad Part Time, Guardia 4x4 Edificios y 1 más.');
+  assert.equal(fallbackLine(hiring([], 'Actividad de contratación: Assetplan')), 'Busca Actividad de contratación: Assetplan.', 'whatever the postings say');
+  const long = 'x'.repeat(400);
+  assert.ok(fallbackLine(hiring([`${long} y más`], jobs))!.length <= 220, 'a long reason is cut');
+  assert.match(fallbackLine(hiring(['palabra '.repeat(80)], jobs))!, /…$/);
+  // A post: its reason, or else what it says.
+  assert.equal(fallbackLine(hiring([], 'Buscamos proveedores de mano de obra para nuestra licitación en Bogotá.', 'linkedin_post')), 'Buscamos proveedores de mano de obra para nuestra licitación en Bogotá.');
+  assert.equal(fallbackLine(hiring([], '   ', 'linkedin_post')), null);
+  // Everything else waits for its summary.
+  for (const kind of ['tender', 'compra_agil', 'private']) assert.equal(fallbackLine(hiring([why], jobs, kind)), null, kind);
 });

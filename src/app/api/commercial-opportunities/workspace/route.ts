@@ -5,6 +5,7 @@ import { criteriaSchema } from '@/lib/server/commercial-opportunities/workspace-
 import { companyContextSchema, privateOpportunitySchema } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityDiscovery, runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
+import { parsePrioritySort } from '@/lib/commercial-opportunities/priority';
 import { PIPELINE_MAX, readOpportunityPipeline } from '@/lib/server/commercial-opportunities/workspace-pipeline';
 import { OPPORTUNITY_SOURCES, sourceKinds, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { AuthError } from '@/lib/server/auth-utils';
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
     if (params.get('view') === 'pipeline') {
       assertOpportunityAdmin(scope);
       const limit = z.coerce.number().int().min(0).max(PIPELINE_MAX).optional().catch(undefined);
-      return opportunitiesJson(await readOpportunityPipeline(auth.admin, scope, { kinds: sourceKinds(source), query: z.string().max(200).catch('').parse(params.get('query') || ''),
+      return opportunitiesJson(await readOpportunityPipeline(auth.admin, scope, { kinds: sourceKinds(source), query: z.string().max(200).catch('').parse(params.get('query') || ''), sort: parsePrioritySort(params.get('sort')),
         limits: { found: limit.parse(params.get('found') ?? undefined), recommended: limit.parse(params.get('recommended') ?? undefined), excluded: limit.parse(params.get('excluded') ?? undefined) } }));
     }
     const options = z.object({ view: z.enum(['all','recommended','review','excluded','pending','assigned','working','blocked','submitted','won','lost','archived']), query: z.string().max(200), page: z.coerce.number().int().min(0).max(1000) })
