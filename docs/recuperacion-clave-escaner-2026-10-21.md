@@ -36,13 +36,26 @@ En Supabase: **Authentication → Emails → Reset password**, cambiar el enlace
 <p><a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery">Crear contraseña nueva</a></p>
 ```
 
-`{{ .RedirectTo }}` es el destino que la app ya envía al pedir el enlace (`…/api/auth/callback?next=%2Frestablecer-clave`), por lo que ya está en las direcciones permitidas y el resto del enlace se agrega con `&`. Un cuerpo completo, si se prefiere reescribirlo:
+`{{ .RedirectTo }}` es el destino que la app ya envía al pedir el enlace (`…/api/auth/callback?next=%2Frestablecer-clave`), por lo que ya está en las direcciones permitidas y el resto del enlace se agrega con `&`.
+
+Cuerpo completo (el de la plantilla actual, con los dos enlaces cambiados y sin la frase «Abre el enlace en el mismo navegador…», que ya no aplica: el enlace nuevo funciona desde cualquier navegador). El asunto no cambia («Crea una contraseña nueva para ANTON.IA»):
 
 ```html
-<h2>Crea tu contraseña nueva</h2>
-<p>Pediste cambiar tu contraseña de ANTON.IA. Pulsa el botón para elegir una nueva:</p>
-<p><a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery">Crear contraseña nueva</a></p>
-<p>Si no fuiste tú, ignora este correo: tu contraseña sigue igual.</p>
+<!doctype html>
+<html lang="es">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Recupera tu contraseña de ANTON.IA</title></head>
+  <body style="margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,sans-serif;line-height:1.6">
+    <main style="max-width:520px;margin:32px auto;padding:28px;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px">
+      <p style="font-size:14px;font-weight:bold;color:#4338ca">ANTON.IA</p>
+      <h1 style="font-size:24px;line-height:1.3">Crea una contraseña nueva</h1>
+      <p>Recibimos una solicitud para recuperar el acceso a tu cuenta. Pulsa el botón y elige tu contraseña nueva.</p>
+      <p style="margin:28px 0"><a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=recovery" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#4338ca;color:#ffffff;text-decoration:none;font-weight:bold">Cambiar mi contraseña</a></p>
+      <p>Si no solicitaste este cambio, puedes ignorar el correo. Tu contraseña seguirá siendo la misma.</p>
+      <p style="font-size:13px;color:#475569">Si el botón no funciona, copia este enlace en tu navegador:</p>
+      <p style="font-size:13px;overflow-wrap:anywhere"><a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=recovery" style="color:#4338ca">{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=recovery</a></p>
+    </main>
+  </body>
+</html>
 ```
 
 ## Cómo comprobarlo después de cambiar la plantilla
