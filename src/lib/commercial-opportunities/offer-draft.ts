@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { citationSchema, validOpportunityCitation, type DocumentChunk, type OpportunityReport } from './expedient';
 import { clampSubmissionKit, offerNumbers } from './submission-kit';
+import { clampOfferAnnexes, type OfferAnnex } from './offer-annexes';
 
 const s = (max: number) => z.string().max(max);
 export const OFFER_DRAFT_VERSION = 1;
@@ -36,7 +37,8 @@ export const offerDraftSchema = z.object({
   /** The data the team must fill in before sending, in short sentences. */
   missing: z.array(s(500)).max(24),
 });
-export type OfferDraft = z.infer<typeof offerDraftSchema>;
+/** The draft the model writes, plus the forms of the bases it filled in (written apart, see offerAnnexesSchema); older drafts have none. */
+export type OfferDraft = z.infer<typeof offerDraftSchema> & { annexes?: OfferAnnex[] };
 /** What the page reads: the draft and the prices the team typed, by line index. */
 export type OfferPrices = Record<string, number>;
 export type SavedOfferDraft = { id: string; created_at: string; updated_at?: string; revision: number; report_id: string | null; draft: OfferDraft; prices: OfferPrices };
@@ -57,6 +59,7 @@ export function clampOfferDraft(draft: OfferDraft): OfferDraft {
     },
     letter: clip(draft.letter.trim(), 4000),
     missing: [...new Set(draft.missing.map(item => clip(item.trim(), 300)).filter(Boolean))].slice(0, 16),
+    ...(draft.annexes ? { annexes: clampOfferAnnexes(draft.annexes) } : {}),
   };
 }
 /** Keeps only the citations that are really in the documents. */
@@ -141,9 +144,9 @@ Escribe en español de Chile, formal y concreto, como se escribe una oferta a un
 REGLAS
 - Nunca inventes experiencia, años, clientes, personal, certificaciones, equipos, plazos ni precios. Usa solo lo que dice la empresa abajo, incluida su ficha para licitaciones (razón social, RUT, experiencia, certificaciones); en la ficha «no sé» es un dato que falta. Lo que falte va como marcador entre corchetes, por ejemplo [N.º de contratos similares], [nombre del jefe de proyecto], [RUT de la empresa], y se lista en missing.
 - technical: una sección por cada criterio de evaluación técnico o requisito técnico de las bases, en el orden en que las bases los evalúan; primero los que más puntaje dan. heading es un título corto; criterion es el criterio o requisito tal como lo nombran las bases; weight es su ponderación si las bases la dan («30 %», «20 puntos»), si no vacío. body es el texto de la oferta para ese criterio, listo para pegar: qué hará la empresa, cómo, con qué recursos y en qué plazos, usando lo que la empresa ofrece y marcadores para lo que falte. Cita en evidence el fragmento de las bases que pide ese criterio (chunkId y quote exactos de los hechos).
-- compliance: cada requisito técnico obligatorio o especificación que las bases piden cumplir, con answer en primera persona plural («Cumplimos: …», o «[confirmar si cumplimos: …]» cuando no se sabe). Cita el requisito.
+- compliance: cada requisito técnico obligatorio o especificación que las bases piden cumplir (no omitas ninguno), con answer en primera persona plural: «Cumplimos: …» y cómo, solo cuando la empresa o su ficha lo respaldan; cuando no se sabe, «[confirmar si cumplimos: …]» con el requisito en pocas palabras. Cita el requisito.
 - economic.lines: las líneas que hay que cotizar, con su cantidad y unidad. Si vienen las líneas oficiales de Mercado Público, úsalas tal cual (misma descripción, cantidad y unidad) y en notes lo que las bases aclaren de cada una. Si no, sácalas de las bases. Nunca pongas precios: los escribe el equipo. priceBasis dice si en el portal va el valor neto o total con IVA (unknown si no se sabe). validity es la vigencia de la oferta que piden las bases; paymentTerms, la forma de pago; notes, lo que afecta el precio (reajustes, costos incluidos, multas, garantías).
-- letter: carta de presentación al organismo, breve, con el nombre y el ID de la licitación, qué ofrece la empresa y la declaración de aceptar las bases; con marcadores para nombre, RUT, representante legal, firma y fecha.
+- letter: solo el CUERPO de la carta de presentación al organismo, en 2 a 4 párrafos: qué ofrece la empresa, con qué dotación o recursos y la declaración de conocer y aceptar las bases y sus anexos. Sin fecha, destinatario, referencia, saludo, despedida ni firma: el documento los pone solo. Los datos de la empresa que no tengas van como marcadores entre corchetes.
 - summary: un párrafo que abre la oferta técnica: qué ofrece la empresa a este organismo y por qué calza.
 - missing: hasta 16 datos concretos que el equipo debe completar o confirmar antes de enviar.
 - Las bases mandan: si algo de la empresa contradice las bases, dilo en missing. No repitas la guía de postulación (carpetas, plazos del portal).
@@ -159,6 +162,43 @@ GUIA: ${JSON.stringify(kit ? { documentos: kit.folders.flatMap(f => f.documents.
 LINEAS OFICIALES: ${JSON.stringify(input.officialItems)}
 HECHOS DE LAS BASES (con su cita): ${JSON.stringify(offerFacts(input.report))}`;
 }
+
+/**
+ * The prompt of the forms: the annexes of the bases that go in the offer, written as forms the team fills in. It reads the text
+ * of the forms themselves (the «Anexo» files and the annexes pasted in the bases): the model copies their fields, their
+ * tables and their declarations, and fills in only what the company said of itself.
+ */
+export function offerAnnexesPrompt(input: {
+  opportunity: { title: string; buyer: string | null; code?: string | null };
+  company: CompanyFacts; report: OpportunityReport; forms: Array<{ name: string; text: string }>; economicLines: OfficialItem[];
+}) {
+  const kit = input.report.submission ? clampSubmissionKit(input.report.submission) : null;
+  const wanted = (kit?.folders || []).flatMap(folder => folder.documents.filter(doc => doc.source === 'annex' || /anexo|formulario|formato|declaraci[oó]n/i.test(doc.title))
+    .map(doc => ({ carpeta: folder.name, titulo: doc.title, conFirma: doc.signed, sinEsteDocumentoQuedasFuera: doc.excludesIfMissing, comoSeLlena: doc.howTo })));
+  return `Arma los FORMULARIOS (anexos) de la oferta de esta empresa para esta licitación o compra, como documentos que el equipo llenará en Word y enviará.
+Escribe en español de Chile, formal. Cada formulario es lo que las bases piden entregar «en el formato del anexo».
+
+REGLAS
+- annexes: un formulario por cada documento de DOCUMENTOS A ENTREGAR que sea un anexo o formulario de las bases, en el orden de las bases y con su número y título tal como las bases los dan («Anexo N°1», «Identificación del oferente y declaración jurada»). Si las bases juntan varios en un archivo (Anexo 3, 4-A y 4-B), haz uno por cada uno. No inventes formularios que las bases no piden; no incluyas certificados ni documentos que emite un tercero.
+- Si el texto del formulario está en FORMULARIOS DE LAS BASES, reprodúcelo fielmente (faithful = true): los mismos datos pedidos, las mismas columnas y filas fijas (las oficinas, los ítems a cotizar, los años de experiencia), las mismas opciones (SÍ / NO, marcar con una X) y el texto de cada declaración palabra por palabra, con sus referencias legales. Si no está, ármalo con lo que piden las bases para ese documento (faithful = false) y sé explícito en intro.
+- blocks, en el orden del formulario: kind «text» para una declaración o instrucción (text); «fields» para datos de una línea (label y value); «table» con columns, las filas que el formulario ya trae en rows y blankRows para las filas que el oferente agrega (por ejemplo, tantas como contratos o trabajadores pidan las bases); «choices» para casillas que se marcan (options). title es el subtítulo del bloque cuando lo tiene.
+- Llena value, y las celdas de las filas, SOLO con datos que la empresa dio abajo (razón social y RUT de su ficha). Lo que no sepas va vacío en fields y tablas, y como marcador entre corchetes en los textos («[nombre del representante legal]», «[domicilio]»). En una declaración, reemplaza los espacios del formulario («(nombre representante legal)», «______») por marcadores entre corchetes, o por el dato de la empresa si lo tienes. Nunca inventes datos, cifras, años ni precios: los precios los escribe el equipo, deja las celdas de precio con «$» o vacías.
+- signed: true cuando el formulario termina con firma del representante legal o de la persona natural; la firma, el lugar y la fecha los agrega el documento, no los pongas en blocks.
+- missing: los datos o documentos concretos que el equipo debe conseguir para llenar estos formularios, en frases cortas.
+- Las bases mandan. Si algo de la empresa contradice las bases, dilo en missing.
+
+OPORTUNIDAD: ${JSON.stringify({ titulo: input.opportunity.title, organismo: input.opportunity.buyer, id: input.opportunity.code || null })}
+EMPRESA: ${JSON.stringify({ oferta: input.company.offer.slice(0, 1500), ...(input.company.ficha ? { fichaParaLicitaciones: input.company.ficha } : {}) })}
+DOCUMENTOS A ENTREGAR: ${JSON.stringify(wanted)}
+LINEAS A COTIZAR: ${JSON.stringify(input.economicLines)}
+REQUISITOS DEL INFORME: ${JSON.stringify(input.report.requirements.slice(0, 60).map(r => ({ titulo: r.title, accion: r.action.slice(0, 200) })))}
+FORMULARIOS DE LAS BASES (texto de cada documento): ${JSON.stringify(input.forms)}`;
+}
+
+/** The forms the model wrote, bounded; the offer carries them as it carries the rest. */
+export const withOfferAnnexes = (draft: OfferDraft, annexes: OfferAnnex[], missing: string[] = []): OfferDraft => clampOfferDraft({
+  ...draft, annexes: clampOfferAnnexes(annexes), missing: [...draft.missing, ...missing],
+});
 
 /** A price typed the Chilean way, or null; zero is a price too (an item included at no cost). */
 export function offerPrice(value: unknown) {

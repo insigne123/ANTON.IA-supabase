@@ -101,7 +101,8 @@ export function MarkedItem({ markKey, label, marks, checkable = true, disabled, 
   if (!marks) return <>{children}</>;
   const mark = marks[markKey] ?? emptyMark(markKey);
   return (
-    <div id={`mark-${markKey.replace(':', '-')}`} className={cn('group/item grid scroll-mt-24 gap-3 rounded-xl transition-colors xl:grid-cols-[minmax(0,1fr)_15rem]',
+    // The note column exists only when there is a note to put in it: otherwise the item takes the whole width.
+    <div id={`mark-${markKey.replace(':', '-')}`} className={cn('group/item grid scroll-mt-24 gap-3 rounded-xl transition-colors', (mark.note || editing) && 'xl:grid-cols-[minmax(0,1fr)_15rem]',
       mark.highlight && '-mx-2 bg-cw-warning-soft/70 px-2 py-1 ring-1 ring-cw-warning/20')}>
       <div className="flex min-w-0 items-start gap-3">
         {checkable ? <DoneCheck done={mark.done} label={label} disabled={disabled} onChange={done => onChange({ key: markKey, label, done })} /> : null}

@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import type { DocumentChunk, OpportunityReport } from '@/lib/commercial-opportunities/expedient';
-import { cleanOfferPrices, companyProfileExtras, offerDraftChunkIds, offerDraftPrompt, offerDraftSchema, officialTenderItems, validateOfferDraft,
+import { cleanOfferPrices, companyProfileExtras, offerAnnexesPrompt, offerDraftChunkIds, offerDraftPrompt, offerDraftSchema, officialTenderItems, validateOfferDraft, withOfferAnnexes,
   type OfferDraft, type OfficialItem, type SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
+import { offerAnnexesSchema, offerFormExcerpts, type OfferAnnex } from '@/lib/commercial-opportunities/offer-annexes';
 import { OPPORTUNITY_BUCKET, type WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { assertOpportunityRead } from './workspace-access';
 import { addOpportunityActivity, opportunityDb } from './workspace-store';
@@ -46,6 +47,19 @@ async function readOfficialItems(client: SupabaseClient, job: OpportunityJob): P
   } catch { return []; }
 }
 
+/** The text of the forms of the bases (the «Anexo» files and the annexes inside the bases), to copy them faithfully. */
+async function readFormExcerpts(client: SupabaseClient, job: OpportunityJob) {
+  const documents = (opportunityDb(await client.from('opportunity_documents').select('id,name').eq('organization_id', job.organization_id).eq('opportunity_id', job.opportunity_id).limit(200)) || []) as Array<{ id: string; name: string }>;
+  const chunks: Array<{ document_id: string; ordinal: number; content: string }> = [];
+  for (let page = 0; page < 8; page++) {
+    const batch = (opportunityDb(await client.from('opportunity_document_chunks').select('document_id,ordinal,content').eq('organization_id', job.organization_id).eq('opportunity_id', job.opportunity_id)
+      .order('document_id').order('ordinal').range(page * 1000, page * 1000 + 999)) || []) as typeof chunks;
+    chunks.push(...batch);
+    if (batch.length < 1000) break;
+  }
+  return offerFormExcerpts(chunks, documents);
+}
+
 export async function runOpportunityOffer(client: SupabaseClient, job: OpportunityJob) {
   const scope: WorkScope = { organizationId: job.organization_id, userId: job.requested_by };
   const id = job.opportunity_id!;
@@ -74,15 +88,30 @@ export async function runOpportunityOffer(client: SupabaseClient, job: Opportuni
   const ids = offerDraftChunkIds(raw);
   const chunks = ids.length ? (opportunityDb(await client.from('opportunity_document_chunks').select('id,document_id,ordinal,locator,content')
     .eq('organization_id', job.organization_id).eq('opportunity_id', id).in('id', ids)) || []) as DocumentChunk[] : [];
-  const draft = validateOfferDraft(raw, chunks);
-  if (!draft.technical.length && !draft.economic.lines.length) throw new AuthError('La IA no encontró en el informe lo necesario para armar la oferta. Sube las bases y actualiza el informe.', 422);
+  const base = validateOfferDraft(raw, chunks);
+  if (!base.technical.length && !base.economic.lines.length) throw new AuthError('La IA no encontró en el informe lo necesario para armar la oferta. Sube las bases y actualiza el informe.', 422);
+  // The forms of the bases are written apart, from their own text: a form is long, and it wants the exact words of the bases. If they
+  // cannot be written (the budget, an odd answer), the offer still goes out, saying so, and the team can ask for another version.
+  let annexes: OfferAnnex[] = []; let annexMissing: string[] = [];
+  try {
+    const annexPrompt = offerAnnexesPrompt({ opportunity: { title: item.title, buyer: item.buyer_name || item.company_name, code: item.data?.observed?.code ?? null },
+      company: { offer: String(context.offer || ''), services: context.services || [], territories: context.territories || [], exclusions: context.exclusions || [], ...(ficha ? { ficha } : {}) },
+      report, forms: await readFormExcerpts(client, job), economicLines: base.economic.lines.map(line => ({ description: line.description, unit: line.unit, quantity: line.quantity })) });
+    const result = await opportunityGenerate(client, job, { step: `offer-annexes:${createHash('sha256').update(annexPrompt).digest('hex')}`, category: 'research', role: 'report',
+      schema: offerAnnexesSchema, output: 14_000, prompt: annexPrompt });
+    annexes = result.annexes; annexMissing = result.missing;
+  } catch (error) {
+    if (error instanceof AuthError && error.status === 409) throw error;
+    annexMissing = ['No pudimos preparar los formularios de las bases: descárgalos en «Documentos» y llénalos con los datos de la oferta (o prepara otra versión).'];
+  }
+  const draft = withOfferAnnexes(base, annexes, annexMissing);
   opportunityDb(await client.from(DRAFTS).upsert({ organization_id: job.organization_id, opportunity_id: id, report_id: saved.id, job_id: job.id,
     created_by: job.requested_by, draft }, { onConflict: 'job_id', ignoreDuplicates: true }));
   await addOpportunityActivity(client, scope, id, 'offer', 'Borrador de oferta preparado', { jobId: job.id }, `offer:${job.id}`).catch(() => undefined);
   await client.from('opportunity_notifications').upsert({ organization_id: job.organization_id, opportunity_id: id, user_id: job.requested_by,
     title: `Borrador de oferta listo: ${String(item.title || 'oportunidad').slice(0, 460)}`, kind: 'report', event_key: `offer:${job.id}` },
     { onConflict: 'organization_id,user_id,event_key', ignoreDuplicates: true }).then(() => undefined, () => undefined);
-  return { offerReady: true, sections: draft.technical.length, lines: draft.economic.lines.length };
+  return { offerReady: true, sections: draft.technical.length, lines: draft.economic.lines.length, annexes: annexes.length };
 }
 
 /** The latest draft of an opportunity, with the prices the team typed; null before the first one (or before the table exists). */

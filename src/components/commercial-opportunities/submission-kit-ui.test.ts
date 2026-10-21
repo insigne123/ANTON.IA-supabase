@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import * as reportView from '@/lib/commercial-opportunities/report-view';
 import * as reportMarks from '@/lib/commercial-opportunities/report-marks';
 import * as submissionKit from '@/lib/commercial-opportunities/submission-kit';
+import * as offerAnnexes from '@/lib/commercial-opportunities/offer-annexes';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -24,6 +25,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/report-view': reportView,
   '@/lib/commercial-opportunities/report-marks': reportMarks,
   '@/lib/commercial-opportunities/submission-kit': submissionKit,
+  '@/lib/commercial-opportunities/offer-annexes': offerAnnexes,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./ReportMarks'] = load(await compile('./ReportMarks.tsx'));
@@ -80,4 +82,25 @@ test('a report from before the guide lists its requirements with the same ticks,
   assert.match(empty, /Genera el informe y la IA armará esta guía/);
   assert.match(empty, /Monto de la ficha: \$212\.000\.000/);
   assert.match(empty, /Ingresa la oferta con «Ofertar»/);
+});
+
+test('the page uses its whole width: a header with the progress, what to prepare in the wide column and what to check beside it', () => {
+  const html = renderToStaticMarkup(React.createElement(SubmissionKit, { report: { ...base, submission }, opportunity, marks: { available: true, items: {} }, onMark: async () => null }));
+  assert.doesNotMatch(html, /max-w-3xl/, 'no narrow centered column');
+  assert.match(html, /<header[^>]*lg:grid-cols-\[minmax\(0,1fr\)_minmax\(18rem,26rem\)\]/, 'title and progress side by side');
+  const main = html.indexOf('Qué entregar');
+  const side = html.indexOf('<aside');
+  assert.ok(main > 0 && side > main, 'documents first, the checks in the aside');
+  const aside = html.slice(side);
+  for (const heading of ['Lo que te deja fuera', 'Los números', 'Garantías', 'Para preguntar en el foro', 'Cómo se envía en Mercado Público', 'Después de enviar']) assert.ok(aside.includes(heading), heading);
+  assert.ok(!html.slice(0, side).includes('Lo que te deja fuera'), 'the rules are not in the wide column');
+});
+
+test('a form the offer already filled in offers its Word on its own row, in place of the chat draft', () => {
+  const annexes = [{ number: 'Anexo N°4', title: 'Formato oficial de oferta económica', intro: '', signed: true, faithful: true, blocks: [{ kind: 'text', title: '', text: 'Declaro.', fields: [], columns: [], rows: [], blankRows: 0, options: [] }] }];
+  const html = renderToStaticMarkup(React.createElement(SubmissionKit, { report: { ...base, submission }, opportunity, marks: { available: true, items: {} }, onMark: async () => null, onDraft: () => undefined,
+    annexes, annexHref: (index: number) => `/export?annex=${index}` }));
+  assert.match(html, /<a href="\/export\?annex=0">/);
+  assert.match(text(html), /Descargar Word para llenar/);
+  assert.doesNotMatch(text(html), /Preparar borrador/, 'the only form with a draft is the annex, and its Word replaces the chat');
 });

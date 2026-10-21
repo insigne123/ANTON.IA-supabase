@@ -452,10 +452,12 @@ export function OpportunityWorkWorkspace() {
         {tab === 'apply' && !signal && <SubmissionKit report={latest?.report ?? null} opportunity={{ title: item.title, kind: item.kind, amount: item.amount, currency: item.currency, deadline: item.deadline_at }}
           marks={detail.marks} onMark={mark} people={detail.members || detail.participants} onGenerate={generate} generating={researching}
           hideNumbers={Boolean(detail.offer?.latest?.draft.economic.lines.length)}
+          annexes={detail.offer?.latest?.draft.annexes} annexHref={index => `/api/commercial-opportunities/${selected}/export?doc=offer&format=docx&annex=${index}`}
           offer={latest && OFFER_KINDS.includes(item.kind) ? <OfferDraft offer={detail.offer} job={offerJob} onPrepare={prepareOffer} preparing={busy} onSavePrices={saveOfferPrices}
             downloadHref={`/api/commercial-opportunities/${selected}/export?doc=offer&format=docx`}
+            annexHref={index => `/api/commercial-opportunities/${selected}/export?doc=offer&format=docx&annex=${index}`}
             budget={{ amount: latest.report.submission?.numbers.budget ?? item.amount, includesTax: latest.report.submission?.numbers.budgetIncludesTax ?? null }} /> : null}
-          onDraft={latest ? title => ask(`Prepara el borrador de «${title}» tal como lo piden las bases, con los datos de mi empresa que conoces y espacios como [RUT] o [firma] para lo que falte, listo para copiar.`) : undefined} />}
+          onDraft={latest ? title => ask(`Prepara el borrador de «${title}» como un formulario listo para llenar y pegar en Word: el título tal como lo dan las bases, una tabla de dos columnas (Campo | Dato) con los datos de mi empresa que conoces, el texto de cada declaración o cláusula tal como lo piden las bases, y [corchetes] para lo que falte. Si no tienes el formato oficial en los fragmentos, dilo al comienzo en una frase.`) : undefined} />}
         {tab === 'market' && MARKET_KINDS.includes(item.kind) && <WinPlan id={selected} />}
         {tab === 'documents' && <section className="space-y-5">
           {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}

@@ -11,7 +11,9 @@ import {CoworkExportError} from '@/lib/server/cowork/file-exports';
 import {opportunitiesJson} from '@/lib/server/commercial-opportunities/responses';
 import { opportunityExportName } from '@/lib/commercial-opportunities/export-file-name';
 import { offerDraftMarkdown } from '@/lib/commercial-opportunities/offer-draft';
+import { clampSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
 import { readOpportunityOffer } from '@/lib/server/commercial-opportunities/workspace-offer';
+import { loadTenderProfile } from '@/lib/server/commercial-opportunities/tender-profile-read';
 
 export const dynamic = 'force-dynamic'; export const maxDuration = 60;
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -19,7 +21,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
     const params = new URL(request.url).searchParams;
-    if (params.get('doc') === 'offer') return await offerExport(auth.admin, scope, id, z.enum(['docx', 'md']).parse(params.get('format') || 'docx'));
+    if (params.get('doc') === 'offer') return await offerExport(auth.admin, scope, id, z.enum(['docx', 'md']).parse(params.get('format') || 'docx'), params.get('annex') === null ? undefined : z.coerce.number().int().min(0).max(40).parse(params.get('annex')));
     const format = z.enum(['pdf', 'md', 'docx', 'xlsx', 'zip']).parse(params.get('format') || 'pdf');
     const row = opportunityDb(await auth.admin.from('opportunity_reports').select('report').eq('organization_id', scope.organizationId).eq('opportunity_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle());
     if (!row) throw new AuthError('El informe aún no está disponible.', 409);
@@ -62,24 +64,34 @@ function download(bytes: Uint8Array, mime: string, name: string, format: string)
   const ascii = opportunityStorageName(`${name}.x`).replace(/\.x$/, '').replace(/"/g, '');
   return new Response(new Uint8Array(bytes).buffer, { headers: { 'Content-Type': mime, 'Content-Disposition': `attachment; filename="${ascii}.${format}"; filename*=UTF-8''${encodeURIComponent(`${name}.${format}`)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
 }
-/** «Tu oferta» in Word or Markdown: the latest draft with the prices the team typed, compared with the budget of the bases. */
-async function offerExport(client: Parameters<typeof readOpportunityOffer>[0], scope: Parameters<typeof readOpportunityOffer>[1], id: string, format: 'docx' | 'md') {
+/**
+ * «Tu oferta» in Word or Markdown: the latest draft with the prices the team typed, compared with the budget of the bases. The Word is
+ * the formal document the team fills in (offer-docx.ts); `annex` asks for one form of the bases on its own.
+ */
+async function offerExport(client: Parameters<typeof readOpportunityOffer>[0], scope: Parameters<typeof readOpportunityOffer>[1], id: string, format: 'docx' | 'md', annex?: number) {
   const offer = await readOpportunityOffer(client, scope, id);
   if (!offer.latest) throw new AuthError('Aún no hay un borrador de oferta.', 409);
-  const [itemRow, reportRow] = await Promise.all([
-    client.from('commercial_opportunities').select('title,buyer_name,company_name,amount').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle(),
+  if (annex !== undefined && !offer.latest.draft.annexes?.[annex]) throw new AuthError('Ese formulario no está en el borrador de la oferta.', 404);
+  const [itemRow, reportRow, profile] = await Promise.all([
+    client.from('commercial_opportunities').select('title,buyer_name,company_name,amount,deadline_at,data').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle(),
     client.from('opportunity_reports').select('report').eq('organization_id', scope.organizationId).eq('opportunity_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    loadTenderProfile(client, scope.organizationId).catch(() => null),
   ]);
-  const item = opportunityDb(itemRow); const numbers = (opportunityDb(reportRow)?.report as OpportunityReport | undefined)?.submission?.numbers;
+  const item = opportunityDb(itemRow); const report = opportunityDb(reportRow)?.report as OpportunityReport | undefined; const numbers = report?.submission?.numbers;
   const title = item?.title || 'Oportunidad';
-  const markdown = offerDraftMarkdown(offer.latest, { title, buyer: item?.buyer_name || item?.company_name, amount: numbers?.budget ?? item?.amount ?? null, budgetIncludesTax: numbers?.budgetIncludesTax ?? null });
+  const buyer = item?.buyer_name || item?.company_name;
   let bytes: Uint8Array; let mime: string;
-  if (format === 'md') { bytes = new TextEncoder().encode(markdown); mime = 'text/markdown'; }
-  else {
-    const { renderCoworkDocx } = await import('@/lib/server/cowork/docx-render');
-    const { parseMarkdown } = await import('@/lib/cowork/markdown');
-    bytes = await renderCoworkDocx(`Borrador de oferta: ${title}`, parseMarkdown(markdown));
+  if (format === 'md') {
+    bytes = new TextEncoder().encode(offerDraftMarkdown(offer.latest, { title, buyer, amount: numbers?.budget ?? item?.amount ?? null, budgetIncludesTax: numbers?.budgetIncludesTax ?? null })); mime = 'text/markdown';
+  } else {
+    const { offerDocx } = await import('@/lib/server/commercial-opportunities/offer-docx');
+    const kit = report?.submission ? clampSubmissionKit(report.submission) : null;
+    bytes = await offerDocx({ saved: offer.latest, onlyAnnex: annex,
+      opportunity: { title, buyer, code: item?.data?.observed?.code ?? null, deadline: item?.deadline_at ?? null, amount: numbers?.budget ?? item?.amount ?? null, budgetIncludesTax: numbers?.budgetIncludesTax ?? null },
+      company: { legalName: profile?.legalName ?? null, rut: profile?.rut ?? null },
+      documents: (kit?.folders || []).flatMap(folder => folder.documents.map(doc => ({ folder: folder.name, title: doc.title, signed: doc.signed, excludesIfMissing: doc.excludesIfMissing }))) });
     mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   }
-  return download(bytes, mime, opportunityExportName('Borrador de oferta', title), format);
+  const annexTitle = annex !== undefined ? [offer.latest.draft.annexes![annex].number, offer.latest.draft.annexes![annex].title].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim() : '';
+  return download(bytes, mime, annexTitle ? `${annexTitle} - ${opportunityExportName('Borrador de oferta', title).replace(/^Borrador de oferta - /, '')}`.slice(0, 120) : opportunityExportName('Borrador de oferta', title), format);
 }

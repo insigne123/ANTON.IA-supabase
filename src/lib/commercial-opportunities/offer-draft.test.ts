@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  cleanOfferPrices, clampOfferDraft, companyProfileExtras, offerDraftChunkIds, offerDraftMarkdown, offerDraftPrompt, offerDraftSchema, offerFacts, offerPlaceholders,
-  offerPrice, offerSheet, officialTenderItems, validateOfferDraft, type OfferDraft,
+  cleanOfferPrices, clampOfferDraft, companyProfileExtras, offerAnnexesPrompt, offerDraftChunkIds, offerDraftMarkdown, offerDraftPrompt, offerDraftSchema, offerFacts, offerPlaceholders,
+  offerPrice, offerSheet, officialTenderItems, validateOfferDraft, withOfferAnnexes, type OfferDraft,
 } from './offer-draft';
 import type { OpportunityReport } from './expedient';
 
@@ -137,4 +137,36 @@ test('the Word version carries the letter, the sections, the sheet with totals a
 
 test('the placeholders to fill in are counted once', () => {
   assert.deepEqual(offerPlaceholders(clampOfferDraft(draft)).sort(), ['[N.º de años]', '[RUT]', '[clientes del sector salud]', '[nombre de la empresa]', '[nombre del supervisor]'].sort());
+});
+
+test('the letter asked of the model is only its body: the document writes the date, the addressee and the signature', () => {
+  const prompt = offerDraftPrompt({ opportunity: { title: 'Aseo', buyer: 'Hospital', code: '1-2-LP26', deadline: null, amount: null, currency: null }, company: { offer: 'Aseo', services: [], territories: [], exclusions: [] }, report, officialItems: [] });
+  assert.ok(prompt.includes('solo el CUERPO de la carta'));
+  assert.ok(prompt.includes('Sin fecha, destinatario, referencia, saludo, despedida ni firma'));
+  assert.ok(prompt.includes('no omitas ninguno'), 'every technical requirement answered');
+});
+
+test('the forms prompt carries the text of the forms, the documents to hand in and the company data, and forbids invented data', () => {
+  const withKit = { ...report, submission: { channel: 'portal', channelDetail: '', folders: [{ name: 'Documentos de la oferta', documents: [
+    { title: 'Anexo N°1 (identificación del oferente)', source: 'annex', signed: true, validity: '', excludesIfMissing: true, howTo: 'Firma el representante legal', evidence: [] },
+    { title: 'Certificado F30', source: 'certificate', signed: false, validity: '', excludesIfMissing: false, howTo: '', evidence: [] },
+  ] }], rules: [], numbers: { budget: null, budgetLabel: '', currency: 'CLP', budgetIncludesTax: null, portalValue: 'unknown', notes: [] }, guarantees: [], afterSubmit: [], inconsistencies: [] } } as unknown as OpportunityReport;
+  const prompt = offerAnnexesPrompt({ opportunity: { title: 'Aseo MHN', buyer: 'Museo', code: '1217466-29-LP26' }, company: { offer: 'Aseo integral', services: [], territories: [], exclusions: [], ficha: { razonSocial: 'Grupo Expro SpA', rut: '76.123.456-7' } },
+    report: withKit, forms: [{ name: 'ANEXO N°1.docx', text: 'Declaración jurada simple: yo, (nombre representante legal)' }], economicLines: [{ description: 'Aseo mensual', unit: 'Mes', quantity: 24 }] });
+  assert.ok(prompt.includes('Declaración jurada simple: yo, (nombre representante legal)'), 'the form itself');
+  assert.ok(prompt.includes('"titulo":"Anexo N°1 (identificación del oferente)"') && !prompt.includes('"titulo":"Certificado F30"'), 'only the forms, not the certificates');
+  assert.ok(prompt.includes('Grupo Expro SpA') && prompt.includes('"id":"1217466-29-LP26"'));
+  assert.ok(prompt.includes('Nunca inventes datos'));
+  assert.ok(prompt.includes('palabra por palabra'), 'the declarations are copied');
+  assert.ok(prompt.includes('"description":"Aseo mensual"'));
+});
+
+test('the forms written apart join the draft, their missing data join the list, and an older draft needs none', () => {
+  const annex = { number: 'Anexo N°1', title: 'Identificación', intro: '', signed: true, faithful: true, blocks: [{ kind: 'text' as const, title: '', text: 'Declaro.', fields: [], columns: [], rows: [], blankRows: 0, options: [] }] };
+  const merged = withOfferAnnexes(clampOfferDraft(draft), [annex], ['Cédula del representante', 'RUT de la empresa']);
+  assert.equal(merged.annexes?.length, 1);
+  assert.deepEqual(merged.missing, ['RUT de la empresa', 'Certificado F30 vigente', 'Cédula del representante'], 'repeated data counts once');
+  assert.equal(clampOfferDraft(draft).annexes, undefined, 'a draft from before the forms stays valid');
+  assert.equal(offerDraftSchema.safeParse(draft).success, true);
+  assert.equal(Object.keys(offerDraftSchema.shape).includes('annexes'), false, 'the model writes them in its own step');
 });
