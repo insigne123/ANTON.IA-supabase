@@ -92,7 +92,7 @@ export async function answerFitQuestion(client: SupabaseClient, scope: WorkScope
     const row = opportunityDb(await client.from('opportunity_tender_profile').select('answers,revision').eq('organization_id', scope.organizationId).maybeSingle());
     if (!row) throw new AuthError('Un administrador debe completar primero la ficha para licitaciones.', 409);
     const profile = readTenderProfile(row.answers);
-    const question = input.question.replace(/\s+/g, ' ').trim().slice(0, 200);
+    const question = input.question.replace(/\s+/g, ' ').trim().slice(0, 320);
     // The same question answered again replaces the earlier answer; the oldest go first past 60.
     const notes = [...profile.notes.filter(note => note.question !== question), { question, answer: input.answer.replace(/\s+/g, ' ').trim().slice(0, 500), at: new Date().toISOString() }].slice(-60);
     const updated = opportunityDb(await client.from('opportunity_tender_profile').update({ answers: { ...profile, notes }, revision: Number(row.revision) + 1,

@@ -27,6 +27,34 @@ export function opportunitySummary(data: unknown): string | null {
   return typeof summary?.text === 'string' && summary.text.trim() ? summary.text.trim() : null;
 }
 
+// The screening's own first reason when it says nothing about the opportunity yet.
+const GENERIC_REASON = /^pendiente de evaluaci[oó]n/i;
+const LINE_CHARS = 220;
+const shorten = (text: string) => {
+  if (text.length <= LINE_CHARS) return text;
+  const cut = text.slice(0, LINE_CHARS - 1);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), LINE_CHARS - 40)).replace(/[,;:.\s]+$/, '')}…`;
+};
+
+/**
+ * What a card of LinkedIn says while its summary is not written (the reading is slow and starts with the tenders closing soon):
+ * what the screening already found, so it is never an empty box. A hiring card: why it matters, or else the jobs it posts. A
+ * post: why it matters, or else what it says. Anything else has no fallback: its summary is on its way.
+ */
+export function fallbackLine(row: { kind?: string; title?: string; reasons?: unknown; data?: unknown }): string | null {
+  if (row.kind !== 'hiring' && row.kind !== 'linkedin_post') return null;
+  const reason = Array.isArray(row.reasons) ? clip(row.reasons[0], 600) : '';
+  if (reason && !GENERIC_REASON.test(reason) && !same(reason, String(row.title ?? ''))) return shorten(reason);
+  const description = String((row.data as { description?: unknown } | null)?.description ?? '');
+  if (row.kind === 'linkedin_post') return clip(description, 20) ? shorten(clip(description, 600)) : null;
+  // The postings come one per line, «Cargo · Lugar · enlace»: the jobs are what is left of them.
+  const jobs = [...new Set(description.split(/\n+/).map(line => clip(line.split(' · ')[0], 90)).filter(Boolean))];
+  if (!jobs.length) return null;
+  const shown = jobs.slice(0, 2);
+  const rest = jobs.length - shown.length;
+  return `Busca ${rest ? `${shown.join(', ')} y ${rest} más` : shown.join(' y ')}.`;
+}
+
 /** A public tender listed by name only: its official file says the buyer, the description and the lines. */
 export function needsTenderDetail(row: SummaryRow) {
   const code = row.data?.observed?.code;

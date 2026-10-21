@@ -11,6 +11,8 @@ import { coworkTurnIntents } from '../../src/lib/cowork/intents';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
 import { coworkRescueNote, runCoworkReadLoop, type CoworkAnswer, type CoworkObservation, type CoworkRejection, type CoworkTurnFailure, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps } from '../../src/lib/cowork/contracts';
+import { runCoworkHarnessTurn } from '../../src/lib/cowork/harness-turn';
+import type { CoworkHarnessConfig } from '../../src/lib/cowork/harness-config';
 import { coworkFailureMessage } from '../../src/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
@@ -278,7 +280,9 @@ export function corpusWorkspace(read: (action: string, input: string) => unknown
 }
 
 export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter, judge?: CorpusJudge, design?: CorpusDesigner, analyze?: CorpusAnalyst,
-  review?: (tasks: import('../../src/lib/cowork/specialists').SpecialistTask[], observations: CoworkObservation[], world: CorpusCase['world']) => Promise<unknown>): Promise<CorpusOutcome> {
+  review?: (tasks: import('../../src/lib/cowork/specialists').SpecialistTask[], observations: CoworkObservation[], world: CorpusCase['world']) => Promise<unknown>,
+  /** The harness runtime (COWORK_RUNTIME=harness) in place of the coordinator loop: given the case's rules and context, the config of its turn. */
+  harness?: (turn: { system: string; context: string }) => CoworkHarnessConfig): Promise<CorpusOutcome> {
   const turns = (entry.history || []).map((turn, index) => ({
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
     reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
@@ -299,7 +303,11 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
   if (workspace) result.workspace = workspace;
   let judgedAnswer: CoworkAnswer | null = null;
   try {
-    const answer = await runCoworkReadLoop({
+    const answer = await (harness ? runCoworkHarnessTurn : runCoworkReadLoop)({
+      ...(harness ? { harness: harness({ system: instructions.systemPrompt, context: JSON.stringify(coworkDecisionContext(instructions, {
+        history: { turns, olderTurnsOmitted: false }, request: entry.request, observations: [], mustAnswer: false, executionPolicy: { mode: 'approval' }, userContext,
+        ...(entry.previousVersions?.length && process.env.COWORK_EVAL_VERSIONS !== 'off' ? { previousVersions: entry.previousVersions } : {}),
+      }, CORPUS_NOW, 'America/Santiago')) }) } : {}),
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
       preferences: Boolean(entry.preferences),

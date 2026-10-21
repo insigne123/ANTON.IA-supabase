@@ -32,15 +32,38 @@ test('dates as the documents write them become Chile times, with summer time', (
   for (const unknown of ['Por confirmar', '5 días hábiles después de la adjudicación', '31-02-20', '']) assert.equal(parseReportDate(unknown), null, unknown);
 });
 
-test('Google Calendar places the reminder the person chose; the calendar file carries the real date and its alert', () => {
+const subject = { title: 'SERVICIO ASEO PARA DEPENDENCIAS DEL MHN', buyer: 'Servicio Nacional del Patrimonio Cultural', code: '1217466-29-LP26', kind: 'tender',
+  appUrl: 'https://app.example/opportunities?op=op-1', sourceUrl: 'https://www.mercadopublico.cl/ficha?idlicitacion=1217466-29-LP26' };
+
+test('a reminder says in the calendar which purchase it is about: its name, its ID, who buys it and where to open it', () => {
+  const at = parseReportDate('22-10-2026 10:00')!.at;
+  const url = new URL(googleCalendarUrl({ subject, label: 'Cierre de recepción de ofertas', date: '22 de octubre de 2026, 10:00', at, reminder: '1d' }));
+  assert.equal(url.searchParams.get('text'), 'Mañana: Cierre de recepción de ofertas · SERVICIO ASEO PARA DEPENDENCIAS DEL MHN (ID 1217466-29-LP26)');
+  const details = url.searchParams.get('details')!;
+  assert.match(details, /^Cierre de recepción de ofertas: 22 de octubre de 2026, 10:00\n\nLicitación: SERVICIO ASEO PARA DEPENDENCIAS DEL MHN\nOrganismo: Servicio Nacional del Patrimonio Cultural\nID: 1217466-29-LP26/);
+  assert.ok(details.includes('Abrir en ANTON.IA: https://app.example/opportunities?op=op-1'));
+  assert.ok(details.includes('Ficha oficial: https://www.mercadopublico.cl/ficha?idlicitacion=1217466-29-LP26'));
+  assert.equal(url.searchParams.get('location'), subject.sourceUrl);
+  // On the day itself the event is the date, with no «Hoy» to say twice.
+  assert.equal(new URL(googleCalendarUrl({ subject, label: 'Cierre de ofertas', date: 'x', at, reminder: 'same' })).searchParams.get('text'), 'Cierre de ofertas · SERVICIO ASEO PARA DEPENDENCIAS DEL MHN (ID 1217466-29-LP26)');
+  assert.match(new URL(googleCalendarUrl({ subject, label: 'Cierre', date: 'x', at, reminder: '3d' })).searchParams.get('text')!, /^En 3 días: Cierre · /);
+  assert.match(new URL(googleCalendarUrl({ subject, label: 'Cierre', date: 'x', at, reminder: '7d' })).searchParams.get('text')!, /^En una semana: Cierre · /);
+  // Without a code or a buyer it still names the purchase, and a link that is not http(s) is not offered as a place.
+  const bare = new URL(googleCalendarUrl({ subject: { title: 'Cargos en Retail Andino', sourceUrl: 'javascript:alert(1)' }, label: 'Llamar', date: 'x', at, reminder: '1d' }));
+  assert.equal(bare.searchParams.get('text'), 'Mañana: Llamar · Cargos en Retail Andino');
+  assert.equal(bare.searchParams.get('location'), null);
+  assert.match(bare.searchParams.get('details')!, /Oportunidad: Cargos en Retail Andino/);
+});
+
+test('Google Calendar places the reminder the person chose; the calendar file carries the real date, its alert and the purchase', () => {
   const at = parseReportDate('29-10-2026 9:00')!.at;
-  const url = new URL(googleCalendarUrl({ title: 'Seguridad Museo', label: 'Cierre de ofertas', date: '29-10-2026 9:00', at, reminder: '3d' }));
+  const url = new URL(googleCalendarUrl({ subject: { title: 'Seguridad Museo' }, label: 'Cierre de ofertas', date: '29-10-2026 9:00', at, reminder: '3d' }));
   assert.equal(url.origin + url.pathname, 'https://calendar.google.com/calendar/render');
   assert.equal(url.searchParams.get('dates'), '20261026T120000Z/20261026T123000Z');
-  assert.match(url.searchParams.get('text')!, /^Recordatorio: Cierre de ofertas \(3 días antes\) · Seguridad Museo$/);
+  assert.equal(url.searchParams.get('text'), 'En 3 días: Cierre de ofertas · Seguridad Museo');
   assert.equal(url.searchParams.get('ctz'), 'America/Santiago');
 
-  const file = reportCalendarFile({ title: 'Seguridad, Museo; Valparaíso', now: new Date('2026-10-16T00:00:00Z'), events: [
+  const file = reportCalendarFile({ subject: { title: 'Seguridad, Museo; Valparaíso', code: '4521-61-LE26', buyer: 'Hospital Regional' }, now: new Date('2026-10-16T00:00:00Z'), events: [
     { uid: 'date:1', label: 'Cierre de ofertas', date: '29-10-2026 9:00', at, reminder: '1d' },
     { uid: 'date:2', label: 'Fin de consultas', date: '16-10-2026 9:00', at: parseReportDate('16-10-2026 9:00')!.at, reminder: 'same' },
   ] });
@@ -48,7 +71,8 @@ test('Google Calendar places the reminder the person chose; the calendar file ca
   assert.match(file, /DTSTART:20261029T120000Z\r\n/);
   assert.match(file, /TRIGGER:-PT1440M\r\n/);
   assert.match(file, /TRIGGER:-PT0M\r\n/);
-  assert.match(file, /SUMMARY:Cierre de ofertas · Seguridad\\, Museo\\; Valparaíso/);
+  assert.ok(file.replace(/\r\n /g, '').includes('SUMMARY:Cierre de ofertas · Seguridad\\, Museo\\; Valparaíso (ID 4521-61-LE26)'));
+  assert.ok(file.replace(/\r\n /g, '').includes('Organismo: Hospital Regional'));
   assert.equal((file.match(/BEGIN:VEVENT/g) || []).length, 2);
   for (const line of file.split('\r\n')) assert.ok(new TextEncoder().encode(line).length <= 75, `line too long: ${line}`);
   assert.ok(file.endsWith('END:VCALENDAR\r\n'));

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { automaticMove, WORK_STATE_LABELS, type WorkEvent } from '@/lib/commercial-opportunities/pipeline';
+import { automaticMove, automaticUndo, WORK_STATE_LABELS, type WorkEvent } from '@/lib/commercial-opportunities/pipeline';
+import { parsePrioritySort, type PrioritySort } from '@/lib/commercial-opportunities/priority';
+import { buildProgress } from '@/lib/commercial-opportunities/progress';
 import { reportRoute } from '@/lib/commercial-opportunities/report-marks';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
@@ -22,6 +24,24 @@ export async function applyAutomaticMove(client: SupabaseClient, scope: WorkScop
     .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', work.revision).select('revision').maybeSingle());
   if (!saved) return null;
   await addOpportunityActivity(client, scope, id, 'auto_state', `Pasó a «${WORK_STATE_LABELS[move.to]}» automáticamente: ${move.reason}.`, { from: work.state, to: move.to });
+  return move.to;
+}
+
+/**
+ * The way back for a tick that was a mistake: if taking back the step to submit undoes the move to «Presentada» the tick itself made, the
+ * opportunity returns to preparation, with the same revision check and a line in the activity. A stage a person chose is never touched.
+ */
+export async function undoAutomaticMove(client: SupabaseClient, scope: WorkScope, id: string, event: { routeKind?: string | null; label: string }) {
+  const work = opportunityDb(await client.from('opportunity_work').select('state,revision').eq('organization_id', scope.organizationId).eq('opportunity_id', id).maybeSingle()) as { state: any; revision: number } | null;
+  if (!work || work.state !== 'submitted') return null;
+  const lastRow = opportunityDb(await client.from('opportunity_activity').select('kind,data').eq('organization_id', scope.organizationId).eq('opportunity_id', id)
+    .in('kind', ['auto_state', 'state']).order('created_at', { ascending: false }).limit(1).maybeSingle()) as { kind: string; data: { to?: string } | null } | null;
+  const move = automaticUndo(work.state, event, lastRow ? { kind: lastRow.kind, to: lastRow.data?.to ?? null } : null);
+  if (!move) return null;
+  const saved = opportunityDb(await client.from('opportunity_work').update({ state: move.to, revision: work.revision + 1, updated_at: new Date().toISOString() })
+    .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', work.revision).select('revision').maybeSingle());
+  if (!saved) return null;
+  await addOpportunityActivity(client, scope, id, 'auto_state', `Volvió a «${WORK_STATE_LABELS[move.to]}» automáticamente: ${move.reason}.`, { from: work.state, to: move.to });
   return move.to;
 }
 
@@ -85,19 +105,23 @@ const ITEM_COLUMNS = 'id,kind,title,company_name,buyer_name,company_domain,url,s
 /** The pipeline loads this many of each stage nobody works yet, and «Cargar más» this many more, up to the most. */
 export const PIPELINE_PAGE = 60;
 export const PIPELINE_MAX = 600;
-export type PipelineOptions = { kinds?: string[]; query?: string; limits?: Partial<Record<'found' | 'recommended' | 'excluded', number>> };
+/** The latest research jobs and reports of the workspace the cards ask about (what the workspace has is far less than this). */
+const PROGRESS_ROWS = 600;
+export type PipelineOptions = { kinds?: string[]; query?: string; sort?: PrioritySort; limits?: Partial<Record<'found' | 'recommended' | 'excluded', number>> };
 const pageLimit = (value: number | undefined, fallback: number) => Math.min(PIPELINE_MAX, Math.max(0, Math.round(Number.isFinite(value) ? Number(value) : fallback)));
 
 /**
  * The pipeline for the admin: exact counts per stage and the opportunities of each one, of the sources and with the words
  * asked for. What nobody works yet counts only while it can still be bid (no deadline or a deadline ahead), the best scored
- * first, as many as the page asked for; the ones the AI left out load only when someone opens them.
+ * first (the stars of priority.ts) or, with `sort: 'deadline'`, the soonest to close first, as many as the page asked for; the
+ * ones the AI left out load only when someone opens them.
  */
 export async function readOpportunityPipeline(client: SupabaseClient, scope: WorkScope, options: PipelineOptions = {}) {
   const org = scope.organizationId;
   const nowIso = new Date().toISOString();
   const kinds = (options.kinds || []).filter(Boolean);
   const term = searchTerm(options.query);
+  const sort = parsePrioritySort(options.sort);
   const limits = { found: pageLimit(options.limits?.found, PIPELINE_PAGE), recommended: pageLimit(options.limits?.recommended, PIPELINE_PAGE), excluded: pageLimit(options.limits?.excluded, 0) };
   const worked = (opportunityDb(await client.from('opportunity_work').select('*').eq('organization_id', org).neq('state', 'unassigned').limit(1000)) || []) as Array<{ opportunity_id: string; state: string }>;
   const workedIds = new Set(worked.map(w => w.opportunity_id));
@@ -110,9 +134,17 @@ export async function readOpportunityPipeline(client: SupabaseClient, scope: Wor
     const stillOpen = `deadline_at.is.null,deadline_at.gt.${nowIso}`;
     return term ? sources.or(`and(or(${stillOpen}),or(${words}))`) : sources.or(stillOpen);
   };
-  const page = (evaluations: string[], limit: number) => limit ? open(client.from('commercial_opportunities').select(ITEM_COLUMNS)).in('data->>evaluation', evaluations)
-    .order('score', { ascending: false }).order('id').range(0, limit - 1) : Promise.resolve({ data: [], error: null });
+  // The soonest to close first leaves the ones with no deadline last; the best scored breaks the ties either way.
+  const ordered = (query: any) => (sort === 'deadline' ? query.order('deadline_at', { ascending: true, nullsFirst: false }) : query).order('score', { ascending: false }).order('id');
+  const page = (evaluations: string[], limit: number) => limit ? ordered(open(client.from('commercial_opportunities').select(ITEM_COLUMNS)).in('data->>evaluation', evaluations))
+    .range(0, limit - 1) : Promise.resolve({ data: [], error: null });
   const count = (evaluations: string[]) => open(client.from('commercial_opportunities').select('id', { count: 'exact', head: true })).in('data->>evaluation', evaluations);
+  // What each card says of its own work (progress.ts): whether it is being researched and whether its report is ready.
+  // Never worth stopping the pipeline for: without it the cards simply say nothing of it.
+  const progressRows = Promise.all([
+    client.from('opportunity_jobs').select('opportunity_id,state,updated_at').eq('organization_id', org).eq('kind', 'research').order('updated_at', { ascending: false }).limit(PROGRESS_ROWS),
+    client.from('opportunity_reports').select('opportunity_id,created_at').eq('organization_id', org).order('created_at', { ascending: false }).limit(PROGRESS_ROWS),
+  ]).catch(() => null);
   const [workedItems, recommended, found, excluded, foundCount, recommendedCount, excludedCount] = await Promise.all([
     worked.length ? filtered(client.from('commercial_opportunities').select(ITEM_COLUMNS).eq('organization_id', org).in('id', worked.map(w => w.opportunity_id))) : Promise.resolve({ data: [], error: null }),
     page(['recommended'], limits.recommended), page(['review', 'pending'], limits.found), page(['excluded'], limits.excluded),
@@ -127,10 +159,14 @@ export async function readOpportunityPipeline(client: SupabaseClient, scope: Wor
   const items = [...inPlay, ...notWorked(recommended), ...notWorked(found), ...notWorked(excluded)];
   // The cards without their line of summary ask for it (workspace-summaries.ts); the page reloads while some wait.
   const waiting = await enqueueOpportunitySummaries(client, scope, items).catch(() => 0);
+  const loaded = await progressRows;
+  const progress = loaded && !loaded[0].error && !loaded[1].error
+    ? buildProgress((loaded[0].data || []) as Array<{ opportunity_id?: string; state?: string; updated_at?: string }>, (loaded[1].data || []) as Array<{ opportunity_id?: string; created_at?: string }>, items.map(item => String((item as { id?: unknown }).id ?? '')))
+    : {};
   const total = (result: { count?: number | null }, evaluations: string[]) => Math.max(0, Number(result.count || 0) - alreadyWorked(evaluations));
   return {
     items, work: worked,
     totals: { found: total(foundCount, ['review', 'pending']), recommended: total(recommendedCount, ['recommended']), excluded: total(excludedCount, ['excluded']) },
-    limits, summaries: { waiting },
+    limits, sort, progress, summaries: { waiting },
   };
 }

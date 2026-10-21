@@ -36,6 +36,8 @@ export async function resolve(specifier, context, nextResolve) {
         throw err;
       }
     }
+    // Next's own entry points (next/headers) are CJS files without an exports map: Node's ESM resolver wants the extension.
+    if (/^next\/[a-z-]+$/.test(specifier)) return nextResolve(`${specifier}.js`, context);
     throw err;
   }
 }

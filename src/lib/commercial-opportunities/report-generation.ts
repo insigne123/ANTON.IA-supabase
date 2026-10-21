@@ -35,6 +35,19 @@ export const REPORT_WRITING_RULES = [
   'Habla de «tu empresa» o por su nombre, nunca de «workspace», «radar», «ficha», «campo», «null», «JSON», «puntaje del sistema», nombres de variables ni de fórmulas, ni de «recalcular con código». Si falta un dato, di cuál falta y dónde conseguirlo.',
   'Si una advertencia es sobre una conexión o configuración interna del sistema, no la incluyas: warnings solo lleva lo que la persona debe saber o conseguir para decidir.',
 ];
+/**
+ * The questions of the report: every one the person needs to ask, complete and ready to paste. For a purchase with bases they go to the
+ * buyer's forum (and, in the PDF, as an email); for a LinkedIn signal they are for the first conversation.
+ */
+export const BUYER_QUESTION_RULE = 'questions (consultas al comprador): haz TODAS las que la empresa necesite para decidir y para ofertar sin quedar inadmisible, cada una completa y lista para pegar en el foro: di dónde está la duda (documento y punto o cláusula), cuál es y qué respuesta se necesita. '
+  + 'Cubre, por orden de riesgo: (1) cada contradicción o inconsistencia que encontraste (fechas u horas distintas entre el portal y las bases, anexos con nombres o números distintos, montos, garantías, plazos); '
+  + '(2) lo que puede dejar la oferta inadmisible y no está claro (visitas a terreno obligatorias y si hay alternativa si se perdió, formato y firma de los anexos, certificados y su vigencia, medio y hora de entrega); '
+  + '(3) la base del precio (neto o con IVA, presupuesto referencial o máximo, reajuste, cantidad o volumen real, horarios o turnos, lugares, quién aporta insumos, equipos o uniformes); '
+  + '(4) los criterios de evaluación y desempate que no precisan cómo se puntúa; (5) las condiciones del contrato (inicio, plazo y renovación, pago, multas y cómo se aplican, subcontratación, uniones temporales); '
+  + '(6) lo que falta en las bases (anexos o documentos que se mencionan y no vienen). No preguntes lo que las bases o las respuestas del foro ya contestan. Una pregunta por punto, sin juntar varias. '
+  + 'Una licitación completa suele pedir entre 6 y 15 consultas; si las bases son claras, menos, pero nunca dejes sin preguntar una contradicción ni lo que puede dejar la oferta fuera.';
+export const SIGNAL_QUESTION_RULE = 'questions (para la primera conversación): todas las que necesitas para calificar a la empresa y personalizar la propuesta, cada una completa y abierta: qué necesita contratar y para cuándo, cuántas personas o servicios, quién decide y cómo compran, qué usan hoy y qué les falló, el presupuesto y los plazos, y qué tendría que pasar para avanzar. Entre 5 y 10, en el orden en que se conversan.';
+
 export function opportunityReportPrompt(cutoff: string, evidence: unknown, kind?: string | null) {
   const signal = isSignalKind(kind);
   return [
@@ -44,6 +57,7 @@ export function opportunityReportPrompt(cutoff: string, evidence: unknown, kind?
     signal
       ? `Incluye estas secciones: ${SIGNAL_OUTLINE.join('; ')}. En «A quién contactar» propone cargos concretos de decisores para esta oferta. En «Cómo abordarlos» escribe un primer mensaje breve (máximo 90 palabras) que mencione la señal concreta. requirements son las cosas a validar con la empresa (status unknown salvo evidencia), tasks los pasos comerciales, milestones y scenarios van vacíos salvo fechas o cifras documentadas, questions son preguntas de descubrimiento para la primera conversación.`
       : `Incluye estas secciones adaptadas al tipo de oportunidad: ${REPORT_OUTLINE.join('; ')}. Cada hallazgo importante debe decir consecuencia, acción, responsable sugerido, plazo y evidencia esperada. questions son consultas listas para enviar al comprador dentro del plazo de consultas.`,
+    signal ? SIGNAL_QUESTION_RULE : BUYER_QUESTION_RULE,
     ...REPORT_WRITING_RULES,
     'specialists trae las notas del equipo que revisó antes que tú (requisitos, puntaje, contrato y estrategia, o empresa, contacto y validación): úsalas para no omitir nada y para priorizar, pero afirma solo lo que respaldan los hechos y fragmentos, con sus citas.',
     'Distingue hechos documentados, cálculos, propuestas y datos pendientes. No inventes salarios, experiencia propia, requisitos, ponderaciones, probabilidad de adjudicación, normativa o competencia. No conviertas referencial en máximo ni garantía en fecha de inicio. No inventes fechas ISO ni plazos cerrados.',

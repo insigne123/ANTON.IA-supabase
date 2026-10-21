@@ -1,42 +1,54 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BellPlus, CalendarPlus, Check, Download, Highlighter, StickyNote } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { REMINDER_OPTIONS, emptyMark, googleCalendarUrl, reportCalendarFile, type ReminderId, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
+import { REMINDER_OPTIONS, emptyMark, googleCalendarUrl, reportCalendarFile, type ReminderId, type ReminderSubject, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
+import { MarkQueue, applyMarkChange } from '@/lib/commercial-opportunities/mark-queue';
 
 export type MarkChange = { key: string; label: string; done?: boolean; highlight?: boolean; note?: string };
 
 /**
- * The team's marks on one screen: at once on screen, back as they were if the server says no. Without the table (or
- * without a way to save) the screen reads as before, with nothing to tick.
+ * The team's marks on one screen: at once on screen, and told to the server in order, one request at a time per item (mark-queue.ts),
+ * so a second click on an item is never lost while the first is still saving and nothing else waits. If the last save of an item fails,
+ * it goes back to what the server last confirmed. Without the table (or without a way to save) the screen reads as before, with nothing to tick.
  */
 export function useReportMarks(initial: { available: boolean; items: ReportMarks } | null | undefined, onMark?: (change: MarkChange) => Promise<ReportMark | null>) {
   const interactive = Boolean(initial?.available && onMark);
   const [marks, setMarks] = useState<ReportMarks>(initial?.items ?? {});
-  useEffect(() => { setMarks(initial?.items ?? {}); }, [initial]);
-  const [saving, setSaving] = useState(false);
-  const change = async (input: MarkChange) => {
-    if (!onMark) return;
-    const before = marks[input.key];
-    setMarks(current => ({ ...current, [input.key]: { ...(current[input.key] ?? emptyMark(input.key)),
-      ...(input.done !== undefined ? { done: input.done } : {}), ...(input.highlight !== undefined ? { highlight: input.highlight } : {}), ...(input.note !== undefined ? { note: input.note.trim() } : {}) } }));
-    setSaving(true);
-    const saved = await onMark(input).catch(() => null);
-    setSaving(false);
-    setMarks(current => { const next = { ...current }; if (saved) next[input.key] = saved; else if (before) next[input.key] = before; else delete next[input.key]; return next; });
+  const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
+  const send = useRef(onMark);
+  send.current = onMark;
+  const queue = useMemo(() => new MarkQueue({
+    send: input => send.current ? send.current(input) : Promise.resolve(null),
+    settled: (key, mark) => setMarks(current => { const next = { ...current }; if (mark) next[key] = mark; else delete next[key]; return next; }),
+    pending: keys => setPending(keys),
+  }, initial?.items ?? {}),
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- one queue per screen; what the server confirms comes in through confirm().
+  []);
+  useEffect(() => {
+    queue.confirm(initial?.items ?? {});
+    // What a reading of the expediente brings replaces what is on screen, except for the items still being saved: those keep what the person just did.
+    setMarks(current => { const next = { ...(initial?.items ?? {}) }; for (const key of queue.pendingKeys()) if (current[key]) next[key] = current[key]; return next; });
+  }, [initial, queue]);
+  const change = (input: MarkChange) => {
+    if (!onMark) return Promise.resolve();
+    setMarks(current => applyMarkChange(current, input));
+    return queue.push(input);
   };
-  return { interactive, marks, saving, change };
+  return { interactive, marks, saving: pending.size > 0, pending, change };
 }
 
 /** A round check the size of a fingertip: «listo» or not, with the item's name for screen readers. */
-export function DoneCheck({ done, label, disabled, onChange }: { done: boolean; label: string; disabled?: boolean; onChange: (done: boolean) => void }) {
+export function DoneCheck({ done, label, disabled, pending, onChange }: { done: boolean; label: string; disabled?: boolean; pending?: boolean; onChange: (done: boolean) => void }) {
+  // It is never blocked while it saves: a second click («me equivoqué») is queued behind the first. It only breathes to say it is on its way.
   return (
-    <button type="button" role="checkbox" aria-checked={done} aria-label={`Listo: ${label}`} disabled={disabled} onClick={() => onChange(!done)}
+    <button type="button" role="checkbox" aria-checked={done} aria-busy={pending || undefined} aria-label={`Listo: ${label}`} disabled={disabled} onClick={() => onChange(!done)}
       className={cn('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50',
+        pending && 'motion-safe:animate-pulse',
         done ? 'border-cw-success bg-cw-success text-white dark:text-background' : 'border-muted-foreground/40 hover:border-primary')}>
       {done ? <Check className="h-3 w-3" strokeWidth={3} aria-hidden="true" /> : null}
     </button>
@@ -93,18 +105,19 @@ export function NoteCard({ mark, label, editing, author, when, disabled, onSave,
 }
 
 /** One item of the report with its marks: the check, the text, the tools and its note beside it on wide screens. */
-export function MarkedItem({ markKey, label, marks, checkable = true, disabled, onChange, authorOf, whenOf, children }: {
-  markKey: string; label: string; marks: Record<string, ReportMark> | null; checkable?: boolean; disabled?: boolean;
+export function MarkedItem({ markKey, label, marks, checkable = true, disabled, pending, onChange, authorOf, whenOf, children }: {
+  markKey: string; label: string; marks: Record<string, ReportMark> | null; checkable?: boolean; disabled?: boolean; pending?: ReadonlySet<string>;
   onChange: (change: MarkChange) => void; authorOf?: (userId?: string | null) => string | null; whenOf?: (at?: string | null) => string | null; children: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   if (!marks) return <>{children}</>;
   const mark = marks[markKey] ?? emptyMark(markKey);
   return (
-    <div id={`mark-${markKey.replace(':', '-')}`} className={cn('group/item grid scroll-mt-24 gap-3 rounded-xl transition-colors xl:grid-cols-[minmax(0,1fr)_15rem]',
+    // The note column exists only when there is a note to put in it: otherwise the item takes the whole width.
+    <div id={`mark-${markKey.replace(':', '-')}`} className={cn('group/item grid scroll-mt-24 gap-3 rounded-xl transition-colors', (mark.note || editing) && 'xl:grid-cols-[minmax(0,1fr)_15rem]',
       mark.highlight && '-mx-2 bg-cw-warning-soft/70 px-2 py-1 ring-1 ring-cw-warning/20')}>
       <div className="flex min-w-0 items-start gap-3">
-        {checkable ? <DoneCheck done={mark.done} label={label} disabled={disabled} onChange={done => onChange({ key: markKey, label, done })} /> : null}
+        {checkable ? <DoneCheck done={mark.done} label={label} disabled={disabled} pending={pending?.has(markKey)} onChange={done => onChange({ key: markKey, label, done })} /> : null}
         <div className={cn('min-w-0 flex-1', mark.done && checkable && '[&_.mark-title]:text-muted-foreground [&_.mark-title]:line-through [&_.mark-title]:decoration-muted-foreground/40')}>{children}</div>
         <span className={cn('transition-opacity', mark.highlight || mark.note || editing ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover/item:opacity-100 sm:group-focus-within/item:opacity-100')}>
           <ItemTools mark={mark} label={label} disabled={disabled} onChange={onChange} onNote={() => setEditing(true)} />
@@ -125,12 +138,13 @@ function saveFile(name: string, text: string) {
 const fileName = (title: string) => `${title.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Oportunidad'}.ics`;
 
 /** «Recordarme»: when to be told (the same day, a day, three days or a week before) and where (Google Calendar or a file). */
-export function ReminderMenu({ title, events, label = 'Recordarme', compact = false }: {
-  title: string; events: Array<{ uid: string; label: string; date: string; at: Date; details?: string }>; label?: string; compact?: boolean;
+export function ReminderMenu({ subject, events, label = 'Recordarme', compact = false }: {
+  subject: ReminderSubject; events: Array<{ uid: string; label: string; date: string; at: Date; details?: string }>; label?: string; compact?: boolean;
 }) {
   const [reminder, setReminder] = useState<ReminderId>('1d');
   if (!events.length) return null;
   const single = events.length === 1 ? events[0] : null;
+  const google = (event: typeof events[number]) => googleCalendarUrl({ subject, label: event.label, date: event.date, at: event.at, reminder, details: event.details });
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -138,7 +152,7 @@ export function ReminderMenu({ title, events, label = 'Recordarme', compact = fa
           <BellPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{label}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-3">
+      <PopoverContent align="end" className={cn('space-y-3', single ? 'w-72' : 'w-[22rem] max-w-[calc(100vw-2rem)]')}>
         <div>
           <p className="text-sm font-semibold">{single ? single.label : `${events.length} fechas`}</p>
           <p className="text-xs text-muted-foreground">{single ? single.date : 'Cada una con el aviso que elijas.'}</p>
@@ -155,21 +169,34 @@ export function ReminderMenu({ title, events, label = 'Recordarme', compact = fa
             ))}
           </div>
         </fieldset>
+        {single ? null : (
+          <ul className="max-h-60 space-y-1 overflow-y-auto" aria-label="Agregar cada fecha a Google Calendar">
+            {events.map(event => (
+              <li key={event.uid} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50">
+                <div className="min-w-0"><p className="truncate text-sm font-medium">{event.label}</p><p className="text-xs text-muted-foreground">{event.date}</p></div>
+                <Button asChild size="sm" variant="outline" className="h-7 shrink-0 px-2 text-xs">
+                  <a href={google(event)} target="_blank" rel="noopener noreferrer" aria-label={`Agregar «${event.label}» a Google Calendar`}><CalendarPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Google Calendar</a>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="grid gap-1.5">
           {single ? (
             <Button asChild size="sm" className="justify-start">
-              <a href={googleCalendarUrl({ title, label: single.label, date: single.date, at: single.at, reminder, details: single.details })} target="_blank" rel="noopener noreferrer">
+              <a href={google(single)} target="_blank" rel="noopener noreferrer">
                 <CalendarPlus className="mr-2 h-4 w-4" aria-hidden="true" />Agregar a Google Calendar
               </a>
             </Button>
           ) : null}
           <Button type="button" size="sm" variant={single ? 'outline' : 'default'} className="justify-start"
-            onClick={() => saveFile(fileName(title), reportCalendarFile({ title, events: events.map(event => ({ ...event, reminder })) }))}>
-            <Download className="mr-2 h-4 w-4" aria-hidden="true" />{single ? 'Descargar para otro calendario' : 'Descargar todas (.ics)'}
+            onClick={() => saveFile(fileName(subject.title), reportCalendarFile({ subject, events: events.map(event => ({ ...event, reminder })) }))}>
+            <Download className="mr-2 h-4 w-4" aria-hidden="true" />{single ? 'Descargar para otro calendario' : 'Descargar todas juntas (.ics)'}
           </Button>
         </div>
         <p className="text-[11px] leading-4 text-muted-foreground">
-          {single ? 'En Google Calendar el aviso queda como un evento en el momento que elegiste. ' : ''}El archivo .ics funciona en Google Calendar, Outlook y Apple Calendar.
+          {single ? 'En Google Calendar el aviso queda como un evento en el momento que elegiste, con el nombre y el ID de la licitación. ' : 'Cada evento dice de qué licitación es: su nombre, el organismo, el ID y un enlace para abrirla. '}
+          El archivo .ics funciona en Google Calendar (Configuración → Importar), Outlook y Apple Calendar.
         </p>
       </PopoverContent>
     </Popover>

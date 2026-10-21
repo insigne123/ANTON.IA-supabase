@@ -34,16 +34,29 @@ export function daysToClose(deadline: string | null | undefined, now = Date.now(
 /**
  * What the work says about the stage, as a move the server applies by itself: a report ready or the first item ticked
  * moves an assigned opportunity into preparation; ticking the step to submit moves it to «Presentada». Never backwards,
- * never out of a closed stage, and never without a reason the team can read in the activity.
+ * never out of a closed stage, and never without a reason the team can read in the activity. The one way back is for a tick
+ * that was a mistake (automaticUndo).
  */
 export type WorkEvent = { kind: 'report_ready' } | { kind: 'marked_done'; routeKind?: string | null; label: string } | { kind: 'task_started' };
+const isSubmitStep = (event: { routeKind?: string | null; label: string }) =>
+  event.routeKind === 'submit' || /^(presentar|subir|enviar|ingresar) (la )?(oferta|postulaci|propuesta)/i.test(event.label.trim());
 export function automaticMove(state: WorkRecord['state'] | null | undefined, event: WorkEvent): { to: WorkRecord['state']; reason: string } | null {
   const current = state ?? 'unassigned';
   if (['submitted', 'won', 'lost', 'archived', 'unassigned'].includes(current)) return null;
-  if (event.kind === 'marked_done' && (event.routeKind === 'submit' || /^(presentar|subir|enviar|ingresar) (la )?(oferta|postulaci|propuesta)/i.test(event.label.trim())))
+  if (event.kind === 'marked_done' && isSubmitStep(event))
     return { to: 'submitted', reason: `se marcó «${event.label.slice(0, 120)}»` };
   if (current !== 'assigned') return null;
   if (event.kind === 'report_ready') return { to: 'working', reason: 'el informe quedó listo' };
   if (event.kind === 'marked_done') return { to: 'working', reason: `se marcó «${event.label.slice(0, 120)}»` };
   return { to: 'working', reason: 'empezó una tarea' };
+}
+
+/**
+ * Taking back the tick of the step to submit, when it was that tick that moved the opportunity to «Presentada»: it goes back to
+ * preparation. A stage a person set (or any other stage) is left alone, and so is a tick that did not move anything.
+ */
+export function automaticUndo(state: WorkRecord['state'] | null | undefined, event: { routeKind?: string | null; label: string }, last: { kind: string; to?: string | null } | null): { to: WorkRecord['state']; reason: string } | null {
+  if (state !== 'submitted' || !isSubmitStep(event)) return null;
+  if (last?.kind !== 'auto_state' || last.to !== 'submitted') return null;
+  return { to: 'working', reason: `se desmarcó «${event.label.slice(0, 120)}»` };
 }

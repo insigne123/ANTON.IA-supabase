@@ -53,7 +53,25 @@ export function reportKeyDates(report: Pick<OpportunityReport, 'milestones'>, de
 }
 
 /** The pending questions as an e-mail the person can paste and send to the buyer before the questions deadline. */
-export function consultationEmail(report: Pick<OpportunityReport, 'questions' | 'title' | 'milestones'>, opportunity: { title: string; buyer?: string | null }) {
+/**
+ * Everything to ask the buyer, once: the questions of the report plus the contradictions found in the bases («Para preguntar en el foro» of
+ * «Cómo postular»), so the report, the email, the download and the guide never disagree about what is still unanswered. A question that
+ * says the same thing as another with other words is not repeated.
+ */
+export function buyerQuestions(report: Pick<OpportunityReport, 'questions'> & { submission?: { inconsistencies?: Array<{ question: string }> } | null }): string[] {
+  const words = (text: string) => new Set(text.toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(word => word.length > 3));
+  const alike = (a: Set<string>, b: Set<string>) => { if (!a.size || !b.size) return false; const shared = [...a].filter(word => b.has(word)).length; return shared / Math.min(a.size, b.size) >= 0.8 && shared / Math.max(a.size, b.size) >= 0.6; };
+  const kept: Array<{ text: string; words: Set<string> }> = [];
+  for (const raw of [...(report.questions || []), ...(report.submission?.inconsistencies || []).map(item => item.question)]) {
+    const text = raw.replace(/\s+/g, ' ').trim();
+    const own = words(text);
+    if (!text || kept.some(item => item.text.toLocaleLowerCase('es') === text.toLocaleLowerCase('es') || alike(item.words, own))) continue;
+    kept.push({ text, words: own });
+  }
+  return kept.map(item => item.text);
+}
+
+export function consultationEmail(report: Pick<OpportunityReport, 'questions' | 'title' | 'milestones'> & { submission?: { inconsistencies?: Array<{ question: string }> } | null }, opportunity: { title: string; buyer?: string | null }) {
   const until = reportKeyDates(report).questions;
   return [
     `Asunto: Consultas · ${opportunity.title}`,
@@ -62,7 +80,7 @@ export function consultationEmail(report: Pick<OpportunityReport, 'questions' | 
     '',
     `Junto con saludar, y dentro del plazo de consultas${until ? ` (${until})` : ''}, solicitamos aclarar los siguientes puntos:`,
     '',
-    ...report.questions.map((q, i) => `${i + 1}. ${q}`),
+    ...buyerQuestions(report).map((q, i) => `${i + 1}. ${q}`),
     '',
     'Quedamos atentos a sus respuestas.',
     '',

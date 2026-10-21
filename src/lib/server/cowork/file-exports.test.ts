@@ -66,8 +66,22 @@ test('the document of a turn also downloads as Word, with its headings, list and
   const result = await coworkBinaryPreview(file.filename, file.bytes);
   assert.ok(result && 'preview' in result && result.preview.kind === 'text');
   const { text } = result.preview as Extract<typeof result.preview, { kind: 'text' }>;
-  assert.match(text, /^Informe de investigación\n\nResumen\n\nInvestigación comercial en Chile 🌍\./);
+  assert.match(text, /^Informe de investigación\n\n\d{1,2} de \p{L}+ de \d{4}\n\nResumen\n\nInvestigación comercial en Chile 🌍\./u, 'the engine\'s cover: title, then the date');
   assert.match(text, /• Uno\n• Dos/);
   assert.match(text, /Empresa \| Estado\nEntel \| Nuevo/);
   await assert.rejects(buildCoworkFile([event('run.completed', { reply: 'Texto', document: null })], 'docx'), /documento/);
+});
+
+test('COWORK_DOCUMENTS_ENGINE=legacy keeps the Word the previous renderer wrote: no cover date', async () => {
+  const before = process.env.COWORK_DOCUMENTS_ENGINE;
+  process.env.COWORK_DOCUMENTS_ENGINE = 'legacy';
+  try {
+    const events = [event('run.completed', { reply: 'Listo', document: { title: 'Informe de investigación', content: '# Resumen\n\nTexto.' } })];
+    const file = await buildCoworkFile(events, 'docx');
+    const result = await coworkBinaryPreview(file.filename, file.bytes);
+    const { text } = (result as { preview: { text: string } }).preview;
+    assert.match(text, /^Informe de investigación\n\nResumen\n\nTexto\./);
+  } finally {
+    if (before === undefined) delete process.env.COWORK_DOCUMENTS_ENGINE; else process.env.COWORK_DOCUMENTS_ENGINE = before;
+  }
 });

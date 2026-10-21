@@ -130,6 +130,11 @@ export default {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-3px)' },
         },
+        // A bar of unknown length (the AI reading the requirements again): a short block sliding across, only with motion allowed.
+        'thinking-slide': {
+          '0%': { transform: 'translateX(-110%)' },
+          '100%': { transform: 'translateX(330%)' },
+        },
         // A route of steps drawing itself once (informe interactivo, CRM): the path has pathLength=1.
         'route-draw': {
           from: { strokeDashoffset: '1' },
@@ -141,6 +146,7 @@ export default {
         'accordion-up': 'accordion-up 0.2s ease-out',
         'ghost-float': 'ghost-float 2.8s ease-in-out infinite',
         'route-draw': 'route-draw 1.4s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'thinking-slide': 'thinking-slide 1.5s ease-in-out infinite',
       },
     },
   },

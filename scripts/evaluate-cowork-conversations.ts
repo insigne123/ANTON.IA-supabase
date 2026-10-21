@@ -55,10 +55,8 @@ import { coworkLiveDraft } from '../src/lib/cowork/partial-json';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
 import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '../src/lib/server/cowork/writer-run';
 import { coworkJudgeInstructions, coworkJudgeSchema, coworkJudgeTurnPrompt } from '../src/lib/cowork/judge';
-import { CORPUS as PRODUCTION_CORPUS, CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
-import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { AXIS_CORPUS } from './fixtures/cowork-axis-paquete';
-import { AXIS_REST_CORPUS } from './fixtures/cowork-axis-resto';
+import { CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
+import { CORPUS } from './fixtures/cowork-full-corpus';
 import { selectCases } from './cowork-case-selection';
 import { askJev, type JevResult } from '../src/lib/server/jev';
 import { COWORK_JEV_DEFAULT_SCREEN, COWORK_JEV_DEFAULT_THRESHOLDS, COWORK_JEV_QUESTIONS, coworkJevJudgement, coworkJevProbabilities, coworkJevSeen, coworkJevStateFromPrompt } from '../src/lib/cowork/jev-review';
@@ -69,67 +67,7 @@ import { coworkTimeZone } from '../src/lib/cowork/decision-context';
 import { coworkReasoningEffort } from '../src/lib/cowork/turn-budget';
 import { COWORK_RESCUE_REASONING_EFFORT } from '../src/lib/cowork/rescue-model';
 import { renderCoworkArtifacts } from './fixtures/cowork-artifact-render';
-import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';
-import { AGENDA_CORPUS } from './fixtures/cowork-agenda-corpus';
-import { REINTENTO_CORPUS } from './fixtures/cowork-reintento-corpus';
-import { WEB_CORPUS } from './fixtures/cowork-web-corpus';
-import { LECTURAS_CORPUS } from './fixtures/cowork-lecturas-corpus';
-import { ICP_CORPUS } from './fixtures/cowork-icp-corpus';
-import { OPPORTUNITIES_CORPUS } from './fixtures/cowork-opportunities-corpus';
-import { TELEFONO_CORPUS } from './fixtures/cowork-telefono-corpus';
-import { BATCH_CORPUS } from './fixtures/cowork-batch-corpus';
-import { USO_REAL_CORPUS } from './fixtures/cowork-uso-real-corpus';
-import { CHAT_CORPUS } from './fixtures/cowork-chat-corpus';
-import { VERSION_CORPUS } from './fixtures/cowork-version-corpus';
-import { ARTIFACT_CORPUS } from './fixtures/cowork-artifact-corpus';
-import { CAMPANA_CORPUS } from './fixtures/cowork-campana-corpus';
-import { PREFERENCIAS_CORPUS } from './fixtures/cowork-preferencias-corpus';
-import { INTEGRAL_CORPUS } from './fixtures/cowork-integral-corpus';
 
-// Production conversations first, then the marketing use cases (email and LinkedIn),
-// every button on the Cowork home and the 44 operations of the AXIS package (axis-*).
-const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS, ...AXIS_CORPUS, ...AXIS_REST_CORPUS];
-
-// «¿Qué toca hoy?» (scripts/fixtures/cowork-agenda-corpus.ts).
-CORPUS.push(...AGENDA_CORPUS);
-
-// Retrying failed sends (scripts/fixtures/cowork-reintento-corpus.ts).
-CORPUS.push(...REINTENTO_CORPUS);
-// Onboarding by the company's website (scripts/fixtures/cowork-web-corpus.ts).
-CORPUS.push(...WEB_CORPUS);
-
-// The reads that close gaps 6, 7 and 10 of the AXIS bank (scripts/fixtures/cowork-lecturas-corpus.ts).
-CORPUS.push(...LECTURAS_CORPUS);
-// «¿Cuál es mi ICP?» (scripts/fixtures/cowork-icp-corpus.ts).
-CORPUS.push(...ICP_CORPUS);
-// «¿Qué oportunidades hay hoy?» (scripts/fixtures/cowork-opportunities-corpus.ts).
-CORPUS.push(...OPPORTUNITIES_CORPUS);
-// Revealing a phone (scripts/fixtures/cowork-telefono-corpus.ts).
-CORPUS.push(...TELEFONO_CORPUS);
-
-// Answering someone who wrote (scripts/fixtures/cowork-thread-corpus.ts): drafting the reply, and, with email.reply_thread on
-// (COWORK_REPLY_THREAD_ENABLED; the hilo-enviar-* cases have it on), proposing to send it in the thread.
-CORPUS.push(...THREAD_CORPUS, ...THREAD_AGENDA_CORPUS, ...THREAD_SEND_CORPUS, ...THREAD_SEND_AGENDA_CORPUS);
-
-// Several people on LinkedIn with one approval (scripts/fixtures/cowork-batch-corpus.ts): the lote-* cases have the batch on.
-CORPUS.push(...BATCH_CORPUS);
-
-// What the owner actually asked between 24 Sep and 5 Oct (Plan 12), on the production world (scripts/fixtures/cowork-uso-real-corpus.ts): ur-*.
-CORPUS.push(...USO_REAL_CORPUS);
-// Remembering preferences with a card (Plan 12, 5; scripts/fixtures/cowork-preferencias-corpus.ts): pref-*, with preference.save on.
-CORPUS.push(...PREFERENCIAS_CORPUS);
-
-CORPUS.push(...ARTIFACT_CORPUS);
-
-CORPUS.push(...CAMPANA_CORPUS);
-
-// Chatting with a colleague (Plan 13; scripts/fixtures/cowork-chat-corpus.ts): general questions, honest disagreement, owning a
-// mistake and the one-line heads-up about today: chat-*.
-CORPUS.push(...CHAT_CORPUS);
-
-// «Otra versión» and the 👎 (Plan 13; scripts/fixtures/cowork-version-corpus.ts): ver-*. COWORK_EVAL_VERSIONS=off runs them without.
-CORPUS.push(...VERSION_CORPUS);
-CORPUS.push(...INTEGRAL_CORPUS);
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
