@@ -312,6 +312,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         documentReviewer: process.env.COWORK_DOCUMENT_VISION === 'true' ? anthropicModel({ model: process.env.COWORK_DOCUMENT_REVIEW_MODEL?.trim() || 'claude-haiku-5-5' }) : undefined,
         effort: harnessSettings.effort, maxRounds: harnessSettings.maxRounds, maxReads: harnessSettings.maxReads, deadlineMs: turnCeiling.softDeadlineMs,
         reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator'),
+        // The answer shows while the model writes it (the same live draft as the coordinator's decision): a correction is announced, not rewritten live.
+        onAnswerPartial: liveDraft ? (prefix, correcting) => { if (liveDraft.held || !correcting) liveDraft.push(prefix); } : undefined,
+        onAnswerReview: liveDraft ? () => { if (liveDraft.held) liveDraft.adjust(); else liveDraft.review(); } : undefined,
+        flushAnswer: liveDraft ? () => liveDraft.flush() : undefined,
         recordUsage: async (reservationId, response, durationMs) => {
           const call = coworkHarnessTelemetry(response, durationMs);
           await recordCoworkModelUsage(client, reservationId, run.lease_token, call);

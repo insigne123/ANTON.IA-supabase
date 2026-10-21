@@ -150,6 +150,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
       toolChoice: forcedFinal ? { type: 'tool', name: forcedFinal } : lastRound ? { type: 'none' } : undefined,
       effort: input.effort, maxTokens: input.limits.maxTokens, signal: input.signal,
       onText: (delta, snapshot) => emit({ type: 'text', delta, snapshot }),
+      onToolInput: ({ name, json }) => emit({ type: 'tool_input', round, name, json }),
     });
     usage = addUsage(usage, response.usage);
     if (!models.includes(response.model)) models.push(response.model);

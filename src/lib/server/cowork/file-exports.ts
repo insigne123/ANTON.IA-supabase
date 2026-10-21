@@ -319,6 +319,23 @@ export async function coworkPdfBytes(title: string, blocks: MdBlock[]) {
   return new Uint8Array(pdf.output('arraybuffer'));
 }
 
+/**
+ * The Word of the same document: the engine's own (lib/documents/render-docx.ts), laid out like the PDF (cover, running header, numbered footer, tables that keep
+ * their header), or, with COWORK_DOCUMENTS_ENGINE=legacy or if the engine fails on a document, the renderer that has always written it (docx-render.ts).
+ */
+export async function coworkDocxBytes(title: string, blocks: MdBlock[]) {
+  if (process.env.COWORK_DOCUMENTS_ENGINE !== 'legacy') {
+    try {
+      const [{ renderDocx }, { specFromMarkdown }] = await Promise.all([import('@/lib/documents/render-docx'), import('@/lib/documents/spec')]);
+      return await renderDocx(specFromMarkdown(title, blocks, { theme: 'cowork', brand: 'ANTON.IA Cowork' }), { date: longDate() });
+    } catch (error) {
+      console.warn('[cowork] document engine failed on the Word, using the previous renderer:', error instanceof Error ? error.message : error);
+    }
+  }
+  const { renderCoworkDocx } = await import('./docx-render');
+  return renderCoworkDocx(title, blocks);
+}
+
 export async function buildCoworkFile(events: CoworkEvent[], format: CoworkExportFormat) {
   const observations = events.filter(event => event.kind === 'tool.completed').map(event => event.payload);
   if (format === 'csv') {
@@ -344,9 +361,8 @@ export async function buildCoworkFile(events: CoworkEvent[], format: CoworkExpor
   const document = getDocument(events);
   if (format === 'md') return { bytes: new TextEncoder().encode(document.content), mime: COWORK_MIME.md, filename: coworkExportFilename(document.title, 'md') };
   if (format === 'docx') {
-    const { renderCoworkDocx } = await import('./docx-render');
-    return { bytes: await renderCoworkDocx(document.title, parseMarkdown(document.content.replace(/\r\n?/g, '\n'))), mime: COWORK_MIME.docx,
-      filename: coworkExportFilename(document.title, 'docx') };
+    const blocks = parseMarkdown(document.content.replace(/\r\n?/g, '\n'));
+    return { bytes: await coworkDocxBytes(document.title, blocks), mime: COWORK_MIME.docx, filename: coworkExportFilename(document.title, 'docx') };
   }
   const title = normalizeCoworkPdfText(document.title);
   const content = normalizeCoworkPdfText(document.content).replace(/\r\n?/g, '\n');

@@ -54,7 +54,7 @@ type ApiMessage = {
   model?: string; stop_reason?: string | null; content: Array<Record<string, unknown> & { type: string }>;
   usage?: { input_tokens?: number | null; output_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null } | null;
 };
-type ApiStream = { on: (event: 'text', listener: (delta: string, snapshot: string) => void) => unknown; finalMessage: () => Promise<ApiMessage> };
+type ApiStream = { on: (event: 'text' | 'streamEvent', listener: (...args: any[]) => void) => unknown; finalMessage: () => Promise<ApiMessage> };
 export type AnthropicLike = { messages: { stream: (params: ReturnType<typeof anthropicRequest>, options: { signal?: AbortSignal }) => ApiStream } };
 
 const STOP: Record<string, StopReason> = {
@@ -117,6 +117,21 @@ export function anthropicModel(options: AnthropicModelOptions): ModelClient {
           if (request.onText) {
             const onText = request.onText;
             stream.on('text', (delta, snapshot) => { try { onText(delta, snapshot); } catch { /* a live preview never breaks the call */ } });
+          }
+          if (request.onToolInput) {
+            const onToolInput = request.onToolInput;
+            // The input of a tool call arrives as JSON fragments by content block: each block's fragments are joined and handed over with its tool's name.
+            const open = new Map<number, { name: string; json: string }>();
+            stream.on('streamEvent', (event: { type?: string; index?: number; content_block?: { type?: string; name?: string }; delta?: { type?: string; partial_json?: string } } | null) => {
+              try {
+                if (!event || typeof event.index !== 'number') return;
+                if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') open.set(event.index, { name: String(event.content_block.name), json: '' });
+                else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+                  const block = open.get(event.index);
+                  if (block) { block.json += event.delta.partial_json ?? ''; onToolInput({ name: block.name, json: block.json }); }
+                }
+              } catch { /* a live preview never breaks the call */ }
+            });
           }
           return responseOf(await stream.finalMessage(), options.model);
         } catch (error) {

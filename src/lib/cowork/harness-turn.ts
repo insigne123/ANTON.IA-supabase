@@ -127,6 +127,8 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
   let planned = false;
   let written: { emails: ReturnType<typeof coworkCampaignEmails>; personal: ReturnType<typeof coworkPersonalEmails>; answer: CoworkAnswer } | null = null;
   let judged: CoworkAnswer | null = null;
+  /** The judge sent the answer back: what is written now is a correction of what the page may already show. */
+  let correcting = false;
   let reservation: string | undefined;
   let startedAt = 0;
   const rememberMemory = async (memory: z.infer<typeof coworkThreadMemorySchema>) => { if (input.remember) await input.remember(memory).catch(() => undefined); };
@@ -290,7 +292,7 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
       const out = info.output as Finished;
       if (info.via !== 'final_tool' || out.via !== 'answer') return null;
       const fix = await input.judge!(out.answer, observations, { canRead: info.round + 2 <= config.maxRounds });
-      if (fix) judged = out.answer;
+      if (fix) { judged = out.answer; correcting = true; config.onAnswerReview?.(); }
       return fix;
     } : undefined,
   };
@@ -299,7 +301,10 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
     model: config.model, system: `${COWORK_HARNESS_PROTOCOL}\n\n${config.system}`, messages: [{ role: 'user', content: config.context }],
     registry, finalTool: 'responder', limits: { maxRounds: config.maxRounds, deadlineMs: config.deadlineMs, maxTokens: 6_000 }, effort: config.effort,
     signal: input.signal, hooks, maxReviews: 1, compaction: { clearAt: 60_000, summarizeAt: Number.POSITIVE_INFINITY },
+    // The answer is a tool call: its input is what the page shows while it is written (the same live draft the coordinator's decision feeds).
+    onEvent: event => { if (event.type === 'tool_input' && event.name === 'responder') config.onAnswerPartial?.(`{"action":"answer","answer":${event.json}`, correcting); },
   });
+  await config.flushAnswer?.();
 
   let out: Finished;
   if (run.stopReason === 'final_tool') out = run.output as Finished;

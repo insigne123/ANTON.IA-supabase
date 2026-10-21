@@ -46,6 +46,8 @@ export type ModelRequest = {
   signal?: AbortSignal;
   /** Live text of the answer as it is written. */
   onText?: (delta: string, snapshot: string) => void;
+  /** A tool call as its input is written: the JSON so far (a prefix of the input object). The final answer is a tool call, so this is how it shows live. */
+  onToolInput?: (event: { name: string; json: string }) => void;
 };
 
 export type ModelResponse = {
@@ -109,6 +111,7 @@ export interface AgentTool<I = unknown> {
 export type AgentEvent =
   | { type: 'round'; round: number }
   | { type: 'text'; delta: string; snapshot: string }
+  | { type: 'tool_input'; round: number; name: string; json: string }
   | { type: 'tool_start'; round: number; id: string; name: string; input: unknown }
   | { type: 'tool_end'; round: number; id: string; name: string; status: ToolOutcome['status']; ms: number; summary: string }
   | { type: 'compact'; before: number; after: number; method: 'clear' | 'summary' }

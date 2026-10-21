@@ -247,3 +247,33 @@ test('a busy server is retried with backoff and the live text reaches the listen
   await assert.rejects(anthropicModel({ model: 'm', client: tired.sdk, backoffMs: 1, retries: 1 }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [] }));
   assert.equal(tired.seen.length, 2);
 });
+
+test('the input of a tool call reaches the listener as it is written, joined by block and named by its tool', async () => {
+  const start = (index: number, name: string) => ({ type: 'content_block_start', index, content_block: { type: 'tool_use', name } });
+  const text = (index: number) => ({ type: 'content_block_start', index, content_block: { type: 'text' } });
+  const delta = (index: number, partial: string) => ({ type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: partial } });
+  const events = [text(0), start(1, 'buscar'), delta(1, '{"q":'), delta(1, '"a"}'), start(2, 'responder'), delta(2, '{"reply":"Ho'), delta(2, 'la"}'), delta(9, 'x'), { type: 'ping' }];
+  const sdk: AnthropicLike = { messages: { stream: () => ({
+    on: (event, listener) => { if (event === 'streamEvent') for (const item of events) listener(item); },
+    finalMessage: async () => ({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }),
+  }) } };
+  const seen: Array<{ name: string; json: string }> = [];
+  await anthropicModel({ model: 'claude-sonnet-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onToolInput: event => seen.push(event) });
+  assert.deepEqual(seen, [
+    { name: 'buscar', json: '{"q":' }, { name: 'buscar', json: '{"q":"a"}' },
+    { name: 'responder', json: '{"reply":"Ho' }, { name: 'responder', json: '{"reply":"Hola"}' },
+  ]);
+  // A listener that throws never breaks the call, and without one nothing is subscribed.
+  const broken = await anthropicModel({ model: 'm', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onToolInput: () => { throw new Error('boom'); } });
+  assert.equal(broken.stopReason, 'end_turn');
+});
+
+test('the loop reports a tool call as its input is written, with the round it belongs to', async () => {
+  const model = new ScriptedModel([request => {
+    request.onToolInput?.({ name: 'entregar', json: '{"ok"' });
+    return reply([call('entregar', { ok: true })]);
+  }]);
+  const events: unknown[] = [];
+  await runStructured({ model, system: 's', prompt: 'p', schema: z.object({ ok: z.boolean() }), signal: new AbortController().signal, onEvent: event => { if (event.type === 'tool_input') events.push(event); } });
+  assert.deepEqual(events, [{ type: 'tool_input', round: 1, name: 'entregar', json: '{"ok"' }]);
+});

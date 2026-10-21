@@ -6,6 +6,7 @@ import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
 import { coworkHarnessSettings, type CoworkHarnessConfig } from './harness-config';
 import { COWORK_HARNESS_PROTOCOL, coworkHarnessTelemetry, coworkReadShape, coworkToolName, runCoworkHarnessTurn } from './harness-turn';
 import type { CoworkLoopInput, CoworkObservation } from './agent-loop';
+import { coworkLiveDraft } from './partial-json';
 
 const UUID = '00000000-0000-4000-8000-000000000021';
 const RUN = '00000000-0000-4000-8000-000000000010';
@@ -262,4 +263,31 @@ test('a long document is reviewed as the PDF it becomes before it is delivered, 
   const broken = new ScriptedModel([reply([call('revisar_documento', { title: 'Informe', content: `| A |\n| - |\n| ${'palabra '.repeat(2400)} |` })]), reply([answer('ok')])]);
   await runCoworkHarnessTurn(base(broken).input);
   assert.match((broken.requests[1].messages[2].content as Array<{ content: string }>)[0].content, /Para corregir:\n- Página \d+: Una fila de la tabla es más alta que la página/);
+});
+
+test('the answer shows while it is written: responder\'s input reaches the live draft as a decision, a correction is announced, and the draft is flushed', async () => {
+  const partials: Array<[string, boolean]> = [];
+  const steps: string[] = [];
+  let reviews = 0;
+  const writing = (reply_: string) => (request: { onToolInput?: (event: { name: string; json: string }) => void }) => {
+    const json = JSON.stringify({ reply: reply_, document: null });
+    request.onToolInput?.({ name: 'leads_search', json: '{"consulta":"x"}' });
+    request.onToolInput?.({ name: 'responder', json: json.slice(0, 14) });
+    request.onToolInput?.({ name: 'responder', json });
+    return reply([call('responder', { reply: reply_, document: null })]);
+  };
+  const model = new ScriptedModel([writing('Tienes algunos contactos.'), writing('Tienes 1 contacto: José C.')]);
+  const { input } = base(model, { judge: async () => { reviews += 1; return reviews === 1 ? 'Di cuántos.' : null; } }, {
+    onAnswerPartial: (prefix, correcting) => { partials.push([prefix, correcting]); },
+    onAnswerReview: () => { steps.push('review'); },
+    flushAnswer: async () => { steps.push('flush'); },
+  });
+  const result = await runCoworkHarnessTurn(input);
+  assert.equal(result.reply, 'Tienes 1 contacto: José C.');
+  assert.ok(partials.every(([prefix]) => prefix.startsWith('{"action":"answer","answer":{"reply":"')), 'wrapped as the decision the draft reads, and only the answer\'s tool: a read is not shown');
+  assert.equal(partials.length, 4);
+  assert.equal(coworkLiveDraft(partials[0][0])?.reply, 'Tien', 'the page\'s own reader takes a half-written answer');
+  assert.match(coworkLiveDraft(partials[1][0])?.reply ?? '', /^Tienes algunos contactos\./);
+  assert.deepEqual(partials.map(([, correcting]) => correcting), [false, false, true, true], 'what is written after the judge sent it back is a correction');
+  assert.deepEqual(steps, ['review', 'flush']);
 });

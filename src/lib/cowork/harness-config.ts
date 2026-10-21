@@ -26,6 +26,15 @@ export type CoworkHarnessConfig = {
   documentReviewer?: ModelClient;
   /** Before each call: the ledger's reservation. Throwing ends the turn with the ledger's own message. */
   reserve?: () => Promise<string | undefined>;
+  /**
+   * The answer as the model writes it (the JSON of `responder` so far, wrapped as the decision the page's live draft reads), and whether it is a
+   * correction of an answer the judge sent back (the page then says «revisando» instead of rewriting what it already showed).
+   */
+  onAnswerPartial?: (decisionPrefix: string, correcting: boolean) => void;
+  /** The judge sent the answer back: say so. */
+  onAnswerReview?: () => void;
+  /** The turn is about to finish: write the last state of the draft. */
+  flushAnswer?: () => Promise<void>;
   /** After each call: what it cost. */
   recordUsage?: (reservationId: string | undefined, response: ModelResponse, durationMs: number) => Promise<void>;
 };
