@@ -78,7 +78,7 @@ El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su en
 - **Quiénes no los reciben:**
   - **cuentas internas y de prueba:** el 20 de octubre se les apagaron a las 18 que no son de clientes (`daily_alerts.email = false` e `internal = true`). Se usan solo para probar;
   - **direcciones de prueba** (example.com, `.test`, `.local`…): nunca reciben un correo automático (`isTestAddress`).
-- **En producción, al 20 de octubre:** solo 3 de 53 usuarios tienen correo conectado, así que **Resend es lo que hace que los avisos lleguen a todos**.
+- **En producción:** solo 3 de 53 usuarios tienen correo conectado, así que **Resend es lo que hace que los avisos lleguen a todos**. Está activo desde el 21 de octubre.
 
 ### Cómo se apagan
 
