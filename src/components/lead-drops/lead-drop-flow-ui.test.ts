@@ -64,10 +64,11 @@ const drop = { id: 'drop-1', date: '2026-10-21', criteria: { titles: ['Gerente d
   items: [{ leadId: 'lf_1', name: 'Ana Pérez', title: 'Gerente de Personas', company: 'Ripley', domain: null, industry: 'Retail', size: null, city: 'Santiago',
     hasEmail: true, hasPhone: false, why: 'Calza.', research: ['Vende ropa.'], draft: { subject: 'Hola', body: 'Hola Ana' } }] };
 
-async function open(dropId: string) {
+async function open(dropId: string, options: { motion?: boolean; played?: boolean } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://app.test/search/contactos/nuevo' });
-  // Reduced motion: once they arrive the contacts show at once, without the playback.
-  (dom.window as any).matchMedia = () => ({ matches: true });
+  // Reduced motion by default: once they arrive the contacts show at once, without the playback.
+  (dom.window as any).matchMedia = () => ({ matches: !options.motion });
+  if (options.played) dom.window.localStorage.setItem('anton:drop-played:drop-1', '1');
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, IS_REACT_ACT_ENVIRONMENT: true });
   const root = createRoot(dom.window.document.getElementById('root')!);
   await act(async () => root.render(React.createElement(LeadDropFlow, { dropId })));
@@ -132,4 +133,69 @@ test('without a customer it says so and leads to «Perfil»; not today, without 
     assert.match(later.text(), /Tu próximo contacto llega mañana\./);
     assert.doesNotMatch(later.text(), /Reintentar/);
   } finally { await close(later); }
+});
+
+const click = async (page: Awaited<ReturnType<typeof open>>, label: string | RegExp) => {
+  const target = [...page.dom.window.document.querySelectorAll('button')].find(button => (typeof label === 'string' ? button.textContent === label : label.test(button.textContent || '')))!;
+  await act(async () => { target.dispatchEvent(new page.dom.window.MouseEvent('click', { bubbles: true })); });
+};
+
+test('an opened contact is the contact: its own title, the subject named, and «Así lo buscamos» folded below it', async () => {
+  answers = [{ status: 200, body: drop }];
+  const page = await open('drop-1');
+  try {
+    await page.settle();
+    const document = page.dom.window.document;
+    assert.equal(document.querySelector('h1')?.textContent, 'Tu contacto del día', 'not «Buscar prospectos»');
+    assert.match(page.text(), /Asunto: Hola/, 'the subject is named, not a loose line above the greeting');
+    // The steps and the filters were the story while it played; after, they are one row under the contact.
+    assert.doesNotMatch(page.text(), /Buscando personas con tus filtros|Ver ahora/);
+    const row = document.querySelector('#drop-filters button')!;
+    assert.equal(row.getAttribute('aria-expanded'), 'false');
+    assert.match(row.textContent || '', /Así lo buscamos[\s\S]*Gerente de Personas · Retail · Chile/);
+    assert.ok(document.querySelector('#drop-results')!.compareDocumentPosition(row) & 4, 'below the contact (DOCUMENT_POSITION_FOLLOWING)');
+    assert.equal(document.querySelector('dl'), null, 'the chips stay folded');
+    await click(page, /Así lo buscamos/);
+    assert.equal(document.querySelector('#drop-filters button')!.getAttribute('aria-expanded'), 'true');
+    assert.match(document.querySelector('dl')?.textContent || '', /Cargo[\s\S]*Gerente de Personas[\s\S]*Rubro[\s\S]*Retail[\s\S]*Lugar[\s\S]*Chile/);
+    assert.match(page.text(), /Tu cliente ideal, de «Perfil»\. Revisamos que tengan correo verificado/);
+  } finally { await close(page); }
+  // More than one: the plural title.
+  answers = [{ status: 200, body: { ...drop, items: [drop.items[0], { ...drop.items[0], leadId: 'lf_2', name: 'Luis Soto' }] } }];
+  const many = await open('drop-1');
+  try {
+    await many.settle();
+    assert.equal(many.dom.window.document.querySelector('h1')?.textContent, 'Tus contactos del día');
+  } finally { await close(many); }
+});
+
+test('the search plays back the first time on this device, and not again when they come back to write to them', async () => {
+  answers = [{ status: 200, body: drop }];
+  const first = await open('drop-1', { motion: true });
+  try {
+    await first.settle();
+    assert.match(first.text(), /Buscando personas con tus filtros/);
+    assert.match(first.text(), /Ver ahora/);
+    assert.equal(first.dom.window.localStorage.getItem('anton:drop-played:drop-1'), null, 'not marked while it plays');
+    await click(first, 'Ver ahora');
+    await first.settle();
+    assert.doesNotMatch(first.text(), /Buscando personas con tus filtros/);
+    assert.equal(first.dom.window.localStorage.getItem('anton:drop-played:drop-1'), '1', 'seen: it will not wait again');
+    assert.match(first.dom.window.document.querySelector('#drop-results')?.textContent || '', /Ana Pérez/);
+  } finally { await close(first); }
+  answers = [{ status: 200, body: drop }];
+  const back = await open('drop-1', { motion: true, played: true });
+  try {
+    await back.settle();
+    assert.doesNotMatch(back.text(), /Buscando personas con tus filtros|Ver ahora/, 'the contact at once');
+    assert.equal(back.dom.window.document.querySelector('#drop-results')?.textContent, 'Ana Pérez');
+  } finally { await close(back); }
+});
+
+test('«Hoy» does not offer to fill in the ideal customer when the next step already leads to «Perfil»', () => {
+  const render = (data: unknown, quiet: boolean) => { home = data; return renderToStaticMarkup(React.createElement(LeadDropBanner, { quietProfile: quiet })); };
+  assert.equal(render({ drop: null, pull: 'profile' }, true), '');
+  assert.match(render({ drop: null, pull: 'profile' }, false), /Completar mi cliente ideal/);
+  assert.match(render({ drop: null, pull: 'first' }, true), /Ver mi primer contacto/, 'the other offers stay');
+  assert.match(render({ drop: { id: 'd-1', dropDate: '2026-10-20', total: 1, left: 1, next: { name: 'Ana Pérez', company: 'Ripley', why: 'Calza.' } }, pull: null }, true), /Ver y guardar/, 'and so does a contact that is ready');
 });

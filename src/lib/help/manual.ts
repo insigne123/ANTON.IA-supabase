@@ -72,7 +72,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       '«Llamadas y LinkedIn» te recuerda llamar o invitar por LinkedIn a quien no respondió tu primer correo, el día que elijas: por defecto, LinkedIn el día 1 y la llamada el día 3. Se enciende con «Activar» y se cambia con «Ajustar».',
       'En cada fila, el botón llama al número o abre su LinkedIn. «Guion y resultado» prepara qué decir, el mensaje si no contesta o la nota de la invitación; marca qué pasó y pulsa «Guardar». Si hablaron, «Subir grabación» deja el resumen, los acuerdos y el próximo paso en el CRM.',
       'Al lado, «Tu resumen de hoy» cuenta tus envíos, contactos, respuestas y guardados del día, y «Tu cupo de hoy» dice cuánto te queda; la semana está arriba, en «Tu semana».',
-      '«Meta de la semana» muestra cuántas personas contactaste y cuántos contactos con correo sumaste, si vas al día y el paso siguiente. Arriba, «Contacto del día» trae tu contacto del martes, miércoles o viernes.',
+      '«Meta de la semana» muestra cuántas personas contactaste y cuántos contactos con correo sumaste, si vas al día y el paso siguiente. Bajo «Lo primero hoy», «Contacto del día» trae tu contacto del martes, miércoles o viernes.',
     ],
     faqs: [
       { q: '¿Por qué «Prepara tu cuenta» dice que mi correo no está conectado?', a: 'Mira si hay una conexión guardada de Gmail u Outlook. La sesión de Outlook abierta solo en el navegador no cuenta. Conéctalo en «Conexiones».' },
@@ -121,7 +121,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     steps: [
       'En «Hoy», pulsa «Tu semana» arriba a la derecha.',
       'Eliges «Esta semana» (de lunes a hoy) o «Semana pasada» (de lunes a domingo). Cada cifra se compara con los mismos días de la semana anterior.',
-      '«Tu semana» trae una frase con lo importante, tus correos enviados, las personas contactadas, las respuestas, las reuniones pedidas y «Para esta semana»: hasta tres cosas para hacer, con su enlace.',
+      '«Tu semana» trae una frase con lo importante, tus correos enviados, personas contactadas, respuestas y reuniones pedidas (sin cifras si no hubo actividad) y «Para esta semana»: hasta tres cosas para hacer.',
       'Si administras la organización, «Equipo» muestra lo mismo por persona, con quién tiene respuestas por atender. Quien no tuvo actividad en la semana queda contado en una línea, y «Ver» lo muestra; si nadie escribió, una frase lo dice.',
       '«Oportunidades» muestra lo que llegó en la semana, lo que cierra en los próximos 7 días y lo que nadie tiene asignado. Lo ven los gestores de oportunidades que elija un administrador; mientras no haya, los administradores.',
       'Abajo, «Recibirlo por correo cada lunes» te lo envía a las 8:00 con la semana anterior, a tu correo. Viene activado y lo apagas ahí mismo. «Enviármelo ahora» te manda el que estás viendo.',

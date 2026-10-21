@@ -7,14 +7,35 @@ const summary = readFileSync('src/components/home/HomeSummary.tsx', 'utf8');
 const today = readFileSync('src/components/home/TodayPanel.tsx', 'utf8');
 const chart = readFileSync('src/components/ui/chart.tsx', 'utf8');
 
-test('«Hoy» puts the work first and the week beside it, in the phone order step → pending → summary → recommended', () => {
-  const todayAt = page.indexOf('<TodayPanel />');
+test('«Hoy» puts the work first and the week beside it, in the phone order step → contact → pending → summary → recommended', () => {
+  const todayAt = page.indexOf('<TodayPanel');
   const asideAt = page.indexOf('<aside aria-label="Tu actividad de hoy"');
   const recommendedAt = page.indexOf('<RecommendedLeads />');
   assert.ok(todayAt > 0 && todayAt < asideAt && asideAt < recommendedAt, 'DOM order is the phone order');
   assert.match(page, /xl:grid-cols-\[minmax\(0,1fr\)_380px\]/);
   assert.match(page, /xl:col-start-2 xl:row-span-2 xl:row-start-1/, 'on wide screens the week sits beside both blocks of work');
   assert.ok(!existsSync('src/components/dashboard/SummaryCards.tsx'), 'the browser no longer downloads whole tables to count');
+});
+
+test('today\'s contact sits right under the next step, not fourth on a phone, and never doubles the «Perfil» step', () => {
+  // It lived in the aside, below the checklist on a phone (21 Oct 2026): the feature we most want used came after two cards of setup.
+  assert.match(page, /<TodayPanel afterPrimary=\{primary => <LeadDropBanner quietProfile=\{primary\.href === '\/profile'\} \/>\} \/>/);
+  const aside = page.slice(page.indexOf('<aside aria-label="Tu actividad de hoy"'), page.indexOf('</aside>'));
+  assert.doesNotMatch(aside, /LeadDropBanner/);
+  assert.match(today, /\{afterPrimary\?\.\(data\.primary\)\}/);
+  assert.ok(today.indexOf('afterPrimary?.(data.primary)') > today.indexOf('{data.primary.cta}'), 'after the next step');
+  assert.ok(today.indexOf('afterPrimary?.(data.primary)') < today.indexOf('Lo que te espera'), 'before the pending');
+  const banner = readFileSync('src/components/home/LeadDropBanner.tsx', 'utf8');
+  assert.match(banner, /if \(quietProfile && data\?\.pull === 'profile'\) return null;/);
+});
+
+test('what is empty today takes one line, not a card: nothing waiting, no activity yet', () => {
+  assert.match(today, /data\.queue\.length === 0 \? \(\s*<p className="flex items-center gap-2[^"]*">\s*<CheckCircle2/);
+  assert.match(today, /Nada pendiente por ahora\./);
+  assert.match(summary, /const quiet=Boolean\(summary\)&&METRICS\.every\(metric=>summary!\[metric\.key\]===0\)&&!summary!\.activity\.length/);
+  assert.match(summary, /if\(quiet\)return <section aria-labelledby="summary-title">[\s\S]*Hoy aún no hay actividad en este workspace\./);
+  // The chart (with its own empty text) is only drawn with activity.
+  assert.ok(summary.indexOf('if(quiet)') < summary.indexOf('<PerformanceChart'));
 });
 
 test('the cards of «Tu semana» keep their own height on phones', () => {
@@ -56,4 +77,16 @@ test('the three readers of the quota on «Hoy» share one request', () => {
     assert.match(source, /fetchQuotaStatus\(/, file);
     assert.doesNotMatch(source, /fetch\('\/api\/quota\/status'/, file);
   }
+});
+
+test('«Tu semana» says its week once, has no tiles of zeros and does not send people to connect a mailbox when the Yago address sends', () => {
+  const report = readFileSync('src/components/weekly-report/WeeklyReport.tsx', 'utf8');
+  const route = readFileSync('src/app/api/weekly-report/route.ts', 'utf8');
+  // The toggle beside it says «Esta semana»: the line is only the range. A role pill no longer repeats «Tu semana» (page title, view toggle, pill).
+  assert.match(report, /\(embedded \? report\.week\.label : `\$\{report\.week\.which === 'current' \? 'Esta semana' : 'La semana pasada'\} · \$\{report\.week\.label\}`\)/);
+  assert.match(readFileSync('src/lib/weekly-report.ts', 'utf8'), /\{ id: 'personal', label: 'Personal' \}/);
+  assert.match(report, /\{quietWeek \? null : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">/);
+  assert.match(report, /const quietWeek = Boolean\(report\) && \[report!\.personal\.sent, report!\.personal\.contacted, report!\.personal\.replies\]\.every\(count => count\.now === 0 && count\.before === 0\) && report!\.personal\.meetings === 0;/);
+  assert.match(report, /\{data\.yago\s*\? 'A las 8:00, con la semana anterior, a tu correo\.'/);
+  assert.match(route, /sender: canEmailEveryone\(\), yago: Boolean\(resendSender\(\)\),/);
 });

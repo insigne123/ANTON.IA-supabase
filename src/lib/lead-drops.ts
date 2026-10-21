@@ -140,11 +140,11 @@ export function tidyCompany(name: string | null | undefined) {
   return value.replace(/\bS\.\s?A\.?$/i, 'S.A.').replace(/\bSpa$/i, 'SpA').replace(/\bLtda\.?$/i, 'Ltda.').replace(/\bE\.?I\.?R\.?L\.?$/i, 'EIRL') || null;
 }
 
-/** «Gerente de Personas en retail, en Santiago»: why the contact fits, from what matched. */
+/** «Calza con tu cliente ideal por su cargo y su rubro (retail), en Santiago»: why the contact fits, from what matched, without repeating the role the screen shows beside it. */
 export function whyText(item: Pick<DropItem, 'title' | 'industry' | 'city'>, criteria: DropCriteria) {
   const source = criteria.source === 'perfil' ? 'tu cliente ideal' : criteria.source === 'equipo' ? 'el cliente ideal de tu equipo' : 'los contactos que guarda tu equipo';
-  const parts = [item.title, item.industry ? `en ${item.industry.toLowerCase()}` : null, item.city ? `en ${item.city}` : null].filter(Boolean);
-  return parts.length ? `${parts.join(' ')}: calza con ${source}.` : `Calza con ${source}.`;
+  const matched = [item.title ? 'su cargo' : null, item.industry ? `su rubro (${item.industry.toLowerCase()})` : null].filter(Boolean).join(' y ');
+  return `Calza con ${source}${matched ? ` por ${matched}` : ''}${item.city ? `, en ${item.city}` : ''}.`;
 }
 
 /** The facts the research starts from: what the company does (the actor's description, summarized when there is one), size and place. */
@@ -163,28 +163,30 @@ const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;
 /** «Buscar prospectos» in the drop's mode: the search that found them, with the contacts ready. */
 export const dropHref = (dropId: string) => `/search/contactos/${encodeURIComponent(dropId)}`;
 
-/** The drop's part of the email: a few lines of text and a table (name, role, company, why) with the link to see them. */
-export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string) {
+/**
+ * The drop's part of the email: each contact as a block (name, role and company, why), the button to see them and a note on
+ * the PDF. With `heading: false` (the drop is all the email has) the title and its lead are left out.
+ */
+export function dropEmailSection(items: DropItem[], dropId: string, appUrl: string, options: { heading?: boolean } = {}) {
   const link = `${appUrl.replace(/\/$/, '')}${dropHref(dropId)}`;
   const one = items.length === 1;
+  const heading = options.heading !== false;
   const lead = one ? 'Tu contacto de hoy, con su correo listo' : `${items.length} contactos nuevos para ti, con su correo listo`;
   const research = one ? 'En el PDF adjunto va una breve investigación y un primer correo sugerido.' : 'En el PDF adjunto va una breve investigación de cada uno y un primer correo sugerido.';
   const text = [
-    `${lead}:`,
+    ...(heading ? [`${lead}:`] : []),
     ...items.map(item => `- ${item.name}, ${[item.title, item.company].filter(Boolean).join(' en ')}. ${item.why}`),
     `${one ? 'Míralo y guárdalo' : 'Míralos y guárdalos'} sin costo: ${link}`,
     research,
   ].join('\n');
-  const cell = 'padding:10px 8px;border-top:1px solid #e5e7eb;font-size:14px;line-height:20px;vertical-align:top';
-  const rows = items.map(item => `<tr><td style="${cell};color:#111827;font-weight:600">${escape(item.name)}</td>`
-    + `<td style="${cell};color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</td>`
-    + `<td style="${cell};color:#6b7280">${escape(item.why)}</td></tr>`).join('');
-  const html = `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
-    + `<p style="margin:0 0 8px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>`
-    + `<table role="presentation" style="width:100%;border-collapse:collapse;border-bottom:1px solid #e5e7eb"><thead><tr>`
-    + ['Nombre', 'Cargo y empresa', 'Por qué'].map(head => `<th style="padding:6px 8px;text-align:left;font-size:12px;font-weight:500;color:#6b7280">${head}</th>`).join('')
-    + `</tr></thead><tbody>${rows}</tbody></table>`
-    + `<p style="margin:16px 0 0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`}</a></p>`
+  const block = (item: DropItem, index: number) => `<div style="padding:12px 0;${index ? 'border-top:1px solid #e5e7eb;' : ''}">`
+    + `<p style="margin:0;font-size:17px;line-height:24px;font-weight:600;color:#111827">${escape(item.name)}</p>`
+    + `<p style="margin:2px 0 0;font-size:14px;line-height:20px;color:#374151">${escape([item.title, item.company].filter(Boolean).join(' · '))}</p>`
+    + `<p style="margin:6px 0 0;font-size:14px;line-height:20px;color:#6b7280">${escape(item.why)}</p></div>`;
+  const html = (heading ? `<h2 style="margin:28px 0 8px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#6b7280">Contacto del día</h2>`
+      + `<p style="margin:0 0 12px;font-size:15px;line-height:22px;color:#111827">${lead}.</p>` : '')
+    + `<div style="margin:0 0 16px;padding:4px 16px;border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb">${items.map(block).join('')}</div>`
+    + `<p style="margin:0"><a href="${escape(link)}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#2563eb;color:#ffffff;text-decoration:none;font-size:14px">${one ? 'Ver y guardar' : `Ver y guardar los ${items.length}`}</a></p>`
     + `<p style="margin:8px 0 0;font-size:13px;line-height:19px;color:#6b7280">${one ? 'Guardarlo' : 'Guardarlos'} no gasta créditos. ${research}</p>`;
   return { text, html, link };
 }

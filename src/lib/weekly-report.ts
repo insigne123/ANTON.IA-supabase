@@ -1,4 +1,5 @@
 import { dayInZone, dayStartInZone, shiftDay } from '@/lib/admin/chile-time';
+import { emailShell } from '@/lib/email-shell';
 import { goalSentence, goalsOff, type GoalProgress } from '@/lib/weekly-goals';
 
 /**
@@ -10,7 +11,7 @@ import { goalSentence, goalsOff, type GoalProgress } from '@/lib/weekly-goals';
 
 export type ReportRole = 'personal' | 'team' | 'opportunities';
 export const REPORT_ROLES: Array<{ id: ReportRole; label: string }> = [
-  { id: 'personal', label: 'Tu semana' }, { id: 'team', label: 'Equipo' }, { id: 'opportunities', label: 'Oportunidades' },
+  { id: 'personal', label: 'Personal' }, { id: 'team', label: 'Equipo' }, { id: 'opportunities', label: 'Oportunidades' },
 ];
 
 export type ReportWeek = { which: 'current' | 'previous'; start: string; end: string; from: string; to: string; previousFrom: string; previousTo: string; label: string };
@@ -188,6 +189,6 @@ export function reportEmail(report: WeeklyReport, appUrl: string) {
   return {
     subject: `Tu informe semanal · ${week.label}`,
     text: lines.join('\n'),
-    html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px">${html.join('')}</div>`,
+    html: emailShell(html.join('')),
   };
 }

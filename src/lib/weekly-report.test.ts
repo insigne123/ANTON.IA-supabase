@@ -73,6 +73,7 @@ test('the email: the same report in a few lines, escaped, without tracking or un
   assert.match(email.html, /href="https:\/\/app\.example\/contacted\/replied"/);
   assert.match(email.text, /Ver el informe completo: https:\/\/app\.example\/dashboard\?vista=semana/);
   assert.doesNotMatch(email.html, /<b>|unsubscribe|tracking|pixel/i);
+  assert.match(email.html, /^<div style="background:#ffffff;color:#111827;color-scheme:light/, 'a white card of its own: readable in a dark mail client');
 });
 
 const member = (name: string, patch: Partial<TeamSection['members'][number]> = {}) => ({ userId: name, name, role: 'member', sent: 0, replies: 0, meetings: 0, pending: 0, ...patch });

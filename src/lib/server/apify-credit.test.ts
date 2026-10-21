@@ -83,6 +83,7 @@ test('what is left comes from the account limits, and the email says what stops 
   assert.match(low.text, /La cuenta de Apify de ANTON\.IA \(yago-org\) usó US\$4,92 de US\$5,00 este ciclo: quedan US\$0,08\./);
   assert.match(low.text, /dejan de funcionar la búsqueda de contactos, el «Contacto del día» y las fuentes de LinkedIn de «Oportunidades»\. El saldo se renueva el 3 de noviembre\./);
   assert.match(low.html, /href="https:\/\/console\.apify\.com\/billing"/);
+  assert.match(low.html, /^<div style="background:#ffffff;color:#111827;color-scheme:light/, 'a white card of its own: readable in a dark mail client');
   const empty = apifyAlertEmail('empty', { ...credit, usedUsd: 5, leftUsd: 0 }, '<b>org</b>');
   assert.equal(empty.subject, 'Apify se quedó sin saldo');
   assert.match(empty.html, /\(&lt;b&gt;org&lt;\/b&gt;\) ya usó los US\$5,00 de este ciclo\./);

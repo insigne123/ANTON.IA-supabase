@@ -90,3 +90,30 @@ test('the email lists each line as a link and escapes what people wrote', () => 
   assert.doesNotMatch(email.html, /Ana <b>/);
   assert.match(email.html, /href="https:\/\/app\.antonia\.ai\/dashboard\?vista=semana"/);
 });
+
+test('with today\'s contact the email has one block and one main button; without it, the usual button', () => {
+  const item = { leadId: 'lf_1', name: 'Ramiro Páez', title: 'Jefe de Reclutamiento', company: 'Logística S.A.', domain: null, industry: null, size: null, city: null, hasEmail: true, hasPhone: false,
+    why: 'Calza con tu cliente ideal por su cargo.', research: [], draft: null, savedLeadId: null };
+  const drop = { id: 'd-1', items: [item] };
+  // Replies and the contact: the list keeps what is not the contact; the contact has its block and its button.
+  const mixed = composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana', company: null }], drop }), TUESDAY)!;
+  assert.ok(mixed.lines.some(line => line.kind === 'drop'), 'the alert itself still counts it');
+  const email = alertEmail(mixed, 'Ana', 'https://app.antonia.ai/', drop);
+  assert.equal([...email.html.matchAll(/Tu contacto de hoy, con su correo listo/g)].length, 1, 'said once, not as a line and again as a heading');
+  assert.match(email.html, /Ana te respondió/);
+  assert.match(email.html, />Ver y guardar</);
+  assert.doesNotMatch(email.html, /background:#111827[^>]*>Abrir ANTON\.IA</, 'no second button');
+  assert.match(email.html, />Abrir ANTON\.IA &rsaquo;</);
+  assert.match(email.html, /^<div style="background:#ffffff;color:#111827;color-scheme:light/, 'on a white card of its own, readable in a dark mail client');
+  assert.doesNotMatch(email.text, /guárdalo sin gastar créditos \(/);
+  // The contact alone: the greeting says it, and there is no list or heading.
+  const alone = composeAlert(facts({ drop, goal: null }), TUESDAY)!;
+  const only = alertEmail(alone, 'Ana', 'https://app.antonia.ai/', drop);
+  assert.match(only.html, /Tu contacto del día ya está listo\./);
+  assert.doesNotMatch(only.html, /border-top:1px solid #e5e7eb;font-size:15px|Contacto del día<\/h2>/);
+  assert.match(only.text, /^Hola, Ana\. Tu contacto del día ya está listo\./);
+  // No contact: the usual dark button, and still the white card.
+  const plain = alertEmail(composeAlert(facts({ newReplies: [{ id: 'c-1', name: 'Ana', company: null }] }), TUESDAY)!, 'Ana', 'https://app.antonia.ai/');
+  assert.match(plain.html, /background:#111827[^>]*>Abrir ANTON\.IA</);
+  assert.match(plain.html, /^<div style="background:#ffffff/);
+});

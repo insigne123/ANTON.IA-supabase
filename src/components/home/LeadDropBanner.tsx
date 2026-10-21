@@ -23,25 +23,28 @@ const OFFER: Record<Pull, { text: string; action: string; href: string }> = {
 };
 
 function Banner({ text, children, accent }: { text: ReactNode; children: ReactNode; accent?: boolean }) {
-  return <Card className={accent ? 'rounded-2xl border-primary/25 bg-primary/5' : 'rounded-2xl'}>
-    <CardContent className="space-y-3 p-4">
-      <div className="space-y-1">
+  return <Card className={accent ? 'rounded-2xl border-primary/25 bg-primary/5' : 'rounded-2xl'} data-tour="lead-drop">
+    <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <div className="min-w-0 space-y-1">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />Contacto del día</h2>
         <div className="text-sm text-muted-foreground">{text}</div>
       </div>
-      {children}
+      <div className="sm:w-56 sm:shrink-0">{children}</div>
     </CardContent>
   </Card>;
 }
 
 /**
  * «Contacto del día» in «Hoy» (src/lib/lead-drops.ts): the contact while it is left to save; otherwise, for whoever gets
- * no email too, today's on Tuesdays, Wednesdays and Fridays (any day for the first one), made at that moment.
+ * no email too, today's on Tuesdays, Wednesdays and Fridays (any day for the first one), made at that moment. It sits in the
+ * main column, under the next step, so on a phone it is the second thing and not the fourth. `quietProfile`: when the next
+ * step already leads to «Perfil», its own offer to fill in the ideal customer would be a second button to the same place.
  */
-export function LeadDropBanner() {
+export function LeadDropBanner({ quietProfile = false }: { quietProfile?: boolean } = {}) {
   const { data } = usePersonalHome<Response>('/api/lead-drops/latest');
   const drop = data?.drop;
   if (!drop) {
+    if (quietProfile && data?.pull === 'profile') return null;
     const offer = data?.pull ? OFFER[data.pull] : null;
     if (!offer) return null;
     return <Banner text={<p>{offer.text}</p>}>
