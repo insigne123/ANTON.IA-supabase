@@ -17,7 +17,7 @@ test('every `next` after signing in goes through safeNextPath: callback, login p
 
 test('a failed or expired link lands on the login page with a notice instead of a silent redirect', () => {
   assert.match(callback, /await supabase\.auth\.exchangeCodeForSession\(code!?\)/);
-  assert.equal((callback.match(/\/login\?enlace=vencido/g) || []).length, 2, 'an exchange error and a Supabase `error` param');
+  assert.equal((callback.match(/\/login\?enlace=vencido/g) || []).length, 3, 'a Supabase `error` param, a token hash that is not a recovery token, and an exchange error');
   assert.match(login, /searchParams\.get\('enlace'\) === 'vencido'/);
 });
 
@@ -30,6 +30,7 @@ test('«¿Olvidaste tu contraseña?» sends a link back through the callback to 
   assert.match(auth, /supabase\.auth\.updateUser\(\{ password \}\)/);
   assert.match(middleware, /pathname === '\/restablecer-clave'/);
   assert.match(reset, /updatePassword\(password\)/);
+  assert.match(reset, /fetch\('\/api\/auth\/recovery', \{ method: 'POST'/, 'the token is spent by a click, never by opening the link');
   assert.match(reset, /href="\/login\?recuperar=1"/, 'an expired link offers a new one');
 });
 
@@ -46,4 +47,13 @@ test('public access has no registration flow and the browser auth context cannot
   assert.doesNotMatch(auth, /signUpWithPassword|auth\.signUp\(/);
   assert.match(login, /Las cuentas las crea la administración de ANTON\.IA/);
   assert.match(login, /signInWithPassword\(email, password\)/);
+});
+
+test('a recovery token is spent only by the POST that «Continuar» sends, never by a GET', () => {
+  const recovery = readFileSync('src/app/api/auth/recovery/route.ts', 'utf8');
+  assert.match(recovery, /export async function POST/);
+  assert.doesNotMatch(recovery, /export async function GET/);
+  assert.match(recovery, /verifyOtp\(\{ token_hash: token, type: 'recovery' \}\)/);
+  assert.doesNotMatch(callback, /verifyOtp/, 'the callback, a GET, cannot spend it: a mail filter opens every link of a message');
+  assert.doesNotMatch(reset, /verifyOtp/, 'and the page asks the server');
 });

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { Suspense, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 import Logo from '@/components/logo';
@@ -13,20 +13,44 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import { PASSWORD_MIN_LENGTH, authErrorMessage, newPasswordProblem } from '@/lib/auth-messages';
+import { RESET_PASSWORD_PATH, recoveryTokenHash } from '@/lib/recovery-link';
 
 /**
- * The end of «¿Olvidaste tu contraseña?»: the email link signs the person in through /api/auth/callback and lands here.
- * Without that session (an old link, or one opened in another browser) the page says so and offers a new link.
+ * The end of «¿Olvidaste tu contraseña?». The email link brings the person here with a one-time token still unspent: a mail filter that opens the
+ * link reaches this page and nothing else, and the token is spent when the person presses «Continuar» (recovery-link.ts). That signs them in and the
+ * page asks for the new password. Without a link or a session (an old link, or one opened in another browser) the page says so and offers a new link.
  */
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const { session, loading, updatePassword } = useAuth();
   const router = useRouter();
+  const tokenHash = recoveryTokenHash(useSearchParams());
+  const [confirming, setConfirming] = useState(false);
+  const [linkFailed, setLinkFailed] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [visible, setVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleContinue = async () => {
+    if (!tokenHash) return;
+    setConfirming(true);
+    setLinkFailed(false);
+    try {
+      const response = await fetch('/api/auth/recovery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tokenHash }), cache: 'no-store' });
+      if (!response.ok) {
+        setLinkFailed(true);
+        return;
+      }
+      // The session is in the cookies now: a fresh load of this page without the token starts the app as that person.
+      window.location.replace(RESET_PASSWORD_PATH);
+    } catch {
+      setError('No pudimos conectar. Revisa tu conexión e intenta de nuevo.');
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -64,13 +88,29 @@ export default function ResetPasswordPage() {
         <Button className="w-full" onClick={() => router.push('/dashboard')}>Ir a Hoy</Button>
       </div>
     );
-  } else if (!session) {
+  } else if (tokenHash && !linkFailed) {
+    content = (
+      <div className="space-y-4">
+        {error && (
+          <Alert variant="destructive" role="alert">
+            <AlertCircle className="h-4 w-4" aria-hidden="true" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <p className="text-sm text-muted-foreground">Para cuidar tu cuenta, confirma que abriste este enlace tú. Después eliges tu contraseña nueva.</p>
+        <Button className="w-full" onClick={() => void handleContinue()} disabled={confirming}>
+          {confirming && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
+          Continuar
+        </Button>
+      </div>
+    );
+  } else if (!session || linkFailed) {
     content = (
       <div className="space-y-4">
         <Alert variant="warning">
           <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertDescription>
-            Este enlace ya no sirve: venció, ya se usó o se abrió en otro navegador. Pide uno nuevo y ábrelo en este mismo navegador.
+            Este enlace ya no sirve: venció, ya se usó (a veces el filtro de seguridad del correo lo abre antes que tú) o se abrió en otro navegador. Pide uno nuevo.
           </AlertDescription>
         </Alert>
         <Button asChild className="w-full"><Link href="/login?recuperar=1">Pedir un enlace nuevo</Link></Button>
@@ -145,5 +185,13 @@ export default function ResetPasswordPage() {
         <CardContent>{content}</CardContent>
       </Card>
     </main>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-muted-foreground">Cargando…</div>}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }

@@ -2,6 +2,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
+import { recoveryPagePath, recoveryTokenHash } from '@/lib/recovery-link';
 import { safeNextPath } from '@/lib/safe-next-path';
 import { authCallbackOrigin } from '@/lib/server/auth-callback-origin';
 
@@ -30,18 +31,19 @@ export async function GET(request: Request) {
     // Supabase sends `error` instead of `code` when the link expired or was already used.
     if (requestUrl.searchParams.get('error')) return redirect('/login?enlace=vencido');
 
-    if (code || tokenHash) {
+    // A recovery link with a token hash is not spent here. Mail security filters request every link of a message before the person does, and a
+    // GET that spent the token would leave them with «vencido» a minute after asking: the token is spent when they press «Continuar» on the page.
+    if (tokenHash) {
+        const token = recovery ? recoveryTokenHash(requestUrl.searchParams) : null;
+        return redirect(token ? recoveryPagePath(token) : '/login?enlace=vencido');
+    }
+
+    if (code) {
         const cookieStore = await cookies();
         // auth-helpers 0.10 reads the store synchronously. Its declaration uses
         // Next's now-async cookies() type, but the runtime needs the resolved store.
         const supabase = createRouteHandlerClient({ cookies: () => cookieStore as unknown as ReturnType<typeof cookies> });
-        // Token-hash recovery links also work when opened in another browser.
-        // Keep OAuth/PKCE exchange unchanged; never accept an arbitrary OTP type.
-        const { error } = tokenHash
-            ? recovery && /^[A-Za-z0-9_-]{1,256}$/.test(tokenHash)
-                ? await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
-                : { error: { code: 'invalid_recovery_link', status: 400 } }
-            : await supabase.auth.exchangeCodeForSession(code!);
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
         // An expired link, or one opened in another browser (the code verifier lives in the first one).
         if (error) {
             // Diagnose a failed exchange without logging the code, verifier,
@@ -54,5 +56,5 @@ export async function GET(request: Request) {
         }
     }
 
-    return redirect(recovery && (code || tokenHash) ? '/restablecer-clave' : next);
+    return redirect(recovery && code ? '/restablecer-clave' : next);
 }
