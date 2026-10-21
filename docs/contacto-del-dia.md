@@ -9,7 +9,7 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
   - una breve investigación;
   - un primer correo sugerido.
 - **Llega por correo**, en el aviso de la mañana:
-  - en el cuerpo, una tabla con el contacto y por qué se recomienda;
+  - en el cuerpo, un bloque con el contacto (nombre, cargo y empresa, por qué calza) y su botón «Ver y guardar»;
   - adjunto, un PDF con la investigación y el borrador;
   - un enlace a «Buscar prospectos», donde se ve la búsqueda que lo encontró, con el contacto ya listo.
 - **Guardarlo no gasta créditos:** ya viene con correo.
@@ -45,12 +45,15 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
    - El contacto queda `ready`.
 3. **Envío:** el aviso de la mañana (`dailyAlertsTick`, 08:00) lo lleva, así que nunca hay dos correos el mismo día.
    - **Asunto:** «Tu contacto de hoy: Gerente de Personas en Ripley», salvo que haya algo más urgente, como una respuesta o un compromiso.
-   - **Cuerpo:** una tabla (nombre, cargo y empresa, por qué) y el botón «Ver y guardar».
+   - **Cuerpo:** un bloque por contacto (nombre, cargo · empresa, por qué calza), no una tabla: una tabla de tres columnas se rompe en un teléfono. Con el contacto va su botón «Ver y guardar», el único botón principal del correo: «Abrir ANTON.IA» pasa a ser un enlace. Si hay otras cosas en el aviso (una respuesta, un compromiso), van en la lista y el contacto no se repite como una línea más; si el contacto es lo único, el saludo lo dice («Tu contacto del día ya está listo») y no hay lista ni título.
+   - **Por qué calza:** lo que coincidió, sin repetir el cargo que se ve al lado: «Calza con tu cliente ideal por su cargo y su rubro (logística), en Santiago.» (`whyText`).
    - **Adjunto:** `contacto-del-dia-AAAA-MM-DD.pdf`, con la investigación y el primer correo.
    - Una vez enviado, pasa a `sent`.
 4. **En la app** (`/search/contactos/<id>`, dentro de «Buscar prospectos»):
-   - **«Así lo buscamos»:** los filtros usados y los pasos de la búsqueda, uno a uno: «Buscando…», «Revisando que tengan correo verificado», «Quitando a quienes tu equipo ya tiene» y «Escribiendo un primer correo». Con movimiento reducido o con «Ver ahora», aparecen de inmediato.
-   - **El contacto:** su nombre como título, cargo y empresa, por qué calza, «Correo verificado» y «Teléfono» si lo hay. La investigación y el primer correo, con «Copiar», están a la vista.
+   - **Título:** «Tu contacto del día» («Tus contactos del día» si son varios), no «Buscar prospectos».
+   - **«Así lo buscamos»:** la primera vez que se abre en ese dispositivo, los filtros usados y los pasos de la búsqueda, uno a uno: «Buscando…», «Revisando que tengan correo verificado», «Quitando a quienes tu equipo ya tiene» y «Escribiendo un primer correo». Con movimiento reducido o con «Ver ahora», aparecen de inmediato. Al terminar se guarda que ya se vio (`localStorage`, `anton:drop-played:<id>`): volver a escribirle no espera la animación otra vez.
+   - **Después, plegado:** «Así lo buscamos» queda como una fila bajo el contacto, con los filtros en una línea («Gerente de Personas +2 · Retail +1 · Chile»); se abre para ver cargo, rubro y lugar. Lo que se ve primero es el contacto.
+   - **El contacto:** su nombre como título, cargo y empresa, por qué calza, «Correo verificado» y «Teléfono» si lo hay. La investigación y el primer correo, con «Copiar», están a la vista; el asunto va con su nombre («Asunto: …»).
    - **Una acción a la vez:**
      - «Guardar en «Por escribir»» usa el correo y el teléfono de la bóveda, **sin créditos ni otra búsqueda**. Si ya estaba en «Por escribir» con ese correo, se enlaza sin duplicarse. La investigación y el borrador quedan en `enriched_leads.data.leadDrop`.
      - Después, «Investigar y escribirle» abre «Por escribir» con su investigación completa ya en marcha (`?investigar=<id>&empezar=1`). Toma unos minutos (3 en la prueba real del 20 de octubre); luego «Preparar correos» deja el correo listo para revisarlo y enviarlo desde ANTON.IA.

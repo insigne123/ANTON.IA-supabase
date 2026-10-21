@@ -64,7 +64,9 @@ test('with few contacts, everyone gets some; by default, one each', () => {
 });
 
 test('why a contact fits, and the facts of its company', () => {
-  assert.equal(whyText({ title: 'Gerente de Personas', industry: 'Retail', city: 'Santiago' }, criteria), 'Gerente de Personas en retail en Santiago: calza con tu cliente ideal.');
+  // What matched, not the role again: it is on the screen right beside it.
+  assert.equal(whyText({ title: 'Gerente de Personas', industry: 'Retail', city: 'Santiago' }, criteria), 'Calza con tu cliente ideal por su cargo y su rubro (retail), en Santiago.');
+  assert.equal(whyText({ title: 'Gerente de Personas', industry: null, city: null }, { ...criteria, source: 'equipo' }), 'Calza con el cliente ideal de tu equipo por su cargo.');
   assert.equal(whyText({ title: null, industry: null, city: null }, { ...criteria, source: 'contactos' }), 'Calza con los contactos que guarda tu equipo.');
   assert.deepEqual(researchFacts({ company: 'Ripley', industry: 'Retail', size: 12000, city: 'Santiago', about: 'Vende ropa y hogar.' }), ['Vende ropa y hogar.', 'Retail · 12.000 personas · Santiago']);
 });
@@ -99,6 +101,16 @@ test('the email table escapes what came from outside and links to the drop', () 
   assert.doesNotMatch(section.html, /Ana <b>/);
   assert.match(section.text, /^Tu contacto de hoy, con su correo listo:/);
   assert.match(section.html, />Ver y guardar</);
+  // One contact is a block, not a three-column table that breaks on a phone: name, role · company, why.
+  assert.doesNotMatch(section.html, /<table|<th /);
+  assert.match(section.html, /font-weight:600[^>]*>Ana &lt;b&gt;<\/p><p[^>]*>Gerente · R&amp;R<\/p><p[^>]*>Calza\.<\/p>/);
+  assert.match(section.html, /Contacto del día<\/h2>/);
+  // When the drop is all the email has, the title and its lead are left out.
+  const bare = dropEmailSection([item], 'drop-1', 'https://app.antonia.ai/', { heading: false });
+  assert.doesNotMatch(bare.html, /Contacto del día|Tu contacto de hoy, con su correo listo/);
+  assert.doesNotMatch(bare.text, /^Tu contacto de hoy/);
+  assert.match(bare.html, />Ver y guardar</);
+  assert.match(dropEmailSection([item, item], 'drop-1', 'https://app.antonia.ai/').html, />Ver y guardar los 2</);
   assert.equal(dropSubject([item]), 'Tu contacto de hoy: Gerente en R&R');
   assert.equal(dropSubject([{ title: null, company: null }]), 'Tu contacto de hoy');
   assert.equal(dropSubject([item, item]), '2 contactos nuevos para ti');

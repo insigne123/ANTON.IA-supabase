@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowRight, CalendarClock, CheckCircle2, Circle, MailCheck, MessageSquareReply, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import type { TodayPlan, TodayQueueItem } from '@/lib/home/today';
+import type { TodayPlan, TodayPrimary, TodayQueueItem } from '@/lib/home/today';
 import {usePersonalHome} from './usePersonalHome';
 
 type TodayResponse = TodayPlan & { partial?: boolean; firstName?: string };
@@ -18,8 +19,11 @@ const QUEUE_ICONS: Record<TodayQueueItem['kind'], typeof MessageSquareReply> = {
   ready: MailCheck,
 };
 
-/** «Hoy»: one clear next step, what is still missing to send, and the people waiting for an answer (src/lib/home/today.ts). */
-export function TodayPanel() {
+/**
+ * «Hoy»: one clear next step, what is still missing to send, and the people waiting for an answer (src/lib/home/today.ts).
+ * `afterPrimary` is what goes right under the next step (today's contact), given that step.
+ */
+export function TodayPanel({ afterPrimary }: { afterPrimary?: (primary: TodayPrimary) => ReactNode } = {}) {
   const {data,error,loading,load}=usePersonalHome<TodayResponse>('/api/home/today');
 
   if (loading && !data) {
@@ -66,43 +70,47 @@ export function TodayPanel() {
           </CardContent>
         </Card>
 
+        {afterPrimary?.(data.primary)}
+
+        {/* Nothing waiting is a sentence, not a card with a title, a description and an empty box. */}
+        {data.queue.length === 0 ? (
+          <p className="flex items-center gap-2 rounded-2xl border border-border/60 px-4 py-3 text-sm text-foreground/80">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            Nada pendiente por ahora. Cuando alguien te responda o venza un compromiso, aparecerá aquí.
+          </p>
+        ) : (
         <Card className="rounded-2xl">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Lo que te espera</CardTitle>
             <CardDescription>Tus pendientes en este workspace, incluidos los anteriores que aún necesitan atención.</CardDescription>
           </CardHeader>
           <CardContent>
-            {data.queue.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                Nada pendiente por ahora. Cuando alguien te responda o venza un compromiso, aparecerá aquí.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {data.queue.map((item, index) => {
-                  const Icon = QUEUE_ICONS[item.kind];
-                  return (
-                    <li key={item.id} className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:fill-mode-both"
-                      style={{ animationDelay: `${Math.min(index, 5) * 40}ms` }}>
-                      <Link href={item.href}
-                        className="group flex items-start gap-3 rounded-xl border border-border/60 p-3 transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        <span className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-                          item.urgent ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground')}>
-                          <Icon className="h-4 w-4" aria-hidden="true" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium">{item.title}</span>
-                           <span className="block text-xs text-muted-foreground">{item.description}</span>
-                           {item.occurredAt&&<time dateTime={item.occurredAt} className="mt-1 block text-xs text-muted-foreground">{item.kind==='commitment'?'Fecha del compromiso: ':'Respuesta recibida: '}{new Date(item.occurredAt).toLocaleString('es-CL',{timeZone:'America/Santiago',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</time>}
-                        </span>
-                        <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <ul className="space-y-2">
+              {data.queue.map((item, index) => {
+                const Icon = QUEUE_ICONS[item.kind];
+                return (
+                  <li key={item.id} className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:fill-mode-both"
+                    style={{ animationDelay: `${Math.min(index, 5) * 40}ms` }}>
+                    <Link href={item.href}
+                      className="group flex items-start gap-3 rounded-xl border border-border/60 p-3 transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <span className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                        item.urgent ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground')}>
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium">{item.title}</span>
+                         <span className="block text-xs text-muted-foreground">{item.description}</span>
+                         {item.occurredAt&&<time dateTime={item.occurredAt} className="mt-1 block text-xs text-muted-foreground">{item.kind==='commitment'?'Fecha del compromiso: ':'Respuesta recibida: '}{new Date(item.occurredAt).toLocaleString('es-CL',{timeZone:'America/Santiago',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</time>}
+                      </span>
+                      <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
           </CardContent>
         </Card>
+        )}
       </div>
 
       {/* Once everything is set up, the checklist shrinks to one line: «Hoy» is for the work, not for setup. */}

@@ -22,6 +22,13 @@ const STEP_MS = 550;
 const MAKING_STEP_MS = 9000;
 const MAKING_WAIT_MS = 6000;
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+/** The search is played back once per contact on this device: coming back to write to them should not wait for it again. */
+const PLAYED = 'anton:drop-played:';
+const wasPlayed = (id: string) => { try { return window.localStorage.getItem(PLAYED + id) === '1'; } catch { return false; } };
+const markPlayed = (id: string) => { try { window.localStorage.setItem(PLAYED + id, '1'); } catch { /* private mode: it plays again, nothing more */ } };
+/** «Gerente de Personas +2 · Retail +1 · Chile»: the filters in one line, for the collapsed «Así lo buscamos». */
+const brief = (criteria: DropCriteria) => [criteria.titles, criteria.industries, criteria.locations]
+  .map(values => (values?.length ? (values.length > 1 ? `${values[0]} +${values.length - 1}` : values[0]) : null)).filter(Boolean).join(' · ');
 const dayLabel = (day: string) => new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 const SOURCE: Record<DropCriteria['source'], string> = { perfil: 'Tu cliente ideal, de «Perfil»', equipo: 'El cliente ideal de tu equipo', contactos: 'Parecidos a los contactos que guarda tu equipo' };
 
@@ -67,8 +74,10 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [howOpen, setHowOpen] = useState(false);
   const started = useRef(false);
   const listId = useId();
+  const howId = useId();
 
   const call = useCallback((path: string, init?: RequestInit) => authenticatedApiFetch(path, {
     cache: 'no-store', ...init, headers: { 'Content-Type': 'application/json', ...(organizationId ? { 'x-organization-id': organizationId } : {}) },
@@ -119,8 +128,8 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
       return () => clearTimeout(timer);
     }
     if (!drop) return;
-    if (reducedMotion()) { setStep(STEPS.length); return; }
-    if (step >= STEPS.length) return;
+    if (step >= STEPS.length) { markPlayed(drop.id); return; }
+    if (reducedMotion() || wasPlayed(drop.id)) { setStep(STEPS.length); return; }
     const timer = setTimeout(() => setStep(value => value + 1), STEP_MS);
     return () => clearTimeout(timer);
   }, [making, drop, step]);
@@ -177,15 +186,51 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           {copied === item.leadId ? <Check className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />}
           {copied === item.leadId ? 'Copiado' : 'Copiar'}</Button>
       </div>
-      <p className="mt-1.5 text-sm font-medium">{item.draft.subject}</p>
-      <p className="mt-1 whitespace-pre-line text-sm leading-6">{item.draft.body}</p>
+      <p className="mt-1.5 text-sm"><span className="text-muted-foreground">Asunto: </span><span className="font-medium">{item.draft.subject}</span></p>
+      <p className="mt-2 whitespace-pre-line text-sm leading-6">{item.draft.body}</p>
     </div> : null}
   </div>;
 
   const playing = Boolean(drop) && step < STEPS.length;
   const searched = one || making ? 'Así lo buscamos' : 'Así los buscamos';
+  // While the search plays, «Así lo buscamos» is the story: the filters and the steps. Once it ends it is one collapsed row below
+  // the contact, since the contact is what the person came for.
+  const howSection = drop ? <section aria-labelledby="drop-filters" className="rounded-2xl border">
+    {playing ? <div className="p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="drop-filters" className="flex items-center gap-2 text-sm font-medium"><Search className="h-4 w-4 text-primary" aria-hidden="true" />{searched}</h2>
+        <span className="text-xs text-muted-foreground">{SOURCE[drop.criteria.source] || 'Tu cliente ideal'}</span>
+      </div>
+      <dl className="mt-4 grid gap-4 sm:grid-cols-3">
+        <Filter label="Cargo" values={drop.criteria.titles || []} />
+        <Filter label="Rubro" values={drop.criteria.industries || []} />
+        <Filter label="Lugar" values={drop.criteria.locations || []} />
+      </dl>
+      <Steps step={step} />
+      <Button variant="link" size="sm" className="mt-2 h-auto p-0" onClick={() => setStep(STEPS.length)}>Ver ahora</Button>
+    </div> : <>
+      <h2 id="drop-filters" className="text-sm font-medium">
+        <button type="button" aria-expanded={howOpen} aria-controls={howId} onClick={() => setHowOpen(value => !value)}
+          className="flex w-full items-center justify-between gap-3 rounded-2xl p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5">
+          <span className="min-w-0">
+            <span className="flex items-center gap-2"><Search className="h-4 w-4 text-primary" aria-hidden="true" />{searched}</span>
+            <span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">{brief(drop.criteria) || SOURCE[drop.criteria.source]}</span>
+          </span>
+          <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', howOpen && 'rotate-180')} aria-hidden="true" />
+        </button>
+      </h2>
+      {howOpen ? <div id={howId} className="space-y-3 border-t p-4 sm:px-5">
+        <dl className="grid gap-4 sm:grid-cols-3">
+          <Filter label="Cargo" values={drop.criteria.titles || []} />
+          <Filter label="Rubro" values={drop.criteria.industries || []} />
+          <Filter label="Lugar" values={drop.criteria.locations || []} />
+        </dl>
+        <p className="text-xs text-muted-foreground">{SOURCE[drop.criteria.source] || 'Tu cliente ideal'}. Revisamos que tengan correo verificado, quitamos a quienes tu equipo ya tiene y escribimos un primer correo.</p>
+      </div> : null}
+    </>}
+  </section> : null;
   return <div className="mx-auto w-full max-w-3xl">
-    <PageHeader title="Buscar prospectos" eyebrow="Contacto del día" back={{ href: '/search', label: 'Búsqueda normal' }}
+    <PageHeader title={drop && !one ? 'Tus contactos del día' : 'Tu contacto del día'} back={{ href: '/search', label: 'Búsqueda normal' }}
       description={drop ? (one ? `Encontrado el ${dayLabel(drop.date)} para ti. Ya tiene su correo verificado: guardarlo no gasta créditos.`
         : `Encontrados el ${dayLabel(drop.date)} para ti. Ya tienen su correo verificado: guardarlos no gasta créditos.`)
         : making ? 'Elegimos un contacto nuevo para ti, con una breve investigación y un primer correo.' : 'Tu contacto nuevo, con su correo verificado.'} />
@@ -214,19 +259,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
     </CardContent></Card> : null}
 
     {drop ? <div className="space-y-6">
-      <section aria-labelledby="drop-filters" className="rounded-2xl border p-4 sm:p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 id="drop-filters" className="flex items-center gap-2 text-sm font-medium"><Search className="h-4 w-4 text-primary" aria-hidden="true" />{searched}</h2>
-          <span className="text-xs text-muted-foreground">{SOURCE[drop.criteria.source] || 'Tu cliente ideal'}</span>
-        </div>
-        <dl className="mt-4 grid gap-4 sm:grid-cols-3">
-          <Filter label="Cargo" values={drop.criteria.titles || []} />
-          <Filter label="Rubro" values={drop.criteria.industries || []} />
-          <Filter label="Lugar" values={drop.criteria.locations || []} />
-        </dl>
-        <Steps step={step} />
-        {playing ? <Button variant="link" size="sm" className="mt-2 h-auto p-0" onClick={() => setStep(STEPS.length)}>Ver ahora</Button> : null}
-      </section>
+      {playing ? howSection : null}
 
       {!playing && one ? <section aria-labelledby="drop-results" className="space-y-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -244,6 +277,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           {badges(one)}
           {one.research.length || one.draft ? details(one) : null}
         </div>
+        {howSection}
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
           <Button variant="ghost" size="sm" className="-ml-2" onClick={() => void downloadPdf()}><Download className="mr-1.5 h-4 w-4" aria-hidden="true" />Descargar PDF</Button>
           <Link href="/search" className="underline underline-offset-2 hover:text-foreground">¿Quieres más? Busca con tus propios filtros</Link>
@@ -289,6 +323,7 @@ export function LeadDropFlow({ dropId }: { dropId: string }) {
           })}
         </ul>
 
+        {howSection}
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
           <Button variant="ghost" size="sm" className="-ml-2" onClick={() => void downloadPdf()}><Download className="mr-1.5 h-4 w-4" aria-hidden="true" />Descargar PDF</Button>
           <Link href="/search" className="underline underline-offset-2 hover:text-foreground">¿Quieres más? Busca con tus propios filtros</Link>

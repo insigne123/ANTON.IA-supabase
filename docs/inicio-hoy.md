@@ -24,13 +24,15 @@ El embudo se corta antes del envío y el inicio no lo decía (hallazgos H02 y H0
    4. «Escríbeles a tus N contactos con correo»;
    5. completar el correo de los guardados;
    6. buscar prospectos.
-2. **Lo que te espera:**
+2. **Contacto del día**, justo debajo de lo primero hoy (en un teléfono es lo segundo, no lo cuarto). Muestra el contacto por guardar, o la oferta de hacerlo en ese momento; ver `docs/contacto-del-dia.md`. Si lo primero hoy ya lleva a «Perfil», su oferta de completar el cliente ideal no se repite.
+3. **Lo que te espera:**
    - Hasta 6 ítems, los urgentes primero: respuestas por atender (la misma regla que «Por responder» en Conversaciones), compromisos de hoy o vencidos, y contactos con correo que aún no recibieron nada.
    - Cada ítem abre la conversación exacta (`/contacted?c=<id>`).
-3. **Prepara tu cuenta:**
+   - Sin pendientes no hay tarjeta: una línea lo dice.
+4. **Prepara tu cuenta:**
    - Cuatro pasos comprobados de verdad, con barra de progreso: perfil con empresa y oferta, correo conectado (Gmail u Outlook), primeros contactos y primer envío.
    - Cada paso pendiente trae su enlace. Al completarse, se tacha.
-4. **Al lado:** «Tu resumen de hoy», actividad por hora de Chile y disponibilidad del cupo personal. Las estadísticas son del usuario dentro del workspace activo.
+5. **Al lado:** «Meta de la semana», «Tu resumen de hoy», actividad por hora de Chile y disponibilidad del cupo personal. Las estadísticas son del usuario dentro del workspace activo. Mientras hoy no haya nada, el resumen es una frase y no cuatro ceros con un gráfico vacío.
 
 El menú dice «Hoy» en vez de «Dashboard». La ruta sigue siendo `/dashboard`.
 

@@ -9,7 +9,7 @@
 - **Dónde está:** el informe ya no es una página del menú. Es la segunda vista de «Hoy»: arriba a la derecha, «Hoy | Tu semana». La dirección `/dashboard?vista=semana` la abre directo.
 - **Enlaces antiguos:** `/weekly-report` redirige ahí, así que los enlaces viejos siguen funcionando. El correo de los lunes ya enlaza directo.
 - **Quién ve qué:**
-  - **«Tu semana»:** todas las personas, cada una con lo suyo.
+  - **«Personal»** (antes «Tu semana», que ya era el título de la pantalla y de su vista): todas las personas, cada una con lo suyo. Solo se ve el selector cuando hay más de un rol.
   - **«Equipo»:** dueños y administradores.
   - **«Oportunidades»:** los gestores de oportunidades que nombre un administrador; mientras no haya ninguno, los administradores.
 - **Sin cambios:** el contenido, el envío del lunes y los permisos.
@@ -20,11 +20,11 @@
 
 ## Qué muestra
 
-Una página, «Informe semanal», en «Centro de mando», con «Esta semana» (de lunes a hoy) o «Semana pasada» (de lunes a domingo, hora de Chile). Tiene una pestaña por rol:
+Una página, «Informe semanal», en «Centro de mando» (dentro de «Hoy», la línea bajo el título es solo el rango de fechas: el selector de al lado ya dice qué semana es), con «Esta semana» (de lunes a hoy) o «Semana pasada» (de lunes a domingo, hora de Chile). Tiene una pestaña por rol:
 
-1. **Tu semana** (todos):
+1. **Personal** (todos):
    - una frase con lo importante;
-   - correos enviados y personas contactadas, ambos con su cambio frente a los mismos días de la semana anterior;
+   - correos enviados y personas contactadas, ambos con su cambio frente a los mismos días de la semana anterior (si esta semana y la anterior no tuvieron nada, no hay cuatro ceros: la frase de arriba ya lo dice);
    - respuestas (con el % de las personas contactadas) y reuniones pedidas;
    - **«Para esta semana»:** hasta tres acciones con enlace, en este orden:
      1. responder a quien escribió;

@@ -54,8 +54,8 @@ test('one search for people with the same customer; each gets different contacts
   assert.equal(new Set(ids).size, ids.length, 'nobody twice');
   assert.ok(!drops.some(drop => drop.items.some((item: any) => item.company === 'Paris')), 'the team already has the one at Paris');
   assert.deepEqual(drops.map(drop => [drop.user_id, drop.status, drop.criteria.source]), [['u-ana', 'pending', 'perfil'], ['u-leo', 'pending', 'equipo'], ['u-sin', 'pending', 'equipo']]);
-  assert.match(drops[0].items[0].why, /calza con tu cliente ideal\.$/);
-  assert.match(drops[1].items[0].why, /calza con el cliente ideal de tu equipo\.$/, 'one search, but each says whose customer it is');
+  assert.match(drops[0].items[0].why, /^Calza con tu cliente ideal por su cargo/);
+  assert.match(drops[1].items[0].why, /^Calza con el cliente ideal de tu equipo por su cargo/, 'one search, but each says whose customer it is');
   assert.ok(drops.every(drop => drop.items.every((item: any) => !('email' in item) && item.hasEmail)), 'the email stays in the vault');
   assert.equal(tables.lead_search_vault.length, ids.length);
   assert.match(tables.lead_search_vault[0].contact_encrypted, /^enc:v1\./);
@@ -71,7 +71,7 @@ test('the title, the company and the industry as people say them: linking words 
   await planOrganizationDrops(client, ORG, ['u-ana'], { now: TUESDAY, search: search as any, budgetUsd: 3, spentUsd: 0, usdPerLead: 0.0035 });
   const [item] = tables.lead_drops[0].items;
   assert.deepEqual([item.title, item.company, item.industry], ['Jefe de Reclutamiento y Selección', 'Rutas S.A.', 'Logística']);
-  assert.equal(item.why, 'Jefe de Reclutamiento y Selección en logística en Santiago: calza con tu cliente ideal.');
+  assert.equal(item.why, 'Calza con tu cliente ideal por su cargo y su rubro (logística), en Santiago.', 'what matched, with the industry in Spanish, not the role again');
   assert.deepEqual(item.research, ['Logística · 500 personas · Santiago']);
 });
 

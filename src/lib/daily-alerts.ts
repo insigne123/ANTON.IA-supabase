@@ -1,4 +1,5 @@
 import { dayInZone, shiftDay } from '@/lib/admin/chile-time';
+import { emailShell } from '@/lib/email-shell';
 import { dropEmailSection, dropHref, dropSubject, type DropItem } from '@/lib/lead-drops';
 import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } from '@/lib/weekly-goals';
 
@@ -142,28 +143,36 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 
-/** The email; with today's drop, its table and link go after the lines (the PDF is attached by the server). */
+/**
+ * The email: each line is a link back to the app. With today's drop (the PDF is attached by the server) it has its own block
+ * and button after the lines, so its line in the list is left out (it would say it twice) and «Abrir ANTON.IA» becomes a
+ * quiet link: one main button per email.
+ */
 export function alertEmail(alert: DailyAlert, name: string, appUrl: string, drop?: AlertFacts['drop']) {
   const base = appUrl.replace(/\/$/, '');
   const link = (href: string) => `${base}${href}`;
   const settings = link('/dashboard?vista=semana');
   const greeting = name ? `Hola, ${name}` : 'Hola';
-  const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base) : null;
+  const lines = drop?.items.length ? alert.lines.filter(line => line.kind !== 'drop') : alert.lines;
+  const section = drop?.items.length ? dropEmailSection(drop.items, drop.id, base, { heading: lines.length > 0 }) : null;
+  const intro = lines.length || !section ? 'Esto te espera hoy en ANTON.IA' : drop!.items.length === 1 ? 'Tu contacto del día ya está listo' : 'Tus contactos del día ya están listos';
   const text = [
-    `${greeting}. Esto te espera hoy en ANTON.IA:`, '',
-    ...alert.lines.map(line => `- ${line.text} (${link(line.href)})`), '',
+    `${greeting}. ${intro}${lines.length ? ':' : '.'}`, '',
+    ...lines.map(line => `- ${line.text} (${link(line.href)})`), ...(lines.length ? [''] : []),
     ...(section ? [section.text, ''] : []),
     `Abrir ANTON.IA: ${link('/dashboard')}`,
     `Te avisamos solo cuando hay algo que hacer. Los apagas en «Tu semana»: ${settings}`,
   ].join('\n');
-  const rows = alert.lines.map(line => `<p style="margin:0;padding:12px 0;border-top:1px solid #e5e7eb;font-size:15px;line-height:22px">`
+  const rows = lines.map(line => `<p style="margin:0;padding:12px 0;border-top:1px solid #e5e7eb;font-size:15px;line-height:22px">`
     + `<a href="${escape(link(line.href))}" style="color:#111827;text-decoration:none">${escape(line.text)}<span style="color:#2563eb"> &rsaquo;</span></a></p>`).join('');
-  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111827">`
-    + `<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
-    + `<p style="margin:0 0 16px;font-size:15px;line-height:22px;color:#6b7280">Esto te espera hoy en ANTON.IA.</p>`
-    + `<div style="border-bottom:1px solid #e5e7eb">${rows}</div>`
+  const open = section
+    ? `<p style="margin:24px 0 0;font-size:14px"><a href="${escape(link('/dashboard'))}" style="color:#2563eb;text-decoration:none">Abrir ANTON.IA &rsaquo;</a></p>`
+    : `<p style="margin:24px 0 0"><a href="${escape(link('/dashboard'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Abrir ANTON.IA</a></p>`;
+  const html = emailShell(`<h1 style="margin:0 0 4px;font-size:20px;line-height:28px">${escape(greeting)}</h1>`
+    + `<p style="margin:0 0 16px;font-size:15px;line-height:22px;color:#6b7280">${escape(intro)}.</p>`
+    + (lines.length ? `<div style="border-bottom:1px solid #e5e7eb">${rows}</div>` : '')
     + (section ? section.html : '')
-    + `<p style="margin:24px 0 0"><a href="${escape(link('/dashboard'))}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Abrir ANTON.IA</a></p>`
-    + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p></div>`;
+    + open
+    + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Te avisamos solo cuando hay algo que hacer. Los apagas en <a href="${escape(settings)}" style="color:#6b7280">«Tu semana»</a>.</p>`);
   return { subject: alert.subject, text, html };
 }

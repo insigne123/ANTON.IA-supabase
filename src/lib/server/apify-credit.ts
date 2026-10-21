@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { emailShell } from '@/lib/email-shell';
 import { resendSender, sendReportEmail } from '@/lib/server/self-email';
 
 /**
@@ -69,11 +70,10 @@ export function apifyAlertEmail(level: Exclude<CreditLevel, 'ok'>, credit: Apify
   const paragraphs = [state, [stops, renews].filter(Boolean).join(' '), action];
   const text = [...paragraphs, '', `Abrir la facturación de Apify: ${BILLING_URL}`, '',
     'Revisamos el saldo cada hora y te avisamos una vez cuando queda poco y otra cuando se acaba.'].join('\n');
-  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111827">`
-    + `<h1 style="margin:0 0 12px;font-size:20px;line-height:28px">${escape(subject)}</h1>`
+  const html = emailShell(`<h1 style="margin:0 0 12px;font-size:20px;line-height:28px">${escape(subject)}</h1>`
     + paragraphs.map(paragraph => `<p style="margin:0 0 12px;font-size:15px;line-height:22px">${escape(paragraph)}</p>`).join('')
     + `<p style="margin:20px 0 0"><a href="${BILLING_URL}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-size:14px">Abrir la facturación de Apify</a></p>`
-    + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Revisamos el saldo cada hora y te avisamos una vez cuando queda poco y otra cuando se acaba.</p></div>`;
+    + `<p style="margin:20px 0 0;font-size:12px;line-height:18px;color:#6b7280">Revisamos el saldo cada hora y te avisamos una vez cuando queda poco y otra cuando se acaba.</p>`);
   return { subject, text, html };
 }
 

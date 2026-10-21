@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { goalSentence, paceSentence } from '@/lib/weekly-goals';
 import { REPORT_ROLES, activeGoal, deltaText, nextActions, personalHeadline, rate, teamActivity, teamHeadline, type ReportRole, type TeamMember, type WeeklyReport as Report } from '@/lib/weekly-report';
 
-type Response = { report: Report; email: boolean; alerts?: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
+type Response = { report: Report; email: boolean; alerts?: boolean; mailbox: 'google' | 'outlook' | null; sender?: boolean; yago?: boolean; managers?: string[]; members?: Array<{ userId: string; name: string; email: string | null }> };
 /** ?informe=equipo opens «Equipo»; ?metas=1 also opens the goals editor, for an admin (the link from «Meta de la semana»). */
 const fromUrl = (key: string) => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get(key) : null;
 
@@ -39,7 +39,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /**
  * «Informe semanal» (propuesta 2): the person's week, their team's when they run it and Oportunidades' when they manage
- * it, with what to do next. Monday's email carries the same, from the person's own mailbox or the reports mailbox.
+ * it, with what to do next. Monday's email carries the same, from the Yago address (or, without Resend, the person's own mailbox or the reports mailbox).
  * `embedded`: inside «Hoy» («Tu semana»), whose header names the page; here only the week and its range.
  */
 export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) {
@@ -92,6 +92,7 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
   const shown: ReportRole = roles.includes(role) ? role : 'personal';
   const team = report?.team ? teamActivity(report.team) : null;
   const weekWord = report?.week.which === 'current' ? 'esta semana' : 'la semana pasada';
+  const quietWeek = Boolean(report) && [report!.personal.sent, report!.personal.contacted, report!.personal.replies].every(count => count.now === 0 && count.before === 0) && report!.personal.meetings === 0;
   const memberRow = (member: TeamMember, idle = false) => <tr key={member.userId} className={cn('border-b last:border-0', idle && 'text-muted-foreground')}>
     <th scope="row" className="max-w-[14rem] px-4 py-2.5 text-left font-normal"><span className="block truncate">{member.name}</span>{member.detail ? <span className="block truncate text-xs text-muted-foreground">{member.detail}</span> : null}</th>
     <td className={cn('px-3 py-2.5 text-right tabular-nums', !member.sent && 'text-muted-foreground')}>{member.sent}</td>
@@ -111,7 +112,8 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
     <header className={cn('flex flex-col gap-4 sm:flex-row sm:justify-between', embedded ? 'sm:items-center' : 'sm:items-end')}>
       <div className="min-w-0">
         {embedded ? null : <h1 className="text-2xl font-semibold tracking-tight">Informe semanal</h1>}
-        <p className={cn('text-sm text-muted-foreground', !embedded && 'mt-1')}>{report ? `${report.week.which === 'current' ? 'Esta semana' : 'La semana pasada'} · ${report.week.label}` : 'Tu semana en un vistazo.'}</p>
+        {/* Embedded, the toggle beside it already says which week: only the range goes here. */}
+        <p className={cn('text-sm text-muted-foreground', !embedded && 'mt-1')}>{report ? (embedded ? report.week.label : `${report.week.which === 'current' ? 'Esta semana' : 'La semana pasada'} · ${report.week.label}`) : 'Tu semana en un vistazo.'}</p>
       </div>
       <div role="group" aria-label="Semana" className="flex self-start rounded-full border p-0.5">
         {(['current', 'previous'] as const).map(value => <Button key={value} size="sm" variant={week === value ? 'secondary' : 'ghost'} className="rounded-full" aria-pressed={week === value} onClick={() => setWeek(value)}>
@@ -139,12 +141,13 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         <GoalProgressRows goal={activeGoal(report.goal)!} />
         <p className="text-sm text-muted-foreground">{report.week.which === 'current' ? paceSentence(activeGoal(report.goal)!, new Date()) : goalSentence(activeGoal(report.goal)!, 'previous')}</p>
       </section> : null}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* A week with nothing, after one with nothing: the sentence above says it; four zeros would say it again. */}
+      {quietWeek ? null : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Correos enviados" value={report.personal.sent.now.toLocaleString('es-CL')} note={deltaText(report.personal.sent)} />
         <Stat label="Personas contactadas" value={report.personal.contacted.now.toLocaleString('es-CL')} note={deltaText(report.personal.contacted)} />
         <Stat label="Respuestas" value={report.personal.replies.now.toLocaleString('es-CL')} note={rate(report.personal.replies.now, report.personal.contacted.now) !== null ? `${rate(report.personal.replies.now, report.personal.contacted.now)} % de quienes escribiste` : deltaText(report.personal.replies)} />
         <Stat label="Reuniones pedidas" value={report.personal.meetings.toLocaleString('es-CL')} />
-      </div>
+      </div>}
       {nextActions(report).length ? <Section title="Para esta semana">
         <ul className="divide-y rounded-2xl border">{nextActions(report).map(action => <li key={action.text}>
           <Link href={action.href} className="flex items-center justify-between gap-3 px-4 py-3 text-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
@@ -233,7 +236,9 @@ export function WeeklyReport({ embedded = false }: { embedded?: boolean } = {}) 
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
             <Label htmlFor="weekly-email" className="text-sm font-medium">Recibirlo por correo cada lunes</Label>
-            <p className="text-xs leading-5 text-muted-foreground">{data.mailbox
+            <p className="text-xs leading-5 text-muted-foreground">{data.yago
+              ? 'A las 8:00, con la semana anterior, a tu correo.'
+              : data.mailbox
               ? `A las 8:00, con la semana anterior. Te lo envías tú mismo desde tu ${MAILBOX[data.mailbox]} conectado, a tu propio correo.`
               : data.sender ? 'A las 8:00, con la semana anterior, a tu correo. Si conectas Gmail u Outlook en «Conexiones», sale desde tu cuenta.'
                 : 'Conecta Gmail u Outlook en «Conexiones» para recibirlo por correo: sale desde tu cuenta, hacia ti.'}</p>
