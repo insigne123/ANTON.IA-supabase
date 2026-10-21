@@ -245,3 +245,21 @@ test('the settings are off unless COWORK_RUNTIME=harness, default to a Claude, a
     { model: 'claude-haiku-5-5', effort: 'high', maxRounds: 5, maxReads: 1 });
   assert.equal(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_HARNESS_EFFORT: 'enorme' })?.effort, 'medium');
 });
+
+test('a long document is reviewed as the PDF it becomes before it is delivered, and what the review says goes back to the agent', async () => {
+  const content = '## Resumen\n\n' + 'Una frase con datos del equipo. '.repeat(60);
+  const model = new ScriptedModel([
+    reply([call('revisar_documento', { title: 'Informe del equipo', content })]),
+    reply([call('responder', { reply: 'Aquí está el informe.', document: { title: 'Informe del equipo', content } })]),
+  ]);
+  const { input } = base(model);
+  const result = await runCoworkHarnessTurn(input);
+  assert.equal(result.document?.title, 'Informe del equipo');
+  const seen = (model.requests[1].messages[2].content as Array<{ content: string }>)[0].content;
+  assert.match(seen, /Como PDF tendría \d+ página/);
+  assert.match(seen, /Se ve bien|Para corregir/);
+  assert.match(model.requests[0].system, /revisar_documento/);
+  const broken = new ScriptedModel([reply([call('revisar_documento', { title: 'Informe', content: `| A |\n| - |\n| ${'palabra '.repeat(2400)} |` })]), reply([answer('ok')])]);
+  await runCoworkHarnessTurn(base(broken).input);
+  assert.match((broken.requests[1].messages[2].content as Array<{ content: string }>)[0].content, /Para corregir:\n- Página \d+: Una fila de la tabla es más alta que la página/);
+});

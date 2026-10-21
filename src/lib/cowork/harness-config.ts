@@ -22,6 +22,8 @@ export type CoworkHarnessConfig = {
   maxReads: number;
   /** After this long the next call has to answer. */
   deadlineMs: number;
+  /** A model that reads images (a Claude): with it, a document the agent reviews is also looked at page by page, as a person would. */
+  documentReviewer?: ModelClient;
   /** Before each call: the ledger's reservation. Throwing ends the turn with the ledger's own message. */
   reserve?: () => Promise<string | undefined>;
   /** After each call: what it cost. */

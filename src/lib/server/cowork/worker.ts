@@ -308,6 +308,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         system: decisionSystemPrompt,
         context: decisionPrompt([], false, []),
         capabilities: readCapabilities.filter(capability => capability.effect === 'read'),
+        // COWORK_DOCUMENT_VISION=true: a Claude also looks at the pages of a document the agent reviews (needs pdftoppm or sharp in the server).
+        documentReviewer: process.env.COWORK_DOCUMENT_VISION === 'true' ? anthropicModel({ model: process.env.COWORK_DOCUMENT_REVIEW_MODEL?.trim() || 'claude-haiku-5-5' }) : undefined,
         effort: harnessSettings.effort, maxRounds: harnessSettings.maxRounds, maxReads: harnessSettings.maxReads, deadlineMs: turnCeiling.softDeadlineMs,
         reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator'),
         recordUsage: async (reservationId, response, durationMs) => {

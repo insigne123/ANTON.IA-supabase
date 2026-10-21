@@ -18,6 +18,10 @@ import { coworkCorrectionVerdict } from './correction-guard';
 import { coworkDesignBriefSchema } from './design-brief';
 import type { CoworkHarnessCapability, CoworkHarnessConfig } from './harness-config';
 import { coworkThreadMemorySchema } from './thread-memory';
+import { parseMarkdown } from './markdown';
+import { produceDocument } from '@/lib/documents/pipeline';
+import { specFromMarkdown } from '@/lib/documents/spec';
+import { rasterizePages, reviewDocumentPages } from '@/lib/documents/vision';
 import { coworkWithDemoNote, coworkWriteBriefSchema } from './writer';
 import { withCoworkReports } from './report-document';
 
@@ -31,6 +35,7 @@ export const COWORK_HARNESS_PROTOCOL = [
   '- draft.write es la herramienta redactar; analysis.write es analizar; artifact.create es disenar (solo si existe).',
   '- Lo que cambia algo, gasta créditos o busca personas nuevas se propone con la herramienta proponer_* de su tipo, con el mismo action de las instrucciones (leads.save_contact, campaign.create, prospecting.propose_search…) y sus mismos campos, más explicacion (lo que las instrucciones llaman answer.reply de una propuesta: 1 a 3 frases). Si devuelve un problema, corrígelo y vuelve a llamarla; nada se ejecuta sin la aprobación de la persona.',
   '- Entregas la respuesta con responder: sus campos son los de answer en las instrucciones (reply, document, question, suggestions, blocks, choices, reports) y, en la respuesta final, memoria. Después de responder o de proponer no llames nada más.',
+  '- Si vas a entregar un documento largo (más de unas 500 palabras, con tablas o varias secciones) en el campo document de responder, llama antes a revisar_documento con su título y contenido: te dice cómo se vería como PDF (páginas, títulos solos, tablas cortadas, última página casi vacía) y qué corregir.',
   '- Un resultado con error dice qué corregir: no lo repitas igual. Si una consulta ya se hizo en este turno, el resultado vuelve de memoria sin gastar presupuesto.',
 ].join('\n');
 
@@ -176,6 +181,25 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
     planned = true;
     await input.authorize();
     await input.record({ action: COWORK_PLAN_ACTION, input: '', result: { steps: steps.slice(0, COWORK_PLAN_LIMITS.steps).map(step => ({ label: step.label.slice(0, COWORK_PLAN_LIMITS.label), read: null })) } });
+  }));
+
+  // The document the answer will carry, seen as the PDF it becomes: the agent corrects it before delivering (generate → render → inspect → correct).
+  registry.add(defineTool({
+    name: 'revisar_documento', kind: 'read',
+    description: 'Revisa cómo se vería como PDF el documento que vas a entregar en responder.document: cuántas páginas, títulos solos al final, tablas que se parten mal, última página casi vacía, caracteres que el PDF no admite. Corrige lo que señale y vuelve a revisarlo si el cambio fue grande.',
+    schema: z.object({ title: z.string().trim().min(1).max(160), content: z.string().min(1).max(40_000) }),
+    run: async ({ title, content }, context) => {
+      const spec = specFromMarkdown(title, parseMarkdown(content.replace(/\r\n?/g, '\n')), { theme: 'cowork', brand: 'ANTON.IA Cowork' });
+      const produced = await produceDocument(spec, { formats: ['pdf'] });
+      const lines = produced.issues.map(issue => `- ${issue.page ? `Página ${issue.page}: ` : ''}${issue.message}`);
+      if (config.documentReviewer) {
+        const pages = await rasterizePages({ pdf: produced.pdf, svgs: produced.svgs });
+        const seen = await reviewDocumentPages({ model: config.documentReviewer, title, pages, signal: context.signal }).catch(() => null);
+        if (seen?.status === 'reviewed') lines.push(...seen.review.issues.map(issue => `- Página ${issue.page} (al verlo): ${issue.problem} → ${issue.fix}`));
+      }
+      return { status: 'ok', output: { pages: produced.pages, issues: lines.length },
+        text: `Como PDF tendría ${produced.pages} página${produced.pages === 1 ? '' : 's'}.${lines.length ? `\nPara corregir:\n${lines.join('\n')}` : ' Se ve bien: puedes entregarlo.'}` };
+    },
   }));
 
   // Proposals: staged through the checks of the coordinator loop; what cannot be staged comes back as the problem to fix.
