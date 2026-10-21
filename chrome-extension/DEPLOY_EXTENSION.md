@@ -104,13 +104,14 @@ npm run extension:test
 npm run typecheck
 ```
 
-Prueba de navegador opcional con Playwright disponible:
+Prueba de navegador opcional con Playwright disponible. Abre el panel compilado, así que primero hay que compilarlo:
 
 ```sh
+npm run extension:build
 node scripts/test-linkedin-extension-browser.mjs
 ```
 
-`PLAYWRIGHT_MODULE` permite apuntar a una instalación externa de Playwright y `EXTENSION_SCREENSHOT_DIR` a una carpeta existente para capturas. La prueba simula la frontera Chrome/API: no usa credenciales ni toca Supabase, LinkedIn o proveedores. Valida light/dark, 320/380/520 px, foco, ausencia de overflow y conectar/guardar/generar/preparar.
+`PLAYWRIGHT_MODULE` permite apuntar a una instalación externa de Playwright y `EXTENSION_SCREENSHOT_DIR` a una carpeta existente para capturas. La prueba simula la frontera Chrome/API: no usa credenciales ni toca Supabase, LinkedIn o proveedores. Valida light/dark, 320/380/520 px, foco, ausencia de overflow y conectar, «Buscar correo y guardar», generar y preparar el mensaje.
 
 Antes de distribuir a usuarios, comprobar manualmente con la app actualizada:
 

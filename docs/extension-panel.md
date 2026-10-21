@@ -77,8 +77,11 @@ La extensión suma la acción `quota` en `/api/extension/workspace`:
 - **`scripts/test-linkedin-extension-browser.mjs`** (Chromium, con la frontera de Chrome simulada):
   - el flujo completo, en claro y oscuro, a 320, 380 y 520 px;
   - créditos, estados y el paso siguiente;
+  - «Buscar correo y guardar» en un clic (sin «Enriquecer perfil» ni «Guardar lead» aparte) y el campo de URL plegado tras «Pegar URL»;
+  - en una búsqueda de LinkedIn, «Buscar correo de N» (`enrich-batch`) y «Solo guardarlos, sin buscar correo» (`save-batch`);
   - pestañas con teclado;
   - el cambio de perfil por aviso, y que sin aviso no se consulta nada en 2 segundos.
+  - Antes hay que compilar el panel: `npm run extension:build`.
   - Para correrlo sin Chrome estable: `PLAYWRIGHT_CHROMIUM_EXECUTABLE=<ruta de Chromium>`.
 
 ## Marca en cada perfil (PR-4b)
