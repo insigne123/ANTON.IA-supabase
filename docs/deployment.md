@@ -74,7 +74,7 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 | Campanas | `campaignProcessingTick` | cada 5 minutos | Invoca el bridge privado `/api/cron/process-campaigns`. |
 | Reconciliacion outbound | `outboundReconciliationTick` | cada 5 minutos | Invoca `/api/cron/outbound-reconciliation`. |
 | Reconciliacion Apollo | `apolloReconciliationTick` | cada 5 minutos | Recupera callbacks y polling pendientes mediante `/api/cron/apollo-reconciliation`. |
-| Uso Apollo | `apolloUsageTick` | cada hora | Captura snapshots sanitizados mediante `/api/cron/apollo-usage`. |
+| Uso Apollo y saldo de Apify | `apolloUsageTick` | cada hora | Captura snapshots sanitizados mediante `/api/cron/apollo-usage`. En la misma pasada lee el saldo del plan de Apify (`/v2/users/me/limits`), lo guarda en `antonia_provider_usage_snapshots` (`provider = 'apify'`) y escribe a `APIFY_ALERT_EMAILS` cuando quedan `APIFY_LOW_CREDIT_USD` (US$0,10) o menos y cuando se acaba: un correo de cada tipo por ciclo y límite, por Resend. Si el correo falla, lo reintenta en la pasada siguiente. |
 | Reply sync | `replySyncTick` | cada 5 minutos | Invoca `/api/cron/reply-sync` por par organizacion/usuario. |
 | Retencion de privacidad | `privacyRetentionTick` | 03:30 UTC diario | Invoca `/api/cron/privacy-retention`. |
 | Rollups ANTON.IA | `antoniaRollupsTick` | 00:10 UTC diario | Invoca `/api/cron/antonia-rollups`. |

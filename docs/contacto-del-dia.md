@@ -94,7 +94,7 @@ La preparación de la mañana es solo para quien recibirá el correo. Los demás
   - Una búsqueda para una persona trae diez resultados, de US$0,02 a US$0,035.
   - En la corrida de la mañana, un equipo de 30 con el mismo cliente ideal comparte una búsqueda de 65, de US$0,13 a US$0,23.
 - **Al mes**, con 13 días de contacto: unos US$0,26 a US$0,46 por persona que lo abre desde «Hoy».
-- **Tope:** `LEAD_DROPS_MONTHLY_USD` limita lo que se gasta en el mes, sumando todos los workspaces (US$3 por defecto). Al llegar al tope, los contactos del día quedan vacíos con el motivo, y «Hoy» deja de ofrecerlos.
+- **Tope:** `LEAD_DROPS_MONTHLY_USD` limita lo que se gasta en el mes, sumando todos los workspaces (US$3 por defecto). Al llegar al tope, los contactos del día quedan vacíos con el motivo, y «Hoy» deja de ofrecerlos. Aparte del tope, si el plan de Apify se queda sin saldo, la búsqueda falla: por eso hay un aviso por correo cuando le quedan US$0,10 (`APIFY_ALERT_EMAILS`, ver `docs/deployment.md`).
 - **Plan de Apify:** el de la cuenta es el gratuito, de US$5 al mes, y lo comparten Oportunidades y la búsqueda híbrida. Para todos los usuarios hace falta subir el tope y, probablemente, un plan pagado: es una aprobación pendiente.
 - **Modelos:**
   - la Redactora usa el modelo de Cowork (`COWORK_WRITER_MODEL` o `COWORK_MODEL`);
