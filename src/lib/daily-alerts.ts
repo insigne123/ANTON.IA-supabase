@@ -5,8 +5,8 @@ import { goalNextStep, goalPace, goalsOff, progressText, type GoalProgress } fro
 
 /**
  * «Avisos» (idea 3): one email in the morning, from Tuesday to Friday, only when there is something concrete to do. It
- * names it: «Te respondió Juan Pérez», «2 licitaciones que te sirven cierran el viernes», «Tus 12 contactos de ayer ya
- * tienen correo». A goal that is behind is reason enough on Wednesdays and Fridays; any other day it only rides along.
+ * names it: «Te respondió Juan Pérez», «2 licitaciones que te sirven cierran el viernes», «Los 12 contactos que guardaste
+ * ayer ya tienen correo». A goal that is behind is reason enough on Wednesdays and Fridays; any other day it only rides along.
  * On Tuesdays, Wednesdays and Fridays it also brings «Contacto del día» (src/lib/lead-drops.ts): one email a day, never two.
  * Mondays belong to the weekly report. Pure: the server reads the facts (server/daily-alerts.ts).
  */
@@ -120,10 +120,13 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
   }
 
   if (facts.newReady.count) {
-    const text = facts.newReady.count === 1 ? `Tu contacto ${facts.newReady.yesterday ? 'de ayer' : 'nuevo'} ya tiene correo`
-      : `Tus ${facts.newReady.count.toLocaleString('es-CL')} contactos ${facts.newReady.yesterday ? 'de ayer' : 'nuevos'} ya tienen correo`;
+    // «Los que guardaste», not «tus contactos»: on a day with a «Contacto del día» the email would otherwise count two sets
+    // of contacts in the same words, and whoever reads «Tus 3 contactos» next to «Tu contacto de hoy» looks for three.
+    const { count, yesterday } = facts.newReady;
+    const saved = `que guardaste${yesterday ? ' ayer' : ''}`;
+    const text = count === 1 ? `El contacto ${saved} ya tiene correo` : `Los ${count.toLocaleString('es-CL')} contactos ${saved} ya tienen correo`;
     lead(text);
-    lines.push({ kind: 'ready', text: `${text}: escríbeles desde «Por escribir»`, href: '/saved/leads/enriched' });
+    lines.push({ kind: 'ready', text: `${text}: escríbe${count === 1 ? 'le' : 'les'} desde «Por escribir»`, href: '/saved/leads/enriched' });
   }
 
   const remindGoal = Boolean(options.goalReminders !== false && goal && goalBehind && goalDay(now));

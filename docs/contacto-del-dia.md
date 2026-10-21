@@ -35,6 +35,7 @@ Es una idea del dueño para que los usuarios vuelvan. Primero eran cinco contact
    - **Reparto:** un contacto por persona (`DROP_SIZE`), distinto entre compañeros y, mientras alcancen, de una empresa que nadie más del equipo recibió.
      - Primero quienes tienen teléfono y un cargo más cercano.
      - Nunca alguien que el equipo ya tiene en «Por escribir» o «Conversaciones», ni quien llegó otro día de los últimos 180.
+     - **Nunca una empresa de otro país que el buscado** (`foreignDomain`). La búsqueda filtra por dónde está la *persona*, no la empresa: el 21 de octubre llegó un contacto «en Santiago» de Gou, una empresa de mudanzas de México (`gou.mx`), y quien lo recibió preguntó por qué era mexicano. Si el dominio es de un país (`.mx`, `.com.ar`) y los lugares del cliente ideal nombran otro («Chile»), se deja fuera aunque tenga teléfono. Un `.com`, un `.co` suelto o lugares sin país («Santiago») no dicen nada, y ahí no se descarta a nadie.
    - **Dónde queda:**
      - el correo y el teléfono, cifrados en `lead_search_vault` (30 días);
      - lo visible, en `lead_drops.items`: nombre, cargo, empresa, por qué calza y los datos de la empresa.

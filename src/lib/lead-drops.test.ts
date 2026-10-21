@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { assignDrops, criteriaKey, dropCriteria, dropDay, dropEmailSection, dropHref, dropSubject, inferCriteria, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
+import { assignDrops, criteriaKey, dropCriteria, dropDay, dropEmailSection, dropHref, dropSubject, foreignDomain, inferCriteria, nextDropDay, researchFacts, tidyCompany, tidyTitle, whyText, type DropCandidate, type DropCriteria } from './lead-drops';
 
 const criteria: DropCriteria = { titles: ['Gerente de Personas'], industries: ['retail'], locations: ['Chile'], sizes: [], source: 'perfil' };
 const candidate = (id: string, company: string, extra: Partial<DropCandidate> = {}): DropCandidate => ({
@@ -61,6 +61,26 @@ test('with few contacts, everyone gets some; by default, one each', () => {
   assert.deepEqual([out.get('ana')!.length, out.get('leo')!.length], [2, 1]);
   const daily = assignDrops([candidate('1', 'A'), candidate('2', 'A', { hasPhone: true }), candidate('3', 'B')], ['ana', 'leo'], none(), criteria);
   assert.deepEqual([...daily.values()].map(picks => picks.map(item => item.company)), [['A'], ['B']], 'one contact of the day each, at different companies');
+});
+
+test('a company from another country is not offered, even when the person works in the country asked (gou.mx, Santiago)', () => {
+  // Rodrigo's contact of the day on 21 Oct: «Gerente de Personas» at a Mexican moving company, located in Santiago.
+  const gou = candidate('1', 'Gou', { domain: 'gou.mx', hasPhone: true });
+  const out = assignDrops([gou, candidate('2', 'Ripley')], ['ana'], none(), criteria);
+  assert.deepEqual(out.get('ana')!.map(item => item.company), ['Ripley'], 'the Mexican company goes even with a phone');
+  assert.deepEqual(assignDrops([gou], ['ana'], none(), criteria).get('ana'), [], 'and nothing is better than that contact');
+
+  assert.equal(foreignDomain('gou.mx', ['Chile']), true);
+  assert.equal(foreignDomain('www.empresa.com.ar', ['Chile']), true);
+  assert.equal(foreignDomain('banco.com.co', ['Chile']), true);
+  assert.equal(foreignDomain('ripley.cl', ['Chile']), false);
+  assert.equal(foreignDomain('gou.mx', ['Chile', 'México']), false, 'a team that searches Mexico too');
+  assert.equal(foreignDomain('gou.mx', ['Chile', 'Perú']), true, 'accents and other places do not matter');
+  // A `.com` or a startup `.co` says no country; places that name none leave the search as it is.
+  assert.equal(foreignDomain('ripley.com', ['Chile']), false);
+  assert.equal(foreignDomain('startup.co', ['Chile']), false);
+  assert.equal(foreignDomain('gou.mx', ['Santiago']), false);
+  assert.equal(foreignDomain(null, ['Chile']), false);
 });
 
 test('why a contact fits, and the facts of its company', () => {

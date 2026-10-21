@@ -64,7 +64,7 @@ El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su en
    - Solo para quien puede ver Oportunidades.
 4. **«Contacto del día»**, martes, miércoles y viernes: un contacto nuevo con correo, con su bloque y su botón en el cuerpo y un PDF adjunto (`docs/contacto-del-dia.md`). Es el botón principal del correo; no se repite como una línea de la lista. Asunto: «Tu contacto de hoy: Gerente de Personas en Ripley», si no hay algo más urgente.
 5. **Investigaciones listas** desde el aviso anterior: «Lista la investigación de Pedro Rojas». El enlace abre la investigación en «Por escribir».
-6. **Contactos que ya tienen correo:** los guardados desde el aviso anterior, con correo y sin escribir. Ejemplo: «Tus 12 contactos de ayer ya tienen correo». Dice «de ayer» cuando todos son de ayer.
+6. **Contactos que ya tienen correo:** los que la persona guardó desde el aviso anterior, con correo y sin escribir. Ejemplo: «Los 12 contactos que guardaste ayer ya tienen correo». Dice «ayer» cuando todos son de ayer. Dice «que guardaste» y no «tus contactos» a propósito: un martes, miércoles o viernes el correo también trae el «Contacto del día» («Tu contacto de hoy»), y con «Tus 3 contactos» al lado de «Tu contacto de hoy» alguien (21 de octubre) buscó tres contactos y solo vio uno.
 7. **Respuestas de días anteriores** que aún esperan. Solo acompañan a otro motivo; nunca son motivo por sí solas.
 8. **La meta de la semana,** con el siguiente paso.
    - Una meta atrasada es motivo suficiente solo **miércoles y viernes**.
