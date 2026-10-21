@@ -54,13 +54,14 @@ test('ticking the step to submit moves it to «Presentada»; a closed stage or a
 });
 
 // The pipeline's reads, recorded: every filter the page asked for reaches each query.
-function recorder() {
+function recorder(tables: Record<string, unknown[]> = {}) {
   const queries: Array<{ table: string; calls: Array<[string, unknown[]]> }> = [];
   const client = { from(table: string) {
     const query = { table, calls: [] as Array<[string, unknown[]]> };
     queries.push(query);
     const result = () => {
       if (table === 'opportunity_work') return { data: [{ opportunity_id: 'w1', state: 'working' }], error: null };
+      if (tables[table] && !query.calls.some(([name, args]) => name === 'select' && (args[1] as { head?: boolean } | undefined)?.head)) return { data: tables[table], error: null };
       const head = query.calls.some(([name, args]) => name === 'select' && (args[1] as { head?: boolean } | undefined)?.head);
       return head ? { data: null, error: null, count: 7 } : { data: [{ id: `${table}-${queries.length}`, data: { evaluation: 'recommended', summary: { text: 'Listo.' } } }], error: null };
     };
@@ -97,4 +98,48 @@ test('without a search the pipeline keeps its plain filter of open opportunities
   const ors = queries.filter(q => q.table === 'commercial_opportunities').flatMap(q => q.calls.filter(([name]) => name === 'or').map(([, args]) => String(args[0])));
   assert.ok(ors.length && ors.every(or => or.startsWith('deadline_at.is.null,deadline_at.gt.')));
   assert.ok(!queries.some(q => q.calls.some(([name, args]) => name === 'in' && args[0] === 'kind')), 'every source');
+});
+
+test('each page is the best scored first by default, or the soonest to close first (the ones with no deadline last) when asked, and says which', async () => {
+  const { readOpportunityPipeline } = await load();
+  const orders = async (options: Record<string, unknown>) => {
+    const { client, queries } = recorder();
+    const result = await readOpportunityPipeline(client, scope, { limits: { found: 60, recommended: 60 }, ...options });
+    const pages = queries.filter(q => q.table === 'commercial_opportunities' && q.calls.some(([name]) => name === 'range'));
+    assert.equal(pages.length, 2, 'the two pages of what nobody works yet');
+    return { result, orders: pages.map(page => page.calls.filter(([name]) => name === 'order').map(([, args]) => JSON.stringify(args))) };
+  };
+  const byScore = ['["score",{"ascending":false}]', '["id"]'];
+  const byDeadline = ['["deadline_at",{"ascending":true,"nullsFirst":false}]', ...byScore];
+  const plain = await orders({});
+  assert.deepEqual(plain.orders, [byScore, byScore]);
+  assert.equal(plain.result.sort, 'priority');
+  const soonest = await orders({ sort: 'deadline' });
+  assert.deepEqual(soonest.orders, [byDeadline, byDeadline]);
+  assert.equal(soonest.result.sort, 'deadline');
+  const unknown = await orders({ sort: 'cheapest' });
+  assert.deepEqual(unknown.orders, [byScore, byScore], 'an unknown order is the default one');
+});
+
+test('each card of the pipeline comes with what its research and its report are doing, and a failure to read that never stops the pipeline', async () => {
+  const { readOpportunityPipeline } = await load();
+  const rows = [{ id: 'a', data: { evaluation: 'recommended', summary: { text: 'Listo.' } } }, { id: 'b', data: { evaluation: 'review', summary: { text: 'Listo.' } } }];
+  const { client, queries } = recorder({ commercial_opportunities: rows,
+    opportunity_jobs: [{ opportunity_id: 'a', state: 'running', updated_at: '2026-10-21T14:58:00Z' }, { opportunity_id: 'nobody', state: 'running', updated_at: '2026-10-21T14:59:00Z' }],
+    opportunity_reports: [{ opportunity_id: 'b', created_at: '2026-10-21T12:00:00Z' }] });
+  const result = await readOpportunityPipeline(client, scope);
+  assert.deepEqual(result.progress, { a: { research: 'running', researchAt: '2026-10-21T14:58:00Z' }, b: { reportAt: '2026-10-21T12:00:00Z' } }, 'only for the cards shown');
+  const jobs = queries.find(q => q.table === 'opportunity_jobs' && q.calls.some(([name, args]) => name === 'eq' && args[0] === 'kind' && args[1] === 'research'))!;
+  assert.ok(jobs.calls.some(([name, args]) => name === 'eq' && args[0] === 'organization_id'), 'only the workspace\'s own');
+  assert.ok(jobs.calls.some(([name, args]) => name === 'limit' && args[0] === 600), 'a bounded read');
+  // The read failing leaves the cards as they were.
+  const failing: any = { from(table: string) {
+    const chain: any = new Proxy({}, { get(_, name) {
+      if (name === 'then') return (resolve: any) => resolve(table === 'opportunity_jobs' ? { data: null, error: { message: 'down' } } : { data: [], error: null, count: 0 });
+      if (name === 'maybeSingle') return async () => ({ data: null, error: null });
+      return () => chain;
+    } });
+    return chain;
+  } };
+  assert.deepEqual((await readOpportunityPipeline(failing, scope)).progress, {});
 });

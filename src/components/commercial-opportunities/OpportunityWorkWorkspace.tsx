@@ -14,6 +14,11 @@ import { PublicMarket } from './PublicMarket';
 import { WinPlan } from './WinPlan';
 import type { OfferPrices, SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
 import { PipelineBoard, type PagedStage, type PipelineSuggestion } from './PipelineBoard';
+import { PriorityStars } from './PriorityStars';
+import { ProgressMarks } from './ProgressMarks';
+import type { PrioritySort } from '@/lib/commercial-opportunities/priority';
+import { isResearching, markOpened, openedKey, parseOpened, progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
+import { useAuth } from '@/context/AuthContext';
 import { OpportunityFilters } from './OpportunityFilters';
 import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
 import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
@@ -66,6 +71,11 @@ const PAGE = 60;
 const FIRST_PAGE: Record<PagedStage, number> = { found: PAGE, recommended: PAGE, excluded: 0 };
 
 export function OpportunityWorkWorkspace() {
+  const { user } = useAuth();
+  // When this person opened each opportunity, kept in this browser (progress.ts): the cards say «Abierta hace 1 min» on the way back.
+  const [opened, setOpened] = useState<Record<string, number>>({});
+  const openedRef = useRef(opened); openedRef.current = opened;
+  useEffect(() => { try { setOpened(parseOpened(window.localStorage.getItem(openedKey(user?.id)))); } catch { setOpened({}); } }, [user?.id]);
   const [overview, setOverview] = useState<(WorkspaceOverview & { suggestion?: any }) | null>(null);
   const [problem, setProblem] = useState(''); const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState(''); const [filter, setFilter] = useState('recommended');
@@ -89,9 +99,10 @@ export function OpportunityWorkWorkspace() {
   // A question the assistant hands to one opportunity's chat: asked there once its expediente is open.
   const handoff = useRef<{ id: string; question: string | null } | null>(null);
   const [pipeline, setPipeline] = useState<{ items: WorkItem[]; work: WorkRecord[]; totals: { found: number; recommended: number; excluded?: number };
-    limits?: Partial<Record<PagedStage, number>>; summaries?: { waiting: number } } | null>(null);
-  // How many of each stage nobody works yet the pipeline asks for: «Cargar más» adds a page; a new search starts over.
-  const filterKey = `${source}|${search}`;
+    limits?: Partial<Record<PagedStage, number>>; summaries?: { waiting: number }; progress?: Record<string, CardProgress> } | null>(null);
+  // How many of each stage nobody works yet the pipeline asks for: «Cargar más» adds a page; a new search, source or order starts over.
+  const [sort, setSort] = useState<PrioritySort>('priority');
+  const filterKey = `${source}|${search}|${sort}`;
   const [paging, setPaging] = useState<{ key: string; limits: Record<PagedStage, number> }>({ key: '', limits: FIRST_PAGE });
   const limits = paging.key === filterKey ? paging.limits : FIRST_PAGE;
   const [loadingMore, setLoadingMore] = useState<PagedStage | null>(null);
@@ -164,26 +175,39 @@ export function OpportunityWorkWorkspace() {
   // Only the latest reading lands: a search typed while another one loads does not get overwritten by the older answer.
   const pipelineRequest = useRef(0);
   const loadPipeline = useCallback(async () => {
-    const request = ++pipelineRequest.current; const key = `${source}|${search}`;
+    const request = ++pipelineRequest.current; const key = `${source}|${search}|${sort}`;
     try {
-      const params = new URLSearchParams({ view: 'pipeline', source, query: search, found: String(limits.found), recommended: String(limits.recommended), excluded: String(limits.excluded) });
+      const params = new URLSearchParams({ view: 'pipeline', source, query: search, sort, found: String(limits.found), recommended: String(limits.recommended), excluded: String(limits.excluded) });
       const result = await json(await fetch(`/api/commercial-opportunities/workspace?${params}`, { cache: 'no-store' }));
       if (request === pipelineRequest.current) { setPipeline(result); setPipelineFor(key); }
     }
     catch (e) { if (request === pipelineRequest.current) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar el embudo.'); setPipelineFor(key); } }
     finally { if (request === pipelineRequest.current) setLoadingMore(null); }
-  }, [source, search, limits]);
+  }, [source, search, sort, limits]);
   const loadMore = useCallback((stage: PagedStage) => { setLoadingMore(stage); setPaging({ key: filterKey, limits: { ...limits, [stage]: Math.min(600, limits[stage] + PAGE) } }); }, [filterKey, limits]);
   const clearFilters = () => { setQuery(''); setSearch(''); setSource('all'); };
   useEffect(() => { if (admin && view === 'pipeline' && !selected) void loadPipeline(); }, [admin, view, selected, loadPipeline]);
-  // Cards still waiting for their line of summary: the pipeline is read again every 20 seconds, for five minutes at most.
+  // Cards still waiting for their line of summary: the pipeline is read again every 20 seconds, for five minutes at most; after
+  // that the faint lines go away instead of promising something that is not coming while the page stays open.
   const summaryReloads = useRef(0);
+  const [summariesStalled, setSummariesStalled] = useState(false);
   useEffect(() => {
-    if (!pipeline?.summaries?.waiting) { summaryReloads.current = 0; return; }
-    if (view !== 'pipeline' || selected || summaryReloads.current >= 15) return;
+    if (!pipeline?.summaries?.waiting) { summaryReloads.current = 0; setSummariesStalled(false); return; }
+    if (view !== 'pipeline' || selected) return;
+    if (summaryReloads.current >= 15) { setSummariesStalled(true); return; }
     const timer = setTimeout(() => { summaryReloads.current++; void loadPipeline(); }, 20_000);
     return () => clearTimeout(timer);
   }, [pipeline, view, selected, loadPipeline]);
+  // Something is being researched: the cards say so and the pipeline is read again every 15 seconds (half an hour at most),
+  // so «Investigando…» turns into «Informe listo» without anyone pressing anything.
+  const anyResearching = Object.values(pipeline?.progress || {}).some(isResearching);
+  const researchReloads = useRef(0);
+  useEffect(() => {
+    if (!anyResearching) { researchReloads.current = 0; return; }
+    if (view !== 'pipeline' || selected || researchReloads.current >= 120) return;
+    const timer = setTimeout(() => { researchReloads.current++; void loadPipeline(); }, 15_000);
+    return () => clearTimeout(timer);
+  }, [anyResearching, pipeline, view, selected, loadPipeline]);
   const readDocument = async (file: File) => {
     setPrefill({ status: 'reading', name: file.name }); setProblem('');
     try {
@@ -231,6 +255,8 @@ export function OpportunityWorkWorkspace() {
   };
   const open = (id: string) => {
     setProblem(''); setSelected(id);
+    const next = markOpened(openedRef.current, id); setOpened(next);
+    try { window.localStorage.setItem(openedKey(user?.id), JSON.stringify(next)); } catch { /* private mode: it is remembered until the page closes */ }
     if (opportunityInUrl() !== id) window.history.pushState(null, '', `${window.location.pathname}?op=${encodeURIComponent(id)}`);
     window.scrollTo({ top: 0 });
     for (const n of overview?.notifications.filter(n => n.opportunity_id === id && !n.read_at) || []) void fetch('/api/commercial-opportunities/workspace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'notification', data: { id: n.id } }) });
@@ -327,7 +353,7 @@ export function OpportunityWorkWorkspace() {
   });
   // With a source picked, its group is called by it («Compra Ágil», «Recibidas»), not by the family it belongs to.
   const listGroups = bySource(items).map(group => source === 'all' ? group : { ...group, label: OPPORTUNITY_SOURCES.find(item => item.id === source)?.label ?? group.label });
-  const card = (item: WorkItem) => { const work = overview?.work.find(w => w.opportunity_id === item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id); return <article key={item.id} className="rounded-xl border bg-background p-5"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="flex flex-wrap items-center gap-2"><span>{TYPES[item.kind]}</span><AdvicePill item={item} /></span><span>{STATES[work?.state || 'unassigned']}</span></div><h3 className="mt-2 text-base font-semibold">{item.title}</h3>{opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}<p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p><p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>{work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}<Button variant="outline" size="sm" className="mt-4" onClick={() => open(item.id)}>Abrir y trabajar</Button></article>; };
+  const card = (item: WorkItem) => { const work = overview?.work.find(w => w.opportunity_id === item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id); return <article key={item.id} className="rounded-xl border bg-background p-5"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="flex flex-wrap items-center gap-2"><span>{TYPES[item.kind]}</span><AdvicePill item={item} />{item.data.evaluation === 'excluded' ? null : <PriorityStars score={item.score} />}<ProgressMarks marks={progressChips(null, opened[item.id])} /></span><span>{STATES[work?.state || 'unassigned']}</span></div><h3 className="mt-2 text-base font-semibold">{item.title}</h3>{opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}<p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p><p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>{work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}<Button variant="outline" size="sm" className="mt-4" onClick={() => open(item.id)}>Abrir y trabajar</Button></article>; };
   const title = admin ? 'Gestionar oportunidades' : 'Mis oportunidades asignadas';
   const item = detail?.item;
   const signal = isSignalKind(item?.kind);
@@ -364,9 +390,9 @@ export function OpportunityWorkWorkspace() {
         : admin && view === 'market' ? <PublicMarket onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} onProfile={() => setProfileOpen(true)} />
         : admin && view === 'pipeline' ? <>
         <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} />
-        {pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} limits={pipeline.limits} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting)}
+        {pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} limits={pipeline.limits} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting) && !summariesStalled}
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open}
-        filtered={Boolean(search) || source !== 'all'} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} onMore={loadMore} onClearFilters={clearFilters} />
+        filtered={Boolean(search) || source !== 'all'} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} onMore={loadMore} onClearFilters={clearFilters} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
       <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} showSources={admin}>
         <div role="group" aria-label="Filtrar oportunidades" className="flex flex-wrap gap-1">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div>

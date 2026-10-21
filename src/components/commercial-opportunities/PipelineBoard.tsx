@@ -7,8 +7,12 @@ import { InitialsAvatar } from '@/components/initials-avatar';
 import { cn } from '@/lib/utils';
 import type { WorkItem, WorkRecord } from '@/lib/commercial-opportunities/workspace';
 import { PIPELINE_STAGES, WORK_STATE_LABELS, daysToClose, pipelineStage } from '@/lib/commercial-opportunities/pipeline';
-import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
+import { PRIORITY_SORTS, comparePriority, type PrioritySort } from '@/lib/commercial-opportunities/priority';
+import { progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
+import { fallbackLine, opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import { PipelineRoute, type PipelineStop } from './PipelineRoute';
+import { PriorityStars } from './PriorityStars';
+import { ProgressMarks } from './ProgressMarks';
 
 export type PipelineSuggestion = { id: string; move: WorkRecord['state'] | null; reason: string; nextAction: string };
 /** Where each card came from, now that a stage can mix them (and the filter can narrow them). */
@@ -23,6 +27,8 @@ const CLOSED_STAGES = [
 /** The stages the page loads by pages (readOpportunityPipeline): what nobody works yet. */
 export type PagedStage = 'found' | 'recommended' | 'excluded';
 const PAGED: string[] = ['found', 'recommended', 'excluded'];
+/** How many job ads a hiring card stands for, when the search counted them. */
+const adsOf = (item: WorkItem) => { const ads = (item.data as { observed?: { ads?: unknown } } | null)?.observed?.ads; return typeof ads === 'number' && ads > 0 ? ads : 0; };
 const MOVES: Record<string, WorkRecord['state'][]> = {
   assigned: ['working', 'blocked', 'archived'], working: ['submitted', 'blocked', 'archived'], submitted: ['won', 'lost'], won: [], blocked: ['working', 'archived'],
 };
@@ -33,7 +39,7 @@ const MOVES: Record<string, WorkRecord['state'][]> = {
  * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
 export function PipelineBoard({ items, work, totals, limits, members, busy, suggestions, reviewing, summariesWaiting = false, filtered = false, loadingMore = null, refreshing = false,
-  onReview, onMove, onOpen, onMore, onClearFilters }: {
+  sort = 'priority', onSort, progress, opened, onReview, onMove, onOpen, onMore, onClearFilters }: {
   items: WorkItem[]; work: WorkRecord[]; members: Array<{ user_id: string; name: string }>; busy: boolean;
   /** Exact counts of what nobody works yet; the page lists only the best scored of them. */
   totals?: { found: number; recommended: number; excluded?: number };
@@ -42,12 +48,19 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   /** A search or a source is on: an empty stage says so. */
   filtered?: boolean; loadingMore?: string | null; refreshing?: boolean;
   onMore?: (stage: PagedStage) => void; onClearFilters?: () => void;
+  /** How the cards of a stage are read: by priority (the stars) or by how soon they close. The server picks the same ones (workspace-pipeline.ts). */
+  sort?: PrioritySort; onSort?: (sort: PrioritySort) => void;
+  /** What each card says of its own work: being researched, report ready (from the server); and when this person opened it (from the browser). */
+  progress?: Record<string, CardProgress>; opened?: Record<string, number>;
   suggestions: PipelineSuggestion[] | null; reviewing: boolean; onReview: () => void;
   /** Some cards are still waiting for their line of summary. */
   summariesWaiting?: boolean;
   onMove: (id: string, state: WorkRecord['state'], revision: number) => void; onOpen: (id: string) => void;
 }) {
   const now = Date.now();
+  // «Abierta hace 1 min» and «Informe listo · hace 2 h» keep counting while the board stays open.
+  const [, setTick] = useState(0);
+  useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), 60_000); return () => clearInterval(timer); }, []);
   const placed = useMemo(() => items.map(item => {
     const record = work.find(w => w.opportunity_id === item.id) ?? null;
     return { item, record, stage: pipelineStage(item, record), days: daysToClose(item.deadline_at, now) };
@@ -65,7 +78,8 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
     return { ...stage, count: stage.id === 'excluded' ? Math.max(totals?.excluded ?? 0, inStage) : inStage, loaded: inStage };
   });
   const stage = [...PIPELINE_STAGES, ...CLOSED_STAGES].find(s => s.id === selected) ?? PIPELINE_STAGES[0];
-  const shown = placed.filter(p => p.stage === selected).sort((a, b) => (a.days ?? 9999) - (b.days ?? 9999));
+  const rank = comparePriority(sort);
+  const shown = placed.filter(p => p.stage === selected).sort((a, b) => rank({ id: a.item.id, score: a.item.score, days: a.days }, { id: b.item.id, score: b.item.score, days: b.days }));
   const count = stops.find(s => s.id === stage.id)?.count ?? closed.find(s => s.id === stage.id)?.count ?? shown.length;
   const paged = PAGED.includes(stage.id) ? stage.id as PagedStage : null;
   // Another page while there are more and the server gives them (PIPELINE_MAX); beyond that, the search narrows them.
@@ -106,8 +120,16 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
       <div className={cn('space-y-3 transition-opacity', refreshing && 'opacity-60')} aria-live="polite" aria-busy={refreshing || loadingMore === stage.id}>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="text-base font-semibold">{stage.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{count}</span></h3>
-          <p className="text-xs text-muted-foreground">{stage.hint}{count > shown.length && shown.length ? ` ${shown.length === 1 ? 'Se muestra 1' : `Se muestran ${shown.length}`} de ${count}, las de más puntaje.` : ''}</p>
+          <p className="text-xs text-muted-foreground">{stage.hint}{count > shown.length && shown.length ? ` ${shown.length === 1 ? 'Se muestra 1' : `Se muestran ${shown.length}`} de ${count}, ${sort === 'deadline' ? 'las que cierran antes' : 'las de mayor prioridad'}.` : ''}</p>
         </div>
+        {shown.length > 1 && stage.id !== 'excluded' ? <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <p className="text-xs text-muted-foreground">Las estrellas dicen qué tan bien calza cada una con tu oferta.</p>
+          <div role="group" aria-label="Ordenar las oportunidades" className="flex items-center gap-0.5 rounded-full border p-0.5">
+            {PRIORITY_SORTS.map(option => <button key={option.id} type="button" aria-pressed={sort === option.id} title={option.hint} onClick={() => onSort?.(option.id)}
+              className={cn('rounded-full px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                sort === option.id ? 'bg-foreground font-medium text-background' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>{option.label}</button>)}
+          </div>
+        </div> : null}
         {!shown.length ? (loadingMore === stage.id || excludedWaiting ? <p role="status" className="flex items-center justify-center gap-2 rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Cargando…</p>
           : <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
@@ -119,13 +141,18 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
               const owner = members.find(m => m.user_id === record?.responsible_id);
               const tip = advice.get(item.id);
               const options = record ? MOVES[record.state] ?? [] : [];
-              const summary = opportunitySummary(item.data);
+              const summary = opportunitySummary(item.data) ?? fallbackLine(item);
+              const ads = adsOf(item);
+              const marks = progressChips(progress?.[item.id], opened?.[item.id], now);
               return (
                 <li key={item.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border bg-background p-4 shadow-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1"
                   style={{ animationDelay: `${Math.min(index, 8) * 50}ms`, animationFillMode: 'both' }}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      {item.buyer_name || item.company_name ? <p className="truncate text-xs text-muted-foreground">{item.buyer_name || item.company_name}</p> : null}
+                    <div className="min-w-0 flex-1 space-y-1">
+                      {item.buyer_name || item.company_name || item.data?.evaluation !== 'excluded' ? <div className="flex items-center justify-between gap-2">
+                        <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{item.buyer_name || item.company_name}</p>
+                        {item.data?.evaluation !== 'excluded' ? <PriorityStars score={item.score} /> : null}
+                      </div> : null}
                       <p className="line-clamp-2 font-medium leading-6">{item.title}</p>
                       {summary ? <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">{summary}</p>
                         : summariesWaiting && !(item.data as { summary?: unknown } | null)?.summary ? <span className="block space-y-2 pt-1" aria-hidden="true"><span className="block h-3 w-11/12 rounded-full bg-muted motion-safe:animate-pulse" /><span className="block h-3 w-2/3 rounded-full bg-muted motion-safe:animate-pulse" /></span> : null}
@@ -135,9 +162,11 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
                   {record ? null : item.data?.evaluation === 'excluded' && item.reasons?.[0] ? <p className="text-xs leading-5 text-muted-foreground">Por qué no: {item.reasons[0]}</p> : null}
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     {SOURCE_LABELS[item.kind] ? <span className="rounded-full border px-2 py-0.5 text-muted-foreground">{SOURCE_LABELS[item.kind]}</span> : null}
+                    {ads ? <span className="rounded-full border px-2 py-0.5 text-muted-foreground">{ads} {ads === 1 ? 'aviso' : 'avisos'}</span> : null}
                     {days !== null ? <span className={cn('rounded-full px-2 py-0.5 font-medium', days < 0 ? 'bg-muted text-muted-foreground' : days < 7 ? 'bg-destructive/10 text-destructive' : 'bg-muted text-foreground/80')}>
                       {days < 0 ? 'Cerrada' : days === 0 ? 'Cierra hoy' : `Cierra en ${days} ${days === 1 ? 'día' : 'días'}`}</span> : null}
                     {record?.state === 'blocked' ? <span className="rounded-full bg-cw-warning-soft px-2 py-0.5 font-medium text-cw-warning">Bloqueada</span> : null}
+                    <ProgressMarks marks={marks} />
                   </div>
                   {tip ? <div className="rounded-xl bg-primary/5 px-3 py-2 text-sm">
                     <p className="flex items-start gap-1.5"><Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /><span><span className="font-medium">{tip.nextAction}</span>{tip.reason ? <span className="text-muted-foreground"> · {tip.reason}</span> : null}</span></p>
