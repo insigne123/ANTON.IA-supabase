@@ -52,3 +52,13 @@ test('Perfil waits for the saved profile before reading the site, uses the palet
   // Its own name: the form's section is also «Tu cliente ideal», and two regions with one name confuse a screen reader.
   assert.match(summary, /<section aria-label="Resumen de tu cliente ideal"/);
 });
+
+test('Perfil lets a person confirm the ideal customer ANTON.IA filled in without editing it', () => {
+  const page = read('src/app/(app)/profile/page.tsx');
+  // «Guardar cambios» only shows with edits; a suggested ideal customer someone agrees with needs its own way to say so.
+  assert.match(page, /\{isDirty \|\| \(icpSuggested && !isLoading && !loadError\) \? \(/);
+  assert.match(page, /isDirty \? 'Guardar cambios' : 'Confirmar'/);
+  assert.match(page, /const confirming = icpSuggested && !isDirty;/);
+  assert.match(page, /title: 'Cliente ideal confirmado'/);
+  assert.match(page, /confírmalo abajo/);
+});

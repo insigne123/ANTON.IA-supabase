@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Building2, PenLine, Save, Sparkles, Target, UserRound } from 'lucide-react';
+import { AlertCircle, Building2, Check, PenLine, Save, Sparkles, Target, UserRound } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -189,6 +189,8 @@ export default function ProfilePage() {
       return;
     }
 
+    // Nothing edited and the ideal customer is ANTON.IA's: saving as is confirms it.
+    const confirming = icpSuggested && !isDirty;
     setIsSaving(true);
     try {
       const currentProfile = await profileService.getProfile();
@@ -198,7 +200,9 @@ export default function ProfilePage() {
       setProfile(saved);
       setSavedProfile(saved);
       setIcpSuggested(false);
-      toast({ title: 'Perfil guardado', description: 'Desde ahora, la IA usa estos datos para buscar, investigar y escribir.' });
+      toast(confirming
+        ? { title: 'Cliente ideal confirmado', description: 'Con él elegimos tu contacto del día.' }
+        : { title: 'Perfil guardado', description: 'Desde ahora, la IA usa estos datos para buscar, investigar y escribir.' });
     } catch (error) {
       console.error('Error saving profile:', error);
       toast({ variant: 'destructive', title: 'No pudimos guardar el perfil', description: 'Tus cambios siguen en pantalla. Intenta nuevamente en unos segundos.' });
@@ -389,7 +393,7 @@ export default function ProfilePage() {
                   <Section id="icp" icon={Target} title="Tu cliente ideal" description="A quién le vendes. «Buscar prospectos» parte de aquí." data-tour="profile-icp">
                     {icpSuggested ? <p className="flex items-start gap-2 rounded-xl bg-primary/5 px-3 py-2.5 text-sm text-muted-foreground">
                       <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                      <span>Lo completamos por ti con lo que vende tu empresa y los contactos que guardaste. Revísalo y guarda: con él elegimos tu contacto del día.</span>
+                      <span>Lo completamos por ti con lo que vende tu empresa y los contactos que guardaste. Revísalo, ajústalo si hace falta y confírmalo abajo: con él elegimos tu contacto del día.</span>
                     </p> : null}
                     <div className="grid gap-4 md:grid-cols-2">
                       <Field id="targetRoles" label="Cargos que buscas" hint="Separados por coma, como aparecen en LinkedIn.">
@@ -422,15 +426,15 @@ export default function ProfilePage() {
         </fieldset>
       </form>
 
-      {isDirty ? (
+      {isDirty || (icpSuggested && !isLoading && !loadError) ? (
         <div className="sticky bottom-3 z-20 mt-4 flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/90 p-3 shadow-[0_18px_45px_-20px_rgba(15,23,42,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/75 sm:flex-row sm:items-center sm:justify-between" role="status">
           <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
-            <PenLine className="h-4 w-4 text-cw-warning" aria-hidden="true" />
-            Cambios sin guardar
+            {isDirty ? <PenLine className="h-4 w-4 text-cw-warning" aria-hidden="true" /> : <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />}
+            {isDirty ? 'Cambios sin guardar' : 'Tu cliente ideal espera tu visto bueno'}
           </div>
           <Button type="submit" form="profile-form" disabled={isSaving || Boolean(websiteError)} aria-busy={isSaving} className="w-full rounded-xl sm:w-auto">
-            {isSaving ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" /> : <Save className="h-4 w-4" />}
-            {isSaving ? 'Guardando…' : 'Guardar cambios'}
+            {isSaving ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" /> : isDirty ? <Save className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+            {isSaving ? 'Guardando…' : isDirty ? 'Guardar cambios' : 'Confirmar'}
           </Button>
         </div>
       ) : null}
