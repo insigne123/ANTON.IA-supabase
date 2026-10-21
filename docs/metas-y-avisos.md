@@ -85,6 +85,18 @@ El asunto nombra lo más urgente, y el cuerpo lista cada cosa una vez, con su en
 - **Por persona:** «Avisos por correo» en «Tu semana», al final de la página. Vienen encendidos (`profiles.signatures.daily_alerts.email`).
 - **Para todos:** `DAILY_ALERTS=off` los detiene.
 
+### Primera corrida real: miércoles 21 de octubre de 2026
+
+Revisada en producción el mismo día, solo con lecturas (`daily_alerts` y `lead_drops`), sin datos personales.
+
+- **Resultado:** las 35 filas del día quedaron en `sent`, con `email_error` vacío. Salieron entre las 11:00:06 y las 11:00:28 UTC, es decir a las 8:00 de Chile, dentro de la ventana de `dailyAlertsTick`.
+- **A quién:** había 35 personas que debían recibirlo (con correo, avisos encendidos y sin dirección de prueba) y las 35 tienen su fila; ninguna quedó sin aviso. No se envió ninguno a quien los apagó, a una dirección de prueba ni a alguien sin correo.
+- **Cómo llegaron:** solo 4 conexiones de Gmail u Outlook, así que el resto salió por Resend. La regla antigua, «solo a quien tiene buzón o correo de informes», ya no aplica desde que Resend está activo.
+- **Contacto del día (era día de entrega):** 33 contactos enviados con su aviso y 2 en `empty`, personas para quienes no se encontró a nadie.
+- **Qué no se comprobó:**
+  - los logs de `/api/cron/daily-alerts`, que corre en App Hosting y no se leyeron en esta revisión: «sin errores» sale del estado de las filas;
+  - la entrega real: `sent` quiere decir que Resend aceptó el correo, no que llegó a la bandeja; los rebotes y el spam se ven en el panel de Resend.
+
 ## Datos
 
 La migración `20261020170000_weekly_goals_and_daily_alerts.sql` crea dos tablas, solo para el servidor: RLS activo, sin permisos para `anon` ni `authenticated`, y todos para `service_role`.
