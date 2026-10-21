@@ -80,7 +80,7 @@ export default {
     {
       url: '**/api/weekly-report?*', method: 'GET',
       respond: (_body, request) => ({ report: report(new URL(request.url()).searchParams.get('week') === 'previous' ? 'previous' : 'current'),
-        email: emailOn, alerts: alertsOn, mailbox: 'google', managers: [], members: MEMBERS }),
+        email: emailOn, alerts: alertsOn, mailbox: 'google', yago: true, managers: [], members: MEMBERS }),
     },
     {
       // «Meta de la semana» in «Hoy», and the editor of «Metas del equipo» (?settings=1). Same shapes as /api/weekly-goals.
@@ -140,7 +140,7 @@ export default {
       waitFor: { text: /^La semana pasada escribiste/, exact: false },
     },
     {
-      title: 'Tu equipo', text: 'Si administras: los totales y una fila por cada persona que tuvo actividad.',
+      title: 'Tu equipo', text: 'Si administras: los totales y una fila por cada persona que tuvo actividad. «Personal» vuelve a tu semana.',
       say: 'En «Equipo», cómo le fue a cada persona.', postit: 'Quien no envió nada aparece en gris, y «Para esta semana» te lo recuerda.',
       target: { role: 'button', name: 'Equipo', within: { role: 'group', name: 'Informe' } }, zoom: 1.6,
       waitFor: { role: 'table' },
@@ -179,7 +179,7 @@ export default {
       target: { text: 'Sin asignar' }, zoomOn: { role: 'heading', name: 'Cierran en los próximos 7 días' }, action: 'none', zoom: 1.25, arrow: true,
     },
     {
-      title: 'Cada lunes en tu correo', text: 'A las 8:00, desde tu Gmail u Outlook conectado, hacia ti. Sin seguimiento ni enlace de baja.',
+      title: 'Cada lunes en tu correo', text: 'A las 8:00, con la semana anterior, a tu correo. Llega desde una dirección de Yago, no de tu Gmail ni de tu Outlook.',
       say: 'Enciéndelo y te llega cada lunes.',
       target: { role: 'switch', name: 'Recibirlo por correo cada lunes' }, zoom: 1.5, arrow: true,
       waitFor: { css: '#weekly-email[data-state="checked"]' },

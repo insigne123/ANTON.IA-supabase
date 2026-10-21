@@ -55,11 +55,18 @@ export default {
   intro: 'Tu punto de partida cada día: lo más importante primero, tus llamadas y LinkedIn, a quién volver a escribir y tu meta de la semana.',
   learn: ['Ver lo más urgente', 'Llamar con un guion y dejar el resumen en el CRM', 'Tu meta y tu contacto del día'],
   mocks: [
+    {
+      // «Tu resumen de hoy» is one sentence on a day with nothing yet (and the bench has no activity of its own): a day of work,
+      // same shape as GET /api/home/summary, so the four figures and the chart are what the video talks about.
+      url: '**/api/home/summary', method: 'GET',
+      respond: (_body, request) => ({ scope: homeScope(request), sent: 7, contacted: 6, replied: 2, saved: 3, automaticReplies: 0, unclassifiedReplies: 0, partial: false,
+        activity: [{ hour: '08:00', sent: 2, replied: 0 }, { hour: '09:00', sent: 3, replied: 1 }, { hour: '10:00', sent: 2, replied: 1 }] }),
+    },
     { url: '**/api/weekly-goals', method: 'GET', respond: (_body, request) => ({ scope: homeScope(request), week: thisWeek(), goal: GOAL, ready: 4, admin: true }) },
     {
       url: '**/api/lead-drops/latest', method: 'GET',
       respond: (_body, request) => ({ scope: homeScope(request), pull: null, drop: { id: '00000000-0000-4000-8000-000000000901', dropDate: chileDay(), total: 1, left: 1,
-        next: { name: 'Fernanda Rojas', company: 'Retail Austral', why: 'Gerente de Personas en retail en Santiago: calza con tu cliente ideal.' } } }),
+        next: { name: 'Fernanda Rojas', company: 'Retail Austral', why: 'Calza con tu cliente ideal por su cargo y su rubro (retail), en Santiago.' } } }),
     },
     {
       url: /\/api\/touches$/, method: 'GET',
@@ -88,6 +95,11 @@ export default {
       say: '«Hoy» te dice qué hacer primero.',
       before: async () => { done = new Set(); scripted = new Set(); },
       target: { role: 'link', name: 'Abrir conversación' }, action: 'none', zoom: 1.5, arrow: true,
+    },
+    {
+      title: 'Contacto del día', text: 'Martes, miércoles y viernes, un contacto nuevo con correo verificado, elegido para ti.',
+      say: 'Martes, miércoles y viernes te espera un contacto nuevo.', postit: 'Guardarlo no gasta créditos: ya trae su correo.',
+      target: { role: 'link', name: 'Ver y guardar' }, zoomOn: { text: 'Contacto del día' }, action: 'hover', zoom: 1.3, arrow: true,
     },
     {
       title: 'Lo que te espera', text: 'Respuestas, compromisos y contactos listos, de lo más urgente a lo menos.',
@@ -131,11 +143,6 @@ export default {
       title: 'Para retomar', text: 'A quién vale la pena volver a escribir, y por qué ahora.',
       say: 'Y a quién conviene volver a escribir.', postit: '«Retomar» prepara un correo con un ángulo nuevo para que lo revises.',
       target: { role: 'button', name: 'Retomar con Martina Valenzuela' }, zoomOn: { css: '[aria-labelledby="reconnect-title"]' }, action: 'hover', zoom: 1.25, arrow: true,
-    },
-    {
-      title: 'Contacto del día', text: 'Martes, miércoles y viernes, un contacto nuevo con correo verificado, elegido para ti.',
-      say: 'Martes, miércoles y viernes te espera un contacto nuevo.', postit: 'Guardarlo no gasta créditos: ya trae su correo.',
-      target: { role: 'link', name: 'Ver y guardar' }, zoomOn: { text: 'Contacto del día' }, action: 'hover', zoom: 1.3, arrow: true,
     },
     {
       title: 'Tu meta de la semana', text: 'A cuántas personas contactar y cuántos contactos nuevos con correo sumar, y si vas al día.',
