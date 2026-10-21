@@ -226,6 +226,8 @@ export function OpportunityWorkWorkspace() {
       const saved = await json(await fetch(`/api/commercial-opportunities/${selected}/workspace`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark', data: change }) })) as ReportMark;
       // The report and «Cómo postular» tick the same items: both read the saved mark when they open.
       setDetail(current => current?.marks ? { ...current, marks: { ...current.marks, items: { ...current.marks.items, [saved.key]: saved } } } : current);
+      // Taking back the step to submit can take the opportunity back from «Presentada»: read the stage again, quietly.
+      if (change.done === false && detail?.work?.state === 'submitted') void loadDetail(selected).then(() => load());
       return saved;
     } catch (e) { setProblem(e instanceof Error ? e.message : 'No se pudo guardar la marca.'); return null; }
   };
@@ -417,7 +419,7 @@ export function OpportunityWorkWorkspace() {
           {!latest && !researching && item.reasons[0] && <div className="rounded-2xl border p-5"><h2 className="text-sm font-semibold">Por qué apareció</h2><p className="mt-2 text-sm leading-6">{item.reasons.join(' ')}</p></div>}
           {latest && <>
             <div className="flex flex-wrap items-center justify-end gap-2"><label className="sr-only" htmlFor="op-export">Formato de descarga</label><select id="op-export" value={download} onChange={e => setDownload(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring">{[['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel'], ['md', 'Markdown'], ['zip', 'Expediente completo (ZIP)']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><Button asChild variant="outline" size="sm"><a href={`/api/commercial-opportunities/${selected}/export?format=${download}`}><Download className="mr-2 h-4 w-4" />Descargar</a></Button></div>
-            <OpportunityWorkReport report={latest.report} opportunity={{ title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency }}
+            <OpportunityWorkReport report={latest.report} opportunity={{ id: item.id, kind: item.kind, code: (item.data as { observed?: { code?: string } } | null)?.observed?.code ?? null, url: item.url, title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency }}
               onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')}
               marks={detail.marks} onMark={mark} people={detail.members || detail.participants}
               fit={detail.fit} fitBusy={busy} onFit={() => void checkFit('fit', {})} onAnswer={(question, answer) => void checkFit('fit_answer', { question, answer })} />

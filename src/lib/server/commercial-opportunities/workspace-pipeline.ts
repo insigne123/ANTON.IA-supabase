@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { automaticMove, WORK_STATE_LABELS, type WorkEvent } from '@/lib/commercial-opportunities/pipeline';
+import { automaticMove, automaticUndo, WORK_STATE_LABELS, type WorkEvent } from '@/lib/commercial-opportunities/pipeline';
 import { reportRoute } from '@/lib/commercial-opportunities/report-marks';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
@@ -22,6 +22,24 @@ export async function applyAutomaticMove(client: SupabaseClient, scope: WorkScop
     .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', work.revision).select('revision').maybeSingle());
   if (!saved) return null;
   await addOpportunityActivity(client, scope, id, 'auto_state', `Pasó a «${WORK_STATE_LABELS[move.to]}» automáticamente: ${move.reason}.`, { from: work.state, to: move.to });
+  return move.to;
+}
+
+/**
+ * The way back for a tick that was a mistake: if taking back the step to submit undoes the move to «Presentada» the tick itself made, the
+ * opportunity returns to preparation, with the same revision check and a line in the activity. A stage a person chose is never touched.
+ */
+export async function undoAutomaticMove(client: SupabaseClient, scope: WorkScope, id: string, event: { routeKind?: string | null; label: string }) {
+  const work = opportunityDb(await client.from('opportunity_work').select('state,revision').eq('organization_id', scope.organizationId).eq('opportunity_id', id).maybeSingle()) as { state: any; revision: number } | null;
+  if (!work || work.state !== 'submitted') return null;
+  const lastRow = opportunityDb(await client.from('opportunity_activity').select('kind,data').eq('organization_id', scope.organizationId).eq('opportunity_id', id)
+    .in('kind', ['auto_state', 'state']).order('created_at', { ascending: false }).limit(1).maybeSingle()) as { kind: string; data: { to?: string } | null } | null;
+  const move = automaticUndo(work.state, event, lastRow ? { kind: lastRow.kind, to: lastRow.data?.to ?? null } : null);
+  if (!move) return null;
+  const saved = opportunityDb(await client.from('opportunity_work').update({ state: move.to, revision: work.revision + 1, updated_at: new Date().toISOString() })
+    .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', work.revision).select('revision').maybeSingle());
+  if (!saved) return null;
+  await addOpportunityActivity(client, scope, id, 'auto_state', `Volvió a «${WORK_STATE_LABELS[move.to]}» automáticamente: ${move.reason}.`, { from: work.state, to: move.to });
   return move.to;
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { automaticMove, daysToClose, pipelineStage } from './pipeline';
+import { automaticMove, automaticUndo, daysToClose, pipelineStage } from './pipeline';
 
 test('each opportunity sits in one stage: the work state once someone works it, the AI evaluation before', () => {
   const item = (evaluation?: string) => ({ kind: 'tender', data: { evaluation } }) as any;
@@ -31,4 +31,15 @@ test('days to close count whole days and go negative once closed', () => {
   assert.equal(daysToClose('2026-10-16T15:00:00Z', now), 1);
   assert.equal(daysToClose('2026-10-15T12:00:00Z', now), -1);
   assert.equal(daysToClose(null, now), null);
+});
+
+test('taking back the tick of the step to submit returns the opportunity to preparation only when that tick moved it', () => {
+  const submit = { routeKind: 'submit', label: 'Subir la oferta al portal' };
+  assert.deepEqual(automaticUndo('submitted', submit, { kind: 'auto_state', to: 'submitted' }), { to: 'working', reason: 'se desmarcó «Subir la oferta al portal»' });
+  assert.equal(automaticUndo('submitted', { label: 'Presentar la oferta' }, { kind: 'auto_state', to: 'submitted' })?.to, 'working', 'the same step by its name');
+  assert.equal(automaticUndo('submitted', submit, { kind: 'state', to: null }), null, 'a stage a person chose stays');
+  assert.equal(automaticUndo('submitted', submit, { kind: 'auto_state', to: 'working' }), null);
+  assert.equal(automaticUndo('submitted', submit, null), null);
+  assert.equal(automaticUndo('submitted', { routeKind: 'prepare', label: 'Reunir los certificados' }, { kind: 'auto_state', to: 'submitted' }), null, 'another step does not undo it');
+  for (const state of ['working', 'won', 'lost', 'archived', 'assigned', null, undefined] as const) assert.equal(automaticUndo(state, submit, { kind: 'auto_state', to: 'submitted' }), null, String(state));
 });

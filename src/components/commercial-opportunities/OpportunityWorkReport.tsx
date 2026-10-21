@@ -7,12 +7,12 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/workspace';
-import { IMPACT_LABELS, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
-import { parseReportDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
+import { IMPACT_LABELS, buyerQuestions, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
+import { parseReportDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type ReminderSubject, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { RoutePath, type RouteNode } from './RoutePath';
 import { MarkedItem, ReminderMenu, useReportMarks, type MarkChange } from './ReportMarks';
 import { FitBadge, FitBar, FitQuestion, type OpportunityFitView } from './RequirementFit';
-import { decisionWithFit } from '@/lib/commercial-opportunities/requirement-fit';
+import { decisionWithFit, isExtraQuestionKey } from '@/lib/commercial-opportunities/requirement-fit';
 
 const TONES = { go: 'bg-cw-success-soft text-cw-success', evaluate: 'bg-cw-warning-soft text-cw-warning', no: 'bg-muted text-muted-foreground', pending: 'bg-muted text-muted-foreground' };
 const IMPACT_TONES: Record<string, string> = { high: 'bg-destructive/10 text-destructive', medium: 'bg-cw-warning-soft text-cw-warning', low: 'bg-muted text-muted-foreground' };
@@ -22,7 +22,7 @@ export const SUGGESTED_QUESTIONS = {
   signal: ['¿A quién debería contactar primero?', '¿Qué le digo en el primer mensaje?', '¿Qué sabemos de esta empresa?'],
 };
 
-type Opportunity = { title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
+type Opportunity = { id?: string; kind?: string; code?: string | null; url?: string | null; title: string; buyer?: string | null; deadline?: string | null; amount?: number | null; currency?: string | null };
 const ROUTE_ICONS: Record<string, typeof PenLine> = { prepare: PenLine, ask: MessageCircleQuestion, submit: Upload, wait: Hourglass, decide: Award, contact: Phone };
 export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onContacts, marks: initialMarks, onMark, people, fit, fitBusy = false, onFit, onAnswer }: {
   report: OpportunityReport & { route?: { steps: Array<{ title: string; detail: string; date: string; kind: 'prepare' | 'ask' | 'submit' | 'wait' | 'decide' | 'contact' }> } | null };
@@ -36,17 +36,23 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
   fit?: OpportunityFitView | null; fitBusy?: boolean; onFit?: () => void; onAnswer?: (question: string, answer: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const { interactive, marks, saving, change } = useReportMarks(initialMarks, onMark);
+  const { interactive, marks, pending, change } = useReportMarks(initialMarks, onMark);
   const itemMarks = interactive ? marks : null;
   const authorOf = (id?: string | null) => people?.find(p => p.user_id === id)?.name ?? null;
   const whenOf = (at?: string | null) => humanDate(at, true);
-  const markProps = { marks: itemMarks, disabled: saving, onChange: (input: MarkChange) => void change(input), authorOf, whenOf };
+  // A tick is never blocked while it saves (mark-queue.ts): a second click on the same item is queued behind the first.
+  const markProps = { marks: itemMarks, pending, onChange: (input: MarkChange) => void change(input), authorOf, whenOf };
+  // What a reminder in the calendar says it is about: the purchase, who buys it, its ID and where to open it.
+  const subject: ReminderSubject = { title: opportunity.title, buyer: opportunity.buyer, code: opportunity.code, kind: opportunity.kind, sourceUrl: opportunity.url,
+    appUrl: opportunity.id && typeof window !== 'undefined' ? `${window.location.origin}/opportunities?op=${encodeURIComponent(opportunity.id)}` : null };
   const signal = isSignalReport(report);
   // With the profile, a «No postular» that rests on unproven requirements reads as conditional (requirement-fit.ts).
   const fitted = signal ? { recommendation: report.recommendation, note: null } : decisionWithFit(report, fit?.latest ?? null);
   const decision = reportDecision({ ...report, recommendation: fitted.recommendation });
   const dates = reportKeyDates(report, opportunity.deadline);
   const steps = reportNextSteps(report);
+  // For a purchase with bases, the questions of the report and the contradictions of the bases are one list.
+  const questions = signal ? report.questions : buyerQuestions(report);
   const route = reportRoute(report);
   // Reports made before version 4 can carry system notes; the person only sees what to know or get.
   const warnings = opportunityReportWarnings(report.warnings, [], false);
@@ -65,7 +71,7 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
     ['requirements', signal ? 'Qué validar' : 'Requisitos', report.requirements.length > 0],
     ['plan', signal ? 'Pasos comerciales' : 'Plan de trabajo', report.tasks.length > 0],
     ['risks', 'Riesgos', report.risks.length > 0],
-    ['questions', signal ? 'Preguntas para conversar' : 'Preguntas al comprador', report.questions.length > 0],
+    ['questions', signal ? 'Preguntas para conversar' : 'Preguntas al comprador', questions.length > 0],
     ['numbers', 'Números', report.scenarios.length > 0],
     ['analysis', 'Análisis detallado', report.sections.length > 0],
     ['sources', 'Documentos leídos', report.coverage.length > 0],
@@ -82,13 +88,13 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
     const firstOpen = route.findIndex(other => !marks[other.key]?.done);
     return { id: step.key, title: step.title, meta: step.date || null, detail: step.detail || null, icon: (() => { const Icon = ROUTE_ICONS[step.kind]; return Icon ? <Icon className="h-4 w-4" aria-hidden="true" /> : undefined; })(),
       state: done ? 'done' : index === firstOpen ? 'current' : 'next',
-      action: interactive ? <button type="button" role="checkbox" aria-checked={done} disabled={saving} onClick={() => void change({ key: step.key, label: step.title, done: !done })}
+      action: interactive ? <button type="button" role="checkbox" aria-checked={done} aria-busy={pending.has(step.key) || undefined} onClick={() => void change({ key: step.key, label: step.title, done: !done })}
         className="rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
         {done ? 'Hecho · deshacer' : 'Marcar hecho'}</button> : null };
   });
   const labels = new Map<string, string>([...checklist.map(item => [item.key, item.label] as const),
     ...report.milestones.map(m => [reportItemKey('date', m.label), m.label] as const), ...report.risks.map(r => [reportItemKey('risk', r.title), r.title] as const),
-    ...report.questions.map(q => [reportItemKey('question', q), q] as const)]);
+    ...questions.map(q => [reportItemKey('question', q), q] as const)]);
   const highlighted = interactive ? Object.values(marks).filter(m => m.highlight && labels.has(m.key)) : [];
   const datedMilestones = report.milestones.flatMap(m => { const parsed = parseReportDate(m.date); return parsed ? [{ uid: reportItemKey('date', m.label), label: m.label, date: m.date, at: parsed.at }] : []; })
     .filter(event => event.at.getTime() > Date.now());
@@ -156,12 +162,12 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
 
       {report.milestones.length > 0 && <section aria-labelledby="report-dates" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">{heading('dates', 'Fechas clave')}
-          {datedMilestones.length > 1 && <ReminderMenu title={opportunity.title} events={datedMilestones} label="Recordatorios de todas" />}</div>
+          {datedMilestones.length > 1 && <ReminderMenu subject={subject} events={datedMilestones} label="Recordatorios de todas" />}</div>
         <ol className="space-y-3 border-l-2 border-primary/30 pl-4">{report.milestones.map((m, i) => { const key = reportItemKey('date', m.label); const event = datedMilestones.find(e => e.uid === key); return <li key={i}>
           <MarkedItem markKey={key} label={m.label} checkable={false} {...markProps}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0"><p className="mark-title text-sm font-medium">{m.label}</p><p className="text-sm text-muted-foreground">{m.date}</p></div>
-              {event && <ReminderMenu title={opportunity.title} events={[event]} compact />}
+              {event && <ReminderMenu subject={subject} events={[event]} compact />}
             </div>
           </MarkedItem></li>; })}</ol>
       </section>}
@@ -175,13 +181,21 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
               <span className={cn('shrink-0 text-xs font-medium', REQUIREMENT_TONES[r.status])}>{statusLabel(r.status)}</span></div>
             {itemFit ? <div className="mt-1.5"><FitBadge fit={itemFit} /></div> : null}
             {r.action && <p className="mt-1.5 text-sm">{r.action}</p>}
-            {itemFit?.fit === 'missing' && itemFit.question && onAnswer ? <FitQuestion id={`fit-${i}`} question={itemFit.question} busy={fitBusy} onAnswer={answer => onAnswer(itemFit.question!, answer)} /> : null}
+            {itemFit?.fit === 'missing' && itemFit.question && onAnswer ? <FitQuestion id={`fit-${i}`} question={itemFit.question} kind={itemFit.answerKind} busy={fitBusy} onAnswer={answer => onAnswer(itemFit.question!, answer)} /> : null}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">{[r.role, r.due].filter(Boolean).join(' · ')}</p>
               <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onTask(r.action || r.title, r.evidence.map(e => e.quote).join('\n'))}>Crear tarea</Button>
             </div>
           </MarkedItem>
         </li>; })}</ul>
+        {!signal && fit?.latest && onAnswer ? (() => {
+          const extras = Object.entries(fit.latest.items).filter(([key, item]) => isExtraQuestionKey(key) && item.question);
+          return extras.length ? <div className="space-y-1 rounded-2xl border p-4">
+            <h4 className="text-sm font-semibold">Para armar tu oferta</h4>
+            <p className="text-xs leading-5 text-muted-foreground">Datos que necesitamos aunque ningún requisito los nombre. Cada respuesta queda en tu ficha.</p>
+            {extras.map(([key, item], i) => <FitQuestion key={key} id={`fit-extra-${i}`} question={item.question!} why={item.basis} kind={item.answerKind} busy={fitBusy} onAnswer={answer => onAnswer(item.question!, answer)} />)}
+          </div> : null;
+        })() : null}
       </section>}
 
       {report.tasks.length > 0 && <section aria-labelledby="report-plan" className="space-y-3">
@@ -207,14 +221,14 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
         </li>)}</ul>
       </section>}
 
-      {report.questions.length > 0 && <section aria-labelledby="report-questions" className="space-y-3">
+      {questions.length > 0 && <section aria-labelledby="report-questions" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          {heading('questions', signal ? 'Preguntas para la primera conversación' : 'Preguntas para el comprador', report.questions.length)}
+          {heading('questions', signal ? 'Preguntas para la primera conversación' : 'Preguntas para el comprador', questions.length)}
           {!signal && <Button variant="outline" size="sm" onClick={() => void copyEmail()}>
             {copied ? <Check className="mr-2 h-4 w-4" aria-hidden="true" /> : <Copy className="mr-2 h-4 w-4" aria-hidden="true" />}{copied ? 'Correo copiado' : 'Copiar como correo de consultas'}</Button>}
         </div>
         {!signal && dates.questions && <p className="text-sm text-muted-foreground">Envíalas antes del cierre de consultas: {dates.questions}.</p>}
-        <ol className="space-y-2 text-sm">{report.questions.map((q, i) => <li key={i} className="rounded-xl px-1">
+        <ol className="space-y-2 text-sm">{questions.map((q, i) => <li key={i} className="rounded-xl px-1">
           <MarkedItem markKey={reportItemKey('question', q)} label={q} checkable={false} {...markProps}>
             <p className="mark-title"><span className="mr-1.5 tabular-nums text-muted-foreground">{i + 1}.</span>{q}</p>
           </MarkedItem></li>)}</ol>

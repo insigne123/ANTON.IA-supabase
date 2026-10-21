@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { claudeRequest } from '@/ai/anthropic-json';
 import { reportSchema } from './expedient';
-import { opportunityReportPrompt, opportunitySynthesisSources, readOpportunityReportEnvelope, reportEnvelopeSchema } from './report-generation';
+import { BUYER_QUESTION_RULE, SIGNAL_QUESTION_RULE, opportunityReportPrompt, opportunitySynthesisSources, readOpportunityReportEnvelope, reportEnvelopeSchema } from './report-generation';
 
 const report = () => ({
   title: 'Oportunidad de prueba', executive: 'Empresa por acreditar; bases parciales.', recommendation: 'insufficient', reasons: ['Faltan bases'],
@@ -77,4 +77,14 @@ test('the report reads like a decision for a busy person and a LinkedIn signal g
   assert.doesNotMatch(signal, /garantías, pagos y multas;/);
   const schema = JSON.parse(tender.split('\n').find(line => line.startsWith('{') && line.includes('"properties"'))!);
   assert.equal(schema.properties.nextSteps.maxItems, 3);
+});
+
+test('the report asks for every question the person needs to ask, in a complete form: the buyer for a purchase, the first conversation for a signal', () => {
+  const tender = opportunityReportPrompt('2026-10-13', {}, 'tender');
+  assert.ok(tender.includes(BUYER_QUESTION_RULE));
+  for (const part of ['haz TODAS las que la empresa necesite', 'dónde está la duda (documento y punto o cláusula)', 'cada contradicción o inconsistencia', 'visitas a terreno obligatorias',
+    'neto o con IVA', 'criterios de evaluación y desempate', 'uniones temporales', 'No preguntes lo que las bases o las respuestas del foro ya contestan', 'nunca dejes sin preguntar una contradicción']) assert.ok(BUYER_QUESTION_RULE.toLowerCase().includes(part.toLowerCase()), part);
+  assert.ok(!tender.includes(SIGNAL_QUESTION_RULE));
+  const signal = opportunityReportPrompt('2026-10-13', {}, 'hiring');
+  assert.ok(signal.includes(SIGNAL_QUESTION_RULE) && !signal.includes(BUYER_QUESTION_RULE));
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { consultationEmail, friendlyJobError, humanDate, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps } from './report-view';
+import { buyerQuestions, consultationEmail, friendlyJobError, humanDate, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps } from './report-view';
 
 const milestones = [{ label: 'Recepción de consultas', date: '20 de octubre de 2026, 17:00', state: 'documented' as const, citations: [] },
   { label: 'Cierre de recepción de ofertas', date: '28 de octubre de 2026, 15:00', state: 'documented' as const, citations: [] }];
@@ -61,4 +61,24 @@ test('a failed report explains what happened and what to do, never the internal 
   assert.match(friendlyJobError('El expediente recibió documentos nuevos. Solicita un análisis actualizado.'), /cambió mientras se preparaba/);
   assert.equal(friendlyJobError('Faltan documentos legibles para investigar. Adjunta las bases o la invitación.'), 'Faltan documentos legibles para investigar. Adjunta las bases o la invitación.');
   assert.equal(friendlyJobError(null), 'Intenta de nuevo en un momento.');
+});
+
+test('everything to ask the buyer is one list: the report\'s questions and the contradictions of the bases, without repeating what says the same', () => {
+  const report = { questions: ['¿Se acepta una póliza de seguro en vez de la boleta de garantía?', '¿Cuál es la hora de cierre de recepción de ofertas?'],
+    submission: { inconsistencies: [
+      { question: '¿Cuál es la hora exacta de cierre de la recepción de ofertas: la del portal o la de las bases?' },
+      { question: '¿Es obligatorio marcar al menos un servicio adicional en el Anexo N°11?' },
+      { question: '¿Se acepta una póliza de seguro en vez de la boleta de garantía?' },
+    ] } };
+  assert.deepEqual(buyerQuestions(report), [
+    '¿Se acepta una póliza de seguro en vez de la boleta de garantía?',
+    '¿Cuál es la hora de cierre de recepción de ofertas?',
+    '¿Es obligatorio marcar al menos un servicio adicional en el Anexo N°11?',
+  ], 'the same question and the one with the same words in a longer sentence are asked once');
+  assert.deepEqual(buyerQuestions({ questions: ['¿A qué hora cierra?'], submission: null }), ['¿A qué hora cierra?']);
+  assert.deepEqual(buyerQuestions({ questions: [] }), []);
+  assert.deepEqual(buyerQuestions({ questions: ['  ', '¿Cuántas personas?'] }), ['¿Cuántas personas?']);
+  // The email of consultations carries them all, numbered.
+  const email = consultationEmail({ ...report, title: 'Aseo', milestones: [] }, { title: 'Aseo MHN', buyer: 'Museo' });
+  assert.match(email, /1\. ¿Se acepta una póliza[^\n]*\n2\. ¿Cuál es la hora de cierre de recepción de ofertas\?\n3\. ¿Es obligatorio marcar/);
 });
