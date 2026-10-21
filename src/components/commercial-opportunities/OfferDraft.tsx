@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { OFFER_PLACEHOLDER, offerPlaceholders, offerPrice, offerSheet, type OfferPrices, type SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
+import { annexOpenFields } from '@/lib/commercial-opportunities/offer-annexes';
 
 export type OfferJob = { id: string; state: string; error: string | null; created_at: string };
 const ACTIVE = ['queued', 'running', 'waiting'];
@@ -46,7 +47,7 @@ function Part({ id, title, count, open, action, children }: { id: string; title:
   </details>;
 }
 
-export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, downloadHref, budget }: {
+export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, downloadHref, annexHref, budget }: {
   offer: { available: boolean; latest: SavedOfferDraft | null } | null | undefined;
   /** The latest «offer» job of the opportunity, if any. */
   job: OfferJob | null;
@@ -54,6 +55,8 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
   preparing?: boolean;
   onSavePrices: (draftId: string, revision: number, prices: Record<string, string>) => Promise<{ revision: number; prices: OfferPrices } | null>;
   downloadHref: string;
+  /** The Word of one form of the bases (by its place in the draft). */
+  annexHref?: (index: number) => string;
   budget: { amount: number | null; includesTax: boolean | null };
 }) {
   const latest = offer?.latest ?? null;
@@ -74,7 +77,7 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
   if (!latest) return <section aria-labelledby="offer-title" className="space-y-4 rounded-3xl border bg-background p-5 shadow-sm sm:p-7">
     <div className="space-y-1">
       <h3 id="offer-title" className="flex items-center gap-2 text-lg font-semibold"><FilePen className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Tu oferta</h3>
-      <p className="text-sm leading-6 text-muted-foreground">La IA arma el borrador con lo que leyó de las bases: la carta de presentación, la oferta técnica según los criterios de evaluación, el cumplimiento de requisitos y las líneas a cotizar. Tú completas los datos marcados y los precios.</p>
+      <p className="text-sm leading-6 text-muted-foreground">La IA arma en un Word para llenar lo que leyó de las bases: la carta de presentación, la oferta técnica según los criterios de evaluación, el cumplimiento de requisitos, las líneas a cotizar y los formularios (anexos) con los datos de tu empresa que ya conocemos. Tú completas los campos amarillos y los precios.</p>
     </div>
     {active ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Preparando el borrador. Tarda unos minutos; puedes seguir trabajando y te avisaremos.</p>
       : <>
@@ -96,7 +99,7 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
         <p className="text-xs text-muted-foreground">Preparado el {when(latest.created_at)}. Revísalo y confirma cada dato con las bases antes de enviarlo.</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button asChild size="sm"><a href={downloadHref}><Download className="mr-2 h-4 w-4" aria-hidden="true" />Descargar Word</a></Button>
+        <Button asChild size="sm"><a href={downloadHref}><Download className="mr-2 h-4 w-4" aria-hidden="true" />Descargar Word para llenar</a></Button>
         <Button size="sm" variant="ghost" disabled={active || preparing} onClick={() => setAsking(value => !value)}>
           {active ? <Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />}{active ? 'Preparando otra versión…' : 'Preparar otra versión'}
         </Button>
@@ -104,6 +107,8 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
     </div>
     {asking && !active ? <div className="space-y-3 rounded-2xl border p-4">{ask}<div className="flex gap-2"><Button size="sm" onClick={prepare} disabled={preparing}>Preparar</Button><Button size="sm" variant="ghost" onClick={() => setAsking(false)}>Cancelar</Button></div><p className="text-xs text-muted-foreground">La versión actual y sus precios se conservan hasta que llegue la nueva.</p></div> : null}
     {failed ? <p role="alert" className="flex gap-2 rounded-2xl bg-destructive/5 p-4 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />La nueva versión no terminó: {failed.error || 'intenta de nuevo.'} Sigues viendo la anterior.</p> : null}
+
+    {!draft.annexes ? <p className="rounded-2xl bg-muted/50 p-4 text-sm leading-6 text-muted-foreground">Este borrador es anterior a los formularios de las bases (anexos). Con «Preparar otra versión» sale con ellos, listos para llenar en el Word.</p> : null}
 
     {draft.missing.length || placeholders.length ? <div className="rounded-2xl bg-cw-warning-soft p-4 text-sm leading-6">
       <p className="font-medium">Antes de enviar, completa {placeholders.length ? `${placeholders.length} dato${placeholders.length === 1 ? '' : 's'} marcado${placeholders.length === 1 ? '' : 's'}` : 'estos datos'}</p>
@@ -141,6 +146,22 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
     </Part> : null}
 
     {draft.economic.lines.length ? <EconomicSheet key={latest.id} saved={latest} budget={budget} onSave={onSavePrices} /> : null}
+
+    {draft.annexes?.length ? <Part id="annexes" title="Formularios de las bases" count={draft.annexes.length}>
+      <p className="text-sm leading-6 text-muted-foreground">Cada formulario va en el Word, listo para llenar y con los datos de tu empresa que ya conocemos. Descárgalos todos juntos arriba o uno por uno aquí.</p>
+      <ul className="divide-y">
+        {draft.annexes.map((annex, index) => {
+          const open = annexOpenFields(annex);
+          return <li key={`${index}:${annex.number}:${annex.title}`} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{[annex.number, annex.title].filter(Boolean).join(' · ')}</p>
+              <p className="text-xs leading-5 text-muted-foreground">{annex.faithful ? 'Copiado del formulario de las bases' : 'Armado con lo que piden las bases: compáralo con el oficial'}{open ? ` · ${open} por completar` : ''}</p>
+            </div>
+            {annexHref ? <Button asChild size="sm" variant="outline"><a href={annexHref(index)}><Download className="mr-2 h-4 w-4" aria-hidden="true" />Descargar Word</a></Button> : null}
+          </li>;
+        })}
+      </ul>
+    </Part> : null}
   </section>;
 }
 
