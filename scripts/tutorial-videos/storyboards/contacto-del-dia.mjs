@@ -8,7 +8,7 @@ const CRITERIA = { titles: ['Gerente de Personas', 'Jefe de Reclutamiento'], ind
 const SIGNATURE = 'Camila Torres\nYago QA';
 const person = (n, name, title, company, industry, size, city, about, hasPhone, subject, body) => ({
   leadId: `lf_demo_${n}`, name, title, company, domain: null, industry, size, city, hasEmail: true, hasPhone,
-  why: `${title} en ${industry.toLowerCase()} en ${city}: calza con tu cliente ideal.`,
+  why: `Calza con tu cliente ideal por su cargo y su rubro (${industry.toLowerCase()}), en ${city}.`,
   research: [about, `${industry} · ${size.toLocaleString('es-CL')} personas · ${city}`],
   draft: { subject, body: `${body}\n\n${SIGNATURE}` },
 });
@@ -44,9 +44,15 @@ export default {
       waitFor: { text: 'Así lo buscamos' },
     },
     {
-      title: 'Así lo buscamos', text: 'Con tu cliente ideal de «Perfil»: cargo, rubro y lugar. Solo correos verificados y nadie que tu equipo ya tenga.',
-      say: 'Así lo buscamos: con tu cliente ideal.', postit: 'Sin cliente ideal en «Perfil», usamos el de tu equipo.',
-      target: { text: 'Así lo buscamos' }, zoomOn: { css: 'section[aria-labelledby="drop-filters"]' }, action: 'none', zoom: 1.25,
+      title: 'Así lo buscamos', text: 'Bajo el contacto hay una fila: ábrela para ver cómo lo buscamos.',
+      say: 'Así lo buscamos. Ábrelo para ver los filtros.',
+      target: { role: 'button', name: 'Así lo buscamos', exact: false }, zoom: 1.4, arrow: true,
+      waitFor: { text: 'Revisamos que tengan correo verificado', exact: false },
+    },
+    {
+      title: 'Tu cliente ideal, como filtros', text: 'Cargo, rubro y lugar de tu cliente ideal en «Perfil». Solo correos verificados y nadie que tu equipo ya tenga.',
+      say: 'Son los filtros de tu cliente ideal.', postit: 'Sin cliente ideal en «Perfil», usamos el de tu equipo.',
+      target: { text: 'Revisamos que tengan correo verificado', exact: false }, zoomOn: { css: 'section[aria-labelledby="drop-filters"]' }, action: 'none', zoom: 1.25,
     },
     {
       title: 'Por qué te sirve', text: 'Quién es, dónde trabaja y por qué calza contigo; si trae teléfono, también lo dice.',
