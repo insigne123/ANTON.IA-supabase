@@ -58,11 +58,9 @@ Una página, «Informe semanal», en «Centro de mando», con «Esta semana» (d
   - si el correo falla, no se reemplaza: el error queda en `weekly_reports.email_error`;
   - una dirección de prueba (example.com, `.test`, `.local`…) nunca recibe un correo automático;
   - no usa el cupo de envíos.
-- **Activar Resend** (lo hace quien administra Yago; la clave nunca pasa por el chat ni por el repositorio):
-  1. En resend.com, agregar el dominio `yago.cl` y poner en su DNS los registros que pide (SPF y DKIM, en el subdominio `send`).
-  2. Crear una clave de envío y guardarla como secreto de App Hosting: `firebase apphosting:secrets:set RESEND_API_KEY --project leadflowai-3yjcy`, y dar acceso al backend `studio` cuando lo pregunte.
-  3. Agregar en `apphosting.yaml` la variable `RESEND_API_KEY` con `secret: RESEND_API_KEY` y publicar. Desde ese momento, informe, avisos y contacto del día salen por Resend.
-  - El plan gratuito de Resend permite 100 correos al día y 3.000 al mes; hoy alcanza para los 35 usuarios de clientes.
+- **Resend, activo desde el 21 de octubre:** el dominio `yago.cl` está verificado en Resend (plan pagado, región sa-east-1), y la clave vive en el secreto de App Hosting `RESEND_API_KEY`, referenciado en `apphosting.yaml`. La clave nunca pasa por el chat ni por el repositorio.
+  - Para cambiarla: `firebase apphosting:secrets:set RESEND_API_KEY --project leadflowai-3yjcy` (o una versión nueva en Secret Manager) y publicar.
+  - Para apagar los correos sin tocar la clave: `WEEKLY_REPORTS_EMAIL=off`.
 - **Contenido:** a diferencia de la prospección, no lleva enlace de baja, seguimiento ni la cabecera de baja con un clic, que agregaría la propia dirección a la lista de no contactar. Se apaga en la misma página.
 - **«Enviármelo ahora»:** manda el informe que está en pantalla.
 - **Gestores:** un administrador elige a los gestores de oportunidades en «Gestores de oportunidades».
