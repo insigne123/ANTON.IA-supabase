@@ -294,6 +294,14 @@ env:
   - variable: APIFY_TOKEN
     secret: APIFY_TOKEN
     availability: [RUNTIME]
+  # Correo cuando al plan de Apify le quedan US$0,10 o menos, y otro cuando se acaba: una vez por ciclo cada uno.
+  # Lo revisa cada hora apolloUsageTick (src/lib/server/apify-credit.ts); sale por Resend.
+  - variable: APIFY_LOW_CREDIT_USD
+    value: "0.1"
+    availability: [RUNTIME]
+  - variable: APIFY_ALERT_EMAILS
+    value: "nicolas.yarur.g@yago.cl"
+    availability: [RUNTIME]
   - variable: JSEARCH_API_KEY
     secret: JSEARCH_API_KEY
     availability: [RUNTIME]
