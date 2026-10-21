@@ -16,11 +16,14 @@ import { MERCADO_PUBLICO_BASE } from './mercado-publico';
 import {gatherOpportunityBuyerContext} from './workspace-public-research';
 import {readPublicMercadoDocuments} from './mercado-publico-documents';
 import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report-view';
-import { opportunityChatDeadline, opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
+import { opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
+import { opportunityChatPrompt } from '@/lib/commercial-opportunities/chat-prompt';
 import { nextReportProgress, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
 import { validateSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
-import { TENDER_PROFILE_RULE } from '@/lib/commercial-opportunities/tender-profile';
 import { loadCompanyForModel } from './tender-profile-read';
+import { opportunityAgentEnabled, runOpportunityChatAgent } from './workspace-agent';
+import { opportunityVerifyEnabled, verifiedWarning, verifyReportClaims } from './workspace-verify';
+import type { ModelClient } from '@/lib/agent-harness/index';
 
 /** What the page's «oficina» shows (report-progress.ts): a note in the job's payload. The report matters more than its progress, so a
  * note that cannot be written never stops the job. */
@@ -187,6 +190,14 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   raw.milestones = raw.milestones.map(m => { const citations = check(m.citations); return { ...m, citations, state: m.state === 'documented' && !citations.length ? 'unknown' : m.state }; });
   raw.risks = raw.risks.map(r => { const citations = check(r.citations); return { ...r, citations, basis: r.basis === 'documented' && !citations.length ? 'unknown' : r.basis }; });
   raw.scenarios = raw.scenarios.filter(s => { try { opportunityFinancialScenario(s); return true; } catch { return false; } });
+  // A second reading of what the report affirms as documented (OPPORTUNITIES_REPORT_VERIFY=on): a quote that does not support its claim leaves the claim «por confirmar».
+  // It needs about ten seconds and must end inside the route's five minutes, so it only runs when there is time.
+  const timeLeft = 285_000 - (Date.now() - started);
+  if (opportunityVerifyEnabled() && timeLeft >= 25_000) {
+    const verified = await verifyReportClaims(client, job, raw, chunks, { timeoutMs: Math.min(60_000, timeLeft - 15_000) });
+    Object.assign(raw, verified.report);
+    if (verified.downgraded) warnings.push(verifiedWarning(verified.downgraded));
+  }
   // Asking for the bases only makes sense while one can still bid.
   const open = !item.deadline_at || Date.parse(item.deadline_at) > Date.now();
   const basesMissing = open && ['tender', 'compra_agil'].includes(item.kind) && !documents.some(d => d.source_kind === 'upload');
@@ -207,7 +218,7 @@ async function replaceCapturedPage(client: SupabaseClient, scope: WorkScope, id:
   const paths = old.flatMap(doc => doc.storage_path ? [doc.storage_path] : []);
   if (paths.length) await client.storage.from(OPPORTUNITY_BUCKET).remove(paths).catch(() => undefined);
 }
-export async function runOpportunityChat(client: SupabaseClient, job: OpportunityJob) {
+export async function runOpportunityChat(client: SupabaseClient, job: OpportunityJob, agentModel?: ModelClient) {
   const scope = { organizationId: job.organization_id, userId: job.requested_by };
   await assertOpportunityRead(client, scope, job.opportunity_id!);
   const message = opportunityDb(await client.from('opportunity_chat_messages').select('*').eq('organization_id', job.organization_id).eq('user_id', job.requested_by).eq('opportunity_id', job.opportunity_id).eq('request_id', job.payload.requestId).single());
@@ -223,21 +234,12 @@ export async function runOpportunityChat(client: SupabaseClient, job: Opportunit
     .eq('user_id', job.requested_by).eq('opportunity_id', job.opportunity_id).lt('created_at', message.created_at).not('answer', 'is', null)
     .order('created_at', { ascending: false }).limit(6)) || []) as Array<{ question: string; answer: { answer?: string } | null }>;
   const conversation = earlier.reverse().map(turn => ({ pregunta: turn.question.slice(0, 600), respuesta: String(turn.answer?.answer || '').slice(0, 900) }));
-  const answer = await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: answerSchema, output: 3000,
-    prompt: `Eres el asistente de ANTON.IA dentro del expediente de esta oportunidad y conversas con quien la trabaja. Responde en español de Chile, cálido y directo, en no más de 150 palabras salvo que pidan un texto. Usa markdown simple: párrafos cortos, listas con guiones al enumerar y **negrita** para lo clave; sin títulos.
-Si es un saludo, un agradecimiento o una pregunta general que no depende del expediente, responde breve y natural, sin citas, ofrece dos o tres cosas concretas que puedes hacer con este expediente y usa mode «conversation». Si respondes algo del expediente, usa mode «expedient».
-Cita el fragmento exacto mediante chunkId y quote. Si la evidencia no alcanza, dilo en una frase y sugiere qué consultar. No presentes una propuesta como obligación. Se recuperó una parte del expediente, no todos los documentos.
-Si la pregunta sigue la conversación previa («¿y el plazo?», «resúmelo»), respóndela en ese contexto.
-Escribe fechas y horas en hora de Chile; nunca menciones UTC. Lo que el informe ya estableció (requisitos con su estado, fechas) puedes usarlo diciendo que viene del informe: no digas que no existe solo porque no está en los fragmentos; si un fragmento lo contradice, dilo.
-Si piden redactar algo (un mensaje, un correo, una consulta), entrégalo listo para copiar, con datos del expediente y de la oferta, sin inventar nombres, cifras ni capacidades; si falta un dato, deja un espacio como [nombre].
-missing: a lo más 3 datos que cambiarían esta respuesta, en frases cortas; vacío si no hay.
-Oportunidad: ${JSON.stringify({ tipo: item?.kind, titulo: item?.title, cliente: item?.buyer_name || item?.company_name, cierre: opportunityChatDeadline(item?.deadline_at), porQueAparecio: item?.reasons })}
-Oferta de tu empresa: ${String(context?.offer || '').slice(0, 1500)}
-${ficha ? `Si preguntan si cumplen un requisito o si conviene postular, usa la ficha para licitaciones de la empresa. ${TENDER_PROFILE_RULE}\nFicha para licitaciones y documentos de la empresa: ${JSON.stringify(ficha)}\n` : ''}Informe: ${JSON.stringify(summary)}
-Conversación previa: ${JSON.stringify(conversation)}
-Pregunta: ${message.question}
-Fragmentos: ${JSON.stringify(chunks)}` });
-  answer.citations = answer.citations.filter(c => validOpportunityCitation(c, chunks));
+  const facts = { item, offer: String(context?.offer || ''), ficha, summary, conversation, question: message.question, chunks };
+  // The agent reads further than the first fragments: its citations are checked against everything it read.
+  const { answer, known } = opportunityAgentEnabled('chat')
+    ? await runOpportunityChatAgent(client, job, { scope, opportunityId: job.opportunity_id!, facts, chunks, base: agentModel })
+    : { answer: await opportunityGenerate(client, job, { step: 'answer', category: 'chat', role: 'chat', schema: answerSchema, output: 3000, prompt: opportunityChatPrompt(facts) }), known: chunks };
+  answer.citations = answer.citations.filter(c => validOpportunityCitation(c, known));
   if (!answer.citations.length && answer.mode !== 'conversation') answer.missing = ['No encontré una cita textual en los documentos para esto: confírmalo en las bases.', ...answer.missing];
   return answer;
 }
