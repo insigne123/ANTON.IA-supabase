@@ -294,8 +294,24 @@ function renderCoworkPdf(pdf: JsPdf, title: string, blocks: MdBlock[]) {
   }
 }
 
-/** A PDF of `title` and the blocks under it, as bytes. */
+/** The date a document carries, in the way people write it in Chile. */
+const longDate = () => new Intl.DateTimeFormat('es-CL', { dateStyle: 'long', timeZone: 'America/Santiago' }).format(new Date());
+
+/**
+ * A PDF of `title` and the blocks under it, as bytes. It goes through the document engine (lib/documents): a type scale and rhythm, headings that
+ * keep company, tables with a repeated header, callouts, a header and a numbered footer, inspected before it is written. COWORK_DOCUMENTS_ENGINE=legacy
+ * keeps the renderer below, which is also what runs if the engine fails on a document.
+ */
 export async function coworkPdfBytes(title: string, blocks: MdBlock[]) {
+  if (process.env.COWORK_DOCUMENTS_ENGINE !== 'legacy') {
+    try {
+      const [{ produceDocument }, { specFromMarkdown }] = await Promise.all([import('@/lib/documents/pipeline'), import('@/lib/documents/spec')]);
+      const produced = await produceDocument(specFromMarkdown(title, blocks, { theme: 'cowork', brand: 'ANTON.IA Cowork' }), { formats: ['pdf'], date: longDate() });
+      if (produced.pdf) return produced.pdf;
+    } catch (error) {
+      console.warn('[cowork] document engine failed, using the previous renderer:', error instanceof Error ? error.message : error);
+    }
+  }
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   pdf.setProperties({ title, creator: 'ANTON.IA Cowork' });
