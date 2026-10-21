@@ -93,6 +93,14 @@ ${input.demand.length ? `Demanda futura (Plan Anual de Compras de los organismos
 Pregunta: ${input.question}`;
 }
 
+/** What the agent adds to the rules of the single call: the list in the prompt is a part of what the person can see, and it can look further. */
+export const ASSISTANT_AGENT_RULES = `Trabajas con herramientas, como un analista que revisa antes de responder.
+- La lista de «Oportunidades» del mensaje es una parte de lo que la persona puede ver. Si la pregunta es sobre un tema, un comprador, un rubro o una región que la lista no cubre, usa buscar_oportunidades antes de decir que no hay.
+- Para saber qué estableció el informe de una oportunidad (decisión, requisitos, fechas, preguntas) usa ver_informe. Los documentos en detalle los lee el chat de esa oportunidad: derívala con handoff.
+- Para la demanda futura y los contratos por vencer (solo administradores) usa buscar_demanda y buscar_contratos con unas palabras del rubro o del organismo.
+- En opportunities y handoff solo pon ids que viste en la lista o en tus búsquedas.
+- Las herramientas de lectura puedes pedirlas varias a la vez. Cuando tengas lo necesario, llama a entregar con la respuesta; no la escribas como texto.`;
+
 /** Keeps only the opportunities of the list given, once each, and resolves them into cards. */
 export function resolveAssistantAnswer(answer: AssistantAnswer, items: Map<string, { title: string; buyer: string | null; kind: string; deadline: string | null }>): SavedAssistantAnswer {
   const seen = new Set<string>();

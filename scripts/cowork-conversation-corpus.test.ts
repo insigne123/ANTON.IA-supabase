@@ -5,6 +5,8 @@ import { CORPUS, LEAD, corpusRead, type CorpusTurnResult } from './fixtures/cowo
 import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { corpusArtifactData, corpusSearchText, corpusShownAnswer, corpusStageImport, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 import { runCoworkWriter } from '../src/lib/cowork/writer';
+import { call, reply, ScriptedModel } from '../src/lib/agent-harness/scripted';
+import { coworkReadCapabilities } from '../src/lib/server/cowork/read-capabilities';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
   coworkDecisionSchema.parse({ action, query, leadId: null, answer: null, ...extra });
@@ -462,4 +464,22 @@ test('the corpus dashboards read the whole account, as production does: 256 cont
   assert.equal(data.tables.campaigns.rows.length, 19);
   assert.equal(data.tables.campaigns.rows[0].name, 'Campaña de prueba');
   assert.equal(data.tables.pipeline.rows.length, 256);
+});
+
+test('the harness runtime plays a corpus case through the same fixtures and the same checks as the coordinator loop', async () => {
+  const entry = CORPUS.find(item => item.id === 'ultimos-guardados')!;
+  // The answer the loop's ideal turn gives for this case, now written by a model that works with tools: it reads, then answers.
+  const ideal = await IDEAL['ultimos-guardados']({ observations: [{ action: 'leads.search' }] } as never, { caseId: entry.id, turn: 1 });
+  const model = new ScriptedModel([
+    reply([call('leads_search', { consulta: '' })]),
+    reply([call('responder', { reply: ideal.answer!.reply, document: null, suggestions: ideal.answer!.suggestions })]),
+  ]);
+  const capabilities = coworkReadCapabilities(null as never, { userId: 'corpus', organizationId: 'corpus' }).filter(capability => capability.effect === 'read');
+  const outcome = await runCorpusCase(entry, async () => { throw new Error('The coordinator loop must not run in harness mode'); }, undefined, undefined, undefined, undefined, undefined,
+    turn => ({ model, system: turn.system, context: turn.context, capabilities, maxRounds: 5, maxReads: 6, deadlineMs: 60_000 }));
+  assert.deepEqual(outcome.checks.filter(check => !check.passed).map(check => check.label), []);
+  assert.equal(outcome.passed, true);
+  assert.deepEqual(outcome.result.actions, ['leads.search'], 'the read went through the corpus fixtures');
+  assert.match(model.requests[0].system, /ANTON\.IA|Cowork/i, 'the case\'s own rules travel as the system prompt');
+  assert.match(String(model.requests[0].messages[0].content), new RegExp(entry.request.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'and the request is in the turn\'s context');
 });

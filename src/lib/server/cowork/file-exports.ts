@@ -294,13 +294,46 @@ function renderCoworkPdf(pdf: JsPdf, title: string, blocks: MdBlock[]) {
   }
 }
 
-/** A PDF of `title` and the blocks under it, as bytes. */
+/** The date a document carries, in the way people write it in Chile. */
+const longDate = () => new Intl.DateTimeFormat('es-CL', { dateStyle: 'long', timeZone: 'America/Santiago' }).format(new Date());
+
+/**
+ * A PDF of `title` and the blocks under it, as bytes. It goes through the document engine (lib/documents): a type scale and rhythm, headings that
+ * keep company, tables with a repeated header, callouts, a header and a numbered footer, inspected before it is written. COWORK_DOCUMENTS_ENGINE=legacy
+ * keeps the renderer below, which is also what runs if the engine fails on a document.
+ */
 export async function coworkPdfBytes(title: string, blocks: MdBlock[]) {
+  if (process.env.COWORK_DOCUMENTS_ENGINE !== 'legacy') {
+    try {
+      const [{ produceDocument }, { specFromMarkdown }] = await Promise.all([import('@/lib/documents/pipeline'), import('@/lib/documents/spec')]);
+      const produced = await produceDocument(specFromMarkdown(title, blocks, { theme: 'cowork', brand: 'ANTON.IA Cowork' }), { formats: ['pdf'], date: longDate() });
+      if (produced.pdf) return produced.pdf;
+    } catch (error) {
+      console.warn('[cowork] document engine failed, using the previous renderer:', error instanceof Error ? error.message : error);
+    }
+  }
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   pdf.setProperties({ title, creator: 'ANTON.IA Cowork' });
   renderCoworkPdf(pdf, title, blocks);
   return new Uint8Array(pdf.output('arraybuffer'));
+}
+
+/**
+ * The Word of the same document: the engine's own (lib/documents/render-docx.ts), laid out like the PDF (cover, running header, numbered footer, tables that keep
+ * their header), or, with COWORK_DOCUMENTS_ENGINE=legacy or if the engine fails on a document, the renderer that has always written it (docx-render.ts).
+ */
+export async function coworkDocxBytes(title: string, blocks: MdBlock[]) {
+  if (process.env.COWORK_DOCUMENTS_ENGINE !== 'legacy') {
+    try {
+      const [{ renderDocx }, { specFromMarkdown }] = await Promise.all([import('@/lib/documents/render-docx'), import('@/lib/documents/spec')]);
+      return await renderDocx(specFromMarkdown(title, blocks, { theme: 'cowork', brand: 'ANTON.IA Cowork' }), { date: longDate() });
+    } catch (error) {
+      console.warn('[cowork] document engine failed on the Word, using the previous renderer:', error instanceof Error ? error.message : error);
+    }
+  }
+  const { renderCoworkDocx } = await import('./docx-render');
+  return renderCoworkDocx(title, blocks);
 }
 
 export async function buildCoworkFile(events: CoworkEvent[], format: CoworkExportFormat) {
@@ -328,9 +361,8 @@ export async function buildCoworkFile(events: CoworkEvent[], format: CoworkExpor
   const document = getDocument(events);
   if (format === 'md') return { bytes: new TextEncoder().encode(document.content), mime: COWORK_MIME.md, filename: coworkExportFilename(document.title, 'md') };
   if (format === 'docx') {
-    const { renderCoworkDocx } = await import('./docx-render');
-    return { bytes: await renderCoworkDocx(document.title, parseMarkdown(document.content.replace(/\r\n?/g, '\n'))), mime: COWORK_MIME.docx,
-      filename: coworkExportFilename(document.title, 'docx') };
+    const blocks = parseMarkdown(document.content.replace(/\r\n?/g, '\n'));
+    return { bytes: await coworkDocxBytes(document.title, blocks), mime: COWORK_MIME.docx, filename: coworkExportFilename(document.title, 'docx') };
   }
   const title = normalizeCoworkPdfText(document.title);
   const content = normalizeCoworkPdfText(document.content).replace(/\r\n?/g, '\n');

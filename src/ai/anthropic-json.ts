@@ -227,7 +227,7 @@ function claudeClient(): ClaudeClient {
 }
 
 /** The SDK's errors as the OpenAI path writes them, so the same checks retry a 429 and stop at empty credits. */
-function providerError(error: unknown): Error {
+export function providerError(error: unknown): Error {
   if (error instanceof Anthropic.APIError) {
     const detail = String(error.message || '').slice(0, 400);
     const credits = /credit balance is too low/i.test(detail) ? ' credit_balance_exhausted' : '';

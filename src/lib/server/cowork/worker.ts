@@ -22,6 +22,9 @@ import { loadCoworkThreadStats } from './thread-stats';
 import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { coworkOperationHash, createCoworkOperationGateway } from './operations';
 import { coworkReadCapabilities } from './read-capabilities';
+import { anthropicModel } from '@/lib/agent-harness/anthropic';
+import { coworkHarnessSettings } from '@/lib/cowork/harness-config';
+import { coworkHarnessTelemetry, runCoworkHarnessTurn } from '@/lib/cowork/harness-turn';
 import { processCoworkEffectQueue, resolveCoworkEffect, admitCoworkContinuation } from './effects';
 import { coworkTaskGraph, coworkTaskReadyEffect, coworkTaskReadyNode } from '@/lib/cowork/task-graph';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
@@ -193,7 +196,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // Reads run through the durable ledger: an identical query replays its
     // stored result instead of hitting the database again after a retry.
     const runLease = process.env.COWORK_OPERATION_LEASES_ENABLED === 'true' ? run.lease_token : undefined;
-    const readGateway = createCoworkOperationGateway(client, coworkReadCapabilities(client, scope), { authorize, runLease });
+    const readCapabilities = coworkReadCapabilities(client, scope);
+    const readGateway = createCoworkOperationGateway(client, readCapabilities, { authorize, runLease });
     const operationScope = { userId: scope.userId, organizationId: scope.organizationId, runId: run.id };
     // How much this turn may spend; the coordinator decides within it.
     const turnCeiling = coworkTurnCeiling();
@@ -295,7 +299,29 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       }));
     // The rescue (Plan 14, 2): one last decision by COWORK_RESCUE_MODEL when the turn would fail, only with time and budget left.
     const rescueModel = coworkRescueModel();
-    const result = await runCoworkReadLoop({
+    // COWORK_RUNTIME=harness: the coordinator is a Claude that works with tools (harness-turn.ts) instead of writing one decision per call.
+    // Off by default; the loop below runs everything it does not take (a task resumed from its specialists, a question about a proposal).
+    const harnessSettings = coworkHarnessSettings();
+    const result = await (harnessSettings ? runCoworkHarnessTurn : runCoworkReadLoop)({
+      harness: harnessSettings ? {
+        model: anthropicModel({ model: harnessSettings.model }),
+        system: decisionSystemPrompt,
+        context: decisionPrompt([], false, []),
+        capabilities: readCapabilities.filter(capability => capability.effect === 'read'),
+        // COWORK_DOCUMENT_VISION=true: a Claude also looks at the pages of a document the agent reviews (needs pdftoppm or sharp in the server).
+        documentReviewer: process.env.COWORK_DOCUMENT_VISION === 'true' ? anthropicModel({ model: process.env.COWORK_DOCUMENT_REVIEW_MODEL?.trim() || 'claude-haiku-5-5' }) : undefined,
+        effort: harnessSettings.effort, maxRounds: harnessSettings.maxRounds, maxReads: harnessSettings.maxReads, deadlineMs: turnCeiling.softDeadlineMs,
+        reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator'),
+        // The answer shows while the model writes it (the same live draft as the coordinator's decision): a correction is announced, not rewritten live.
+        onAnswerPartial: liveDraft ? (prefix, correcting) => { if (liveDraft.held || !correcting) liveDraft.push(prefix); } : undefined,
+        onAnswerReview: liveDraft ? () => { if (liveDraft.held) liveDraft.adjust(); else liveDraft.review(); } : undefined,
+        flushAnswer: liveDraft ? () => liveDraft.flush() : undefined,
+        recordUsage: async (reservationId, response, durationMs) => {
+          const call = coworkHarnessTelemetry(response, durationMs);
+          await recordCoworkModelUsage(client, reservationId, run.lease_token, call);
+          telemetry.push({ model: call.modelName, durationMs });
+        },
+      } : undefined,
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
       metricPeriods: !clarificationOnly,
       clarification: clarificationOnly,

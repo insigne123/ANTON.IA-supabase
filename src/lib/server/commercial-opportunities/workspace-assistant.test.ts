@@ -2,14 +2,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
+import { call, reply, ScriptedModel, usageOf } from '@/lib/agent-harness/scripted';
 
 // The «Asistente» of Oportunidades with the database and the model in memory: threads, what the model reads, the answer saved.
-async function load() {
+async function load(options: { agent?: boolean } = {}) {
   const stubs: Record<string, string> = {
     '@/lib/server/auth-utils': 'export class AuthError extends Error {constructor(message,status){super(message);this.status=status}}',
-    './workspace-access': 'export async function assertOpportunityRead(){} export function assertOpportunityAdmin(){} export async function readableOpportunityIds(client, scope){ return globalThis.__readable ?? null }',
-    './workspace-ai': 'export async function opportunityGenerate(client, job, options){ globalThis.__call = options; return globalThis.__reply(options) }',
+    './workspace-access': 'export async function assertOpportunityRead(client, scope, id){ if (globalThis.__unreadable?.includes(id)) throw new Error("no access") } export function assertOpportunityAdmin(){} export async function readableOpportunityIds(client, scope){ return globalThis.__readable ?? null }',
+    './workspace-ai': 'export async function opportunityGenerate(client, job, options){ globalThis.__call = options; return globalThis.__reply(options) }'
+      + (options.agent ? ' export const PRICING_VERSION = "t"; export function prices(){ return { input: .1, output: .5, cache: .01, write: .2 } }'
+        + ' export async function reserveOpportunityStep(client, job, input){ (globalThis.__steps ||= []).push(input); return { fresh: true, id: "res-" + globalThis.__steps.length } }'
+        + ' export async function settleOpportunityStep(client, id, cost){ (globalThis.__settled ||= []).push([id, cost]) }' : ''),
+    './workspace-agent': 'export function opportunityAgentEnabled(){ return false } export async function runOpportunityAgent(){ throw new Error("no agent here") } export async function runOpportunityChatAgent(){ throw new Error("no agent here") }',
   };
+  if (options.agent) delete stubs['./workspace-agent'];
   const bundle = await build({
     stdin: { contents: `export * from './src/lib/server/commercial-opportunities/workspace-assistant';`, loader: 'ts', resolveDir: process.cwd() },
     bundle: true, write: false, format: 'cjs', platform: 'node', packages: 'external',
@@ -201,4 +207,86 @@ test('a conversation shows why a question has no answer yet, and deleting it rem
   await assert.rejects(deleteAssistantThread(client, { ...member, userId: 'u2' }, threadId), (error: any) => error.status === 404);
   await deleteAssistantThread(client, member, threadId);
   assert.equal(tables.opportunity_assistant_threads.length, 0);
+});
+
+// ─── The assistant as an agent (OPPORTUNITIES_RUNTIME=harness) ────────────────────────────────────────────────────────────
+
+const says = (content: any) => ({ ...reply(content, undefined, usageOf(2000, 400)), model: 'claude-haiku-5-5' });
+async function withAgentEnv<T>(work: () => Promise<T>) {
+  const before = { runtime: process.env.OPPORTUNITIES_RUNTIME, key: process.env.ANTHROPIC_API_KEY, chat: process.env.OPPORTUNITIES_CHAT_MODEL };
+  Object.assign(process.env, { OPPORTUNITIES_RUNTIME: 'harness', ANTHROPIC_API_KEY: 'synthetic-not-a-credential' }); delete process.env.OPPORTUNITIES_CHAT_MODEL;
+  (globalThis as any).__steps = []; (globalThis as any).__settled = [];
+  try { return await work(); } finally {
+    for (const [name, value] of Object.entries({ OPPORTUNITIES_RUNTIME: before.runtime, ANTHROPIC_API_KEY: before.key, OPPORTUNITIES_CHAT_MODEL: before.chat })) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+  }
+}
+
+test('with the agent on, the assistant searches past its first list, shows only opportunities it saw, and pays each round as a step', async () => {
+  await withAgentEnv(async () => {
+    const { askOpportunityAssistant, runOpportunityAssistant } = await load({ agent: true });
+    const list = (args: any) => (args.p_query === 'drones' ? [opportunity('o7', 'Servicio de drones Corfo', { deadline_at: '2026-11-03T15:00:00Z' })] : [opportunity('o1', 'Aseo Hospital de Castro')]);
+    const { tables, client } = memory({ organization_members: [{ organization_id: 'org', user_id: 'u1', role: 'member' }],
+      opportunity_company_context: [{ organization_id: 'org', offer: 'Seguridad y aseo', services: [] }] }, { list });
+    const { threadId } = await askOpportunityAssistant(client, member, { question: '¿Hay algo de drones?', requestId: 'r1' });
+    const model = new ScriptedModel([
+      says([call('buscar_oportunidades', { consulta: 'drones' }, 'u1')]),
+      says([call('entregar', { answer: 'Hay una.', opportunities: [{ id: 'zz-inventada', note: 'No existe' }], handoff: null, followups: [] }, 'u2')]),
+      says([call('entregar', { answer: 'Hay una de **drones**, cierra el 3 de noviembre.', opportunities: [{ id: 'o7', note: 'Cierra el 3 de noviembre' }],
+        handoff: { id: 'o7', question: '¿Qué piden las bases?' }, followups: ['¿Qué garantía piden?'] }, 'u3')]),
+    ]);
+    const job = { id: 'job-1', organization_id: 'org', requested_by: 'u1', opportunity_id: null, kind: 'assistant', payload: { requestId: 'r1', threadId }, lease_token: 'l', state: 'running' };
+    const saved = await runOpportunityAssistant(client, job, model);
+    assert.deepEqual(saved.cards.map((card: any) => [card.id, card.title]), [['o7', 'Servicio de drones Corfo']], 'found with a tool, not in the first list');
+    assert.equal(saved.handoff.id, 'o7');
+    assert.match(JSON.stringify(model.requests[2].messages), /Estos ids no están en la lista ni en tus búsquedas: zz-inventada/, 'an invented id went back to the model');
+    assert.match(JSON.stringify(model.requests[1].messages), /Servicio de drones Corfo/, 'the search result reached the model');
+    assert.deepEqual(model.requests[0].tools.map((tool: any) => tool.name), ['buscar_oportunidades', 'ver_informe', 'entregar'], 'a member has no plan or contracts');
+    assert.match(model.requests[0].system, /analista que revisa antes de responder/);
+    assert.match(String(model.requests[0].messages[0].content), /Eres el asistente de Oportunidades de ANTON\.IA[\s\S]*Pregunta: ¿Hay algo de drones\?/, 'the same prompt as the single call');
+    assert.deepEqual((globalThis as any).__steps.map((step: any) => [step.step, step.category]), [['answer:r1', 'chat'], ['answer:r2', 'chat'], ['answer:r3', 'chat']]);
+    assert.deepEqual((globalThis as any).__settled.map(([, cost]: [string, number]) => cost), [400, 400, 400]);
+    assert.deepEqual(tables.opportunity_assistant_messages[0].answer, saved);
+  });
+});
+
+test('an admin\'s agent also searches the plan and the contracts; the report is read only for what the person can open', async () => {
+  await withAgentEnv(async () => {
+    const { opportunityAssistantTools } = await load({ agent: true });
+    const month = Number(new Intl.DateTimeFormat('en-US', { month: 'numeric', timeZone: 'America/Santiago' }).format(new Date()));
+    const { client } = memory({
+      opportunity_purchase_plan: [
+        { organization_id: 'org', year: 2026, institution: 'Municipalidad de Castro', description: 'Cámaras de televigilancia', amount: 100, month },
+        { organization_id: 'org', year: 2026, institution: 'Hospital Grande', description: 'Aseo industrial', amount: 900, month },
+      ],
+      opportunity_jobs: [{ organization_id: 'org', kind: 'contracts', state: 'ready', created_at: '2026-10-18T10:00:00Z',
+        result: { contracts: [{ agency: 'Hospital de Puerto Montt', name: 'Servicio de aseo', endsOn: '2026-12-01', winnerName: 'Aseos del Sur', amount: 5_000_000, currency: 'CLP' },
+          { agency: 'Municipalidad de Castro', name: 'Mantención de cámaras', endsOn: '2027-01-15', winnerName: null, amount: null, currency: 'CLP' }] } }],
+      commercial_opportunities: [{ id: 'o1-uuid-0001', organization_id: 'org', kind: 'tender', title: 'Aseo Hospital', buyer_name: 'Hospital', company_name: null, deadline_at: null },
+        { id: 'o2-uuid-0002', organization_id: 'org', kind: 'tender', title: 'Reasignada', buyer_name: null, company_name: null, deadline_at: null }],
+      opportunity_reports: [{ organization_id: 'org', opportunity_id: 'o1-uuid-0001', created_at: '2026-10-17T10:00:00Z',
+        report: { recommendation: 'conditional', executive: 'Conviene si hay garantía.', nextSteps: ['Pedir las bases'], questions: [], requirements: [{ title: 'Boleta de garantía', status: 'pending' }], milestones: [] } }],
+    });
+    const run = async (tools: any[], name: string, input: unknown) => { const tool = tools.find(item => item.name === name); return tool.run(tool.schema.parse(input), {}); };
+    const known = new Map();
+    const admin = opportunityAssistantTools(client, { organizationId: 'org', userId: 'a1', role: 'admin' }, known);
+    assert.deepEqual(admin.map((tool: any) => tool.name), ['buscar_oportunidades', 'ver_informe', 'buscar_demanda', 'buscar_contratos']);
+    const plan = await run(admin, 'buscar_demanda', { consulta: 'camaras' });
+    assert.deepEqual(plan.output.compras.map((line: any) => line.organismo), ['Municipalidad de Castro'], 'accents and case do not hide a match');
+    const contracts = await run(admin, 'buscar_contratos', { consulta: 'castro' });
+    assert.deepEqual(contracts.output.contratos.map((line: any) => line.organismo), ['Municipalidad de Castro']);
+    assert.match((await run(admin, 'buscar_contratos', { consulta: 'minería' })).text, /Sin contratos por vencer/);
+    const report = await run(admin, 'ver_informe', { id: 'o1-uuid-0001' });
+    assert.equal(report.output.informe.decision, 'conditional');
+    assert.deepEqual(report.output.informe.requisitos, [{ requisito: 'Boleta de garantía', estado: 'pending' }]);
+    assert.equal(known.get('o1-uuid-0001').title, 'Aseo Hospital', 'an opportunity whose report was read can be shown');
+    assert.match((await run(admin, 'ver_informe', { id: 'o2-uuid-0002' })).output.informe === null ? 'sin informe' : 'con informe', /sin informe/);
+    known.delete('o2-uuid-0002');
+    (globalThis as any).__unreadable = ['o2-uuid-0002'];
+    const denied = await run(admin, 'ver_informe', { id: 'o2-uuid-0002' });
+    (globalThis as any).__unreadable = null;
+    assert.equal(denied.status, 'error', 'an opportunity the person cannot open is not there for the agent either');
+    assert.ok(!known.has('o2-uuid-0002'));
+    const member = opportunityAssistantTools(client, { organizationId: 'org', userId: 'u1', role: 'member' }, new Map());
+    assert.equal((await run(member, 'buscar_oportunidades', { vista: 'assigned' })).status, 'error', 'the «assigned» view is the admin\'s');
+  });
 });

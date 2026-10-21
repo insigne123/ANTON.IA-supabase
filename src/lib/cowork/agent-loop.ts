@@ -35,6 +35,7 @@ import { withCoworkReports } from './report-document';
 import { COWORK_NEXT_STEP_RULE } from './next-step';
 import { coworkPreferenceAlreadyKept, coworkPreferenceSchema, coworkPreferenceSuggestion, coworkRememberSuggestion, type CoworkPreference } from './preference-proposal';
 import { coworkTaskPlanProblem, coworkTaskPlanSchema, type CoworkTaskPlan } from './task-plan';
+import type { CoworkHarnessConfig } from './harness-config';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -131,7 +132,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry' | 'lead.enrich_phone'
   | 'contacts.prepare_batch' | 'preference.save' | 'task.plan';
 export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION | typeof COWORK_WRITTEN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
-type Decision = z.infer<typeof coworkDecisionSchema>;
+export type Decision = z.infer<typeof coworkDecisionSchema>;
 
 export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string;
   campaign?: z.infer<typeof coworkCampaignDraftSchema>; code?: z.infer<typeof coworkCodeProposalSchema>;
@@ -517,7 +518,7 @@ const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observa
  * Writer needs for a sequence. «Crea una campaña para mis contactos con correo» needs contacts, sends and campaigns
  * besides it, and with three reads the turn stopped before writing (round g1, 16 Oct 2026).
  */
-const FREE_READS: ReadonlySet<string> = new Set(['message.context']);
+export const FREE_READS: ReadonlySet<string> = new Set(['message.context']);
 
 function budgetFeedback(readsUsed: number, maximum: number) {
   const left = Math.max(0, maximum - readsUsed);
@@ -1208,7 +1209,7 @@ export function coworkOutline(value: Decision['outline']): CoworkPlanStep[] | nu
  * passing («siempre firma como Nico»), as Odysseus and ChatGPT learn durable facts from the conversation. Here it is only a
  * suggestion: touching it asks Cowork to remember, which proposes the card. Never when Cowork already remembers it, and never twice.
  */
-function coworkWithPreferenceSuggestion<T extends { suggestions?: CoworkAnswer['suggestions'] }>(input: { message: string; preferences?: boolean; userContext?: unknown }, answer: T): T {
+export function coworkWithPreferenceSuggestion<T extends { suggestions?: CoworkAnswer['suggestions'] }>(input: { message: string; preferences?: boolean; userContext?: unknown }, answer: T): T {
   if (!input.preferences) return answer;
   const memories = (input.userContext as { memories?: unknown } | null | undefined)?.memories;
   const suggestion = coworkPreferenceSuggestion(input.message, Array.isArray(memories) ? memories.map(String) : []);
@@ -1223,6 +1224,12 @@ export async function runCoworkReadLoop(input: Parameters<typeof runCoworkLoop>[
   let proposed = false;
   const proposeEffect = input.proposeEffect;
   const answer = await runCoworkLoop(proposeEffect ? { ...input, proposeEffect: async proposal => { proposed = true; await proposeEffect(proposal); } } : input, observations);
+  return coworkFinishAnswer(input, answer, observations, proposed);
+}
+
+/** What every turn's answer goes through on its way out, whichever runtime wrote it: the preference chip, the offers that cannot be made, the chart its reads allow. */
+export function coworkFinishAnswer(input: Pick<CoworkLoopInput, 'message' | 'preferences' | 'userContext' | 'offeredReads'>, answer: CoworkAnswer,
+  observations: CoworkObservation[], proposed: boolean): CoworkAnswer {
   const kept = proposed ? answer : coworkWithPreferenceSuggestion(input, coworkKeptPreferenceAnswer(input, answer));
   // With offered reads on, an offer the turn could not make leaves rather than asking permission for it.
   const closed = proposed || !input.offeredReads ? kept : coworkWithoutSecondaryReadChips(coworkWithoutOfferedRead(kept), observations);
@@ -1271,11 +1278,51 @@ function coworkKeptPreferenceAnswer<T extends { reply: string }>(input: { messag
 }
 
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
+export type CoworkLoopInput = Parameters<typeof runCoworkLoop>[0];
+
+class StageStop extends Error {}
+
+/**
+ * One decision of a proposal (a campaign, a search, a note, an effect) through the checks the coordinator loop has always applied:
+ * the target must have been observed, the campaign carries the emails the person saw, a lookup already run is not asked again, and
+ * the thread's budgets hold. The harness runtime decides in tool calls; it stages what it decided here, so no proposal reaches the
+ * person's approval by a shorter road. A proposal that cannot be staged comes back as what to fix, never as an exception.
+ */
+export async function coworkStageDecision(input: CoworkLoopInput, decision: unknown, observations: CoworkObservation[]):
+  Promise<{ ok: true; answer: CoworkAnswer } | { ok: false; problem: string }> {
+  const parsed = coworkDecisionSchema.safeParse(decision);
+  if (!parsed.success) return { ok: false, problem: `La propuesta no cumple el formato (${issueSummary(parsed.error) || 'campos inválidos'}). Corrígela.` };
+  let given = false;
+  let problem = '';
+  try {
+    const answer = await runCoworkLoop({
+      ...input, resumedObservations: undefined, seeded: observations, metricPeriods: false, offeredReads: false, judge: undefined, rescue: undefined,
+      ceiling: { decisions: 3, reads: 0, softDeadlineMs: 600_000 },
+      decide: async (_observations, _mustAnswer, rejections = []) => {
+        if (!given) { given = true; return parsed.data; }
+        problem = rejections.at(-1)?.reason || 'La propuesta no se pudo preparar.';
+        throw new StageStop();
+      },
+    }, []);
+    return { ok: true, answer };
+  } catch (error) {
+    if (error instanceof StageStop) return { ok: false, problem };
+    throw error;
+  }
+}
+
 async function runCoworkLoop(input: {
   message: string;
   runId?: string;
   history?: CoworkHistoryTurn[];
   resumedObservations?: CoworkObservation[];
+  /** The harness runtime's wiring (harness-turn.ts); this coordinator loop ignores it. */
+  harness?: CoworkHarnessConfig;
+  /** What the turn already read, outside this loop (the harness runtime): the effect checks see it, and unlike resumed observations the
+   * decisions below still run in full. */
+  seeded?: CoworkObservation[];
+  /** The emails the Writer already wrote in this turn, for a campaign decided next (the harness runtime). */
+  writtenSeed?: { emails: CoworkEditedEmail[] | null; personal: CoworkPersonalEmail[] | null; answer: CoworkAnswer } | null;
   signal: AbortSignal;
   authorize: () => Promise<void>;
   /** How much this turn may spend; the coordinator decides within it (turn-budget.ts). */
@@ -1344,13 +1391,14 @@ async function runCoworkLoop(input: {
   /** The turn was rescued, and why. */
   onRescue?: (failure: CoworkTurnFailure) => void;
 }, observations: CoworkObservation[]) {
+  if (input.seeded?.length) observations.push(...input.seeded);
   const remember = async (decision: Decision) => {
     if (decision.memory && input.remember) await input.remember(decision.memory).catch(() => undefined);
   };
   // A preference asked for next to a writing task (Plan 12, 5): the Writer applied it, and a quick reply keeps it for next time.
   // Seen with the real model: the Writer's own suggestions never offered it, so the preference was lost.
   const withRememberSuggestion = (answer: CoworkAnswer): CoworkAnswer => coworkWithPreferenceSuggestion(input, answer);
-  if (observations.length) {
+  if (observations.length && !input.seeded) {
     // The pre-queue phase already spent reads/model decisions. Resume only
     // synthesis, never a second tool or specialist budget in the same run.
     input.signal.throwIfAborted(); await input.authorize();
@@ -1472,7 +1520,7 @@ async function runCoworkLoop(input: {
   }
   // Emails the Writer wrote when the person asked for the campaign in the same request (Plan 12, 4a-2): the next
   // decision proposes it with them, word for word. Whatever happens after, the Writer's answer is never lost.
-  let written: { emails: CoworkEditedEmail[] | null; personal: CoworkPersonalEmail[] | null; answer: CoworkAnswer } | null = null;
+  let written: { emails: CoworkEditedEmail[] | null; personal: CoworkPersonalEmail[] | null; answer: CoworkAnswer } | null = input.writtenSeed ?? null;
   for (let turn = 0; turn <= last; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
