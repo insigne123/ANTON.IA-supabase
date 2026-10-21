@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
+import { recoveryPagePath, recoveryTokenHash } from '@/lib/recovery-link';
 import { safeNextPath } from '@/lib/safe-next-path';
 import { authCallbackOrigin } from '@/lib/server/auth-callback-origin';
 
@@ -19,11 +20,16 @@ function fixture(error: any = null, environment: Record<string, string | undefin
     const modules: Record<string, unknown> = {
         'next/server': { NextResponse },
         'next/headers': { cookies: () => cookieStore },
+        '@/lib/recovery-link': { recoveryPagePath, recoveryTokenHash },
         '@/lib/safe-next-path': { safeNextPath },
         '@/lib/server/auth-callback-origin': { authCallbackOrigin: (url: URL) => authCallbackOrigin(url, environment) },
         '@supabase/auth-helpers-nextjs': { createRouteHandlerClient: (context: any) => {
             assert.equal(context.cookies(), cookieStore, 'the exchange retains its cookie-backed verifier/session storage');
-            return { auth: { exchangeCodeForSession: async (code: string) => { calls.push(code); return { error }; } } };
+            return { auth: {
+                exchangeCodeForSession: async (code: string) => { calls.push(code); return { error }; },
+                // A recovery link must never be spent by the callback: a mail filter that opens it would leave the person with «vencido».
+                verifyOtp: async () => { throw new Error('the callback must not spend a recovery token'); },
+            } };
         } },
     };
     const testModule = { exports: {} as any };
@@ -84,4 +90,28 @@ test('public origin preference, base URL compatibility and localhost development
     assert.equal(authCallbackOrigin(internal, { NEXT_PUBLIC_APP_URL: PUBLIC }), PUBLIC);
     assert.equal(authCallbackOrigin(new URL('http://localhost:9003'), { NODE_ENV: 'development' }), 'http://localhost:9003');
     assert.throws(() => authCallbackOrigin(internal, { CANONICAL_APP_URL: 'https://user:password@evil.example' }));
+});
+
+test('a recovery link with a token hash is not spent here: the page that asks for a click is where the token goes, and a mail filter that opens the link changes nothing', async () => {
+    const env = fixture();
+    const response = await env.GET(new Request('https://0.0.0.0:8080/api/auth/callback?next=%2Frestablecer-clave&token_hash=abc_DEF-123&type=recovery', {
+        headers: { 'user-agent': 'Mozilla/5.0 (compatible; Microsoft Defender Safe Links)' },
+    }));
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get('location'), `${PUBLIC}/restablecer-clave?token_hash=abc_DEF-123&type=recovery`);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    assert.deepEqual(env.calls, [], 'no exchange either');
+    // The same address, followed twice (a filter, then the person), leads to the same page: nothing was spent in between.
+    const again = await env.GET(new Request('https://0.0.0.0:8080/api/auth/callback?next=%2Frestablecer-clave&token_hash=abc_DEF-123&type=recovery'));
+    assert.equal(again.headers.get('location'), response.headers.get('location'));
+});
+
+test('a token hash that is not a recovery token never reaches the page', async () => {
+    for (const query of ['token_hash=abc&type=signup', 'token_hash=abc', 'token_hash=%3Cscript%3E&type=recovery', `token_hash=${'a'.repeat(300)}&type=recovery`]) {
+        const env = fixture();
+        const response = await env.GET(new Request(`https://0.0.0.0:8080/api/auth/callback?${query}`));
+        assert.equal(response.headers.get('location'), `${PUBLIC}/login?enlace=vencido`, query.slice(0, 40));
+        assert.deepEqual(env.calls, []);
+    }
 });
