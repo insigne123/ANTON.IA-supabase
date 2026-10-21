@@ -30,11 +30,7 @@ El enlace del correo ya no gasta el token al abrirse. Lleva a `/restablecer-clav
 
 El código nuevo se publica primero. Mientras la plantilla no cambie, el correo sigue trayendo el enlace anterior y el problema sigue igual. Los enlaces ya enviados siguen funcionando como antes.
 
-En Supabase: **Authentication → Emails → Reset password**, cambiar el enlace del cuerpo por:
-
-```html
-<p><a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery">Crear contraseña nueva</a></p>
-```
+En Supabase: **Authentication → Emails → Reset password**, reemplazar el cuerpo completo por el de abajo.
 
 `{{ .RedirectTo }}` es el destino que la app ya envía al pedir el enlace (`…/api/auth/callback?next=%2Frestablecer-clave`), por lo que ya está en las direcciones permitidas y el resto del enlace se agrega con `&`.
 
