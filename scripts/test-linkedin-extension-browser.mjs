@@ -1,4 +1,4 @@
-// UI smoke with a mocked Chrome boundary. Does not contact LinkedIn, Supabase or providers.
+// UI smoke with a mocked Chrome boundary. Does not contact LinkedIn, Supabase or providers. Opens the built panel: run `npm run extension:build` first.
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import assert from 'node:assert/strict';
@@ -52,6 +52,8 @@ try {
               if (request.body.action === 'phone-status') result = { phone: '+511234567', status: 'completed' };
               if (request.body.action === 'company') result = window.companyView;
               if (request.body.action === 'save-batch') result = { saved: request.body.profiles.map(({ linkedinUrl, fullName }) => ({ linkedinUrl, fullName })), already: [], blocked: [], failed: [] };
+              if (request.body.action === 'enrich-batch') result = { consumed: 1, people: request.body.profiles.map(({ linkedinUrl, fullName }, index) => (index === 0
+                ? { linkedinUrl, fullName, outcome: 'email', email: 'ana.rojas@example.test' } : { linkedinUrl, fullName, outcome: 'not_found' })) };
               if (request.body.action === 'quota') result = { credits: { used: 3, limit: 50, remaining: 47 } };
               if (request.body.action === 'enrich') result = { enriched: [{ linkedinUrl: profile.linkedinUrl, fullName: profile.fullName, title: profile.title, companyName: profile.companyName, email: profile.email, companyDomain: profile.companyDomain, city: 'Lima', country: 'Perú', industry: 'Servicios', seniority: 'director' }] };
               if (request.body.action === 'enrich' && request.body.revealPhone && window.requests.filter(item => item.body?.action === 'enrich').length > 1) result = { enriched: [{ id: 'person-id', linkedinUrl: profile.linkedinUrl, enrichmentStatus: 'pending_phone' }] };
@@ -82,12 +84,14 @@ try {
     await page.getByRole('heading', { name: 'María Fernández' }).waitFor();
     await page.getByText('47 créditos hoy', { exact: true }).waitFor();
     assert.match(await page.locator('.chips').textContent(), /^Sin guardar/);
+    // One click: enriching and saving are a single step, so the person reaches «Por escribir» with what was found.
     assert.equal(await page.getByRole('button', { name: 'Guardar lead', exact: true }).count(), 0);
-    await page.getByRole('button', { name: 'Enriquecer perfil', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Enriquecer perfil', exact: true }).count(), 0);
+    await page.getByText('Usa 1 crédito. Queda en «Por escribir» con su correo, a la vista de tu equipo.', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Buscar correo y guardar', exact: true }).click();
+    await page.getByText('Quedó guardado en «Por escribir».', { exact: false }).waitFor();
     await page.getByText('Más información profesional', { exact: true }).click();
     await page.getByText('Lima, Perú', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Guardar lead', exact: true }).click();
-    await page.getByText('Lead guardado en tu organización.', { exact: true }).waitFor();
     assert.match(await page.locator('.chips').textContent(), /Guardado.*Correo verificado/);
     // The next step is researching: the card offers it and the tab does not repeat it.
     await page.getByRole('button', { name: 'Investigar lead', exact: true }).waitFor();
@@ -173,10 +177,13 @@ try {
     await page.getByText('Este mensaje ya está registrado como enviado. No lo reenviamos.', { exact: true }).waitFor();
     await draft.fill('Hola María, ¿te parece si revisamos una propuesta para tu equipo?');
     await page.getByRole('button', { name: 'Revisar y enviar', exact: true }).click();
+    // While LinkedIn shows a profile the URL field stays folded behind «Pegar URL».
+    assert.equal(await page.getByLabel('URL de un perfil de LinkedIn', { exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Pegar URL', exact: true }).click();
     for (const width of [320, 380, 520]) {
       await page.setViewportSize({ width, height: 900 });
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Horizontal overflow at ${width}/${colorScheme}`);
-      await page.getByLabel('URL de LinkedIn', { exact: true }).focus();
+      await page.getByLabel('URL de un perfil de LinkedIn', { exact: true }).focus();
       await page.keyboard.press('Tab');
       assert.ok(await page.evaluate(() => document.activeElement.tagName !== 'BODY'));
       assert.ok(await page.locator('.account').isVisible(), 'Account stays visible at narrow widths');
@@ -215,9 +222,11 @@ try {
     assert.equal(await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_API' && request.body.action === 'message').length), afterOptions);
     await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/another-profile' }); });
     await page.waitForFunction(() => document.querySelector('#profile-url').value === 'https://www.linkedin.com/in/another-profile');
-    await page.getByLabel('Seguir el perfil abierto en LinkedIn', { exact: true }).uncheck();
+    // Pasting a URL stops following LinkedIn: the panel stays on that person and offers the profile LinkedIn shows instead.
+    await page.getByRole('button', { name: 'Abrir perfil', exact: true }).click();
     await page.evaluate(() => { window.navigateTo({ ...window.activeProfile, linkedinUrl: 'https://www.linkedin.com/in/third-profile' }); });
-    await page.waitForTimeout(500);
+    await page.getByRole('button', { name: /^Usar el perfil abierto/ }).waitFor();
+    await page.getByRole('button', { name: 'Pegar URL', exact: true }).click();
     assert.equal(await page.locator('#profile-url').inputValue(), 'https://www.linkedin.com/in/another-profile');
     // Nothing asks for the profile on a timer: without an announcement, the panel does not query.
     const asked = await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_PROFILE').length);
@@ -236,7 +245,7 @@ try {
     const searchCard = page.locator('section[aria-labelledby="search-heading"]');
     await searchCard.getByText('En conversación con Ana', { exact: true }).waitFor();
     assert.ok(await searchCard.getByRole('checkbox', { name: /Otro perfil/ }).isDisabled(), 'Someone else works this person: not selectable');
-    assert.ok(await searchCard.getByRole('button', { name: 'Elige a quiénes guardar' }).isDisabled());
+    assert.ok(await searchCard.getByRole('button', { name: 'Elige a quiénes buscar' }).isDisabled());
     await searchCard.getByRole('button', { name: 'Seleccionar disponibles' }).click();
     assert.ok(await searchCard.getByRole('checkbox', { name: /Ana Rojas/ }).isChecked());
     assert.ok(await searchCard.getByRole('checkbox', { name: /Luis Soto/ }).isChecked());
@@ -245,14 +254,30 @@ try {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Horizontal overflow in the search at ${width}/${colorScheme}`);
     }
     const presenceAsked = await page.evaluate(() => window.requests.filter(request => request.action === 'PROSPECT_PRESENCE').length);
-    await searchCard.getByRole('button', { name: 'Guardar 2 en Anton.IA' }).click();
-    await page.getByText('2 contactos guardados en tu organización.', { exact: true }).waitFor();
-    const batch = await page.evaluate(() => JSON.stringify(window.requests.filter(request => request.action === 'PROSPECT_API' && request.body.action === 'save-batch').map(request => request.body.profiles)));
-    assert.deepEqual(JSON.parse(batch), [[
+    const chosenPeople = [
       { linkedinUrl: 'https://www.linkedin.com/in/ana-rojas', fullName: 'Ana Rojas', title: 'Jefa de Operaciones', companyName: 'Minera Norte', details: { headline: 'Jefa de Operaciones en Minera Norte' } },
       { linkedinUrl: 'https://www.linkedin.com/in/luis-soto', fullName: 'Luis Soto', title: 'Gerente de Personas', companyName: 'Logística Sur', details: { headline: 'Gerente de Personas at Logística Sur' } },
-    ]]);
-    await searchCard.getByRole('button', { name: 'Elige a quiénes guardar' }).waitFor();
+    ];
+    // The main action looks up the email of everyone chosen and saves what it finds, in one request.
+    await searchCard.getByRole('button', { name: 'Buscar correo de 2', exact: true }).click();
+    await searchCard.getByText('1 queda con correo en «Por escribir». 1 quedó sin correo: puedes escribirles por LinkedIn. Usaste 1 crédito.', { exact: true }).waitFor();
+    await searchCard.getByText('ana.rojas@example.test', { exact: true }).waitFor();
+    await searchCard.getByText('Con correo', { exact: true }).waitFor();
+    await searchCard.getByText('Sin correo', { exact: true }).waitFor();
+    const lookup = await page.evaluate(() => JSON.stringify(window.requests.filter(request => request.action === 'PROSPECT_API' && request.body.action === 'enrich-batch')
+      .map(({ body }) => ({ profiles: body.profiles, revealPhone: body.revealPhone, operationId: typeof body.operationId }))));
+    assert.deepEqual(JSON.parse(lookup), [{ profiles: chosenPeople, revealPhone: false, operationId: 'string' }]);
+    await searchCard.getByRole('button', { name: 'Elige a quiénes buscar' }).waitFor();
+    for (const width of [320, 380, 520]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Horizontal overflow in the search results at ${width}/${colorScheme}`);
+    }
+    // The quiet way out: the same people saved without looking anything up.
+    await searchCard.getByRole('button', { name: 'Seleccionar disponibles' }).click();
+    await searchCard.getByRole('button', { name: 'Solo guardarlos, sin buscar correo', exact: true }).click();
+    await page.getByText('2 contactos guardados en tu organización.', { exact: true }).waitFor();
+    const batch = await page.evaluate(() => JSON.stringify(window.requests.filter(request => request.action === 'PROSPECT_API' && request.body.action === 'save-batch').map(request => request.body.profiles)));
+    assert.deepEqual(JSON.parse(batch), [chosenPeople]);
     await page.waitForFunction(count => window.requests.filter(request => request.action === 'PROSPECT_PRESENCE').length > count, presenceAsked);
     // A company page: its facts, the organization's contacts there, the pilot's hiring signal and the search for its decision makers.
     await page.evaluate(() => {
@@ -292,7 +317,7 @@ try {
     await page.getByRole('heading', { name: '1 persona de Minera Norte en pantalla' }).waitFor();
     assert.equal(await companyCard.getByRole('link', { name: /Ver sus personas en LinkedIn/ }).count(), 0, 'Already on its people tab');
     await context.close();
-    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, profile changes by announcement without polling, search batch save with team presence, company card with contacts, hiring signal and decision makers, opening from a recent post, no horizontal overflow (mocked boundary).`);
+    console.log(`PASS: ${colorScheme}, 320/380/520 px, connect/credits/chips/next step/one-click email lookup and save/research/generate/prepare/campaign-add/sequence/send confirmation/replay, tabs by keyboard, URL folded behind «Pegar URL», profile changes by announcement without polling, search batch email lookup and save-only with team presence, company card with contacts, hiring signal and decision makers, opening from a recent post, no horizontal overflow (mocked boundary).`);
   }
   assert.deepEqual(errors, []);
 } finally { await browser.close(); }
