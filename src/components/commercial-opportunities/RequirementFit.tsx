@@ -1,10 +1,11 @@
 'use client';
 // «¿Cumplimos?» inside the report: each requirement as ✓ meets, ⚠ a missing fact (with its question, answered right
 // there) or ✗ does not meet, against the company's «Ficha para licitaciones».
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, CircleHelp, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { FIT_LABELS, fitSummary, type RequirementFit, type ReportFit } from '@/lib/commercial-opportunities/requirement-fit';
 
@@ -22,25 +23,59 @@ export function FitBadge({ fit }: { fit: RequirementFit }) {
   );
 }
 
+/**
+ * The AI looks at the requirements again with the new answer, which takes some seconds: the answered question says so, with a bar that
+ * moves (and, with reduced motion, only the words), so the page never looks stuck.
+ */
+export function FitThinking({ answer }: { answer: string }) {
+  return (
+    <div role="status" aria-live="polite" className="mt-2 space-y-2">
+      <p className="flex items-start gap-2 text-sm text-foreground">
+        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+        <span>Guardé tu respuesta («{answer.length > 80 ? `${answer.slice(0, 80)}…` : answer}»). La IA está revisando todos los requisitos con tu ficha…</span>
+      </p>
+      <div className="h-1 overflow-hidden rounded-full bg-foreground/10" aria-hidden="true">
+        <div className="h-full w-1/4 rounded-full bg-primary motion-safe:animate-thinking-slide motion-reduce:w-full motion-reduce:opacity-40" />
+      </div>
+      <p className="text-xs text-muted-foreground">Tarda unos segundos. Puedes seguir leyendo el informe.</p>
+    </div>
+  );
+}
+
 /** The AI's question about a missing fact, answered in one tap (Sí / No) or in a few words; the answer goes into the profile. */
-export function FitQuestion({ id, question, busy, onAnswer }: { id: string; question: string; busy: boolean; onAnswer: (answer: string) => void }) {
-  const [writing, setWriting] = useState(false);
+export function FitQuestion({ id, question, why, kind, busy, onAnswer }: {
+  id: string; question: string; busy: boolean; onAnswer: (answer: string) => void;
+  /** Why it is asked (for a question that is not about one requirement). */
+  why?: string;
+  /** detail: the answer takes figures, names or several things, so it is asked in words and not with yes / no. */
+  kind?: 'detail';
+}) {
+  const detail = kind === 'detail';
+  const [writing, setWriting] = useState(detail);
   const [text, setText] = useState('');
+  // What this question was just answered with, while the page waits for the AI to read the requirements again.
+  const [sent, setSent] = useState<string | null>(null);
+  useEffect(() => { if (!busy) setSent(null); }, [busy]);
+  const answer = (value: string) => { setSent(value); onAnswer(value); };
   return (
     <div className="mt-2 rounded-xl bg-cw-warning-soft px-3 py-2.5">
       <p className="text-sm text-foreground" id={`${id}-question`}>{question}</p>
-      {writing ? (
-        <form className="mt-2 flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); if (text.trim()) { onAnswer(text.trim()); setWriting(false); setText(''); } }}>
+      {why ? <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{why}</p> : null}
+      {sent !== null && busy ? <FitThinking answer={sent} /> : writing ? (
+        <form className="mt-2 flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); if (text.trim()) { answer(text.trim()); setWriting(detail); setText(''); } }}>
           <label htmlFor={`${id}-answer`} className="sr-only">Tu respuesta</label>
-          <Input id={`${id}-answer`} value={text} maxLength={500} autoFocus placeholder="Ej.: Sí, hasta $10.000.000 con boleta bancaria" aria-describedby={`${id}-question`}
-            onChange={event => setText(event.target.value)} className="h-8 min-w-0 flex-1 text-sm" />
-          <Button type="submit" size="sm" className="h-8" disabled={busy || !text.trim()}>Guardar</Button>
-          <Button type="button" size="sm" variant="ghost" className="h-8" onClick={() => setWriting(false)}>Cancelar</Button>
+          {detail
+            ? <Textarea id={`${id}-answer`} value={text} maxLength={500} rows={3} placeholder="Escribe la respuesta con el detalle: cifras, nombres y fechas." aria-describedby={`${id}-question`}
+              onChange={event => setText(event.target.value)} className="min-h-[72px] w-full resize-y text-sm" />
+            : <Input id={`${id}-answer`} value={text} maxLength={500} autoFocus placeholder="Ej.: Sí, hasta $10.000.000 con boleta bancaria" aria-describedby={`${id}-question`}
+              onChange={event => setText(event.target.value)} className="h-8 min-w-0 flex-1 text-sm" />}
+          <Button type="submit" size="sm" className="h-8" disabled={busy || !text.trim()}>{detail ? 'Guardar y revisar' : 'Guardar'}</Button>
+          {detail ? null : <Button type="button" size="sm" variant="ghost" className="h-8" onClick={() => setWriting(false)}>Cancelar</Button>}
         </form>
       ) : (
         <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Responder a la IA">
-          <Button type="button" size="sm" variant="outline" className="h-7 px-3 text-xs" disabled={busy} onClick={() => onAnswer('Sí')}>Sí</Button>
-          <Button type="button" size="sm" variant="outline" className="h-7 px-3 text-xs" disabled={busy} onClick={() => onAnswer('No')}>No</Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-3 text-xs" disabled={busy} onClick={() => answer('Sí')}>Sí</Button>
+          <Button type="button" size="sm" variant="outline" className="h-7 px-3 text-xs" disabled={busy} onClick={() => answer('No')}>No</Button>
           <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy} onClick={() => setWriting(true)}>Responder con detalle</Button>
         </div>
       )}

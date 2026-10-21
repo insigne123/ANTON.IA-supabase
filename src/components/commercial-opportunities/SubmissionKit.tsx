@@ -39,8 +39,8 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
   annexHref?: (index: number) => string;
 }) {
   const kit = report?.submission ? clampSubmissionKit(report.submission) : null;
-  const { interactive, marks, saving, change } = useReportMarks(initialMarks, onMark);
-  const markProps = { marks: interactive ? marks : null, disabled: saving, onChange: (input: MarkChange) => void change(input),
+  const { interactive, marks, pending, change } = useReportMarks(initialMarks, onMark);
+  const markProps = { marks: interactive ? marks : null, pending, onChange: (input: MarkChange) => void change(input),
     authorOf: (id?: string | null) => people?.find(p => p.user_id === id)?.name ?? null, whenOf: (at?: string | null) => humanDate(at, true) };
   // Without a guide (a report from before it existed), the report's requirements are the list: the same ticks as in the report.
   const checklist = useMemo(() => kit ? kitChecklist(kit) : (report?.requirements || []).map(r => ({ key: reportItemKey('requirement', r.title), label: r.title, folder: '', critical: r.status === 'blocked' })), [kit, report]);

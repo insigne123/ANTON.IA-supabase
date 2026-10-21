@@ -92,17 +92,48 @@ export const REMINDER_OPTIONS = [
 export type ReminderId = typeof REMINDER_OPTIONS[number]['id'];
 const stamp = (date: Date) => date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 
+/** What a reminder is about: enough for the person to know which opportunity it speaks of, from the calendar alone. */
+export type ReminderSubject = {
+  title: string; buyer?: string | null; code?: string | null; kind?: string | null;
+  /** Where to open it in ANTON.IA, and the official page of the purchase. */
+  appUrl?: string | null; sourceUrl?: string | null;
+};
+const SUBJECT_NAME: Record<string, string> = { tender: 'Licitación', compra_agil: 'Compra Ágil', private: 'Compra privada', project: 'Proyecto' };
+const WHEN: Record<ReminderId, string> = { same: 'Hoy', '1d': 'Mañana', '3d': 'En 3 días', '7d': 'En una semana' };
+
+/** «Cierre de recepción de ofertas · Servicio de aseo del Museo (ID 1217466-29-LP26)»: the date, then which purchase. */
+export function reminderSummary(label: string, subject: ReminderSubject) {
+  const name = subject.title.trim();
+  return `${label}${name ? ` · ${name}` : ''}${subject.code ? ` (ID ${subject.code})` : ''}`;
+}
+/** The title of the event at the moment of the reminder: when it is, the date it announces and the purchase. */
+export function reminderTitle(label: string, reminder: ReminderId, subject: ReminderSubject) {
+  return `${WHEN[reminder]}: ${reminderSummary(label, subject)}`;
+}
+/** The description: the date in full, which purchase and who buys it, and the links to open it. */
+export function reminderDetails(input: { label: string; date: string; subject: ReminderSubject; details?: string }) {
+  const { subject } = input;
+  const kind = SUBJECT_NAME[subject.kind || ''] || 'Oportunidad';
+  return [
+    `${input.label}: ${input.date}`,
+    [subject.title ? `${kind}: ${subject.title}` : '', subject.buyer ? `Organismo: ${subject.buyer}` : '', subject.code ? `ID: ${subject.code}` : ''].filter(Boolean).join('\n'),
+    input.details || '',
+    [subject.appUrl ? `Abrir en ANTON.IA: ${subject.appUrl}` : '', subject.sourceUrl ? `Ficha oficial: ${subject.sourceUrl}` : ''].filter(Boolean).join('\n'),
+  ].filter(Boolean).join('\n\n');
+}
+
 /**
  * A Google Calendar event the person adds with one click. Google's link cannot carry an alert, so the event sits at the
- * moment of the reminder the person chose («3 días antes»), half an hour long, and says which date it announces.
+ * moment of the reminder the person chose («en 3 días»), half an hour long, and says which date it announces and which purchase.
  */
-export function googleCalendarUrl(input: { title: string; label: string; date: string; at: Date; reminder: ReminderId; details?: string }) {
+export function googleCalendarUrl(input: { subject: ReminderSubject; label: string; date: string; at: Date; reminder: ReminderId; details?: string }) {
   const option = REMINDER_OPTIONS.find(o => o.id === input.reminder) ?? REMINDER_OPTIONS[0];
   const start = new Date(input.at.getTime() - option.minutes * 60_000);
   const end = new Date(start.getTime() + 30 * 60_000);
-  const text = option.minutes ? `Recordatorio: ${input.label} (${option.label.toLocaleLowerCase('es')})` : input.label;
-  const params = new URLSearchParams({ action: 'TEMPLATE', text: `${text} · ${input.title}`.slice(0, 300), dates: `${stamp(start)}/${stamp(end)}`, ctz: 'America/Santiago',
-    details: [`${input.label}: ${input.date}`, input.details].filter(Boolean).join('\n\n').slice(0, 1500) });
+  const text = option.minutes ? reminderTitle(input.label, input.reminder, input.subject) : reminderSummary(input.label, input.subject);
+  const params = new URLSearchParams({ action: 'TEMPLATE', text: text.slice(0, 300), dates: `${stamp(start)}/${stamp(end)}`, ctz: 'America/Santiago',
+    details: reminderDetails({ label: input.label, date: input.date, subject: input.subject, details: input.details }).slice(0, 1800) });
+  if (input.subject.sourceUrl && /^https?:\/\//.test(input.subject.sourceUrl)) params.set('location', input.subject.sourceUrl.slice(0, 300));
   return `https://calendar.google.com/calendar/render?${params}`;
 }
 
@@ -118,14 +149,14 @@ function fold(line: string) {
   return [...out, current].join('\r\n');
 }
 /** One calendar file with the chosen dates, each at its real time with an alert as long before as the person chose. */
-export function reportCalendarFile(input: { title: string; events: Array<{ uid: string; label: string; date: string; at: Date; reminder: ReminderId; details?: string }>; now?: Date }) {
+export function reportCalendarFile(input: { subject: ReminderSubject; events: Array<{ uid: string; label: string; date: string; at: Date; reminder: ReminderId; details?: string }>; now?: Date }) {
   const now = stamp(input.now ?? new Date());
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ANTON.IA//Oportunidades//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
   for (const event of input.events) {
     const option = REMINDER_OPTIONS.find(o => o.id === event.reminder) ?? REMINDER_OPTIONS[0];
     lines.push('BEGIN:VEVENT', `UID:${event.uid}@anton.ia`, `DTSTAMP:${now}`, `DTSTART:${stamp(event.at)}`, `DTEND:${stamp(new Date(event.at.getTime() + 30 * 60_000))}`,
-      `SUMMARY:${icsText(`${event.label} · ${input.title}`)}`, `DESCRIPTION:${icsText([`${event.label}: ${event.date}`, event.details].filter(Boolean).join('\n\n'))}`,
-      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(event.label)}`, `TRIGGER:-PT${Math.max(option.minutes, 0)}M`, 'END:VALARM', 'END:VEVENT');
+      `SUMMARY:${icsText(reminderSummary(event.label, input.subject))}`, `DESCRIPTION:${icsText(reminderDetails({ label: event.label, date: event.date, subject: input.subject, details: event.details }))}`,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsText(reminderSummary(event.label, input.subject))}`, `TRIGGER:-PT${Math.max(option.minutes, 0)}M`, 'END:VALARM', 'END:VEVENT');
   }
   lines.push('END:VCALENDAR');
   return lines.map(fold).join('\r\n') + '\r\n';

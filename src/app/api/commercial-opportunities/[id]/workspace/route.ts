@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityRead, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
 import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb, saveOpportunityReportMark } from '@/lib/server/commercial-opportunities/workspace-store';
 import { markInputSchema } from '@/lib/commercial-opportunities/report-marks';
-import { applyAutomaticMove, routeKindOf } from '@/lib/server/commercial-opportunities/workspace-pipeline';
+import { applyAutomaticMove, routeKindOf, undoAutomaticMove } from '@/lib/server/commercial-opportunities/workspace-pipeline';
 import { assignmentSchema, activitySchema, taskSchema, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
@@ -41,7 +41,7 @@ export async function POST(request: Request, context: Context) {
     if (action === 'fit' || action === 'fit_answer') {
       // An answer goes into the company's tender profile first; then the requirements are read again with it, now.
       if (action === 'fit_answer') {
-        const input = z.object({ question: z.string().trim().min(2).max(200), answer: z.string().trim().min(1).max(500) }).strict().parse(data);
+        const input = z.object({ question: z.string().trim().min(2).max(320), answer: z.string().trim().min(1).max(500) }).strict().parse(data);
         await answerFitQuestion(auth.admin, scope, id, input);
       }
       const key = await enqueueRequirementFit(auth.admin, scope, id);
@@ -79,6 +79,8 @@ export async function POST(request: Request, context: Context) {
       const saved = await saveOpportunityReportMark(auth.admin, scope, id, input);
       // Ticking an item can move the stage: into preparation, or to «Presentada» when it is the step to submit.
       if (input.done) await applyAutomaticMove(auth.admin, scope, id, { kind: 'marked_done', label: input.label, routeKind: await routeKindOf(auth.admin, scope, id, input.key) }).catch(() => null);
+      // Taking a tick back («me equivoqué») also takes back the move to «Presentada» that the tick itself made.
+      else if (input.done === false) await undoAutomaticMove(auth.admin, scope, id, { label: input.label, routeKind: await routeKindOf(auth.admin, scope, id, input.key) }).catch(() => null);
       return opportunitiesJson(saved);
     }
     if (action === 'link') {

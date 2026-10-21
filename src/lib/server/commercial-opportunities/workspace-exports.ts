@@ -1,6 +1,6 @@
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import { opportunityFinancialScenario } from '@/lib/commercial-opportunities/workspace';
-import { IMPACT_LABELS, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
+import { IMPACT_LABELS, buyerQuestions, consultationEmail, humanDate, isSignalReport, opportunityReportWarnings, reportDecision, reportKeyDates, reportNextSteps, statusLabel } from '@/lib/commercial-opportunities/report-view';
 import {normalizeCoworkPdfText} from '@/lib/server/cowork/file-exports';
 import { reportChecklist, reportItemKey, reportProgress, reportRoute, type MarkKind, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { KIT_SOURCE_LABELS, clampSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
@@ -20,7 +20,7 @@ function teamNotes(report: OpportunityReport, marks?: ExportMarks) {
   if (!marks) return [];
   const items: Array<[MarkKind, string]> = [...reportNextSteps(report).map(t => ['step', t] as [MarkKind, string]), ...reportRoute(report).map(r => ['route', r.title] as [MarkKind, string]),
     ...report.milestones.map(m => ['date', m.label] as [MarkKind, string]), ...report.requirements.map(r => ['requirement', r.title] as [MarkKind, string]),
-    ...report.tasks.map(t => ['task', t.title] as [MarkKind, string]), ...report.risks.map(r => ['risk', r.title] as [MarkKind, string]), ...report.questions.map(q => ['question', q] as [MarkKind, string]),
+    ...report.tasks.map(t => ['task', t.title] as [MarkKind, string]), ...report.risks.map(r => ['risk', r.title] as [MarkKind, string]), ...(isSignalReport(report) ? report.questions : buyerQuestions(report)).map(q => ['question', q] as [MarkKind, string]),
     ...(report.submission?.folders || []).flatMap(f => f.documents.map(d => ['document', d.title] as [MarkKind, string]))];
   const seen = new Set<string>();
   return items.flatMap(([kind, label]) => {
@@ -66,7 +66,8 @@ export function opportunityReportMarkdown(report: OpportunityReport, opportunity
   }
   if (report.tasks.length) lines.push('', isSignalReport(report) ? '## Pasos comerciales' : '## Plan de trabajo', ...report.tasks.map(t => `- ${check(marks, 'task', t.title)}**${t.title}**${star('task', t.title)} · ${[t.role, t.due].filter(Boolean).join(' · ')}${t.dependency ? `\n  Antes: ${t.dependency}` : ''}${t.evidence ? `\n  Resultado: ${t.evidence}` : ''}`));
   if (report.risks.length) lines.push('', '## Riesgos y cómo cubrirlos', ...report.risks.map(r => `- **${r.title}** · ${label(r.impact)}\n  ${r.mitigation}`));
-  if (report.questions.length) lines.push('', isSignalReport(report) ? '## Preguntas para la primera conversación' : '## Preguntas para el comprador', ...report.questions.map((q, i) => `${i + 1}. ${q}`));
+  const questions = isSignalReport(report) ? report.questions : buyerQuestions(report);
+  if (questions.length) lines.push('', isSignalReport(report) ? '## Preguntas para la primera conversación' : '## Preguntas para el comprador', ...questions.map((q, i) => `${i + 1}. ${q}`));
   lines.push('', '## Números');
   if (!report.scenarios.length) lines.push('No hay escenarios numéricos disponibles: faltan costos y condiciones para calcular la garantía y el precio.');
   for (const s of report.scenarios) { const r = opportunityFinancialScenario(s); lines.push(`### ${s.name}`, ...s.assumptions.map(a => `- Supuesto: ${a}`), ...Object.entries(r).map(([k, v]) => `- ${label(k)}: ${v === null ? 'por confirmar' : money(v)}`)); }
@@ -141,9 +142,10 @@ export async function opportunityReportPdf(report: OpportunityReport, opportunit
   if (report.risks.length) { heading('Riesgos y cómo cubrirlos'); table(['Riesgo', 'Impacto', 'Cómo cubrirlo'], report.risks.map(r => [r.title, label(r.impact), r.mitigation]), lit('risk', report.risks.map(r => r.title))); }
   const notes = teamNotes(report, marks);
   if (notes.length) { heading('Notas del equipo'); table(['Sobre', 'Nota', 'Quién / cuándo'], notes.map(n => [n.label, n.note, n.by || '—']), notes.map(n => n.highlight)); }
-  if (report.questions.length) {
+  const buyerList = isSignalReport(report) ? report.questions : buyerQuestions(report);
+  if (buyerList.length) {
     heading(isSignalReport(report) ? 'Preguntas para la primera conversación' : 'Preguntas para el comprador');
-    if (isSignalReport(report)) report.questions.forEach((q, i) => text(`${i + 1}. ${q}`));
+    if (isSignalReport(report)) buyerList.forEach((q, i) => text(`${i + 1}. ${q}`));
     else { text('Correo listo para enviar dentro del plazo de consultas:', 10, [100, 116, 139]); text(consultationEmail(report, { title: opportunity?.title || report.title, buyer: opportunity?.buyer }), 9); }
   }
   heading('Números');
@@ -169,7 +171,7 @@ export async function opportunityReportExcel(report: OpportunityReport) {
   add('Plan', [['Tarea', 'Responsable', 'Hito', 'Dependencia', 'Evidencia'], ...report.tasks.map(t => [t.title, t.role, t.due, t.dependency, t.evidence])]);
   add('Riesgos', [['Riesgo', 'Impacto', 'Fundamento', 'Mitigación'], ...report.risks.map(r => [r.title, label(r.impact), label(r.basis), r.mitigation])]);
   add('Escenarios', [['Escenario', 'Costo mensual', 'Meses', 'Estructura %', 'Margen %', 'Impuesto %', 'Demora pago meses', 'Garantía %', 'Precio neto', 'Capital trabajo', 'Supuestos'], ...report.scenarios.map(s => { const r = opportunityFinancialScenario(s); return [s.name, s.monthlyCost, s.months, s.overheadPercent, s.marginPercent, s.taxPercent, s.paymentDelayMonths, s.guaranteePercent, r.totalNet, r.workingCapital, s.assumptions.join('; ')]; })]);
-  add('Preguntas', [['Pregunta'], ...report.questions.map(q => [q])]);
+  add('Preguntas', [['Pregunta'], ...(isSignalReport(report) ? report.questions : buyerQuestions(report)).map(q => [q])]);
   add('Documentos', [['Documento', 'Lectura', 'Páginas leídas', 'Páginas'], ...report.coverage.map(d => [d.name, label(d.status), d.pagesRead, d.pagesTotal])]);
   return new Uint8Array(XLSX.write(book, { bookType: 'xlsx', type: 'buffer' }));
 }

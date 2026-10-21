@@ -9,6 +9,7 @@ import * as reportView from '@/lib/commercial-opportunities/report-view';
 import * as reportMarks from '@/lib/commercial-opportunities/report-marks';
 import * as submissionKit from '@/lib/commercial-opportunities/submission-kit';
 import * as offerAnnexes from '@/lib/commercial-opportunities/offer-annexes';
+import * as markQueue from '@/lib/commercial-opportunities/mark-queue';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -26,6 +27,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/report-marks': reportMarks,
   '@/lib/commercial-opportunities/submission-kit': submissionKit,
   '@/lib/commercial-opportunities/offer-annexes': offerAnnexes,
+  '@/lib/commercial-opportunities/mark-queue': markQueue,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./ReportMarks'] = load(await compile('./ReportMarks.tsx'));
