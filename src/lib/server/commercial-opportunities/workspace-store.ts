@@ -19,9 +19,10 @@ const COLUMNS = 'id,kind,title,company_name,buyer_name,company_domain,url,score,
 export async function workspaceMembers(client: SupabaseClient, scope: WorkScope) {
   const rows = opportunityDb(await client.from('organization_members').select('user_id,role').eq('organization_id', scope.organizationId).limit(1000)) || [];
   if (!rows.length) return [];
-  const profiles = opportunityDb(await client.from('profiles').select('id,full_name').in('id', rows.map(r => r.user_id))) || [];
-  const names = new Map(profiles.map(p => [p.id, p.full_name]));
-  return rows.map(row => ({ user_id: row.user_id, role: row.role, name: String(names.get(row.user_id) || 'Integrante') }));
+  const profiles = opportunityDb(await client.from('profiles').select('id,full_name,email').in('id', rows.map(r => r.user_id))) || [];
+  // Whoever has no name yet (the app asks for it when they open it) is listed by their email, never as a stranger.
+  const names = new Map(profiles.map(p => [p.id, String(p.full_name || '').trim() || String(p.email || '').trim()]));
+  return rows.map(row => ({ user_id: row.user_id, role: row.role, name: names.get(row.user_id) || 'Integrante' }));
 }
 export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkScope, options: { view?: string; query?: string; page?: number; kinds?: string[] } = {}): Promise<WorkspaceOverview> {
   const admin = isOpportunityAdmin(scope.role);

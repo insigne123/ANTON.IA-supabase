@@ -7,6 +7,7 @@ import { AppSidebar } from '@/components/app-sidebar';
 import { PageHelpButton } from '@/components/help/PageHelp';
 import Logo from '@/components/logo';
 import { ProductTourProvider } from '@/components/onboarding/ProductTour';
+import { FullNamePrompt, useFullNamePrompt } from '@/components/profile/FullNamePrompt';
 import QuotaSync from '@/components/quota/quota-sync';
 import ThemeToggle from '@/components/theme-toggle';
 import { UsageCapture } from '@/components/admin/UsageCapture';
@@ -23,6 +24,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const adminUsage=useAdminUsageAccess(user?.id,organizationId);
+  // An account without a name is asked for it first; the welcome tour waits so two dialogs never open together.
+  const fullName = useFullNamePrompt(user?.id);
   const navAccess = useNavAccess({ userId: user?.id, email: user?.email, organizationId });
   const access = useMemo(() => ({ cowork: navAccess.cowork, opportunities: navAccess.opportunities }), [navAccess.cowork, navAccess.opportunities]);
   // The help shows the same parts of the app as the menu.
@@ -55,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         Saltar al contenido
       </a>
-      <ProductTourProvider userId={user?.id} onNavigate={(href) => router.push(href)}>
+      <ProductTourProvider userId={fullName.state === 'done' ? user?.id : undefined} onNavigate={(href) => router.push(href)}>
         <QuotaSync />
         <UsageCapture />
         <AppSidebar access={access} adminUsage={adminUsage} />
@@ -82,6 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <ShellChromeProvider value={chrome}><NavAccessProvider value={access}>{children}</NavAccessProvider></ShellChromeProvider>
           </main>
         </SidebarInset>
+        <FullNamePrompt open={fullName.state === 'missing'} onSaved={fullName.onSaved} />
       </ProductTourProvider>
     </SidebarProvider>
   );
