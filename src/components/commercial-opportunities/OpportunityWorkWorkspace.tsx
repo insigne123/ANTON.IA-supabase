@@ -37,6 +37,7 @@ import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
 import { AdvicePill, ExclusionGroups, NewsList, StartHere, TenderPrerequisites } from './OpportunityRadar';
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
+import { pickPrefillFiles } from '@/lib/commercial-opportunities/prefill-package';
 import { OPPORTUNITY_SOURCES, bySource, closesLabel, sourceKinds, workAdvice, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
@@ -110,7 +111,7 @@ export function OpportunityWorkWorkspace() {
   const [pipelineFor, setPipelineFor] = useState(filterKey);
   // «Cargar oportunidad»: from a document the AI reads (prefill.ts) or typed, and what the reading found.
   const [createMode, setCreateMode] = useState<'upload' | 'write'>('upload');
-  const [prefill, setPrefill] = useState<{ status: 'idle' | 'reading' | 'done' | 'error'; name?: string; missing?: string[]; partial?: boolean; message?: string }>({ status: 'idle' });
+  const [prefill, setPrefill] = useState<{ status: 'idle' | 'reading' | 'done' | 'error'; name?: string; missing?: string[]; partial?: boolean; message?: string; read?: string[]; kept?: number; notes?: string[] }>({ status: 'idle' });
   const [suggestions, setSuggestions] = useState<PipelineSuggestion[] | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const watching = useRef<string | null>(null);
@@ -208,18 +209,31 @@ export function OpportunityWorkWorkspace() {
     const timer = setTimeout(() => { researchReloads.current++; void loadPipeline(); }, 15_000);
     return () => clearTimeout(timer);
   }, [anyResearching, pipeline, view, selected, loadPipeline]);
-  const readDocument = async (file: File) => {
-    setPrefill({ status: 'reading', name: file.name }); setProblem('');
+  // The bases of a private process arrive as several documents, often in ZIPs: they are opened here, the ones that define the
+  // process are read together (prefill-package.ts) and all of them stay with the opportunity, as its bases.
+  const readDocuments = async (picked: File[]) => {
+    if (!picked.length) return;
+    const label = picked.length === 1 ? picked[0].name : `${picked.length} archivos`;
+    setPrefill({ status: 'reading', name: label }); setProblem('');
     try {
-      const body = new FormData(); body.set('file', file);
+      const { files: opened, notes } = await expandZipUploads(picked);
+      if (!opened.length) throw new Error(notes[0]?.message || 'No encontramos documentos que podamos leer. Escribe los datos.');
+      const { chosen } = pickPrefillFiles(opened);
+      const body = new FormData(); for (const file of chosen) body.append('file', file);
       const result = await json(await fetch('/api/commercial-opportunities/workspace/prefill', { method: 'POST', body }));
       const found = Object.fromEntries(Object.entries(result.fields || {}).filter(([, value]) => value !== '' && value !== null && value !== undefined));
       setDraft(current => ({ ...current, ...found }));
-      // The document stays with the opportunity, as one of its bases.
-      setFiles(current => [file, ...current.filter(item => item.name !== file.name)]);
-      setPrefill({ status: 'done', name: file.name, missing: result.missing || [], partial: Boolean(result.partial) });
+      setFiles(current => [...opened, ...current.filter(item => !opened.some(file => file.name === item.name))]);
+      const skipped = ((result.skipped || []) as Array<{ name: string; why: string }>).map(item => `«${item.name}»: ${item.why}`);
+      setPrefill({ status: 'done', name: label, missing: result.missing || [], partial: Boolean(result.partial), read: result.read || [], kept: opened.length, notes: [...notes.map(note => note.message), ...skipped] });
       setCreateMode('write');
-    } catch (e) { setPrefill({ status: 'error', name: file.name, message: e instanceof Error ? e.message : 'No pudimos leer el documento. Escribe los datos.' }); }
+    } catch (e) { setPrefill({ status: 'error', name: label, message: e instanceof Error ? e.message : 'No pudimos leer el documento. Escribe los datos.' }); }
+  };
+  // «Bases y anexos»: a ZIP goes up as the documents inside it, like in Documentos.
+  const addFiles = async (chosen: File[]) => {
+    const { files: opened, notes } = await expandZipUploads(chosen);
+    setFiles(current => [...current, ...opened.filter(file => !current.some(item => item.name === file.name))]);
+    if (notes.length) setProblem(notes.map(note => note.message).join(' '));
   };
   const review = async () => {
     setReviewing(true); setProblem('');
@@ -497,26 +511,26 @@ export function OpportunityWorkWorkspace() {
           <div role="group" aria-label="Cómo cargarla" className="flex w-full rounded-xl bg-muted p-1 sm:w-fit">{([['upload', 'Subir documento'], ['write', 'Escribir los datos']] as const).map(([key, label]) =>
             <button key={key} type="button" aria-pressed={createMode === key} disabled={prefill.status === 'reading'} onClick={() => setCreateMode(key)} className={cn('flex-1 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 sm:flex-none', createMode === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}</div>
           {createMode === 'upload' ? <div className="space-y-3">
-            <label htmlFor="op-prefill-file" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files?.[0]; if (file && prefill.status !== 'reading') void readDocument(file); }}
+            <label htmlFor="op-prefill-file" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const dropped = Array.from(e.dataTransfer.files || []); if (dropped.length && prefill.status !== 'reading') void readDocuments(dropped); }}
               className={cn('flex cursor-pointer flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-10 text-center transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-muted/40', prefill.status === 'reading' && 'cursor-wait')}>
               {prefill.status === 'reading' ? <Loader2 className="h-6 w-6 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" /> : <FileUp className="h-6 w-6 text-primary" aria-hidden="true" />}
-              <span className="max-w-md space-y-1"><span className="block font-medium">{prefill.status === 'reading' ? `Leyendo «${prefill.name}»…` : 'Sube la invitación, las bases o el correo'}</span>
-                <span className="block text-sm leading-6 text-muted-foreground">{prefill.status === 'reading' ? 'La IA está completando el formulario. Tarda unos segundos.' : 'La IA lee el documento y completa el formulario. Tú lo revisas antes de guardar.'}</span></span>
-              {prefill.status !== 'reading' ? <span className="inline-flex h-9 items-center rounded-md border bg-background px-4 text-sm font-medium shadow-sm">Elegir documento</span> : null}
-              <input id="op-prefill-file" type="file" className="sr-only" accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.html,.htm,.docm,.dotx,.xlsm,.xltx,.odt,.ods,.pptx,.rtf,.jpg,.jpeg,.png,.webp,.gif" disabled={prefill.status === 'reading'} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void readDocument(file); }} />
+              <span className="max-w-md space-y-1"><span className="block font-medium">{prefill.status === 'reading' ? `Leyendo ${prefill.name?.includes(' archivos') ? prefill.name : `«${prefill.name}»`}…` : 'Sube la invitación, las bases o el correo'}</span>
+                <span className="block text-sm leading-6 text-muted-foreground">{prefill.status === 'reading' ? 'La IA está completando el formulario. Tarda unos segundos.' : 'Puedes subir varios documentos o el ZIP con las bases y los anexos. La IA lee los más importantes y completa el formulario; tú lo revisas antes de guardar.'}</span></span>
+              {prefill.status !== 'reading' ? <span className="inline-flex h-9 items-center rounded-md border bg-background px-4 text-sm font-medium shadow-sm">Elegir documentos</span> : null}
+              <input id="op-prefill-file" type="file" multiple className="sr-only" accept={ACCEPTED_FILES} disabled={prefill.status === 'reading'} onChange={e => { const chosen = Array.from(e.target.files || []); e.target.value = ''; void readDocuments(chosen); }} />
             </label>
             {prefill.status === 'reading' ? <p role="status" className="sr-only">Leyendo el documento</p> : null}
             {prefill.status === 'error' ? <p role="alert" className="text-sm text-destructive">{prefill.message}</p> : null}
-            <p className="text-xs text-muted-foreground">PDF, Word, Excel, texto o una foto del documento, hasta 20 MB. El documento queda guardado con la oportunidad.</p>
+            <p className="text-xs text-muted-foreground">PDF, Word, Excel, texto, fotos o un ZIP, hasta 20 MB cada documento. Todos quedan guardados con la oportunidad.</p>
           </div> : <>
-            {prefill.status === 'done' ? <div role="status" className="flex gap-2 rounded-xl bg-primary/5 px-3 py-2.5 text-sm leading-6"><Sparkles className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><p>Completamos el formulario con «{prefill.name}». Revisa los datos antes de guardar.{prefill.missing?.length ? ` No encontramos ${listEs(prefill.missing)}.` : ''}{prefill.partial ? ' El documento es largo: leímos su primera parte.' : ''}</p></div> : null}
+            {prefill.status === 'done' ? <div role="status" className="flex gap-2 rounded-xl bg-primary/5 px-3 py-2.5 text-sm leading-6"><Sparkles className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" /><div className="space-y-1"><p>{(prefill.read?.length ?? 0) > 1 ? `Completamos el formulario leyendo ${prefill.read!.length} documentos${(prefill.kept ?? 0) > prefill.read!.length ? ` (los ${prefill.kept} quedan para subir con la oportunidad)` : ''}.` : `Completamos el formulario con «${prefill.name}».`} Revisa los datos antes de guardar.{prefill.missing?.length ? ` No encontramos ${listEs(prefill.missing)}.` : ''}{prefill.partial ? ((prefill.read?.length ?? 0) > 1 ? ' Algunos documentos son largos: leímos sus partes más importantes.' : ' El documento es largo: leímos su primera parte.') : ''}</p>{prefill.notes?.length ? <p className="text-xs text-muted-foreground">{prefill.notes.join(' ')}</p> : null}</div></div> : null}
             {[['title', 'Nombre de la oportunidad'], ['company', 'Cliente o entidad convocante'], ['url', 'Enlace · opcional']].map(([key, label]) => <div key={key} className="space-y-2"><Label htmlFor={`op-new-${key}`}>{label}</Label><Input id={`op-new-${key}`} type={key === 'url' ? 'url' : 'text'} required={key !== 'url'} value={draft[key] || ''} onChange={e => field(key, e.target.value)} /></div>)}
             <div className="space-y-2"><Label htmlFor="op-kind">Tipo</Label><select id="op-kind" value={draft.kind || 'private_tender'} onChange={e => field('kind', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="private_tender">Licitación privada</option><option value="proposal">Solicitud de propuesta</option><option value="quote">Solicitud de cotización</option><option value="commercial">Oportunidad comercial</option></select></div>
-            <div className="space-y-2"><Label htmlFor="op-invitation">Invitación o contexto recibido</Label><Textarea id="op-invitation" rows={8} className="resize-y leading-6" value={draft.description || ''} onChange={e => field('description', e.target.value)} maxLength={40000} placeholder="Pega aquí el correo o mensaje con la invitación." /></div>
+            <div className="space-y-2"><Label htmlFor="op-invitation">Invitación o contexto recibido</Label><Textarea id="op-invitation" rows={8} className="resize-y leading-6" value={draft.description || ''} onChange={e => field('description', e.target.value)} maxLength={40000} placeholder="Pega aquí el correo o mensaje con la invitación." /><p className="text-xs text-muted-foreground">Pega también el correo de la invitación: suele decir por qué plataforma se postula (Coupa, Ariba, WEX…) y qué hay que ingresar en ella.</p></div>
             <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem]"><div className="space-y-2"><Label htmlFor="op-new-deadline">Cierre · hora local, opcional</Label><Input id="op-new-deadline" type="datetime-local" value={draft.deadline || ''} onChange={e => field('deadline', e.target.value)} /></div><div className="space-y-2"><Label htmlFor="op-amount">Monto · opcional</Label><Input id="op-amount" type="number" min={0} value={draft.amount || ''} onChange={e => field('amount', e.target.value)} /></div><div className="space-y-2"><Label htmlFor="op-currency">Moneda</Label><Input id="op-currency" value={draft.currency || 'CLP'} onChange={e => field('currency', e.target.value)} /></div></div>
-            <div className="space-y-2"><Label htmlFor="op-new-files">Bases y anexos</Label><Input id="op-new-files" type="file" multiple accept={ACCEPTED_FILES} onChange={e => { const chosen = Array.from(e.target.files || []); e.target.value = ''; setFiles(current => [...current, ...chosen.filter(file => !current.some(item => item.name === file.name))]); }} />
+            <div className="space-y-2"><Label htmlFor="op-new-files">Bases y anexos</Label><Input id="op-new-files" type="file" multiple accept={ACCEPTED_FILES} onChange={e => { const chosen = Array.from(e.target.files || []); e.target.value = ''; void addFiles(chosen); }} />
               {files.length ? <ul className="flex flex-wrap gap-2" aria-label="Documentos que se subirán">{files.map(file => <li key={file.name} className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted py-1 pl-3 pr-1 text-xs"><span className="truncate">{file.name}</span><button type="button" className="rounded-full p-1 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Quitar ${file.name}`} onClick={() => setFiles(current => current.filter(item => item !== file))}><X className="h-3 w-3" aria-hidden="true" /></button></li>)}</ul> : null}
-              <p className="text-xs text-muted-foreground">PDF, Word, Excel o fotos, hasta 20 MB cada uno. También puedes subirlos después en Documentos.</p></div>
+              <p className="text-xs text-muted-foreground">PDF, Word, Excel, fotos o un ZIP, hasta 20 MB cada documento. También puedes subirlos después en Documentos.</p></div>
           </>}
         </>}
         {problem && modal && <p role="alert" className="text-sm text-destructive">{problem}</p>}<div className="sticky bottom-0 -mx-6 -mb-6 flex justify-end gap-2 border-t bg-background/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"><Button variant="outline" type="button" disabled={busy} onClick={() => setModal(null)}>Cancelar</Button>{modal === 'create' && createMode === 'upload' ? null : <Button type="submit" disabled={busy || prefill.status === 'reading'}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{modal === 'context' ? 'Confirmar oferta' : modal === 'criteria' ? 'Guardar' : modal === 'assign' ? 'Asignar y notificar' : 'Guardar'}</Button>}</div>

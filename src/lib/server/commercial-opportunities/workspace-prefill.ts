@@ -16,7 +16,8 @@ export async function runOpportunityPrefill(client: SupabaseClient, job: Opportu
   if (!job.payload.scanned && text.trim().length < 40) throw new AuthError('No encontramos texto en el documento. Escribe los datos.', 422);
   const read = job.payload.scanned ? String(job.payload.sha || '') : createHash('sha256').update(text).digest('hex');
   const answer = await opportunityGenerate(client, job, { step: `prefill:${read.slice(0, 32)}`, category: 'evaluation', role: 'extract',
-    schema: prefillAnswerSchema, output: 2000, prompt: prefillPrompt({ name: String(job.payload.name || 'documento').slice(0, 200), text: job.payload.scanned ? PREFILL_SCANNED : text, today: opportunityLocalClock().day }),
+    schema: prefillAnswerSchema, output: 2000, prompt: prefillPrompt({ name: String(job.payload.name || 'documento').slice(0, 200), text: job.payload.scanned ? PREFILL_SCANNED : text, today: opportunityLocalClock().day,
+      documents: Number(job.payload.documents) || 1 }),
     ...(job.payload.scanned ? { attachments, attachmentTokens: Number(job.payload.attachmentTokens) || 0 } : {}) });
   return prefillFields(answer);
 }
