@@ -83,3 +83,27 @@ test('what arrived since the last visit, each source on its own; one that fails 
   // Never asked Cowork anything: nothing to compare with.
   assert.equal(await loadCoworkSinceLastVisit({ client: fakeClient({}) as never, admin, opportunities: true }, scope, NOW), null);
 });
+
+test('a person who only sees what was assigned to them hears about those, never about the workspace\'s new ones', async () => {
+  const OTHER = '00000000-0000-4000-8000-0000000000ee';
+  const tables = { cowork_runs: runs };
+  const workerTables = {
+    commercial_opportunities: [
+      { id: 'o1', title: 'Servicio de guardias Municipalidad', kind: 'tender', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
+      { id: 'o2', title: 'Aseo antes de la visita', kind: 'tender', status: 'new', first_seen_at: '2026-10-01T11:20:00Z', organization_id: ORG },
+      { id: 'o3', title: 'De otra persona', kind: 'tender', status: 'new', first_seen_at: '2026-10-05T11:20:00Z', organization_id: ORG },
+    ],
+    opportunity_participants: [
+      { organization_id: ORG, opportunity_id: 'o1', user_id: USER, assigned_at: '2026-10-05T11:30:00Z' },
+      { organization_id: ORG, opportunity_id: 'o2', user_id: USER, assigned_at: '2026-10-01T11:30:00Z' },
+      { organization_id: ORG, opportunity_id: 'o3', user_id: OTHER, assigned_at: '2026-10-05T11:30:00Z' },
+    ],
+  };
+  const worker = fakeClient(workerTables);
+  const since = await loadCoworkSinceLastVisit({ client: fakeClient(tables) as never, admin: () => worker as never, opportunities: 'assigned' }, scope, NOW);
+  assert.deepEqual(since?.items.map(item => item.text), ['Te asignaron una oportunidad: Servicio de guardias Municipalidad']);
+  assert.equal(worker.reads.filter(table => table === 'commercial_opportunities').length, 1, 'only the titles of what was assigned are read');
+  // Nothing assigned since the last visit: nothing is said (not the workspace\'s count either).
+  const quiet = await loadCoworkSinceLastVisit({ client: fakeClient(tables) as never, admin: () => fakeClient({ ...workerTables, opportunity_participants: [] }) as never, opportunities: 'assigned' }, scope, NOW);
+  assert.deepEqual(quiet?.items, []);
+});
