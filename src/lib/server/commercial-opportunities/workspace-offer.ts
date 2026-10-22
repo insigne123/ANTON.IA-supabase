@@ -1,3 +1,4 @@
+import { canSetPrices } from '@/lib/commercial-opportunities/member-work';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
@@ -125,6 +126,9 @@ export async function readOpportunityOffer(client: SupabaseClient, scope: WorkSc
 /** Saves the unit prices of the latest draft, only if nobody changed them since the page read them. */
 export async function saveOpportunityOfferPrices(client: SupabaseClient, scope: WorkScope, id: string, input: { draftId: string; expectedRevision: number; prices: Record<string, unknown> }) {
   await assertOpportunityRead(client, scope, id);
+  // The prices are the company's commitment: whoever is in charge or an administrator sets them (member-work.ts).
+  const work = opportunityDb(await client.from('opportunity_work').select('responsible_id').eq('organization_id', scope.organizationId).eq('opportunity_id', id).maybeSingle()) as { responsible_id: string | null } | null;
+  if (!canSetPrices(scope.role, scope.userId, work?.responsible_id)) throw new AuthError('Los precios los fija quien está a cargo de la oportunidad o un administrador.', 403);
   const row = opportunityDb(await client.from(DRAFTS).select('draft').eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('id', input.draftId).maybeSingle());
   if (!row) throw new AuthError('No encontramos ese borrador.', 404);
   const prices = cleanOfferPrices(input.prices, (row.draft as OfferDraft).economic.lines.length);
