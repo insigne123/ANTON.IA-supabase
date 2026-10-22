@@ -11,13 +11,13 @@ import * as assignmentEmail from '../../lib/commercial-opportunities/assignment-
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-const el = (tag: string) => (props: any) => React.createElement(tag, props);
+function El(tag: string) { const Component = (props: any) => React.createElement(tag, props); Component.displayName = tag; return Component; }
 const dependencies: Record<string, unknown> = {
   'lucide-react': new Proxy({}, { get: () => 'svg' }),
   '@/components/ui/button': { Button: (props: any) => React.createElement('button', { ...props, variant: undefined, size: undefined }) },
-  '@/components/ui/textarea': { Textarea: el('textarea') }, '@/components/ui/label': { Label: el('label') }, '@/components/ui/input': { Input: el('input') },
+  '@/components/ui/textarea': { Textarea: El('textarea') }, '@/components/ui/label': { Label: El('label') }, '@/components/ui/input': { Input: El('input') },
   // The dialog\'s content only exists while it is open; closed, as here, the page shows nothing of it.
-  '@/components/ui/dialog': { Dialog: ({ open, children }: any) => (open ? React.createElement('div', null, children) : null), DialogContent: el('div'), DialogHeader: el('div'), DialogTitle: el('h2'), DialogDescription: el('p') },
+  '@/components/ui/dialog': { Dialog: ({ open, children }: any) => (open ? React.createElement('div', null, children) : null), DialogContent: El('div'), DialogHeader: El('div'), DialogTitle: El('h2'), DialogDescription: El('p') },
   '@/lib/commercial-opportunities/member-work': memberWork,
   '@/lib/commercial-opportunities/assignment-email': assignmentEmail,
 };
