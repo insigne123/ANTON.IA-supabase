@@ -9,11 +9,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { CompanyDocuments } from './CompanyDocuments';
-import { CERTIFICATIONS, CHILE_REGIONS, COMPANY_SIZES, EMPTY_TENDER_PROFILE, PROVIDER_REGISTRY, normalizeRut, tenderProfileProgress,
+import { CERTIFICATIONS, CHILE_REGIONS, COMPANY_SIZES, EMPTY_TENDER_PROFILE, PROVIDER_REGISTRY, WOMEN_OWNERSHIP, femaleLedSeal, normalizeRut, tenderProfileProgress,
   type TenderProfile, type TenderProfileField, type TenderProfileSuggestion } from '@/lib/commercial-opportunities/tender-profile';
 
 type View = { available: boolean; profile: TenderProfile; revision: number; updatedAt: string | null; progress: { answered: number; total: number }; reconsiderable: number };
-const NUMBERS = ['employees', 'yearsOperating', 'staffCapacity', 'contractMin', 'contractMax', 'guaranteeMax'] as const;
+const NUMBERS = ['employees', 'yearsOperating', 'staffCapacity', 'contractMin', 'contractMax', 'guaranteeMax', 'legalReps', 'legalRepsWomen'] as const;
 type NumberField = typeof NUMBERS[number];
 /** The form as typed: numbers as text («5.000.000»), everything else as the profile keeps it. */
 export type TenderProfileForm = Omit<TenderProfile, NumberField> & Record<NumberField, string>;
@@ -59,6 +59,15 @@ function Choice<T extends string>({ legend, name, value, options, onChange }: { 
       </div>
     </fieldset>
   );
+}
+
+/** What the answers above give: whether the company has the seal, with the reason, as soon as the person answers. */
+function SealResult({ profile }: { profile: TenderProfile }) {
+  const seal = femaleLedSeal(profile);
+  const text = seal.status === 'si' ? `Cumples el Sello Empresa Mujer: ${seal.because}. Las licitaciones que lo premian te suman puntaje.`
+    : seal.status === 'solicitar' ? `Puedes pedir el Sello Empresa Mujer: ${seal.because}.`
+      : seal.status === 'no' ? 'Con estas respuestas no cumples las condiciones del sello.' : 'Responde lo que sepas y te decimos si cumples el sello.';
+  return <p role="status" className={seal.status === 'si' ? 'rounded-lg bg-cw-success-soft px-3 py-2 text-sm' : 'rounded-lg bg-muted/40 px-3 py-2 text-sm text-muted-foreground'}>{text}</p>;
 }
 
 /** The questions, in the groups of tender-profile.ts. Rendered on its own so it can be tested without the sheet. */
@@ -165,6 +174,25 @@ export function TenderProfileFields({ form, sources, onChange }: { form: TenderP
         </Field>
         {amount('guaranteeMax', 'Garantía máxima que puedes entregar (CLP)', 'Ej.: 10.000.000', 'Boleta, póliza o certificado de fianza: lo que tu banco o aseguradora te da hoy.')}
         <Choice legend="¿Tienes seguro de responsabilidad civil vigente?" name="tp-insurance" value={form.insurance} options={[['si', 'Sí'], ['no', 'No']]} onChange={value => set('insurance', value)} />
+      </section>
+
+      <section aria-labelledby="tp-seal" className="space-y-4">
+        <div>
+          <h3 id="tp-seal" className="text-sm font-semibold">Liderazgo y Sello Empresa Mujer</h3>
+          <p className="text-xs text-muted-foreground">ChileCompra da este sello a las empresas que cumplen al menos una de estas condiciones, y muchas bases lo premian con puntaje. Solo contamos: no hace falta escribir nombres.</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {amount('legalReps', 'Representantes legales', 'Ej.: 3')}
+          {amount('legalRepsWomen', 'De ellos, mujeres', 'Ej.: 2')}
+        </div>
+        <Choice legend="¿La gerencia general la ejerce una mujer?" name="tp-manager" value={form.womanGeneralManager} options={[['si', 'Sí'], ['no', 'No']]} onChange={value => set('womanGeneralManager', value)} />
+        <Field id="tp-ownership" label="Propiedad de la empresa en manos de mujeres">
+          <select id="tp-ownership" value={form.womenOwnership || ''} onChange={event => set('womenOwnership', (event.target.value || null) as TenderProfile['womenOwnership'])} className="block h-10 w-full rounded-md border bg-background px-3 text-sm">
+            <option value="">No sé</option>
+            {Object.entries(WOMEN_OWNERSHIP).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
+        </Field>
+        <SealResult profile={profileFromForm(form)} />
       </section>
 
       <section aria-labelledby="tp-means" className="space-y-4">

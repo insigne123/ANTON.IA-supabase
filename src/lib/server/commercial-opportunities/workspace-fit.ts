@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
 import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
-import { readTenderProfile, tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
+import { femaleLedSeal, readTenderProfile, tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
 import { requirementFitPrompt, requirementFitSchema, resolveRequirementFit, type ReportFit } from '@/lib/commercial-opportunities/requirement-fit';
 import { opportunityDb } from './workspace-store';
 import { assertOpportunityRead } from './workspace-access';
@@ -24,11 +24,13 @@ export async function readOpportunityFit(client: SupabaseClient, organizationId:
   const [fit, profile] = await Promise.all([
     reportId ? client.from(TABLE).select('items,no_rests_on_requirements,profile_revision,created_at').eq('organization_id', organizationId).eq('report_id', reportId)
       .order('created_at', { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null, error: null }),
-    client.from('opportunity_tender_profile').select('revision').eq('organization_id', organizationId).maybeSingle(),
+    client.from('opportunity_tender_profile').select('revision,answers').eq('organization_id', organizationId).maybeSingle(),
   ]);
   // Before its migration the table is missing: the report reads as before.
-  if (fit.error) return { available: false, latest: null, profileRevision: null };
-  return { available: true, latest: fit.data ? fitFromRow(fit.data) : null, profileRevision: profile.error || !profile.data ? null : Number(profile.data.revision) };
+  if (fit.error) return { available: false, latest: null, profileRevision: null, seal: null };
+  const stored = profile.error || !profile.data ? null : profile.data;
+  return { available: true, latest: fit.data ? fitFromRow(fit.data) : null, profileRevision: stored ? Number(stored.revision) : null,
+    seal: stored ? femaleLedSeal(readTenderProfile(stored.answers)) : null };
 }
 
 /** A reading of the latest report with the current profile, once per report and profile version. Returns the job's key. */

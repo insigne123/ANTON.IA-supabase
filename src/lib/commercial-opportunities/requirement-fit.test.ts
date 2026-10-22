@@ -54,6 +54,8 @@ test('the prompt reads the requirements with their citation and the profile with
   assert.match(prompt, /"index":1,"titulo":"Boleta de garantía de seriedad por \$4\.500\.000"/);
   assert.match(prompt, /"cita":null/, 'an uncited requirement says so');
   assert.match(prompt, /"garantiaMaximaQuePuedeEntregar":"no sé"/);
+  assert.match(prompt, /"selloEmpresaMujer":"no sé"/);
+  assert.match(prompt, /mira «selloEmpresaMujer» de la ficha y no la lista de certificaciones/);
   assert.match(prompt, /"respuestasDeLaEmpresa":\["¿Boleta por \$4\.500\.000\? → Sí"\]/, 'the company\'s answers count as facts');
 });
 

@@ -109,7 +109,11 @@ test('the reading is saved for the report and the profile version, kept honest, 
   assert.deepEqual(Object.values(saved.items).map((item: any) => item.fit), ['meets', 'missing'], 'a «no cumples» without a fact against it is a question');
   const view = await readOpportunityFit(client, 'org', 'r1');
   assert.deepEqual([view.available, view.profileRevision, view.latest.profileRevision], [true, 3, 3]);
-  assert.deepEqual(await readOpportunityFit(memory({}, ['opportunity_requirement_fit']).client, 'org', 'r1'), { available: false, latest: null, profileRevision: null });
+  assert.equal(view.seal.status, 'no_se', 'the report page also gets what the profile says about the Sello Empresa Mujer');
+  assert.deepEqual(await readOpportunityFit(memory({}, ['opportunity_requirement_fit']).client, 'org', 'r1'), { available: false, latest: null, profileRevision: null, seal: null });
+  const led = memory({ ...seed(), opportunity_tender_profile: [{ organization_id: 'org', revision: 4, answers: { legalReps: 3, legalRepsWomen: 2 } }] });
+  assert.deepEqual((await readOpportunityFit(led.client, 'org', null)).seal, { status: 'si', because: '2 de 3 representantes legales son mujeres' });
+  assert.equal((await readOpportunityFit(memory({ ...seed(), opportunity_tender_profile: [] }).client, 'org', null)).seal, null, 'no profile, no seal');
   assert.deepEqual((await readOpportunityFit(memory(seed()).client, 'org', null)).latest, null);
   await assert.rejects(runRequirementFit(client, { ...job, payload: { reportId: 'r1', profileRevision: 2 } }), /La ficha cambió/);
 });
