@@ -46,11 +46,17 @@
   - Al subir la invitación, las bases o el correo, la IA completa el formulario: nombre, cliente o entidad, enlace, tipo, contexto, cierre, monto y moneda.
   - Pasa a «Escribir los datos» con un aviso: «Completamos el formulario con «archivo». Revisa los datos antes de guardar». Si falta algo, el aviso dice qué no encontró (el cierre, la hora de cierre, el monto, el cliente).
   - El documento queda en «Bases y anexos» y se sube con la oportunidad al guardar. La lista muestra cada archivo con «Quitar».
-- **Formatos:** PDF, Word (.docx y .doc), Excel (.xlsx y .xls), texto, Markdown, CSV y HTML, hasta 20 MB.
-  - Se leen con el mismo extractor del expediente (`extractOpportunityFile`), hasta 50.000 caracteres. Si el documento es más largo, el aviso dice que se leyó su primera parte.
+- **Un paquete, no solo un archivo (desde el 22 de octubre de 2026):** una licitación privada llega como varios documentos, muchas veces en ZIP (invitación, condicionado general y particular, bases técnicas, contrato marco, anexos).
+  - Se pueden elegir o soltar varios archivos y ZIP a la vez. El navegador abre cada ZIP (`expandZipUploads`, el mismo del expediente) y todos los documentos quedan en «Bases y anexos». «Bases y anexos» también abre ZIP.
+  - La IA lee juntos hasta 8 documentos, 24 MB en total (`pickPrefillFiles`): primero los que definen el proceso (invitación o condicionado particular, bases generales, bases técnicas) y al final los anexos y el contrato. Una ley o un decreto que las bases citan solo se lee si no hay otra cosa.
+  - Se reparte el texto en partes iguales (50.000 caracteres en total; los que definen el proceso pesan el doble). Un documento corto se lee entero y devuelve lo que no usa; uno largo se corta dejando su inicio y los pasajes con el cronograma, la plataforma, las garantías, la vigencia y el monto (`prefillPackageText`).
+  - El aviso dice cuántos documentos se leyeron y cuáles quedaron fuera y por qué (un escaneado dentro de un paquete no se lee: solo se lee si se sube solo).
+  - En una licitación o proceso privado la descripción trae la plataforma (Coupa, SAP Ariba, WEX…), el administrador del proceso y las fechas del cronograma, y el cierre es la entrega de ofertas, no la de consultas ni la confirmación de participación. Un precio por hora, una tarifa o el monto de una garantía no se toman como presupuesto.
+- **Formatos:** PDF, Word (.docx y .doc), Excel (.xlsx y .xls), texto, Markdown, CSV, HTML, fotos y ZIP, hasta 20 MB cada documento.
+  - Se leen con el mismo extractor del expediente (`extractOpportunityFile`), hasta 50.000 caracteres. Si un solo documento es más largo, el aviso dice que se leyó su primera parte.
   - Un PDF escaneado, sin texto, se rechaza con el mensaje «escribe los datos».
 - **Cómo funciona:**
-  - La ruta es `POST /api/commercial-opportunities/workspace/prefill` (multipart, solo administradores).
+  - La ruta es `POST /api/commercial-opportunities/workspace/prefill` (multipart con uno o más `file`, solo administradores).
   - Crea un trabajo `evaluate` con `payload.prefill` y lo corre en la misma petición (`runQueuedOpportunityJobNow`). Haiku 5.5 trabaja con el rol `extract`, dentro del presupuesto del workspace.
   - Al terminar borra el texto del documento del trabajo. No se guarda nada hasta que la persona pulsa «Guardar».
   - No necesita la oferta del workspace confirmada.
