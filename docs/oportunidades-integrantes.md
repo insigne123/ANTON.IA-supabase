@@ -39,6 +39,6 @@ Los precios de la oferta y lo que se responde en «¿Cumplimos?» son afirmacion
 
 Tampoco hay migración: las propuestas usan la actividad de la oportunidad (`fit_proposal`).
 
-## Pendiente (otro PR)
+## Precio
 
-- Escenarios de puntaje por precio y la calculadora de valor hora.
+Los escenarios de puntaje por precio y la calculadora de valor hora están en [oportunidades-precio.md](oportunidades-precio.md).

@@ -27,6 +27,8 @@ import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/rep
 import { OpportunityContacts } from './OpportunityContacts';
 import { DecisionCallout, MemberStrip } from './MemberWork';
 import { FitProposals } from './FitProposals';
+import { PriceStudio } from './PriceStudio';
+import { studioKey } from '@/lib/commercial-opportunities/price-studio';
 import { MEMBER_FILTERS, memberFilter, memberView, openDecision, pendingFitProposals } from '@/lib/commercial-opportunities/member-work';
 import { OpportunityChat } from './OpportunityChat';
 import { OpportunityAssistant } from './OpportunityAssistant';
@@ -503,7 +505,8 @@ export function OpportunityWorkWorkspace() {
               fit={detail.fit} fitBusy={busy} onFit={() => void checkFit('fit', {})} onAnswer={(question, answer) => void checkFit('fit_answer', { question, answer })} />
           </>}
         </div>}
-        {tab === 'apply' && !signal && <SubmissionKit report={latest?.report ?? null} opportunity={{ title: item.title, kind: item.kind, amount: item.amount, currency: item.currency, deadline: item.deadline_at }}
+        {tab === 'apply' && !signal && <div className="space-y-5">
+          <SubmissionKit report={latest?.report ?? null} opportunity={{ title: item.title, kind: item.kind, amount: item.amount, currency: item.currency, deadline: item.deadline_at }}
           marks={detail.marks} onMark={mark} people={detail.members || detail.participants} onGenerate={generate} generating={researching}
           hideNumbers={Boolean(detail.offer?.latest?.draft.economic.lines.length)}
           annexes={detail.offer?.latest?.draft.annexes} annexHref={index => `/api/commercial-opportunities/${selected}/export?doc=offer&format=docx&annex=${index}`}
@@ -512,7 +515,10 @@ export function OpportunityWorkWorkspace() {
             annexHref={index => `/api/commercial-opportunities/${selected}/export?doc=offer&format=docx&annex=${index}`}
             canPrice={detail.offer?.canPrice !== false}
             budget={{ amount: latest.report.submission?.numbers.budget ?? item.amount, includesTax: latest.report.submission?.numbers.budgetIncludesTax ?? null }} /> : null}
-          onDraft={latest ? title => ask(`Prepara el borrador de «${title}» como un formulario listo para llenar y pegar en Word: el título tal como lo dan las bases, una tabla de dos columnas (Campo | Dato) con los datos de mi empresa que conoces, el texto de cada declaración o cláusula tal como lo piden las bases, y [corchetes] para lo que falte. Si no tienes el formato oficial en los fragmentos, dilo al comienzo en una frase.`) : undefined} />}
+          onDraft={latest ? title => ask(`Prepara el borrador de «${title}» como un formulario listo para llenar y pegar en Word: el título tal como lo dan las bases, una tabla de dos columnas (Campo | Dato) con los datos de mi empresa que conoces, el texto de cada declaración o cláusula tal como lo piden las bases, y [corchetes] para lo que falte. Si no tienes el formato oficial en los fragmentos, dilo al comienzo en una frase.`) : undefined} />
+          {/* The cost of an hour and the points the price is worth: for whoever sets the prices (an administrator or whoever is in charge). */}
+          {OFFER_KINDS.includes(item.kind) && detail.offer?.canPrice !== false ? <PriceStudio storageKey={studioKey(user?.id, item.id)} /> : null}
+        </div>}
         {tab === 'market' && MARKET_KINDS.includes(item.kind) && <WinPlan id={selected} />}
         {tab === 'documents' && <section className="space-y-5">
           {!signal && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={Boolean(latest)} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
