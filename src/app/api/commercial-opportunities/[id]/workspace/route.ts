@@ -1,9 +1,10 @@
+import { after } from 'next/server';
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityRead, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
 import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb, saveOpportunityReportMark } from '@/lib/server/commercial-opportunities/workspace-store';
 import { markInputSchema } from '@/lib/commercial-opportunities/report-marks';
 import { applyAutomaticMove, routeKindOf, undoAutomaticMove } from '@/lib/server/commercial-opportunities/workspace-pipeline';
-import { assignmentSchema, activitySchema, taskSchema, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
+import { assignmentSchema, activitySchema, taskSchema, isOpportunityAdmin, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
 import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
@@ -11,6 +12,9 @@ import { enqueueOpportunityOffer, readOpportunityOffer, saveOpportunityOfferPric
 import { answerFitQuestion, enqueueRequirementFit, readOpportunityFit } from '@/lib/server/commercial-opportunities/workspace-fit';
 import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { AuthError } from '@/lib/server/auth-utils';
+import { notifyNewParticipants, readParticipantIds } from '@/lib/server/commercial-opportunities/workspace-assignment-notice';
+import { notifyManagers, recordDecision, replyToDecision } from '@/lib/server/commercial-opportunities/workspace-decisions';
+import { decisionReplySchema, decisionSchema, memberMayMove, stateNoteSchema } from '@/lib/commercial-opportunities/member-work';
 
 export const dynamic = 'force-dynamic';
 const STATE_LABELS: Record<string, string> = { unassigned: 'sin asignar', assigned: 'asignada', working: 'en gestión', blocked: 'bloqueada', submitted: 'oferta presentada', won: 'ganada', lost: 'perdida', archived: 'archivada' };
@@ -28,8 +32,16 @@ export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer']), data: z.unknown() }).strict().parse(await request.json());
-    if (action === 'assign') return opportunitiesJson({ revision: await assignOpportunity(auth.admin, scope, id, assignmentSchema.parse(data)) });
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
+    if (action === 'assign') {
+      const input = assignmentSchema.parse(data); const before = await readParticipantIds(auth.admin, scope, id);
+      const revision = await assignOpportunity(auth.admin, scope, id, input);
+      // Whoever joined the team gets the email after the answer is sent: a failure there never fails the assignment.
+      after(() => notifyNewParticipants(auth.admin, scope, id, before).catch(() => null));
+      return opportunitiesJson({ revision });
+    }
+    if (action === 'decision') { await recordDecision(auth.admin, scope, id, decisionSchema.parse(data)); return opportunitiesJson({ ok: true }); }
+    if (action === 'decision_reply') { assertOpportunityAdmin(scope); await replyToDecision(auth.admin, scope, id, decisionReplySchema.parse(data)); return opportunitiesJson({ ok: true }); }
     if (action === 'activity') {
       const input = activitySchema.parse(data); await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
     }
@@ -54,12 +66,22 @@ export async function POST(request: Request, context: Context) {
       return opportunitiesJson(await saveOpportunityOfferPrices(auth.admin, scope, id, input));
     }
     if (action === 'state') {
-      const input = z.object({ state: z.enum(WORK_STATES), expectedRevision: z.number().int().nonnegative() }).strict().parse(data);
-      if (['unassigned', 'assigned', 'won', 'lost', 'archived'].includes(input.state)) assertOpportunityAdmin(scope);
+      const input = z.object({ state: z.enum(WORK_STATES), expectedRevision: z.number().int().nonnegative(), note: z.string().trim().max(500).optional() }).strict().parse(data);
+      if (!isOpportunityAdmin(scope.role)) {
+        // A member moves the work along (managing it, blocked, presented); the stages the administrators set stay theirs, and so does
+        // an opportunity they already closed.
+        const current = opportunityDb(await auth.admin.from('opportunity_work').select('state').eq('organization_id', scope.organizationId).eq('opportunity_id', id).maybeSingle()) as { state: any } | null;
+        if (!memberMayMove(current?.state, input.state)) throw new AuthError(['won', 'lost', 'archived'].includes(String(current?.state)) ? 'Un administrador ya cerró esta oportunidad.' : 'Esta acción corresponde a un administrador.', 403);
+        if (input.state === 'blocked' && !stateNoteSchema.safeParse(input.note).success) throw new AuthError('Cuenta qué te bloquea, para que el equipo pueda ayudarte.', 400);
+      }
       const saved = opportunityDb(await auth.admin.from('opportunity_work').update({ state: input.state, revision: input.expectedRevision + 1, updated_at: new Date().toISOString() })
         .eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('revision', input.expectedRevision).select('revision').maybeSingle());
       if (!saved) throw new AuthError('El estado cambió. Actualiza la oportunidad.', 409);
-      await addOpportunityActivity(auth.admin, scope, id, 'state', `Estado: ${STATE_LABELS[input.state] ?? input.state}`); return opportunitiesJson(saved);
+      const note = input.note?.replace(/\s+/g, ' ').trim();
+      await addOpportunityActivity(auth.admin, scope, id, 'state', `Estado: ${STATE_LABELS[input.state] ?? input.state}${note ? `. ${note}` : ''}`, note ? { note } : {});
+      // A block is news for whoever can unblock it.
+      if (input.state === 'blocked') await notifyManagers(auth.admin, scope, id, 'Oportunidad bloqueada', `blocked:${id}:${saved.revision}`).catch(() => null);
+      return opportunitiesJson(saved);
     }
     if (action === 'task') {
       const input = taskSchema.extend({ id: z.string().uuid().optional() }).parse(data);

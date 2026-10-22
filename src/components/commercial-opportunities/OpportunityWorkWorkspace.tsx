@@ -25,6 +25,8 @@ import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import type { MarkChange } from './ReportMarks';
 import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { OpportunityContacts } from './OpportunityContacts';
+import { DecisionCallout, MemberStrip } from './MemberWork';
+import { MEMBER_FILTERS, memberFilter, memberView, openDecision } from '@/lib/commercial-opportunities/member-work';
 import { OpportunityChat } from './OpportunityChat';
 import { OpportunityAssistant } from './OpportunityAssistant';
 import { TenderProfileSheet } from './TenderProfileSheet';
@@ -122,7 +124,7 @@ export function OpportunityWorkWorkspace() {
   const listShown = view === 'list' || overview?.mode !== 'management';
   const listSearch = listShown ? search : ''; const listSource = listShown ? source : 'all'; const listCategories = listShown ? categoryKey : '';
   const load = useCallback(async (signal?: AbortSignal) => {
-    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: filter, query: listSearch, page: String(page), source: listSource, category: listCategories })}`, { cache: 'no-store', signal }));
+    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: memberView(filter), query: listSearch, page: String(page), source: listSource, category: listCategories })}`, { cache: 'no-store', signal }));
       if (!signal?.aborted) { setOverview(result); setProblem(''); }
     } catch (e) { if (!signal?.aborted) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar.'); setOverview(null); } }
   }, [filter, listSearch, page, listSource, listCategories]);
@@ -283,6 +285,23 @@ export function OpportunityWorkWorkspace() {
     void perform('offer', { requestId: crypto.randomUUID(), ...(instructions ? { instructions } : {}) }, selected, true)
       .then(result => { if (result) setFeedback('Preparando el borrador de oferta. Tarda unos minutos: te avisaremos cuando esté listo.'); });
   };
+  // The steps of the person working the opportunity (stage, a block with its reason) and the decisions they put to the administrators.
+  const stepTo = async (to: WorkRecord['state'], note?: string) => {
+    if (!detail?.work) return false;
+    const done = await perform('state', { state: to, expectedRevision: detail.work.revision, ...(note ? { note } : {}) }, selected, true);
+    if (done) setFeedback(to === 'blocked' ? 'Avisamos a los administradores del bloqueo.' : `Pasó a «${WORK_STATE_LABELS[to]}».`);
+    return Boolean(done);
+  };
+  const decide = async (type: 'ask' | 'no_go', text: string, dueAt: string | null) => {
+    const done = await perform('decision', { type, text, dueAt }, selected, true);
+    if (done) setFeedback('Se lo avisamos a los administradores. Verás su respuesta aquí.');
+    return Boolean(done);
+  };
+  const replyDecision = async (text: string) => {
+    const done = await perform('decision_reply', { text }, selected, true);
+    if (done) setFeedback('Respuesta enviada.');
+    return Boolean(done);
+  };
   // Prices save on their own, like the marks: no reload of the expediente.
   const saveOfferPrices = async (draftId: string, expectedRevision: number, prices: Record<string, string>) => {
     if (!selected) return null;
@@ -358,14 +377,14 @@ export function OpportunityWorkWorkspace() {
     }
     if (result) { setModal(null); setFiles([]); }
   };
-  const filters = admin ? [['recommended', 'Recomendadas'], ['review', 'Por revisar'], ['assigned', 'Asignadas'], ['excluded', 'No recomendadas'], ['pending', 'Por evaluar'], ['all', 'Todas']] : [['all', 'Mi trabajo'], ['assigned', 'Nuevas asignaciones'], ['working', 'En gestión'], ['blocked', 'Bloqueadas']];
+  const filters = admin ? [['recommended', 'Recomendadas'], ['review', 'Por revisar'], ['assigned', 'Asignadas'], ['excluded', 'No recomendadas'], ['pending', 'Por evaluar'], ['all', 'Todas']] : MEMBER_FILTERS;
   const kinds = sourceKinds(source);
   const items = (overview?.items || []).filter(item => {
     const work = overview?.work.find(w => w.opportunity_id === item.id);
     if (kinds.length && !kinds.includes(item.kind)) return false;
     if (categories.length && !inCategories(item, categories)) return false;
     if (search && ![item.title, item.company_name, item.buyer_name].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
-    if (!admin) return filter === 'recommended' || filter === 'all' || (work?.state || 'assigned') === filter;
+    if (!admin) return memberFilter(filter, work?.state);
     if (filter === 'assigned') return Boolean(work && work.state !== 'unassigned');
     return filter === 'all' || (item.data.evaluation || (item.kind === 'private' ? 'review' : 'pending')) === filter;
   });
@@ -447,8 +466,16 @@ export function OpportunityWorkWorkspace() {
             {admin && <Button variant="outline" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}><Users className="mr-2 h-4 w-4" />Asignar equipo</Button>}
             {item.url && <Button asChild variant="ghost"><a href={item.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-2 h-4 w-4" />{item.kind === 'tender' ? 'Ver en Mercado Público' : signal ? 'Ver en LinkedIn' : 'Ver fuente'}</a></Button>}
           </div>
+          {detail.work && detail.work.state !== 'unassigned' && <MemberStrip state={detail.work.state} canStep={!admin} busy={busy}
+            assignedBy={(detail.members || detail.participants).find(m => m.user_id === detail.work?.assigned_by)?.name ?? null} nextActionAt={detail.work.due_at}
+            openTasks={detail.tasks.filter(t => t.owner_id === user?.id && t.status !== 'done').length} onStep={stepTo} onDecision={decide} />}
           {detail.work?.objective && <p className="text-sm">Objetivo: {detail.work.objective}</p>}
         </header>
+        {(() => {
+          const decision = openDecision(detail.activity);
+          return decision ? <DecisionCallout decision={decision} admin={admin} busy={busy} onReply={replyDecision}
+            who={(detail.members || detail.participants).find(m => m.user_id === decision.actorId)?.name ?? 'Alguien del equipo'} /> : null;
+        })()}
         <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular']]), ...(MARKET_KINDS.includes(item.kind) ? [['market', 'Cómo ganar']] : []), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
         {tab === 'summary' && <div className="space-y-5">
           {detail.participants.length ? <section aria-label="Equipo de trabajo" className="space-y-2"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">Equipo de trabajo</h2>{admin && <Button variant="ghost" size="sm" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}>Cambiar equipo</Button>}</div>

@@ -6,6 +6,7 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkFirstName, type CoworkOverview } from '@/lib/cowork/overview';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
+import { isOpportunityAdmin } from '@/lib/commercial-opportunities/workspace';
 import { loadCoworkSinceLastVisit } from '@/lib/server/cowork/since-visit';
 import { readNeverWritten } from '@/lib/server/cowork/agenda-read';
 
@@ -30,7 +31,10 @@ export async function GET() {
     const own = (table: string) => auth.supabase.from(table).select('id', { count: 'exact', head: true })
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId);
     // Without the service client the home still arrives: «Desde tu última visita» just leaves Opportunities out.
-    const opportunities = await Promise.resolve().then(() => canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId)).catch(() => false);
+    // Whoever is not an administrator only sees the opportunities assigned to them in «Oportunidades»: «Desde tu última visita»
+    // tells them what reached them, not what the workspace found (which they could not open).
+    const mayOpportunities = await Promise.resolve().then(() => canUseOpportunities(getSupabaseAdminClient(), auth.user, auth.organizationId)).catch(() => false);
+    const opportunities = mayOpportunities && !isOpportunityAdmin(auth.organizationRole) ? 'assigned' as const : mayOpportunities;
     const [contacts, withEmail, campaigns, linkedin, context, since, toWrite] = await Promise.allSettled([
       own('leads'),
       own('leads').not('email', 'is', null).neq('email', ''),
