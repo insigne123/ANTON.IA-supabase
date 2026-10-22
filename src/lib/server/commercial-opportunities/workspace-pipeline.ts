@@ -10,7 +10,7 @@ import type { WorkScope } from '@/lib/commercial-opportunities/workspace';
 import { addOpportunityActivity, opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { enqueueOpportunitySummaries } from './workspace-summaries';
-import { searchTerm } from '@/lib/commercial-opportunities/workspace-radar';
+import { categoryTerms, searchTerm } from '@/lib/commercial-opportunities/workspace-radar';
 
 /**
  * Moves the opportunity forward when the work shows it moved (pipeline.ts), with the same revision check as a person's
@@ -107,7 +107,7 @@ export const PIPELINE_PAGE = 60;
 export const PIPELINE_MAX = 600;
 /** The latest research jobs and reports of the workspace the cards ask about (what the workspace has is far less than this). */
 const PROGRESS_ROWS = 600;
-export type PipelineOptions = { kinds?: string[]; query?: string; sort?: PrioritySort; limits?: Partial<Record<'found' | 'recommended' | 'excluded', number>> };
+export type PipelineOptions = { kinds?: string[]; query?: string; categories?: string[]; sort?: PrioritySort; limits?: Partial<Record<'found' | 'recommended' | 'excluded', number>> };
 const pageLimit = (value: number | undefined, fallback: number) => Math.min(PIPELINE_MAX, Math.max(0, Math.round(Number.isFinite(value) ? Number(value) : fallback)));
 
 /**
@@ -126,13 +126,20 @@ export async function readOpportunityPipeline(client: SupabaseClient, scope: Wor
   const worked = (opportunityDb(await client.from('opportunity_work').select('*').eq('organization_id', org).neq('state', 'unassigned').limit(1000)) || []) as Array<{ opportunity_id: string; state: string }>;
   const workedIds = new Set(worked.map(w => w.opportunity_id));
   const words = `title.ilike.*${term}*,company_name.ilike.*${term}*,buyer_name.ilike.*${term}*`;
-  // One «or» per request: still open, and the words in the name, the company or the buyer when there are any.
-  const filtered = (query: any) => { const of = kinds.length ? query.in('kind', kinds) : query; return term ? of.or(words) : of; };
+  // A category is the words of its line of service in the title or in the line that summarizes the opportunity (the terms are ours: no wildcards or commas).
+  const lines = categoryTerms(options.categories || []).flatMap(word => [`title.ilike.*${word}*`, `data->summary->>text.ilike.*${word}*`]).join(',');
+  // One «or» per request, whatever the filters: each group of words is an «or» inside one «and».
+  const together = (groups: string[]) => (groups.length === 1 ? groups[0] : `and(${groups.map(group => `or(${group})`).join(',')})`);
+  const filtered = (query: any) => {
+    const of = kinds.length ? query.in('kind', kinds) : query;
+    const groups = [term ? words : '', lines].filter(Boolean);
+    return groups.length ? of.or(together(groups)) : of;
+  };
   const open = (query: any) => {
     const of = query.eq('organization_id', org);
     const sources = kinds.length ? of.in('kind', kinds) : of;
     const stillOpen = `deadline_at.is.null,deadline_at.gt.${nowIso}`;
-    return term ? sources.or(`and(or(${stillOpen}),or(${words}))`) : sources.or(stillOpen);
+    return sources.or(together([stillOpen, term ? words : '', lines].filter(Boolean)));
   };
   // The soonest to close first leaves the ones with no deadline last; the best scored breaks the ties either way.
   const ordered = (query: any) => (sort === 'deadline' ? query.order('deadline_at', { ascending: true, nullsFirst: false }) : query).order('score', { ascending: false }).order('id');

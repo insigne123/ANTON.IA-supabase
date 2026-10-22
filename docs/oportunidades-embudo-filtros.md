@@ -1,6 +1,6 @@
-# Oportunidades: Embudo y Lista con búsqueda, fuente y «Cargar más»
+# Oportunidades: Embudo y Lista con búsqueda, fuente, rubro y «Cargar más»
 
-**Fecha:** 20 de octubre de 2026.
+**Fecha:** 20 de octubre de 2026. El rubro se agregó el 22 de octubre (ver «Rubro» más abajo).
 
 ## Por qué
 
@@ -36,6 +36,22 @@
    - el nombre siempre bajo el círculo;
    - «N cierran en menos de 7 días» escrito, en vez de una burbuja roja.
 7. **«Empresa del workspace»** ordenada en grupos (ver `docs/oportunidades-resumenes-y-carga.md`).
+
+## Rubro (22 de octubre de 2026)
+
+En la demo del 21 de octubre, GrupoExpro pidió ver las oportunidades por línea de servicio: seguridad y aseo dejan poco margen; reclutamiento, selección y outsourcing son los que más les interesan. Bajo la búsqueda y la fuente, los administradores ven una fila **Rubro** con cuatro botones que se pueden combinar (basta que calce uno): **Seguridad**, **Aseo**, **Outsourcing y externalización** y **Reclutamiento y selección**. El Embudo y la Lista los comparten.
+
+- **Qué calza.** Una oportunidad está en un rubro cuando su título, o la línea de resumen que la IA escribe bajo el nombre, nombra una de las palabras del rubro (`OPPORTUNITY_CATEGORIES`, en `workspace-radar.ts`). Sin mayúsculas ni tildes; una raíz cubre las terminaciones («externaliza» → externalización, externalizar). Un rubro no excluye a otro: «personal de aseo» está en Aseo y también en Outsourcing si habla de suministro de personal.
+- **Aseo es el servicio.** Las palabras son frases («servicio de aseo», «servicios de limpieza», «aseo industrial», «personal de aseo»…). Con «aseo» suelto, la mitad de lo que calzaba eran compras de artículos de aseo y también «paseo». Se midió con los títulos de producción, solo de lectura: 108 oportunidades de servicio de aseo, ninguna «paseo» y una sola con insumos («Servicio de Aseo e Insumos…»).
+- **Qué no es.** Es una búsqueda por palabras, no una clasificación de la IA: «videovigilancia» cae en Seguridad aunque sea un equipo y no un guardia, y una oportunidad cuyo título y resumen no usan estas palabras no aparece. Las palabras se afinan en un solo lugar.
+- **Cómo se filtra.**
+  - **Embudo:** el mismo `or` de cada lectura lleva ahora también las palabras del rubro (título y `data->summary->>text`), junto al «sigue abierta» y a la búsqueda. Los números de cada etapa son exactos con el rubro elegido.
+  - **Lista:** `opportunity_workspace_list_terms`, una función nueva junto a las anteriores, con las mismas reglas de lectura. Antes de aplicar su migración, la página lee la lista como siempre y la acota con las mismas palabras: es correcto, pero solo cubre la primera página (100).
+  - **Parámetro de la ruta:** `category=seguridad,aseo`. Lo desconocido se ignora.
+- **Quién lo ve.** Solo los administradores, junto a la fuente; la lista de quien recibe asignaciones es corta.
+- **Palabras de búsqueda de GrupoExpro.** Las sugerencias del piloto (`GRUPOEXPRO_TENDER_KEYWORDS`) suman «reclutamiento y selección», «headhunting», «búsqueda de ejecutivos» y «evaluación psicolaboral». Solo valen para un «Qué buscamos» nuevo: el de la cuenta se edita en la página.
+- **Migración `20261022150000_opportunity_workspace_list_terms.sql`:** una función nueva (la página funciona igual antes y después), solo `service_role`.
+- **Pruebas:** `workspace-radar.test.ts` (palabras, tildes, «paseo», compras de insumos), `workspace-pipeline.test.ts` (un solo `or` por lectura con rubro, con búsqueda y sin nada), `workspace-overview-parallel.test.ts` (función nueva y respaldo si no existe), `opportunity-filters-ui.test.ts` (botones) y `opportunity_workspace.test.sql` (4 pruebas de la función).
 
 ## Cómo funciona
 

@@ -6,7 +6,24 @@ import type { z } from 'zod';
 import { reportJobProgress } from '@/lib/commercial-opportunities/report-progress';
 import { marksFromRows, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { companyDocumentAlerts } from '@/lib/commercial-opportunities/company-documents';
+import { categoryTerms, inCategories } from '@/lib/commercial-opportunities/workspace-radar';
 import { assertOpportunityRead, assertOpportunityAdmin, readableOpportunityIds } from './workspace-access';
+
+/**
+ * The page of the list asked for. A source picked reads with its kinds (opportunity_workspace_list_kinds), a category with its
+ * words (opportunity_workspace_list_terms); without either, the list as it always was. Before the migration of the words the
+ * list is read as it was and narrowed here to the categories, which only covers its first page.
+ */
+async function readWorkspaceList(client: SupabaseClient, scope: WorkScope, options: { view?: string; query?: string; page?: number; kinds?: string[]; categories?: string[] }) {
+  const base = { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0 };
+  const terms = categoryTerms(options.categories || []);
+  const asRead = () => (options.kinds?.length ? client.rpc('opportunity_workspace_list_kinds', { ...base, p_kinds: options.kinds }) : client.rpc('opportunity_workspace_list', base));
+  if (!terms.length) return (opportunityDb(await asRead()) as WorkItem[]) || [];
+  const byWords = await client.rpc('opportunity_workspace_list_terms', { ...base, p_kinds: options.kinds || [], p_terms: terms });
+  if (!byWords.error) return (opportunityDb(byWords) as WorkItem[]) || [];
+  return ((opportunityDb(await asRead()) as WorkItem[]) || []).filter(item => inCategories(item, options.categories || []));
+}
+
 
 export function opportunityDb<T>(result: { data: T; error: { code?: string; message?: string } | null }): T {
   if (result.error) {
@@ -24,18 +41,14 @@ export async function workspaceMembers(client: SupabaseClient, scope: WorkScope)
   const names = new Map(profiles.map(p => [p.id, String(p.full_name || '').trim() || String(p.email || '').trim()]));
   return rows.map(row => ({ user_id: row.user_id, role: row.role, name: names.get(row.user_id) || 'Integrante' }));
 }
-export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkScope, options: { view?: string; query?: string; page?: number; kinds?: string[] } = {}): Promise<WorkspaceOverview> {
+export async function readWorkspaceOverview(client: SupabaseClient, scope: WorkScope, options: { view?: string; query?: string; page?: number; kinds?: string[]; categories?: string[] } = {}): Promise<WorkspaceOverview> {
   const admin = isOpportunityAdmin(scope.role);
   const period = new Date().toISOString().slice(0, 7) + '-01';
   // The reads do not depend on each other, so they go together (one after another they took ~2.7 s of the page's load);
   // only the work records wait for the list.
   const [ids, items, notifications, groups, context, budget, members, documentAlerts] = await Promise.all([
     readableOpportunityIds(client, scope),
-    // A source picked reads with its kinds (opportunity_workspace_list_kinds); without one, the list as it always was.
-    (options.kinds?.length
-      ? client.rpc('opportunity_workspace_list_kinds', { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0, p_kinds: options.kinds })
-      : client.rpc('opportunity_workspace_list', { p_org: scope.organizationId, p_user: scope.userId, p_view: options.view || 'all', p_query: options.query || '', p_page: options.page || 0 }))
-      .then(result => (opportunityDb(result) as WorkItem[]) || []),
+    readWorkspaceList(client, scope, options),
     client.from('opportunity_notifications').select('id,opportunity_id,title,created_at,read_at')
       .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).order('created_at', { ascending: false }).limit(100).then(result => opportunityDb(result) || []),
     admin ? client.from('organization_reporting_groups').select('id,name').eq('organization_id', scope.organizationId).eq('is_active', true).then(result => opportunityDb(result) || []) : [],

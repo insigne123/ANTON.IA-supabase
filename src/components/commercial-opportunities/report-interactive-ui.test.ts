@@ -10,6 +10,7 @@ import * as reportMarks from '@/lib/commercial-opportunities/report-marks';
 import * as workspace from '@/lib/commercial-opportunities/workspace';
 import * as requirementFit from '@/lib/commercial-opportunities/requirement-fit';
 import * as markQueue from '@/lib/commercial-opportunities/mark-queue';
+import * as genderCriterion from '@/lib/commercial-opportunities/gender-criterion';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -27,6 +28,7 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/workspace': workspace,
   '@/lib/commercial-opportunities/requirement-fit': requirementFit,
   '@/lib/commercial-opportunities/mark-queue': markQueue,
+  '@/lib/commercial-opportunities/gender-criterion': genderCriterion,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./RoutePath'] = load(await compile('./RoutePath.tsx'));
@@ -162,6 +164,21 @@ test('with the tender profile, each requirement says if the company meets it, as
   const none = renderToStaticMarkup(React.createElement(OpportunityWorkReport, { report, opportunity: { title: 'Seguridad Museo' }, onTask: () => {}, onAsk: () => {},
     fit: { available: true, profileRevision: null, latest: null } }));
   assert.match(text(none), /Con la «Ficha para licitaciones» de tu empresa, la IA te dice qué requisitos cumples/);
+});
+
+test('when the bases give points to companies led by women, the report says whether this company adds them; when they do not, it says nothing', () => {
+  const valued = { ...report, sections: [{ id: 'evaluation', title: 'Cómo se evalúa y cómo ganar puntaje', paragraphs: ['Precio 70 %. Se asignarán 5 puntos a las empresas lideradas por mujeres.'], facts: [] }] };
+  const view = (seal: unknown, source: unknown = valued) => renderToStaticMarkup(React.createElement(OpportunityWorkReport, { report: source, opportunity: { title: 'Seguridad Museo' },
+    onTask: () => {}, onAsk: () => {}, fit: { available: true, profileRevision: 3, latest: null, seal } }));
+  const yes = view({ status: 'si', because: '2 de 3 representantes legales son mujeres' });
+  assert.match(text(yes), /Sumas puntaje con el Sello Empresa Mujer/);
+  assert.match(text(yes), /Según tu ficha: 2 de 3 representantes legales son mujeres/);
+  assert.match(yes, /bg-cw-success-soft/);
+  assert.match(text(view({ status: 'solicitar', because: 'las mujeres tienen más de un cuarto de la propiedad' })), /antes hay que pedir el Sello Empresa Mujer/);
+  assert.match(text(view(null)), /podría darte puntaje por ser una empresa liderada por mujeres/, 'a company with no profile yet is told what to answer');
+  assert.doesNotMatch(text(view({ status: 'si', because: 'x' }, report)), /Sello Empresa Mujer/, 'bases that do not value it: no note');
+  const signal = { ...valued, kind: 'linkedin_post' };
+  assert.doesNotMatch(text(view({ status: 'si', because: 'x' }, signal)), /Sumas puntaje/, 'a LinkedIn signal has no bases');
 });
 
 test('after answering «No» the page says the AI is reading the requirements again, with a bar that moves, so it never looks stuck', () => {

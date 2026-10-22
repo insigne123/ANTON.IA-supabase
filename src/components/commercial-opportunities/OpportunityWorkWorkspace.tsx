@@ -38,7 +38,7 @@ import { AdvicePill, ExclusionGroups, NewsList, StartHere, TenderPrerequisites }
 import { ACCEPTED_FILES, DocumentList, ExpedientGuide, ReportProgress, usePublicLinks, type ExpedientDocument } from './OpportunityExpedient';
 import { expandZipUploads, isZip } from '@/lib/commercial-opportunities/zip-uploads';
 import { pickPrefillFiles } from '@/lib/commercial-opportunities/prefill-package';
-import { OPPORTUNITY_SOURCES, bySource, closesLabel, sourceKinds, workAdvice, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
+import { OPPORTUNITY_SOURCES, bySource, closesLabel, inCategories, sourceKinds, workAdvice, type OpportunityCategory, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 import { humanDate, reportDecision } from '@/lib/commercial-opportunities/report-view';
 import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
 import type { WorkspaceOverview, WorkItem, WorkRecord, WorkspaceMember } from '@/lib/commercial-opportunities/workspace';
@@ -80,11 +80,12 @@ export function OpportunityWorkWorkspace() {
   const [overview, setOverview] = useState<(WorkspaceOverview & { suggestion?: any }) | null>(null);
   const [problem, setProblem] = useState(''); const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState(''); const [filter, setFilter] = useState('recommended');
-  // The pipeline and the list share the words searched (read 300 ms after the last key) and the source picked.
+  // The pipeline and the list share the words searched (read 300 ms after the last key), the source picked and the lines of service (rubros).
   const [search, setSearch] = useState(''); const [source, setSource] = useState<OpportunitySource>('all');
+  const [categories, setCategories] = useState<OpportunityCategory[]>([]); const categoryKey = categories.join(',');
   useEffect(() => { const timer = setTimeout(() => setSearch(query.trim()), 300); return () => clearTimeout(timer); }, [query]);
   const [page, setPage] = useState(0);
-  useEffect(() => setPage(0), [search, filter, source]);
+  useEffect(() => setPage(0), [search, filter, source, categoryKey]);
   const [selected, setSelected] = useState<string | null>(null); const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState('summary'); const [modal, setModal] = useState<'create' | 'context' | 'assign' | 'task' | 'criteria' | null>(null);
   const [draft, setDraft] = useState<Record<string, any>>({}); const [files, setFiles] = useState<File[]>([]);
@@ -103,7 +104,7 @@ export function OpportunityWorkWorkspace() {
     limits?: Partial<Record<PagedStage, number>>; summaries?: { waiting: number }; progress?: Record<string, CardProgress> } | null>(null);
   // How many of each stage nobody works yet the pipeline asks for: «Cargar más» adds a page; a new search, source or order starts over.
   const [sort, setSort] = useState<PrioritySort>('priority');
-  const filterKey = `${source}|${search}|${sort}`;
+  const filterKey = `${source}|${search}|${sort}|${categoryKey}`;
   const [paging, setPaging] = useState<{ key: string; limits: Record<PagedStage, number> }>({ key: '', limits: FIRST_PAGE });
   const limits = paging.key === filterKey ? paging.limits : FIRST_PAGE;
   const [loadingMore, setLoadingMore] = useState<PagedStage | null>(null);
@@ -119,12 +120,12 @@ export function OpportunityWorkWorkspace() {
   useEffect(() => { const read = () => setSelected(opportunityInUrl()); read(); window.addEventListener('popstate', read); return () => window.removeEventListener('popstate', read); }, []);
   // The list reads with the search and source only while it is on screen: typing in the pipeline does not read the list too.
   const listShown = view === 'list' || overview?.mode !== 'management';
-  const listSearch = listShown ? search : ''; const listSource = listShown ? source : 'all';
+  const listSearch = listShown ? search : ''; const listSource = listShown ? source : 'all'; const listCategories = listShown ? categoryKey : '';
   const load = useCallback(async (signal?: AbortSignal) => {
-    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: filter, query: listSearch, page: String(page), source: listSource })}`, { cache: 'no-store', signal }));
+    try { const result = await json(await fetch(`/api/commercial-opportunities/workspace?${new URLSearchParams({ view: filter, query: listSearch, page: String(page), source: listSource, category: listCategories })}`, { cache: 'no-store', signal }));
       if (!signal?.aborted) { setOverview(result); setProblem(''); }
     } catch (e) { if (!signal?.aborted) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar.'); setOverview(null); } }
-  }, [filter, listSearch, page, listSource]);
+  }, [filter, listSearch, page, listSource, listCategories]);
   // The list is read again every minute while it is on view; an open opportunity or a hidden tab does not ask for it.
   useEffect(() => {
     const controller = new AbortController(); void load(controller.signal);
@@ -176,17 +177,17 @@ export function OpportunityWorkWorkspace() {
   // Only the latest reading lands: a search typed while another one loads does not get overwritten by the older answer.
   const pipelineRequest = useRef(0);
   const loadPipeline = useCallback(async () => {
-    const request = ++pipelineRequest.current; const key = `${source}|${search}|${sort}`;
+    const request = ++pipelineRequest.current; const key = `${source}|${search}|${sort}|${categoryKey}`;
     try {
-      const params = new URLSearchParams({ view: 'pipeline', source, query: search, sort, found: String(limits.found), recommended: String(limits.recommended), excluded: String(limits.excluded) });
+      const params = new URLSearchParams({ view: 'pipeline', source, query: search, category: categoryKey, sort, found: String(limits.found), recommended: String(limits.recommended), excluded: String(limits.excluded) });
       const result = await json(await fetch(`/api/commercial-opportunities/workspace?${params}`, { cache: 'no-store' }));
       if (request === pipelineRequest.current) { setPipeline(result); setPipelineFor(key); }
     }
     catch (e) { if (request === pipelineRequest.current) { setProblem(e instanceof Error ? e.message : 'No se pudo cargar el embudo.'); setPipelineFor(key); } }
     finally { if (request === pipelineRequest.current) setLoadingMore(null); }
-  }, [source, search, sort, limits]);
+  }, [source, search, sort, limits, categoryKey]);
   const loadMore = useCallback((stage: PagedStage) => { setLoadingMore(stage); setPaging({ key: filterKey, limits: { ...limits, [stage]: Math.min(600, limits[stage] + PAGE) } }); }, [filterKey, limits]);
-  const clearFilters = () => { setQuery(''); setSearch(''); setSource('all'); };
+  const clearFilters = () => { setQuery(''); setSearch(''); setSource('all'); setCategories([]); };
   useEffect(() => { if (admin && view === 'pipeline' && !selected) void loadPipeline(); }, [admin, view, selected, loadPipeline]);
   // Cards still waiting for their line of summary: the pipeline is read again every 20 seconds, for five minutes at most; after
   // that the faint lines go away instead of promising something that is not coming while the page stays open.
@@ -362,6 +363,7 @@ export function OpportunityWorkWorkspace() {
   const items = (overview?.items || []).filter(item => {
     const work = overview?.work.find(w => w.opportunity_id === item.id);
     if (kinds.length && !kinds.includes(item.kind)) return false;
+    if (categories.length && !inCategories(item, categories)) return false;
     if (search && ![item.title, item.company_name, item.buyer_name].join(' ').toLowerCase().includes(search.toLowerCase())) return false;
     if (!admin) return filter === 'recommended' || filter === 'all' || (work?.state || 'assigned') === filter;
     if (filter === 'assigned') return Boolean(work && work.state !== 'unassigned');
@@ -405,17 +407,17 @@ export function OpportunityWorkWorkspace() {
       {view === 'assistant' ? <OpportunityAssistant admin={admin} threadId={assistantThread} onThread={setAssistantThread} onOpen={open} onHandoff={continueIn} />
         : admin && view === 'market' ? <PublicMarket onOpen={open} onCriteria={(overview.context as any)?.criteria ? openCriteria : undefined} onProfile={() => setProfileOpen(true)} />
         : admin && view === 'pipeline' ? <>
-        <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} />
+        <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} />
         {pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} limits={pipeline.limits} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting) && !summariesStalled}
         suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open}
-        filtered={Boolean(search) || source !== 'all'} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} onMore={loadMore} onClearFilters={clearFilters} />
+        filtered={Boolean(search) || source !== 'all' || categories.length > 0} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} onMore={loadMore} onClearFilters={clearFilters} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
-      <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} showSources={admin}>
+      <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} showSources={admin}>
         <div role="group" aria-label="Filtrar oportunidades" className="flex flex-wrap gap-1">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div>
       </OpportunityFilters>
-      {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{search || source !== 'all' ? 'Prueba otro texto, otra fuente o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p>
-        {search || source !== 'all' ? <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Quitar filtros</Button> : null}</section>}
-      {admin && filter === 'recommended' && !search && source === 'all' && <StartHere items={items} onOpen={open} />}
+      {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{search || source !== 'all' || categories.length ? 'Prueba otro texto, otra fuente u otro rubro, o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p>
+        {search || source !== 'all' || categories.length ? <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Quitar filtros</Button> : null}</section>}
+      {admin && filter === 'recommended' && !search && source === 'all' && !categories.length && <StartHere items={items} onOpen={open} />}
       {items.length > 0 && <div className="space-y-8">{listGroups.map(group => <section key={group.key} aria-labelledby={`source-${group.key}`} className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><h2 id={`source-${group.key}`} className="text-lg font-semibold">{group.label} <span className="text-sm font-normal tabular-nums text-muted-foreground">{group.items.length}</span></h2><p className="text-xs text-muted-foreground">{group.note}</p></div>
         {admin && filter === 'excluded' ? <ExclusionGroups items={group.items} onOpen={open} /> : <div className="grid gap-3 xl:grid-cols-2">{group.items.map(card)}</div>}

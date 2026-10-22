@@ -4,14 +4,16 @@ import type { ReactNode } from 'react';
 import { Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { OPPORTUNITY_SOURCES, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
+import { OPPORTUNITY_CATEGORIES, OPPORTUNITY_SOURCES, type OpportunityCategory, type OpportunitySource } from '@/lib/commercial-opportunities/workspace-radar';
 
 /**
- * What the pipeline and the list share: the words to search and where the opportunities came from (licitaciones, Compra
- * Ágil, LinkedIn or recibidas). The list adds its own filters below (`children`); the pipeline's stages are its own.
+ * What the pipeline and the list share: the words to search, where the opportunities came from (licitaciones, Compra
+ * Ágil, LinkedIn or recibidas) and the line of service they are about (seguridad, aseo, outsourcing, reclutamiento; any of the ones
+ * picked). The list adds its own filters below (`children`); the pipeline's stages are its own.
  */
-export function OpportunityFilters({ query, onQuery, source, onSource, showSources = true, children }: {
+export function OpportunityFilters({ query, onQuery, source, onSource, categories = [], onCategories, showSources = true, children }: {
   query: string; onQuery: (value: string) => void; source: OpportunitySource; onSource: (value: OpportunitySource) => void;
+  categories?: OpportunityCategory[]; onCategories?: (value: OpportunityCategory[]) => void;
   /** Only the admin sees where each one came from; an assigned person's list is short. */
   showSources?: boolean; children?: ReactNode;
 }) {
@@ -33,6 +35,16 @@ export function OpportunityFilters({ query, onQuery, source, onSource, showSourc
             {item.label}</button>)}
         </div> : null}
       </div>
+      {showSources && onCategories ? <div role="group" aria-label="Rubro" className="-mx-1 flex max-w-full items-center gap-1 overflow-x-auto px-1 pb-0.5 lg:mx-0 lg:px-0">
+        <span className="shrink-0 pr-1 text-xs text-muted-foreground">Rubro</span>
+        {OPPORTUNITY_CATEGORIES.map(item => {
+          const on = categories.includes(item.id);
+          return <button key={item.id} type="button" aria-pressed={on} onClick={() => onCategories(on ? categories.filter(id => id !== item.id) : [...categories, item.id])}
+            className={cn('h-7 shrink-0 rounded-full border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              on ? 'border-transparent bg-foreground font-medium text-background' : 'border-border bg-background text-foreground/75 hover:bg-muted hover:text-foreground')}>
+            {item.label}</button>;
+        })}
+      </div> : null}
       {children}
     </div>
   );
