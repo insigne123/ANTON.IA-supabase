@@ -11,7 +11,7 @@ import { resolveTicketForOrganization } from './tickets';
 import { CompraAgilError, searchCompraAgil, compraAgilQuery } from './compra-agil';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
-import { EXCLUSION_MOTIVES } from '@/lib/commercial-opportunities/workspace-radar';
+import { EXCLUSION_MOTIVES, tenderWordsOfTheDay } from '@/lib/commercial-opportunities/workspace-radar';
 import { TENDER_PROFILE_RULE, tenderProfileForModel } from '@/lib/commercial-opportunities/tender-profile';
 import { loadTenderProfile } from './tender-profile-read';
 
@@ -79,7 +79,7 @@ export async function captureOpportunityTenders(client: SupabaseClient, job: Opp
   const tenders = await listOpenLicitaciones({ fetch: globalThis.fetch, ticket: ticket.ticket });
   const candidates=tenders.map(tenderCandidate);
   opportunityDb(await client.from('opportunity_source_snapshots').insert({job_id:job.id,organization_id:job.organization_id,candidates}));
-  for (const keyword of (context.criteria?.keywords || []).slice(0, 6)) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: job.organization_id, requested_by: job.requested_by,
+  for (const keyword of tenderWordsOfTheDay(context.criteria?.keywords || [], Date.now() / 86_400_000)) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: job.organization_id, requested_by: job.requested_by,
     kind: 'tenders', dedupe_key: `${job.dedupe_key}:agil:${createHash('sha256').update(keyword).digest('hex')}`, payload: { keyword, revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
   return { ...await persistOpportunityCandidates(client, job, candidates, context.revision), listed: tenders.length, coverage: 'active_listing' };
 }

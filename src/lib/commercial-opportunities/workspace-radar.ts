@@ -161,6 +161,20 @@ export function inCategories(item: { title?: string | null; data?: unknown }, ca
   return terms.some(term => text.includes(foldText(term)));
 }
 
+/** How many of the company's words Compra Ágil is asked with on one day: the ticket takes a few calls at a time. */
+export const TENDER_WORDS_PER_DAY = 6;
+/**
+ * The words Compra Ágil is asked with on a day. A company can list up to 30, so a few go each day, in turn: every word is asked
+ * every few days, well within the two weeks of quotes the search reads. The same day always gives the same words, and a list that
+ * fits in one day is asked whole.
+ */
+export function tenderWordsOfTheDay(words: readonly string[], day: number, perDay = TENDER_WORDS_PER_DAY): string[] {
+  const list = [...new Set(words.map(word => String(word).trim()).filter(Boolean))];
+  if (list.length <= perDay) return list;
+  const start = (((Math.floor(day) * perDay) % list.length) + list.length) % list.length;
+  return Array.from({ length: perDay }, (_, index) => list[(start + index) % list.length]);
+}
+
 /**
  * What a person typed, safe inside a PostgREST filter: without its wildcards and the commas, parentheses and quotes that
  * would end the filter. Empty when nothing searchable is left.
