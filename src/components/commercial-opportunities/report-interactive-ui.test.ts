@@ -80,27 +80,30 @@ test('with marks: each requirement, task and step can be ticked, and the progres
   assert.match(text(html), /Lo ve Ana el lunes Ana Soto · 16 de octubre de 2026, 11:00/);
 });
 
-test('each future date offers a reminder, with Google Calendar and a calendar file, and the dates without a day do not', () => {
+test('each future date offers a reminder, with Outlook (Microsoft 365) first, Google Calendar as the other choice and a calendar file, and the dates without a day do not', () => {
   const html = render({ marks: { available: true, items: {} }, onMark: async () => null });
-  assert.equal((html.match(/Agregar a Google Calendar/g) || []).length, 2, 'one per dated milestone; «Por confirmar» has none');
-  assert.match(html, /href="https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE[^"]*dates=20991028T120000Z%2F20991028T123000Z/, 'one day before by default');
+  assert.equal((html.match(/Agregar a Outlook \(Microsoft 365\)/g) || []).length, 2, 'one per dated milestone; «Por confirmar» has none');
+  assert.match(html, /href="https:\/\/outlook\.office\.com\/calendar\/0\/deeplink\/compose\?path=%2Fcalendar%2Faction%2Fcompose&amp;rru=addevent[^"]*startdt=2099-10-28T12%3A00%3A00%2B00%3A00/, 'one day before by default');
+  assert.match(html, /aria-pressed="true"[^>]*>Outlook \(Microsoft 365\)<\/button>/, 'the work calendar is the one picked');
+  assert.match(html, /aria-pressed="false"[^>]*>Google Calendar<\/button>/, 'Google Calendar is one tap away');
+  assert.doesNotMatch(html, /calendar\.google\.com/, 'only the calendar picked is linked');
   assert.match(text(html), /Recordatorios de todas/);
   assert.match(text(html), /Descargar todas juntas \(\.ics\)/);
   assert.match(text(html), /Una semana antes/);
 });
 
-test('«Recordatorios de todas» also adds each date to Google Calendar, one by one, and every reminder says which purchase it is about', () => {
+test('«Recordatorios de todas» also adds each date to the calendar picked, one by one, and every reminder says which purchase it is about', () => {
   const html = render({ marks: { available: true, items: {} }, onMark: async () => null,
     opportunity: { id: 'op-1', kind: 'tender', code: '1217466-29-LP26', url: 'https://www.mercadopublico.cl/ficha?idlicitacion=1217466-29-LP26', title: 'SERVICIO ASEO PARA DEPENDENCIAS DEL MHN', buyer: 'Servicio Nacional del Patrimonio Cultural', deadline: '2099-10-29T12:00:00Z' } });
-  const all = html.slice(html.indexOf('aria-label="Agregar cada fecha a Google Calendar"'));
-  assert.ok(all.includes('aria-label="Agregar «Fin de consultas» a Google Calendar"') && all.includes('aria-label="Agregar «Cierre de ofertas» a Google Calendar"'), 'a Google Calendar link for each dated milestone');
+  const all = html.slice(html.indexOf('aria-label="Agregar cada fecha a Outlook (Microsoft 365)"'));
+  assert.ok(all.includes('aria-label="Agregar «Fin de consultas» a Outlook (Microsoft 365)"') && all.includes('aria-label="Agregar «Cierre de ofertas» a Outlook (Microsoft 365)"'), 'an Outlook link for each dated milestone');
   assert.ok(!all.slice(0, all.indexOf('</ul>')).includes('Adjudicación'), 'a date without a day has none');
-  const links = [...html.matchAll(/href="(https:\/\/calendar\.google\.com\/[^"]+)"/g)].map(match => new URL(match[1].replace(/&amp;/g, '&')));
+  const links = [...html.matchAll(/href="(https:\/\/outlook\.office\.com\/[^"]+)"/g)].map(match => new URL(match[1].replace(/&amp;/g, '&')));
   assert.ok(links.length >= 4, 'the list of all and one for each date');
   for (const link of links) {
-    assert.match(link.searchParams.get('text')!, /SERVICIO ASEO PARA DEPENDENCIAS DEL MHN \(ID 1217466-29-LP26\)$/, 'the purchase is in the title of every event');
-    assert.match(link.searchParams.get('details')!, /Organismo: Servicio Nacional del Patrimonio Cultural/);
-    assert.match(link.searchParams.get('details')!, /Ficha oficial: https:\/\/www\.mercadopublico\.cl\//);
+    assert.match(link.searchParams.get('subject')!, /SERVICIO ASEO PARA DEPENDENCIAS DEL MHN \(ID 1217466-29-LP26\)$/, 'the purchase is in the title of every event');
+    assert.match(link.searchParams.get('body')!, /Organismo: Servicio Nacional del Patrimonio Cultural/);
+    assert.match(link.searchParams.get('body')!, /Ficha oficial: https:\/\/www\.mercadopublico\.cl\//);
   }
 });
 

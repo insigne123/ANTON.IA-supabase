@@ -28,6 +28,7 @@ Cuatro cosas que se vieron mal al usar el informe de una licitación (ID 1217466
 
 ## 3. «Recordatorios de todas» con Google Calendar, y la respuesta «No» que parecía pegada
 
+- **(Desde el 22 de octubre el menú ofrece también Outlook (Microsoft 365) y lo elige primero: ver `docs/oportunidades-recordatorios-outlook.md`.)**
 - **Google Calendar para todas.** El menú de «Recordatorios de todas» lista cada fecha con su botón «Google Calendar» (una pestaña por fecha; Google solo recibe un evento por enlace) y ofrece «Descargar todas juntas (.ics)» para importarlas de una vez (en Google Calendar, Configuración → Importar).
 - **«La IA está pensando».** Responder «Sí» o «No» a una pregunta de «Falta un dato» guarda la respuesta y **vuelve a leer todos los requisitos con la IA, en la misma petición**: 10 a 40 s sin ninguna señal, con los botones apagados. Ahora la pregunta respondida muestra «Guardé tu respuesta («No»). La IA está revisando todos los requisitos con tu ficha…», un círculo que gira y una barra que se mueve (con movimiento reducido, la barra queda quieta y llena), y «Tarda unos segundos. Puedes seguir leyendo el informe.» (`FitThinking`, animación `thinking-slide` en Tailwind).
 

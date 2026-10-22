@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { googleCalendarUrl, markInputSchema, marksFromRows, parseReportDate, reportCalendarFile, reportChecklist, reportItemKey, reportProgress, reportRoute } from './report-marks';
+import { CALENDAR_PROVIDERS, calendarUrl, googleCalendarUrl, isCalendarProvider, markInputSchema, outlookCalendarUrl, marksFromRows, parseReportDate, reportCalendarFile, reportChecklist, reportItemKey, reportProgress, reportRoute } from './report-marks';
 
 test('an item keeps its key across versions of the report: case and spaces do not matter, the kind does', () => {
   const key = reportItemKey('requirement', 'Boleta de garantía de seriedad');
@@ -90,4 +90,42 @@ test('the route is the AI\'s own when there is one, and otherwise the plan and t
     milestones: [{ label: 'Cierre de ofertas', date: '29-10-2026 9:00', state: 'documented', citations: [] }, { label: 'Adjudicación', date: 'Por confirmar', state: 'unknown', citations: [] },
       { label: 'Fin de consultas', date: '16-10-2026 9:00', state: 'documented', citations: [] }, { label: 'Fecha de publicación', date: '09-10-2026', state: 'documented', citations: [] }] as any });
   assert.deepEqual(derived.map(s => [s.title, s.kind]), [['Pedir garantía', 'prepare'], ['Fin de consultas', 'ask'], ['Cierre de ofertas', 'submit'], ['Adjudicación', 'decide']]);
+});
+
+test('the same reminder opens in Outlook with a work account: the event form filled in, at the moment chosen and in UTC, with the purchase named', () => {
+  const at = parseReportDate('22-10-2026 10:00')!.at;
+  const input = { subject, label: 'Cierre de recepción de ofertas', date: '22 de octubre de 2026, 10:00', at, reminder: '1d' as const };
+  const link = new URL(outlookCalendarUrl(input));
+  assert.equal(`${link.origin}${link.pathname}`, 'https://outlook.office.com/calendar/0/deeplink/compose');
+  assert.equal(link.searchParams.get('path'), '/calendar/action/compose');
+  assert.equal(link.searchParams.get('rru'), 'addevent');
+  assert.equal(link.searchParams.get('subject'), 'Mañana: Cierre de recepción de ofertas · SERVICIO ASEO PARA DEPENDENCIAS DEL MHN (ID 1217466-29-LP26)');
+  // The same moment as Google's link, one day before the close, half an hour long.
+  const google = new URL(googleCalendarUrl(input)).searchParams.get('dates')!.split('/');
+  const stampOf = (iso: string) => iso.replace(/[-:]/g, '').replace('+0000', 'Z');
+  assert.deepEqual([stampOf(link.searchParams.get('startdt')!), stampOf(link.searchParams.get('enddt')!)], google);
+  assert.match(link.searchParams.get('startdt')!, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00$/);
+  assert.equal((Date.parse(link.searchParams.get('enddt')!) - Date.parse(link.searchParams.get('startdt')!)) / 60_000, 30);
+  const body = link.searchParams.get('body')!;
+  assert.match(body, /^Cierre de recepción de ofertas: 22 de octubre de 2026, 10:00\r\n\r\nLicitación: SERVICIO ASEO PARA DEPENDENCIAS DEL MHN\r\nOrganismo: Servicio Nacional del Patrimonio Cultural\r\nID: 1217466-29-LP26/);
+  assert.ok(body.includes('Abrir en ANTON.IA: https://app.example/opportunities?op=op-1'));
+  assert.equal(link.searchParams.get('location'), subject.sourceUrl);
+  // On the day itself there is no «Hoy» to say twice, and a link that is not http(s) is not offered as a place.
+  assert.equal(new URL(outlookCalendarUrl({ ...input, reminder: 'same' })).searchParams.get('subject'), 'Cierre de recepción de ofertas · SERVICIO ASEO PARA DEPENDENCIAS DEL MHN (ID 1217466-29-LP26)');
+  assert.equal(new URL(outlookCalendarUrl({ ...input, subject: { title: 'Cargos', sourceUrl: 'javascript:alert(1)' } })).searchParams.get('location'), null);
+  // The title and the description are cut to what a link can carry.
+  const long = new URL(outlookCalendarUrl({ ...input, subject: { title: 'A'.repeat(900) }, details: 'x'.repeat(5000) }));
+  assert.ok(long.searchParams.get('subject')!.length <= 300 && long.searchParams.get('body')!.length <= 2400);
+});
+
+test('the calendar is picked by name: Outlook for a work account first, Google Calendar as the other, and anything else is not a calendar', () => {
+  assert.deepEqual(CALENDAR_PROVIDERS.map(item => item.id), ['outlook', 'google']);
+  assert.ok(isCalendarProvider('outlook') && isCalendarProvider('google'));
+  assert.ok(!isCalendarProvider('yahoo') && !isCalendarProvider(null) && !isCalendarProvider(undefined));
+  const at = parseReportDate('22-10-2026 10:00')!.at;
+  const input = { subject, label: 'Cierre', date: 'x', at, reminder: '1d' as const };
+  assert.equal(calendarUrl('outlook', input), outlookCalendarUrl(input));
+  assert.equal(calendarUrl('google', input), googleCalendarUrl(input));
+  assert.match(calendarUrl('outlook', input), /^https:\/\/outlook\.office\.com\//);
+  assert.match(calendarUrl('google', input), /^https:\/\/calendar\.google\.com\//);
 });
