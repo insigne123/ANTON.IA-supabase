@@ -78,6 +78,7 @@ numbers: budget es el presupuesto disponible o máximo como número (sin puntos)
 guarantees: cada garantía exigida (seriedad, fiel cumplimiento, anticipo) con monto o porcentaje, vigencia, cuándo se entrega y a nombre de quién.
 afterSubmit: hasta 6 hitos después de enviar que exigen algo de la empresa (salvar errores formales en un plazo, firmar el contrato, entregar la garantía, documentos para cada pago).
 inconsistencies: contradicciones entre partes de las bases (número de carpetas, nombres de anexos, fechas, montos) con la pregunta concreta para el foro.
+Si el tipo es private (un proceso privado por invitación), channel suele ser portal: nombra en channelDetail la plataforma de la invitación si aparece en los hechos y qué hay que ingresar en ella (por ejemplo un resumen de la propuesta económica); separa en folders lo que se sube de lo que se completa en la plataforma, pon los formularios con su código y la cotización en el formato pedido, y deja la confirmación de participación y la negociación posterior en afterSubmit o rules.
 Escribe en español de Chile, frases cortas, para quien postula: nunca menciones «los hechos», «el expediente» ni lo que no se sabe (si algo no está, deja el campo vacío). No repitas la fecha de cierre como regla: la página ya la muestra. Las horas van en hora de Chile; una fecha ISO con Z o +00:00 está en UTC. Usa solo los hechos; no inventes documentos, montos, plazos ni direcciones. Las citas deben copiarse tal cual de los hechos.`;
 
 type Fact = { text: string; state: string; citations?: Array<{ chunkId: string; quote: string }> };
@@ -153,6 +154,30 @@ export const PORTAL_STEPS: Array<{ title: string; detail: string }> = [
   { title: 'Firma la declaración jurada y envía', detail: 'Al ofertar se firma en línea la Declaración Jurada de Requisitos para Ofertar. Envía con tiempo: después de la hora de cierre el portal no recibe ofertas.' },
   { title: 'Guarda el comprobante', detail: 'Descarga el comprobante de envío y revisa que estén todos los archivos. Mientras la licitación siga abierta puedes editar la oferta.' },
 ];
+
+/**
+ * The same route for a private process (an invitation through the buyer's platform, a request for proposals): the bases of each one decide, and
+ * the page says so. It rests on how these processes are run, not on a law: the buyer sets the platform, the forms and the schedule.
+ */
+export const PRIVATE_STEPS: Array<{ title: string; detail: string }> = [
+  { title: 'Confirma que participas', detail: 'Muchas invitaciones piden confirmar la participación antes de una fecha, por la plataforma o al administrador del proceso. Sin esa confirmación puedes quedar fuera.' },
+  { title: 'Pregunta en el período de consultas', detail: 'Las consultas y sus respuestas suelen ser públicas para todos los participantes y se envían por la plataforma, no por contacto directo con el cliente. Revisa hasta cuándo.' },
+  { title: 'Prepara los formularios tal como vienen', detail: 'Usa los formatos de la invitación sin modificarlos, completa cada campo y haz que los firme el representante legal. Cambiar el formato o dejar una partida en blanco puede descalificar la oferta.' },
+  { title: 'Arma la cotización en el formato pedido', detail: 'Suele pedirse en Excel, sin protección ni imágenes pegadas, en la moneda del contrato y con todos los costos e impuestos incluidos. Después de entregarla, el precio no se renegocia.' },
+  { title: 'Sube todo a la plataforma', detail: 'Carga los documentos que piden y, si la plataforma lo exige, ingresa el resumen de la propuesta económica: revisa que lo escrito coincida con la cotización.' },
+  { title: 'Guarda el comprobante', detail: 'Descarga o captura la confirmación de envío y revisa que estén todos los archivos antes del cierre.' },
+];
+export const PRIVATE_AFTER_SUBMIT = [
+  'Puede haber una o más rondas de negociación después de entregar: el cliente no está obligado a adjudicar a la oferta más barata.',
+  'Si te adjudican, se acepta formalmente la adjudicación y se firma el contrato marco; sus condiciones suelen no ser negociables.',
+  'Antes de firmar suelen pedir la garantía de fiel cumplimiento y un seguro de responsabilidad civil, a veces con el cliente como asegurado adicional.',
+];
+
+/** The route the page shows for an opportunity: Mercado Público's for a purchase there, the platform's for a private process. */
+export function submissionRoute(kind: string | null | undefined, channel?: SubmissionKit['channel'] | null) {
+  if (kind === 'private') return { title: channel === 'email' ? 'Cómo se envía (en general)' : 'Cómo se envía en la plataforma de la invitación', steps: PRIVATE_STEPS, after: PRIVATE_AFTER_SUBMIT };
+  return { title: channel === 'email' ? 'Cómo se envía (en general)' : 'Cómo se envía en Mercado Público', steps: PORTAL_STEPS, after: AFTER_SUBMIT_DEFAULTS };
+}
 
 /** After sending: what usually comes and what it asks of the company. */
 export const AFTER_SUBMIT_DEFAULTS = [

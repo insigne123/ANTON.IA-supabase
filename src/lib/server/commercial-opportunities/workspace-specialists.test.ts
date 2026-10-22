@@ -71,3 +71,28 @@ test('the facts the team reads stay small enough for one Haiku call', async () =
   assert.ok(JSON.stringify(kept).length < 75_000);
   assert.ok(kept.every((f: any) => f.text.length <= 600));
 });
+
+test('a private process is read by its own four angles (forms and platform, how it is judged, framework contract, price as a proposal), and its route asks for the private steps', async () => {
+  const { runOpportunitySpecialists, PRIVATE_TEAM, TENDER_TEAM } = await load();
+  const calls: Array<{ step: string; prompt: string }> = [];
+  const generate = async (_client: unknown, _job: unknown, call: any) => {
+    calls.push({ step: call.step, prompt: call.prompt });
+    if (call.step.startsWith('route:')) return { steps: [{ title: 'Confirmar participación', detail: 'Por la plataforma', date: '7 de octubre', kind: 'contact' }] };
+    if (call.step.startsWith('kit-v2:')) throw new Error('left out');
+    return { findings: ['Boleta de fiel cumplimiento de 10% anual.'], advice: ['Pedirla al banco.'], missing: [] };
+  };
+  const review = await runOpportunitySpecialists({}, { id: 'j' }, { ...input, kind: 'private', title: 'Servicio de seguridad', buyer: 'Cliente S.A.' }, generate);
+  assert.equal(PRIVATE_TEAM.length, TENDER_TEAM.length);
+  assert.deepEqual(review.notes.map((note: any) => note.name), ['Requisitos y documentos', 'Evaluación', 'Contrato y condiciones no negociables', 'Propuesta económica y estrategia']);
+  const requisitos = calls.find(call => call.step.startsWith('specialist:requisitos'))!.prompt;
+  assert.match(requisitos, /formulario, anexo, declaración, certificado o estado financiero[\s\S]*A\.1 o B\.2[\s\S]*Excel sin protección[\s\S]*confirmación de participación/);
+  assert.doesNotMatch(requisitos, /Registro de Proveedores/);
+  assert.match(calls.find(call => call.step.startsWith('specialist:contrato'))!.prompt, /contrato marco[\s\S]*Marca qué no se negocia/);
+  assert.match(calls.find(call => call.step.startsWith('specialist:estrategia'))!.prompt, /precio por hora, estructura de sueldos, turnos/);
+  assert.match(calls.find(call => call.step.startsWith('route:'))!.prompt, /es un proceso privado: si existen, incluye confirmar la participación, el período de consultas, la entrega por la plataforma y la negociación posterior/);
+  // A public tender keeps its team and its route as they were.
+  calls.length = 0;
+  const tender = await runOpportunitySpecialists({}, { id: 'j' }, input, generate);
+  assert.equal(tender.notes[1].name, 'Evaluación y puntaje');
+  assert.doesNotMatch(calls.find(call => call.step.startsWith('route:'))!.prompt, /proceso privado/);
+});
