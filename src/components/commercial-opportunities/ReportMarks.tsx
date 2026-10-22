@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { REMINDER_OPTIONS, emptyMark, googleCalendarUrl, reportCalendarFile, type ReminderId, type ReminderSubject, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
+import { CALENDAR_PROVIDERS, REMINDER_OPTIONS, calendarUrl, emptyMark, isCalendarProvider, reportCalendarFile, type CalendarProvider, type ReminderId, type ReminderSubject, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { MarkQueue, applyMarkChange } from '@/lib/commercial-opportunities/mark-queue';
 
 export type MarkChange = { key: string; label: string; done?: boolean; highlight?: boolean; note?: string };
@@ -137,14 +137,21 @@ function saveFile(name: string, text: string) {
 }
 const fileName = (title: string) => `${title.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Oportunidad'}.ics`;
 
-/** «Recordarme»: when to be told (the same day, a day, three days or a week before) and where (Google Calendar or a file). */
+/** The calendar the person used last, kept in this browser only: a convenience, the menu works without it. */
+const CALENDAR_KEY = 'anton:reminder-calendar';
+
+/** «Recordarme»: when to be told (the same day, a day, three days or a week before) and where (Outlook, Google Calendar or a file). */
 export function ReminderMenu({ subject, events, label = 'Recordarme', compact = false }: {
   subject: ReminderSubject; events: Array<{ uid: string; label: string; date: string; at: Date; details?: string }>; label?: string; compact?: boolean;
 }) {
   const [reminder, setReminder] = useState<ReminderId>('1d');
+  const [provider, setProvider] = useState<CalendarProvider>('outlook');
+  useEffect(() => { try { const saved = window.localStorage.getItem(CALENDAR_KEY); if (isCalendarProvider(saved)) setProvider(saved); } catch { /* the menu works without it */ } }, []);
+  const pick = (next: CalendarProvider) => { setProvider(next); try { window.localStorage.setItem(CALENDAR_KEY, next); } catch { /* not saved */ } };
   if (!events.length) return null;
   const single = events.length === 1 ? events[0] : null;
-  const google = (event: typeof events[number]) => googleCalendarUrl({ subject, label: event.label, date: event.date, at: event.at, reminder, details: event.details });
+  const name = CALENDAR_PROVIDERS.find(item => item.id === provider)!;
+  const link = (event: typeof events[number]) => calendarUrl(provider, { subject, label: event.label, date: event.date, at: event.at, reminder, details: event.details });
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -169,13 +176,25 @@ export function ReminderMenu({ subject, events, label = 'Recordarme', compact = 
             ))}
           </div>
         </fieldset>
+        <fieldset className="space-y-1.5">
+          <legend className="text-xs font-medium text-muted-foreground">Mi calendario</legend>
+          <div className="grid grid-cols-2 gap-1.5">
+            {CALENDAR_PROVIDERS.map(option => (
+              <button key={option.id} type="button" aria-pressed={provider === option.id} onClick={() => pick(option.id)}
+                className={cn('rounded-lg border px-2 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  provider === option.id ? 'border-primary bg-primary/10 font-medium text-primary' : 'border-border hover:bg-muted/60')}>
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         {single ? null : (
-          <ul className="max-h-60 space-y-1 overflow-y-auto" aria-label="Agregar cada fecha a Google Calendar">
+          <ul className="max-h-60 space-y-1 overflow-y-auto" aria-label={`Agregar cada fecha a ${name.label}`}>
             {events.map(event => (
               <li key={event.uid} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50">
                 <div className="min-w-0"><p className="truncate text-sm font-medium">{event.label}</p><p className="text-xs text-muted-foreground">{event.date}</p></div>
                 <Button asChild size="sm" variant="outline" className="h-7 shrink-0 px-2 text-xs">
-                  <a href={google(event)} target="_blank" rel="noopener noreferrer" aria-label={`Agregar «${event.label}» a Google Calendar`}><CalendarPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Google Calendar</a>
+                  <a href={link(event)} target="_blank" rel="noopener noreferrer" aria-label={`Agregar «${event.label}» a ${name.label}`}><CalendarPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{name.short}</a>
                 </Button>
               </li>
             ))}
@@ -184,8 +203,8 @@ export function ReminderMenu({ subject, events, label = 'Recordarme', compact = 
         <div className="grid gap-1.5">
           {single ? (
             <Button asChild size="sm" className="justify-start">
-              <a href={google(single)} target="_blank" rel="noopener noreferrer">
-                <CalendarPlus className="mr-2 h-4 w-4" aria-hidden="true" />Agregar a Google Calendar
+              <a href={link(single)} target="_blank" rel="noopener noreferrer">
+                <CalendarPlus className="mr-2 h-4 w-4" aria-hidden="true" />Agregar a {name.label}
               </a>
             </Button>
           ) : null}
@@ -195,8 +214,8 @@ export function ReminderMenu({ subject, events, label = 'Recordarme', compact = 
           </Button>
         </div>
         <p className="text-[11px] leading-4 text-muted-foreground">
-          {single ? 'En Google Calendar el aviso queda como un evento en el momento que elegiste, con el nombre y el ID de la licitación. ' : 'Cada evento dice de qué licitación es: su nombre, el organismo, el ID y un enlace para abrirla. '}
-          El archivo .ics funciona en Google Calendar (Configuración → Importar), Outlook y Apple Calendar.
+          {single ? `En ${name.label} el aviso queda como un evento en el momento que elegiste, con el nombre y el ID de la licitación. ` : 'Cada evento dice de qué licitación es: su nombre, el organismo, el ID y un enlace para abrirla. '}
+          Se abre el formulario del evento en tu calendario: tú lo confirmas. El archivo .ics sirve en Outlook, Google Calendar y Apple Calendar.
         </p>
       </PopoverContent>
     </Popover>

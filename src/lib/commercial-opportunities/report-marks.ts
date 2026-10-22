@@ -122,20 +122,47 @@ export function reminderDetails(input: { label: string; date: string; subject: R
   ].filter(Boolean).join('\n\n');
 }
 
+type CalendarEvent = { subject: ReminderSubject; label: string; date: string; at: Date; reminder: ReminderId; details?: string };
 /**
- * A Google Calendar event the person adds with one click. Google's link cannot carry an alert, so the event sits at the
- * moment of the reminder the person chose («en 3 días»), half an hour long, and says which date it announces and which purchase.
+ * What a calendar link carries, the same for every calendar: neither link can carry an alert, so the event sits at the moment of the
+ * reminder the person chose («en 3 días»), half an hour long, and says which date it announces and which purchase.
  */
-export function googleCalendarUrl(input: { subject: ReminderSubject; label: string; date: string; at: Date; reminder: ReminderId; details?: string }) {
+function calendarSlot(input: CalendarEvent) {
   const option = REMINDER_OPTIONS.find(o => o.id === input.reminder) ?? REMINDER_OPTIONS[0];
   const start = new Date(input.at.getTime() - option.minutes * 60_000);
   const end = new Date(start.getTime() + 30 * 60_000);
-  const text = option.minutes ? reminderTitle(input.label, input.reminder, input.subject) : reminderSummary(input.label, input.subject);
-  const params = new URLSearchParams({ action: 'TEMPLATE', text: text.slice(0, 300), dates: `${stamp(start)}/${stamp(end)}`, ctz: 'America/Santiago',
-    details: reminderDetails({ label: input.label, date: input.date, subject: input.subject, details: input.details }).slice(0, 1800) });
-  if (input.subject.sourceUrl && /^https?:\/\//.test(input.subject.sourceUrl)) params.set('location', input.subject.sourceUrl.slice(0, 300));
+  const title = (option.minutes ? reminderTitle(input.label, input.reminder, input.subject) : reminderSummary(input.label, input.subject)).slice(0, 300);
+  const details = reminderDetails({ label: input.label, date: input.date, subject: input.subject, details: input.details }).slice(0, 1800);
+  const location = input.subject.sourceUrl && /^https?:\/\//.test(input.subject.sourceUrl) ? input.subject.sourceUrl.slice(0, 300) : null;
+  return { start, end, title, details, location };
+}
+
+/** A Google Calendar event the person adds with one click. */
+export function googleCalendarUrl(input: CalendarEvent) {
+  const { start, end, title, details, location } = calendarSlot(input);
+  const params = new URLSearchParams({ action: 'TEMPLATE', text: title, dates: `${stamp(start)}/${stamp(end)}`, ctz: 'America/Santiago', details });
+  if (location) params.set('location', location);
   return `https://calendar.google.com/calendar/render?${params}`;
 }
+
+/**
+ * The same event for Outlook on the web with a work or school account (Microsoft 365), where a company's calendar lives. It opens the
+ * new-event form filled in, in the person's own calendar; nothing is read or written for them. Dates go in UTC, which Outlook shows in
+ * the person's time zone.
+ */
+export function outlookCalendarUrl(input: CalendarEvent) {
+  const { start, end, title, details, location } = calendarSlot(input);
+  const utc = (date: Date) => `${date.toISOString().slice(0, 19)}+00:00`;
+  const params = new URLSearchParams({ path: '/calendar/action/compose', rru: 'addevent', subject: title, startdt: utc(start), enddt: utc(end), body: details.replace(/\n/g, '\r\n') });
+  if (location) params.set('location', location);
+  return `https://outlook.office.com/calendar/0/deeplink/compose?${params}`;
+}
+
+/** Where a reminder can be added with one click: the work calendar first (Microsoft 365), then Google's. */
+export const CALENDAR_PROVIDERS = [{ id: 'outlook', label: 'Outlook (Microsoft 365)', short: 'Outlook' }, { id: 'google', label: 'Google Calendar', short: 'Google' }] as const;
+export type CalendarProvider = typeof CALENDAR_PROVIDERS[number]['id'];
+export const isCalendarProvider = (value: unknown): value is CalendarProvider => CALENDAR_PROVIDERS.some(provider => provider.id === value);
+export const calendarUrl = (provider: CalendarProvider, input: CalendarEvent) => (provider === 'google' ? googleCalendarUrl(input) : outlookCalendarUrl(input));
 
 const icsText = (value: string) => value.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 /** Lines of at most 75 octets, continued with a space (RFC 5545). */
