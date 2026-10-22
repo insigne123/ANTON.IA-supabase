@@ -127,6 +127,41 @@ export const isOpportunitySource = (value: unknown): value is OpportunitySource 
 export const sourceKinds = (source: string): string[] => [...(OPPORTUNITY_SOURCES.find(item => item.id === source)?.kinds ?? [])];
 
 /**
+ * The line of service an opportunity is about, as the filter of the pipeline and the list says it. An opportunity is in a category
+ * when its title (or the line that summarizes it) names one of the `terms`, whatever the case; a stem covers the accents and the
+ * endings («externaliza» → externalización, externalizar). A category is not exclusive: «personal de aseo» is in two. The terms are
+ * ours, never typed, so they go as they are into a filter.
+ */
+export const OPPORTUNITY_CATEGORIES = [
+  { id: 'seguridad', label: 'Seguridad', terms: ['guardia', 'vigilancia', 'vigilante', 'seguridad privada', 'servicio de seguridad', 'servicios de seguridad', 'seguridad y vigilancia'] },
+  // «aseo» alone would also bring «paseo» and every purchase of cleaning supplies: these are the phrases of the service.
+  { id: 'aseo', label: 'Aseo', terms: ['servicio de aseo', 'servicios de aseo', 'servicio aseo', 'servicios aseo', 'serv aseo', 'serv. aseo', 'serv. de aseo', 'serv de aseo', 'externos de aseo',
+    'aseo industrial', 'aseo y limpieza', 'limpieza y aseo', 'aseo y mantenci', 'personal de aseo', 'auxiliar de aseo', 'auxiliares de aseo', 'servicio de limpieza', 'servicios de limpieza',
+    'servicio limpieza', 'servicios limpieza'] },
+  { id: 'outsourcing', label: 'Outsourcing y externalización', terms: ['outsourcing', 'externaliza', 'suministro de personal', 'servicios transitorios', 'servicio transitorio', 'personal transitorio',
+    'subcontrataci', 'contact center', 'call center'] },
+  { id: 'reclutamiento', label: 'Reclutamiento y selección', terms: ['reclutamiento', 'selección de personal', 'seleccion de personal', 'headhunting', 'head hunting', 'búsqueda de ejecutivos',
+    'busqueda de ejecutivos', 'psicolaboral', 'evaluación de postulantes', 'evaluacion de postulantes'] },
+] as const;
+export type OpportunityCategory = typeof OPPORTUNITY_CATEGORIES[number]['id'];
+/** The categories in a query string («seguridad,aseo»): the known ones, once each, in the order of the list. */
+export function parseCategories(value: unknown): OpportunityCategory[] {
+  const wanted = new Set(String(value ?? '').split(',').map(part => part.trim()));
+  return OPPORTUNITY_CATEGORIES.filter(category => wanted.has(category.id)).map(category => category.id);
+}
+/** The words that put an opportunity in any of these categories. */
+export const categoryTerms = (categories: readonly string[]): string[] => [...new Set(OPPORTUNITY_CATEGORIES.filter(category => categories.includes(category.id)).flatMap(category => category.terms))];
+const foldText = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+/** Whether an opportunity is in any of the categories (all of them when none is asked), by the same words the server filters with. */
+export function inCategories(item: { title?: string | null; data?: unknown }, categories: readonly string[]) {
+  const terms = categoryTerms(categories);
+  if (!terms.length) return true;
+  const summary = (item.data as { summary?: { text?: unknown } | null } | null | undefined)?.summary?.text;
+  const text = foldText(`${item.title || ''} ${typeof summary === 'string' ? summary : ''}`);
+  return terms.some(term => text.includes(foldText(term)));
+}
+
+/**
  * What a person typed, safe inside a PostgREST filter: without its wildcards and the commas, parentheses and quotes that
  * would end the filter. Empty when nothing searchable is left.
  */

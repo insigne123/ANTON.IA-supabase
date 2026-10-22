@@ -100,6 +100,28 @@ test('without a search the pipeline keeps its plain filter of open opportunities
   assert.ok(!queries.some(q => q.calls.some(([name, args]) => name === 'in' && args[0] === 'kind')), 'every source');
 });
 
+test('a line of service filters every read with the words of its category in the title or the summary, in the same single «or»', async () => {
+  const { readOpportunityPipeline } = await load();
+  const orsOf = async (options: Record<string, unknown>) => {
+    const { client, queries } = recorder();
+    await readOpportunityPipeline(client, scope, options);
+    return queries.filter(q => q.table === 'commercial_opportunities').flatMap(q => q.calls.filter(([name]) => name === 'or').map(([, args]) => String(args[0])));
+  };
+  const only = await orsOf({ categories: ['seguridad'] });
+  assert.equal(only.length, 6, 'one «or» in each of the six reads');
+  assert.ok(only.every(or => or.includes('title.ilike.*guardia*') && or.includes('data->summary->>text.ilike.*guardia*')), 'the title and the summary line');
+  assert.equal(only.filter(or => or.startsWith('and(or(deadline_at.is.null,deadline_at.gt.')).length, 5, 'still open and in the category');
+  assert.ok(only.some(or => or.startsWith('title.ilike.*')), 'what is already worked is not cut by the deadline, only by the category');
+  // Words searched and category together: both groups inside the one «and».
+  const both = await orsOf({ categories: ['aseo'], query: 'hospital' });
+  assert.ok(both.every(or => or.includes('title.ilike.*hospital*') && or.includes('title.ilike.*servicio de aseo*')));
+  assert.ok(both.every(or => /^and\(or\(.+\),or\(.+\)(,or\(.+\))?\)$/.test(or)), 'each group is its own «or» inside one «and»');
+  // Two lines are alternatives, and an unknown one is no filter at all.
+  const two = await orsOf({ categories: ['seguridad', 'reclutamiento'] });
+  assert.ok(two.every(or => or.includes('*guardia*') && or.includes('*reclutamiento*')));
+  assert.ok((await orsOf({ categories: [] })).every(or => or.startsWith('deadline_at.is.null,')), 'none picked: the plain filter');
+});
+
 test('each page is the best scored first by default, or the soonest to close first (the ones with no deadline last) when asked, and says which', async () => {
   const { readOpportunityPipeline } = await load();
   const orders = async (options: Record<string, unknown>) => {
