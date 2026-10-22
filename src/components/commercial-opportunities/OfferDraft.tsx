@@ -47,7 +47,7 @@ function Part({ id, title, count, open, action, children }: { id: string; title:
   </details>;
 }
 
-export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, downloadHref, annexHref, budget }: {
+export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, downloadHref, annexHref, budget, canPrice = true }: {
   offer: { available: boolean; latest: SavedOfferDraft | null } | null | undefined;
   /** The latest «offer» job of the opportunity, if any. */
   job: OfferJob | null;
@@ -58,6 +58,8 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
   /** The Word of one form of the bases (by its place in the draft). */
   annexHref?: (index: number) => string;
   budget: { amount: number | null; includesTax: boolean | null };
+  /** Whether this person sets the prices (an administrator or whoever is in charge); the rest of the team reads them. */
+  canPrice?: boolean;
 }) {
   const latest = offer?.latest ?? null;
   const active = Boolean(job && ACTIVE.includes(job.state));
@@ -145,7 +147,7 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
       </ul>
     </Part> : null}
 
-    {draft.economic.lines.length ? <EconomicSheet key={latest.id} saved={latest} budget={budget} onSave={onSavePrices} /> : null}
+    {draft.economic.lines.length ? <EconomicSheet key={latest.id} saved={latest} budget={budget} onSave={onSavePrices} canPrice={canPrice} /> : null}
 
     {draft.annexes?.length ? <Part id="annexes" title="Formularios de las bases" count={draft.annexes.length}>
       <p className="text-sm leading-6 text-muted-foreground">Cada formulario va en el Word, listo para llenar y con los datos de tu empresa que ya conocemos. Descárgalos todos juntos arriba o uno por uno aquí.</p>
@@ -166,8 +168,8 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
 }
 
 /** The lines to quote with the prices the team types, the totals with VAT and how they stand against the budget. */
-export function EconomicSheet({ saved, budget, onSave }: {
-  saved: SavedOfferDraft; budget: { amount: number | null; includesTax: boolean | null };
+export function EconomicSheet({ saved, budget, onSave, canPrice = true }: {
+  saved: SavedOfferDraft; budget: { amount: number | null; includesTax: boolean | null }; canPrice?: boolean;
   onSave: (draftId: string, revision: number, prices: Record<string, string>) => Promise<{ revision: number; prices: OfferPrices } | null>;
 }) {
   const { draft } = saved;
@@ -195,7 +197,8 @@ export function EconomicSheet({ saved, budget, onSave }: {
   };
   const basis = sheet.withTax ? 'con IVA' : 'neto';
   return <Part id="economic" title="Oferta económica" count={draft.economic.lines.length} open>
-    <p className="text-sm leading-6 text-muted-foreground">Escribe el precio unitario {basis} de cada línea{draft.economic.priceBasis === 'unknown' ? ' (las bases no dicen si el portal pide neto o total: confírmalo)' : ''}. Los totales se calculan solos.</p>
+    <p className="text-sm leading-6 text-muted-foreground">{canPrice ? <>Escribe el precio unitario {basis} de cada línea{draft.economic.priceBasis === 'unknown' ? ' (las bases no dicen si el portal pide neto o total: confírmalo)' : ''}. Los totales se calculan solos.</>
+      : <>Los precios los fija quien está a cargo de la oportunidad o un administrador. Tú los ves con sus totales; si crees que hay que cambiarlos, plantéalo como una decisión.</>}</p>
     <div className="overflow-x-auto">
       <table className="w-full min-w-[34rem] text-sm">
         <thead><tr className="border-b text-left text-xs text-muted-foreground">
@@ -208,7 +211,7 @@ export function EconomicSheet({ saved, budget, onSave }: {
             <td className="whitespace-nowrap py-2.5 pr-3 tabular-nums">{row.quantity ?? '—'}{row.unit ? <span className="ml-1 text-xs text-muted-foreground">{row.unit}</span> : null}</td>
             <td className="py-2.5 pr-3">
               <Label htmlFor={`offer-price-${row.index}`} className="sr-only">Precio unitario de {row.description}</Label>
-              <Input id={`offer-price-${row.index}`} inputMode="decimal" className="h-9 w-36 tabular-nums" placeholder="$0" value={typed[String(row.index)] ?? ''}
+              <Input id={`offer-price-${row.index}`} inputMode="decimal" className="h-9 w-36 tabular-nums" placeholder="$0" value={typed[String(row.index)] ?? ''} readOnly={!canPrice} aria-readonly={!canPrice}
                 onChange={e => { setState('idle'); setTyped(current => ({ ...current, [String(row.index)]: e.target.value })); }} />
             </td>
             <td className="whitespace-nowrap py-2.5 text-right tabular-nums">{row.subtotal === null ? '—' : money(row.subtotal)}</td>
@@ -228,10 +231,10 @@ export function EconomicSheet({ saved, budget, onSave }: {
       {!sheet.complete && sheet.priced ? <p className="text-muted-foreground">Faltan precios en {sheet.rows.length - sheet.priced} línea{sheet.rows.length - sheet.priced === 1 ? '' : 's'}.</p> : null}
       {state === 'error' ? <p role="alert" className="text-destructive">No se guardaron los precios. Si otra persona los cambió, ya ves los suyos: revísalos y guarda de nuevo.</p> : null}
     </div>
-    <div className="flex flex-wrap items-center gap-3">
+    {canPrice ? <div className="flex flex-wrap items-center gap-3">
       <Button size="sm" onClick={() => void save()} disabled={!changed || state === 'saving'}>{state === 'saving' ? 'Guardando…' : 'Guardar precios'}</Button>
       {state === 'saved' && !changed ? <span className="flex items-center gap-1 text-xs text-muted-foreground"><Check className="h-3.5 w-3.5" aria-hidden="true" />Guardados para el equipo</span> : null}
-    </div>
+    </div> : null}
     {[draft.economic.validity ? `Vigencia de la oferta: ${draft.economic.validity}` : '', draft.economic.paymentTerms ? `Forma de pago: ${draft.economic.paymentTerms}` : '', ...draft.economic.notes].filter(Boolean).length
       ? <ul className="space-y-1 text-xs leading-5 text-muted-foreground">{[draft.economic.validity ? `Vigencia de la oferta: ${draft.economic.validity}` : '', draft.economic.paymentTerms ? `Forma de pago: ${draft.economic.paymentTerms}` : '', ...draft.economic.notes].filter(Boolean).map(line => <li key={line}>{line}</li>)}</ul> : null}
   </Part>;

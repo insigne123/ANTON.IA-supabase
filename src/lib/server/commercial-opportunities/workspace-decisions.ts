@@ -10,7 +10,7 @@ import { addOpportunityActivity, opportunityDb } from './workspace-store';
 type Row = Record<string, any>;
 
 /** Tells people on «Novedades» that something needs them on an opportunity; once per person and event. */
-async function notify(client: SupabaseClient, scope: WorkScope, id: string, users: Array<string | null | undefined>, title: string, eventKey: string) {
+export async function notifyPeople(client: SupabaseClient, scope: WorkScope, id: string, users: Array<string | null | undefined>, title: string, eventKey: string) {
   const to = [...new Set(users.filter((user): user is string => Boolean(user) && user !== scope.userId))];
   if (!to.length) return;
   opportunityDb(await client.from('opportunity_notifications').upsert(
@@ -32,7 +32,7 @@ export async function notifyManagers(client: SupabaseClient, scope: WorkScope, i
     opportunityTitle(client, scope, id), responsibleOf(client, scope, id),
     client.from('organization_members').select('user_id').eq('organization_id', scope.organizationId).in('role', ['owner', 'admin']).limit(200).then(result => (opportunityDb(result) || []) as Row[]),
   ]);
-  await notify(client, scope, id, [...admins.map(row => String(row.user_id)), responsible], `${headline}: ${title}`, eventKey);
+  await notifyPeople(client, scope, id, [...admins.map(row => String(row.user_id)), responsible], `${headline}: ${title}`, eventKey);
 }
 
 /**
@@ -56,5 +56,5 @@ export async function replyToDecision(client: SupabaseClient, scope: WorkScope, 
   const key = `decision:${randomUUID()}`;
   await addOpportunityActivity(client, scope, id, 'decision', replyBody(input.text), { type: 'reply', to: waiting.id }, key);
   const [title, responsible] = await Promise.all([opportunityTitle(client, scope, id), responsibleOf(client, scope, id)]);
-  await notify(client, scope, id, [waiting.actorId, responsible], `Respondieron tu decisión: ${title}`, key);
+  await notifyPeople(client, scope, id, [waiting.actorId, responsible], `Respondieron tu decisión: ${title}`, key);
 }

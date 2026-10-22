@@ -29,7 +29,16 @@ camino del integrante no se había usado con gente real.
 - `OPPORTUNITY_ASSIGNMENT_EMAIL=off` los detiene todos. Sin esa variable, están encendidos.
 - Se envía después de responderle al administrador: si falla, la asignación queda hecha igual.
 
-## Pendiente (otros PRs)
+## Lo que vale por la empresa pasa por un administrador
 
-- Que los precios de la oferta y las respuestas a «¿Cumplimos?» de un integrante pasen por un administrador antes de valer.
+Los precios de la oferta y lo que se responde en «¿Cumplimos?» son afirmaciones de la empresa, y las ofertas son públicas. Por eso:
+
+- **Precios.** Los fija un administrador o quien quedó a cargo de la oportunidad. Si nadie quedó a cargo, cualquiera del equipo puede (alguien tiene que poder). El resto del equipo ve los precios y los totales, pero no los edita; el servidor lo revisa, no solo la pantalla. Si cree que hay que cambiarlos, lo plantea como decisión.
+- **Respuestas para la ficha.** Si un integrante responde una pregunta de «¿Cumplimos?», no entra a la ficha: queda como *respuesta por confirmar* (en la actividad, con aviso a los administradores). Un administrador la **confirma** (se guarda en la ficha como si la hubiera escrito él y los requisitos se revisan de nuevo) o la **descarta**; quien la dio recibe el aviso en cualquiera de los dos casos. La misma persona respondiendo de nuevo la misma pregunta reemplaza su respuesta.
+- Las respuestas de un administrador siguen entrando directo, y la ficha completa sigue siendo solo de administradores.
+
+Tampoco hay migración: las propuestas usan la actividad de la oportunidad (`fit_proposal`).
+
+## Pendiente (otro PR)
+
 - Escenarios de puntaje por precio y la calculadora de valor hora.

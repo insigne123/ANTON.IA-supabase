@@ -14,7 +14,8 @@ import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunitie
 import { AuthError } from '@/lib/server/auth-utils';
 import { notifyNewParticipants, readParticipantIds } from '@/lib/server/commercial-opportunities/workspace-assignment-notice';
 import { notifyManagers, recordDecision, replyToDecision } from '@/lib/server/commercial-opportunities/workspace-decisions';
-import { decisionReplySchema, decisionSchema, memberMayMove, stateNoteSchema } from '@/lib/commercial-opportunities/member-work';
+import { canSetPrices, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, memberMayMove, stateNoteSchema } from '@/lib/commercial-opportunities/member-work';
+import { proposeFitAnswer, resolveFitProposal } from '@/lib/server/commercial-opportunities/workspace-proposals';
 
 export const dynamic = 'force-dynamic';
 const STATE_LABELS: Record<string, string> = { unassigned: 'sin asignar', assigned: 'asignada', working: 'en gestión', blocked: 'bloqueada', submitted: 'oferta presentada', won: 'ganada', lost: 'perdida', archived: 'archivada' };
@@ -25,14 +26,14 @@ export async function GET(_request: Request, context: Context) {
     // The detail checks the access first; the offer draft of the same opportunity comes with it.
     const detail = await readOpportunityDetail(auth.admin, scope, id);
     const [offer, fit] = await Promise.all([readOpportunityOffer(auth.admin, scope, id), readOpportunityFit(auth.admin, scope.organizationId, detail.reports?.[0]?.id)]);
-    return opportunitiesJson({ ...detail, offer, fit });
+    return opportunitiesJson({ ...detail, offer: { ...offer, canPrice: canSetPrices(scope.role, scope.userId, detail.work?.responsible_id) }, fit });
   } catch (error) { return opportunitiesError(error); }
 }
 export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer', 'fit_proposal', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') {
       const input = assignmentSchema.parse(data); const before = await readParticipantIds(auth.admin, scope, id);
       const revision = await assignOpportunity(auth.admin, scope, id, input);
@@ -50,10 +51,21 @@ export async function POST(request: Request, context: Context) {
       const input = z.object({ requestId: z.string().uuid(), instructions: z.string().trim().max(1500).optional() }).strict().parse(data);
       return opportunitiesJson({ jobId: await enqueueOpportunityOffer(auth.admin, scope, id, input) }, 202);
     }
+    if (action === 'fit_proposal') {
+      // An administrator confirms (into the ficha) or drops an answer a member gave; a confirmed one reads the requirements again.
+      assertOpportunityAdmin(scope);
+      const accepted = await resolveFitProposal(auth.admin, scope, id, fitResolveSchema.parse(data));
+      if (!accepted) return opportunitiesJson({ accepted: false });
+      const key = await enqueueRequirementFit(auth.admin, scope, id);
+      const done = await runQueuedOpportunityJobNow(auth.admin, scope.organizationId, key, 'fit').catch(() => null);
+      return opportunitiesJson({ accepted: true, queued: !(done?.processed === 1 && done.state === 'ready') });
+    }
     if (action === 'fit' || action === 'fit_answer') {
-      // An answer goes into the company's tender profile first; then the requirements are read again with it, now.
+      // An answer from an administrator goes into the company's tender profile first, then the requirements are read again with it, now.
+      // An answer from anyone else is a proposal: it waits for an administrator to confirm it (workspace-proposals.ts).
       if (action === 'fit_answer') {
-        const input = z.object({ question: z.string().trim().min(2).max(320), answer: z.string().trim().min(1).max(500) }).strict().parse(data);
+        const input = fitProposalSchema.parse(data);
+        if (!isOpportunityAdmin(scope.role)) { await proposeFitAnswer(auth.admin, scope, id, input); return opportunitiesJson({ proposed: true }); }
         await answerFitQuestion(auth.admin, scope, id, input);
       }
       const key = await enqueueRequirementFit(auth.admin, scope, id);

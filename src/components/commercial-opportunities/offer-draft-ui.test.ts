@@ -112,3 +112,18 @@ test('a new version that failed says so and keeps the previous one on view', () 
   const old = text(render({ job: { id: 'j0', state: 'failed', error: 'Vieja falla', created_at: '2026-10-16T10:00:00Z' } }));
   assert.doesNotMatch(old, /Vieja falla/, 'a failure older than the draft is history');
 });
+
+test('whoever does not set the prices reads them with their totals, but cannot type or save them', () => {
+  const owner = render();
+  assert.match(owner, /<input[^>]*id="offer-price-0"/);
+  assert.doesNotMatch(owner, /\sreadonly=""/);
+  assert.match(text(owner), /Guardar precios/);
+  const reader = render({ canPrice: false });
+  assert.match(reader, /<input[^>]*id="offer-price-0"[^>]*\sreadonly=""/);
+  assert.match(reader, /aria-readonly="true"/);
+  assert.doesNotMatch(text(reader), /Guardar precios/);
+  assert.match(text(reader), /Los precios los fija quien está a cargo de la oportunidad o un administrador/);
+  assert.match(text(reader), /Neto/, 'the totals are still there');
+  assert.match(reader, /value="7000000"/, 'and so is the price that was typed');
+  assert.match(text(reader), /\$168\.000\.000/, 'with its subtotal');
+});

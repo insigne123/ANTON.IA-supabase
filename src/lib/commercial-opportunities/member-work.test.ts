@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DECISION_LABELS, MEMBER_FILTERS, decisionBody, decisionReplySchema, decisionSchema, memberFilter, memberMayMove, memberSteps, memberView, openDecision, stateNoteSchema, type ActivityLike } from './member-work';
+import { DECISION_LABELS, MEMBER_FILTERS, canSetPrices, decisionBody, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, memberFilter, memberMayMove, memberSteps, memberView, openDecision, pendingFitProposals, stateNoteSchema, type ActivityLike } from './member-work';
 
 test('each stage offers the person one way forward first and the exits after it', () => {
   assert.deepEqual(memberSteps('assigned').map(step => [step.to, Boolean(step.primary), Boolean(step.needsNote)]), [['working', true, false], ['blocked', false, true]]);
@@ -55,4 +55,28 @@ test('«Mi trabajo» is what is still open; what was presented or closed is one 
   assert.equal(memberFilter('assigned', 'assigned'), true); assert.equal(memberFilter('assigned', null), true, 'no record yet reads as just assigned');
   assert.equal(memberFilter('working', 'blocked'), false); assert.equal(memberFilter('blocked', 'blocked'), true);
   assert.equal(memberView('done'), 'all', 'the server does not know that filter'); assert.equal(memberView('working'), 'working'); assert.equal(memberView('all'), 'all');
+});
+
+test('the prices are set by an administrator or whoever is in charge; with nobody in charge, anyone on the team can', () => {
+  assert.equal(canSetPrices('admin', 'u1', 'u2'), true);
+  assert.equal(canSetPrices('owner', 'u1', 'u2'), true);
+  assert.equal(canSetPrices('member', 'u2', 'u2'), true, 'left in charge');
+  assert.equal(canSetPrices('member', 'u1', 'u2'), false, 'somebody else is in charge');
+  assert.equal(canSetPrices('member', 'u1', null), true, 'nobody in charge: someone has to be able to');
+  assert.equal(canSetPrices(undefined, 'u1', undefined), true);
+  assert.equal(canSetPrices(undefined, 'u1', 'u2'), false);
+});
+
+test('only the answers still waiting for an administrator are listed, the oldest first', () => {
+  const proposal = (id: string, status: string, at: string, extra: Record<string, unknown> = {}): ActivityLike =>
+    ({ id, kind: 'fit_proposal', body: id, actor_id: 'u1', created_at: at, data: { question: `¿Pregunta ${id}?`, answer: `Respuesta ${id}`, status, ...extra } });
+  const list = pendingFitProposals([proposal('c', 'pending', '2026-10-22T12:00:00Z'), proposal('b', 'accepted', '2026-10-22T11:00:00Z'), proposal('a', 'pending', '2026-10-22T10:00:00Z'),
+    proposal('d', 'rejected', '2026-10-22T09:00:00Z'), { id: 'x', kind: 'note', body: 'n', actor_id: null, created_at: '2026-10-22T08:00:00Z', data: { status: 'pending', question: 'q', answer: 'a' } },
+    { ...proposal('e', 'pending', '2026-10-22T07:00:00Z'), data: { status: 'pending', question: 7 } }]);
+  assert.deepEqual(list.map(item => [item.id, item.question, item.answer]), [['a', '¿Pregunta a?', 'Respuesta a'], ['c', '¿Pregunta c?', 'Respuesta c']]);
+  assert.deepEqual(pendingFitProposals([]), []);
+  assert.equal(fitProposalSchema.safeParse({ question: 'q', answer: 'a' }).success, false, 'a one-letter question says nothing');
+  assert.equal(fitProposalSchema.safeParse({ question: '¿Tienen ISO 9001?', answer: 'Sí, vigente hasta 2027' }).success, true);
+  assert.equal(fitResolveSchema.safeParse({ activityId: '00000000-0000-4000-8000-0000000000aa', accept: true }).success, true);
+  assert.equal(fitResolveSchema.safeParse({ activityId: 'a1', accept: true }).success, false);
 });

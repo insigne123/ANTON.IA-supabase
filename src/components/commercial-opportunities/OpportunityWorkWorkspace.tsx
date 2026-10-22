@@ -26,7 +26,8 @@ import type { MarkChange } from './ReportMarks';
 import type { ReportMark, ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { OpportunityContacts } from './OpportunityContacts';
 import { DecisionCallout, MemberStrip } from './MemberWork';
-import { MEMBER_FILTERS, memberFilter, memberView, openDecision } from '@/lib/commercial-opportunities/member-work';
+import { FitProposals } from './FitProposals';
+import { MEMBER_FILTERS, memberFilter, memberView, openDecision, pendingFitProposals } from '@/lib/commercial-opportunities/member-work';
 import { OpportunityChat } from './OpportunityChat';
 import { OpportunityAssistant } from './OpportunityAssistant';
 import { TenderProfileSheet } from './TenderProfileSheet';
@@ -48,7 +49,7 @@ import type { ReportJobProgress } from '@/lib/commercial-opportunities/report-pr
 
 type Job = { id: string; kind: string; state: string; error: string | null; created_at: string; progress?: ReportJobProgress; documentId?: string };
 type Detail = { item: WorkItem; work: WorkRecord | null; participants: WorkspaceMember[]; members?: Array<{ user_id: string; name: string }>; activity: any[]; tasks: any[]; documents: ExpedientDocument[]; reports: Array<{ id: string; created_at: string; report: OpportunityReport }>; jobs: Job[]; contacts: any[]; decisionMakerTitles: string[];
-  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null }; fit?: OpportunityFitView };
+  marks?: { available: boolean; items: ReportMarks }; offer?: { available: boolean; latest: SavedOfferDraft | null; canPrice?: boolean }; fit?: OpportunityFitView };
 /** The kinds with bases to answer with an offer (server/commercial-opportunities/workspace-offer.ts). */
 const OFFER_KINDS = ['tender', 'compra_agil', 'private'];
 /** The kinds with a public buyer whose history ChileCompra keeps (server/commercial-opportunities/workspace-market.ts). */
@@ -297,6 +298,11 @@ export function OpportunityWorkWorkspace() {
     if (done) setFeedback('Se lo avisamos a los administradores. Verás su respuesta aquí.');
     return Boolean(done);
   };
+  // An answer a member gave for the company waits for an administrator: confirmed, it goes into the ficha and the requirements are read again.
+  const resolveProposal = async (activityId: string, accept: boolean) => {
+    const done = await perform('fit_proposal', { activityId, accept }, selected, true);
+    if (done) setFeedback(accept ? 'Confirmada: ya está en la ficha. Revisamos los requisitos con ella.' : 'Respuesta descartada.');
+  };
   const replyDecision = async (text: string) => {
     const done = await perform('decision_reply', { text }, selected, true);
     if (done) setFeedback('Respuesta enviada.');
@@ -321,6 +327,7 @@ export function OpportunityWorkWorkspace() {
   // «¿Cumplimos?»: read now with the profile; an answer is saved in the profile first (workspace-fit.ts).
   const checkFit = async (action: 'fit' | 'fit_answer', data: Record<string, string>) => {
     const result = await perform(action, data, selected, true);
+    if (result?.proposed) { setFeedback('Enviamos tu respuesta a un administrador. Cuando la confirme, queda en la ficha y revisamos los requisitos de nuevo.'); return; }
     if (result) setFeedback(action === 'fit_answer' ? 'Guardado en tu ficha para licitaciones. Revisamos los requisitos con tu respuesta.' : result.queued ? 'Revisando los requisitos con tu ficha. Tarda unos segundos.' : 'Requisitos revisados con tu ficha.');
   };
   const continueIn = (id: string, question: string | null) => { handoff.current = { id, question }; open(id); };
@@ -480,6 +487,8 @@ export function OpportunityWorkWorkspace() {
         {tab === 'summary' && <div className="space-y-5">
           {detail.participants.length ? <section aria-label="Equipo de trabajo" className="space-y-2"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">Equipo de trabajo</h2>{admin && <Button variant="ghost" size="sm" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}>Cambiar equipo</Button>}</div>
             <TeamOffice people={detail.participants} responsibleId={detail.work?.responsible_id} /></section> : null}
+          <FitProposals proposals={pendingFitProposals(detail.activity)} admin={admin} busy={busy} onResolve={(activityId, accept) => void resolveProposal(activityId, accept)}
+            nameOf={userId => (detail.members || detail.participants).find(m => m.user_id === userId)?.name ?? 'Alguien del equipo'} />
           {research && (researching || ['failed', 'blocked'].includes(research.state)) && <ReportProgress state={research.state} error={research.error} signal={signal} pending={busy} onRetry={generate} kept={Boolean(latest)}
             progress={research.progress} tender={item.kind === 'tender'} documents={detail.documents.length} buyer={item.buyer_name || item.company_name} />}
           {latest && newerDocuments.length > 0 && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-muted/30 p-4 text-sm"><p>Subiste {newerDocuments.length === 1 ? 'un documento nuevo' : `${newerDocuments.length} documentos nuevos`} después del informe. Actualízalo para incluir{newerDocuments.length === 1 ? 'lo' : 'los'}.</p><Button size="sm" onClick={generate} disabled={busy}>Actualizar informe</Button></div>}
@@ -501,6 +510,7 @@ export function OpportunityWorkWorkspace() {
           offer={latest && OFFER_KINDS.includes(item.kind) ? <OfferDraft offer={detail.offer} job={offerJob} onPrepare={prepareOffer} preparing={busy} onSavePrices={saveOfferPrices}
             downloadHref={`/api/commercial-opportunities/${selected}/export?doc=offer&format=docx`}
             annexHref={index => `/api/commercial-opportunities/${selected}/export?doc=offer&format=docx&annex=${index}`}
+            canPrice={detail.offer?.canPrice !== false}
             budget={{ amount: latest.report.submission?.numbers.budget ?? item.amount, includesTax: latest.report.submission?.numbers.budgetIncludesTax ?? null }} /> : null}
           onDraft={latest ? title => ask(`Prepara el borrador de «${title}» como un formulario listo para llenar y pegar en Word: el título tal como lo dan las bases, una tabla de dos columnas (Campo | Dato) con los datos de mi empresa que conoces, el texto de cada declaración o cláusula tal como lo piden las bases, y [corchetes] para lo que falte. Si no tienes el formato oficial en los fragmentos, dilo al comienzo en una frase.`) : undefined} />}
         {tab === 'market' && MARKET_KINDS.includes(item.kind) && <WinPlan id={selected} />}

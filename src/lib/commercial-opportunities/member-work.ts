@@ -2,7 +2,7 @@
 // administrators («Propongo no postular», «Necesito que decidan») and the order of their list. Pure: the page and the server
 // (which re-checks every step) share it.
 import { z } from 'zod';
-import type { WorkRecord } from './workspace';
+import { isOpportunityAdmin, type WorkRecord } from './workspace';
 
 export type WorkState = WorkRecord['state'];
 
@@ -75,3 +75,23 @@ export function memberFilter(filter: string, state: WorkState | null | undefined
 }
 /** What the list is asked for: the stages the server knows by name, and everything for the one that is read here. */
 export const memberView = (filter: string) => (filter === 'done' ? 'all' : filter);
+
+/**
+ * Who fixes the prices of the offer: an administrator, whoever was left in charge, or any member of the team while nobody is in
+ * charge (someone has to be able to). The prices are the company's commitment, so the rest of the team reads them but does not set them.
+ */
+export function canSetPrices(role: string | null | undefined, userId: string, responsibleId: string | null | undefined) {
+  return isOpportunityAdmin(role) || !responsibleId || responsibleId === userId;
+}
+
+export const fitProposalSchema = z.object({ question: z.string().trim().min(2).max(320), answer: z.string().trim().min(1).max(500) }).strict();
+export const fitResolveSchema = z.object({ activityId: z.string().uuid(), accept: z.boolean() }).strict();
+export type FitProposal = { id: string; question: string; answer: string; actorId: string | null; at: string };
+/** The answers members gave to «¿Cumplimos?» that no administrator has confirmed or dropped yet, the oldest first. */
+export function pendingFitProposals(activity: readonly ActivityLike[]): FitProposal[] {
+  return activity.flatMap(line => {
+    const data = line.data;
+    if (line.kind !== 'fit_proposal' || data?.status !== 'pending' || typeof data.question !== 'string' || typeof data.answer !== 'string') return [];
+    return [{ id: line.id, question: data.question, answer: data.answer, actorId: line.actor_id, at: line.created_at }];
+  }).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
