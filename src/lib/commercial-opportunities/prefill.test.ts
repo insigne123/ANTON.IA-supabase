@@ -37,6 +37,18 @@ test('the prompt dates today in Chile, asks for nulls instead of guesses and car
   assert.match(prompt, /Documento «Invitación\.pdf»:\nEstimados, los invitamos…/);
 });
 
+test('a package of documents is read as one, and a private process is read for its platform, schedule and closing', () => {
+  const prompt = prefillPrompt({ name: '4 documentos', text: '=== Documento «Condicionado Particular.pdf» ===\nCronograma', today: '2026-10-19', documents: 4 });
+  assert.match(prompt, /Lee los 4 documentos que recibió el equipo comercial \(cada uno va bajo su nombre, entre ===\)/);
+  assert.match(prompt, /Paquete «4 documentos»:\n=== Documento «Condicionado Particular\.pdf» ===/);
+  assert.match(prompt, /la plataforma por la que se presenta \(Coupa, SAP Ariba, WEX u otra\), el administrador del proceso con su correo y las fechas del cronograma/);
+  assert.match(prompt, /es la de entrega o presentación de ofertas o propuestas, no la de consultas, respuestas ni confirmación de participación/);
+  assert.match(prompt, /private_tender si es una licitación o concurso privado, o un proceso formal de solicitud de propuestas/);
+  assert.match(prompt, /un precio por hora, una tarifa, el monto de una garantía o un porcentaje no son el presupuesto/);
+  // One document keeps the wording it always had.
+  assert.match(prefillPrompt({ name: 'Invitación.pdf', text: 'x', today: '2026-10-19' }), /Lee el documento que recibió el equipo comercial/);
+});
+
 test('the text read keeps where each part comes from and stops at the limit', () => {
   assert.equal(prefillText([{ locator: 'Página 1', text: 'Bases   técnicas\n\n\n\nObjeto' }, { locator: 'Página 2', text: '  ' }]), '[Página 1]\nBases técnicas\n\nObjeto');
   const long = prefillText(Array.from({ length: 40 }, (_, i) => ({ locator: `Página ${i + 1}`, text: 'x'.repeat(3000) })));

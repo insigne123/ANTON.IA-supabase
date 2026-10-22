@@ -24,23 +24,24 @@ export type PrefillFields = { title: string; company: string; url: string; kind:
 /** What the prompt says in place of the text when the document is a scan or a photo, attached for the model to read. */
 export const PREFILL_SCANNED = '(El documento no tiene texto digital: va adjunto como imagen o PDF escaneado. Léelo ahí; lo que no se lea con seguridad va null.)';
 
-export function prefillPrompt(input: { name: string; text: string; today: string }) {
-  return `Lee el documento que recibió el equipo comercial (una invitación, unas bases, una solicitud de propuesta o cotización, o un correo) y completa el formulario para cargar la oportunidad. La persona revisará cada campo antes de guardar.
+export function prefillPrompt(input: { name: string; text: string; today: string; documents?: number }) {
+  const several = (input.documents ?? 1) > 1;
+  return `Lee ${several ? `los ${input.documents} documentos que recibió el equipo comercial (cada uno va bajo su nombre, entre ===): las bases de un proceso, sus condiciones, anexos y contrato` : 'el documento que recibió el equipo comercial (una invitación, unas bases, una solicitud de propuesta o cotización, o un correo)'} y completa el formulario para cargar la oportunidad. La persona revisará cada campo antes de guardar.
 
 Hoy es ${input.today} en Chile.
 
 Campos:
-- title: nombre corto y claro de lo que se pide, como lo diría el equipo (máximo 120 caracteres). Sin «RE:», «FW:» ni códigos internos sueltos.
-- company: el cliente o la entidad que invita o compra. null si no aparece.
+- title: nombre corto y claro de lo que se pide, como lo diría el equipo (máximo 120 caracteres). Sin «RE:», «FW:» ni códigos internos sueltos. Es el nombre del servicio o del proceso, no el del archivo.
+- company: el cliente o la entidad que invita o compra (en un proceso privado, la titular del proceso o la razón social de las unidades de negocio). No la empresa dueña de la plataforma ni quien administra el proceso. null si no aparece.
 - url: un enlace web que aparezca escrito en el documento y lleve a la convocatoria o sus bases. null si no hay.
-- kind: private_tender si es una licitación o concurso privado; proposal si piden una propuesta (RFP, propuesta técnica y económica); quote si piden una cotización o precio; commercial si es otra oportunidad comercial.
-- description: el contexto en hasta 1.200 caracteres, con lo que dice el documento: qué se pide y su alcance, requisitos importantes, cómo y dónde se presenta, contactos y fechas clave. Sin opiniones ni recomendaciones.
-- deadline: el cierre o la fecha límite para presentar, como AAAA-MM-DDTHH:MM en hora de Chile. Si el año no aparece, usa la próxima vez que esa fecha ocurra desde hoy. Si no dice la hora, usa 23:59 y deadlineTimeGiven false. null si no hay fecha de cierre.
-- amount y currency: el presupuesto o monto estimado si aparece (número sin separadores; currency CLP, UF, USD o EUR). null si no aparece. Nunca calcules ni estimes un monto.
+- kind: private_tender si es una licitación o concurso privado, o un proceso formal de solicitud de propuestas con bases y un cronograma en que varias empresas compiten (aunque se llame RFP o invitación directa); proposal si piden una propuesta sin un proceso competitivo formal; quote si piden una cotización o precio; commercial si es otra oportunidad comercial.
+- description: el contexto en hasta 1.200 caracteres, con lo que dicen los documentos: qué se pide y su alcance, requisitos importantes, cómo y dónde se presenta, contactos y fechas clave. En un proceso privado incluye la plataforma por la que se presenta (Coupa, SAP Ariba, WEX u otra), el administrador del proceso con su correo y las fechas del cronograma (confirmación de participación, consultas, respuestas, entrega de ofertas, adjudicación, inicio del servicio). Sin opiniones ni recomendaciones.
+- deadline: el cierre o la fecha límite para presentar, como AAAA-MM-DDTHH:MM en hora de Chile. Si hay un cronograma con varias fechas, es la de entrega o presentación de ofertas o propuestas, no la de consultas, respuestas ni confirmación de participación. Si el año no aparece, usa la próxima vez que esa fecha ocurra desde hoy. Si no dice la hora, usa 23:59 y deadlineTimeGiven false. null si no hay fecha de cierre.
+- amount y currency: el presupuesto o monto estimado si aparece (número sin separadores; currency CLP, UF, USD o EUR). null si no aparece. Nunca calcules ni estimes un monto: un precio por hora, una tarifa, el monto de una garantía o un porcentaje no son el presupuesto.
 
 Nunca inventes datos: lo que no está en el documento va null.
 
-Documento «${input.name}»:
+${several ? `Paquete «${input.name}»` : `Documento «${input.name}»`}:
 ${input.text}`;
 }
 
