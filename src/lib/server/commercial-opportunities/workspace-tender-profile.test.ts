@@ -80,7 +80,8 @@ function memory(seed: Record<string, any[]> = {}, missing: string[] = []) {
 }
 const admin = { organizationId: 'org', userId: 'a1', role: 'admin' };
 const blank = { legalName: null, rut: null, size: null, employees: null, yearsOperating: null, regions: null, staffCapacity: null, contractMin: null, contractMax: null,
-  publicExperience: null, publicContracts: null, privateClients: null, providerRegistry: null, certifications: null, otherCertifications: null, guaranteeMax: null, insurance: null, assets: null, limits: null };
+  publicExperience: null, publicContracts: null, privateClients: null, providerRegistry: null, certifications: null, otherCertifications: null, guaranteeMax: null, insurance: null, assets: null, limits: null,
+  legalReps: null, legalRepsWomen: null, womanGeneralManager: null, womenOwnership: null };
 
 test('the profile is saved by admins only, and a save over another admin\'s newer one is refused', async () => {
   const { saveTenderProfile, readTenderProfileView } = await profileModule();
@@ -89,7 +90,7 @@ test('the profile is saved by admins only, and a save over another admin\'s newe
   const first = await saveTenderProfile(client, admin, { profile: { ...blank, legalName: 'Aseo Sur SpA', rut: '760864285', regions: ['Los Lagos'] }, expectedRevision: 0 });
   assert.equal(first.revision, 1);
   assert.equal(tables.opportunity_tender_profile[0].answers.rut, '76.086.428-5', 'saved normalized');
-  assert.deepEqual(first.progress, { answered: 3, total: 16 });
+  assert.deepEqual(first.progress, { answered: 3, total: 19 });
   await assert.rejects(saveTenderProfile(client, admin, { profile: blank, expectedRevision: 0 }), (error: any) => error.status === 409, 'a second first save');
   const second = await saveTenderProfile(client, admin, { profile: { ...blank, legalName: 'Aseo Sur SpA', employees: 40 }, expectedRevision: 1 });
   assert.equal(second.revision, 2);

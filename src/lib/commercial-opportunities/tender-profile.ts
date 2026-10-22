@@ -8,6 +8,8 @@ export const CHILE_REGIONS = ['Arica y Parinacota', 'Tarapacá', 'Antofagasta', 
 export const CERTIFICATIONS = ['ISO 9001', 'ISO 14001', 'ISO 45001', 'ISO 27001', 'Sello ProPyme'] as const;
 export const COMPANY_SIZES = { micro: 'Micro (hasta 2.400 UF al año)', pequena: 'Pequeña (hasta 25.000 UF)', mediana: 'Mediana (hasta 100.000 UF)', grande: 'Grande (más de 100.000 UF)' } as const;
 export const PROVIDER_REGISTRY = { habil: 'Inscrita y hábil', en_tramite: 'En trámite', no: 'No inscrita' } as const;
+/** The part of the company's property that is in women's hands, in the steps ChileCompra's «Sello Empresa Mujer» tells apart. */
+export const WOMEN_OWNERSHIP = { mas_50: 'Más del 50 %', entre_25_50: 'Más del 25 % y hasta el 50 %', menos_25: 'El 25 % o menos' } as const;
 
 /** A Chilean RUT with its check digit («76.123.456-0», «76123456-0»), written back with dots and hyphen. */
 export function normalizeRut(value: string) {
@@ -46,17 +48,26 @@ const tenderProfileShape = z.object({
   insurance: z.enum(['si', 'no']).nullable(),
   assets: text(2000),
   limits: text(2000),
+  /** Who leads the company, as counts and never as names: the «Sello Empresa Mujer» needs how many legal representatives there are and how many are women. */
+  legalReps: count(50),
+  legalRepsWomen: count(50),
+  womanGeneralManager: z.enum(['si', 'no']).nullable(),
+  womenOwnership: z.enum(Object.keys(WOMEN_OWNERSHIP) as [keyof typeof WOMEN_OWNERSHIP, ...Array<keyof typeof WOMEN_OWNERSHIP>]).nullable(),
   /** Answers to the AI's questions about a requirement («¿Pueden entregar una boleta por $4.500.000?» → «Sí»), kept for the next tenders. */
   notes: z.array(z.object({ question: z.string().trim().min(2).max(320), answer: z.string().trim().min(1).max(500), at: z.string().max(40) })).max(60).default([]),
 }).strict();
-export const tenderProfileSchema = tenderProfileShape.refine(value => value.contractMin === null || value.contractMax === null || value.contractMin <= value.contractMax,
-  { message: 'El monto mínimo de contrato no puede superar al máximo.', path: ['contractMax'] });
+export const tenderProfileSchema = tenderProfileShape
+  .refine(value => value.contractMin === null || value.contractMax === null || value.contractMin <= value.contractMax,
+    { message: 'El monto mínimo de contrato no puede superar al máximo.', path: ['contractMax'] })
+  .refine(value => value.legalReps === null || value.legalRepsWomen === null || value.legalRepsWomen <= value.legalReps,
+    { message: 'Las mujeres entre los representantes legales no pueden ser más que el total.', path: ['legalRepsWomen'] });
 export type TenderProfile = z.infer<typeof tenderProfileSchema>;
 export type TenderProfileField = keyof TenderProfile;
 
 export const EMPTY_TENDER_PROFILE: TenderProfile = { legalName: null, rut: null, size: null, employees: null, yearsOperating: null, regions: null, staffCapacity: null,
   contractMin: null, contractMax: null, publicExperience: null, publicContracts: null, privateClients: null, providerRegistry: null, certifications: null,
-  otherCertifications: null, guaranteeMax: null, insurance: null, assets: null, limits: null, notes: [] };
+  otherCertifications: null, guaranteeMax: null, insurance: null, assets: null, limits: null, legalReps: null, legalRepsWomen: null, womanGeneralManager: null, womenOwnership: null,
+  notes: [] };
 
 /** A saved profile read leniently: a field that no longer validates comes back as «no sé», never breaking the page. */
 export function readTenderProfile(value: unknown): TenderProfile {
@@ -75,18 +86,44 @@ export const TENDER_PROFILE_GROUPS: Array<{ title: string; fields: TenderProfile
   { title: 'Dónde y cuánto', fields: ['regions', 'staffCapacity', 'contractMin', 'contractMax'] },
   { title: 'Experiencia', fields: ['publicExperience', 'publicContracts', 'privateClients'] },
   { title: 'Lo que suelen pedir las bases', fields: ['providerRegistry', 'certifications', 'otherCertifications', 'guaranteeMax', 'insurance'] },
+  { title: 'Liderazgo y Sello Empresa Mujer', fields: ['legalReps', 'legalRepsWomen', 'womanGeneralManager', 'womenOwnership'] },
   { title: 'Medios y límites', fields: ['assets', 'limits'] },
 ];
 const COUNTED: TenderProfileField[][] = [['legalName'], ['rut'], ['size'], ['employees'], ['yearsOperating'], ['regions'], ['staffCapacity'], ['contractMin', 'contractMax'],
-  ['publicExperience'], ['publicContracts', 'privateClients'], ['providerRegistry'], ['certifications', 'otherCertifications'], ['guaranteeMax'], ['insurance'], ['assets'], ['limits']];
+  ['publicExperience'], ['publicContracts', 'privateClients'], ['providerRegistry'], ['certifications', 'otherCertifications'], ['guaranteeMax'], ['insurance'],
+  ['legalReps', 'legalRepsWomen'], ['womanGeneralManager'], ['womenOwnership'], ['assets'], ['limits']];
 const known = (value: unknown) => value !== null && value !== undefined && value !== '';
 /** «10 de 16»: how much of the profile the AI can rely on. */
 export function tenderProfileProgress(profile: TenderProfile) {
   return { answered: COUNTED.filter(fields => fields.some(field => known(profile[field]))).length, total: COUNTED.length };
 }
 
+/**
+ * ChileCompra's «Sello Empresa Mujer» for a company, from the profile. A company has it when at least one of three things holds:
+ * more than half of its legal representatives are women, a woman is its general manager, or women own more than half; since
+ * July 2025 a company where women hold more than a quarter of the shares can also ask for it. Only counts are read: the sex of a
+ * person is never guessed from a name. «no_se» while a way to reach it is still unanswered, never a no.
+ */
+export type FemaleLedSeal = { status: 'si' | 'solicitar' | 'no' | 'no_se'; because: string };
+export function femaleLedSeal(profile: Pick<TenderProfile, 'legalReps' | 'legalRepsWomen' | 'womanGeneralManager' | 'womenOwnership'>): FemaleLedSeal {
+  const { legalReps, legalRepsWomen, womanGeneralManager, womenOwnership } = profile;
+  const repsKnown = legalReps !== null && legalRepsWomen !== null && legalRepsWomen <= legalReps;
+  const ways = [
+    repsKnown && legalReps > 0 && legalRepsWomen * 2 > legalReps ? `${legalRepsWomen} de ${legalReps} representantes legales son mujeres` : '',
+    womanGeneralManager === 'si' ? 'la gerencia general la ejerce una mujer' : '',
+    womenOwnership === 'mas_50' ? 'más de la mitad de la propiedad es de mujeres' : '',
+  ].filter(Boolean);
+  if (ways.length) return { status: 'si', because: ways.join('; ') };
+  if (womenOwnership === 'entre_25_50') return { status: 'solicitar', because: 'las mujeres tienen más de un cuarto de la propiedad, y con eso el sello se pide en el Centro de Ayuda de ChileCompra' };
+  if (repsKnown && womanGeneralManager === 'no' && womenOwnership === 'menos_25') return { status: 'no', because: 'ninguna de las condiciones del sello se cumple' };
+  const missing = [repsKnown ? '' : 'cuántos representantes legales son mujeres', womanGeneralManager === null ? 'si la gerencia general la ejerce una mujer' : '',
+    womenOwnership === null ? 'qué parte de la propiedad es de mujeres' : ''].filter(Boolean);
+  return { status: 'no_se', because: missing.length ? `falta saber ${missing.join(', ')}` : 'falta completar los datos' };
+}
+
 const clp = (amount: number | null) => (amount === null ? 'no sé' : `${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(amount)} CLP`);
 const yesNo = (value: 'si' | 'no' | null) => (value === null ? 'no sé' : value === 'si' ? 'sí' : 'no');
+const sealForModel = (seal: FemaleLedSeal) => (seal.status === 'si' ? `sí (${seal.because})` : seal.status === 'solicitar' ? `se puede pedir (${seal.because})` : seal.status === 'no' ? 'no' : 'no sé');
 const or = (value: string | number | null | undefined) => (value === null || value === undefined || value === '' ? 'no sé' : value);
 /**
  * The profile as the model reads it: «no sé» spelled out, so an unknown is never read as a no. `legal` adds the name and
@@ -112,6 +149,7 @@ export function tenderProfileForModel(profile: TenderProfile, options: { legal?:
     seguroDeResponsabilidadCivil: yesNo(profile.insurance),
     equiposFlotaInstalacionesOLicencias: or(profile.assets),
     loQueNoHaceONoLeInteresa: or(profile.limits),
+    selloEmpresaMujer: sealForModel(femaleLedSeal(profile)),
     ...(profile.notes.length ? { respuestasDeLaEmpresa: profile.notes.slice(-40).map(note => `${note.question} → ${note.answer}`) } : {}),
   };
 }
@@ -119,7 +157,10 @@ export function tenderProfileForModel(profile: TenderProfile, options: { legal?:
 /** The rule shared by the screening, the chat and the assistant: an unknown is a question, never a reason to discard. */
 export const TENDER_PROFILE_RULE = 'La ficha de la empresa dice lo que es y puede hacer. «no sé» significa que no lo sabemos, nunca que no lo tenga. '
   + 'Solo da algo por incumplido cuando la ficha lo muestra (una región que no está entre las suyas, una garantía mayor que su máximo, una certificación que no está entre las suyas cuando la ficha dice cuáles tiene). '
-  + 'Si la ficha no lo dice, trátalo como dato pendiente y di qué falta saber.';
+  + 'Si la ficha no lo dice, trátalo como dato pendiente y di qué falta saber. '
+  + 'Si las bases dan puntaje, desempate o preferencia a las empresas lideradas por mujeres o al Sello Empresa Mujer de ChileCompra, mira «selloEmpresaMujer» de la ficha: «sí» es puntaje a favor (di el motivo), '
+  + '«se puede pedir» exige pedir el sello al Centro de Ayuda de ChileCompra antes de ofertar, «no sé» es una pregunta pendiente y «no» es que ese puntaje no se suma. '
+  + 'Ese sello no figura entre las certificaciones: nunca lo des por faltante mirando solo la lista de certificaciones.';
 
 /** What the AI may suggest when it fills the profile from «Perfil», the website and the offer: never the guarantee or the registry. */
 export const tenderProfileSuggestionSchema = z.object({

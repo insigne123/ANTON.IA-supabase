@@ -4,12 +4,13 @@ Primera parte del punto 12 («¿Conviene postular?» sin falsos «no»), 18 oct 
 
 ## Qué pregunta
 
-16 respuestas en cinco grupos (`tender-profile.ts`):
+19 respuestas en seis grupos (`tender-profile.ts`):
 
 - **Tu empresa:** razón social, RUT (con dígito verificador), tamaño por ventas anuales, personas y años en el rubro.
 - **Dónde y cuánto:** regiones de Chile donde presta el servicio, personas que podría asignar a un contrato nuevo y el rango de montos de contrato que le interesa.
 - **Experiencia:** si le ha vendido al Estado, contratos con organismos públicos y clientes privados similares.
 - **Lo que suelen pedir las bases:** Registro de Proveedores, certificaciones vigentes (ISO 9001, 14001, 45001, 27001, Sello ProPyme u otras), garantía máxima que puede entregar y seguro de responsabilidad civil.
+- **Liderazgo y Sello Empresa Mujer:** cuántos representantes legales tiene la empresa y cuántos son mujeres, si la gerencia general la ejerce una mujer y qué parte de la propiedad es de mujeres (más del 50 %, más del 25 % y hasta el 50 %, o el 25 % o menos). Se piden cantidades, nunca nombres. Ver «Sello Empresa Mujer» más abajo.
 - **Medios y límites:** equipos, flota, instalaciones o licencias, y lo que no hace.
 
 Todo es opcional. En blanco significa «no sé», y la IA lo trata como un dato pendiente, nunca como un no. Una lista de certificaciones vacía, marcada como «No tenemos certificaciones», sí es un no.
@@ -18,7 +19,7 @@ Todo es opcional. En blanco significa «no sé», y la IA lo trata como un dato 
 
 En Oportunidades, los administradores ven el botón «Ficha para licitaciones» junto a «Qué buscamos». Abre un panel lateral con:
 
-- **El avance.** Por ejemplo, «10 de 16 respuestas».
+- **El avance.** Por ejemplo, «10 de 19 respuestas».
 - **«Completar con IA».** Es un trabajo `profile`, respondido en la misma petición. Lee:
   - la oferta del workspace;
   - lo que los administradores escribieron en Perfil (empresa, descripción, clientes, pruebas), solo si la empresa de su Perfil es la del workspace (`sameCompany`). Un Perfil personal puede describir otra empresa: en producción, una persona de Yago que administra GrupoExpro llenó la ficha de GrupoExpro con el nombre y los productos de Yago (18 oct 2026, corregido);
@@ -36,6 +37,18 @@ En Oportunidades, los administradores ven el botón «Ficha para licitaciones» 
 - **El borrador de oferta.** Recibe la razón social, el RUT, la experiencia y las certificaciones, que llenan los marcadores en vez de dejarlos abiertos.
 
 La lectura para los prompts (`tender-profile-read.ts`) no depende de la descarga ni de la IA. Sin ficha, o antes de la migración, todo sigue funcionando como antes.
+
+## Sello Empresa Mujer
+
+ChileCompra entrega el sello a una persona jurídica que cumple **al menos una** de tres condiciones: más del 50 % de sus representantes legales son mujeres, su gerente general es una mujer, o más del 50 % de la propiedad es de mujeres. Desde julio de 2025, una empresa donde las mujeres controlan más del 25 % de las acciones también puede obtenerlo, pidiéndolo por el Centro de Ayuda. Muchas bases lo premian con puntaje o lo usan como desempate (la Directiva 20 de ChileCompra lo recomienda). El puntaje y su valor los fija cada comprador: lo que dicen las bases de cada licitación manda.
+
+- **Se calcula, no se marca.** `femaleLedSeal` lee los cuatro datos de «Liderazgo y Sello Empresa Mujer» y da `sí`, `se puede pedir`, `no` o `no sé`, con el motivo («2 de 3 representantes legales son mujeres»). Mientras alguna vía siga sin responder, el resultado es `no sé`: nunca se da por un no. Solo se leen cantidades; el sexo de una persona no se deduce de su nombre.
+- **En la ficha.** Mientras la persona responde, el panel dice si cumple, si puede pedirlo o si no.
+- **En el informe.** Si las bases valoran a las empresas lideradas por mujeres (`genderCriterion` busca «Sello Empresa Mujer», «empresas lideradas por mujeres», «perspectiva» o «criterio de género» en las secciones, los requisitos y el resumen), el informe muestra una tarjeta bajo la decisión: «Sumas puntaje con el Sello Empresa Mujer» (con la frase de las bases y el motivo), «Puedes sumar puntaje, pero antes hay que pedir el sello» o «Esta licitación podría darte puntaje…» con lo que falta responder. Si las bases no lo valoran, no aparece nada. Las señales de LinkedIn no la muestran.
+- **Para la IA.** La ficha que leen la evaluación, el chat, el Asistente y el cotejo de requisitos trae `selloEmpresaMujer` aparte de las certificaciones, y la regla compartida (`TENDER_PROFILE_RULE`) dice cómo leerlo. Así un requisito que pide el sello no se da por faltante solo porque la lista de certificaciones no lo nombra. El cotejo lo marca ✓ con el motivo, o pregunta lo que falta.
+- **Lo que no hace.** No consulta el Registro de Proveedores para ver si el sello ya figura en el perfil del proveedor: la tarjeta pide revisarlo antes del cierre. Tampoco cubre a una persona natural mujer, que ChileCompra reconoce sola.
+
+Sin migración: los datos van dentro del JSON `answers` de `opportunity_tender_profile` y una ficha guardada antes los lee como `no sé`.
 
 ## Migraciones
 
@@ -96,6 +109,7 @@ Migración, después de las anteriores:
 Pruebas unitarias sin red:
 
 - RUT, guardado y lectura tolerante, avance, texto para el modelo con «no sé», filtro de sugerencias y prompt;
+- Sello Empresa Mujer: cada condición, la mitad exacta que no cuenta, la vía de los 25 %, el `no sé` mientras falte una respuesta, los conteos incoherentes, la tarjeta del informe según el caso y la sección de la ficha;
 - con base y modelo en memoria:
   - guardado solo de administradores y con revisión;
   - revisión de descartadas (solo `requisito`/`escala` abiertas, una vez por versión);

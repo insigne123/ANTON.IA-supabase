@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CHILE_REGIONS, EMPTY_TENDER_PROFILE, cleanTenderProfileSuggestion, normalizeRut, readTenderProfile, tenderProfileForModel, tenderProfileProgress,
+import { CHILE_REGIONS, EMPTY_TENDER_PROFILE, TENDER_PROFILE_RULE, cleanTenderProfileSuggestion, femaleLedSeal, normalizeRut, readTenderProfile, tenderProfileForModel, tenderProfileProgress,
   tenderProfileSchema, tenderProfileSuggestionPrompt } from './tender-profile';
 
 test('a RUT is accepted only with its check digit, and written with dots and hyphen', () => {
@@ -34,9 +34,11 @@ test('a stored profile is read leniently: a field that no longer validates is «
 });
 
 test('progress counts the questions answered, with paired fields once', () => {
-  assert.deepEqual(tenderProfileProgress(EMPTY_TENDER_PROFILE), { answered: 0, total: 16 });
+  assert.deepEqual(tenderProfileProgress(EMPTY_TENDER_PROFILE), { answered: 0, total: 19 });
   const some = { ...EMPTY_TENDER_PROFILE, legalName: 'A', contractMin: 1, contractMax: 2, certifications: [] as never[], otherCertifications: 'SEC' };
-  assert.deepEqual(tenderProfileProgress(some), { answered: 3, total: 16 });
+  assert.deepEqual(tenderProfileProgress(some), { answered: 3, total: 19 });
+  const leaders = { ...EMPTY_TENDER_PROFILE, legalReps: 3, legalRepsWomen: 2, womanGeneralManager: 'no' as const, womenOwnership: 'menos_25' as const };
+  assert.deepEqual(tenderProfileProgress(leaders), { answered: 3, total: 19 }, 'the two counts are one answer');
 });
 
 test('the model reads «no sé» spelled out, never a no; the legal data only when asked', () => {
@@ -52,6 +54,43 @@ test('the model reads «no sé» spelled out, never a no; the legal data only wh
   assert.ok(!('rut' in model), 'the screening does not need the RUT');
   const legal = tenderProfileForModel(EMPTY_TENDER_PROFILE, { legal: true });
   assert.deepEqual([legal.razonSocial, legal.rut, legal.certificacionesVigentes, legal.regionesDondeOpera], ['no sé', 'no sé', 'no sé', 'no sé']);
+});
+
+test('the Sello Empresa Mujer follows the three conditions, the way to ask for it, and stays «no sé» until it can be decided', () => {
+  const of = (extra: Partial<typeof EMPTY_TENDER_PROFILE>) => femaleLedSeal({ ...EMPTY_TENDER_PROFILE, ...extra });
+  // More than half of the legal representatives.
+  assert.deepEqual(of({ legalReps: 3, legalRepsWomen: 2 }), { status: 'si', because: '2 de 3 representantes legales son mujeres' });
+  assert.equal(of({ legalReps: 1, legalRepsWomen: 1 }).status, 'si');
+  assert.notEqual(of({ legalReps: 2, legalRepsWomen: 1 }).status, 'si', 'exactly half is not more than half');
+  // A woman as general manager, or women owning more than half.
+  assert.match(of({ womanGeneralManager: 'si' }).because, /gerencia general/);
+  assert.match(of({ womenOwnership: 'mas_50' }).because, /más de la mitad de la propiedad/);
+  assert.equal(of({ legalReps: 3, legalRepsWomen: 2, womanGeneralManager: 'si' }).because, '2 de 3 representantes legales son mujeres; la gerencia general la ejerce una mujer');
+  // Between a quarter and a half of the shares: it is asked for, it does not come by itself.
+  assert.equal(of({ womenOwnership: 'entre_25_50' }).status, 'solicitar');
+  assert.equal(of({ womenOwnership: 'entre_25_50', womanGeneralManager: 'si' }).status, 'si', 'a condition that holds wins over asking');
+  // «No» only when every way is answered and none holds.
+  assert.equal(of({ legalReps: 3, legalRepsWomen: 1, womanGeneralManager: 'no', womenOwnership: 'menos_25' }).status, 'no');
+  assert.equal(of({ legalReps: 3, legalRepsWomen: 1 }).status, 'no_se', 'another way is still unanswered');
+  assert.match(of({ legalReps: 3, legalRepsWomen: 1 }).because, /gerencia general.*propiedad/);
+  assert.equal(of({}).status, 'no_se');
+  assert.equal(of({ legalReps: 0, legalRepsWomen: 0, womanGeneralManager: 'no', womenOwnership: 'menos_25' }).status, 'no', 'no representatives is an answer, not a majority');
+  // A count that does not add up is not read.
+  assert.equal(of({ legalReps: 2, legalRepsWomen: 5 }).status, 'no_se');
+  assert.throws(() => tenderProfileSchema.parse({ ...EMPTY_TENDER_PROFILE, legalReps: 2, legalRepsWomen: 5 }), /no pueden ser más que el total/);
+  assert.equal(tenderProfileSchema.parse({ ...EMPTY_TENDER_PROFILE, legalReps: 2, legalRepsWomen: 2, womenOwnership: 'mas_50' }).legalRepsWomen, 2);
+  assert.throws(() => tenderProfileSchema.parse({ ...EMPTY_TENDER_PROFILE, womenOwnership: 'casi todo' }));
+  // A stored value that no longer validates is «no sé», like any other field.
+  assert.equal(readTenderProfile({ womenOwnership: 'casi todo', legalReps: 4 }).womenOwnership, null);
+  // The model reads the seal apart from the certifications, so a company with only ISO 9001 is not taken to lack it.
+  const model = (extra: Partial<typeof EMPTY_TENDER_PROFILE>) => tenderProfileForModel({ ...EMPTY_TENDER_PROFILE, certifications: ['ISO 9001'], ...extra });
+  assert.equal(model({ legalReps: 3, legalRepsWomen: 2 }).selloEmpresaMujer, 'sí (2 de 3 representantes legales son mujeres)');
+  assert.equal(model({ legalReps: 3, legalRepsWomen: 2 }).certificacionesVigentes, 'ISO 9001');
+  assert.match(String(model({ womenOwnership: 'entre_25_50' }).selloEmpresaMujer), /^se puede pedir \(/);
+  assert.equal(model({}).selloEmpresaMujer, 'no sé');
+  assert.equal(model({ legalReps: 3, legalRepsWomen: 0, womanGeneralManager: 'no', womenOwnership: 'menos_25' }).selloEmpresaMujer, 'no');
+  assert.match(TENDER_PROFILE_RULE, /«selloEmpresaMujer»/);
+  assert.match(TENDER_PROFILE_RULE, /nunca lo des por faltante mirando solo la lista de certificaciones/);
 });
 
 test('the AI\'s suggestions fill only blank fields, with valid values, and say where they came from', () => {

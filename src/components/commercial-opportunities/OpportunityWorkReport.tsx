@@ -11,7 +11,8 @@ import { IMPACT_LABELS, buyerQuestions, consultationEmail, humanDate, isSignalRe
 import { parseReportDate, reportChecklist, reportItemKey, reportProgress, reportRoute, type ReminderSubject, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { RoutePath, type RouteNode } from './RoutePath';
 import { MarkedItem, ReminderMenu, useReportMarks, type MarkChange } from './ReportMarks';
-import { FitBadge, FitBar, FitQuestion, type OpportunityFitView } from './RequirementFit';
+import { FitBadge, FitBar, FitQuestion, SealCard, type OpportunityFitView } from './RequirementFit';
+import { genderCriterion, sealNote } from '@/lib/commercial-opportunities/gender-criterion';
 import { decisionWithFit, isExtraQuestionKey } from '@/lib/commercial-opportunities/requirement-fit';
 
 const TONES = { go: 'bg-cw-success-soft text-cw-success', evaluate: 'bg-cw-warning-soft text-cw-warning', no: 'bg-muted text-muted-foreground', pending: 'bg-muted text-muted-foreground' };
@@ -115,6 +116,7 @@ export function OpportunityWorkReport({ report, opportunity, onTask, onAsk, onCo
         {facts.length > 0 && <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-4">
           {facts.map(([label, value]) => <div key={label} className="min-w-0 bg-background px-4 py-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 text-sm font-semibold">{value}</dd></div>)}
         </dl>}
+        {!signal ? <SealCard note={sealNote(genderCriterion(report), fit?.seal ?? null)} /> : null}
         {interactive && progress.total > 0 && <div className="mt-6 space-y-2" aria-live="polite">
           <div className="flex items-baseline justify-between gap-3 text-sm">
             <p className="font-medium">{signal ? 'Avance' : 'Avance de la postulación'}</p>
