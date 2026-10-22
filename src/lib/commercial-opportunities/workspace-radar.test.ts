@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { EXCLUSION_MOTIVES, OPPORTUNITY_CATEGORIES, OPPORTUNITY_SOURCES, TENDER_PREREQUISITES, byClosing, bySource, categoryTerms, closesLabel, exclusionGroups, inCategories, parseCategories, searchTerm, sourceKinds, startHere, workAdvice } from './workspace-radar';
+import { EXCLUSION_MOTIVES, OPPORTUNITY_CATEGORIES, tenderWordsOfTheDay, OPPORTUNITY_SOURCES, TENDER_PREREQUISITES, byClosing, bySource, categoryTerms, closesLabel, exclusionGroups, inCategories, parseCategories, searchTerm, sourceKinds, startHere, workAdvice } from './workspace-radar';
 
 const NOW = Date.parse('2026-10-14T12:00:00Z');
 const at = (days: number) => new Date(NOW + days * 86_400_000).toISOString();
@@ -138,4 +138,31 @@ test('«aseo» is the service, not a «paseo» nor the purchase of cleaning supp
   assert.equal(inCategories(op('PNS PRODUCTOS DE LIMPIEZA AREAS CLINICAS'), ['aseo']), false);
   for (const title of ['SERV. DE ASEO NAD REGIONES DE ÑUBLE A LOS LAGOS', 'SERVICIOS EXTERNOS DE ASEO', 'Servicio de Aseo para el Tribunal de Quellón', 'SERVICIO ASEO OFICINA PROVINCIAL TOCOPILLA', 'SERV ASEO MANT. Y ALIMENT. CF CHUNGARA'])
     assert.equal(inCategories(op(title), ['aseo']), true, title);
+});
+
+test('Compra Ágil is asked with a few of the company\'s words each day, in turn, until all have been asked; a short list goes whole', () => {
+  const words = Array.from({ length: 30 }, (_, index) => `palabra ${index + 1}`);
+  const days = Array.from({ length: 5 }, (_, day) => tenderWordsOfTheDay(words, day));
+  assert.ok(days.every(day => day.length === 6), 'six a day');
+  assert.deepEqual(days[0], ['palabra 1', 'palabra 2', 'palabra 3', 'palabra 4', 'palabra 5', 'palabra 6']);
+  assert.deepEqual(days[1].slice(0, 2), ['palabra 7', 'palabra 8']);
+  assert.deepEqual(new Set(days.flat()), new Set(words), 'five days ask all thirty');
+  assert.deepEqual(tenderWordsOfTheDay(words, 5), days[0], 'and then it starts again');
+  assert.deepEqual(tenderWordsOfTheDay(words, 3), tenderWordsOfTheDay(words, 3), 'the same day, the same words');
+  assert.deepEqual(tenderWordsOfTheDay(words, 3.9), tenderWordsOfTheDay(words, 3), 'a day is a whole day');
+  // A list that does not divide by six still reaches every word, and wraps around the end.
+  const seven = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  assert.deepEqual(new Set([0, 1, 2, 3, 4, 5, 6].flatMap(day => tenderWordsOfTheDay(seven, day))), new Set(seven));
+  assert.deepEqual(tenderWordsOfTheDay(seven, 1), ['g', 'a', 'b', 'c', 'd', 'e']);
+  // Short lists, repeats and blanks.
+  assert.deepEqual(tenderWordsOfTheDay(['aseo', 'seguridad'], 123), ['aseo', 'seguridad']);
+  assert.deepEqual(tenderWordsOfTheDay(['aseo', ' aseo ', '', 'seguridad'], 0), ['aseo', 'seguridad']);
+  assert.deepEqual(tenderWordsOfTheDay([], 4), []);
+  assert.deepEqual(tenderWordsOfTheDay(words, -1).length, 6, 'a date before the epoch still gives six');
+});
+
+test('the daily search of Compra Ágil takes its words from the day, not the first six', () => {
+  const sources = readFileSync('src/lib/server/commercial-opportunities/workspace-sources.ts', 'utf8');
+  assert.match(sources, /tenderWordsOfTheDay\(context\.criteria\?\.keywords \|\| \[\], Date\.now\(\) \/ 86_400_000\)/);
+  assert.doesNotMatch(sources, /criteria\?\.keywords \|\| \[\]\)\.slice\(0, 6\)/);
 });
