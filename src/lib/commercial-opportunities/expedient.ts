@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EVIDENCE_STATES } from './workspace';
 import type { SubmissionKit } from './submission-kit';
+import { commercialBriefSchema } from './signal-brief';
 
 const s = (max: number) => z.string().max(max);
 export const citationSchema = z.object({ chunkId: s(100), quote: s(1200) });
@@ -20,6 +21,8 @@ export const reportSchema = z.object({
   questions: z.array(s(2000)).max(30), warnings: z.array(s(1000)).max(30),
   /** The three things to do now, in order. Reports before version 4 have none: the page derives them from the plan. */
   nextSteps: z.array(s(300)).min(1).max(3),
+  /** The structured commercial plan of a signal (signal-brief.ts): reports of a purchase, and signals before it existed, have none. */
+  commercial: commercialBriefSchema.optional(),
 });
 export type OpportunityReport = Omit<z.infer<typeof reportSchema>, 'nextSteps'> & { nextSteps?: string[]; kind?: string; generatedAt: string; coverage: Array<{ id: string; name: string; status: string; pagesRead: number; pagesTotal: number | null }>;
   sources: Array<{ id: string; documentId: string; locator: string; name: string }>;

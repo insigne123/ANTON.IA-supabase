@@ -6,7 +6,8 @@ import { opportunityStorageName } from '@/lib/server/commercial-opportunities/wo
 import { opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { AuthError } from '@/lib/server/auth-utils';
 import { OPPORTUNITY_BUCKET } from '@/lib/commercial-opportunities/workspace';
-import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient';
+import { isSignalKind, type OpportunityReport } from '@/lib/commercial-opportunities/expedient';
+import { signalSheetDownload } from '@/lib/server/commercial-opportunities/signal-sheet-export';
 import {CoworkExportError} from '@/lib/server/cowork/file-exports';
 import {opportunitiesJson} from '@/lib/server/commercial-opportunities/responses';
 import { opportunityExportName } from '@/lib/commercial-opportunities/export-file-name';
@@ -24,14 +25,26 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (params.get('doc') === 'offer') return await offerExport(auth.admin, scope, id, z.enum(['docx', 'md']).parse(params.get('format') || 'docx'), params.get('annex') === null ? undefined : z.coerce.number().int().min(0).max(40).parse(params.get('annex')));
     const format = z.enum(['pdf', 'md', 'docx', 'xlsx', 'zip']).parse(params.get('format') || 'pdf');
     const row = opportunityDb(await auth.admin.from('opportunity_reports').select('report').eq('organization_id', scope.organizationId).eq('opportunity_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle());
-    if (!row) throw new AuthError('El informe aún no está disponible.', 409);
-    const report = row.report as OpportunityReport; let bytes: Uint8Array; let mime: string;
-    const item = opportunityDb(await auth.admin.from('commercial_opportunities').select('title,buyer_name,company_name,deadline_at,amount,currency').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle());
+    const item = opportunityDb(await auth.admin.from('commercial_opportunities').select('kind,title,buyer_name,company_name,company_domain,company_linkedin_url,url,score,reasons,deadline_at,amount,currency,data,updated_at').eq('organization_id', scope.organizationId).eq('id', id).maybeSingle());
+    // The sheet of a signal (a company hiring, a LinkedIn post) is a page of its own, and it downloads even before the AI has written the plan.
+    const sheetOnly = format === 'pdf' && isSignalKind(item?.kind);
+    if (!row && !sheetOnly) throw new AuthError('El informe aún no está disponible.', 409);
+    const report = (row?.report ?? null) as OpportunityReport | null; let bytes: Uint8Array; let mime: string;
     const opportunity = item ? { title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency } : undefined;
     // The download keeps what the team marked: checks, highlights and notes with who wrote them.
     const saved = await readOpportunityReportMarks(auth.admin, scope, id);
     const marks: ExportMarks | undefined = saved.available ? { items: saved.items,
       names: Object.fromEntries((await workspaceMembers(auth.admin, scope)).map(member => [member.user_id, member.name])) } : undefined;
+    if (sheetOnly && item) {
+      const [context, links] = await Promise.all([
+        auth.admin.from('opportunity_company_context').select('criteria').eq('organization_id', scope.organizationId).maybeSingle(),
+        auth.admin.from('opportunity_contact_links').select('opportunity_id').eq('organization_id', scope.organizationId).eq('opportunity_id', id),
+      ]);
+      const sheet = await signalSheetDownload({ item, report, marks, decisionMakerTitles: opportunityDb(context)?.criteria?.decisionMakerTitles || [], contactsCount: (opportunityDb(links) || []).length });
+      if (!sheet) throw new AuthError('Esta oportunidad no tiene ficha comercial.', 409);
+      return download(sheet, 'application/pdf', opportunityExportName('Ficha comercial', item.title), 'pdf');
+    }
+    if (!report) throw new AuthError('El informe aún no está disponible.', 409);
     if (format === 'pdf') { bytes = await opportunityReportPdf(report, opportunity, marks); mime = 'application/pdf'; }
     else if (format === 'xlsx') { bytes = await opportunityReportExcel(report); mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'; }
     else if (format === 'docx') {

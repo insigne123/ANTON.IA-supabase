@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { OpportunityWorkReport, SUGGESTED_QUESTIONS } from './OpportunityWorkReport';
+import { SignalSheetPanel } from './SignalSheet';
 import { SubmissionKit } from './SubmissionKit';
 import { OfferDraft } from './OfferDraft';
 import { PublicMarket } from './PublicMarket';
@@ -496,8 +497,12 @@ export function OpportunityWorkWorkspace() {
           {latest && newerDocuments.length > 0 && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-muted/30 p-4 text-sm"><p>Subiste {newerDocuments.length === 1 ? 'un documento nuevo' : `${newerDocuments.length} documentos nuevos`} después del informe. Actualízalo para incluir{newerDocuments.length === 1 ? 'lo' : 'los'}.</p><Button size="sm" onClick={generate} disabled={busy}>Actualizar informe</Button></div>}
           {latest && item.kind === 'tender' && !advice?.closed && !detail.documents.some(d => d.source_kind === 'upload') && !researching && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-cw-warning-soft p-4 text-sm"><p>Este informe se hizo sin las bases. Súbelas para completarlo: la IA podrá revisar requisitos, criterios y garantías.</p><Button size="sm" variant="outline" onClick={() => setTab('documents')}>Subir bases</Button></div>}
           {!latest && !researching && <ExpedientGuide kind={item.kind} url={item.url} links={links} documents={detail.documents} onUpload={upload} onGenerate={generate} generating={researching} hasReport={false} busy={busy} closed={advice?.closed ? humanDate(item.deadline_at) : null} />}
-          {!latest && !researching && item.reasons[0] && <div className="rounded-2xl border p-5"><h2 className="text-sm font-semibold">Por qué apareció</h2><p className="mt-2 text-sm leading-6">{item.reasons.join(' ')}</p></div>}
-          {latest && <>
+          {!latest && !researching && !signal && item.reasons[0] && <div className="rounded-2xl border p-5"><h2 className="text-sm font-semibold">Por qué apareció</h2><p className="mt-2 text-sm leading-6">{item.reasons.join(' ')}</p></div>}
+          {signal ? <SignalSheetPanel item={item} report={latest?.report ?? null} decisionMakerTitles={detail.decisionMakerTitles || []} contactsCount={detail.contacts?.length ?? 0}
+            marks={detail.marks} onMark={mark} people={detail.members || detail.participants}
+            onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')} onGenerate={latest ? generate : undefined} generating={busy || researching}
+            downloadHref={`/api/commercial-opportunities/${selected}/export?format=pdf`} /> : null}
+          {!signal && latest && <>
             <div className="flex flex-wrap items-center justify-end gap-2"><label className="sr-only" htmlFor="op-export">Formato de descarga</label><select id="op-export" value={download} onChange={e => setDownload(e.target.value)} className="h-9 rounded-md border bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring">{[['pdf', 'PDF'], ['docx', 'Word'], ['xlsx', 'Excel'], ['md', 'Markdown'], ['zip', 'Expediente completo (ZIP)']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><Button asChild variant="outline" size="sm"><a href={`/api/commercial-opportunities/${selected}/export?format=${download}`}><Download className="mr-2 h-4 w-4" />Descargar</a></Button></div>
             <OpportunityWorkReport report={latest.report} opportunity={{ id: item.id, kind: item.kind, code: (item.data as { observed?: { code?: string } } | null)?.observed?.code ?? null, url: item.url, title: item.title, buyer: item.buyer_name || item.company_name, deadline: item.deadline_at, amount: item.amount, currency: item.currency }}
               onTask={(title, evidence) => { setDraft({ title, evidence }); setModal('task'); }} onAsk={ask} onContacts={() => setTab('contacts')}

@@ -32,7 +32,7 @@ export function opportunityDb<T>(result: { data: T; error: { code?: string; mess
   }
   return result.data;
 }
-const COLUMNS = 'id,kind,title,company_name,buyer_name,company_domain,url,score,reasons,deadline_at,amount,currency,data,updated_at';
+const COLUMNS = 'id,kind,title,company_name,buyer_name,company_domain,company_linkedin_url,url,score,reasons,deadline_at,amount,currency,data,updated_at';
 export async function workspaceMembers(client: SupabaseClient, scope: WorkScope) {
   const rows = opportunityDb(await client.from('organization_members').select('user_id,role').eq('organization_id', scope.organizationId).limit(1000)) || [];
   if (!rows.length) return [];
