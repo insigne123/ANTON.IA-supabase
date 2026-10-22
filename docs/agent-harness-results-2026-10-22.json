@@ -1,0 +1,850 @@
+{
+ "measuredAt": "2026-10-22",
+ "corpus": "scripts/fixtures/cowork-full-corpus.ts (141 cases without the AXIS axis); sample of 40, 2 runs each",
+ "cases": [
+  "pendientes-vacio",
+  "recomendacion-hoy",
+  "metricas-semana",
+  "informe-jefe",
+  "lectura-contar-segmento",
+  "lectura-saldo-creditos",
+  "dominio",
+  "prospeccion-mineria",
+  "campana-no-guardado",
+  "mkt-campana-rrhh",
+  "mkt-secuencia",
+  "mkt-mejorar-correo",
+  "importar-excel",
+  "telefono-una-persona",
+  "lote-invitar",
+  "hilo-responder-precio",
+  "hilo-enviar-reunion",
+  "hilo-no-escribir-baja",
+  "descargar-correo",
+  "archivo-pdf",
+  "descargar-tabla",
+  "agendar-reunion",
+  "editar-campana",
+  "reintento-enriquecer",
+  "web-lee-mi-sitio",
+  "icp-cual-es-mi-icp",
+  "oportunidades-hoy",
+  "pref-no-escribir",
+  "pref-de-pasada",
+  "ur-hola",
+  "ur-dime-todo",
+  "ur-buscar-leads-yago",
+  "ur-escribir-sin-correo",
+  "ur-tablero-mes",
+  "art-prospectos-filtro",
+  "cmp-secuencia-y-campana",
+  "chat-honesto",
+  "chat-error",
+  "integral-tres-roles",
+  "integral-cambio-oferta"
+ ],
+ "writer": "on (gpt-6-luna), as COWORK_WRITER_ENABLED in production",
+ "arms": [
+  {
+   "name": "bucle-actual",
+   "model": "gpt-6-luna",
+   "passed": 64,
+   "total": 80,
+   "passRate": 80,
+   "coordinatorCostUsd": 0.16,
+   "secondsPerCase": 25.4,
+   "writerAndReviewerCostUsd": 0.025,
+   "coordinatorCalls": 161
+  },
+  {
+   "name": "harness-sonnet-high",
+   "model": "claude-sonnet-5-5",
+   "passed": 67,
+   "total": 80,
+   "passRate": 83.8,
+   "coordinatorCostUsd": 6.95,
+   "secondsPerCase": 14.2,
+   "coordinatorCalls": 166,
+   "inputTokens": 10869122,
+   "cacheReadTokens": 9654334,
+   "outputTokens": 112391
+  },
+  {
+   "name": "harness-haiku-high",
+   "model": "claude-haiku-5-5",
+   "passed": 59,
+   "total": 80,
+   "passRate": 73.8,
+   "coordinatorCostUsd": 0.57,
+   "secondsPerCase": 22.6,
+   "coordinatorCalls": 197,
+   "inputTokens": 12958541,
+   "cacheReadTokens": 11488666,
+   "outputTokens": 318995
+  }
+ ],
+ "perCase": {
+  "bucle-actual": {
+   "pendientes-vacio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "recomendacion-hoy": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "metricas-semana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "informe-jefe": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "lectura-contar-segmento": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "cuenta con una sola lectura exacta"
+    ]
+   },
+   "lectura-saldo-creditos": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "dice que revelar un teléfono cuesta diez",
+     "lee el saldo en una sola lectura"
+    ]
+   },
+   "dominio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "prospeccion-mineria": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "campana-no-guardado": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-campana-rrhh": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-secuencia": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-mejorar-correo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "importar-excel": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "telefono-una-persona": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "lote-invitar": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "propone un lote de invitaciones, no una por persona",
+     "cubre a las personas con perfil, una de cada empresa como mínimo",
+     "no incluye a quien no tiene perfil de LinkedIn guardado",
+     "sale una persona por empresa hoy y la otra de la misma empresa espera con su motivo",
+     "dice que lo revisas o lo apruebas en la tarjeta antes de que salga",
+     "propone una sola cosa: ni búsqueda ni otra acción"
+    ]
+   },
+   "hilo-responder-precio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "hilo-enviar-reunion": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "hilo-no-escribir-baja": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "descargar-correo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "archivo-pdf": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "descargar-tabla": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "entrega la tabla como tarjeta",
+     "dice que la tarjeta se baja en Excel con «Descargar»",
+     "cierra con un siguiente paso o una propuesta",
+     "ofrece respuestas sugeridas u opciones para seguir"
+    ]
+   },
+   "agendar-reunion": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "editar-campana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "reintento-enriquecer": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "propone investigar"
+    ]
+   },
+   "web-lee-mi-sitio": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "propone 2 o 3 segmentos (cargo y tipo de empresa) en una lista",
+     "cierra ofreciendo buscar 10 prospectos del primer segmento",
+     "la primera sugerencia responde que sí: busca 10 prospectos",
+     "otra sugerencia guarda la oferta con el sitio",
+     "no propone nada sin tu aprobación ni envía",
+     "no trae cifras que el sitio no dice"
+    ]
+   },
+   "icp-cual-es-mi-icp": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "entrega el documento «Tu cliente ideal»"
+    ]
+   },
+   "oportunidades-hoy": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "si propone algo, es buscar decisores de una empresa contratando por su dominio",
+     "menciona las licitaciones o la Compra Ágil y su cierre"
+    ]
+   },
+   "pref-no-escribir": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "pref-de-pasada": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-hola": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-dime-todo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-buscar-leads-yago": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-escribir-sin-correo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-tablero-mes": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "art-prospectos-filtro": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "entrega algo visual"
+    ]
+   },
+   "cmp-secuencia-y-campana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "chat-honesto": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "usa sus datos (21 con correo o 118 de RR. HH.)"
+    ]
+   },
+   "chat-error": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "integral-tres-roles": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "integral-cambio-oferta": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   }
+  },
+  "harness-sonnet-high": {
+   "pendientes-vacio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "recomendacion-hoy": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "metricas-semana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "informe-jefe": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "lectura-contar-segmento": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "lectura-saldo-creditos": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "dice que revelar un teléfono cuesta diez"
+    ]
+   },
+   "dominio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "prospeccion-mineria": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "campana-no-guardado": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-campana-rrhh": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-secuencia": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-mejorar-correo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "importar-excel": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "telefono-una-persona": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "lote-invitar": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "no dice cuántas salen: lo fija el servidor y lo muestra la tarjeta"
+    ]
+   },
+   "hilo-responder-precio": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "lee la conversación de esa persona, y solo esa"
+    ]
+   },
+   "hilo-enviar-reunion": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "hilo-no-escribir-baja": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "lee la conversación de esa persona, y solo esa",
+     "dice que pidió no recibir más mensajes"
+    ]
+   },
+   "descargar-correo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "archivo-pdf": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "descargar-tabla": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "agendar-reunion": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "editar-campana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "reintento-enriquecer": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "web-lee-mi-sitio": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "otra sugerencia guarda la oferta con el sitio"
+    ]
+   },
+   "icp-cual-es-mi-icp": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "oportunidades-hoy": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "menciona las licitaciones o la Compra Ágil y su cierre",
+     "si propone algo, es buscar decisores de una empresa contratando por su dominio"
+    ]
+   },
+   "pref-no-escribir": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "pref-de-pasada": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-hola": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-dime-todo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-buscar-leads-yago": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-escribir-sin-correo": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "explica cómo conseguir el correo"
+    ]
+   },
+   "ur-tablero-mes": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "art-prospectos-filtro": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "cmp-secuencia-y-campana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "chat-honesto": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "chat-error": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "integral-tres-roles": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "integral-cambio-oferta": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   }
+  },
+  "harness-haiku-high": {
+   "pendientes-vacio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "recomendacion-hoy": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "metricas-semana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "informe-jefe": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "usa actividad además de métricas"
+    ]
+   },
+   "lectura-contar-segmento": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "cuenta con una sola lectura exacta"
+    ]
+   },
+   "lectura-saldo-creditos": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "lee el saldo en una sola lectura",
+     "dice que revelar un teléfono cuesta diez"
+    ]
+   },
+   "dominio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "prospeccion-mineria": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "campana-no-guardado": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-campana-rrhh": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-secuencia": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "mkt-mejorar-correo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "importar-excel": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "telefono-una-persona": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "propone pedir el teléfono de esa persona, con su tarjeta"
+    ]
+   },
+   "lote-invitar": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "propone un lote de invitaciones, no una por persona",
+     "cubre a las personas con perfil, una de cada empresa como mínimo",
+     "no incluye a quien no tiene perfil de LinkedIn guardado",
+     "sale una persona por empresa hoy y la otra de la misma empresa espera con su motivo",
+     "propone una sola cosa: ni búsqueda ni otra acción"
+    ]
+   },
+   "hilo-responder-precio": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "hilo-enviar-reunion": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "lee la conversación de esa persona, y solo esa",
+     "no propone nada más: ni búsqueda ni otra acción"
+    ]
+   },
+   "hilo-no-escribir-baja": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "lee la conversación de esa persona, y solo esa",
+     "dice que pidió no recibir más mensajes"
+    ]
+   },
+   "descargar-correo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "archivo-pdf": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "descargar-tabla": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "agendar-reunion": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "editar-campana": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "reintento-enriquecer": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "propone investigar"
+    ]
+   },
+   "web-lee-mi-sitio": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "propone 2 o 3 segmentos (cargo y tipo de empresa) en una lista",
+     "otra sugerencia guarda la oferta con el sitio"
+    ]
+   },
+   "icp-cual-es-mi-icp": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "oportunidades-hoy": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "pref-no-escribir": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "pref-de-pasada": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-hola": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-dime-todo": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-buscar-leads-yago": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "ur-escribir-sin-correo": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "explica cómo conseguir el correo"
+    ]
+   },
+   "ur-tablero-mes": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "art-prospectos-filtro": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "cmp-secuencia-y-campana": {
+    "passes": 0,
+    "runs": 2,
+    "failedChecks": [
+     "termina sin fallar",
+     "cierra con un siguiente paso o una propuesta",
+     "ofrece respuestas sugeridas u opciones para seguir",
+     "propone la campaña en el mismo turno",
+     "la campaña lleva los 3 correos",
+     "va a Jose",
+     "el texto es el de la Redactora"
+    ]
+   },
+   "chat-honesto": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "recomienda segmentar o personalizar"
+    ]
+   },
+   "chat-error": {
+    "passes": 1,
+    "runs": 2,
+    "failedChecks": [
+     "sin disculpas largas"
+    ]
+   },
+   "integral-tres-roles": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   },
+   "integral-cambio-oferta": {
+    "passes": 2,
+    "runs": 2,
+    "failedChecks": []
+   }
+  }
+ },
+ "opportunities": {
+  "fixture": "scripts/fixtures/opportunities-expedient.ts (invented tender, 21 fragments, 17 questions)",
+  "firstFragmentsQuestions": {
+   "questions": 14,
+   "haiku": {
+    "repeat": 3,
+    "single": {
+     "passed": 42,
+     "total": 42,
+     "costUsd": 0.0215
+    },
+    "agent": {
+     "passed": 42,
+     "total": 42,
+     "costUsd": 0.0241
+    }
+   },
+   "sonnet": {
+    "repeat": 2,
+    "single": {
+     "passed": 28,
+     "total": 28,
+     "costUsd": 0.1906
+    },
+    "agent": {
+     "passed": 27,
+     "total": 28,
+     "costUsd": 0.2235
+    }
+   }
+  },
+  "searchWithOtherWordsQuestions": {
+   "questions": [
+    "vehiculos-edad",
+    "plan-b",
+    "castigo-posicion"
+   ],
+   "haiku": {
+    "repeat": 4,
+    "single": {
+     "passed": 0,
+     "total": 12,
+     "costUsd": 0.005
+    },
+    "agent": {
+     "passed": 12,
+     "total": 12,
+     "costUsd": 0.0102
+    }
+   },
+   "sonnet": {
+    "repeat": 4,
+    "single": {
+     "passed": 0,
+     "total": 12,
+     "costUsd": 0.0638
+    },
+    "agent": {
+     "passed": 12,
+     "total": 12,
+     "costUsd": 0.1458
+    }
+   }
+  }
+ }
+}
