@@ -16,7 +16,7 @@ export type ExportMarks = { items: ReportMarks; names?: Record<string, string> }
 const markOf = (marks: ExportMarks | undefined, kind: MarkKind, text: string) => marks?.items[reportItemKey(kind, text)];
 const check = (marks: ExportMarks | undefined, kind: MarkKind, text: string) => marks ? (markOf(marks, kind, text)?.done ? '[x] ' : '[ ] ') : '';
 /** Every note, in report order, with its item and who wrote it. */
-function teamNotes(report: OpportunityReport, marks?: ExportMarks) {
+export function teamNotes(report: OpportunityReport, marks?: ExportMarks) {
   if (!marks) return [];
   const items: Array<[MarkKind, string]> = [...reportNextSteps(report).map(t => ['step', t] as [MarkKind, string]), ...reportRoute(report).map(r => ['route', r.title] as [MarkKind, string]),
     ...report.milestones.map(m => ['date', m.label] as [MarkKind, string]), ...report.requirements.map(r => ['requirement', r.title] as [MarkKind, string]),

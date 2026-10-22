@@ -1,12 +1,16 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { sanitizeBrief, SIGNAL_BRIEF_RULE } from './signal-brief';
 import { reportSchema, REPORT_OUTLINE, PRIVATE_OUTLINE, SIGNAL_OUTLINE, isPrivateKind, isSignalKind, type DocumentChunk } from './expedient';
 
 // The provider compiles only this small envelope. The complete report contract still validates locally.
 export const reportEnvelopeSchema = z.object({ json: z.string() });
 
 export function readOpportunityReportEnvelope(envelope: z.infer<typeof reportEnvelopeSchema>) {
-  return reportSchema.parse(JSON.parse(envelope.json));
+  const raw = JSON.parse(envelope.json);
+  // The commercial plan of a signal is cut to its limits here: a long or malformed one must not lose a paid report.
+  if (raw && typeof raw === 'object' && 'commercial' in raw) raw.commercial = sanitizeBrief(raw.commercial);
+  return reportSchema.parse(raw);
 }
 
 /** Give synthesis bounded original evidence too: an invalid extraction quote is not missing source content. */
@@ -70,6 +74,7 @@ export function opportunityReportPrompt(cutoff: string, evidence: unknown, kind?
       : `Incluye estas secciones adaptadas al tipo de oportunidad: ${(priv ? PRIVATE_OUTLINE : REPORT_OUTLINE).join('; ')}. Cada hallazgo importante debe decir consecuencia, acción, responsable sugerido, plazo y evidencia esperada. questions son consultas listas para enviar al comprador dentro del plazo de consultas.`,
     ...(priv ? [PRIVATE_PROCESS_RULE] : []),
     signal ? SIGNAL_QUESTION_RULE : BUYER_QUESTION_RULE,
+    ...(signal ? [SIGNAL_BRIEF_RULE] : []),
     ...REPORT_WRITING_RULES,
     'specialists trae las notas del equipo que revisó antes que tú (requisitos, puntaje, contrato y estrategia, o empresa, contacto y validación): úsalas para no omitir nada y para priorizar, pero afirma solo lo que respaldan los hechos y fragmentos, con sus citas.',
     'Distingue hechos documentados, cálculos, propuestas y datos pendientes. No inventes salarios, experiencia propia, requisitos, ponderaciones, probabilidad de adjudicación, normativa o competencia. No conviertas referencial en máximo ni garantía en fecha de inicio. No inventes fechas ISO ni plazos cerrados.',

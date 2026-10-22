@@ -39,7 +39,7 @@ export const companyContextSchema = z.object({
 }).strict();
 export type WorkScope = { organizationId: string; userId: string; role?: string };
 export type WorkItem = { id: string; kind: string; title: string; company_name: string | null; buyer_name: string | null;
-  company_domain: string | null; url: string | null; score: number; reasons: string[]; deadline_at: string | null;
+  company_domain: string | null; /** Only the detail of one opportunity reads it. */ company_linkedin_url?: string | null; url: string | null; score: number; reasons: string[]; deadline_at: string | null;
   amount: number | null; currency: string | null; data: Record<string, unknown>; updated_at: string };
 export type WorkRecord = { opportunity_id: string; revision: number; state: typeof WORK_STATES[number]; team_id: string | null;
   responsible_id: string | null; objective: string; due_at: string | null; assigned_by: string | null; updated_at: string };
