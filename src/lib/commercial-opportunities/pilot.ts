@@ -28,4 +28,5 @@ export const DECISION_MAKER_TITLES = ['Gerente de Recursos Humanos', 'Jefe de Re
 
 /** What GrupoExpro sells, as public tenders name it (staffing, outsourcing, recruitment, payroll). Editable in the page. */
 export const GRUPOEXPRO_TENDER_KEYWORDS = ['suministro de personal', 'servicios transitorios', 'personal transitorio', 'personal de reemplazo',
-  'outsourcing', 'externalización', 'contact center', 'call center', 'reclutamiento', 'selección de personal', 'remuneraciones'];
+  'outsourcing', 'externalización', 'contact center', 'call center', 'reclutamiento', 'reclutamiento y selección', 'selección de personal', 'headhunting', 'búsqueda de ejecutivos',
+  'evaluación psicolaboral', 'remuneraciones'];

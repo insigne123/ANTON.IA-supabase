@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { EXCLUSION_MOTIVES, OPPORTUNITY_SOURCES, TENDER_PREREQUISITES, byClosing, bySource, closesLabel, exclusionGroups, searchTerm, sourceKinds, startHere, workAdvice } from './workspace-radar';
+import { EXCLUSION_MOTIVES, OPPORTUNITY_CATEGORIES, OPPORTUNITY_SOURCES, TENDER_PREREQUISITES, byClosing, bySource, categoryTerms, closesLabel, exclusionGroups, inCategories, parseCategories, searchTerm, sourceKinds, startHere, workAdvice } from './workspace-radar';
 
 const NOW = Date.parse('2026-10-14T12:00:00Z');
 const at = (days: number) => new Date(NOW + days * 86_400_000).toISOString();
@@ -66,7 +66,7 @@ test('the evaluation asks why an excluded one was left out and keeps it next to 
   assert.match(sources, /excludedMotive: answer\.verdict === 'excluded' \? answer\.motive \?\? null : null/);
   const page = readFileSync('src/components/commercial-opportunities/OpportunityWorkWorkspace.tsx', 'utf8');
   assert.match(page, /<AdvicePill item=\{item\} \/>/);
-  assert.match(page, /filter === 'recommended' && !search && source === 'all' && <StartHere/);
+  assert.match(page, /filter === 'recommended' && !search && source === 'all' && !categories\.length && <StartHere/, 'a line of service is a filter: no suggestions over it');
   assert.match(page, /bySource\(items\)\.map\(group =>/);
   assert.match(page, /listGroups\.map\(group =>/);
   assert.match(page, /filter === 'excluded' \? <ExclusionGroups items=\{group\.items\}/);
@@ -101,4 +101,41 @@ test('what a person types is searched without what would end a PostgREST filter'
   assert.equal(searchTerm('RR.HH. 100%_'), 'RR.HH. 100');
   assert.equal(searchTerm('  '), '');
   assert.equal(searchTerm('a'.repeat(300)).length, 100);
+});
+
+test('the lines of service are read from the query string: the known ones, once each, in the order of the list', () => {
+  assert.deepEqual(OPPORTUNITY_CATEGORIES.map(category => category.id), ['seguridad', 'aseo', 'outsourcing', 'reclutamiento']);
+  assert.deepEqual(parseCategories('reclutamiento, seguridad,seguridad,marte'), ['seguridad', 'reclutamiento']);
+  assert.deepEqual(parseCategories(''), []);
+  assert.deepEqual(parseCategories(null), []);
+  assert.deepEqual(categoryTerms([]), []);
+  assert.ok(categoryTerms(['seguridad']).includes('guardia'));
+  assert.ok(categoryTerms(['seguridad', 'aseo']).includes('servicio de aseo'));
+  // The words go into a filter as they are: none can carry a wildcard, a comma, a parenthesis or a quote.
+  for (const term of categoryTerms(OPPORTUNITY_CATEGORIES.map(category => category.id))) assert.doesNotMatch(term, /[%_*,()"'\\]/, term);
+});
+
+test('an opportunity is in a line of service when its title or its summary names it, whatever the case and the accents', () => {
+  const op = (title: string, summary?: string) => ({ title, data: summary ? { summary: { text: summary } } : {} });
+  assert.equal(inCategories(op('SERVICIO DE GUARDIAS DE SEGURIDAD PARA OFICINAS'), ['seguridad']), true);
+  assert.equal(inCategories(op('Servicio de Vigilancia CESFAM Rosario'), ['seguridad']), true);
+  assert.equal(inCategories(op('SERVICIO DE ASEO CEVS LONCOCHE'), ['seguridad']), false);
+  assert.equal(inCategories(op('Servicio de reclutamiento y selección de personal'), ['reclutamiento']), true);
+  assert.equal(inCategories(op('SERVICIO DE SELECCION DE PERSONAL'), ['reclutamiento']), true, 'without the accent');
+  assert.equal(inCategories(op('Servicio de externalización de nómina'), ['outsourcing']), true, 'a stem covers the ending');
+  assert.equal(inCategories(op('Contratación de apoyo', 'Suministro de personal transitorio para bodega'), ['outsourcing']), true, 'the summary line counts');
+  // Any of the lines picked; none picked is everything.
+  assert.equal(inCategories(op('Servicio de aseo para el Tribunal'), ['seguridad', 'aseo']), true);
+  assert.equal(inCategories(op('Compra de escritorios'), []), true);
+  assert.equal(inCategories({ title: null, data: null }, ['aseo']), false);
+});
+
+test('«aseo» is the service, not a «paseo» nor the purchase of cleaning supplies', () => {
+  const op = (title: string) => ({ title, data: {} });
+  assert.equal(inCategories(op('HABILITACIÓN PASEO PEATONAL CALLE COLO COLO'), ['aseo']), false);
+  assert.equal(inCategories(op('CONSTRUCCION PASEO FLUVIAL SEGURO RIO CONTAO'), ['aseo']), false);
+  assert.equal(inCategories(op('Adquisición de artículos de aseo para FF-Riveros'), ['aseo']), false);
+  assert.equal(inCategories(op('PNS PRODUCTOS DE LIMPIEZA AREAS CLINICAS'), ['aseo']), false);
+  for (const title of ['SERV. DE ASEO NAD REGIONES DE ÑUBLE A LOS LAGOS', 'SERVICIOS EXTERNOS DE ASEO', 'Servicio de Aseo para el Tribunal de Quellón', 'SERVICIO ASEO OFICINA PROVINCIAL TOCOPILLA', 'SERV ASEO MANT. Y ALIMENT. CF CHUNGARA'])
+    assert.equal(inCategories(op(title), ['aseo']), true, title);
 });

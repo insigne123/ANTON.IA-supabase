@@ -68,3 +68,22 @@ test('a source picked reads the list with its kinds; without one, the list as it
   assert.deepEqual(filtered.items, [{ id: 'op2', title: 'Avisos de guardias' }]);
   assert.ok(state.order.includes('opportunity_workspace_list_kinds') && !state.order.includes('opportunity_workspace_list'));
 });
+
+test('a line of service reads the list with its words and, before that function exists, narrows the list it already has', async () => {
+  const { state, client } = slowClient();
+  const admin = { organizationId: 'org', userId: 'u1', role: 'admin' };
+  rows.opportunity_workspace_list_terms = [{ id: 'op3', title: 'Servicio de guardias' }];
+  const read = await readWorkspaceOverview(client, admin, { view: 'all', categories: ['seguridad'] });
+  assert.deepEqual(read.items, [{ id: 'op3', title: 'Servicio de guardias' }]);
+  assert.ok(state.order.includes('opportunity_workspace_list_terms') && !state.order.includes('opportunity_workspace_list'));
+  const none = slowClient();
+  rows.opportunity_workspace_list = [{ id: 'a', title: 'Servicio de guardias de seguridad' }, { id: 'b', title: 'Servicio de aseo' }];
+  delete rows.opportunity_workspace_list_terms;
+  const rpc = none.client.rpc;
+  none.client.rpc = (name: string, ...rest: unknown[]) => (name === 'opportunity_workspace_list_terms'
+    ? { then: (resolve: any) => resolve({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }) } as any : rpc(name, ...rest as []));
+  const before = await readWorkspaceOverview(none.client, admin, { view: 'all', categories: ['seguridad'] });
+  assert.deepEqual(before.items.map((item: any) => item.id), ['a'], 'without the function the list is narrowed here');
+  const plain = await readWorkspaceOverview(slowClient().client, admin, { view: 'all' });
+  assert.deepEqual(plain.items.map((item: any) => item.id), ['a', 'b'], 'no category: the list as it always was');
+});
