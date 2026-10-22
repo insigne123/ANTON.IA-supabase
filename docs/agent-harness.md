@@ -4,7 +4,9 @@ Un harness es lo que rodea al modelo y lo hace trabajar como Claude Code o Cowor
 sistema las ejecuta y le devuelve lo que pasó (incluidos los errores), hasta que entrega la respuesta. Esta página dice qué hay,
 dónde se enciende, qué cambió en cada área y qué falta por medir con modelos reales.
 
-Todo lo nuevo está **apagado por defecto**. Sin las variables de abajo, la app se comporta como antes.
+Todo lo nuevo está **apagado por defecto**. Sin las variables de abajo, la app se comporta como antes. El motor de documentos es la excepción: el PDF y el Word de Cowork pasan por él salvo `COWORK_DOCUMENTS_ENGINE=legacy`.
+
+**Medido con modelos reales el 22 de octubre de 2026** (`docs/agent-harness-mediciones-2026-10-22.md`): en Cowork el harness con Sonnet acierta como el bucle de hoy y cuesta unas 40 veces más, y con Haiku cuesta más y acierta menos, así que `COWORK_RUNTIME` se deja apagado; en Oportunidades el agente responde lo que la llamada única no encuentra y se puede encender.
 
 ## Piezas
 
@@ -99,10 +101,12 @@ Verificado (pruebas, tipos y lint):
 - El libro de presupuesto de Oportunidades: reserva por ronda, costo con el uso real, repetición al retomar, errores del proveedor, tope de contexto.
 - El PDF y el Word del motor de documentos, revisados como imagen en LibreOffice y `pdftoppm`.
 
+Medido con modelos reales (22 oct 2026, ver `docs/agent-harness-mediciones-2026-10-22.md`): el coordinador de Cowork sobre 40 casos del corpus con dos repeticiones (Sonnet y Haiku contra el bucle con Luna), y el chat de Oportunidades sobre un expediente de prueba (Haiku y Sonnet contra la llamada única).
+
 **No verificado:**
 
-- Ninguna ejecución con modelos reales de Anthropic: este entorno no tiene `ANTHROPIC_API_KEY`. No se ha medido la calidad contra el coordinador actual, ni
-  latencia, ni costo real por turno.
+- Los otros 101 casos del corpus y el eje AXIS con el harness; una lectura humana de sus respuestas (los chequeos del corpus son léxicos).
+- La segunda lectura del informe (`OPPORTUNITIES_REPORT_VERIFY`) con modelos reales: necesita informes y citas reales.
 - Que el proveedor devuelva el nombre del modelo tal como se pide (se acepta una versión con fecha del mismo modelo; otro nombre deja el costo «por conciliar»).
 - El texto en vivo de la respuesta con el SDK real (probado con un cliente simulado de los eventos de `streamEvent`).
 - El Word en Microsoft Word (se revisó en LibreOffice) y la revisión visual en el servidor de producción.
@@ -112,11 +116,11 @@ Verificado (pruebas, tipos y lint):
 1. Medir Cowork: con `ANTHROPIC_API_KEY` en el entorno (nunca desde un archivo),
 
    ```
-   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-harness.ts --live --max-calls=200 --repeat=2 --output=harness.json
-   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-conversations.ts --live --max-calls=200 --repeat=2 --output=bucle.json
+   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-harness.ts --live --writer --max-calls=200 --repeat=2 --output=harness.json
+   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-conversations.ts --live --writer --max-calls=200 --repeat=2 --output=bucle.json
    ```
 
-   Se comparan tasa de casos que pasan sus chequeos, llamadas, tokens, costo y segundos por caso (mismos `--cases` y `--repeat`).
+   `--writer` enciende la Redactora, como en producción (necesita `OPENAI_API_KEY` y `COWORK_MODEL`); sin ella, dos casos de campaña no se pueden pasar. Se comparan tasa de casos que pasan sus chequeos, llamadas, tokens, costo y segundos por caso (mismos `--cases` y `--repeat`). Para el chat de Oportunidades: `scripts/evaluate-opportunities-harness.ts --live --max-calls=400 --repeat=3` (solo necesita `ANTHROPIC_API_KEY`).
 2. Activar en un entorno de prueba `COWORK_RUNTIME=harness` y probar a mano los turnos que proponen algo (campaña, búsqueda, nota) y los que entregan un documento.
 3. Activar `OPPORTUNITIES_RUNTIME=harness` y hacer preguntas a un chat con documentos y al asistente; mirar en la base los pasos `answer:rN` del libro.
 4. Solo después, `OPPORTUNITIES_REPORT_VERIFY=on` y leer qué afirmaciones bajó a «por confirmar».

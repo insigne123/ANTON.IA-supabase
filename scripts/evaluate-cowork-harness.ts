@@ -3,7 +3,11 @@
 // Explicit opt-in only. Never loads env files, touches the database or calls any provider but Anthropic's.
 //
 //   ANTHROPIC_API_KEY=... COWORK_HARNESS_MODEL=claude-sonnet-5-5 \
-//   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-harness.ts --live --max-calls=120 [--cases=a,b|axis-*] [--repeat=2] [--output=file.json]
+//   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-harness.ts --live --max-calls=120 [--cases=a,b|axis-*] [--repeat=2] [--output=file.json] [--writer]
+//
+// --writer hands writing to the Writer and the Reviewer (writer.ts), as COWORK_WRITER_ENABLED does in production and as --writer does in
+// evaluate-cowork-conversations.ts: they run on OpenAI with COWORK_MODEL (COWORK_WRITER_MODEL / COWORK_REVIEWER_MODEL pick theirs), so it needs
+// OPENAI_API_KEY too, and the harness only decides when to hand over. Their calls count against --max-calls.
 //
 // Compare with the coordinator loop by running evaluate-cowork-conversations.ts with the same --cases and --repeat, and read both reports
 // with the same rubric: pass rate of the corpus checks, calls, tokens, cost and seconds per case. Cases the harness hands back to the
@@ -12,11 +16,15 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { anthropicModel } from '../src/lib/agent-harness/anthropic';
 import { addUsage, emptyUsage, type Effort, type ModelClient, type Usage } from '../src/lib/agent-harness/index';
+import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import { coworkHarnessSettings } from '../src/lib/cowork/harness-config';
+import { runCoworkWriter } from '../src/lib/cowork/writer';
+import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '../src/lib/server/cowork/writer-run';
 import { coworkReadCapabilities } from '../src/lib/server/cowork/read-capabilities';
 import { selectCases } from './cowork-case-selection';
 import { CORPUS } from './fixtures/cowork-full-corpus';
-import { runCorpusCase } from './fixtures/cowork-conversation-runner';
+import { CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
+import { runCorpusCase, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 
 /** Micro-USD per token, as the Oportunidades ledger prices them (workspace-ai.ts). */
 const PRICES: Record<string, { input: number; output: number; cache: number; write: number }> = {
@@ -41,6 +49,11 @@ async function main() {
   const repeat = Math.max(1, Math.min(5, Number(arg('repeat') || 1)));
   const settings = coworkHarnessSettings({ COWORK_RUNTIME: 'harness', ...(process.env as Record<string, string | undefined>) })!;
   const modelName = settings.model;
+  const writerOn = process.argv.includes('--writer');
+  if (writerOn && (!String(process.env.OPENAI_API_KEY || '').trim() || !String(process.env.COWORK_MODEL || '').trim())) throw new Error('--writer needs OPENAI_API_KEY and COWORK_MODEL for the Writer and the Reviewer.');
+  const writerModels = coworkWriterModels();
+  const writerEfforts = coworkWriterEfforts();
+  const writerCalls = { writer: 0, reviewer: 0 };
   const selected = selectCases(CORPUS, arg('cases')) || CORPUS.filter(entry => !entry.axis).map(entry => entry.id);
   const unknown = selected.filter(id => !CORPUS.some(entry => entry.id === id));
   if (unknown.length) throw new Error(`Unknown cases: ${unknown.join(', ')}`);
@@ -72,8 +85,19 @@ async function main() {
       const entry = CORPUS.find(item => item.id === id)!;
       current = { usage: emptyUsage(), calls: 0, modelMs: 0 };
       const started = Date.now();
+      const write: CorpusWriter | undefined = writerOn ? (brief, observations, meta) => runCoworkWriter({
+        request: meta.request, brief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step, now: CORPUS_NOW,
+        generate: async ({ role, schema, systemPrompt, prompt, fix }) => {
+          if (calls >= maxCalls) throw new Error('Evaluation call budget exhausted');
+          calls += 1; current.calls += 1; writerCalls[role] += 1;
+          const chosen = coworkWriterCallModel(brief.kind, role, fix, writerModels, writerEfforts);
+          const response = await generateStructuredWithTelemetry({ schema, systemPrompt, prompt, provider: 'openai', openAiModel: chosen.model,
+            allowDefaultModelFallback: false, maxAttempts: 1, maxOutputTokens: role === 'writer' ? 6000 : 1500, timeoutMs: 90000, reasoningEffort: chosen.effort });
+          return response.data;
+        },
+      }) : undefined;
       const outcome = await runCorpusCase(entry, async () => { throw new Error('The coordinator loop must not run in harness mode'); },
-        undefined, undefined, undefined, undefined, undefined,
+        write, undefined, undefined, undefined, undefined,
         turn => ({ model: counted, system: turn.system, context: turn.context, capabilities, effort, maxRounds: settings.maxRounds, maxReads: settings.maxReads, deadlineMs: 80_000 }));
       total = addUsage(total, current.usage);
       const failedChecks = outcome.checks.filter(check => !check.passed).map(check => check.label);
@@ -85,7 +109,7 @@ async function main() {
   }
   const passed = outcomes.filter(item => item.passed).length;
   const report = {
-    runtime: 'harness', model: modelName, effort, selected, repeat, rubric: 'cowork-corpus-checks',
+    runtime: 'harness', model: modelName, effort, selected, repeat, rubric: 'cowork-corpus-checks', writer: writerOn ? { ...writerCalls, model: process.env.COWORK_MODEL } : null,
     passed, total: outcomes.length, passRate: outcomes.length ? Math.round((passed / outcomes.length) * 1000) / 10 : null,
     calls, usage: total, costUsd: costUsd(total, modelName), outcomes,
   };
