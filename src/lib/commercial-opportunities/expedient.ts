@@ -61,3 +61,11 @@ export const SIGNAL_OUTLINE = [
   'A quién contactar', 'Cómo abordarlos: ángulo y primer mensaje', 'Preguntas para la primera conversación', 'Qué validar antes de invertir tiempo',
 ];
 export const isSignalKind = (kind?: string | null) => kind === 'hiring' || kind === 'linkedin_post';
+/** A private process the team received (an invitation through a buyer's platform, a request for proposals): bases of its own, not Mercado Público's. */
+export const isPrivateKind = (kind?: string | null) => kind === 'private';
+/** The same, for a private process: its schedule and how it is submitted come before the requirements, and the price is a proposal. */
+export const PRIVATE_OUTLINE = [
+  'Decisión y próximos pasos', 'Qué piden y cómo calza con tu oferta', 'Cronograma y cómo se presenta (plataforma, formularios y cotización)',
+  'Requisitos para postular y qué falta', 'Cómo se evalúa y cómo ganar puntaje', 'Condiciones del contrato: garantías, seguros, pagos, reajuste y multas',
+  'Propuesta económica, precio y números', 'Riesgos y cómo cubrirlos', 'Preguntas para el cliente y documentos por preparar',
+];

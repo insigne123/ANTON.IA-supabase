@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { kitChecklist, kitFacts, offerNumbers, parseAmount, submissionKitSchema, validateSubmissionKit, type SubmissionKit } from './submission-kit';
+import { AFTER_SUBMIT_DEFAULTS, PORTAL_STEPS, PRIVATE_AFTER_SUBMIT, PRIVATE_STEPS, SUBMISSION_KIT_PROMPT, kitChecklist, kitFacts, offerNumbers, parseAmount, submissionKitSchema, submissionRoute, validateSubmissionKit, type SubmissionKit } from './submission-kit';
 import { reportItemKey } from './report-marks';
 
 // Dalcahue 4481-22-LP25, as the bases write it.
@@ -94,4 +94,28 @@ test('the guide speaks of the bases, not of how it was made, and does not restat
   assert.equal(shown.channelDetail, 'Portal ChileCompra.');
   assert.deepEqual(shown.rules.map(rule => rule.kind), ['minimum', 'deadline'], 'another date that leaves the offer out stays');
   assert.equal(clampSubmissionKit(kit).channelDetail, kit.channelDetail);
+});
+
+test('a private process shows the route of its platform, not Mercado Público\'s; every other purchase keeps the one it had', () => {
+  const priv = submissionRoute('private', 'portal');
+  assert.equal(priv.title, 'Cómo se envía en la plataforma de la invitación');
+  assert.equal(priv.steps, PRIVATE_STEPS);
+  assert.equal(priv.after, PRIVATE_AFTER_SUBMIT);
+  assert.deepEqual(priv.steps.map(step => step.title), ['Confirma que participas', 'Pregunta en el período de consultas', 'Prepara los formularios tal como vienen',
+    'Arma la cotización en el formato pedido', 'Sube todo a la plataforma', 'Guarda el comprobante']);
+  assert.doesNotMatch(JSON.stringify([...priv.steps, ...priv.after]), /Mercado Público|Registro de Proveedores|F30/, 'nothing of the public route');
+  assert.match(priv.after.join(' '), /negociación[\s\S]*contrato marco[\s\S]*fiel cumplimiento/);
+  for (const kind of ['tender', 'compra_agil', 'project', undefined, null]) {
+    const route = submissionRoute(kind, 'portal');
+    assert.equal(route.title, 'Cómo se envía en Mercado Público');
+    assert.equal(route.steps, PORTAL_STEPS);
+    assert.equal(route.after, AFTER_SUBMIT_DEFAULTS);
+  }
+  assert.equal(submissionRoute('private', 'email').title, 'Cómo se envía (en general)');
+  assert.equal(submissionRoute('tender', 'email').title, 'Cómo se envía (en general)');
+});
+
+test('the guide is asked to name the platform of a private invitation and what is entered in it', () => {
+  assert.match(SUBMISSION_KIT_PROMPT, /Si el tipo es private[\s\S]*nombra en channelDetail la plataforma de la invitación[\s\S]*resumen de la propuesta económica/);
+  assert.match(SUBMISSION_KIT_PROMPT, /la confirmación de participación y la negociación posterior en afterSubmit o rules/);
 });

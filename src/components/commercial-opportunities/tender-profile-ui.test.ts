@@ -40,7 +40,7 @@ test('the form keeps amounts as typed and saves them as numbers; blanks and empt
 test('the questions come in their groups, with «No sé» as an answer and the AI\'s suggestions marked', () => {
   const form = formFromProfile({ ...profile.EMPTY_TENDER_PROFILE, rut: '76.086.428-4', certifications: [], publicExperience: 'si' });
   const html = renderToStaticMarkup(React.createElement(TenderProfileFields, { form, sources: { legalName: 'sitio web' }, onChange: () => {} }));
-  for (const title of ['Tu empresa', 'Dónde y cuánto', 'Experiencia', 'Lo que suelen pedir las bases', 'Medios y límites']) assert.match(text(html), new RegExp(title));
+  for (const title of ['Tu empresa', 'Dónde y cuánto', 'Experiencia', 'Lo que suelen pedir las bases', 'Liderazgo y Sello Empresa Mujer', 'Medios y límites']) assert.match(text(html), new RegExp(title));
   assert.match(html, /<label for="tp-legalName">Razón social<\/label>/);
   assert.match(text(html), /Sugerido por la IA · sitio web/);
   assert.match(html, /aria-invalid="true"[^>]*aria-describedby="tp-rut-error"/);
@@ -50,7 +50,28 @@ test('the questions come in their groups, with «No sé» as an answer and the A
   assert.match(text(html), /No tenemos certificaciones/);
   assert.match(html, /<input type="checkbox"[^>]*checked=""[^>]*\/>No tenemos certificaciones/, 'an empty list reads as «none»');
   assert.match(text(html), /Sin marcar, la IA no sabe dónde operas y no descarta por región\./);
-  assert.equal((html.match(/>No sé</g) || []).length, 4, 'size, registry, public experience and insurance can stay unknown');
+  assert.equal((html.match(/>No sé</g) || []).length, 6, 'size, registry, public experience, insurance, general manager and ownership can stay unknown');
+});
+
+test('the seal section asks for counts, never names, and says at once whether the answers give the seal', () => {
+  const render = (extra: Partial<typeof profile.EMPTY_TENDER_PROFILE>) => renderToStaticMarkup(React.createElement(TenderProfileFields,
+    { form: formFromProfile({ ...profile.EMPTY_TENDER_PROFILE, ...extra }), sources: {}, onChange: () => {} }));
+  const blank = render({});
+  assert.match(text(blank), /Solo contamos: no hace falta escribir nombres\./);
+  assert.match(blank, /<label for="tp-legalReps">Representantes legales<\/label>/);
+  assert.match(blank, /<label for="tp-legalRepsWomen">De ellos, mujeres<\/label>/);
+  assert.match(blank, /<legend[^>]*>¿La gerencia general la ejerce una mujer\?<\/legend>/);
+  assert.match(blank, /<label for="tp-ownership">Propiedad de la empresa en manos de mujeres<\/label>/);
+  assert.match(blank, /<option value="entre_25_50">Más del 25 % y hasta el 50 %<\/option>/);
+  assert.match(blank, /role="status"[^>]*>Responde lo que sepas y te decimos si cumples el sello\./);
+  const yes = render({ legalReps: 3, legalRepsWomen: 2 });
+  assert.match(yes, /<input id="tp-legalReps"[^>]*value="3"/);
+  assert.match(yes, /bg-cw-success-soft[^>]*>Cumples el Sello Empresa Mujer: 2 de 3 representantes legales son mujeres\./);
+  assert.match(render({ womenOwnership: 'entre_25_50' }), /Puedes pedir el Sello Empresa Mujer: .*Centro de Ayuda de ChileCompra/);
+  assert.match(render({ legalReps: 3, legalRepsWomen: 0, womanGeneralManager: 'no', womenOwnership: 'menos_25' }), /Con estas respuestas no cumples las condiciones del sello\./);
+  // What is typed becomes the counts that are saved.
+  const saved = profileFromForm({ ...formFromProfile(profile.EMPTY_TENDER_PROFILE), legalReps: '3', legalRepsWomen: '2' });
+  assert.deepEqual([saved.legalReps, saved.legalRepsWomen, saved.womanGeneralManager, saved.womenOwnership], [3, 2, null, null]);
 });
 
 test('the sheet opens loading its answers', () => {

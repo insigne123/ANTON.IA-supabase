@@ -8,10 +8,25 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { FIT_LABELS, fitSummary, type RequirementFit, type ReportFit } from '@/lib/commercial-opportunities/requirement-fit';
+import type { SealNote } from '@/lib/commercial-opportunities/gender-criterion';
+import type { FemaleLedSeal } from '@/lib/commercial-opportunities/tender-profile';
 
-export type OpportunityFitView = { available: boolean; latest: ReportFit | null; profileRevision: number | null };
+/** `seal` is what the profile says about the «Sello Empresa Mujer»: null before the profile exists. */
+export type OpportunityFitView = { available: boolean; latest: ReportFit | null; profileRevision: number | null; seal?: FemaleLedSeal | null };
 const TONE: Record<RequirementFit['fit'], string> = { meets: 'text-cw-success', missing: 'text-cw-warning', fails: 'text-destructive', na: 'text-muted-foreground' };
 const ICON = { meets: Check, missing: CircleHelp, fails: X, na: null } as const;
+
+const SEAL_TONE = { good: 'bg-cw-success-soft', ask: 'bg-cw-warning-soft', neutral: 'bg-muted/40' } as const;
+/** Only when the bases value a company led by women (gender-criterion.ts): whether this company adds those points. */
+export function SealCard({ note }: { note: SealNote | null }) {
+  if (!note) return null;
+  return (
+    <div className={cn('mt-6 rounded-2xl px-4 py-3', SEAL_TONE[note.tone])}>
+      <p className="text-sm font-medium text-foreground">{note.title}</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{note.body}</p>
+    </div>
+  );
+}
 
 export function FitBadge({ fit }: { fit: RequirementFit }) {
   const Icon = ICON[fit.fit];

@@ -12,7 +12,7 @@ import type { OpportunityReport } from '@/lib/commercial-opportunities/expedient
 import { parseReportDate, reportItemKey, reportProgress, type ReportMark, type ReportMarks } from '@/lib/commercial-opportunities/report-marks';
 import { humanDate, reportKeyDates } from '@/lib/commercial-opportunities/report-view';
 import { matchAnnex, type OfferAnnex } from '@/lib/commercial-opportunities/offer-annexes';
-import { AFTER_SUBMIT_DEFAULTS, KIT_SOURCE_LABELS, clampSubmissionKit, PORTAL_STEPS, VAT_PERCENT, kitChecklist, offerNumbers, parseAmount, type SubmissionKit as Kit } from '@/lib/commercial-opportunities/submission-kit';
+import { AFTER_SUBMIT_DEFAULTS, KIT_SOURCE_LABELS, clampSubmissionKit, VAT_PERCENT, submissionRoute, kitChecklist, offerNumbers, parseAmount, type SubmissionKit as Kit } from '@/lib/commercial-opportunities/submission-kit';
 import { MarkedItem, useReportMarks, type MarkChange } from './ReportMarks';
 
 const money = (n: number, currency = 'CLP') => currency === 'CLP' || !currency
@@ -46,7 +46,8 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
   const checklist = useMemo(() => kit ? kitChecklist(kit) : (report?.requirements || []).map(r => ({ key: reportItemKey('requirement', r.title), label: r.title, folder: '', critical: r.status === 'blocked' })), [kit, report]);
   const progress = reportProgress(checklist, marks);
   const dates = report ? reportKeyDates(report, opportunity.deadline) : { questions: null, closes: humanDate(opportunity.deadline, true) };
-  const after = kit?.afterSubmit.length ? kit.afterSubmit : AFTER_SUBMIT_DEFAULTS;
+  const route = submissionRoute(opportunity.kind, kit?.channel);
+  const after = kit?.afterSubmit.length ? kit.afterSubmit : route.after;
   const sectionTitle = (id: string, icon: ReactNode, title: string, count?: number) => <SectionTitle id={id} icon={icon} title={title} count={count} />;
 
   return (
@@ -182,9 +183,9 @@ export function SubmissionKit({ report, opportunity, marks: initialMarks, onMark
 
       {kit && kit.inconsistencies.length > 0 && <ForumQuestions items={kit.inconsistencies} until={dates.questions} />}
 
-      <Panel id="portal" icon={<ListOrdered />} title={kit?.channel === 'email' ? 'Cómo se envía (en general)' : 'Cómo se envía en Mercado Público'}>
+      <Panel id="portal" icon={<ListOrdered />} title={route.title}>
         <ol className="space-y-4">
-          {PORTAL_STEPS.map((step, index) => (
+          {route.steps.map((step, index) => (
             <li key={step.title} className="flex gap-3">
               <span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums">{index + 1}</span>
               <div className="min-w-0"><p className="text-sm font-medium leading-6">{step.title}</p><p className="text-sm leading-6 text-muted-foreground">{step.detail}</p></div>

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { claudeRequest } from '@/ai/anthropic-json';
 import { reportSchema } from './expedient';
-import { BUYER_QUESTION_RULE, SIGNAL_QUESTION_RULE, opportunityReportPrompt, opportunitySynthesisSources, readOpportunityReportEnvelope, reportEnvelopeSchema } from './report-generation';
+import { BUYER_QUESTION_RULE, PRIVATE_PROCESS_RULE, SIGNAL_QUESTION_RULE, opportunityReportPrompt, opportunitySynthesisSources, readOpportunityReportEnvelope, reportEnvelopeSchema } from './report-generation';
 
 const report = () => ({
   title: 'Oportunidad de prueba', executive: 'Empresa por acreditar; bases parciales.', recommendation: 'insufficient', reasons: ['Faltan bases'],
@@ -87,4 +87,21 @@ test('the report asks for every question the person needs to ask, in a complete 
   assert.ok(!tender.includes(SIGNAL_QUESTION_RULE));
   const signal = opportunityReportPrompt('2026-10-13', {}, 'hiring');
   assert.ok(signal.includes(SIGNAL_QUESTION_RULE) && !signal.includes(BUYER_QUESTION_RULE));
+});
+
+test('a private process is written up as one: its schedule, platform, forms and framework contract, and no public-procurement rules', () => {
+  const prompt = opportunityReportPrompt('2026-10-22', {}, 'private');
+  assert.ok(prompt.includes(PRIVATE_PROCESS_RULE));
+  assert.match(prompt, /no apliques Mercado Público, la Ley 19\.886 ni el Registro de Proveedores/);
+  assert.match(prompt, /Cronograma y cómo se presenta \(plataforma, formularios y cotización\)/);
+  assert.match(prompt, /Condiciones del contrato: garantías, seguros, pagos, reajuste y multas/);
+  assert.match(prompt, /el contrato marco y sus condiciones suelen no serlo/);
+  assert.match(prompt, /sin inventar cifras/);
+  // A public tender keeps its own outline and does not get the private rules; a signal is untouched.
+  for (const kind of ['tender', 'compra_agil', undefined]) {
+    const other = opportunityReportPrompt('2026-10-22', {}, kind);
+    assert.ok(!other.includes(PRIVATE_PROCESS_RULE));
+    assert.match(other, /Condiciones del contrato: garantías, pagos y multas/);
+  }
+  assert.ok(!opportunityReportPrompt('2026-10-22', {}, 'hiring').includes(PRIVATE_PROCESS_RULE));
 });

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { reportSchema, REPORT_OUTLINE, SIGNAL_OUTLINE, isSignalKind, type DocumentChunk } from './expedient';
+import { reportSchema, REPORT_OUTLINE, PRIVATE_OUTLINE, SIGNAL_OUTLINE, isPrivateKind, isSignalKind, type DocumentChunk } from './expedient';
 
 // The provider compiles only this small envelope. The complete report contract still validates locally.
 export const reportEnvelopeSchema = z.object({ json: z.string() });
@@ -48,15 +48,27 @@ export const BUYER_QUESTION_RULE = 'questions (consultas al comprador): haz TODA
   + 'Una licitación completa suele pedir entre 6 y 15 consultas; si las bases son claras, menos, pero nunca dejes sin preguntar una contradicción ni lo que puede dejar la oferta fuera.';
 export const SIGNAL_QUESTION_RULE = 'questions (para la primera conversación): todas las que necesitas para calificar a la empresa y personalizar la propuesta, cada una completa y abierta: qué necesita contratar y para cuándo, cuántas personas o servicios, quién decide y cómo compran, qué usan hoy y qué les falló, el presupuesto y los plazos, y qué tendría que pasar para avanzar. Entre 5 y 10, en el orden en que se conversan.';
 
+/**
+ * A private process (an invitation through the buyer's platform, a request for proposals) is not a public purchase: no Mercado Público, no
+ * public-procurement law, no supplier registry. It has its own schedule, platform, forms and framework contract, which are not negotiable.
+ */
+export const PRIVATE_PROCESS_RULE = 'Este es un proceso privado por invitación, no una compra pública: no apliques Mercado Público, la Ley 19.886 ni el Registro de Proveedores, salvo que los documentos los pidan. '
+  + 'Incluye el cronograma del proceso (confirmación de participación, consultas, respuestas, entrega de ofertas, negociación, adjudicación e inicio del servicio) con sus fechas, la plataforma por la que se presenta y qué hay que ingresar en ella, '
+  + 'los formularios y anexos que se completan (con su código) y la cotización o propuesta económica en el formato pedido (cambiar el formato o dejar una partida vacía puede descalificar). '
+  + 'Distingue lo negociable de lo que no: el contrato marco y sus condiciones suelen no serlo. Resume garantías (tipo, monto o porcentaje, moneda, vigencia), seguros, reajuste, vigencia de la propuesta, multas y niveles de servicio. '
+  + 'Si piden un precio por hora o una estructura de sueldos, dilo en «Propuesta económica, precio y números» sin inventar cifras.';
+
 export function opportunityReportPrompt(cutoff: string, evidence: unknown, kind?: string | null) {
   const signal = isSignalKind(kind);
+  const priv = isPrivateKind(kind);
   return [
     signal
       ? `Genera una ficha comercial accionable en español para la empresa del workspace a partir de una señal de LinkedIn (avisos de trabajo o una publicación). No es una licitación: no hay bases, garantías, multas ni postulación. Fecha de corte ${cutoff}.`
       : `Genera un expediente MUY completo, proactivo y accionable en español para la empresa del workspace. No lo reduzcas a resumen. Fecha de corte ${cutoff}.`,
     signal
       ? `Incluye estas secciones: ${SIGNAL_OUTLINE.join('; ')}. En «A quién contactar» propone cargos concretos de decisores para esta oferta. En «Cómo abordarlos» escribe un primer mensaje breve (máximo 90 palabras) que mencione la señal concreta. requirements son las cosas a validar con la empresa (status unknown salvo evidencia), tasks los pasos comerciales, milestones y scenarios van vacíos salvo fechas o cifras documentadas, questions son preguntas de descubrimiento para la primera conversación.`
-      : `Incluye estas secciones adaptadas al tipo de oportunidad: ${REPORT_OUTLINE.join('; ')}. Cada hallazgo importante debe decir consecuencia, acción, responsable sugerido, plazo y evidencia esperada. questions son consultas listas para enviar al comprador dentro del plazo de consultas.`,
+      : `Incluye estas secciones adaptadas al tipo de oportunidad: ${(priv ? PRIVATE_OUTLINE : REPORT_OUTLINE).join('; ')}. Cada hallazgo importante debe decir consecuencia, acción, responsable sugerido, plazo y evidencia esperada. questions son consultas listas para enviar al comprador dentro del plazo de consultas.`,
+    ...(priv ? [PRIVATE_PROCESS_RULE] : []),
     signal ? SIGNAL_QUESTION_RULE : BUYER_QUESTION_RULE,
     ...REPORT_WRITING_RULES,
     'specialists trae las notas del equipo que revisó antes que tú (requisitos, puntaje, contrato y estrategia, o empresa, contacto y validación): úsalas para no omitir nada y para priorizar, pero afirma solo lo que respaldan los hechos y fragmentos, con sus citas.',
