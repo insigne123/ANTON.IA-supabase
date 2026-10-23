@@ -109,10 +109,10 @@ test('saving puts the contact in «Por escribir» with its email, once, and the 
   const scope = { organizationId: ORG, userId: 'u-ana' };
   const drop = tables.lead_drops[0];
   assert.equal(drop.items.length, 1, 'one contact a day');
-  await assert.rejects(saveDropLeads(client, { organizationId: ORG, userId: 'u-leo' }, drop.id), { status: 404 }, 'never another person\'s drop');
+  await assert.rejects(saveDropLeads(client, { organizationId: ORG, userId: 'u-leo' }, drop.id, undefined, { now: TUESDAY }), { status: 404 }, 'never another person\'s drop');
   const { name, company, why } = drop.items[0];
   assert.deepEqual(await latestDrop(client, scope, TUESDAY), { id: drop.id, dropDate: '2026-10-20', total: 1, left: 1, next: { name, company, why } });
-  const saved = await saveDropLeads(client, scope, drop.id, [drop.items[0].leadId]);
+  const saved = await saveDropLeads(client, scope, drop.id, [drop.items[0].leadId], { now: TUESDAY });
   assert.equal(saved.saved.length, 1);
   const row = tables.enriched_leads.find(lead => lead.id === saved.saved[0].savedLeadId);
   assert.ok(row.email && row.email.endsWith('.cl'));
@@ -121,7 +121,7 @@ test('saving puts the contact in «Por escribir» with its email, once, and the 
   assert.equal(row.data.leadDrop.draft.subject, 'Ingresos en temporada alta');
   assert.equal(tables.lead_search_vault.length, 0);
   assert.equal(await latestDrop(client, scope, TUESDAY), null, 'nothing left to save');
-  assert.equal((await saveDropLeads(client, scope, drop.id)).saved.length, 0, 'saving again saves nobody twice');
+  assert.equal((await saveDropLeads(client, scope, drop.id, undefined, { now: TUESDAY })).saved.length, 0, 'saving again saves nobody twice');
 });
 
 test('the morning alert carries the ready contact of the day, with its PDF, and marks it sent', async () => {
