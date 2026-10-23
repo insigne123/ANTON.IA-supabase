@@ -7,7 +7,7 @@
 // «mentions the company») and the draft context filters, and what the email says once it does.
 //
 // ANTHROPIC_API_KEY=... node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts \
-//   [--targets=Enaex,Besalco] [--modes=sin,con,pro] [--out=dir] [--concurrency=3] [--reuse=dir [--reuse-docs]]
+//   [--targets=Enaex,Besalco] [--modes=sin,con,pro] [--out=dir] [--concurrency=3] [--reuse=dir [--reuse-docs]] [--candidates=3 --selector=claude-haiku-5-5]
 // Modes: sin = only the company's own site, con = plus the researcher that picks pages, pro = con plus the Claude that picks the signals out of
 // the facts (RESEARCH_SIGNAL_HARVEST_ENABLED). `pro` reads the research of `con` (from --reuse, or it runs it) so both see the same pages.
 // Needs OPENAI_API_KEY (Luna: research, report and email) and ANTHROPIC_API_KEY (the researcher and the judge). Without SERPER_API_KEY the
@@ -64,6 +64,10 @@ const reuseDocs = process.argv.includes('--reuse-docs');
 const inject = process.argv.includes('--inject');
 // --instruction="…": a private writing instruction for the writer (the one a person can give to a draft), to try a guidance on the same documents.
 const instruction = arg('instruction') || undefined;
+// --candidates=N (1 a 6): N correos por caso, cada uno con otro tipo de apertura. Con --selector=<modelo> un juez barato puntúa los N y se queda con uno,
+// y el juez de referencia (Opus) puntúa todos: mide qué hace elegir entre candidatos (la línea base es el primero, que es lo que escribe la app hoy).
+const candidates = Math.min(6, Math.max(1, Number(arg('candidates') || 1)));
+const selector = arg('selector')?.trim() || '';
 const outDir = resolve(arg('out') || join('.eval-research-drafts', new Date().toISOString().replace(/[:.]/g, '-')));
 mkdirSync(join(outDir, 'research'), { recursive: true });
 mkdirSync(join(outDir, 'documents'), { recursive: true });
@@ -173,8 +177,11 @@ async function runOne(target: typeof TARGETS[number], index: number, mode: Mode)
         claudeWeb: name === 'con' ? researcher : null,
         signalHarvest: null,
       });
-    let projection: any = await researchOf(mode === 'pro' ? 'con' : mode);
-    if (mode === 'pro') {
+    const documentFile = (dir: string) => join(dir, 'documents', `${slug}-${mode}.json`);
+    // With the report document of an earlier run the research is not needed: only the stages after the report change (--inject still needs the live harvest).
+    const reusedDocument: any = reuseDir && reuseDocs && !inject && existsSync(documentFile(reuseDir)) ? JSON.parse(readFileSync(documentFile(reuseDir), 'utf8')) : null;
+    let projection: any = reusedDocument ? null : await researchOf(mode === 'pro' ? 'con' : mode);
+    if (projection && mode === 'pro') {
       const settings = signalHarvestSettings({ ...process.env, RESEARCH_SIGNAL_HARVEST_ENABLED: 'true' });
       if (!settings) throw new Error('The signal harvest needs ANTHROPIC_API_KEY');
       const harvest = await harvestResearchSignals({
@@ -196,28 +203,27 @@ async function runOne(target: typeof TARGETS[number], index: number, mode: Mode)
       row.harvest = { candidates: harvest.candidates, picked: harvest.picked, accepted: harvest.drafts.length, rejected: harvest.rejected, usage: harvest.usage, items,
         signals: items.map(item => `${item.date} · ${item.statement}`) };
     }
-    writeFileSync(file(outDir, mode), JSON.stringify(projection, null, 1));
-    const recentFacts = projection.facts.filter((fact: any) => {
-      const source = projection.sources.find((item: any) => item.id === fact.sourceId);
-      const date = fact.observedAt || source?.publishedAt;
-      return date && NOW - Date.parse(date) <= 180 * DAY && Date.parse(date) <= NOW + DAY;
-    });
-    Object.assign(row, {
-      stage: 'report', seconds: Math.round((Date.now() - started) / 1000), pages: projection.researchMetrics?.pages, claudeWeb: projection.researchMetrics?.claudeWeb ?? null,
-      facts: projection.facts.length, recentFacts: recentFacts.length, claims: projection.claims.length,
-      signalClaims: projection.claims.filter((claim: any) => claim.type === 'fact' && claim.dimension === 'signal' && claim.observedAt).length,
-    });
+    if (projection) {
+      writeFileSync(file(outDir, mode), JSON.stringify(projection, null, 1));
+      const recentFacts = projection.facts.filter((fact: any) => {
+        const source = projection.sources.find((item: any) => item.id === fact.sourceId);
+        const date = fact.observedAt || source?.publishedAt;
+        return date && NOW - Date.parse(date) <= 180 * DAY && Date.parse(date) <= NOW + DAY;
+      });
+      Object.assign(row, {
+        stage: 'report', seconds: Math.round((Date.now() - started) / 1000), pages: projection.researchMetrics?.pages, claudeWeb: projection.researchMetrics?.claudeWeb ?? null,
+        facts: projection.facts.length, recentFacts: recentFacts.length, claims: projection.claims.length,
+        signalClaims: projection.claims.filter((claim: any) => claim.type === 'fact' && claim.dimension === 'signal' && claim.observedAt).length,
+      });
 
-    // As production, between the research and the synthesis.
-    projection.qualification = qualifyEntityV2({ entity: projection.entity, rules: null, productKeys: SELLER_PROFILE.products.map((product: any) => product.key), headcount: null });
-    projection.committee = buildReportV2Committee({ entity: projection.entity, qualification: projection.qualification, claims: projection.claims });
-    const documentFile = (dir: string) => join(dir, 'documents', `${slug}-${mode}.json`);
-    const document: any = reuseDir && reuseDocs && existsSync(documentFile(reuseDir))
-      ? JSON.parse(readFileSync(documentFile(reuseDir), 'utf8'))
-      : (await synthesizeReportV2({
-        researchSnapshotId: DRAFT_FIXTURE_IDS.snapshot, scope: { organizationId: DRAFT_FIXTURE_IDS.organization, ownerUserId: DRAFT_FIXTURE_IDS.user },
-        language: 'es', ...projection, sellerProfile: SELLER_PROFILE, companyContext: target.about, generatedAt, revision: 1, synthesisContextHash: 'eval', depth: 'standard',
-      })).document;
+      // As production, between the research and the synthesis.
+      projection.qualification = qualifyEntityV2({ entity: projection.entity, rules: null, productKeys: SELLER_PROFILE.products.map((product: any) => product.key), headcount: null });
+      projection.committee = buildReportV2Committee({ entity: projection.entity, qualification: projection.qualification, claims: projection.claims });
+    }
+    const document: any = reusedDocument ?? (await synthesizeReportV2({
+      researchSnapshotId: DRAFT_FIXTURE_IDS.snapshot, scope: { organizationId: DRAFT_FIXTURE_IDS.organization, ownerUserId: DRAFT_FIXTURE_IDS.user },
+      language: 'es', ...projection, sellerProfile: SELLER_PROFILE, companyContext: target.about, generatedAt, revision: 1, synthesisContextHash: 'eval', depth: 'standard',
+    })).document;
     writeFileSync(documentFile(outDir), JSON.stringify(document, null, 1));
     const angle = document.sections.find((section: any) => section.key === 'angle');
     Object.assign(row, {
@@ -235,9 +241,11 @@ async function runOne(target: typeof TARGETS[number], index: number, mode: Mode)
     Object.assign(row, { stage: 'email', evidence, evidenceCount: evidence.length, fromReport: evidence.filter((item: any) => item.de_informe).length });
 
     context.recipient.displayName = null;
-    const openingKind = OUTREACH_OPENING_KINDS[index % OUTREACH_OPENING_KINDS.length];
-    const email = await writeEmail(context, openingKind, instruction);
-    Object.assign(row, { stage: 'done', seconds: Math.round((Date.now() - started) / 1000), openingKind, email, words: wordCount(email.body) });
+    const kinds = Array.from({ length: candidates }, (_, at) => OUTREACH_OPENING_KINDS[(index + at) % OUTREACH_OPENING_KINDS.length]);
+    const written = await Promise.all(kinds.map(kind => writeEmail(context, kind, instruction)));
+    const email = written[0]!;
+    Object.assign(row, { stage: 'done', seconds: Math.round((Date.now() - started) / 1000), openingKind: kinds[0], email, words: wordCount(email.body),
+      candidates: written.map((item, at) => ({ openingKind: kinds[at], email: item, words: wordCount(item.body) })) });
     return row;
   } catch (error) {
     return { ...row, error: String(error instanceof Error ? error.message : error).slice(0, 400) };
@@ -254,35 +262,65 @@ await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, asy
     const { target, index, mode } = jobs[at]!;
     const row = await runOne(target, index, mode);
     rows[at] = row;
-    console.log(`${target.companyName.padEnd(14)} ${mode}: ${row.error ? `FALLÓ en ${row.stage}: ${row.error}` : row.blocked ? `bloqueado: ${row.blocked}` : `${row.pages} páginas, ${row.facts} hechos (${row.recentFacts} recientes), ${row.signalClaims} señales${row.harvest ? ` (${row.harvest.accepted} de ${row.harvest.picked} propuestas por Claude)` : ''}, informe ${row.reportStatus}/${row.audit}, ${row.angleClaims} afirmaciones del ángulo, ${row.evidenceCount} evidencias en el borrador (${row.fromReport} del informe), ${row.words} palabras, ${row.seconds}s`}`);
+    console.log(`${target.companyName.padEnd(14)} ${mode}: ${row.error ? `FALLÓ en ${row.stage}: ${row.error}` : row.blocked ? `bloqueado: ${row.blocked}` : `${row.pages === undefined ? 'informe reutilizado' : `${row.pages} páginas, ${row.facts} hechos (${row.recentFacts} recientes), ${row.signalClaims} señales${row.harvest ? ` (${row.harvest.accepted} de ${row.harvest.picked} propuestas por Claude)` : ''}`}, informe ${row.reportStatus}/${row.audit}, ${row.angleClaims} afirmaciones del ángulo, ${row.evidenceCount} evidencias en el borrador (${row.fromReport} del informe), ${row.words} palabras, ${row.seconds}s`}`);
   }
 }));
 
 // Phase 2: the judge, with the evidence the writer saw. Set here so the writer above never ran with it.
 process.env.OPENAI_EMAIL_MODEL = judgeModel;
 if (isClaudeModel(judgeModel) ? !process.env.ANTHROPIC_API_KEY : !process.env.OPENAI_API_KEY) throw new Error('The judge key is missing');
-for (const row of rows) {
-  if (!row?.email) continue;
-  const target = targets.find(item => item.companyName === row.company)!;
-  try {
-    const datos = {
-      tipo: 'frio', tratamiento: 'tu',
-      destinatario: { nombre: null, cargo: RECIPIENT_ROLE, empresa: target.companyName, dominio: target.domain },
-      actividadEmpresa: target.about,
-      // Everything the writer was given as evidence besides the overview: what the research found.
-      hechos_de_la_investigacion: row.evidence.filter((item: any) => item.hecho !== target.about).map((item: any) => `${item.hecho} [${item.fuente}]`),
-      hechos_permitidos: [
-        `Vendedor: ${SELLER.name}, ${SELLER.jobTitle} de ${SELLER.companyName}`, SELLER.description,
-        ...SELLER.services.map((service: string) => `${SELLER.companyName} ofrece: ${service}`), SELLER.valueProposition, ...(SELLER.proofPoints || []),
-      ].filter(Boolean),
-      cta_aprobado: row.email.cta,
-    };
-    const score = await judgeOutreach({ datos, asunto: row.email.subject, cuerpo: row.email.body });
-    row.judge = { ...score, veredicto: judgeVerdict(score) };
-    console.log(`${row.company.padEnd(14)} ${row.mode}: H${score.suena_humano} E${score.especificidad} P${score.un_solo_pedido} T${score.tono_y_tratamiento} V${score.veracidad} => ${row.judge.veredicto}`);
-  } catch (error) {
-    row.judgeError = String(error instanceof Error ? error.message : error).slice(0, 300);
+if (selector && (isClaudeModel(selector) ? !process.env.ANTHROPIC_API_KEY : !process.env.OPENAI_API_KEY)) throw new Error('The selector key is missing');
+const judgeJobs = rows.flatMap(row => row?.email ? (row.candidates as any[]).map((item, at) => ({ row, item, at })) : []);
+let nextJudge = 0;
+await Promise.all(Array.from({ length: Math.min(4, judgeJobs.length) }, async () => {
+  while (nextJudge < judgeJobs.length) {
+    const { row, item, at } = judgeJobs[nextJudge++]!;
+    const target = targets.find(entry => entry.companyName === row.company)!;
+    try {
+      const datos = {
+        tipo: 'frio', tratamiento: 'tu',
+        destinatario: { nombre: null, cargo: RECIPIENT_ROLE, empresa: target.companyName, dominio: target.domain },
+        actividadEmpresa: target.about,
+        // Everything the writer was given as evidence besides the overview: what the research found.
+        hechos_de_la_investigacion: row.evidence.filter((entry: any) => entry.hecho !== target.about).map((entry: any) => `${entry.hecho} [${entry.fuente}]`),
+        hechos_permitidos: [
+          `Vendedor: ${SELLER.name}, ${SELLER.jobTitle} de ${SELLER.companyName}`, SELLER.description,
+          ...SELLER.services.map((service: string) => `${SELLER.companyName} ofrece: ${service}`), SELLER.valueProposition, ...(SELLER.proofPoints || []),
+        ].filter(Boolean),
+        cta_aprobado: item.email.cta,
+      };
+      const score = await judgeOutreach({ datos, asunto: item.email.subject, cuerpo: item.email.body, model: judgeModel });
+      item.judge = { ...score, veredicto: judgeVerdict(score) };
+      if (selector) {
+        const quick = await judgeOutreach({ datos, asunto: item.email.subject, cuerpo: item.email.body, model: selector });
+        item.quick = { ...quick, veredicto: judgeVerdict(quick) };
+      }
+      if (at === 0) {
+        row.judge = item.judge;
+        console.log(`${row.company.padEnd(14)} ${row.mode}: H${score.suena_humano} E${score.especificidad} P${score.un_solo_pedido} T${score.tono_y_tratamiento} V${score.veracidad} => ${item.judge.veredicto}`);
+      }
+    } catch (error) {
+      item.judgeError = String(error instanceof Error ? error.message : error).slice(0, 300);
+      if (at === 0) row.judgeError = item.judgeError;
+    }
   }
+}));
+
+// What choosing among the candidates does. A judge's score for choosing is style first (human + specific), and a fact without support disqualifies.
+type Judged = { suena_humano: number; especificidad: number; un_solo_pedido: number; tono_y_tratamiento: number; veracidad: number; hechos_sin_respaldo: string[] };
+const choosingScore = (judge: Judged | undefined) => judge
+  ? judge.suena_humano + judge.especificidad + 0.1 * (judge.un_solo_pedido + judge.tono_y_tratamiento) - (judge.veracidad < 5 || judge.hechos_sin_respaldo.length ? 10 : 0)
+  : -99;
+const bestOf = (items: any[], pick: (item: any) => number) => items.reduce((best: number, item: any, at: number) => {
+  if (!item.email.valid && items[best].email.valid) return best;
+  if (item.email.valid && !items[best].email.valid) return at;
+  const gap = pick(item) - pick(items[best]);
+  return gap > 0 || (gap === 0 && item.words < items[best].words) ? at : best;
+}, 0);
+if (candidates > 1) for (const row of rows) {
+  if (!row?.email || (row.candidates as any[]).some(item => !item.judge)) continue;
+  if (selector) row.selected = bestOf(row.candidates, item => choosingScore(item.quick));
+  row.oracle = bestOf(row.candidates, item => choosingScore(item.judge));
 }
 
 writeFileSync(join(outDir, 'results.json'), JSON.stringify({ generatedAt: new Date().toISOString(), searchEngine: process.env.SERPER_API_KEY ? 'serper' : 'none', writerModel, judgeModel, rows }, null, 2));
@@ -294,6 +332,14 @@ for (const row of rows) {
   md += `Informe ${row.reportStatus}/${row.audit} ${row.auditIssues.join(', ')} · ${row.angleClaims} afirmaciones del ángulo · evidencias del borrador: ${row.evidenceCount} (${row.fromReport} del informe)\n\n`;
   if (row.harvest) md += `Señales de Claude (${row.harvest.accepted} de ${row.harvest.picked}${row.harvest.rejected.length ? `; rechazadas: ${row.harvest.rejected.join(', ')}` : ''}):\n${row.harvest.signals.map((signal: string) => `- ${signal}`).join('\n')}\n\n`;
   for (const item of row.evidence) md += `- ${item.de_informe ? '(informe) ' : ''}${item.hecho.slice(0, 220)} [${item.fuente}]\n`;
+  if (candidates > 1) {
+    (row.candidates as any[]).forEach((item, at) => {
+      const mark = [at === 0 ? 'primero' : '', at === row.selected ? 'elegido' : '', at === row.oracle ? 'mejor según Opus' : ''].filter(Boolean).join(', ');
+      md += `\n**Candidato ${at + 1} (${item.openingKind}${mark ? `; ${mark}` : ''}${item.email.valid ? '' : '; inválido'})** Asunto: ${item.email.subject}\n\n${item.email.body}\n\n`;
+      if (item.judge) md += `Opus: humano ${item.judge.suena_humano} · específico ${item.judge.especificidad} · veracidad ${item.judge.veracidad}${item.quick ? ` | ${selector}: humano ${item.quick.suena_humano} · específico ${item.quick.especificidad} · veracidad ${item.quick.veracidad}` : ''}\n\n`;
+    });
+    continue;
+  }
   md += `\n**Asunto:** ${row.email.subject}\n\n${row.email.body}\n\n`;
   if (row.judge) md += `Juez: humano ${row.judge.suena_humano} · específico ${row.judge.especificidad} · pedido ${row.judge.un_solo_pedido} · tono ${row.judge.tono_y_tratamiento} · veracidad ${row.judge.veracidad} → ${row.judge.veredicto}${row.judge.hechos_sin_respaldo.length ? ` · sin respaldo: ${row.judge.hechos_sin_respaldo.join(' | ')}` : ''}\n\n`;
 }
@@ -305,5 +351,32 @@ const average = (mode: string, pick: (row: Row) => number | null | undefined) =>
 };
 for (const mode of modes) {
   console.log(`\n${mode}: evidencias del informe ${average(mode, row => row.fromReport)}, afirmaciones del ángulo ${average(mode, row => row.angleClaims)}, humano ${average(mode, row => row.judge.suena_humano)}, específico ${average(mode, row => row.judge.especificidad)}, tono ${average(mode, row => row.judge.tono_y_tratamiento)}, veracidad ${average(mode, row => row.judge.veracidad)}, enviar ${rows.filter(row => row?.mode === mode && row.judge?.veredicto === 'enviar').length}/${rows.filter(row => row?.mode === mode && row.judge).length}`);
+}
+if (candidates > 1) {
+  const judged = rows.filter(row => row?.candidates && row.oracle !== undefined);
+  const mean = (values: number[]) => values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100 : null;
+  const summarize = (name: string, items: any[]) => console.log(`${name.padEnd(36)} humano ${mean(items.map(item => item.judge.suena_humano))} · específico ${mean(items.map(item => item.judge.especificidad))} · pedido ${mean(items.map(item => item.judge.un_solo_pedido))} · tono ${mean(items.map(item => item.judge.tono_y_tratamiento))} · veracidad ${mean(items.map(item => item.judge.veracidad))} · enviar ${items.filter(item => item.judge.veredicto === 'enviar').length}/${items.length} · válidos ${items.filter(item => item.email.valid).length}/${items.length}`);
+  console.log(`\nElegir entre ${candidates} candidatos (juez de referencia ${judgeModel}${selector ? `, elige ${selector}` : ''}), ${judged.length} casos:`);
+  summarize('primer candidato (lo de hoy)', judged.map(row => row.candidates[0]));
+  summarize('todos los candidatos (azar)', judged.flatMap(row => row.candidates));
+  if (selector) summarize(`elegido por ${selector}`, judged.map(row => row.candidates[row.selected]));
+  summarize('mejor según el juez de referencia', judged.map(row => row.candidates[row.oracle]));
+  if (selector) {
+    // Does the cheap judge rank like the reference inside each case? (scores centred per case, so only the differences between candidates count)
+    let sumX = 0, sumY = 0, sumXY = 0, hits = 0;
+    for (const row of judged) {
+      const quick = (row.candidates as any[]).map(item => choosingScore(item.quick));
+      const reference = (row.candidates as any[]).map(item => choosingScore(item.judge));
+      const centre = (values: number[]) => values.map(value => value - values.reduce((sum, entry) => sum + entry, 0) / values.length);
+      const x = centre(quick), y = centre(reference);
+      x.forEach((value, at) => { sumX += value * value; sumY += y[at]! * y[at]!; sumXY += value * y[at]!; });
+      if (reference[row.selected] === Math.max(...reference)) hits += 1;
+    }
+    console.log(`Acuerdo dentro de cada caso: correlación ${sumX && sumY ? Math.round((sumXY / Math.sqrt(sumX * sumY)) * 100) / 100 : 'n/a'}; el elegido es de los mejores según la referencia en ${hits} de ${judged.length}.`);
+  }
+  for (const kind of OUTREACH_OPENING_KINDS) {
+    const items = judged.flatMap(row => (row.candidates as any[]).filter(item => item.openingKind === kind));
+    if (items.length) summarize(`apertura «${kind}»`, items);
+  }
 }
 console.log(`\nResultados en ${outDir}`);

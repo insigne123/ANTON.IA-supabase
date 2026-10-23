@@ -1,0 +1,2423 @@
+import { createHash } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { isIP } from 'node:net';
+import { ResearchClaimV1Schema, ResearchSnapshotV1Schema, } from '@/lib/research-contracts';
+import { isGenericResearchText, isHardRejectedResearchUrl, isHardRejectedResearchText, isQualifiedResearchFactEvidence, isRelevantResearchSignal, isSameResearchCompanyDomain, mentionsResearchCompany, } from '@/lib/research-fact-eligibility';
+import { NativeResearchLeadSchema, NativeResearchOptionsSchema, NativeResearchStatusSchema, } from '@/lib/native-research-contracts';
+import { canonicalJson } from '@/lib/messaging-contracts';
+import { assessResearchQuality } from '@/lib/native-research-quality';
+import { enrichCompanyResearchSnapshotV1 } from '@/ai/flows/enrich-company-research';
+import { publicCompanyCoverageWarnings, PublicCompanyIdentitySchema } from '@/lib/public-company-research-contracts';
+import { publicCompanyToNative } from '@/lib/public-company-research-adapter';
+import { loadPublicCompany, sharedPublicCompanyEnabled } from './public-company-research';
+import { completeLeadResearchRequestClaim, consumeLeadResearchRequestQuota, deterministicLeadResearchSnapshotId, failLeadResearchRequestClaim, markLeadResearchRequestProviderSubmitting, parseLeadResearchRequestClaim, releaseLeadResearchRequestClaim, } from '@/lib/server/lead-research-jobs';
+import { COMPANY_RESEARCH_ARTIFACT_TTL_MS, COMPANY_RESEARCH_INSUFFICIENT_TTL_MS, buildCompanyResearchArtifactIdentity, claimCompanyResearchArtifact, completeCompanyResearchArtifact, releaseCompanyResearchArtifactClaim, } from '@/lib/server/company-research-artifacts';
+import { getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
+import { apolloCompanyResearchContext, loadApolloResearchContext, loadApolloPublicCompanyIdentity, mergeApolloResearchContextIntoLead, parseApolloResearchContext, } from '@/lib/server/apollo-research-context';
+import { collectPublicPersonEvidence } from '@/lib/server/native-person-research';
+import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+import { tryEnsureResearchReportDocument, researchReportDocumentMetadata, } from '@/lib/server/research-report-documents';
+import { RESEARCH_REPORT_V2_SCHEMA_VERSION, enqueueResearchReportSynthesis, publicResearchReportSynthesisState, } from '@/lib/server/research-report-synthesis-state';
+import { RESEARCH_REPORT_V2_RUNTIME_VERSION } from '@/lib/server/research-report-v2-documents';
+import { loadReportV2SellerConfiguration, loadSellerProfile } from '@/lib/server/seller-profile';
+import { processResearchReportSynthesisQueue } from '@/lib/server/research-report-worker';
+import { readResearchQueue } from '@/lib/server/research-queue-read';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { researchBrand, researchBrandMentions, researchSimilarweb, researchSerpCompanyNews, researchSerpCompanyProfile, researchSerpJobsSignals, researchWhois, } from '@/lib/server/suplia-research-tools';
+import { nativeResearchSearchContext } from '@/lib/server/native-research-search-context';
+const NATIVE_PROVIDER = 'native-research-v1';
+const ACTIVE_STATUSES = ['queued', 'running', 'in_progress', 'pending', 'processing'];
+const OFFICIAL_SITE_MAX_RESPONSE_BYTES = 180_000;
+const MAX_OFFICIAL_SITE_PAGES = 5;
+const MAX_DEEP_OFFICIAL_SITE_PAGES = 12;
+const MAX_OFFICIAL_PAGE_SEGMENTS = 6;
+const PERSONAL_EMAIL_DOMAINS = new Set([
+    'gmail.com', 'googlemail.com', 'hotmail.com', 'outlook.com', 'live.com', 'msn.com',
+    'yahoo.com', 'yahoo.es', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com',
+]);
+export function isNativeResearchEnabled() {
+    const configured = String(process.env.NATIVE_RESEARCH_ENABLED || '').trim();
+    return configured.toLowerCase() === 'true';
+}
+function assertNativeResearchEnabled() {
+    if (!isNativeResearchEnabled())
+        throw new Error('NATIVE_RESEARCH_DISABLED');
+}
+function readableOrganizationIds(access) {
+    return [...new Set([access.organizationId, ...(access.organizationIds || [])].map(text).filter(Boolean))];
+}
+function applyReadableOrganizationScope(query, access) {
+    const organizationIds = readableOrganizationIds(access);
+    return organizationIds.length === 1
+        ? query.eq('organization_id', organizationIds[0])
+        : query.in('organization_id', organizationIds);
+}
+function text(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+function object(value) {
+    return value && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : {};
+}
+function array(value) {
+    return Array.isArray(value) ? value : [];
+}
+function hash(value) {
+    return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex');
+}
+export function deriveNativeResearchLeadRef(lead) {
+    const candidate = text(lead.id || lead.email || lead.linkedinUrl || `${lead.fullName || 'lead'}:${lead.companyDomain || lead.companyName || 'company'}`);
+    if (!candidate)
+        throw new Error('NATIVE_RESEARCH_LEAD_REF_REQUIRED');
+    return candidate.length <= 500 ? candidate : `native:${hash({ leadRef: candidate }).slice(0, 48)}`;
+}
+function isTerminalNativeResearchStatus(value) {
+    return ['completed', 'partial', 'insufficient_data', 'failed', 'cancelled'].includes(text(value).toLowerCase());
+}
+function id(prefix, value) {
+    return `${prefix}:${hash(value).slice(0, 24)}`;
+}
+function normalizeDomain(value) {
+    const raw = text(value);
+    if (!raw)
+        return '';
+    try {
+        const parsed = new URL(raw.includes('://') ? raw : `https://${raw}`);
+        return parsed.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
+    }
+    catch {
+        return raw
+            .toLowerCase()
+            .replace(/^https?:\/\//, '')
+            .replace(/^www\./, '')
+            .split('/')[0]
+            .trim();
+    }
+}
+function companyResearchDomain(lead) {
+    const explicit = normalizeDomain(lead.companyDomain || lead.companyWebsite);
+    if (explicit)
+        return explicit;
+    const emailDomain = normalizeDomain(lead.email?.split('@')[1]);
+    return PERSONAL_EMAIL_DOMAINS.has(emailDomain) ? '' : emailDomain;
+}
+function isSafePublicDomain(domain) {
+    if (!domain || domain.length > 253 || domain.includes('..'))
+        return false;
+    if (isIP(domain) !== 0)
+        return false;
+    if (!/^[a-z0-9.-]+$/i.test(domain) || !domain.includes('.'))
+        return false;
+    if (domain === 'localhost'
+        || domain.endsWith('.local')
+        || domain.endsWith('.internal')
+        || domain === 'metadata.google.internal'
+        || /^127\./.test(domain)
+        || /^10\./.test(domain)
+        || /^192\.168\./.test(domain)
+        || /^169\.254\./.test(domain)
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(domain))
+        return false;
+    return true;
+}
+function ipv6Words(address) {
+    const normalized = address.toLowerCase().split('%')[0];
+    const sides = normalized.split('::');
+    if (sides.length > 2)
+        return null;
+    const left = sides[0] ? sides[0].split(':') : [];
+    const right = sides.length === 2 && sides[1] ? sides[1].split(':') : [];
+    const lastSide = right.length > 0 ? right : left;
+    const last = lastSide[lastSide.length - 1];
+    if (last && isIP(last) === 4) {
+        const octets = last.split('.').map(Number);
+        lastSide.splice(lastSide.length - 1, 1, ((octets[0] << 8) | octets[1]).toString(16), ((octets[2] << 8) | octets[3]).toString(16));
+    }
+    const explicitLength = left.length + right.length;
+    if ((sides.length === 1 && explicitLength !== 8) || explicitLength > 8)
+        return null;
+    const words = [
+        ...left,
+        ...Array(Math.max(0, 8 - explicitLength)).fill('0'),
+        ...right,
+    ];
+    if (words.length !== 8 || words.some((word) => !/^[0-9a-f]{1,4}$/.test(word)))
+        return null;
+    return words.map((word) => Number.parseInt(word, 16));
+}
+function isPrivateIpAddress(address) {
+    const normalized = address.toLowerCase().split('%')[0];
+    const version = isIP(normalized);
+    if (version === 4) {
+        const parts = normalized.split('.').map(Number);
+        const [first, second] = parts;
+        return first === 10
+            || first === 127
+            || (first === 172 && second >= 16 && second <= 31)
+            || (first === 192 && second === 168)
+            || (first === 169 && second === 254)
+            || (first === 100 && second >= 64 && second <= 127)
+            || (first === 192 && second === 0)
+            || (first === 198 && second >= 18 && second <= 19)
+            || (first === 198 && second === 51)
+            || (first === 203 && second === 0)
+            || first === 0
+            || first >= 224;
+    }
+    if (version !== 6)
+        return true;
+    const words = ipv6Words(normalized);
+    if (!words)
+        return true;
+    const ipv4Mapped = words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff;
+    const ipv4Compatible = words.slice(0, 6).every((word) => word === 0);
+    const nat64 = words[0] === 0x64 && words[1] === 0xff9b;
+    return ipv4Mapped
+        || ipv4Compatible
+        || nat64
+        || normalized === '::'
+        || normalized === '::1'
+        || (words[0] & 0xfe00) === 0xfc00
+        || (words[0] & 0xffc0) === 0xfe80
+        || (words[0] & 0xff00) === 0xff00
+        || (words[0] === 0x2001 && words[1] === 0x0db8);
+}
+async function resolvePublicAddress(domain) {
+    try {
+        const addresses = await lookup(domain, { all: true, verbatim: true });
+        if (addresses.length === 0 || addresses.some(({ address }) => isPrivateIpAddress(address)))
+            return null;
+        const selected = addresses[0];
+        const family = isIP(selected.address);
+        return family === 4 || family === 6
+            ? { address: selected.address, family }
+            : null;
+    }
+    catch {
+        return null;
+    }
+}
+function validHttpUrl(value) {
+    try {
+        const parsed = new URL(String(value || ''));
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : '';
+    }
+    catch {
+        return '';
+    }
+}
+const TRACKING_QUERY_PARAMETER = /^(?:utm_.+|gclid|dclid|fbclid|msclkid|mc_cid|mc_eid)$/i;
+function canonicalResearchSourceUrl(value) {
+    const displayUrl = validHttpUrl(value);
+    if (!displayUrl)
+        return '';
+    const url = new URL(displayUrl);
+    url.hash = '';
+    for (const key of [...url.searchParams.keys()]) {
+        if (TRACKING_QUERY_PARAMETER.test(key))
+            url.searchParams.delete(key);
+    }
+    url.searchParams.sort();
+    if (url.pathname !== '/')
+        url.pathname = url.pathname.replace(/\/+$/, '');
+    return url.toString();
+}
+function safeSourceUrl(value, fallbackDomain) {
+    const direct = validHttpUrl(value);
+    if (direct)
+        return direct;
+    return fallbackDomain ? `https://${fallbackDomain}` : '';
+}
+function isSafeOfficialSiteUrl(url) {
+    const domain = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+        && !url.username
+        && !url.password
+        && !url.port
+        && isSafePublicDomain(domain);
+}
+function headerValue(headers, name) {
+    const value = headers[name];
+    return Array.isArray(value) ? value[0] || null : value || null;
+}
+function boundedOfficialSiteChunk(chunk, bufferedBytes) {
+    const remaining = Math.max(0, OFFICIAL_SITE_MAX_RESPONSE_BYTES - bufferedBytes);
+    return remaining > 0 ? chunk.subarray(0, remaining) : null;
+}
+function pinnedOfficialSiteLookup(address) {
+    return (_hostname, options, callback) => {
+        if (options && typeof options === 'object' && options.all) {
+            callback(null, [{ address: address.address, family: address.family }]);
+            return;
+        }
+        callback(null, address.address, address.family);
+    };
+}
+function requestOfficialSite(url, address, signal) {
+    return new Promise((resolve, reject) => {
+        const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
+            method: 'GET',
+            headers: {
+                Accept: 'text/html,application/xhtml+xml',
+                'User-Agent': 'ANTON.IA Native Research/1.0',
+            },
+            lookup: pinnedOfficialSiteLookup(address),
+            signal,
+        }, (response) => {
+            const status = response.statusCode || 0;
+            const headers = response.headers;
+            const contentType = headerValue(headers, 'content-type') || '';
+            if ((status >= 300 && status < 400) || (!contentType.includes('html') && !contentType.includes('text/'))) {
+                response.resume();
+                resolve({ status, headers, body: '' });
+                return;
+            }
+            const chunks = [];
+            let totalBytes = 0;
+            let settled = false;
+            const complete = () => {
+                if (settled)
+                    return;
+                settled = true;
+                resolve({ status, headers, body: Buffer.concat(chunks).toString('utf8') });
+            };
+            const fail = (error) => {
+                if (settled)
+                    return;
+                settled = true;
+                reject(error);
+            };
+            response.on('data', (chunk) => {
+                const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                const accepted = boundedOfficialSiteChunk(buffer, totalBytes);
+                if (accepted) {
+                    chunks.push(accepted);
+                    totalBytes += accepted.length;
+                }
+                if (totalBytes >= OFFICIAL_SITE_MAX_RESPONSE_BYTES) {
+                    complete();
+                    response.destroy();
+                }
+            });
+            response.once('error', fail);
+            response.once('end', complete);
+        });
+        request.once('error', reject);
+        request.end();
+    });
+}
+function decodeHtmlText(value) {
+    const namedEntities = {
+        amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
+    };
+    const codePoint = (raw, radix) => {
+        const parsed = Number.parseInt(raw, radix);
+        return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff && !(parsed >= 0xd800 && parsed <= 0xdfff)
+            ? String.fromCodePoint(parsed)
+            : '';
+    };
+    return String(value || '')
+        .replace(/&#x([0-9a-f]+);/gi, (_match, code) => codePoint(code, 16))
+        .replace(/&#(\d+);/g, (_match, code) => codePoint(code, 10))
+        .replace(/&([a-z]+);/gi, (match, name) => namedEntities[String(name).toLowerCase()] ?? match);
+}
+function cleanOfficialText(value) {
+    const markupStripped = String(value || '')
+        .replace(/<!--[\s\S]*?(?:-->|$)/g, ' ')
+        .replace(/<!doctype\b[^>]*(?:>|$)/gi, ' ')
+        .replace(/<\s*(?:script|style|noscript)\b[\s\S]*?(?:<\/\s*(?:script|style|noscript)\s*>|$)/gi, ' ')
+        .replace(/<\s*\/?\s*[a-z][^>]*(?:>|$)/gi, ' ');
+    return text(decodeHtmlText(markupStripped));
+}
+function officialStatementKey(value) {
+    return text(value)
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+}
+function substantiveOfficialStatements(value, maxSegments = MAX_OFFICIAL_PAGE_SEGMENTS) {
+    const normalized = cleanOfficialText(value);
+    if (!normalized)
+        return [];
+    const sentences = normalized.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) || [normalized];
+    const statements = [];
+    let pending = '';
+    for (const sentence of sentences) {
+        const unit = text(sentence);
+        if (!unit)
+            continue;
+        const combined = text(`${pending} ${unit}`);
+        if (pending && combined.length > 560) {
+            statements.push(conciseSourceStatement(pending, 560));
+            pending = unit;
+        }
+        else {
+            pending = combined;
+        }
+        if (pending.length >= 60 && /[.!?]$/.test(unit)) {
+            statements.push(conciseSourceStatement(pending, 560));
+            pending = '';
+        }
+        if (statements.length >= maxSegments)
+            break;
+    }
+    if (statements.length < maxSegments && pending.length >= 60) {
+        statements.push(conciseSourceStatement(pending, 560));
+    }
+    const seen = new Set();
+    return statements.filter((statement) => {
+        const key = officialStatementKey(statement);
+        if (!key || seen.has(key) || isGenericResearchText(statement))
+            return false;
+        seen.add(key);
+        return true;
+    }).slice(0, maxSegments);
+}
+function officialSegmentsFromHtml(html) {
+    const cleaned = html
+        .replace(/<script\b[\s\S]*?(?:<\/script>|$)/gi, ' ')
+        .replace(/<style\b[\s\S]*?(?:<\/style>|$)/gi, ' ')
+        .replace(/<noscript\b[\s\S]*?(?:<\/noscript>|$)/gi, ' ')
+        .replace(/<(?:nav|footer|form|svg)\b[\s\S]*?(?:<\/(?:nav|footer|form|svg)>|$)/gi, ' ');
+    const segments = [];
+    const seen = new Set();
+    const blockPattern = /<(h[1-6]|p|li|dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+    let heading = '';
+    let blockIndex = 0;
+    let match;
+    while ((match = blockPattern.exec(cleaned)) && segments.length < MAX_OFFICIAL_PAGE_SEGMENTS) {
+        const tag = match[1].toLowerCase();
+        const blockText = cleanOfficialText(match[2]);
+        if (tag.startsWith('h')) {
+            heading = blockText.slice(0, 140);
+            continue;
+        }
+        blockIndex += 1;
+        for (const statement of substantiveOfficialStatements(blockText, MAX_OFFICIAL_PAGE_SEGMENTS - segments.length)) {
+            const key = officialStatementKey(statement);
+            if (!key || seen.has(key))
+                continue;
+            seen.add(key);
+            segments.push({
+                text: statement,
+                locator: `${heading || tag}#${blockIndex}`,
+            });
+        }
+    }
+    return segments;
+}
+function officialPageFromHtml(url, html) {
+    const title = cleanOfficialText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]) || null;
+    const description = cleanOfficialText(html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i)?.[1]
+        || html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i)?.[1]) || null;
+    const contentHtml = html
+        .replace(/<script\b[\s\S]*?(?:<\/script>|$)/gi, ' ')
+        .replace(/<style\b[\s\S]*?(?:<\/style>|$)/gi, ' ')
+        .replace(/<noscript\b[\s\S]*?(?:<\/noscript>|$)/gi, ' ')
+        .replace(/<(?:nav|footer|form|svg)\b[\s\S]*?(?:<\/(?:nav|footer|form|svg)>|$)/gi, ' ');
+    const readable = cleanOfficialText(contentHtml).slice(0, 4_000);
+    if (isHardRejectedResearchUrl(url.toString())
+        || isHardRejectedResearchText(title)
+        || isHardRejectedResearchText(description)
+        || isHardRejectedResearchText(readable)) {
+        return { url: url.toString(), title: null, description: null, text: '' };
+    }
+    const segments = officialSegmentsFromHtml(html);
+    return { url: url.toString(), title, description, text: readable, ...(segments.length > 0 ? { segments } : {}) };
+}
+function isHardRejectedOfficialPage(value) {
+    const page = object(value);
+    const segmentText = array(page.segments).map((segment) => text(object(segment).text));
+    return isHardRejectedResearchText([
+        isHardRejectedResearchUrl(page.url) ? 'challenge platform' : '',
+        page.title,
+        page.description,
+        page.text,
+        ...segmentText,
+    ].filter(Boolean).join(' '));
+}
+function usefulOfficialPageContents(page) {
+    if (isHardRejectedOfficialPage(page))
+        return [];
+    const contents = [];
+    const seen = new Set();
+    const add = (statement, locator) => {
+        const normalized = conciseSourceStatement(cleanOfficialText(statement), 560);
+        const key = officialStatementKey(normalized);
+        if (normalized.length < 60 || !key || seen.has(key) || isGenericResearchText(normalized))
+            return;
+        seen.add(key);
+        contents.push({ statement: normalized, locator });
+    };
+    const storedSegments = array(page.segments);
+    for (const segment of storedSegments) {
+        if (contents.length >= MAX_OFFICIAL_PAGE_SEGMENTS)
+            break;
+        add(object(segment).text, text(object(segment).locator) || `page_section#${contents.length + 1}`);
+    }
+    if (contents.length < MAX_OFFICIAL_PAGE_SEGMENTS)
+        add(page.description, 'meta_description');
+    if (storedSegments.length === 0) {
+        for (const statement of substantiveOfficialStatements(page.text)) {
+            if (contents.length >= MAX_OFFICIAL_PAGE_SEGMENTS)
+                break;
+            add(statement, contents.length === 0 ? 'page_text' : `page_text#${contents.length + 1}`);
+        }
+    }
+    return contents.slice(0, MAX_OFFICIAL_PAGE_SEGMENTS);
+}
+function usefulOfficialPageContent(page) {
+    return usefulOfficialPageContents(page)[0] || null;
+}
+function isUsefulOfficialPage(page) {
+    return usefulOfficialPageContents(page).length > 0;
+}
+function candidateOfficialPageUrls(html, baseUrl, domain, country, maxPages = MAX_OFFICIAL_SITE_PAGES) {
+    const countryKey = text(country).toLowerCase();
+    const candidates = new Map();
+    const countryPath = countryKey
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    if (countryPath) {
+        const countryUrl = new URL(`/${countryPath}/`, baseUrl);
+        if (countryUrl.toString() !== baseUrl.toString()
+            && isSafeOfficialSiteUrl(countryUrl)
+            && isSameResearchCompanyDomain(countryUrl.toString(), domain)) {
+            candidates.set(countryUrl.toString(), 12);
+        }
+    }
+    const anchorPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = anchorPattern.exec(html))) {
+        try {
+            const url = new URL(match[1], baseUrl);
+            if (!isSafeOfficialSiteUrl(url) || !isSameResearchCompanyDomain(url.toString(), domain))
+                continue;
+            if (url.hash || url.pathname === '/' || url.toString() === baseUrl.toString())
+                continue;
+            const label = text(match[2].replace(/<[^>]+>/g, ' ')).toLowerCase();
+            const path = url.pathname.toLowerCase();
+            const target = `${path} ${label}`;
+            let score = 0;
+            if (/(?:nosotros|quienes|empresa|about|company|productos?|products?|plataforma|platform|servicios|services|solutions|portfolio|casos|cases?|case-stud(?:y|ies)|success-stories|clientes|customers|integraciones|integrations|partners|socios|equipo|team|leadership|liderazgo|ubicaciones|locations|oficinas|offices|seguridad|security|trust|compliance|noticias|news|press|blog|careers|jobs|empleos|vacantes|reclutamiento|seleccion|talento)/.test(target))
+                score += 6;
+            if (countryKey && target.includes(countryKey))
+                score += 5;
+            if (/(?:^|\/)(?:cl|chile)(?:\/|$)/.test(path))
+                score += 4;
+            if (path.split('/').filter(Boolean).length <= 3)
+                score += 1;
+            if (score > 0)
+                candidates.set(url.toString(), Math.max(candidates.get(url.toString()) || 0, score));
+        }
+        catch {
+            // Ignore malformed links from public HTML.
+        }
+    }
+    return Array.from(candidates.entries())
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .slice(0, Math.max(0, maxPages - 1))
+        .map(([url]) => url);
+}
+async function fetchOfficialPage(input) {
+    let currentUrl = input.url;
+    for (let attempt = 0; attempt <= (input.maxRedirects ?? 1); attempt += 1) {
+        if (!isSafeOfficialSiteUrl(currentUrl) || !isSameResearchCompanyDomain(currentUrl.toString(), input.domain)) {
+            return { page: null, html: '', warning: 'official_site_redirect_rejected', redirectedTo: currentUrl.toString() };
+        }
+        const resolved = await resolvePublicAddress(currentUrl.hostname);
+        if (!resolved)
+            return { page: null, html: '', warning: 'official_site_dns_rejected' };
+        const response = await requestOfficialSite(currentUrl, resolved, input.signal);
+        if (response.status >= 300 && response.status < 400) {
+            const location = headerValue(response.headers, 'location');
+            if (!location)
+                return { page: null, html: '', warning: 'official_site_redirect_missing' };
+            currentUrl = new URL(location, currentUrl);
+            continue;
+        }
+        if (response.status < 200 || response.status >= 300) {
+            return { page: null, html: '', warning: `official_site_http_${response.status}` };
+        }
+        const contentType = headerValue(response.headers, 'content-type') || '';
+        if (!contentType.includes('html') && !contentType.includes('text/')) {
+            return { page: null, html: '', warning: 'official_site_not_html' };
+        }
+        return { page: officialPageFromHtml(currentUrl, response.body), html: response.body };
+    }
+    return { page: null, html: '', warning: 'official_site_redirect_limit' };
+}
+export async function fetchOfficialSite(input) {
+    if (!isSafePublicDomain(input.domain))
+        return { value: null, warning: 'official_site_domain_rejected' };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+        const first = await fetchOfficialPage({
+            url: new URL(`https://${input.domain}`),
+            domain: input.domain,
+            signal: controller.signal,
+        });
+        if (!first.page)
+            return { value: null, warning: first.warning };
+        const maxPages = Math.max(1, Math.min(MAX_DEEP_OFFICIAL_SITE_PAGES, Math.floor(input.maxPages || MAX_OFFICIAL_SITE_PAGES)));
+        const candidateUrls = candidateOfficialPageUrls(first.html, new URL(first.page.url), input.domain, input.country, maxPages);
+        const followUps = await Promise.all(candidateUrls.map(async (candidate) => {
+            try {
+                return await fetchOfficialPage({ url: new URL(candidate), domain: input.domain, signal: controller.signal });
+            }
+            catch {
+                return { page: null, html: '', warning: 'official_site_fetch_failed' };
+            }
+        }));
+        const pages = [first.page, ...followUps.flatMap((result) => result.page ? [result.page] : [])];
+        const usablePages = pages.filter(isUsefulOfficialPage);
+        const primary = usablePages
+            .sort((left, right) => (Number(Boolean(right.description)) - Number(Boolean(left.description))
+            || right.text.length - left.text.length))[0];
+        if (!primary)
+            return { value: null, warning: 'official_site_content_generic' };
+        return { value: { ...primary, pages: usablePages } };
+    }
+    catch (error) {
+        return {
+            value: null,
+            warning: error?.name === 'AbortError' ? 'official_site_timeout' : 'official_site_fetch_failed',
+        };
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+}
+/**
+ * The pages of a company site that describe it, for «Perfil» (src/ai/flows/generate-company-profile.ts). Same safety as
+ * fetchOfficialSite (public DNS only, redirects within the company, a fixed time budget). A home page that only asks for the
+ * country is followed into the country page, and the offer, company and proof pages are read from both
+ * (src/lib/profile/site-pages.ts). Nothing is cached or written.
+ */
+export async function fetchCompanyProfileSite(input) {
+    if (!isSafePublicDomain(input.domain))
+        return { pages: [], warning: 'official_site_domain_rejected' };
+    const { countryLandingUrl, profilePageCandidates, readableProfilePage } = await import('@/lib/profile/site-pages');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 14_000);
+    let domain = input.domain;
+    const read = async (url) => {
+        try {
+            return await fetchOfficialPage({ url: new URL(url), domain, signal: controller.signal, maxRedirects: 4 });
+        }
+        catch {
+            return { page: null, html: '', warning: 'official_site_fetch_failed' };
+        }
+    };
+    try {
+        let first = await read(`https://${domain}`);
+        // A brand that moved (psol.cl → psol-latam.com) redirects its old domain to the new one. The person typed the old
+        // one, so that single move is followed, and every later page must belong to the new domain.
+        const moved = first.warning === 'official_site_redirect_rejected' && first.redirectedTo
+            ? new URL(first.redirectedTo).hostname.toLowerCase().replace(/^www\./, '')
+            : '';
+        if (moved && moved !== domain && isSafePublicDomain(moved)) {
+            domain = moved;
+            first = await read(`https://${domain}`);
+        }
+        if (!first.page)
+            return { pages: [], warning: first.warning };
+        const maxPages = Math.max(1, Math.min(10, Math.floor(input.maxPages || 8)));
+        const fetched = [{ page: first.page, html: first.html }];
+        const landing = countryLandingUrl(first.html, new URL(first.page.url), domain, input.country || 'Chile');
+        if (landing && landing.replace(/\/$/, '') !== first.page.url.replace(/\/$/, '')) {
+            const country = await read(landing);
+            if (country.page)
+                fetched.push({ page: country.page, html: country.html });
+        }
+        const candidates = profilePageCandidates({
+            pages: fetched.map((item) => ({ html: item.html, url: item.page.url })),
+            domain,
+            exclude: fetched.map((item) => item.page.url),
+            limit: Math.max(0, maxPages - fetched.length),
+        });
+        const followUps = await Promise.all(candidates.map(read));
+        // Marketing copy is what a profile needs, so the research filter for «generic» statements does not apply here: each
+        // page is re-read leniently from its HTML and only has to be readable and not a challenge or block page.
+        const pages = [...fetched, ...followUps.flatMap((result) => (result.page ? [{ page: result.page, html: result.html }] : []))]
+            .map((item) => readableProfilePage(item.page.url, item.html))
+            .filter((page) => !isHardRejectedResearchUrl(page.url)
+            && !isHardRejectedResearchText(`${page.title || ''} ${page.description || ''} ${page.text.slice(0, 1_500)}`)
+            && (page.text.length >= 120 || (page.description || '').length >= 40));
+        return pages.length > 0 ? { pages, domain } : { pages: [], domain, warning: 'official_site_content_generic' };
+    }
+    catch (error) {
+        return { pages: [], warning: error?.name === 'AbortError' ? 'official_site_timeout' : 'official_site_fetch_failed' };
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+}
+function nullableObject(value) {
+    const normalized = object(value);
+    return Object.keys(normalized).length > 0 ? normalized : null;
+}
+function emptyCompanySignals(domain) {
+    return {
+        domain,
+        official: null,
+        whois: null,
+        brand: null,
+        fetchedAt: new Date().toISOString(),
+    };
+}
+function officialPageFromArtifactPayload(value, expectedDomain) {
+    const stored = object(value);
+    const url = validHttpUrl(stored.url);
+    if (!url
+        || (expectedDomain && !isSameResearchCompanyDomain(url, expectedDomain))
+        || isHardRejectedOfficialPage(stored))
+        return null;
+    const segments = array(stored.segments).flatMap((segment) => {
+        const candidate = object(segment);
+        const segmentText = cleanOfficialText(candidate.text);
+        if (!segmentText || isHardRejectedResearchText(segmentText))
+            return [];
+        return [{ text: segmentText, locator: text(candidate.locator) || 'page_section' }];
+    });
+    const page = {
+        url,
+        title: cleanOfficialText(stored.title) || null,
+        description: cleanOfficialText(stored.description) || null,
+        text: cleanOfficialText(stored.text),
+        ...(segments.length > 0 ? { segments } : {}),
+    };
+    return isHardRejectedOfficialPage(page) ? null : page;
+}
+function officialSiteFromArtifactPayload(value, expectedDomain) {
+    const stored = object(value);
+    if (Object.keys(stored).length === 0)
+        return null;
+    const pages = [];
+    const seen = new Set();
+    for (const candidate of [stored, ...array(stored.pages)]) {
+        const page = officialPageFromArtifactPayload(candidate, expectedDomain);
+        const canonicalUrl = page ? canonicalResearchSourceUrl(page.url) : '';
+        if (!page || !canonicalUrl || seen.has(canonicalUrl))
+            continue;
+        seen.add(canonicalUrl);
+        pages.push(page);
+    }
+    return pages.length > 0 ? { ...pages[0], pages } : null;
+}
+function companySignalsFromArtifactPayload(payload, expectedDomain) {
+    const value = object(object(payload).companySignals);
+    const fetchedAt = text(value.fetchedAt);
+    const domain = normalizeDomain(value.domain);
+    if (!fetchedAt || (expectedDomain && domain !== expectedDomain))
+        return null;
+    return {
+        domain: domain || expectedDomain,
+        official: officialSiteFromArtifactPayload(value.official, domain || expectedDomain),
+        whois: nullableObject(value.whois),
+        brand: nullableObject(value.brand),
+        fetchedAt,
+    };
+}
+function hasCompanySignals(signals) {
+    const official = signals.official && isUsefulOfficialPage(signals.official);
+    const brandDescription = text(signals.brand?.description);
+    return Boolean(official || (brandDescription && !isGenericResearchText(brandDescription)));
+}
+async function collectCompanySignals(input) {
+    const domain = companyResearchDomain(input.lead);
+    const companyApolloContext = apolloCompanyResearchContext(input.apolloContext);
+    const warnings = [];
+    if (!domain && !text(input.lead.companyName)) {
+        warnings.push('company_identity_missing');
+        return {
+            signals: emptyCompanySignals(domain),
+            cacheHit: false,
+            expiresAt: null,
+            warnings,
+            artifactId: null,
+            cacheIdentity: null,
+            busy: false,
+        };
+    }
+    const identity = buildCompanyResearchArtifactIdentity({
+        organizationId: input.organizationId,
+        companyDomain: domain,
+        companyName: input.lead.companyName,
+        countryCode: input.lead.country,
+        researchDepth: input.options.depth,
+        researchLanguage: input.options.language,
+        provider: NATIVE_PROVIDER,
+        providerContextFingerprint: companyApolloContext?.fingerprint,
+    });
+    let claim = await claimCompanyResearchArtifact({
+        identity,
+        forceRefresh: input.options.refresh,
+        leaseSeconds: 300,
+    });
+    if (claim.state === 'cached') {
+        const cached = companySignalsFromArtifactPayload(claim.artifact.payload, domain);
+        if (cached) {
+            return {
+                signals: cached,
+                cacheHit: true,
+                expiresAt: claim.artifact.expiresAt,
+                warnings,
+                artifactId: claim.artifact.id,
+                cacheIdentity: identity.cacheIdentity,
+                busy: false,
+            };
+        }
+        warnings.push('company_artifact_payload_invalid');
+        claim = await claimCompanyResearchArtifact({ identity, forceRefresh: true, leaseSeconds: 300 });
+    }
+    if (claim.state === 'busy') {
+        return {
+            signals: emptyCompanySignals(domain),
+            cacheHit: false,
+            expiresAt: null,
+            warnings: [...warnings, 'company_research_in_progress'],
+            artifactId: claim.artifact.id,
+            cacheIdentity: identity.cacheIdentity,
+            busy: true,
+        };
+    }
+    if (claim.state !== 'claimed' || !claim.claimToken) {
+        throw new Error('COMPANY_RESEARCH_ARTIFACT_CLAIM_UNAVAILABLE');
+    }
+    try {
+        const official = await fetchOfficialSite({
+            domain,
+            country: input.lead.country,
+            maxPages: input.options.depth === 'deep' ? MAX_DEEP_OFFICIAL_SITE_PAGES : input.options.depth === 'basic' ? 1 : MAX_OFFICIAL_SITE_PAGES,
+        });
+        if (official.warning)
+            warnings.push(official.warning);
+        const auth = {
+            user: { id: input.lead.id || 'native-research' },
+            organizationId: input.organizationId,
+            supabase: getSupabaseAdminClient(),
+        };
+        const context = { auth, conversationId: 'native-research' };
+        const providerInput = {
+            domain,
+            company: input.lead.companyName || domain,
+            companyName: input.lead.companyName || domain,
+            language: input.options.language,
+            countryCode: input.lead.country || 'cl',
+            cache: !input.options.refresh,
+        };
+        const [whois, brand] = await Promise.all([
+            domain ? researchWhois(providerInput, context).catch(() => {
+                warnings.push('whois_unavailable');
+                return null;
+            }) : Promise.resolve(null),
+            domain && process.env.BRANDDEV_API_KEY
+                ? researchBrand(providerInput, context).catch(() => {
+                    warnings.push('brand_unavailable');
+                    return null;
+                })
+                : Promise.resolve(null),
+        ]);
+        const signals = {
+            domain,
+            official: official.value,
+            whois: nullableObject(whois),
+            brand: nullableObject(brand),
+            fetchedAt: new Date().toISOString(),
+        };
+        const status = hasCompanySignals(signals) ? 'completed' : 'insufficient_data';
+        const artifact = await completeCompanyResearchArtifact({
+            artifact: claim.artifact,
+            identity,
+            claimToken: claim.claimToken,
+            status,
+            payload: {
+                schemaVersion: 'native-company-signals/v2',
+                companySignals: signals,
+                ...(companyApolloContext ? { apolloCompanyContext: companyApolloContext } : {}),
+            },
+            expiresAt: new Date(Math.max(Date.now() + 60_000, Math.min(Date.now() + (status === 'completed'
+                ? COMPANY_RESEARCH_ARTIFACT_TTL_MS
+                : COMPANY_RESEARCH_INSUFFICIENT_TTL_MS), companyApolloContext?.observedAt
+                ? Date.parse(companyApolloContext.observedAt) + COMPANY_RESEARCH_ARTIFACT_TTL_MS
+                : Number.POSITIVE_INFINITY))).toISOString(),
+            errorMetadata: { warnings },
+        });
+        return {
+            signals,
+            cacheHit: false,
+            expiresAt: artifact.expiresAt,
+            warnings,
+            artifactId: artifact.id,
+            cacheIdentity: identity.cacheIdentity,
+            busy: false,
+        };
+    }
+    catch (error) {
+        try {
+            await releaseCompanyResearchArtifactClaim({
+                artifact: claim.artifact,
+                identity,
+                claimToken: claim.claimToken,
+                errorCode: 'native_company_research_failed',
+                errorMessage: text(error?.message) || 'Native company research failed.',
+                errorMetadata: { stage: 'company_signals' },
+            });
+        }
+        catch (releaseError) {
+            console.error('[native-research] company artifact release failed:', releaseError);
+        }
+        throw error;
+    }
+}
+function logUnavailableSource(source, error) {
+    // Only the reason code: the message never carries lead data, and it tells a missing key from a provider outage.
+    console.warn('[native-research] optional source unavailable', { source, reason: text(error?.message).slice(0, 120) || 'unknown' });
+}
+async function collectSearchSignals(input) {
+    const domain = companyResearchDomain(input.lead);
+    const context = nativeResearchSearchContext(input.organizationId, input.lead.id, getSupabaseAdminClient());
+    const providerInput = {
+        domain,
+        company: input.lead.companyName || domain,
+        companyName: input.lead.companyName || domain,
+        location: [input.lead.city, input.lead.country].filter(Boolean).join(', '),
+        language: input.options.language,
+        countryCode: input.lead.country || 'cl',
+        cache: !input.options.refresh,
+    };
+    const warnings = [];
+    const [profile, news, jobs, mentions, similarweb] = await Promise.all([
+        domain || input.lead.companyName
+            ? researchSerpCompanyProfile(providerInput, context).catch((error) => {
+                logUnavailableSource('company_profile', error);
+                warnings.push('company_profile_unavailable');
+                return null;
+            })
+            : Promise.resolve(null),
+        domain || input.lead.companyName
+            ? researchSerpCompanyNews(providerInput, context).catch((error) => {
+                logUnavailableSource('company_news', error);
+                warnings.push('company_news_unavailable');
+                return null;
+            })
+            : Promise.resolve(null),
+        domain || input.lead.companyName
+            ? researchSerpJobsSignals(providerInput, context).catch((error) => {
+                logUnavailableSource('hiring_signals', error);
+                warnings.push('hiring_signals_unavailable');
+                return null;
+            })
+            : Promise.resolve(null),
+        input.options.depth === 'deep' && (domain || input.lead.companyName)
+            ? researchBrandMentions(providerInput, context).catch((error) => {
+                logUnavailableSource('company_mentions', error);
+                warnings.push('company_mentions_unavailable');
+                return null;
+            })
+            : Promise.resolve(null),
+        domain
+            ? researchSimilarweb(providerInput, context).catch((error) => {
+                logUnavailableSource('similarweb', error);
+                warnings.push('similarweb_unavailable');
+                return null;
+            })
+            : Promise.resolve(null),
+    ]);
+    return { profile: object(profile), news: object(news), jobs: object(jobs), mentions: object(mentions), similarweb: object(similarweb), warnings };
+}
+function createError(input) {
+    return {
+        code: input.code,
+        stage: input.stage,
+        severity: 'warning',
+        retryable: input.retryable,
+        message: input.message,
+        provider: input.provider || NATIVE_PROVIDER,
+        observedAt: new Date().toISOString(),
+    };
+}
+function isoDateOrNull(value) {
+    const timestamp = Date.parse(text(value));
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+function isoAfterDate(value, days) {
+    const timestamp = Date.parse(value);
+    return new Date((Number.isFinite(timestamp) ? timestamp : Date.now()) + days * 24 * 60 * 60 * 1_000).toISOString();
+}
+function conciseSourceStatement(value, maxLength = 720) {
+    const normalized = text(value);
+    if (normalized.length <= maxLength)
+        return normalized;
+    return `${normalized.slice(0, maxLength - 1).replace(/\s+\S*$/, '').replace(/[\s,;:.!?-]+$/, '')}…`;
+}
+function officialClaimKind(page) {
+    return /(?:servicios|services|solutions|portfolio|reclutamiento|seleccion|talento)/i.test(page.url)
+        ? 'company_service'
+        : 'company_overview';
+}
+function visibleSignalLimit(depth) {
+    return depth === 'deep' ? 12 : depth === 'basic' ? 6 : 9;
+}
+function selectBalancedSearchSignals(signals, limit) {
+    const buckets = {
+        news: signals.filter((signal) => signal.kind === 'news'),
+        jobs: signals.filter((signal) => signal.kind === 'jobs'),
+        mentions: signals.filter((signal) => signal.kind === 'mentions'),
+    };
+    const selected = [];
+    for (let index = 0; selected.length < limit; index += 1) {
+        let added = false;
+        for (const kind of ['news', 'jobs', 'mentions']) {
+            const signal = buckets[kind][index];
+            if (!signal || selected.length >= limit)
+                continue;
+            selected.push(signal);
+            added = true;
+        }
+        if (!added)
+            break;
+    }
+    return selected;
+}
+function isRelevantSearchResult(input) {
+    const statement = `${input.title} ${input.snippet}`.trim();
+    if (!statement || isHardRejectedResearchUrl(input.link) || isHardRejectedResearchText(statement) || isGenericResearchText(statement))
+        return false;
+    return isSameResearchCompanyDomain(input.link, input.companyDomain)
+        || mentionsResearchCompany(statement, input);
+}
+function buildSnapshot(input) {
+    const now = new Date().toISOString();
+    const domain = companyResearchDomain(input.lead);
+    const leadRef = text(input.lead.id || input.lead.email || input.lead.linkedinUrl || `${input.lead.fullName || 'lead'}:${domain || 'company'}`);
+    const sources = [];
+    const evidence = [];
+    const claims = [];
+    const addSource = (source) => {
+        const url = validHttpUrl(source.url);
+        const canonicalUrl = canonicalResearchSourceUrl(url);
+        if (!url || !canonicalUrl || isHardRejectedResearchUrl(url))
+            return null;
+        const existing = sources.find((item) => item.canonicalUrl === canonicalUrl);
+        if (existing) {
+            const publishedAt = isoDateOrNull(source.publishedAt);
+            const retrievedAt = isoDateOrNull(source.retrievedAt);
+            if (publishedAt && (!existing.publishedAt || publishedAt > existing.publishedAt))
+                existing.publishedAt = publishedAt;
+            if (retrievedAt && retrievedAt > existing.retrievedAt)
+                existing.retrievedAt = retrievedAt;
+            if (!existing.title && text(source.title))
+                existing.title = text(source.title);
+            if (!existing.publisher && text(source.publisher))
+                existing.publisher = text(source.publisher);
+            existing.reliability = Math.max(existing.reliability, Math.max(0, Math.min(1, source.reliability ?? 0.7)));
+            if (existing.type !== 'official_site' && source.type === 'news')
+                existing.type = 'news';
+            return existing;
+        }
+        const created = {
+            id: id('source', canonicalUrl),
+            type: source.type,
+            url,
+            canonicalUrl,
+            ...(text(source.title) ? { title: text(source.title) } : {}),
+            ...(text(source.publisher) ? { publisher: text(source.publisher) } : {}),
+            provider: source.provider,
+            ...(isoDateOrNull(source.publishedAt) ? { publishedAt: isoDateOrNull(source.publishedAt) } : {}),
+            retrievedAt: isoDateOrNull(source.retrievedAt) || now,
+            reliability: Math.max(0, Math.min(1, source.reliability ?? 0.7)),
+        };
+        sources.push(created);
+        return created;
+    };
+    const addEvidence = (value) => {
+        const statement = text(value.statement);
+        if (!value.source || !statement || isHardRejectedResearchText(statement))
+            return null;
+        const evidenceId = id('evidence', `${value.source.id}:${statement}`);
+        const existing = evidence.find((item) => item.id === evidenceId);
+        if (existing)
+            return existing;
+        const created = {
+            id: evidenceId,
+            subjectScope: value.subjectScope || 'company',
+            kind: value.kind || 'observation',
+            path: 'native_research',
+            statement,
+            sourceId: value.source.id,
+            ...(value.locator ? { locator: value.locator } : {}),
+            ...(isoDateOrNull(value.observedAt) || isoDateOrNull(value.extractedAt)
+                ? { observedAt: isoDateOrNull(value.observedAt) || isoDateOrNull(value.extractedAt) }
+                : {}),
+            extractedAt: isoDateOrNull(value.extractedAt) || now,
+            confidence: Math.max(0, Math.min(1, value.confidence ?? 0.7)),
+            extraction: { method: value.extractionMethod || 'provider', provider: NATIVE_PROVIDER, version: 'native-research/v2' },
+        };
+        evidence.push(created);
+        return created;
+    };
+    const addClaim = (value) => {
+        const statement = text(value.statement);
+        const supporting = value.supportingEvidenceIds.filter((evidenceId) => evidence.some((item) => item.id === evidenceId));
+        if (!statement || supporting.length === 0)
+            return null;
+        const asOf = isoDateOrNull(value.asOf) || now;
+        const created = {
+            id: id('claim', `${value.kind}:${statement}`),
+            kind: value.kind,
+            subjectScope: value.kind.startsWith('lead_') ? 'person' : 'company',
+            classification: value.classification || 'fact',
+            statement,
+            supportingEvidenceIds: supporting,
+            contradictingEvidenceIds: [],
+            confidence: Math.max(0, Math.min(1, value.confidence ?? 0.7)),
+            freshness: {
+                asOf,
+                validUntil: isoAfterDate(asOf, value.validityDays ?? (value.classification === 'hypothesis' ? 14 : 30)),
+                policyVersion: 'research-freshness/v1',
+            },
+            derivation: value.derivation || { method: 'rule', promptVersion: 'native-research/v2' },
+        };
+        const existingIndex = claims.findIndex((item) => item.id === created.id);
+        if (existingIndex >= 0) {
+            const existing = claims[existingIndex];
+            const merged = ResearchClaimV1Schema.parse({
+                ...existing,
+                supportingEvidenceIds: [...new Set([...existing.supportingEvidenceIds, ...created.supportingEvidenceIds])],
+            });
+            claims[existingIndex] = merged;
+            return merged;
+        }
+        claims.push(created);
+        return created;
+    };
+    const companyName = text(input.lead.companyName) || domain;
+    const companyFetchedAt = isoDateOrNull(input.company.fetchedAt) || now;
+    const officialPages = input.company.official?.pages?.length
+        ? input.company.official.pages
+        : input.company.official ? [input.company.official] : [];
+    const companyUrl = safeSourceUrl(officialPages[0]?.url || input.lead.companyWebsite, domain);
+    const companyFactEvidence = [];
+    const personFactEvidence = [];
+    const officialStatementKeys = new Set();
+    for (const page of officialPages) {
+        const contents = usefulOfficialPageContents(page);
+        if (contents.length === 0)
+            continue;
+        const source = addSource({
+            url: page.url,
+            type: 'official_site',
+            title: page.title || companyName,
+            provider: 'official-site',
+            reliability: 0.9,
+            retrievedAt: companyFetchedAt,
+        });
+        for (const { statement, locator } of contents) {
+            const statementKey = officialStatementKey(statement);
+            if (!statementKey || officialStatementKeys.has(statementKey))
+                continue;
+            const itemEvidence = addEvidence({
+                statement,
+                source,
+                kind: 'fact',
+                confidence: 0.86,
+                locator: { kind: 'page_section', value: locator },
+                extractedAt: companyFetchedAt,
+                extractionMethod: 'rule',
+            });
+            if (!itemEvidence || !source || !isQualifiedResearchFactEvidence({
+                evidence: itemEvidence,
+                source,
+                companyName,
+                companyDomain: domain,
+            }))
+                continue;
+            officialStatementKeys.add(statementKey);
+            companyFactEvidence.push(itemEvidence);
+            addClaim({
+                kind: officialClaimKind(page),
+                statement,
+                supportingEvidenceIds: [itemEvidence.id],
+                confidence: itemEvidence.confidence,
+                asOf: companyFetchedAt,
+            });
+        }
+    }
+    const brandDescription = conciseSourceStatement(input.company.brand?.description);
+    const brandIndustry = conciseSourceStatement(input.company.brand?.industry);
+    if ((brandDescription && !isGenericResearchText(brandDescription)) || brandIndustry) {
+        const source = addSource({
+            url: `https://brand.dev/retrieve/${encodeURIComponent(domain)}`,
+            type: 'other',
+            title: 'Perfil de marca',
+            provider: 'brand.dev',
+            reliability: 0.72,
+            retrievedAt: companyFetchedAt,
+        });
+        if (brandDescription && !isGenericResearchText(brandDescription)) {
+            const itemEvidence = addEvidence({
+                statement: `${companyName}: ${brandDescription}`,
+                source,
+                kind: 'fact',
+                confidence: 0.72,
+                locator: { kind: 'provider_annotation', value: 'brand_description' },
+                extractedAt: companyFetchedAt,
+                extractionMethod: 'provider',
+            });
+            if (itemEvidence && source && isQualifiedResearchFactEvidence({ evidence: itemEvidence, source, companyName, companyDomain: domain })) {
+                companyFactEvidence.push(itemEvidence);
+                addClaim({
+                    kind: 'company_overview',
+                    statement: itemEvidence.statement,
+                    supportingEvidenceIds: [itemEvidence.id],
+                    confidence: itemEvidence.confidence,
+                    asOf: companyFetchedAt,
+                });
+            }
+        }
+        if (brandIndustry) {
+            const itemEvidence = addEvidence({
+                statement: `${companyName} opera en la industria ${brandIndustry}.`,
+                source,
+                kind: 'fact',
+                confidence: 0.72,
+                locator: { kind: 'provider_annotation', value: 'brand_industry' },
+                extractedAt: companyFetchedAt,
+                extractionMethod: 'provider',
+            });
+            if (itemEvidence && source && isQualifiedResearchFactEvidence({ evidence: itemEvidence, source, companyName, companyDomain: domain })) {
+                companyFactEvidence.push(itemEvidence);
+                addClaim({
+                    kind: 'company_industry',
+                    statement: itemEvidence.statement,
+                    supportingEvidenceIds: [itemEvidence.id],
+                    confidence: itemEvidence.confidence,
+                    asOf: companyFetchedAt,
+                });
+            }
+        }
+    }
+    const whoisCreated = text(input.company.whois?.created || input.company.whois?.creationDate);
+    if (whoisCreated) {
+        const source = addSource({
+            url: `https://mcp.domaindetails.com/lookup/${encodeURIComponent(domain)}`,
+            type: 'registry',
+            title: 'Registro de dominio',
+            provider: 'domaindetails',
+            reliability: 0.68,
+            retrievedAt: companyFetchedAt,
+        });
+        addEvidence({
+            statement: `El dominio ${domain} registra actividad desde ${whoisCreated}.`,
+            source,
+            kind: 'observation',
+            confidence: 0.68,
+            locator: { kind: 'provider_annotation', value: 'domain_creation_date' },
+            extractedAt: companyFetchedAt,
+        });
+    }
+    for (const item of input.person.items) {
+        const link = validHttpUrl(item.link);
+        const statement = conciseSourceStatement(`${text(item.title) || input.lead.fullName}${text(item.snippet) ? `: ${text(item.snippet)}` : ''}`);
+        if (!link || !statement || isGenericResearchText(statement))
+            continue;
+        const source = addSource({
+            url: link,
+            type: new URL(link).hostname.toLowerCase().endsWith('linkedin.com') ? 'linkedin' : 'search_result',
+            title: item.title || input.lead.fullName || 'Perfil publico',
+            publisher: item.source,
+            provider: input.person.provider,
+            reliability: 0.74,
+            retrievedAt: input.person.fetchedAt,
+            publishedAt: item.date,
+        });
+        const itemEvidence = addEvidence({
+            statement,
+            source,
+            kind: 'fact',
+            subjectScope: 'person',
+            confidence: 0.74,
+            locator: { kind: 'search_snippet', value: 'strict_identity_match' },
+            extractedAt: input.person.fetchedAt,
+            observedAt: item.date,
+            extractionMethod: 'rule',
+        });
+        if (!itemEvidence)
+            continue;
+        personFactEvidence.push(itemEvidence);
+        addClaim({
+            kind: input.lead.title ? 'lead_role' : 'lead_profile',
+            statement,
+            supportingEvidenceIds: [itemEvidence.id],
+            confidence: itemEvidence.confidence,
+            asOf: input.person.fetchedAt,
+        });
+    }
+    const searchEvidence = [];
+    for (const kind of ['profile', 'news', 'jobs', 'mentions']) {
+        const payload = kind === 'profile' ? input.profile : kind === 'news' ? input.news : kind === 'jobs' ? input.jobs : input.mentions;
+        const fetchedAt = isoDateOrNull(payload.fetchedAt) || now;
+        const maxItems = input.options.depth === 'deep' ? 8 : input.options.depth === 'basic' ? 3 : 6;
+        const items = array(payload.items || payload.results || payload.organic_results).slice(0, maxItems);
+        for (const item of items) {
+            const link = validHttpUrl(item?.link || item?.url);
+            const title = text(item?.title || item?.name);
+            const snippet = text(item?.snippet || item?.description || item?.summary);
+            if (!link || !isRelevantSearchResult({ title, snippet, link, companyName, companyDomain: domain }))
+                continue;
+            const source = addSource({
+                url: link,
+                type: kind === 'news' ? 'news' : kind === 'jobs' ? 'jobs' : 'other',
+                title: title || (kind === 'profile' ? 'Perfil de empresa' : 'Señal externa'),
+                publisher: text(item?.source),
+                provider: text(payload.provider) || 'serper',
+                reliability: 0.64,
+                retrievedAt: fetchedAt,
+                publishedAt: item?.date,
+            });
+            const itemEvidence = addEvidence({
+                statement: conciseSourceStatement(`${title || (kind === 'profile' ? companyName : 'Señal externa')}${snippet ? `: ${snippet}` : ''}`),
+                source,
+                kind: kind === 'profile' ? 'fact' : 'event',
+                confidence: kind === 'profile' ? 0.68 : 0.64,
+                locator: { kind: 'search_snippet', value: 'organic_result' },
+                extractedAt: fetchedAt,
+                observedAt: source?.publishedAt || fetchedAt,
+            });
+            if (!itemEvidence || !source)
+                continue;
+            if (kind === 'profile') {
+                if (isQualifiedResearchFactEvidence({ evidence: itemEvidence, source, companyName, companyDomain: domain })) {
+                    companyFactEvidence.push(itemEvidence);
+                    addClaim({
+                        kind: 'company_overview',
+                        statement: itemEvidence.statement,
+                        supportingEvidenceIds: [itemEvidence.id],
+                        confidence: itemEvidence.confidence,
+                        asOf: fetchedAt,
+                    });
+                }
+            }
+            else if ((kind !== 'news' || Boolean(source.publishedAt)) && isRelevantResearchSignal({
+                evidence: itemEvidence,
+                source,
+                companyName,
+                companyDomain: domain,
+            })) {
+                searchEvidence.push({ evidence: itemEvidence, source, kind });
+            }
+        }
+    }
+    if (text(input.similarweb.status) === 'completed') {
+        const visits = Number(input.similarweb.visitsMonthly);
+        const globalRank = Number(input.similarweb.globalRank);
+        const category = text(input.similarweb.category);
+        const details = [
+            Number.isFinite(visits) && visits > 0 ? `${visits.toLocaleString('es-CL')} visitas mensuales estimadas` : '',
+            Number.isFinite(globalRank) && globalRank > 0 ? `ranking global estimado ${globalRank.toLocaleString('es-CL')}` : '',
+            category ? `categoría ${category}` : '',
+        ].filter(Boolean);
+        if (details.length > 0) {
+            const fetchedAt = isoDateOrNull(input.similarweb.fetchedAt) || now;
+            const source = addSource({
+                url: `https://data.similarweb.com/api/v1/data?domain=${encodeURIComponent(domain)}`,
+                type: 'other',
+                title: `${companyName} en Similarweb`,
+                publisher: 'Similarweb',
+                provider: 'similarweb',
+                reliability: 0.55,
+                retrievedAt: fetchedAt,
+            });
+            const itemEvidence = addEvidence({
+                statement: `Similarweb estima para ${companyName}: ${details.join('; ')}. Es una señal direccional de presencia digital, no una medición financiera ni de tamaño de la empresa.`,
+                source,
+                kind: 'event',
+                confidence: 0.55,
+                locator: { kind: 'provider_annotation', value: 'similarweb_public_metrics' },
+                extractedAt: fetchedAt,
+                observedAt: fetchedAt,
+                extractionMethod: 'provider',
+            });
+            if (itemEvidence && source)
+                searchEvidence.push({ evidence: itemEvidence, source, kind: 'mentions' });
+        }
+    }
+    const visibleSignals = selectBalancedSearchSignals(searchEvidence, visibleSignalLimit(input.options.depth));
+    for (const signal of visibleSignals) {
+        const asOf = signal.source.publishedAt || signal.source.retrievedAt;
+        const signalSummary = conciseSourceStatement(signal.evidence.statement, 280);
+        addClaim({
+            kind: signal.kind === 'jobs' ? 'hiring_signal' : signal.kind === 'news' ? 'news_signal' : 'site_signal',
+            statement: signalSummary,
+            supportingEvidenceIds: [signal.evidence.id],
+            classification: 'fact',
+            confidence: signal.evidence.confidence,
+            validityDays: signal.source.publishedAt ? 14 : 7,
+            asOf,
+        });
+    }
+    const primarySignal = visibleSignals[0];
+    if (primarySignal) {
+        const asOf = primarySignal.source.publishedAt || primarySignal.source.retrievedAt;
+        const signalSummary = conciseSourceStatement(primarySignal.evidence.statement, 280);
+        if (companyFactEvidence.length > 0) {
+            addClaim({
+                kind: 'opportunity_hypothesis',
+                statement: `Podría ser útil explorar si la señal “${signalSummary}” cambia alguna prioridad actual de ${companyName}, sin asumir una necesidad antes de confirmarla.`,
+                supportingEvidenceIds: [primarySignal.evidence.id],
+                classification: 'hypothesis',
+                confidence: 0.61,
+                validityDays: primarySignal.source.publishedAt ? 14 : 7,
+                asOf,
+            });
+        }
+    }
+    if (input.publicCompany) {
+        const publicGraph = publicCompanyToNative(input.publicCompany.graph, input.publicCompany.reference);
+        // The public graph can repeat what the site already gave: keep one of each id, or the report fails validation.
+        for (const source of publicGraph.sources)
+            if (!sources.some((item) => item.id === source.id))
+                sources.push(source);
+        for (const item of publicGraph.evidence)
+            if (!evidence.some((existing) => existing.id === item.id))
+                evidence.push(item);
+        for (const claim of publicGraph.claims)
+            if (!claims.some((existing) => existing.id === claim.id))
+                claims.push(claim);
+        const cited = new Set(publicGraph.claims.flatMap((claim) => claim.supportingEvidenceIds));
+        companyFactEvidence.push(...publicGraph.evidence.filter((item) => cited.has(item.id)));
+    }
+    if (!input.publicCompany && companyFactEvidence.length > 0 && !claims.some((claim) => claim.classification === 'hypothesis')) {
+        addClaim({
+            kind: 'use_case_hypothesis',
+            statement: `La información pública disponible sobre ${companyName} podría justificar explorar sus prioridades actuales antes de proponer una solución; no confirma una necesidad concreta.`,
+            supportingEvidenceIds: [companyFactEvidence[0].id],
+            classification: 'hypothesis',
+            confidence: 0.52,
+            validityDays: 14,
+            asOf: companyFetchedAt,
+        });
+    }
+    const qualifiedSignals = searchEvidence.filter(({ evidence: itemEvidence, source }) => isRelevantResearchSignal({
+        evidence: itemEvidence,
+        source,
+        companyName,
+        companyDomain: domain,
+    }));
+    const reportWarnings = [...new Set(input.warnings)];
+    if (companyFactEvidence.length === 0)
+        reportWarnings.push('company_context_missing');
+    if (input.lead.fullName && personFactEvidence.length === 0 && !reportWarnings.includes('person_public_evidence_missing')) {
+        reportWarnings.push('person_public_evidence_missing');
+    }
+    const hasUsefulClaim = claims.length > 0;
+    // Only missing company context leaves the research partial. News, hiring, mentions, digital presence and the person's
+    // public trail add color: when one is missing the report says so (the warnings below), but the research is complete.
+    // Before 20 oct 2026 any warning made it partial: 47 of 73 in 45 days, most with a sound company profile.
+    const status = companyFactEvidence.length > 0
+        ? 'completed'
+        : hasUsefulClaim ? 'partial' : 'insufficient_data';
+    const lifecycleErrors = reportWarnings.map((warning) => createError({
+        code: warning.includes('http') ? 'provider_http_error' : warning.includes('timeout') ? 'provider_timeout' : 'insufficient_evidence',
+        stage: warning.includes('official') ? 'fetch' : 'validate',
+        message: warning.replace(/_/g, ' '),
+        retryable: !input.publicCompany || !publicCompanyCoverageWarnings(input.publicCompany.graph).includes(warning),
+    }));
+    if (status === 'insufficient_data')
+        lifecycleErrors.push(createError({ code: 'insufficient_evidence', stage: 'validate', message: 'No se obtuvo contexto público suficiente para explicar esta empresa.', retryable: true }));
+    const qualifiedEvidence = [...companyFactEvidence, ...personFactEvidence, ...qualifiedSignals.map((item) => item.evidence)];
+    const companyCoverage = Math.min(1, companyFactEvidence.length / 2);
+    const personCoverage = Math.min(1, personFactEvidence.length / 2);
+    const recentSignalCount = qualifiedSignals.filter((item) => Boolean(item.source.publishedAt)).length
+        + claims.filter((claim) => claim.id.startsWith('public-company:') && claim.kind === 'news_signal'
+            && Date.parse(claim.freshness.asOf) >= Date.parse(now) - 14 * 86_400_000
+            && Date.parse(claim.freshness.asOf) <= Date.parse(now)).length;
+    const recentCoverage = Math.min(1, recentSignalCount / 2);
+    const overallConfidence = Math.max(0, Math.min(1, 0.2 + companyCoverage * 0.55 + personCoverage * 0.1 + recentCoverage * 0.15));
+    const verifiedSourceCount = new Set(qualifiedEvidence.map((item) => item.sourceId)).size;
+    const companyFactSourceCount = new Set(companyFactEvidence.map((item) => item.sourceId)).size;
+    const researchQuality = assessResearchQuality({
+        status,
+        companyIdentityPresent: Boolean(domain || input.lead.companyName),
+        emailPresent: Boolean(input.lead.email),
+        leadRolePresent: claims.some((claim) => claim.kind === 'lead_role' && claim.classification === 'fact'),
+        evidenceCount: qualifiedEvidence.length,
+        verifiedSourceCount,
+        companyFactCount: companyFactEvidence.length,
+        companyFactSourceCount,
+        recentSignalCount,
+        overallConfidence,
+    });
+    const snapshotId = deterministicLeadResearchSnapshotId({ providerReportId: input.reportId, scopeKey: input.access.organizationId, userId: input.access.userId });
+    const snapshot = ResearchSnapshotV1Schema.parse({
+        kind: 'research_snapshot',
+        schemaVersion: 'research-snapshot/v1',
+        id: snapshotId,
+        revision: 1,
+        scope: { kind: 'organization', organizationId: input.access.organizationId, ownerUserId: input.access.userId },
+        subject: {
+            leadRef,
+            ...(input.lead.id ? { leadId: input.lead.id } : {}),
+            ...(input.lead.email ? { email: input.lead.email } : {}),
+            person: {
+                ...(input.lead.fullName ? { fullName: input.lead.fullName } : {}),
+                ...(input.lead.title ? { title: input.lead.title } : {}),
+                ...(input.lead.headline ? { headline: input.lead.headline } : {}),
+                ...(input.lead.seniority ? { seniority: input.lead.seniority } : {}),
+                ...(input.lead.departments?.length ? { departments: input.lead.departments } : {}),
+                ...(input.lead.linkedinUrl ? { linkedinUrl: input.lead.linkedinUrl } : {}),
+                ...(input.lead.city ? { city: input.lead.city } : {}),
+                ...(input.lead.country ? { country: input.lead.country } : {}),
+            },
+            company: {
+                ...(input.lead.companyName ? { name: input.lead.companyName } : {}),
+                ...(domain ? { domain } : {}),
+                ...(companyUrl ? { websiteUrl: companyUrl } : {}),
+                ...(input.lead.companyLinkedinUrl ? { linkedinUrl: input.lead.companyLinkedinUrl } : {}),
+                ...(input.lead.country ? { country: input.lead.country } : {}),
+                ...((input.lead.organizationIndustry || input.lead.industry) ? { industry: input.lead.organizationIndustry || input.lead.industry } : {}),
+                ...(input.lead.organizationSize ? { size: input.lead.organizationSize } : {}),
+                ...(input.lead.descriptionSnippet ? { description: input.lead.descriptionSnippet } : {}),
+            },
+        },
+        request: {
+            requestId: input.jobId,
+            idempotencyKey: input.requestIdempotencyKey,
+            inputFingerprint: `sha256:${hash({ lead: input.lead, options: input.options })}`,
+            provider: NATIVE_PROVIDER,
+            providerJobId: input.reportId,
+            language: input.options.language,
+            depth: input.options.depth,
+            requestedAt: now,
+        },
+        lifecycle: {
+            status,
+            queuedAt: now,
+            startedAt: now,
+            completedAt: now,
+            errors: lifecycleErrors,
+        },
+        sources,
+        evidence,
+        claims,
+        contradictions: [],
+        ...(input.publicCompany ? { publicCompanyResearch: input.publicCompany.reference } : {}),
+        quality: {
+            assessmentVersion: 'research-quality/v1',
+            coverage: { company: companyCoverage, person: personCoverage, recentSignals: recentCoverage },
+            overallConfidence,
+        },
+        createdAt: now,
+        updatedAt: now,
+    });
+    const score = researchQuality.score;
+    const priority = score >= 72 ? 'high' : score >= 48 ? 'medium' : 'low';
+    const angle = claims.find((claim) => claim.kind === 'opportunity_hypothesis')?.statement || '';
+    const result = {
+        status,
+        reportId: input.reportId,
+        researchSnapshotId: snapshotId,
+        lead: input.lead,
+        score,
+        priority,
+        evidence: evidence.map((item) => ({
+            id: item.id,
+            statement: item.statement,
+            sourceId: item.sourceId,
+            sourceUrl: sources.find((source) => source.id === item.sourceId)?.url || '',
+            kind: item.kind === 'event' ? 'signal' : item.kind === 'fact' ? 'fact' : 'hypothesis',
+        })),
+        sources: sources.map((source) => ({ id: source.id, title: source.title || source.url, url: source.url, type: source.type, provider: source.provider })),
+        angle,
+        ordenEnvio: priority === 'high' ? 1 : priority === 'medium' ? 2 : 3,
+        esperaSugeridaDias: priority === 'high' ? 2 : priority === 'medium' ? 4 : 7,
+        promptPack: {
+            context: [input.lead.fullName, input.lead.title, input.lead.companyName, domain].filter(Boolean).join(' | '),
+            claims: claims.map((claim) => claim.statement).slice(0, 8),
+            doNotClaim: ['No afirmar una necesidad que no esté respaldada por evidencia.', 'No convertir una hipótesis en un hecho.', 'No mencionar fuentes internas ni herramientas de investigación.'],
+        },
+        companyResearchCache: {
+            hit: false,
+            domain: domain || null,
+            expiresAt: null,
+            artifactId: null,
+            cacheIdentity: null,
+        },
+        quality: researchQuality,
+        draftEligibility: researchQuality.draftEligibility,
+        warnings: reportWarnings,
+    };
+    return { snapshot, result };
+}
+function mapJob(row) {
+    const idValue = text(row?.id);
+    const organizationId = text(row?.organization_id);
+    const userId = text(row?.user_id);
+    const reportId = text(row?.provider_report_id);
+    if (!idValue || !organizationId || !userId || !reportId)
+        return null;
+    return {
+        id: idValue,
+        startedAt: text(row?.started_at) || text(row?.created_at) || null,
+        organizationId,
+        userId,
+        scopeKey: text(row?.scope_key),
+        providerReportId: reportId,
+        requestIdempotencyKey: text(row?.request_idempotency_key),
+        leadRef: text(row?.lead_ref),
+        leadId: text(row?.lead_id) || null,
+        email: text(row?.email).toLowerCase() || null,
+        companyName: text(row?.company_name) || null,
+        companyDomain: text(row?.company_domain).toLowerCase() || null,
+        status: (text(row?.status).toLowerCase() || 'queued'),
+        requestClaimState: text(row?.request_claim_state) || null,
+        requestPayload: object(row?.request_payload),
+        resultPayload: row?.result_payload == null ? null : object(row.result_payload),
+        researchSnapshotId: text(row?.research_snapshot_id) || null,
+        errorCode: text(row?.error_code) || null,
+        errorMessage: text(row?.error_message) || null,
+    };
+}
+async function claimNativeResearchRequest(input) {
+    const { data, error } = await getSupabaseAdminClient().rpc('claim_native_lead_research_request_v1', {
+        p_scope_key: text(input.scopeKey),
+        p_organization_id: text(input.organizationId) || null,
+        p_user_id: text(input.userId),
+        p_request_idempotency_key: text(input.requestIdempotencyKey),
+        p_lead_ref: text(input.leadRef),
+        p_lead_id: text(input.leadId) || null,
+        p_email: text(input.email).toLowerCase() || null,
+        p_company_name: text(input.companyName) || null,
+        p_company_domain: text(input.companyDomain).toLowerCase() || null,
+        p_request_payload: object(input.requestPayload),
+        p_stale_after_seconds: Math.max(60, Math.trunc(Number(input.staleAfterSeconds) || 300)),
+    });
+    if (error)
+        throw error;
+    if (object(data).suppressed === true)
+        return null;
+    return parseLeadResearchRequestClaim(data);
+}
+async function isNativeResearchSuppressed(input) {
+    if (!input.email)
+        return false;
+    return isEmailSuppressedForScope(input.email, {
+        organizationId: input.organizationId,
+        userId: input.userId,
+    });
+}
+async function cancelNativeResearchClaim(input) {
+    const { data, error } = await getSupabaseAdminClient().rpc('cancel_native_lead_research_request_claim_v1', {
+        p_job_id: input.jobId,
+        p_scope_key: input.scopeKey,
+        p_organization_id: input.organizationId,
+        p_user_id: input.userId,
+        p_claim_token: input.claimToken,
+    });
+    if (error)
+        throw error;
+    return data === true;
+}
+async function settleSuppressedNativeResearchJobWithoutClaim(input) {
+    const { data, error } = await getSupabaseAdminClient().rpc('settle_suppressed_native_lead_research_job_v1', {
+        p_job_id: input.jobId,
+        p_scope_key: input.scopeKey,
+        p_organization_id: input.organizationId,
+        p_user_id: input.userId,
+        p_email: input.email,
+    });
+    if (error)
+        throw error;
+    return data === true;
+}
+async function patchNativeIdentity(input) {
+    const admin = getSupabaseAdminClient();
+    const { data, error } = await admin
+        .from('lead_research_jobs')
+        .update({
+        provider: NATIVE_PROVIDER,
+        provider_report_id: input.reportId,
+        request_payload: { ...input.requestPayload, native: true, provider: NATIVE_PROVIDER },
+        updated_at: new Date().toISOString(),
+    })
+        .eq('id', input.jobId)
+        .select('id')
+        .maybeSingle();
+    if (error)
+        throw error;
+    if (!data)
+        throw new Error('NATIVE_RESEARCH_PRIVACY_SUPPRESSED');
+}
+async function persistNativeResearchProviderContext(input) {
+    const { data, error } = await getSupabaseAdminClient()
+        .from('lead_research_jobs')
+        .update({
+        request_payload: input.requestPayload,
+        company_name: input.lead.companyName || null,
+        company_domain: companyResearchDomain(input.lead) || null,
+        updated_at: new Date().toISOString(),
+    })
+        .eq('id', input.job.id)
+        .eq('organization_id', input.job.organizationId)
+        .eq('user_id', input.job.userId)
+        .eq('request_claim_token', input.claimToken)
+        .select('id')
+        .maybeSingle();
+    if (error)
+        throw error;
+    if (!data)
+        throw new Error('NATIVE_RESEARCH_PROVIDER_CONTEXT_CLAIM_LOST');
+}
+async function enqueueNativeResearchInternal(input, holdClaim) {
+    assertNativeResearchEnabled();
+    const requestedLead = NativeResearchLeadSchema.parse(input.lead);
+    const apolloContext = await loadApolloResearchContext({
+        organizationId: input.access.organizationId,
+        userId: input.access.userId,
+        leadId: requestedLead.id,
+        companyDomain: requestedLead.companyDomain,
+    });
+    const lead = mergeApolloResearchContextIntoLead(requestedLead, apolloContext);
+    const options = NativeResearchOptionsSchema.parse(input.options || {});
+    const leadRef = deriveNativeResearchLeadRef(lead);
+    const requestPayload = {
+        lead,
+        options,
+        publicCompanyIdentity: sharedPublicCompanyEnabled() ? await loadApolloPublicCompanyIdentity({
+            organizationId: input.access.organizationId, userId: input.access.userId,
+            lead: requestedLead, apolloContext, language: options.language, depth: options.depth,
+        }) : null,
+        ...(apolloContext ? { apolloContext } : {}),
+        ...(input.runId ? { run_id: input.runId } : {}),
+    };
+    const claim = await claimNativeResearchRequest({
+        userId: input.access.userId,
+        organizationId: input.access.organizationId,
+        scopeKey: input.access.organizationId,
+        leadRef,
+        leadId: lead.id,
+        email: lead.email,
+        companyName: lead.companyName,
+        companyDomain: companyResearchDomain(lead),
+        requestIdempotencyKey: input.requestIdempotencyKey,
+        requestPayload,
+    });
+    if (!claim)
+        throw new Error('NATIVE_RESEARCH_PRIVACY_SUPPRESSED');
+    const reportId = claim.job.providerReportId || `native:${claim.job.id}`;
+    const needsIdentityPatch = claim.created || claim.recovered || !claim.job.providerReportId;
+    if (needsIdentityPatch) {
+        await patchNativeIdentity({ jobId: claim.job.id, reportId, requestPayload });
+    }
+    const releasableClaim = claim.claimed && Boolean(claim.claimToken) && claim.job.requestClaimState === 'pre_provider';
+    if (releasableClaim && !holdClaim) {
+        try {
+            await releaseLeadResearchRequestClaim({
+                userId: input.access.userId,
+                organizationId: input.access.organizationId,
+                scopeKey: input.access.organizationId,
+                jobId: claim.job.id,
+                claimToken: claim.claimToken,
+                errorCode: '',
+                errorMessage: '',
+            });
+        }
+        catch (error) {
+            console.warn('[native-research] initial claim release failed; worker recovery will retry:', error);
+        }
+    }
+    return {
+        jobId: claim.job.id,
+        reportId,
+        status: isTerminalNativeResearchStatus(claim.job.status) ? claim.job.status : 'queued',
+        reused: !claim.created,
+        claimToken: holdClaim && releasableClaim ? claim.claimToken : null,
+    };
+}
+export async function enqueueNativeResearch(input) {
+    const queued = await enqueueNativeResearchInternal(input, false);
+    const { claimToken: _claimToken, ...result } = queued;
+    return result;
+}
+export async function enqueueHeldNativeResearch(input) {
+    return enqueueNativeResearchInternal(input, true);
+}
+export async function releaseHeldNativeResearchClaim(input) {
+    return releaseLeadResearchRequestClaim({
+        userId: input.userId,
+        organizationId: input.organizationId,
+        scopeKey: input.organizationId,
+        jobId: input.jobId,
+        claimToken: input.claimToken,
+        errorCode: '',
+        errorMessage: '',
+    });
+}
+export async function abortHeldNativeResearchClaim(input) {
+    const { data, error } = await getSupabaseAdminClient().rpc('abort_native_lead_research_request_claim_v1', {
+        p_job_id: input.jobId,
+        p_scope_key: input.organizationId,
+        p_organization_id: input.organizationId,
+        p_user_id: input.userId,
+        p_claim_token: input.claimToken,
+        p_error_code: 'native_research_run_setup_failed',
+        p_error_message: 'The native research run could not be initialized safely.',
+    });
+    if (error)
+        throw error;
+    return data === true;
+}
+export async function findNativeResearchJob(input) {
+    const admin = getSupabaseAdminClient();
+    const query = admin
+        .from('lead_research_jobs')
+        .select('*')
+        .eq('provider', NATIVE_PROVIDER)
+        .eq('provider_report_id', input.reportId)
+        .eq('user_id', input.access.userId);
+    const { data, error } = await applyReadableOrganizationScope(query, input.access).maybeSingle();
+    if (error)
+        throw error;
+    return mapJob(data);
+}
+export async function listNativeResearchRun(input) {
+    const admin = getSupabaseAdminClient();
+    const runQuery = admin
+        .from('research_runs')
+        .select('*')
+        .eq('id', input.runId)
+        .eq('user_id', input.access.userId);
+    const { data: run, error: runError } = await applyReadableOrganizationScope(runQuery, input.access).maybeSingle();
+    if (runError)
+        throw runError;
+    if (!run)
+        return null;
+    const runOrganizationId = text(run.organization_id);
+    const { data: items, error: itemsError } = await admin
+        .from('research_run_items')
+        .select('id,job_id,lead_ref,position,status,error_code,error_message,updated_at')
+        .eq('run_id', input.runId)
+        .eq('organization_id', runOrganizationId)
+        .eq('user_id', input.access.userId)
+        .order('position', { ascending: true });
+    if (itemsError)
+        throw itemsError;
+    const jobIds = (items || []).map((item) => item.job_id).filter(Boolean);
+    const { data: jobs, error: jobsError } = jobIds.length
+        ? await admin
+            .from('lead_research_jobs')
+            .select('id,provider_report_id,status,result_payload,research_snapshot_id,error_code,error_message,organization_id,user_id,started_at,created_at')
+            .in('id', jobIds)
+            .eq('organization_id', runOrganizationId)
+            .eq('user_id', input.access.userId)
+        : { data: [], error: null };
+    if (jobsError)
+        throw jobsError;
+    const byJobId = new Map((jobs || []).map((job) => [job.id, job]));
+    return {
+        ...run,
+        items: (items || []).map((item) => ({ ...item, job: byJobId.get(item.job_id) || null })),
+    };
+}
+function resultFromStoredPayload(value) {
+    const payload = object(value);
+    const status = NativeResearchStatusSchema.safeParse(text(payload.status).toLowerCase());
+    if (!status.success || !text(payload.reportId) || !Array.isArray(payload.evidence) || !Array.isArray(payload.sources)) {
+        return null;
+    }
+    return payload;
+}
+export async function listNativeResearchLeadStatuses(input) {
+    const leadIds = [...new Set(input.leadIds.map(text).filter(Boolean))].slice(0, 200);
+    if (leadIds.length === 0)
+        return [];
+    const query = getSupabaseAdminClient()
+        .from('lead_research_jobs')
+        .select('lead_id,status,provider_report_id,research_snapshot_id,result_payload,error_code,updated_at')
+        .eq('provider', NATIVE_PROVIDER)
+        .eq('user_id', input.access.userId)
+        .in('lead_id', leadIds)
+        .order('updated_at', { ascending: false })
+        .limit(Math.min(1_000, leadIds.length * 5));
+    const { data, error } = await applyReadableOrganizationScope(query, input.access);
+    if (error)
+        throw error;
+    const latestByLeadId = new Map();
+    for (const row of data || []) {
+        const leadId = text(row.lead_id);
+        const status = NativeResearchStatusSchema.safeParse(text(row.status).toLowerCase());
+        if (!leadId || !status.success || latestByLeadId.has(leadId))
+            continue;
+        const payload = object(row.result_payload);
+        latestByLeadId.set(leadId, {
+            leadId,
+            status: status.data,
+            reportId: text(row.provider_report_id),
+            researchSnapshotId: text(row.research_snapshot_id) || text(payload.researchSnapshotId) || null,
+            result: resultFromStoredPayload(payload),
+            errorCode: text(row.error_code) || null,
+            updatedAt: text(row.updated_at) || null,
+        });
+    }
+    return Array.from(latestByLeadId.values());
+}
+async function persistNativeSnapshotRow(input) {
+    const admin = getSupabaseAdminClient();
+    const contentHash = hash(input.snapshot);
+    const { error: insertError } = await admin.from('research_snapshots').upsert({
+        id: input.snapshot.id,
+        scope_key: input.job.organizationId,
+        organization_id: input.job.organizationId,
+        user_id: input.job.userId,
+        lead_ref: input.snapshot.subject.leadRef,
+        source: NATIVE_PROVIDER,
+        schema_version: 1,
+        payload: input.snapshot,
+        content_hash: contentHash,
+        captured_at: input.snapshot.createdAt,
+        created_at: input.snapshot.createdAt,
+    }, { onConflict: 'id', ignoreDuplicates: true });
+    if (insertError)
+        throw insertError;
+    const { data: owned, error: ownedError } = await admin
+        .from('research_snapshots')
+        .select('id,content_hash')
+        .eq('id', input.snapshot.id)
+        .eq('organization_id', input.job.organizationId)
+        .eq('user_id', input.job.userId)
+        .maybeSingle();
+    if (ownedError)
+        throw ownedError;
+    if (!owned || owned.content_hash !== contentHash)
+        throw new Error('NATIVE_RESEARCH_SNAPSHOT_CONFLICT');
+    return input.snapshot.id;
+}
+async function persistNativeSnapshot(input) {
+    const admin = getSupabaseAdminClient();
+    const serialized = canonicalJson(input.output.snapshot);
+    await persistNativeSnapshotRow({ job: input.job, snapshot: input.output.snapshot });
+    const resultPayload = {
+        ...input.output.result,
+        snapshot: input.output.snapshot,
+        serialized_size: serialized.length,
+        provider_status: input.output.snapshot.lifecycle.status,
+        research_snapshot_id: input.output.snapshot.id,
+    };
+    const { error: jobError } = await admin
+        .from('lead_research_jobs')
+        .update({
+        status: input.output.snapshot.lifecycle.status,
+        result_payload: resultPayload,
+        research_snapshot_id: input.output.snapshot.id,
+        error_code: null,
+        error_message: null,
+        completed_at: input.output.snapshot.lifecycle.completedAt || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    })
+        .eq('id', input.job.id)
+        .eq('organization_id', input.job.organizationId)
+        .eq('user_id', input.job.userId)
+        .is('research_snapshot_id', null);
+    if (jobError)
+        throw jobError;
+    return input.output.snapshot.id;
+}
+async function ensureNativeResearchReport(job, snapshot) {
+    const access = { organizationId: job.organizationId, userId: job.userId };
+    try {
+        const configuration = await loadReportV2SellerConfiguration(access);
+        if (configuration.mode === 'visible')
+            return { document: null, synthesis: null };
+    }
+    catch {
+        // An invalid V2 configuration must not break the already-shipped V1 report path.
+    }
+    const sellerProfile = await loadSellerProfile(job.userId, job.organizationId);
+    return tryEnsureResearchReportDocument({ snapshot, access, sellerProfile });
+}
+async function tryEnqueueNativeResearchReportV2(job, snapshot) {
+    try {
+        const configuration = await loadReportV2SellerConfiguration({
+            organizationId: job.organizationId,
+            userId: job.userId,
+        });
+        if (configuration.mode === 'off')
+            return;
+        await enqueueResearchReportSynthesis({
+            researchSnapshotId: snapshot.id,
+            schemaVersion: RESEARCH_REPORT_V2_SCHEMA_VERSION,
+            promptVersion: RESEARCH_REPORT_V2_RUNTIME_VERSION,
+            sellerProfileHash: configuration.synthesisContextHash,
+        });
+    }
+    catch (error) {
+        console.error('[native-research] Report V2 enqueue failed:', {
+            jobId: job.id,
+            researchSnapshotId: snapshot.id,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
+function attachReportSynthesis(result, report) {
+    if (report.document) {
+        const metadata = researchReportDocumentMetadata(report.document);
+        result.reportSynthesis = {
+            status: metadata.status,
+            generationMethod: 'model',
+            retryable: metadata.retryable,
+            errorCode: metadata.errorCode,
+        };
+        return;
+    }
+    const state = publicResearchReportSynthesisState(report.synthesis);
+    if (!state)
+        return;
+    result.reportSynthesis = {
+        status: state.status,
+        generationMethod: null,
+        retryable: state.retryable,
+        errorCode: state.errorCode,
+        attemptCount: state.attemptCount,
+        nextRetryAt: state.nextRetryAt,
+    };
+}
+export async function settleNativeResearchRunItems(input) {
+    const admin = getSupabaseAdminClient();
+    const { error } = await admin.rpc('settle_native_research_run_items_v1', {
+        p_job_id: input.jobId,
+        p_organization_id: input.organizationId,
+        p_user_id: input.userId,
+        p_status: input.status,
+        p_error_code: input.errorCode || null,
+        p_error_message: input.errorMessage || null,
+    });
+    if (error)
+        throw error;
+}
+async function updateRunItem(input) {
+    return settleNativeResearchRunItems({
+        jobId: input.job.id,
+        organizationId: input.job.organizationId,
+        userId: input.job.userId,
+        status: input.status,
+        errorCode: input.errorCode,
+        errorMessage: input.errorMessage,
+    });
+}
+async function settleSuppressedNativeResearchJob(input) {
+    const cancelled = input.claimToken
+        ? await cancelNativeResearchClaim({
+            ...input.access,
+            jobId: input.job.id,
+            claimToken: input.claimToken,
+        })
+        : await settleSuppressedNativeResearchJobWithoutClaim({
+            ...input.access,
+            jobId: input.job.id,
+            email: input.job.email,
+        });
+    if (cancelled) {
+        await updateRunItem({
+            job: input.job,
+            status: 'failed',
+            errorCode: 'privacy_suppressed',
+            errorMessage: 'Research was cancelled because the recipient is suppressed.',
+        });
+    }
+    return cancelled;
+}
+async function processJob(job) {
+    const access = { organizationId: job.organizationId, userId: job.userId, scopeKey: job.scopeKey };
+    const claim = await claimNativeResearchRequest({
+        userId: job.userId,
+        organizationId: job.organizationId,
+        scopeKey: job.scopeKey,
+        leadRef: job.leadRef,
+        leadId: job.leadId,
+        email: job.email,
+        companyName: job.companyName,
+        companyDomain: job.companyDomain,
+        requestIdempotencyKey: job.requestIdempotencyKey,
+        requestPayload: job.requestPayload,
+        staleAfterSeconds: 180,
+    });
+    if (!claim) {
+        await settleSuppressedNativeResearchJob({ job, access });
+        return false;
+    }
+    if (!claim.claimed || !claim.claimToken) {
+        if (claim.job.requestClaimState === 'provider_unknown' || claim.job.requestClaimState === 'provider_failed') {
+            await updateRunItem({
+                job,
+                status: claim.job.status,
+                errorCode: claim.job.errorCode,
+                errorMessage: claim.job.errorMessage,
+            });
+        }
+        return false;
+    }
+    const owned = { ...access, jobId: job.id, claimToken: claim.claimToken };
+    if (await isNativeResearchSuppressed(job)) {
+        await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+        return false;
+    }
+    const recoveringTerminalResult = claim.job.requestClaimState === 'terminal_pending';
+    let terminalCheckpointStored = recoveringTerminalResult;
+    try {
+        if (recoveringTerminalResult) {
+            const durableSnapshot = ResearchSnapshotV1Schema.parse(object(claim.job.resultPayload?.snapshot));
+            const durableResult = { ...object(claim.job.resultPayload) };
+            delete durableResult.snapshot;
+            const recoveredResult = durableResult;
+            const recoveredJob = {
+                ...job,
+                providerReportId: claim.job.providerReportId || job.providerReportId,
+                status: claim.job.status,
+                requestClaimState: claim.job.requestClaimState,
+                requestPayload: claim.job.requestPayload,
+                resultPayload: claim.job.resultPayload,
+                researchSnapshotId: claim.job.researchSnapshotId,
+                errorCode: claim.job.errorCode,
+                errorMessage: claim.job.errorMessage,
+            };
+            await persistNativeSnapshotRow({ job: recoveredJob, snapshot: durableSnapshot });
+            const report = await ensureNativeResearchReport(recoveredJob, durableSnapshot);
+            attachReportSynthesis(recoveredResult, report);
+            if (await isNativeResearchSuppressed(recoveredJob)) {
+                await settleSuppressedNativeResearchJob({ job: recoveredJob, access, claimToken: claim.claimToken });
+                return false;
+            }
+            const snapshotId = await persistNativeSnapshot({
+                job: recoveredJob,
+                output: { snapshot: durableSnapshot, result: recoveredResult },
+            });
+            await tryEnqueueNativeResearchReportV2(recoveredJob, durableSnapshot);
+            await completeLeadResearchRequestClaim({
+                ...owned,
+                providerReportId: recoveredJob.providerReportId,
+                status: durableSnapshot.lifecycle.status,
+                leadRef: recoveredJob.leadRef,
+                leadId: recoveredJob.leadId,
+                email: recoveredJob.email,
+                companyName: recoveredJob.companyName,
+                companyDomain: recoveredJob.companyDomain,
+                requestPayload: recoveredJob.requestPayload,
+                phase: 'release',
+            });
+            await updateRunItem({ job: recoveredJob, status: durableSnapshot.lifecycle.status });
+            console.info('[native-research] recovered terminal result', { jobId: job.id, snapshotId });
+            return true;
+        }
+        const limits = await getEffectiveDailyQuotaLimits({ userId: job.userId, organizationId: job.organizationId });
+        const quota = await consumeLeadResearchRequestQuota({ ...owned, limit: limits.research });
+        if (!quota.allowed) {
+            await releaseLeadResearchRequestClaim({ ...owned, errorCode: 'daily_research_quota_exceeded', errorMessage: 'Daily research quota exceeded.' });
+            await updateRunItem({ job, status: 'failed', errorCode: 'daily_research_quota_exceeded', errorMessage: 'Daily research quota exceeded.' });
+            return false;
+        }
+        if (await isNativeResearchSuppressed(job)) {
+            await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+            return false;
+        }
+        const requestedLead = NativeResearchLeadSchema.parse({
+            id: job.leadId,
+            fullName: object(job.requestPayload.lead).fullName,
+            email: job.email,
+            title: object(job.requestPayload.lead).title,
+            headline: object(job.requestPayload.lead).headline,
+            seniority: object(job.requestPayload.lead).seniority,
+            departments: object(job.requestPayload.lead).departments,
+            linkedinUrl: object(job.requestPayload.lead).linkedinUrl,
+            companyName: job.companyName,
+            companyDomain: job.companyDomain,
+            companyWebsite: object(job.requestPayload.lead).companyWebsite,
+            companyLinkedinUrl: object(job.requestPayload.lead).companyLinkedinUrl,
+            descriptionSnippet: object(job.requestPayload.lead).descriptionSnippet,
+            industry: object(job.requestPayload.lead).industry,
+            organizationIndustry: object(job.requestPayload.lead).organizationIndustry,
+            organizationSize: object(job.requestPayload.lead).organizationSize,
+            city: object(job.requestPayload.lead).city,
+            country: object(job.requestPayload.lead).country,
+        });
+        const apolloContext = await loadApolloResearchContext({
+            organizationId: job.organizationId,
+            userId: job.userId,
+            leadId: job.leadId,
+            companyDomain: job.companyDomain,
+        }) || parseApolloResearchContext(job.requestPayload.apolloContext);
+        const lead = mergeApolloResearchContextIntoLead(requestedLead, apolloContext);
+        const options = NativeResearchOptionsSchema.parse(object(job.requestPayload.options));
+        const requestPayload = {
+            ...job.requestPayload,
+            lead,
+            options,
+            ...(apolloContext ? { apolloContext } : {}),
+        };
+        await persistNativeResearchProviderContext({ job, claimToken: claim.claimToken, requestPayload, lead });
+        job.requestPayload = requestPayload;
+        job.companyName = lead.companyName || null;
+        job.companyDomain = companyResearchDomain(lead) || null;
+        await markLeadResearchRequestProviderSubmitting(owned);
+        if (await isNativeResearchSuppressed(job)) {
+            await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+            return false;
+        }
+        // Enrollment is fixed at enqueue; retries revalidate but never enroll legacy jobs.
+        const publicIdentity = job.requestPayload.publicCompanyIdentity
+            ? PublicCompanyIdentitySchema.parse(job.requestPayload.publicCompanyIdentity) : null;
+        if (publicIdentity) {
+            const currentIdentity = await loadApolloPublicCompanyIdentity({
+                organizationId: job.organizationId, userId: job.userId, lead: requestedLead,
+                apolloContext, language: options.language, depth: options.depth,
+            });
+            if (publicIdentity.domain !== companyResearchDomain(lead)
+                || canonicalJson(publicIdentity) !== canonicalJson(currentIdentity))
+                throw new Error('PUBLIC_COMPANY_SCOPE_MISMATCH');
+        }
+        let publicCompany;
+        if (publicIdentity) {
+            try {
+                publicCompany = await loadPublicCompany({ identity: publicIdentity, organizationId: job.organizationId, refresh: options.refresh });
+            }
+            catch (error) {
+                if (!(error instanceof Error) || error.message !== 'PUBLIC_COMPANY_RESEARCH_BUSY')
+                    throw error;
+                await releaseLeadResearchRequestClaim({ ...owned, errorCode: 'company_research_in_progress', errorMessage: 'Public company research is in progress.' });
+                await updateRunItem({ job, status: 'queued', errorCode: 'company_research_in_progress', errorMessage: 'Public company research is in progress.' });
+                return false;
+            }
+        }
+        const company = publicCompany ? {
+            signals: emptyCompanySignals(publicIdentity.domain), cacheHit: publicCompany.metrics.state === 'hit',
+            expiresAt: publicCompany.reference.expiresAt, artifactId: publicCompany.reference.artifactId,
+            cacheIdentity: hash(publicIdentity), busy: false, warnings: publicCompanyCoverageWarnings(publicCompany.graph),
+        } : await collectCompanySignals({ organizationId: job.organizationId, lead, options, apolloContext });
+        if (company.busy) {
+            await releaseLeadResearchRequestClaim({
+                ...owned,
+                errorCode: 'company_research_in_progress',
+                errorMessage: 'A matching company research artifact is already being generated.',
+            });
+            await updateRunItem({
+                job,
+                status: 'queued',
+                errorCode: 'company_research_in_progress',
+                errorMessage: 'A matching company research artifact is already being generated.',
+            });
+            return false;
+        }
+        const [search, person] = await Promise.all([
+            publicCompany ? Promise.resolve({ profile: {}, news: {}, jobs: {}, mentions: {}, similarweb: {}, warnings: [] }) : collectSearchSignals({ organizationId: job.organizationId, lead, options }),
+            collectPublicPersonEvidence({ organizationId: job.organizationId, lead, options }),
+        ]);
+        if (await isNativeResearchSuppressed(job)) {
+            await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+            return false;
+        }
+        const output = buildSnapshot({
+            jobId: job.id,
+            reportId: job.providerReportId,
+            requestIdempotencyKey: job.requestIdempotencyKey,
+            access,
+            lead,
+            options,
+            company: company.signals,
+            profile: search.profile,
+            news: search.news,
+            jobs: search.jobs,
+            mentions: search.mentions,
+            similarweb: search.similarweb,
+            person,
+            publicCompany,
+            warnings: [...company.warnings, ...search.warnings, ...person.warnings],
+        });
+        if (!publicCompany)
+            output.snapshot = await enrichCompanyResearchSnapshotV1(output.snapshot, apolloContext);
+        output.result.promptPack.claims = output.snapshot.claims.map((item) => item.statement).slice(0, 8);
+        output.result.companyResearchCache = {
+            hit: company.cacheHit,
+            domain: company.signals.domain || null,
+            expiresAt: company.expiresAt,
+            artifactId: company.artifactId,
+            cacheIdentity: company.cacheIdentity,
+            ...(publicCompany ? { revision: publicCompany.reference.revision, metrics: { company: publicCompany.metrics, lead: person.metrics || null } } : {}),
+        };
+        if (await isNativeResearchSuppressed(job)) {
+            await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+            return false;
+        }
+        const terminalResultPayload = { ...output.result, snapshot: output.snapshot };
+        await completeLeadResearchRequestClaim({
+            ...owned,
+            providerReportId: job.providerReportId,
+            status: output.snapshot.lifecycle.status,
+            leadRef: job.leadRef,
+            leadId: job.leadId,
+            email: job.email,
+            companyName: job.companyName,
+            companyDomain: job.companyDomain,
+            requestPayload: job.requestPayload,
+            resultPayload: terminalResultPayload,
+            phase: 'store_terminal',
+        });
+        terminalCheckpointStored = true;
+        await persistNativeSnapshotRow({ job, snapshot: output.snapshot });
+        const report = await ensureNativeResearchReport(job, output.snapshot);
+        attachReportSynthesis(output.result, report);
+        if (await isNativeResearchSuppressed(job)) {
+            await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+            return false;
+        }
+        const snapshotId = await persistNativeSnapshot({ job, output });
+        await tryEnqueueNativeResearchReportV2(job, output.snapshot);
+        await completeLeadResearchRequestClaim({
+            ...owned,
+            providerReportId: job.providerReportId,
+            status: output.snapshot.lifecycle.status,
+            leadRef: job.leadRef,
+            leadId: job.leadId,
+            email: job.email,
+            companyName: job.companyName,
+            companyDomain: job.companyDomain,
+            requestPayload: job.requestPayload,
+            phase: 'release',
+        });
+        await updateRunItem({ job, status: output.snapshot.lifecycle.status });
+        console.info('[native-research] completed', { jobId: job.id, snapshotId, status: output.snapshot.lifecycle.status });
+        return true;
+    }
+    catch (error) {
+        const message = text(error?.message) || 'Native research failed.';
+        if (!terminalCheckpointStored) {
+            try {
+                await failLeadResearchRequestClaim({ ...owned, errorCode: 'native_research_failed', errorMessage: message, resultPayload: { provider_status: 'failed' } });
+            }
+            catch (persistError) {
+                console.error('[native-research] failed to persist job error:', persistError);
+            }
+            await updateRunItem({ job, status: 'failed', errorCode: 'native_research_failed', errorMessage: message });
+        }
+        console.error('[native-research] job failed:', { jobId: job.id, error: message });
+        return false;
+    }
+}
+export async function processNativeResearchQueue(input = {}) {
+    if (!isNativeResearchEnabled()) {
+        return { claimed: 0, completed: 0, failed: 0 };
+    }
+    const admin = getSupabaseAdminClient();
+    const limit = Math.max(1, Math.min(25, Math.trunc(Number(input.limit) || 5)));
+    const now = new Date();
+    const dueAt = now.toISOString();
+    const staleAt = new Date(now.getTime() - 180_000).toISOString();
+    const scopedQueue = (query) => {
+        if (input.organizationId)
+            query = query.eq('organization_id', input.organizationId);
+        if (input.userId)
+            query = query.eq('user_id', input.userId);
+        return query;
+    };
+    const readyQuery = () => scopedQueue(admin
+        .from('lead_research_jobs')
+        .select('*')
+        .eq('provider', NATIVE_PROVIDER)
+        .in('status', ['queued', 'running', 'completed', 'partial', 'insufficient_data'])
+        .in('request_claim_state', ['retryable', 'terminal_pending'])
+        .lte('scheduled_for', dueAt)
+        .order('scheduled_for', { ascending: true })
+        .order('created_at', { ascending: true })
+        .limit(limit));
+    const stalePreProviderQuery = () => scopedQueue(admin
+        .from('lead_research_jobs')
+        .select('*')
+        .eq('provider', NATIVE_PROVIDER)
+        .eq('status', 'queued')
+        .eq('request_claim_state', 'pre_provider')
+        .lte('scheduled_for', dueAt)
+        .lt('request_claimed_at', staleAt)
+        .order('request_claimed_at', { ascending: true })
+        .limit(limit));
+    const staleSubmittingQuery = () => scopedQueue(admin
+        .from('lead_research_jobs')
+        .select('*')
+        .eq('provider', NATIVE_PROVIDER)
+        .eq('status', 'running')
+        .eq('request_claim_state', 'provider_submitting')
+        .lte('scheduled_for', dueAt)
+        .lt('request_claimed_at', staleAt)
+        .order('request_claimed_at', { ascending: true })
+        .limit(limit));
+    const [{ data: ready }, { data: stalePreProvider }, { data: staleSubmitting },] = await Promise.all([
+        readResearchQueue('collection-ready', readyQuery),
+        readResearchQueue('collection-stale-pre-provider', stalePreProviderQuery),
+        readResearchQueue('collection-stale-submitting', staleSubmittingQuery),
+    ]);
+    const seen = new Set();
+    const jobs = [...(staleSubmitting || []), ...(stalePreProvider || []), ...(ready || [])]
+        .map(mapJob)
+        .filter((job) => Boolean(job))
+        .filter((job) => !seen.has(job.id) && Boolean(seen.add(job.id)))
+        .slice(0, limit);
+    let completed = 0;
+    for (const job of jobs) {
+        if (await processJob(job))
+            completed += 1;
+    }
+    await processResearchReportSynthesisQueue({
+        limit,
+        organizationId: input.organizationId,
+        userId: input.userId,
+    });
+    return { claimed: jobs.length, completed, failed: jobs.length - completed };
+}
+export async function getNativeSnapshot(input) {
+    const admin = getSupabaseAdminClient();
+    const query = admin
+        .from('research_snapshots')
+        .select('id,organization_id,payload,content_hash,captured_at')
+        .eq('id', input.snapshotId)
+        .eq('user_id', input.access.userId);
+    const { data, error } = await applyReadableOrganizationScope(query, input.access).maybeSingle();
+    if (error)
+        throw error;
+    return data || null;
+}
+export function nativeResearchJobToResult(job) {
+    return {
+        jobId: job.id,
+        startedAt: job.startedAt || null,
+        reportId: job.providerReportId,
+        status: job.status,
+        researchSnapshotId: job.researchSnapshotId,
+        result: job.resultPayload,
+        errorCode: job.errorCode,
+        errorMessage: job.errorMessage,
+    };
+}
+export const nativeResearchInternals = {
+    buildSnapshot,
+    boundedOfficialSiteChunk,
+    canonicalResearchSourceUrl,
+    candidateOfficialPageUrls,
+    companySignalsFromArtifactPayload,
+    fetchOfficialSite,
+    isPrivateIpAddress,
+    isRelevantSearchResult,
+    isSafeOfficialSiteUrl,
+    officialPageFromHtml,
+    pinnedOfficialSiteLookup,
+    selectBalancedSearchSignals,
+    usefulOfficialPageContent,
+    usefulOfficialPageContents,
+    visibleSignalLimit,
+};
