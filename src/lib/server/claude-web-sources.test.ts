@@ -4,7 +4,7 @@ import { call, reply, ScriptedModel, usageOf } from '@/lib/agent-harness/scripte
 import type { ContentBlock, ServerBlock } from '@/lib/agent-harness/index';
 import { claudeWebSourcesSettings, findResearchSourcesWithClaude, type ClaudeWebSourcesSettings } from './claude-web-sources';
 
-const settings: ClaudeWebSourcesSettings = { model: 'claude-sonnet-5-5', effort: 'low', searches: 6, fetches: 3, maxSources: 8, deadlineMs: 30_000, basic: true };
+const settings: ClaudeWebSourcesSettings = { model: 'claude-haiku-5-5', effort: 'low', searches: 6, fetches: 3, maxSources: 8, deadlineMs: 30_000, basic: true };
 const input = { companyName: 'Enaex', domain: 'enaex.com', country: 'CL', contactTitle: 'Gerente de Personas', department: 'Recursos Humanos', sellerOffer: 'AXIS revisa antecedentes' };
 
 const search = (id: string, query: string): ServerBlock => ({ type: 'server_tool_use', id, name: 'web_search', input: { query } });
@@ -24,7 +24,7 @@ test('the researcher is off unless the flag is on and there is a key, and its li
   assert.equal(claudeWebSourcesSettings({ RESEARCH_CLAUDE_WEB_ENABLED: 'true' }), null, 'without a key there is no Claude');
   assert.equal(claudeWebSourcesSettings({ ANTHROPIC_API_KEY: 'k' }), null, 'the key alone turns nothing on');
   assert.deepEqual(claudeWebSourcesSettings({ RESEARCH_CLAUDE_WEB_ENABLED: 'true', ANTHROPIC_API_KEY: 'k' }),
-    { model: 'claude-sonnet-5-5', effort: 'low', searches: 6, fetches: 3, maxSources: 8, deadlineMs: 45_000, basic: true });
+    { model: 'claude-haiku-5-5', effort: 'low', searches: 6, fetches: 3, maxSources: 8, deadlineMs: 45_000, basic: true });
   assert.deepEqual(claudeWebSourcesSettings({ RESEARCH_CLAUDE_WEB_ENABLED: 'true', ANTHROPIC_API_KEY: 'k', RESEARCH_CLAUDE_WEB_MODEL: 'claude-haiku-5-5', RESEARCH_CLAUDE_WEB_EFFORT: 'medium',
     RESEARCH_CLAUDE_WEB_SEARCHES: '99', RESEARCH_CLAUDE_WEB_FETCHES: '0', RESEARCH_CLAUDE_WEB_SOURCES: '0', RESEARCH_CLAUDE_WEB_DEADLINE_MS: '5', RESEARCH_CLAUDE_WEB_BASIC: 'false' }),
   { model: 'claude-haiku-5-5', effort: 'medium', searches: 10, fetches: 0, maxSources: 1, deadlineMs: 10_000, basic: false });

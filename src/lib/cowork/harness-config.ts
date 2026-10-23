@@ -94,7 +94,7 @@ export function coworkWebSettings(env: Record<string, string | undefined> = type
  */
 export function coworkSubagentSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env, web: WebSettings | null = coworkWebSettings(env)): CoworkSubagentSettings | null {
   if (env.COWORK_SUBAGENTS_ENABLED?.trim() !== 'true' || !web) return null;
-  const model = env.COWORK_SUBAGENT_MODEL?.trim() || env.COWORK_HARNESS_MODEL?.trim() || 'claude-sonnet-5-5';
+  const model = env.COWORK_SUBAGENT_MODEL?.trim() || env.COWORK_HARNESS_MODEL?.trim() || 'claude-haiku-5-5';
   // An expensive tier does not run them (src/ai/blocked-models.ts): without sub-agents the coordinator reads the web itself.
   if (isBlockedModel(model)) return null;
   return {
@@ -127,7 +127,7 @@ export function coworkWebAvailable(env: Record<string, string | undefined> = typ
 }
 
 /**
- * The harness runtime's settings, or null when it is off. The model is a Claude (COWORK_HARNESS_MODEL, Sonnet by default: the coordinator
+ * The harness runtime's settings, or null when it is off. The model is a Claude (COWORK_HARNESS_MODEL, Haiku by default, the only Claude allowed with Sonnet out: the coordinator
  * is the part of Cowork that reads the most and decides the most). Rounds stay within what the ledger admits; with several tools asked
  * in one round, five rounds are enough for a turn that reads, proposes and answers.
  */
@@ -135,7 +135,7 @@ export function coworkHarnessSettings(env: Record<string, string | undefined> = 
   if (!coworkHarnessEnabled(env, userId)) return null;
   const effort = EFFORTS.find(item => item === env.COWORK_HARNESS_EFFORT?.trim()) ?? 'medium';
   return {
-    model: env.COWORK_HARNESS_MODEL?.trim() || 'claude-sonnet-5-5',
+    model: env.COWORK_HARNESS_MODEL?.trim() || 'claude-haiku-5-5',
     effort,
     maxRounds: bounded(env.COWORK_HARNESS_MAX_ROUNDS, 2, COWORK_MAX_COORDINATOR_CALLS, COWORK_MAX_COORDINATOR_CALLS),
     maxReads: bounded(env.COWORK_HARNESS_MAX_READS, 1, 12, 6),

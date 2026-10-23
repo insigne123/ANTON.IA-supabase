@@ -36,13 +36,13 @@ const bounded = (value: string | undefined, min: number, max: number, fallback: 
 
 /**
  * Off unless RESEARCH_SIGNAL_HARVEST_ENABLED=true and there is an Anthropic key. Each research adds one call to a Claude over its facts
- * (about 10 000 tokens in, 500 out: US$0,03 with Sonnet): RESEARCH_SIGNAL_HARVEST_MODEL, _MAX (3), _FACTS (80), _DAYS (30) and
+ * (about 10 000 tokens in, 500 out: US$0,001 with Haiku): RESEARCH_SIGNAL_HARVEST_MODEL, _MAX (3), _FACTS (80), _DAYS (30) and
  * _DEADLINE_MS (45 000) bound it.
  */
 export function signalHarvestSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env): SignalHarvestSettings | null {
   if (env.RESEARCH_SIGNAL_HARVEST_ENABLED?.trim() !== 'true' || !env.ANTHROPIC_API_KEY?.trim()) return null;
   return {
-    model: env.RESEARCH_SIGNAL_HARVEST_MODEL?.trim() || 'claude-sonnet-5-5',
+    model: env.RESEARCH_SIGNAL_HARVEST_MODEL?.trim() || 'claude-haiku-5-5',
     maxSignals: bounded(env.RESEARCH_SIGNAL_HARVEST_MAX, 1, 5, 3),
     maxFacts: bounded(env.RESEARCH_SIGNAL_HARVEST_FACTS, 20, 150, 80),
     recencyDays: bounded(env.RESEARCH_SIGNAL_HARVEST_DAYS, 7, 365, 30),

@@ -1,9 +1,9 @@
 import type { StructuredTelemetry } from '@/ai/openai-json';
 export type OpportunityRole = 'screen' | 'extract' | 'specialist' | 'report' | 'chat';
-/** The report's writer is Sonnet; everyone else, the specialists who review before it writes included, is Haiku. */
+/** Every role is Haiku, the report's writer included: Sonnet is out of the app (src/ai/blocked-models.ts), and Luna can be named instead. */
 export function opportunityModel(role: OpportunityRole, env: Record<string,string|undefined> = process.env) {
-  const wanted = env[`OPPORTUNITIES_${role.toUpperCase()}_MODEL`] || (role === 'report' ? 'claude-sonnet-5-5' : 'claude-haiku-5-5');
-  if (!['claude-haiku-5-5','claude-sonnet-5-5','gpt-6-luna'].includes(wanted)) throw new Error('El modelo configurado no está permitido para Oportunidades.');
+  const wanted = env[`OPPORTUNITIES_${role.toUpperCase()}_MODEL`] || 'claude-haiku-5-5';
+  if (!['claude-haiku-5-5','gpt-6-luna'].includes(wanted)) throw new Error('El modelo configurado no está permitido para Oportunidades.');
   return wanted;
 }
 export function opportunityUsageCost(telemetry: StructuredTelemetry, price: { input:number;output:number;cache:number;write:number }) {
