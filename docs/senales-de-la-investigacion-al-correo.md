@@ -57,6 +57,10 @@ Lo que sale es una afirmación común (`dimension: signal`, apoyada en los hecho
 - **Muestra pequeña**: 8 empresas, una corrida por variante y dos para la comparación final. Sirve para ver por dónde se pierden las señales y que el cambio va en la dirección buena, no para afirmar cuánto mejora.
 - **La ventana de 30 días del borrador deja fuera lo más reciente que sí existe** (resultados de agosto, un plan de inversión): es una regla de producto; ver la decisión abajo.
 
+## Dónde corre
+
+La cosecha (y el investigador de páginas del PR 497) corren en la investigación del informe v2 que lee páginas, `gatherReportV2Research`. Con la investigación pública compartida (`SHARED_PUBLIC_COMPANY_RESEARCH_ENABLED`, que `apphosting.yaml` no enciende hoy) la investigación sale de un artefacto guardado de la empresa y ese camino no lee páginas, así que la cosecha no corre. Las señales en el borrador (`DRAFT_SIGNAL_EVIDENCE_ENABLED`) sirven con cualquier informe v2.
+
 ## Para encenderlo
 
 Orden sugerido, con una cuenta y mirando una semana: `RESEARCH_SIGNAL_HARVEST_ENABLED=true` (necesita `ANTHROPIC_API_KEY`) y después `DRAFT_SIGNAL_EVIDENCE_ENABLED=true`. La segunda cambia qué hecho abre el correo, así que conviene leer los primeros correos a mano. Para repetir la medida:
