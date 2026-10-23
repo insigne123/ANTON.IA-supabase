@@ -6,7 +6,7 @@ novedades y decisiones pendientes para cada persona. Nada sale a la red y ningun
 
 ## Qué se probó
 
-Once recorridos (`journeys/opportunities.mjs`), cada uno una meta de verdad, con el computador y el teléfono:
+Doce recorridos (`journeys/opportunities.mjs`), cada uno una meta de verdad, con el computador y el teléfono:
 
 | Persona | Meta | Clics |
 |---|---|---|
@@ -14,6 +14,7 @@ Once recorridos (`journeys/opportunities.mjs`), cada uno una meta de verdad, con
 | Administrador | Asignar desde la oportunidad ya abierta | 3 |
 | Administrador | Responder la decisión que pidió un integrante (desde «Novedades») | 2 |
 | Administrador | Marcar una oportunidad como presentada | 3 (antes 4: «Plan y tareas» y bajar hasta el final) |
+| Administrador | Cerrar una oportunidad presentada como perdida, con su motivo | 3 (la etapa, una línea opcional y confirmar) |
 | Administrador | Marcar un paso del informe como hecho | 1 |
 | Integrante | Abrir lo más urgente y empezar a gestionarlo | 2 |
 | Integrante | Reportar un bloqueo con su motivo | 1 |
@@ -52,10 +53,16 @@ respuestas de error de la app.
   los filtros). **Hecho después (23 oct):** el estado de la oferta pasó de tarjeta a una línea con sus tres acciones («Qué buscamos»,
   «Ficha para licitaciones», «Actualizar oportunidades»), y «Antes de postular» de tarjeta a una línea que se despliega. Con la oferta
   por confirmar sigue la tarjeta, que ahí sí es la tarea. El embudo empieza 76 px más arriba a 1440 px (su título pasa de 675 a 599 px) y
-  «Novedades», lo que el administrador tiene que atender, queda como la única tarjeta de arriba; los once recorridos terminan con los mismos
+  «Novedades», lo que el administrador tiene que atender, queda como la única tarjeta de arriba; los once recorridos de entonces terminan con los mismos
   clics y `audit:visual` no da hallazgos de accesibilidad ni de desborde en claro y oscuro, a 390 y 1440 px. Queda mover los filtros dentro
   del embudo, que es una decisión de diseño más grande.
-- Cambiar de etapa a «Ganada» o «Perdida» no pide un motivo; para aprender qué se gana y qué no, convendría una línea opcional.
+- **Hecho (23 oct):** cambiar de etapa a «Ganada» o «Perdida» (desde el embudo, desde una sugerencia de la IA o desde «Cambiar etapa» de la
+  oportunidad) abre un diálogo corto, «Pasar a Perdida», con una línea opcional («Ej.: adjudicaron a otra empresa con menor plazo de
+  entrega»). Se puede confirmar con la línea vacía o cancelar para dejar la oportunidad donde estaba; si el servidor responde con un error
+  (la oportunidad cambió mientras tanto), el error se dice dentro del diálogo y la línea no se pierde. El motivo queda en la actividad de la
+  oportunidad junto a la etapa nueva («Estado: perdida. Adjudicaron a otra empresa…»): el servidor ya aceptaba una nota al cambiar de etapa
+  (la usa el bloqueo), así que no hay migración ni cambio de datos. Ver los motivos juntos para aprender qué se gana y qué no sería lo
+  siguiente.
 
 ## Cómo repetirlo
 
