@@ -32,6 +32,10 @@ export function memberSteps(state: WorkState | null | undefined): MemberStep[] {
   }
 }
 
+/** The stages an administrator can move an opportunity to from the page itself: every one but where it already is. */
+export const ADMIN_STAGES: readonly WorkState[] = ['assigned', 'working', 'blocked', 'submitted', 'won', 'lost', 'archived'];
+export const adminMoves = (from: WorkState | null | undefined): WorkState[] => ADMIN_STAGES.filter(state => state !== from);
+
 /** Whether a person who is not an administrator may take the opportunity from `from` to `to`. */
 export function memberMayMove(from: WorkState | null | undefined, to: WorkState) {
   if (!MEMBER_STATES.includes(to)) return false;

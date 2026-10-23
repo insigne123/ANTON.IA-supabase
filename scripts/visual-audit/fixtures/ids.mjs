@@ -13,6 +13,8 @@ export function makeContext({ ownerEmail, now = Date.now(), pageGuideIds = [] })
     pageGuideIds,
     memberEmail: 'diego.fuentes@yago-qa.cl',
     uid,
+    /** The n-th opportunity of fixtures/opportunities.mjs, for the tables that point at it. */
+    opp: n => uid(9510 + n),
     minutesAgo: n => at(n * 60_000),
     hoursAgo: n => at(n * 3_600_000),
     daysAgo: n => at(n * 86_400_000),

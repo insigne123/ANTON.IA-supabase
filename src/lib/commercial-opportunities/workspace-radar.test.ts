@@ -65,7 +65,7 @@ test('the evaluation asks why an excluded one was left out and keeps it next to 
   assert.match(sources, /motive: z\.enum\(EXCLUSION_MOTIVES\)\.nullable\(\)\.optional\(\)/, 'results saved before the motive still parse');
   assert.match(sources, /excludedMotive: answer\.verdict === 'excluded' \? answer\.motive \?\? null : null/);
   const page = readFileSync('src/components/commercial-opportunities/OpportunityWorkWorkspace.tsx', 'utf8');
-  assert.match(page, /<AdvicePill item=\{item\} \/>/);
+  assert.match(page, /<AdvicePill item=\{item\}[^>]*\/>/);
   assert.match(page, /filter === 'recommended' && !search && source === 'all' && !categories\.length && <StartHere/, 'a line of service is a filter: no suggestions over it');
   assert.match(page, /bySource\(items\)\.map\(group =>/);
   assert.match(page, /listGroups\.map\(group =>/);

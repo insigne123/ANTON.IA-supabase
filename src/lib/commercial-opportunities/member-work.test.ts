@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DECISION_LABELS, MEMBER_FILTERS, canSetPrices, decisionBody, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, memberFilter, memberMayMove, memberSteps, memberView, openDecision, pendingFitProposals, stateNoteSchema, type ActivityLike } from './member-work';
+import { ADMIN_STAGES, DECISION_LABELS, MEMBER_FILTERS, adminMoves, canSetPrices, decisionBody, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, memberFilter, memberMayMove, memberSteps, memberView, openDecision, pendingFitProposals, stateNoteSchema, type ActivityLike } from './member-work';
 
 test('each stage offers the person one way forward first and the exits after it', () => {
   assert.deepEqual(memberSteps('assigned').map(step => [step.to, Boolean(step.primary), Boolean(step.needsNote)]), [['working', true, false], ['blocked', false, true]]);
@@ -79,4 +79,12 @@ test('only the answers still waiting for an administrator are listed, the oldest
   assert.equal(fitProposalSchema.safeParse({ question: '¿Tienen ISO 9001?', answer: 'Sí, vigente hasta 2027' }).success, true);
   assert.equal(fitResolveSchema.safeParse({ activityId: '00000000-0000-4000-8000-0000000000aa', accept: true }).success, true);
   assert.equal(fitResolveSchema.safeParse({ activityId: 'a1', accept: true }).success, false);
+});
+
+test('an administrator can move an opportunity to any stage but the one it is in, and never back to «sin asignar» that way', () => {
+  assert.deepEqual(adminMoves('working'), ['assigned', 'blocked', 'submitted', 'won', 'lost', 'archived']);
+  assert.deepEqual(adminMoves('won'), ['assigned', 'working', 'blocked', 'submitted', 'lost', 'archived']);
+  assert.equal(adminMoves('assigned').includes('assigned'), false);
+  assert.equal(ADMIN_STAGES.includes('unassigned' as never), false);
+  assert.deepEqual(adminMoves(null), [...ADMIN_STAGES]);
 });

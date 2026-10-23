@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { DECISION_LABELS, memberSteps, type DecisionType, type OpenDecision, type WorkState } from '@/lib/commercial-opportunities/member-work';
+import { DECISION_LABELS, adminMoves, memberSteps, type DecisionType, type OpenDecision, type WorkState } from '@/lib/commercial-opportunities/member-work';
 import { assignmentWhen } from '@/lib/commercial-opportunities/assignment-email';
 
 const STATE_WORDS: Record<WorkState, string> = { unassigned: 'Sin asignar', assigned: 'Asignada', working: 'En gestión', blocked: 'Bloqueada', submitted: 'Presentada', won: 'Ganada', lost: 'Perdida', archived: 'Archivada' };
@@ -17,13 +17,15 @@ type StripProps = Facts & {
   canStep: boolean; busy: boolean;
   onStep: (to: WorkState, note?: string) => Promise<boolean>;
   onDecision: (type: DecisionType, text: string, dueAt: string | null) => Promise<boolean>;
+  /** An administrator moves the stage from here, where the stage is read, instead of a row at the foot of «Plan y tareas». */
+  onMove?: (to: WorkState) => Promise<boolean>;
 };
 
 /**
  * «Tu avance»: where the opportunity is, what is expected next and who assigned it, with the one step forward in front and the exits
  * (a block, a decision for the administrators) behind it. One strip under the title; the page keeps its single main action above.
  */
-export function MemberStrip({ state, assignedBy, nextActionAt, openTasks, canStep, busy, onStep, onDecision }: StripProps) {
+export function MemberStrip({ state, assignedBy, nextActionAt, openTasks, canStep, busy, onStep, onDecision, onMove }: StripProps) {
   const [dialog, setDialog] = useState<'block' | 'decision' | null>(null);
   const [text, setText] = useState(''); const [type, setType] = useState<DecisionType>('ask'); const [day, setDay] = useState('');
   const steps = canStep ? memberSteps(state) : [];
@@ -44,6 +46,14 @@ export function MemberStrip({ state, assignedBy, nextActionAt, openTasks, canSte
       <p className="text-sm font-medium">{STATE_WORDS[state ?? 'assigned']}</p>
     </div>
     {facts.length > 0 && <ul className="min-w-0 flex-1 space-y-0.5 text-xs text-muted-foreground">{facts.map(fact => <li key={String(fact)}>{fact}</li>)}</ul>}
+    {!canStep && onMove && <div className="ml-auto">
+      <label htmlFor="stage-move" className="sr-only">Cambiar etapa</label>
+      <select id="stage-move" value="" disabled={busy} onChange={event => { const to = event.target.value as WorkState; if (to) void onMove(to); }}
+        className="h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
+        <option value="">Cambiar etapa…</option>
+        {adminMoves(state).map(to => <option key={to} value={to}>{STATE_WORDS[to]}</option>)}
+      </select>
+    </div>}
     {canStep && <div className="ml-auto flex flex-wrap items-center gap-2">
       {steps.map(step => step.needsNote
         ? <Button key={step.to} size="sm" variant="ghost" disabled={busy} onClick={() => setDialog('block')}><Flag className="mr-2 h-4 w-4" aria-hidden="true" />{step.label}</Button>

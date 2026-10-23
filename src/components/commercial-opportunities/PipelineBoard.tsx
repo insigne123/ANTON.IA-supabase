@@ -39,7 +39,7 @@ const MOVES: Record<string, WorkRecord['state'][]> = {
  * card says what the opportunity is about in a line the AI writes (summaries.ts), a faint line while it is on its way.
  */
 export function PipelineBoard({ items, work, totals, limits, members, busy, suggestions, reviewing, summariesWaiting = false, filtered = false, loadingMore = null, refreshing = false,
-  sort = 'priority', onSort, progress, opened, onReview, onMove, onOpen, onMore, onClearFilters }: {
+  sort = 'priority', onSort, progress, opened, onReview, onMove, onOpen, onAssign, onMore, onClearFilters }: {
   items: WorkItem[]; work: WorkRecord[]; members: Array<{ user_id: string; name: string }>; busy: boolean;
   /** Exact counts of what nobody works yet; the page lists only the best scored of them. */
   totals?: { found: number; recommended: number; excluded?: number };
@@ -56,6 +56,8 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
   /** Some cards are still waiting for their line of summary. */
   summariesWaiting?: boolean;
   onMove: (id: string, state: WorkRecord['state'], revision: number) => void; onOpen: (id: string) => void;
+  /** An administrator gives a team to a card nobody works yet without leaving the list (the stage the person is going through stays in view). */
+  onAssign?: (item: WorkItem) => void;
 }) {
   const now = Date.now();
   // «Abierta hace 1 min» and «Informe listo · hace 2 h» keep counting while the board stays open.
@@ -179,7 +181,11 @@ export function PipelineBoard({ items, work, totals, limits, members, busy, sugg
                         className="h-8 rounded-md border bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <option value="">Elegir…</option>
                         {options.map(state => <option key={state} value={state}>{WORK_STATE_LABELS[state]}</option>)}
-                      </select></label> : <span className="text-xs text-muted-foreground">{record || item.data?.evaluation === 'excluded' ? '' : 'Asígnale un equipo para empezar'}</span>}
+                      </select></label>
+                      : !record && item.data?.evaluation !== 'excluded' && onAssign
+                        ? <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => onAssign(item)} title="Elige quién la trabaja: pasa a «Asignadas» y avisamos a las personas.">
+                          <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Asignar</Button>
+                        : <span className="text-xs text-muted-foreground">{record || item.data?.evaluation === 'excluded' ? '' : 'Asígnale un equipo para empezar'}</span>}
                     <Button type="button" size="sm" variant="outline" onClick={() => onOpen(item.id)}>Abrir</Button>
                   </div>
                 </li>
