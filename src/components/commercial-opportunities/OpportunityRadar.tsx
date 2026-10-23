@@ -18,9 +18,13 @@ const TONES: Record<WorkAdvice['tone'], string> = {
 };
 const dayMonth = new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'short', timeZone: 'America/Santiago' });
 
+const ADVICE_DONE = ['submitted', 'won', 'lost', 'archived'];
+
 /** «Postular», «Evaluar», «No postular» or «Por evaluar», with the deadline when it is close. */
 /** `decision`: once a report exists, an opportunity still «Por evaluar» shows the report's decision instead. */
-export function AdvicePill({ item, now = Date.now(), decision }: { item: WorkItem; now?: number; decision?: { label: string; tone: WorkAdvice['tone'] } }) {
+export function AdvicePill({ item, now = Date.now(), decision, state }: { item: WorkItem; now?: number; decision?: { label: string; tone: WorkAdvice['tone'] }; state?: string | null }) {
+  // Once it was presented or closed, «Postular» is advice for a decision already taken: the stage next to it says where it stands.
+  if (state && ADVICE_DONE.includes(state)) return null;
   const evaluated = workAdvice(item, now);
   const advice = decision && evaluated.tone === 'pending' ? { ...evaluated, ...decision } : evaluated;
   const closes = advice.urgent ? closesLabel(advice) : null;

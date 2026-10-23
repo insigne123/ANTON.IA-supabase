@@ -22,7 +22,9 @@ export function routeList(ctx) {
     app('/campaigns/history', 'Historial de campañas'),
     app('/contact/compose', 'Redactar'),
     app('/contact/sequence', 'Secuencia'),
-    app('/opportunities', 'Oportunidades', { gate: 'opportunities' }),
+    // With the workspace on (OPPORTUNITIES_WORKSPACE_ENABLED, as in production) every member of the organization opens it: the owner
+    // manages and the member works what was assigned to them. Without it, only OPPORTUNITIES_ALLOWED_EMAILS (and the members let in) do.
+    app('/opportunities', 'Oportunidades'),
     // Open to every account since 19 Oct 2026 (COWORK_OPEN_TO_ALL in apphosting.yaml): no list to check for the member.
     app('/cowork', 'Cowork'),
     app('/profile', 'Perfil'),
