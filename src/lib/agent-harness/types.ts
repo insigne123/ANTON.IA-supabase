@@ -2,6 +2,7 @@
 // plugs into, tools, and the events a run reports. Pure types: no SDK, no server module, so the loop, the tools and the tests
 // run anywhere and the Anthropic client is only one implementation of ModelClient.
 import type { z } from 'zod';
+import type { WebAction } from './web';
 
 /** `citations` are the sources the API attached to a sentence of a web answer: they go back with the turn as they came. */
 export type TextBlock = { type: 'text'; text: string; citations?: unknown[] };
@@ -63,6 +64,9 @@ export type ModelRequest = {
   onText?: (delta: string, snapshot: string) => void;
   /** A tool call as its input is written: the JSON so far (a prefix of the input object). The final answer is a tool call, so this is how it shows live. */
   onToolInput?: (event: { name: string; json: string }) => void;
+  /** A block of a tool the API runs on its side, the moment it is complete: the call once its input is written, the result when it arrives. A
+   * search shows while the call is still going on, not when it ends. */
+  onServerBlock?: (block: ServerBlock) => void;
 };
 
 export type ModelResponse = {
@@ -125,6 +129,8 @@ export interface AgentTool<I = unknown> {
 
 export type AgentEvent =
   | { type: 'round'; round: number }
+  /** A search or a page read the API made, with what came back (web.ts). It arrives while the call goes on when the model client says so. */
+  | { type: 'web'; round: number; action: WebAction }
   | { type: 'text'; delta: string; snapshot: string }
   | { type: 'tool_input'; round: number; name: string; json: string }
   | { type: 'tool_start'; round: number; id: string; name: string; input: unknown }

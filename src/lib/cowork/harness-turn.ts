@@ -315,6 +315,18 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
     await input.record(observation);
     observations.push(observation);
   };
+  // Each search is recorded the moment it finishes (the page shows it while the call still goes on) and once more never: the end of the call finds it done.
+  const recordedWeb = new Map<string, Promise<void>>();
+  const recordWebOnce = (action: WebAction) => {
+    let done = recordedWeb.get(action.id);
+    if (!done) {
+      done = recordWeb(action);
+      // A failure while the call goes on is raised where the call ends, not as an unhandled rejection.
+      done.catch(() => undefined);
+      recordedWeb.set(action.id, done);
+    }
+    return done;
+  };
 
   // The judge reads the answer before it is delivered and can send it back once. With the web, a link that comes from nowhere the agent looked
   // is sent back first (it can fix it without the judge's turn).
@@ -333,7 +345,7 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
     },
     afterModelCall: async ({ response }: { response: ModelResponse }) => {
       await config.recordUsage?.(reservation, response, Date.now() - startedAt);
-      if (web) for (const action of webActions(response.content)) await recordWeb(action);
+      if (web) for (const action of webActions(response.content)) await recordWebOnce(action);
     },
     review: async info => {
       // An answer written as loose text (after a web search it happens) goes back to be delivered with responder, which closes it and keeps the memory.
@@ -363,7 +375,10 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
     // Loose text, a link made up out of nothing and the judge's verdict: each sends the answer back at most once.
     signal: input.signal, hooks, maxReviews: 3, compaction: { clearAt: 60_000, summarizeAt: Number.POSITIVE_INFINITY },
     // The answer is a tool call: its input is what the page shows while it is written (the same live draft the coordinator's decision feeds).
-    onEvent: event => { if (event.type === 'tool_input' && event.name === 'responder') config.onAnswerPartial?.(`{"action":"answer","answer":${event.json}`, correcting); },
+    onEvent: event => {
+      if (event.type === 'tool_input' && event.name === 'responder') config.onAnswerPartial?.(`{"action":"answer","answer":${event.json}`, correcting);
+      if (event.type === 'web' && web) void recordWebOnce(event.action);
+    },
   });
   await config.flushAnswer?.();
 

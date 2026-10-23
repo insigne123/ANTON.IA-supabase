@@ -379,3 +379,19 @@ test('an answer with a link to a site nobody looked at goes back before the judg
   const plain = new ScriptedModel([reply([call('responder', { reply: 'Mira https://cualquiera.cl.', document: null, ...closes })])]);
   assert.match((await runCoworkHarnessTurn(base(plain).input)).reply, /cualquiera/);
 });
+
+test('a search is recorded the moment it finishes, while the call goes on, and only once', async () => {
+  let liveRecorded = -1;
+  const recordedNow: unknown[] = [];
+  const model = new ScriptedModel([async request => {
+    request.onServerBlock?.(sourceBlocks[0] as never);
+    request.onServerBlock?.(sourceBlocks[1] as never);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    liveRecorded = recordedNow.length;
+    return reply([...sourceBlocks, call('responder', { reply: 'Según [la nota](https://www.encancha.cl/sodexo), publicó ofertas.', document: null, ...closes })]);
+  }]);
+  const { input, recorded } = base(model, { record: async (observation: unknown) => { recordedNow.push(observation); recorded.push(observation); } } as never, { web });
+  await runCoworkHarnessTurn(input);
+  assert.equal(liveRecorded, 1, 'the page can show it before the call ends');
+  assert.equal(recordedNow.length, 1, 'and the end of the call does not record it again');
+});

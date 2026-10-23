@@ -6,7 +6,7 @@ import { estimateTokens, transcriptOf } from './context';
 import { runAgent } from './loop';
 import { call, reply, ScriptedModel, usageOf } from './scripted';
 import { defineTool, ToolRegistry } from './tools';
-import type { AgentEvent, ContentBlock, Message, ServerToolSpec } from './types';
+import type { AgentEvent, ContentBlock, Message, ServerBlock, ServerToolSpec } from './types';
 import { addUsage, emptyUsage } from './types';
 import { describeWebAction, webActions, webToolSpecs } from './web';
 
@@ -16,8 +16,8 @@ const answer = defineTool({
   run: async ({ reply: text }) => ({ status: 'final', output: { reply: text }, text }),
 });
 
-const search = (id: string, query: string): ContentBlock => ({ type: 'server_tool_use', id, name: 'web_search', input: { query } });
-const found = (id: string, ...pages: Array<[string, string]>): ContentBlock => ({
+const search = (id: string, query: string): ServerBlock => ({ type: 'server_tool_use', id, name: 'web_search', input: { query } });
+const found = (id: string, ...pages: Array<[string, string]>): ServerBlock => ({
   type: 'web_search_tool_result', tool_use_id: id,
   content: pages.map(([title, url]) => ({ type: 'web_search_result', title, url, page_age: '2 days ago', encrypted_content: 'EnC0d3d' })),
 });
@@ -186,4 +186,57 @@ test('what the API ran counts toward the size of the conversation and shows in a
   ];
   assert.ok(estimateTokens(messages) > 2_900, 'a result is worth reading even though its text is not ours');
   assert.equal(transcriptOf(messages), 'Usuario: investiga\nAgente buscó en la web licitaciones aseo\nAgente leyó la página https://sodexo.cl');
+});
+
+test('the blocks of the API\'s tools are reported as they complete: the call when its input is written, the result when it arrives', async () => {
+  const events = [
+    { type: 'content_block_start', index: 0, content_block: { type: 'server_tool_use', id: 'srv1', name: 'web_search', input: {} } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"query":"aseo ' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: 'hospitales"}' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: found('srv1', ['Mercado Público', 'https://www.mercadopublico.cl']) },
+    { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_start', index: 3, content_block: { type: 'server_tool_use', id: 'srv2', name: 'web_fetch', input: {} } },
+    { type: 'content_block_delta', index: 3, delta: { type: 'input_json_delta', partial_json: '{"url":"https://a.cl"' } },
+    { type: 'content_block_stop', index: 3 },
+    { type: 'content_block_start', index: 4, content_block: { type: 'tool_use', id: 'toolu_1', name: 'responder', input: {} } },
+    { type: 'content_block_stop', index: 4 },
+  ];
+  const sdk: AnthropicLike = { messages: { stream: () => ({
+    on: (event, listener) => { if (event === 'streamEvent') for (const item of events) listener(item); },
+    finalMessage: async () => ({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }),
+  }) } };
+  const blocks: ContentBlock[] = [];
+  await anthropicModel({ model: 'claude-sonnet-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onServerBlock: block => blocks.push(block) });
+  assert.deepEqual(blocks, [
+    { type: 'server_tool_use', id: 'srv1', name: 'web_search', input: { query: 'aseo hospitales' } },
+    found('srv1', ['Mercado Público', 'https://www.mercadopublico.cl']),
+  ], 'a client tool and text are not reported, and neither is a call whose input was cut');
+  assert.deepEqual(webActions(blocks, { onlyDone: true }).map(action => [action.input, action.ok, action.sources.length]), [['aseo hospitales', true, 1]]);
+  assert.deepEqual(webActions(blocks.slice(0, 1), { onlyDone: true }), [], 'a call with no result yet is not done');
+  assert.equal(webActions(blocks.slice(0, 1))[0].ok, false, 'at the end of a response it is a failure');
+  // A listener that throws never breaks the call.
+  const broken = await anthropicModel({ model: 'm', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onServerBlock: () => { throw new Error('boom'); } });
+  assert.equal(broken.stopReason, 'end_turn');
+});
+
+test('the loop shows each search the moment its result arrives, and again never when the call ends', async () => {
+  const model = new ScriptedModel([async request => {
+    request.onServerBlock?.(search('s1', 'q1'));
+    request.onServerBlock?.(found('s1', ['A', 'https://a.cl']));
+    request.onServerBlock?.(search('s2', 'q2'));
+    request.onServerBlock?.(found('s2', ['B', 'https://b.cl']));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    return reply([search('s1', 'q1'), found('s1', ['A', 'https://a.cl']), search('s2', 'q2'), found('s2', ['B', 'https://b.cl']), search('s3', 'q3'), found('s3', ['C', 'https://c.cl']), call('responder', { reply: 'ya' })]);
+  }]);
+  const events: string[] = [];
+  const during: string[] = [];
+  const run = await runAgent({
+    model, system: 's', messages: [{ role: 'user', content: 'investiga' }], registry: new ToolRegistry([answer]), finalTool: 'responder', limits: { maxRounds: 2 }, signal: signal(),
+    serverTools: webToolSpecs({ searches: 3, fetches: 0 }),
+    onEvent: event => { if (event.type === 'web') events.push(event.action.input); if (event.type === 'tool_end' && event.name === 'web_search') during.push(event.summary); },
+  });
+  assert.equal(run.stopReason, 'final_tool');
+  assert.deepEqual(events, ['q1', 'q2', 'q3'], 'the third was not reported live: it is shown when the call ends, and the first two are not shown twice');
+  assert.deepEqual(during, ['Búsqueda «q1»: 1 resultado', 'Búsqueda «q2»: 1 resultado', 'Búsqueda «q3»: 1 resultado']);
 });

@@ -152,17 +152,29 @@ export function anthropicModel(options: AnthropicModelOptions): ModelClient {
             const onText = request.onText;
             stream.on('text', (delta, snapshot) => { try { onText(delta, snapshot); } catch { /* a live preview never breaks the call */ } });
           }
-          if (request.onToolInput) {
-            const onToolInput = request.onToolInput;
-            // The input of a tool call arrives as JSON fragments by content block: each block's fragments are joined and handed over with its tool's name.
-            const open = new Map<number, { name: string; json: string }>();
-            stream.on('streamEvent', (event: { type?: string; index?: number; content_block?: { type?: string; name?: string }; delta?: { type?: string; partial_json?: string } } | null) => {
+          if (request.onToolInput || request.onServerBlock) {
+            const { onToolInput, onServerBlock } = request;
+            // A tool call's input arrives as JSON fragments by content block: each block's fragments are joined and handed over with its tool's name. A block
+            // of the API's own tools is complete when it closes (the call) or when it opens (its result comes whole).
+            const open = new Map<number, { id: string; name: string; json: string; server: boolean }>();
+            stream.on('streamEvent', (event: { type?: string; index?: number; content_block?: Record<string, unknown> & { type?: string }; delta?: { type?: string; partial_json?: string } } | null) => {
               try {
                 if (!event || typeof event.index !== 'number') return;
-                if (event.type === 'content_block_start' && (event.content_block?.type === 'tool_use' || event.content_block?.type === 'server_tool_use')) open.set(event.index, { name: String(event.content_block.name), json: '' });
-                else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
-                  const block = open.get(event.index);
-                  if (block) { block.json += event.delta.partial_json ?? ''; onToolInput({ name: block.name, json: block.json }); }
+                const block = event.content_block;
+                if (event.type === 'content_block_start' && block) {
+                  if (block.type === 'tool_use' || block.type === 'server_tool_use') open.set(event.index, { id: String(block.id ?? ''), name: String(block.name), json: '', server: block.type === 'server_tool_use' });
+                  else if (onServerBlock && typeof block.type === 'string' && isServerBlock(block.type)) onServerBlock({ ...block } as ServerBlock);
+                } else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+                  const call = open.get(event.index);
+                  if (call) { call.json += event.delta.partial_json ?? ''; onToolInput?.({ name: call.name, json: call.json }); }
+                } else if (event.type === 'content_block_stop') {
+                  const call = open.get(event.index);
+                  open.delete(event.index);
+                  if (call?.server && onServerBlock) {
+                    let parsed: unknown = {};
+                    try { parsed = call.json ? JSON.parse(call.json) : {}; } catch { /* a half-written input is not reported */ return; }
+                    onServerBlock({ type: 'server_tool_use', id: call.id, name: call.name, input: parsed });
+                  }
                 }
               } catch { /* a live preview never breaks the call */ }
             });

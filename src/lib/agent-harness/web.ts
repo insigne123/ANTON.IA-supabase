@@ -86,8 +86,9 @@ function fetchResult(content: unknown): Pick<WebAction, 'ok' | 'sources' | 'erro
 }
 
 /** The searches and page reads in a response, in the order they were made, each with what came back. The code the API runs to filter
- * them is not an action of the person's: it stays out. */
-export function webActions(content: ContentBlock[]): WebAction[] {
+ * them is not an action of the person's: it stays out. `onlyDone` leaves out a call whose result has not arrived yet (blocks seen while the
+ * response is still being written); at the end of the response such a call is a failure, not a pending one. */
+export function webActions(content: ContentBlock[], options: { onlyDone?: boolean } = {}): WebAction[] {
   const results = new Map<string, ServerBlock>();
   for (const block of content) {
     if (block.type !== 'web_search_tool_result' && block.type !== 'web_fetch_tool_result') continue;
@@ -102,6 +103,7 @@ export function webActions(content: ContentBlock[]): WebAction[] {
     if (!tool || typeof call.id !== 'string') continue;
     const input = asRecord(call.input);
     const result = results.get(call.id);
+    if (!result && options.onlyDone) continue;
     const outcome = !result ? { ok: false, sources: [], error: 'no_result' } : tool === 'web_search' ? searchResult(result.content) : fetchResult(result.content);
     actions.push({ id: call.id, tool, input: text(tool === 'web_search' ? input?.query : input?.url).trim(), ...outcome });
   }
