@@ -40,6 +40,7 @@ import { ContactabilityStatusCard } from '@/components/commercial/Contactability
 import { CampaignQaPanel } from '@/components/commercial/CampaignQaPanel';
 import { useContactability } from '@/hooks/use-contactability';
 import { assessCampaignQa } from '@/lib/campaign-qa';
+import { draftFailureAdvice, type DraftFailureAdvice } from '@/lib/draft-failure-advice';
 import { resolveManualEmailOperation, type ManualEmailOperation } from '@/lib/manual-send-idempotency';
 import { FirstContactFollowUpPlan } from '@/components/campaigns-v2/FirstContactFollowUpPlan';
 import { RewriteProposalReview } from '@/components/campaigns-v2/RewriteProposalReview';
@@ -125,6 +126,7 @@ function ComposeInner() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [creatingDraft, setCreatingDraft] = useState(false);
   const [creationError, setCreationError] = useState<string | null>(null);
+  const [creationAdvice, setCreationAdvice] = useState<DraftFailureAdvice | null>(null);
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -1056,10 +1058,15 @@ function ComposeInner() {
     const researchHref = lead?._sourceTable === 'opportunities'
       ? '/saved/leads/enriched'
       : `/saved/leads/enriched${leadIdForResearch ? `?investigar=${encodeURIComponent(leadIdForResearch)}&empezar=1` : ''}`;
+    // The refusals for evidence on this research, kept for the session so a reload does not forget them: another try with the same research rarely changes the answer.
+    const failuresKey = `native-draft-failures:${snapshotId}`;
+    const failuresSoFar = () => { try { return Number(window.sessionStorage.getItem(failuresKey)) || 0; } catch { return 0; } };
+    const rememberFailures = (count: number) => { try { if (count) window.sessionStorage.setItem(failuresKey, String(count)); else window.sessionStorage.removeItem(failuresKey); } catch { /* the count is a convenience */ } };
     const createDraft = async () => {
       if (!snapshotId || creatingDraft) return;
       setCreatingDraft(true);
       setCreationError(null);
+      setCreationAdvice(null);
       try {
         const response = await fetch('/api/native-drafts', {
           method: 'POST',
@@ -1067,7 +1074,13 @@ function ComposeInner() {
           body: JSON.stringify({ researchSnapshotId: snapshotId }),
         });
         const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload?.draft?.draftId) throw new Error(payload?.message || 'No pudimos crear el borrador. Revisa o actualiza la investigación del contacto.');
+        if (!response.ok || !payload?.draft?.draftId) {
+          const failures = failuresSoFar() + (payload?.error === 'draft_preflight_failed' ? 1 : 0);
+          const advice = draftFailureAdvice(payload, failures);
+          if (advice) { rememberFailures(failures); setCreationAdvice(advice); return; }
+          throw new Error(payload?.message || 'No pudimos crear el borrador. Revisa o actualiza la investigación del contacto.');
+        }
+        rememberFailures(0);
         router.replace(`/contact/compose?draftId=${encodeURIComponent(payload.draft.draftId)}`);
       } catch (error: any) {
         setCreationError(error?.message || 'No pudimos crear el borrador. Inténtalo nuevamente.');
@@ -1079,10 +1092,18 @@ function ComposeInner() {
         <Card><CardHeader><CardTitle className="text-base">{lead.fullName || 'Contacto'}</CardTitle><CardDescription>{composeEmail || 'Sin email disponible'}</CardDescription></CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm leading-6 text-muted-foreground">{snapshotId ? 'Crea un borrador desde la investigación guardada. Después podrás editarlo, revisarlo y decidir si enviarlo.' : 'Este contacto necesita una investigación actualizada antes de crear el correo. «Investigar a este contacto» la abre directo y, si aún no tiene una, la empieza.'} Nada se enviará desde este paso.</p>
-            {creationError ? <Alert variant="destructive"><AlertTitle>No se pudo preparar</AlertTitle><AlertDescription>{creationError}</AlertDescription></Alert> : null}
+            {creationAdvice ? (
+              <Alert variant="destructive">
+                <AlertTitle>{creationAdvice.title}</AlertTitle>
+                <AlertDescription className="space-y-1.5">
+                  {creationAdvice.reasons.length ? <ul className="list-disc pl-5">{creationAdvice.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul> : null}
+                  <p>{creationAdvice.next}</p>
+                </AlertDescription>
+              </Alert>
+            ) : creationError ? <Alert variant="destructive"><AlertTitle>No se pudo preparar</AlertTitle><AlertDescription>{creationError}</AlertDescription></Alert> : null}
             <div className="flex flex-col gap-2 sm:flex-row">
-              {snapshotId ? <Button disabled={creatingDraft || !composeEmail} onClick={() => void createDraft()}>{creatingDraft ? 'Creando borrador…' : 'Crear borrador para revisar'}</Button> : null}
-              {creatingDraft ? <Button variant="outline" disabled>Investigar a este contacto</Button> : <Button asChild variant={snapshotId ? 'outline' : 'default'}><Link href={researchHref}>Investigar a este contacto</Link></Button>}
+              {snapshotId ? <Button variant={creationAdvice?.researchFirst ? 'outline' : 'default'} disabled={creatingDraft || !composeEmail} onClick={() => void createDraft()}>{creatingDraft ? 'Creando borrador…' : 'Crear borrador para revisar'}</Button> : null}
+              {creatingDraft ? <Button variant="outline" disabled>Investigar a este contacto</Button> : <Button asChild variant={snapshotId && !creationAdvice?.researchFirst ? 'outline' : 'default'}><Link href={researchHref}>Investigar a este contacto</Link></Button>}
             </div>
           </CardContent>
         </Card>
