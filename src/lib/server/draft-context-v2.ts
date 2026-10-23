@@ -268,6 +268,12 @@ export const DraftContextV2Schema = z.object({
     prohibitedPhrases: z.array(z.string().trim().min(1)).min(1),
     minimumEvidenceProvenance: z.literal(1),
   }).strict(),
+  /**
+   * How the writer is asked to rest the email on its evidence, present only when this draft was built with DRAFT_ANCHOR_SPECIFICS_ENABLED
+   * (for this person: see draftFlagsForUser). The writer's prompt and the preflight read it here, so both look for the same terms and a
+   * context built without the flag is exactly what it was.
+   */
+  writing: z.object({ anchorSpecifics: z.literal(true) }).strict().optional(),
   warnings: z.array(z.string().trim().min(1).max(2_000)).max(20),
 }).strict();
 export type DraftContextV2 = z.infer<typeof DraftContextV2Schema>;
@@ -301,6 +307,8 @@ export type BuildDraftContextV2Input = {
   signalEvidence?: boolean;
   /** Overrides DRAFT_HOOK_FILTER_ENABLED (see draftHookFilterEnabled). */
   hookFilter?: boolean;
+  /** Overrides DRAFT_ANCHOR_SPECIFICS_ENABLED (see draftAnchorSpecificsEnabled). */
+  anchorSpecifics?: boolean;
 };
 
 /**
@@ -330,6 +338,24 @@ export function draftHookFilterEnabled(env: Record<string, string | undefined> =
  */
 export function draftAnchorSpecificsEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
   return env.DRAFT_ANCHOR_SPECIFICS_ENABLED?.trim() === 'true';
+}
+
+/**
+ * The three draft flags as they apply to one person. DRAFT_PILOT_USER_IDS (user ids, comma separated) limits them to those people while they are
+ * tried, as COWORK_HARNESS_USER_IDS does for the Cowork harness: whoever is not on the list writes exactly as before, whatever the flags say.
+ * Empty or absent, each flag is what it says for everyone. The list never turns a flag on by itself.
+ */
+export function draftFlagsForUser(
+  userId?: string | null,
+  env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env,
+) {
+  const pilot = (env.DRAFT_PILOT_USER_IDS ?? '').split(',').map((id) => id.trim().toLowerCase()).filter(Boolean);
+  const inPilot = !pilot.length || (Boolean(userId) && pilot.includes(String(userId).toLowerCase()));
+  return {
+    signalEvidence: inPilot && draftSignalEvidenceEnabled(env),
+    hookFilter: inPilot && draftHookFilterEnabled(env),
+    anchorSpecifics: inPilot && draftAnchorSpecificsEnabled(env),
+  };
 }
 
 /** The lead-in some aggregator pages put before a text («Así se verá:»); it says nothing about the company. */
@@ -508,6 +534,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
   const artifactHashMatches = /^[a-f0-9]{64}$/.test(artifactHash) && artifactHash === snapshotHash;
   const factClaimsByEvidenceId = new Map<string, string[]>();
   const hookFilter = input.hookFilter ?? draftHookFilterEnabled();
+  const anchorSpecifics = input.anchorSpecifics ?? draftAnchorSpecificsEnabled();
 
   const freshCompanyFactClaims = snapshot.claims.filter((claim) =>
     isDraftableCompanyFactWithPublicEvidence({ snapshot, claim, nowMs }),
@@ -848,6 +875,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       prohibitedPhrases: [...DRAFT_PROHIBITED_PHRASES],
       minimumEvidenceProvenance: 1,
     },
+    ...(anchorSpecifics ? { writing: { anchorSpecifics: true } } : {}),
     warnings,
   });
 

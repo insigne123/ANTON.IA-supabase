@@ -56,13 +56,11 @@ test('with keepSpecifics a statement that names its datum after a comma keeps ev
     draftEvidencePersonalizationStatementV2(vacancies, { keepSpecifics: true }),
     'Enaex mantiene vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama',
   );
-  // The flag is read from the environment when the option is not given.
+  // The function never reads the environment: the prompt and the preflight pass the option, taken from the context.
   const previous = process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED;
   try {
-    delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED;
-    assert.equal(draftEvidencePersonalizationStatementV2(vacancies), 'Enaex mantiene vacantes abiertas en el norte de Chile');
     process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = 'true';
-    assert.match(draftEvidencePersonalizationStatementV2(vacancies), /Antofagasta y Atacama$/);
+    assert.equal(draftEvidencePersonalizationStatementV2(vacancies), 'Enaex mantiene vacantes abiertas en el norte de Chile');
   } finally {
     if (previous === undefined) delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED; else process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = previous;
   }
@@ -103,6 +101,23 @@ test('the specific anchor terms name the concrete datum first, the company\'s ow
   );
   assert.deepEqual(specificAnchorTerms('Es una de las.'), []);
   assert.deepEqual(specificAnchorTerms(''), []);
+});
+
+test('the preflight looks for the terms of the same statement the writer was given: the context says which', () => {
+  const context = draftContextFixture();
+  const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
+  evidence.statement = 'Acme mantiene vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama, para conductores, técnicos y supervisores.';
+  const output = {
+    ...validOutput(),
+    // Names the regions and nothing else of the first item of the list.
+    body: validOutput().body.replace('Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.', 'Hay cargos que cubrir en Antofagasta y Atacama.'),
+  };
+  const grounded = (value: typeof context) => !validateDraftPreflightV2(value, output).issues.some((issue) => issue.code === 'personalization_invalid');
+  assert.equal(grounded(context), false, 'today the statement is its first item and the regions are not in it');
+  assert.equal(grounded({ ...context, writing: { anchorSpecifics: true } }), true, 'with the marker the regions are part of what the email must keep');
+  // The reverse also holds: the first item alone, without the regions, is still enough with the marker (two of its terms in one sentence).
+  const first = { ...validOutput(), body: validOutput().body.replace('Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.', 'Acme mantiene vacantes abiertas en el norte.') };
+  assert.equal(!validateDraftPreflightV2({ ...context, writing: { anchorSpecifics: true } }, first).issues.some((issue) => issue.code === 'personalization_invalid'), true);
 });
 
 function validOutput(): GeneratedOutreachV2 {

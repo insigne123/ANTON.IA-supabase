@@ -391,6 +391,28 @@ test('native drafting asks the user to complete the commercial profile before ge
   assert.equal(fixture.claimCount(), 0);
 });
 
+test('the draft flags reach only the people of the pilot (DRAFT_PILOT_USER_IDS) and the writer is given what each context says', async () => {
+  const names = ['DRAFT_SIGNAL_EVIDENCE_ENABLED', 'DRAFT_HOOK_FILTER_ENABLED', 'DRAFT_ANCHOR_SPECIFICS_ENABLED', 'DRAFT_PILOT_USER_IDS'] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  const draftWith = async (pilot: string | undefined) => {
+    for (const name of names.slice(0, 3)) process.env[name] = 'true';
+    if (pilot === undefined) delete process.env.DRAFT_PILOT_USER_IDS; else process.env.DRAFT_PILOT_USER_IDS = pilot;
+    const fixture = dependencies();
+    let seen: DraftContextV2 | undefined;
+    fixture.value.generate = async ({ context }) => { seen = context; return generated(context); };
+    const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
+    assert.equal(result.status, 'drafted');
+    return seen!;
+  };
+  try {
+    assert.deepEqual((await draftWith(undefined)).writing, { anchorSpecifics: true }, 'without a list the flags are for everyone');
+    assert.deepEqual((await draftWith(` ${access.userId.toUpperCase()} `)).writing, { anchorSpecifics: true }, 'the person is on the list');
+    assert.equal((await draftWith('00000000-0000-4000-8000-000000000001')).writing, undefined, 'someone else is the pilot: this person writes as before');
+  } finally {
+    for (const name of names) if (previous[name] === undefined) delete process.env[name]; else process.env[name] = previous[name];
+  }
+});
+
 test('native drafting permits one corrective generation pass, then persists a traceable immutable version', async () => {
   const fixture = dependencies();
   let generationCalls = 0;

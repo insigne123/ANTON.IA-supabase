@@ -27,6 +27,7 @@ import {
   createDefaultDraftWritingStyleV2,
   DEFAULT_DRAFT_CTA,
   DEFAULT_DRAFT_CTA_USTED,
+  draftFlagsForUser,
   normalizeDraftWritingStyleV2,
   requiredReportAwareDraftPersonalizationV2,
   type DraftContextBuildResult,
@@ -870,6 +871,8 @@ async function createDraftContext(input: {
       reportDocument: reportSelection?.document,
       reportDocumentMetadata: reportSelection?.metadata,
       now: input.now,
+      // The draft flags that are on for this person (DRAFT_PILOT_USER_IDS limits them to the people of the pilot).
+      ...draftFlagsForUser(input.access.userId),
     }),
   };
 }
