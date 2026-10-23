@@ -1175,12 +1175,16 @@ function invalidDecisionReason(error: unknown): string | null {
   return summary ? `La decisión anterior no cumple el formato (${summary}). Corrígela.`.slice(0, 600) : null;
 }
 
+const INTERNAL_ERROR_NAMES = new Set(['TypeError', 'ReferenceError', 'RangeError', 'SyntaxError']);
+
 /** A proposal the server could not stage (for example a recipient outside the
- * audience) goes back to the model; access, cancellation and timeouts do not. */
+ * audience) goes back to the model; access, cancellation, timeouts and our own bugs do not. */
 function proposalRejection(error: unknown, signal: AbortSignal): unknown {
   if (signal.aborted || !(error instanceof Error)) return error;
   const status = (error as { status?: number }).status;
-  if (['AuthError', 'AbortError', 'TimeoutError', 'CoworkDecisionRejected'].includes(error.name) || status === 401 || status === 403) return error;
+  // A bug of ours («Cannot read properties of undefined (reading 'from')») is neither a reason the model can fix by rewording nor
+  // text for the person: it stops the turn as it is, and the person reads the generic message (failure-messages.ts).
+  if (INTERNAL_ERROR_NAMES.has(error.name) || ['AuthError', 'AbortError', 'TimeoutError', 'CoworkDecisionRejected'].includes(error.name) || status === 401 || status === 403) return error;
   const reason = (issueSummary(error) || error.message || 'motivo no informado').slice(0, 300);
   return new CoworkDecisionRejected(error.message, `La propuesta no se pudo preparar: ${reason}`, true);
 }
