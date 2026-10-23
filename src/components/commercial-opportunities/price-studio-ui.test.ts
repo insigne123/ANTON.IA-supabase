@@ -57,3 +57,61 @@ test('before anything is typed it still shows the result, with what is missing s
   assert.match(words, /Copiar el cálculo/); assert.match(words, /Usar el total \(neto\) en el puntaje/);
   assert.equal((html.match(/aria-label="Quitar el perfil/g) || []).length, 0, 'a single profile cannot be removed');
 });
+
+const shiftDraft = () => {
+  const draft = priceStudio.defaultDraft();
+  Object.assign(draft.profiles[0], { name: 'Guardia 4x4', headcount: '2', base: '604.000', nonTaxable: '60.000', annualBonus: '60.000', holidays: '8', holidayHours: '11', exempt: '8.000', postPeople: '2', postHours: '334,58' });
+  draft.loads = [['Cesantía', '2,4'], ['Mutual', '0,93'], ['SIS', '1,78'], ['Expectativa de vida', '0,72'], ['Capitalización individual', '0,1'], ['Rentabilidad protegida', '0,9'], ['Vacaciones (provisión)', '5,75'], ['Indemnización (provisión)', '8,33']]
+    .map(([label, pct], index) => ({ id: `l${index}`, label, pct }));
+  draft.expenses = [{ id: 'e0', label: 'Supervisor repartido', amount: '60.000' }];
+  draft.sites = [{ id: 's0', name: 'Tienda Centro', posts: '3', postHours: '', hoursMonth: '1.003,75' }, { id: 's1', name: 'Tienda Norte', posts: '1', postHours: '309,6', hoursMonth: '309,6' }];
+  Object.assign(draft.params, { profitOn: 'cost', margin: '10', minimumWage: '539.000', workerDeductions: '19,1', minNet: '670.000', guarantee: '10', absenteeism: '1', overhead: '1' });
+  return draft;
+};
+const shifts = renderToStaticMarkup(React.createElement(PriceStudio, { storageKey: 'anton:price-studio:v1:u1:op-1', initialDraft: shiftDraft() }));
+
+test('a post in shifts shows the price of the post, the net pay and the sites with their hour and their month, as the client\'s form asks', () => {
+  const words = text(shifts);
+  assert.match(words, /Guardia 4x4 × 2/);
+  assert.match(words, /Puesto de 2 personas: \$[\d.]+ al mes por puesto/);
+  assert.match(words, /Líquido estimado por persona: \$670\.795/);
+  assert.match(words, /Precio por sitio o tienda/);
+  assert.match(words, /Un puesto de «Guardia 4x4» cuesta \$[\d.]+ al mes \(neto\), con sus 2 personas/);
+  assert.match(shifts, /<label[^>]*>Horas al mes del sitio 1<\/label>/);
+  assert.match(shifts, /value="Tienda Centro"/); assert.match(shifts, /value="1\.003,75"/);
+  assert.match(words, /Total de los sitios/);
+  assert.match(words, /Garantía de fiel cumplimiento \(10 % del monto anual\): \$[\d.]+/);
+  assert.match(words, /Usar el total anual de los sitios \(neto\) en el puntaje/);
+  assert.match(words, /Totales de los sitios \(los puestos de «Guardia 4x4»\)/);
+  assert.match(words, /Garantía de fiel cumplimiento \$[\d.]+/, 'with sites and a bond, the fourth figure is the bond');
+  assert.match(words, /un puesto cubre 334,58 horas al mes con 2 personas en turno/, 'the form that halves the hour is warned about');
+});
+
+test('the profit over the cost says what it is, and the labels follow it', () => {
+  const words = text(shifts);
+  assert.match(shifts, /aria-pressed="true"[^>]*>El costo \(utilidad del formulario\)<\/button>/);
+  assert.match(shifts, /aria-pressed="false"[^>]*>El precio \(margen\)<\/button>/);
+  assert.match(words, /Utilidad \(% del costo\)/); assert.match(words, /Gastos generales \(% del costo\)/);
+  assert.match(words, /un recargo sobre el costo total \(10 % de utilidad = costo × 1,10\)/);
+  assert.match(words, /Margen y gastos generales se miden sobre el costo/);
+  assert.doesNotMatch(words, /Margen \(% del precio\)/);
+  assert.match(text(html), /El margen y los gastos generales son una parte del precio \(10 % de margen = costo ÷ 0,90\)/, 'by default it is the price, as in the financial scenario');
+});
+
+test('what is new has its fields, labelled, with the provisions empty and the expenses as lines to change', () => {
+  const words = text(shifts);
+  for (const label of ['Personas por puesto', 'Horas del puesto al mes', 'Aguinaldos y bonos al año \\(por persona\\)', 'Festivos trabajados al año', 'Horas de cada festivo', 'Costos sin utilidad al mes \\(por persona\\)',
+    'Ingreso mínimo mensual', 'Jornada semanal \\(horas\\)', 'Descuentos del trabajador \\(%\\)', 'Líquido mínimo que piden las bases', 'Garantía de fiel cumplimiento \\(% del monto anual\\)']) assert.match(words, new RegExp(label), label);
+  assert.match(shifts, /value="Supervisor repartido"/); assert.match(shifts, /<label[^>]*>Monto del gasto 1<\/label>/);
+  assert.match(words, /Gastos por persona al mes/); assert.match(words, /Las provisiones de vacaciones y de indemnización empiezan vacías/);
+  assert.match(html, /value="Vacaciones \(provisión\)"/); assert.match(html, /value="Indemnización por años de servicio \(provisión\)"/);
+  assert.match(text(html), /Para cotizar sitio por sitio, define el puesto de un perfil/, 'without a post there is nothing to price by site');
+  assert.doesNotMatch(text(html), /Total de los sitios/);
+});
+
+test('the person can remove a site and a row that says nothing is not matched to a result', () => {
+  assert.equal((shifts.match(/aria-label="Quitar el sitio \d"/g) || []).length, 2);
+  assert.equal((shifts.match(/aria-label="Quitar el gasto \d"/g) || []).length, 1);
+  assert.equal(priceStudio.siteKept({ id: 'x', name: '', posts: '', postHours: '', hoursMonth: '' }), false);
+  assert.equal(priceStudio.siteKept(priceStudio.newSite()), true);
+});
