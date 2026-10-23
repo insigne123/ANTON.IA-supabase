@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, coworkSameLine, type CoworkBlock, type CoworkPlanStep, type CoworkWebAction } from './contracts';
+import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, coworkSameLine, type CoworkBlock, type CoworkPlanStep, type CoworkWebAction } from './contracts';
 import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText, withoutRepeatedAside, withoutTrailingQuestions } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
@@ -131,7 +131,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry' | 'lead.enrich_phone'
   | 'contacts.prepare_batch' | 'preference.save' | 'task.plan';
-export type CoworkObservation = { action: CoworkReadAction | CoworkWebAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION | typeof COWORK_WRITTEN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
+export type CoworkObservation = { action: CoworkReadAction | CoworkWebAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION | typeof COWORK_WRITTEN_ACTION | typeof COWORK_AGENT_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 export type Decision = z.infer<typeof coworkDecisionSchema>;
 
 export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string;
