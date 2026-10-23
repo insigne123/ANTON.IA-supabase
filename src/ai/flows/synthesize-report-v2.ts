@@ -80,7 +80,7 @@ export async function synthesizeReportV2(input: {
   synthesisContextHash?: string;
   depth?: ResearchDepth;
   researchWarnings?: string[];
-  researchMetrics?: { queries: number; pages: number; elapsedMs: number };
+  researchMetrics?: { queries: number; pages: number; elapsedMs: number; claudeWeb?: { sources: number; searches: number; reads: number } };
   signal?: AbortSignal;
 }, dependencies: {
   reason?: typeof reasonAboutReportV2Account;

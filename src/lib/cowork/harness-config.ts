@@ -67,6 +67,8 @@ export function coworkWebSettings(env: Record<string, string | undefined> = type
   const country = (env.COWORK_WEB_COUNTRY ?? 'CL').trim().toUpperCase();
   return {
     searches, fetches, maxPageTokens: 20_000,
+    // COWORK_WEB_BASIC=true: the tools without dynamic filtering (see WebSettings.basic).
+    ...(env.COWORK_WEB_BASIC?.trim() === 'true' ? { basic: true } : {}),
     ...(blocked.length ? { blockedDomains: blocked } : {}),
     ...(/^[A-Z]{2}$/.test(country) ? { country, ...(country === 'CL' ? { timezone: 'America/Santiago' } : {}) } : {}),
   };

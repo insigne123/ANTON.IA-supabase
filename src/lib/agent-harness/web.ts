@@ -5,6 +5,9 @@ import type { ContentBlock, ServerBlock, ServerToolSpec, Usage } from './types';
 
 export const WEB_SEARCH_TOOL = 'web_search_20260209';
 export const WEB_FETCH_TOOL = 'web_fetch_20260209';
+/** The same tools without dynamic filtering: the model reads the results as they come and asks for the next search itself, instead of writing code that loops over searches. */
+export const WEB_SEARCH_BASIC_TOOL = 'web_search_20250305';
+export const WEB_FETCH_BASIC_TOOL = 'web_fetch_20250910';
 
 export type WebSettings = {
   /** Searches and page reads a whole run may make. */
@@ -17,6 +20,17 @@ export type WebSettings = {
   timezone?: string;
   /** Tokens of a page that reach the model. */
   maxPageTokens?: number;
+  /**
+   * Searches or reads one call may make. Without it a call may spend the whole budget at once, and a model that asks for six searches
+   * together never gets to look at the first results before the rest. With it the rest waits for the next call, which has seen them.
+   */
+  perCall?: number;
+  /**
+   * The basic tools, without the code that filters results. The model of the dynamic ones writes a loop of searches and, when the loop fails,
+   * runs it again: it burns the searches of its budget on retries and ends «out of searches» after one real query (23 Oct, Enaex, three of
+   * three runs). For a task that is a few searches and reading what they return, the basic ones are enough and cost fewer tokens.
+   */
+  basic?: boolean;
 };
 
 /**
@@ -25,16 +39,18 @@ export type WebSettings = {
  */
 export function webToolSpecs(web: WebSettings, spent: Pick<Usage, 'webSearches' | 'webFetches'> = {}): ServerToolSpec[] {
   const specs: ServerToolSpec[] = [];
+  // With a limit per call the definition does change as the budget is spent; the cache of the tool list matters less to a run of a few calls.
+  const allowed = (budget: number, used: number | undefined) => (web.perCall ? Math.max(1, Math.min(web.perCall, budget - (used ?? 0))) : budget);
   if (web.searches > 0 && (spent.webSearches ?? 0) < web.searches) {
     specs.push({
-      type: WEB_SEARCH_TOOL, name: 'web_search', max_uses: web.searches,
+      type: web.basic ? WEB_SEARCH_BASIC_TOOL : WEB_SEARCH_TOOL, name: 'web_search', max_uses: allowed(web.searches, spent.webSearches),
       ...(web.blockedDomains?.length ? { blocked_domains: web.blockedDomains } : {}),
       ...(web.country ? { user_location: { type: 'approximate', country: web.country, ...(web.timezone ? { timezone: web.timezone } : {}) } } : {}),
     });
   }
   if (web.fetches > 0 && (spent.webFetches ?? 0) < web.fetches) {
     specs.push({
-      type: WEB_FETCH_TOOL, name: 'web_fetch', max_uses: web.fetches,
+      type: web.basic ? WEB_FETCH_BASIC_TOOL : WEB_FETCH_TOOL, name: 'web_fetch', max_uses: allowed(web.fetches, spent.webFetches),
       ...(web.blockedDomains?.length ? { blocked_domains: web.blockedDomains } : {}),
       ...(web.maxPageTokens ? { max_content_tokens: web.maxPageTokens } : {}),
     });
