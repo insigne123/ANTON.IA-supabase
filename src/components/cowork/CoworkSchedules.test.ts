@@ -40,8 +40,9 @@ const dependencies: Record<string, unknown> = {
 };
 const exports: any = {};
 new Function('require', 'exports', code)((id: string) => id in dependencies ? dependencies[id] : require(id), exports);
-const { CoworkSchedules, coworkScheduleStatusLine } = exports as {
+const { CoworkSchedules, coworkScheduleLastRun, coworkScheduleStatusLine } = exports as {
   CoworkSchedules: React.ComponentType<Record<string, unknown>>;
+  coworkScheduleLastRun: (iso: string, now?: Date) => string;
   coworkScheduleStatusLine: (task: Record<string, unknown>, now?: Date) => string;
 };
 
@@ -53,13 +54,23 @@ const task = (overrides: Record<string, unknown> = {}) => ({
 const NOW = new Date('2026-10-26T15:00:00Z');
 
 test('the line under a task says when it fires next, or why it does not, and what happened last time', () => {
-  assert.equal(coworkScheduleStatusLine(task(), NOW), 'Próxima: lunes, 2 de noviembre, 09:00');
-  // «Última vez» is in the clock of whoever reads it (the browser's), so the expectation asks the same helper.
-  assert.equal(coworkScheduleStatusLine(task({ lastStatus: 'admitted', lastRunAt: '2026-10-26T12:00:05.000Z' }), NOW),
-    `Próxima: lunes, 2 de noviembre, 09:00 · Última vez: ${presentation.coworkShortTime('2026-10-26T12:00:05.000Z', NOW)}`);
+  assert.equal(coworkScheduleStatusLine(task(), NOW), 'Próxima: lunes 2 de noviembre, 09:00');
+  // «Última vez» is in the clock of whoever reads it (the browser's).
+  assert.equal(coworkScheduleStatusLine(task({ lastStatus: 'admitted', lastRunAt: '2026-10-26T12:00:05.000Z' }), new Date('2026-10-26T12:30:00Z')),
+    `Próxima: lunes 2 de noviembre, 09:00 · Última vez: hoy a las ${new Date('2026-10-26T12:00:05.000Z').toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })}`);
   assert.equal(coworkScheduleStatusLine(task({ status: 'paused', nextRunAt: null }), NOW), 'Pausada');
-  assert.equal(coworkScheduleStatusLine(task({ lastStatus: 'skipped' }), NOW), 'Próxima: lunes, 2 de noviembre, 09:00 · La última vez se omitió: el sistema estaba detenido');
+  assert.equal(coworkScheduleStatusLine(task({ lastStatus: 'skipped' }), NOW), 'Próxima: lunes 2 de noviembre, 09:00 · La última vez se omitió: el sistema estaba detenido');
   assert.equal(coworkScheduleStatusLine(task({ status: 'paused', nextRunAt: null, lastStatus: 'failed' }), NOW), 'Pausada porque no pudo iniciarse tres veces seguidas');
+});
+
+test('the last run is told as a person counts it: today, yesterday, days ago, or the date', () => {
+  const now = new Date('2026-10-26T12:30:00Z');
+  const ago = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString();
+  assert.match(coworkScheduleLastRun('2026-10-26T12:00:05.000Z', now), /^hoy a las \d\d:\d\d$/);
+  assert.equal(coworkScheduleLastRun(ago(1), now), 'ayer');
+  assert.equal(coworkScheduleLastRun(ago(4), now), 'hace 4 días');
+  assert.equal(coworkScheduleLastRun(ago(6), now), 'hace 6 días');
+  assert.equal(coworkScheduleLastRun(ago(20), now), 'el 6 de octubre');
 });
 
 type Call = { url: string; method: string; body: any };
@@ -118,7 +129,7 @@ test('each task shows its name, its schedule and when it fires next; the count o
   try {
     assert.match(view.text(), /Resumen del lunes/);
     assert.match(view.text(), /Los lunes a las 09:00/);
-    assert.match(view.text(), /Próxima: lunes, 2 de noviembre, 09:00/);
+    assert.match(view.text(), /Próxima: lunes 2 de noviembre, 09:00/);
     assert.match(view.text(), /Respuestas de la mañana/);
     assert.match(view.text(), /1 de 5 activas/);
     assert.match(view.text(), /Pausada/);
