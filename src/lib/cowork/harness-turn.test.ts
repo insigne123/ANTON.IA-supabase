@@ -57,6 +57,9 @@ test('reads are tools of the gateway, asked together run together, and the turn 
   assert.equal(tools.includes('opportunities_list'), false, 'a read the account does not have is not offered');
   assert.equal(tools.some(name => name.startsWith('proponer_')), false, 'no proposals without a way to stage them');
   assert.ok(model.requests[0].system.startsWith(COWORK_HARNESS_PROTOCOL));
+  // A question for information is answered whole and the proposal is offered as the next step: «¿qué oportunidades hay hoy?» got only the proposal's two
+  // sentences, without the tenders that close soon (oportunidades-hoy failed in every measured configuration until the protocol said so).
+  assert.match(COWORK_HARNESS_PROTOCOL, /pregunta de información[^']*se responde con responder[^']*propuesta[^']*en question[^']*ya pidió la acción, propónla/);
   assert.match(model.requests[0].system, /REGLAS DEL COORDINADOR/);
   assert.equal(model.requests[0].messages[0].content, '{"request":"hola"}');
   assert.equal(model.requests[0].effort, undefined);
