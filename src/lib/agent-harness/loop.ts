@@ -7,8 +7,9 @@ import { clearOldToolResults, estimateTokens, summarizeOldTurns } from './contex
 import { renderToolOutput, searchToolsTool, summarizeOutcome, ToolRegistry, toolSpec, inputProblems } from './tools';
 import {
   addUsage, emptyUsage, type AgentEvent, type AgentRun, type AgentStopReason, type AgentTool, type ContentBlock, type Effort, type Message,
-  type ModelClient, type ModelResponse, type ToolContext, type ToolOutcome, type ToolResultBlock, type ToolUseBlock, type Usage,
+  type ModelClient, type ModelResponse, type ServerToolSpec, type ToolContext, type ToolOutcome, type ToolResultBlock, type ToolUseBlock, type Usage,
 } from './types';
+import { describeWebAction, webActions, type WebAction } from './web';
 
 export type AgentLimits = {
   /** Calls to the model. Each round can ask for several tools at once, so a few rounds do a lot. */
@@ -57,6 +58,9 @@ export type RunAgentInput = {
   registry: ToolRegistry;
   /** The tool whose `final` outcome is the run's answer. On the last round the model is forced to call it. */
   finalTool?: string;
+  /** Tools the API runs on its side (web search and page reading), or a function that says which to offer given what the run has spent.
+   * They are not offered on the last round, which only answers. */
+  serverTools?: ServerToolSpec[] | ((spent: Usage) => ServerToolSpec[]);
   limits: AgentLimits;
   effort?: Effort;
   signal: AbortSignal;
@@ -145,20 +149,37 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
 
     const active = registry.active();
     const forcedFinal = lastRound && input.finalTool && registry.get(input.finalTool) ? input.finalTool : null;
+    const serverTools = lastRound ? [] : typeof input.serverTools === 'function' ? input.serverTools(usage) : input.serverTools ?? [];
+    // The searches and page reads of this call, shown as each one finishes when the model client reports its blocks as they complete.
+    const announced = new Set<string>();
+    const seen: ContentBlock[] = [];
+    const announce = (action: WebAction) => {
+      if (announced.has(action.id)) return;
+      announced.add(action.id);
+      emit({ type: 'web', round, action });
+      emit({ type: 'tool_start', round, id: action.id, name: action.tool, input: action.tool === 'web_search' ? { query: action.input } : { url: action.input } });
+      emit({ type: 'tool_end', round, id: action.id, name: action.tool, status: action.ok ? 'ok' : 'error', ms: 0, summary: describeWebAction(action) });
+    };
     const response = await input.model.complete({
       system: input.system, messages, tools: (forcedFinal ? active.filter(tool => tool.name === forcedFinal) : active).map(toolSpec),
+      ...(serverTools.length ? { serverTools } : {}),
       toolChoice: forcedFinal ? { type: 'tool', name: forcedFinal } : lastRound ? { type: 'none' } : undefined,
       effort: input.effort, maxTokens: input.limits.maxTokens, signal: input.signal,
       onText: (delta, snapshot) => emit({ type: 'text', delta, snapshot }),
       onToolInput: ({ name, json }) => emit({ type: 'tool_input', round, name, json }),
+      onServerBlock: block => { seen.push(block); for (const action of webActions(seen, { onlyDone: true })) announce(action); },
     });
     usage = addUsage(usage, response.usage);
     if (!models.includes(response.model)) models.push(response.model);
     emit({ type: 'usage', usage: response.usage, model: response.model });
     await input.hooks?.afterModelCall?.({ round, response, model: response.model });
     messages = [...messages, { role: 'assistant', content: response.content }];
+    // Whatever the client did not report as it happened is shown now, with the rest of the call.
+    for (const action of webActions(response.content)) announce(action);
 
     if (response.stopReason === 'refusal') throw new Error('AGENT_REFUSAL: the model declined this request.');
+    // The API stopped a long run of its own tools (ten steps) with the work half done: sending the conversation back, ending with its own blocks, makes it go on.
+    if (response.stopReason === 'pause_turn') continue;
     const toolUses = response.content.filter((block): block is ToolUseBlock => block.type === 'tool_use');
 
     // A call cut by the output limit has a half-written input: it is answered with the problem instead of being run.

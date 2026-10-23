@@ -42,6 +42,10 @@ export type CoworkEvent = {
 export const COWORK_NOTE_ACTION = 'assistant.note';
 /** The emails the Writer wrote in a turn that also proposes their campaign (Plan 12, 4a-2): the coordinator reads them, nothing is stored. */
 export const COWORK_WRITTEN_ACTION = 'assistant.written';
+/** What the agent searched or read on the web in a turn (harness-turn.ts): data it found, with the pages it came from, not a read of the account. */
+export const COWORK_WEB_ACTIONS = ['web.search', 'web.fetch'] as const;
+export type CoworkWebAction = typeof COWORK_WEB_ACTIONS[number];
+export const coworkIsWebAction = (action: unknown): action is CoworkWebAction => COWORK_WEB_ACTIONS.some(item => item === action);
 
 export function coworkNoteText(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;

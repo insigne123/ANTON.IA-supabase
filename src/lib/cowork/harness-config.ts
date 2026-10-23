@@ -2,7 +2,7 @@
 // run until now (agent-loop.ts) stays the default, and a turn the harness cannot take (a task resumed from its specialists, a question
 // about a proposal) goes to it too. Types only plus the settings reader: the server wires the pieces (worker.ts).
 import type { z } from 'zod';
-import type { Effort, ModelClient, ModelResponse } from '@/lib/agent-harness/index';
+import type { Effort, ModelClient, ModelResponse, WebSettings } from '@/lib/agent-harness/index';
 import { COWORK_MAX_COORDINATOR_CALLS } from './turn-budget';
 
 export type CoworkHarnessCapability = { name: string; description: string; input: z.ZodTypeAny };
@@ -24,6 +24,8 @@ export type CoworkHarnessConfig = {
   deadlineMs: number;
   /** A model that reads images (a Claude): with it, a document the agent reviews is also looked at page by page, as a person would. */
   documentReviewer?: ModelClient;
+  /** The web: the API's own search and page reading, with what the turn may spend on them (COWORK_WEB_ENABLED). Without it the agent has no web. */
+  web?: WebSettings;
   /** Before each call: the ledger's reservation. Throwing ends the turn with the ledger's own message. */
   reserve?: () => Promise<string | undefined>;
   /**
@@ -39,7 +41,7 @@ export type CoworkHarnessConfig = {
   recordUsage?: (reservationId: string | undefined, response: ModelResponse, durationMs: number) => Promise<void>;
 };
 
-export type CoworkHarnessSettings = { model: string; effort: Effort; maxRounds: number; maxReads: number };
+export type CoworkHarnessSettings = { model: string; effort: Effort; maxRounds: number; maxReads: number; web: WebSettings | null };
 
 const bounded = (value: string | undefined, min: number, max: number, fallback: number) => {
   const number = Number(value);
@@ -48,6 +50,25 @@ const bounded = (value: string | undefined, min: number, max: number, fallback: 
 };
 
 const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * The web is off unless COWORK_WEB_ENABLED=true. Each search is billed on top of the tokens (the price goes in COWORK_MODEL_PRICING_JSON as
+ * webSearchUsdPerThousand), so a turn has a small budget: COWORK_WEB_MAX_SEARCHES (4) and COWORK_WEB_MAX_FETCHES (3). The agent looks from Chile
+ * (COWORK_WEB_COUNTRY, CL) and never reads the domains in COWORK_WEB_BLOCKED_DOMAINS (comma separated).
+ */
+export function coworkWebSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env): WebSettings | null {
+  if (env.COWORK_WEB_ENABLED?.trim() !== 'true') return null;
+  const searches = bounded(env.COWORK_WEB_MAX_SEARCHES, 0, 10, 4);
+  const fetches = bounded(env.COWORK_WEB_MAX_FETCHES, 0, 8, 3);
+  if (searches + fetches === 0) return null;
+  const blocked = (env.COWORK_WEB_BLOCKED_DOMAINS ?? '').split(',').map(domain => domain.trim().toLowerCase()).filter(domain => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)).slice(0, 20);
+  const country = (env.COWORK_WEB_COUNTRY ?? 'CL').trim().toUpperCase();
+  return {
+    searches, fetches, maxPageTokens: 20_000,
+    ...(blocked.length ? { blockedDomains: blocked } : {}),
+    ...(/^[A-Z]{2}$/.test(country) ? { country, ...(country === 'CL' ? { timezone: 'America/Santiago' } : {}) } : {}),
+  };
+}
 
 export function coworkHarnessEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
   return env.COWORK_RUNTIME?.trim() === 'harness';
@@ -66,5 +87,6 @@ export function coworkHarnessSettings(env: Record<string, string | undefined> = 
     effort,
     maxRounds: bounded(env.COWORK_HARNESS_MAX_ROUNDS, 2, COWORK_MAX_COORDINATOR_CALLS, COWORK_MAX_COORDINATOR_CALLS),
     maxReads: bounded(env.COWORK_HARNESS_MAX_READS, 1, 12, 6),
+    web: coworkWebSettings(env),
   };
 }

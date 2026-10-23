@@ -2,11 +2,12 @@
 // 1) clear the results of old tool calls (the model already used them and the call that made them stays in the conversation, so it can
 //    ask again), and 2) summarize the oldest turns into a note and keep the recent ones whole. Pure: the summary is written by a
 //    function the caller gives (a small, fast model), so this module has no SDK and tests use a plain function.
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from './types';
+import type { ContentBlock, Message, ServerBlock, ToolResultBlock, ToolUseBlock } from './types';
 
 const CHARS_PER_TOKEN = 3.2;
 const IMAGE_TOKENS = 1_600;
 const DOCUMENT_TOKENS = 6_000;
+const SERVER_RESULT_TOKENS = 1_500;
 
 function blockSize(block: ContentBlock): number {
   switch (block.type) {
@@ -18,7 +19,9 @@ function blockSize(block: ContentBlock): number {
     case 'tool_use': return (block.name.length + JSON.stringify(block.input ?? null).length) / CHARS_PER_TOKEN + 8;
     case 'tool_result': return typeof block.content === 'string' ? block.content.length / CHARS_PER_TOKEN + 8
       : block.content.reduce((sum, part) => sum + blockSize(part), 8);
-    default: return 0;
+    // What the API ran on its side: the call is small; a result (the pages a search found, the code that filtered them) is what it is worth to read.
+    case 'server_tool_use': return JSON.stringify(block.input ?? null).length / CHARS_PER_TOKEN + 8;
+    default: return String(block.type).endsWith('_tool_result') ? SERVER_RESULT_TOKENS : 0;
   }
 }
 
@@ -81,6 +84,14 @@ export function tailStart(messages: Message[], keepLast: number): number {
   return index;
 }
 
+/** What a search or a page read was for, in a summary: the only calls of the API's own tools the agent mentions (the code that filters them is not). */
+function webLine(block: ServerBlock): string | null {
+  const input = (block.input ?? {}) as { query?: unknown; url?: unknown };
+  if (block.name === 'web_search') return `Agente buscó en la web ${brief(input.query)}`;
+  if (block.name === 'web_fetch') return `Agente leyó la página ${brief(input.url)}`;
+  return null;
+}
+
 /** A readable copy of the turns that will be summarized: what was asked, what was done and what came back, cut short. */
 export function transcriptOf(messages: Message[], perBlock = 1_200): string {
   const lines: string[] = [];
@@ -89,6 +100,7 @@ export function transcriptOf(messages: Message[], perBlock = 1_200): string {
     for (const block of message.content) {
       if (block.type === 'text') lines.push(`${message.role === 'user' ? 'Usuario' : 'Agente'}: ${block.text.slice(0, perBlock)}`);
       else if (block.type === 'tool_use') lines.push(`Agente llamó ${block.name}(${brief(block.input)})`);
+      else if (block.type === 'server_tool_use') { const line = webLine(block); if (line) lines.push(line); }
       else if (block.type === 'tool_result') lines.push(`Resultado${block.is_error ? ' (error)' : ''}: ${(typeof block.content === 'string' ? block.content : '[contenido]').slice(0, perBlock)}`);
     }
   }

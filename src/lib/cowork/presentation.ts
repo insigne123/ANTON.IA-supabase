@@ -86,11 +86,18 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'credits.balance': { label: 'Revisó tu saldo de créditos', source: 'Créditos', icon: 'scale' },
   'gmail.contact_history': { label: 'Revisó correos en tu Gmail', source: 'Gmail', icon: 'mail' },
   'prospecting.search': { label: 'Buscó nuevos contactos en el proveedor', source: 'Búsqueda externa', icon: 'globe' },
+  'web.search': { label: 'Buscó en la web', source: 'Web', icon: 'globe' },
+  'web.fetch': { label: 'Leyó una página web', source: 'Web', icon: 'globe' },
 };
 
 export function coworkActionInfo(action: unknown): CoworkActionInfo {
   const key = typeof action === 'string' ? action : '';
   return ACTIONS[key] || { label: 'Consultó datos de la cuenta', source: 'ANTON.IA', icon: 'search' };
+}
+
+/** The site of an address, as the person knows it («mercadopublico.cl»); what was written when it is not one. */
+function webSite(address: string): string {
+  try { return new URL(address).hostname.replace(/^www\./, ''); } catch { return address.length > 48 ? `${address.slice(0, 47)}…` : address; }
 }
 
 function countOf(result: unknown): number | null {
@@ -108,8 +115,11 @@ export function describeCoworkObservation(payload: Record<string, unknown>): { l
   const info = coworkActionInfo(action);
   const input = typeof payload.input === 'string' ? payload.input.trim() : '';
   const parts: string[] = [];
-  const showsQuery = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'site.read', 'leads.count', 'compliance.obligation'].includes(action);
+  const showsQuery = ['leads.search', 'crm.search', 'contacted.search', 'deliverability.check', 'site.read', 'leads.count', 'compliance.obligation', 'web.search'].includes(action);
   if (showsQuery && input) parts.push(`«${input.length > 48 ? `${input.slice(0, 47)}…` : input}»`);
+  // A page that was read is told by its site, not its whole address.
+  if (action === 'web.fetch' && input) parts.push(webSite(input));
+  if ((action === 'web.search' || action === 'web.fetch') && (payload.result as { ok?: unknown } | null)?.ok === false) parts.push('no se pudo');
   if (action === 'prospecting.search' && payload.input && typeof payload.input === 'object') {
     const criteria = payload.input as { titles?: unknown; target?: unknown };
     if (criteria.target === 'companies') parts.push('empresas');
@@ -119,7 +129,7 @@ export function describeCoworkObservation(payload: Record<string, unknown>): { l
     const research = (payload.result as { availability?: string; research?: { sources?: unknown[] } } | null);
     if (research?.availability === 'available') parts.push(`${research.research?.sources?.length ?? 0} fuentes`);
     else if (research?.availability) parts.push('sin informe disponible');
-  } else {
+  } else if (action !== 'web.fetch' && !(action === 'web.search' && (payload.result as { ok?: unknown } | null)?.ok === false)) {
     const count = countOf(payload.result);
     if (count !== null) parts.push(`${count} resultado${count === 1 ? '' : 's'}`);
   }
@@ -149,6 +159,7 @@ const FINDING_NOUNS: Record<string, [string, string]> = {
   'agenda.today': ['pendiente de hoy', 'pendientes de hoy'],
   'credits.balance': ['saldo', 'saldos'],
   'prospecting.search': ['contacto nuevo', 'contactos nuevos'],
+  'web.search': ['fuente', 'fuentes'],
 };
 
 export function coworkReadFinding(payload: Record<string, unknown> | null | undefined): CoworkReadFinding | null {

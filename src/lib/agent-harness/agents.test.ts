@@ -216,7 +216,7 @@ test('the request caches the rules and the conversation so far, leaves thinking 
 test('the answer is read back into blocks, stop reason and usage the loop understands', () => {
   const response = responseOf({
     model: 'claude-sonnet-5-5-20261001', stop_reason: 'tool_use',
-    content: [{ type: 'thinking', thinking: 'a', signature: 's' }, { type: 'text', text: 'Voy a mirar.' }, { type: 'tool_use', id: 'x', name: 'consultar', input: { k: 1 } }, { type: 'server_tool_use', id: 'z' }],
+    content: [{ type: 'thinking', thinking: 'a', signature: 's' }, { type: 'text', text: 'Voy a mirar.' }, { type: 'tool_use', id: 'x', name: 'consultar', input: { k: 1 } }, { type: 'something_new', id: 'z' }],
     usage: { input_tokens: 100, output_tokens: 40, cache_read_input_tokens: 900, cache_creation_input_tokens: 50 },
   }, 'claude-sonnet-5-5');
   assert.equal(response.stopReason, 'tool_use');

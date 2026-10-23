@@ -8,4 +8,5 @@ export * from './subagent';
 export * from './structured';
 export * from './review';
 export * from './plan';
+export * from './web';
 export { anthropicModel, anthropicRequest, requestMessages, type AnthropicLike } from './anthropic';

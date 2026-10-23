@@ -39,3 +39,16 @@ test('Claude cache writes cost a quarter more than plain input', () => {
   assert.equal(usage(9_000).costUsd, null);
   assert.equal(usage(-1).costUsd, null);
 });
+
+test('a web search is billed on top of the tokens, at the price the configuration gives', () => {
+  const usage = (price: Record<string, unknown>, searches?: number) => coworkModelUsage({ modelName: 'claude-sonnet-5-5', durationMs: 10, usage: { prompt_tokens: 10_000,
+    completion_tokens: 1_000, total_tokens: 11_000, prompt_tokens_details: { cached_tokens: 2_000 }, ...(searches === undefined ? {} : { web_search_requests: searches }) } },
+  JSON.stringify({ 'claude-sonnet-5-5': { version: 'anthropic-2026-10', inputUsdPerMillion: 3, outputUsdPerMillion: 15, cachedInputUsdPerMillion: 0.3, ...price } }));
+  const tokens = (8_000 * 3 + 2_000 * 0.3 + 1_000 * 15) / 1_000_000;
+  assert.equal(usage({}).costUsd?.toFixed(8), tokens.toFixed(8));
+  assert.equal(usage({}, 0).costUsd?.toFixed(8), tokens.toFixed(8), 'no search, no price needed');
+  assert.equal(usage({ webSearchUsdPerThousand: 10 }, 3).costUsd?.toFixed(8), (tokens + 0.03).toFixed(8));
+  assert.equal(usage({}, 3).costUsd, null, 'searches with no price are an unknown cost, not a free one');
+  assert.equal(usage({ webSearchUsdPerThousand: -1 }, 3).costUsd, null);
+  assert.equal(usage({ webSearchUsdPerThousand: 10 }, -2).costUsd, null);
+});
