@@ -81,11 +81,11 @@ export function getContactabilityCopy(status: ContactabilityStatus): Pick<Contac
     case 'ok':
       return { label: 'Contactable', description: 'No encontramos bloqueos para este contacto.' };
     case 'warning':
-      return { label: 'Revisar antes de contactar', description: 'Hay senales que conviene revisar antes de enviar.' };
+      return { label: 'Revisar antes de contactar', description: 'Hay señales que conviene revisar antes de enviar.' };
     case 'blocked':
-      return { label: 'No contactar', description: 'Este contacto o dominio esta bloqueado para envios.' };
+      return { label: 'No contactar', description: 'Este contacto o dominio está bloqueado para envíos.' };
     case 'missing_email':
-      return { label: 'Sin email', description: 'Necesitas un email valido antes de contactar.' };
+      return { label: 'Sin email', description: 'Necesitas un email válido antes de contactar.' };
     default:
       return { label: 'Estado no disponible', description: 'No pudimos verificar el estado de contacto ahora.' };
   }
@@ -111,12 +111,12 @@ export function getTrustCenterCopy(tone: TrustCenterTone) {
   }
   if (tone === 'attention') {
     return {
-      label: 'Necesita una revision breve',
-      description: 'Hay aprobaciones, excepciones o leads calientes que conviene atender antes de aumentar automatizacion.',
+      label: 'Necesita una revisión breve',
+      description: 'Hay aprobaciones, excepciones o leads calientes que conviene atender antes de aumentar la automatización.',
     };
   }
   return {
     label: 'Autopilot pausado o asistido',
-    description: 'ANTONIA puede preparar trabajo, pero no deberia operar sola hasta ajustar la configuracion.',
+    description: 'ANTONIA puede preparar trabajo, pero no debería operar sola hasta ajustar la configuración.',
   };
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ADMIN_STAGES, DECISION_LABELS, MEMBER_FILTERS, adminMoves, canSetPrices, decisionBody, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, memberFilter, memberMayMove, memberSteps, memberView, openDecision, pendingFitProposals, stateNoteSchema, type ActivityLike } from './member-work';
+import { ADMIN_STAGES, DECISION_LABELS, MEMBER_FILTERS, adminMoves, canSetPrices, decisionBody, decisionReplySchema, decisionSchema, fitProposalSchema, fitResolveSchema, isFinished, memberFilter, memberMayMove, memberSteps, memberView, openDecision, pendingFitProposals, stateNoteSchema, type ActivityLike } from './member-work';
 
 test('each stage offers the person one way forward first and the exits after it', () => {
   assert.deepEqual(memberSteps('assigned').map(step => [step.to, Boolean(step.primary), Boolean(step.needsNote)]), [['working', true, false], ['blocked', false, true]]);
@@ -10,6 +10,11 @@ test('each stage offers the person one way forward first and the exits after it'
   assert.deepEqual(memberSteps('submitted').map(step => step.to), ['working'], 'a presented one taken by mistake can go back');
   for (const closed of ['won', 'lost', 'archived', 'unassigned'] as const) assert.deepEqual(memberSteps(closed), []);
   for (const state of ['assigned', 'working', 'blocked', 'submitted'] as const) for (const step of memberSteps(state)) assert.equal(memberMayMove(state, step.to), true, `${state} → ${step.to}`);
+});
+
+test('an opportunity that was handed in or closed is finished: the page stops pushing «Cómo postular» from then on', () => {
+  for (const state of ['submitted', 'won', 'lost', 'archived'] as const) assert.equal(isFinished(state), true, state);
+  for (const state of ['unassigned', 'assigned', 'working', 'blocked', null, undefined] as const) assert.equal(isFinished(state), false, String(state));
 });
 
 test('a member never sets a stage that belongs to the administrators, nor reopens one they closed', () => {

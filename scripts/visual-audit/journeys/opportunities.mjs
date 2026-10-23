@@ -1,6 +1,7 @@
 // Journeys of «Oportunidades»: what an administrator and a member do with the workspace of fixtures/opportunity-workspace.mjs.
 // Opportunity numbers are the ones of that file: 2 is the tender in preparation with its report (Diego works it, Camila is on it),
 // 3 and 6 are assigned to Diego (6 closes tomorrow), 9 is recommended and nobody has it, 10 is submitted and 11 won.
+import { standsOut } from '../checks.mjs';
 const opp = n => `00000000-0000-4000-8000-${String(9510 + n).padStart(12, '0')}`;
 const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
 const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'mark', 'decision', 'decision_reply'] };
@@ -12,6 +13,8 @@ const inCard = (c, title, button) => c.page.getByText(title, { exact: true }).fi
 const open = async (c, title, button) => { await c.clickOn(inCard(c, title, button)); };
 const workOf = (c, n) => c.table('opportunity_work').find(row => row.opportunity_id === opp(n));
 const stateOf = (c, n) => workOf(c, n)?.state ?? 'unassigned';
+/** Whether «Cómo postular» in the header is the filled, main action of the page (the first button of that name: the tab comes after it). */
+const applyIsMain = c => c.page.getByRole('button', { name: 'Cómo postular' }).first().evaluate(node => /\bbg-primary\b/.test(node.className)).catch(() => null);
 
 export default () => [
   // ─── Administrator ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -22,11 +25,19 @@ export default () => [
       { say: 'Pulso Asignar en la tarjeta de Maipú', do: async c => { await open(c, 'Compra Ágil: personal administrativo de apoyo', 'Asignar'); await c.seeRole('dialog', /Asignar/); } },
       { say: 'Toco a Diego', do: async c => { await c.click({ role: 'button', name: /Diego Fuentes/ }); } },
       { say: 'Escribo el objetivo', do: async c => { await c.fill({ placeholder: 'Ej.: presentar la oferta antes del cierre' }, 'Postular con el mismo precio por persona de Providencia.'); } },
+      { say: 'Elijo la próxima acción: Mañana', do: async c => {
+        const dialog = c.page.getByRole('dialog');
+        await c.click({ role: 'button', name: 'Mañana' });
+        const on = dialog.getByRole('button', { name: 'Mañana' }).first();
+        const { ok, ratio } = await standsOut(on, dialog.getByRole('button', { name: 'En 3 días' }).first());
+        c.check('lo elegido se distingue de lo demás', (await on.getAttribute('aria-pressed').catch(() => null)) === 'true' && ok, `contraste ${ratio} a 1`);
+      } },
       { say: 'Pulso Asignar y notificar', do: async c => {
         await c.click('Asignar y notificar'); await c.wait(1500);
         c.check('la oportunidad quedó asignada', stateOf(c, 9) === 'assigned', `estado: ${stateOf(c, 9)}`);
         c.check('Diego es parte del equipo', c.table('opportunity_participants').some(row => row.opportunity_id === opp(9) && row.user_id === '00000000-0000-4000-8000-000000000012'));
         c.check('el objetivo quedó escrito', /precio por persona/.test(workOf(c, 9)?.objective || ''));
+        c.check('la próxima acción quedó para mañana', Boolean(workOf(c, 9)?.due_at), `due_at: ${workOf(c, 9)?.due_at}`);
         c.check('sigue en la lista, sin abrir la oportunidad', await c.has('Gestionar oportunidades'));
       } },
     ] },
@@ -44,7 +55,10 @@ export default () => [
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
       { say: 'Veo la novedad de la decisión pedida', do: async c => { await c.see('Decisión pedida'); } },
-      { say: 'Abro la licitación desde la novedad', do: async c => { await c.click({ text: 'Decisión pedida' }); await c.see('Pide una decisión'); } },
+      { say: 'Abro la licitación desde la novedad', do: async c => {
+        await c.click({ text: 'Decisión pedida' }); await c.see('Pide una decisión');
+        c.check('mientras se gestiona, «Cómo postular» es la acción principal', (await applyIsMain(c)) === true);
+      } },
       { say: 'Escribo mi respuesta', do: async c => { await c.fill('Tu respuesta', 'Sí, ofrécelo como opcional con el 12 % extra.'); } },
       { say: 'Pulso Responder', do: async c => {
         await c.click('Responder'); await c.wait(1500);
@@ -63,12 +77,16 @@ export default () => [
     ] },
   { id: 'admin-perdida', persona: 'owner', title: 'Administrador: cerrar una oportunidad presentada como perdida, con su motivo', goal: 'Que la propuesta presentada pase a «Perdida» y el equipo lea por qué.', passWrites: [ACTIONS],
     steps: [
-      { say: 'Abro la oportunidad presentada', do: async c => { await c.go(`/opportunities?op=${opp(10)}`); await c.see('Cambiar etapa'); } },
+      { say: 'Abro la oportunidad presentada', do: async c => {
+        await c.go(`/opportunities?op=${opp(10)}`); await c.see('Cambiar etapa');
+        c.check('presentada, «Cómo postular» ya no es la acción principal', (await applyIsMain(c)) === false);
+      } },
       { say: 'Elijo la etapa Perdida', do: async c => { await c.choose('Cambiar etapa', 'Perdida'); await c.seeRole('dialog', /Pasar a Perdida/); c.check('aún no cambió: pide el motivo primero', stateOf(c, 10) === 'submitted', `estado: ${stateOf(c, 10)}`); } },
       { say: 'Cuento qué pasó, en una línea', do: async c => { await c.page.getByRole('dialog').getByRole('textbox').first().fill('Adjudicaron a otra empresa con menor plazo de entrega.'); } },
       { say: 'Pulso Pasar a Perdida', do: async c => {
         await c.page.getByRole('dialog').getByRole('button', { name: 'Pasar a Perdida' }).click(); await c.wait(1500);
         c.check('la oportunidad quedó perdida', stateOf(c, 10) === 'lost', `estado: ${stateOf(c, 10)}`);
+        c.check('ya perdida, «Cómo postular» deja de ser la acción principal', (await applyIsMain(c)) === false);
         c.check('el motivo quedó en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(10) && /perdida\. Adjudicaron a otra empresa/.test(row.body)), 'opportunity_activity');
       } },
     ] },
@@ -89,6 +107,10 @@ export default () => [
       { say: 'Veo qué cierra primero', do: async c => {
         const first = await c.page.locator('h3, h2').filter({ hasText: /Servicio de guardias de seguridad/ }).first().isVisible().catch(() => false);
         c.check('lo más urgente se ve sin buscar', first);
+        // The filter that is on must be seen: the list used to start with none marked for a member, and «secondary» on white is 1.1 to 1.
+        const mine = c.page.getByRole('button', { name: 'Mi trabajo' }).first();
+        const { ok, ratio } = await standsOut(mine, c.page.getByRole('button', { name: 'Nuevas asignaciones' }).first());
+        c.check('«Mi trabajo» arranca marcado y se distingue de los demás', (await mine.getAttribute('aria-pressed').catch(() => null)) === 'true' && ok, `contraste ${ratio} a 1`);
       } },
       { say: 'Abro la licitación de guardias', do: async c => { await open(c, 'Servicio de guardias de seguridad para 12 sucursales', 'Abrir y trabajar'); await c.see('Empezar a gestionarla'); } },
       { say: 'Pulso Empezar a gestionarla', do: async c => {

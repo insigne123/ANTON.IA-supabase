@@ -120,13 +120,13 @@ export class ReportSynthesisFailed extends Error {
 }
 
 const reportSectionDescriptions: Record<ResearchReportSectionV1, string> = {
-  person_verified: 'No se encontraron hechos publicos verificables sobre la persona con coincidencia de identidad suficiente.',
-  company_overview: 'No hay una descripcion publica verificable de la empresa.',
+  person_verified: 'No se encontraron hechos públicos verificables sobre la persona con coincidencia de identidad suficiente.',
+  company_overview: 'No hay una descripción pública verificable de la empresa.',
   company_offerings: 'No se verificaron ofertas o servicios concretos.',
-  company_market: 'No se verifico informacion suficiente sobre industria o mercado.',
-  company_scale: 'No se verificaron indicadores publicos de escala.',
-  signals: 'No se encontraron senales publicas recientes y atribuibles.',
-  commercial_hypotheses: 'La evidencia disponible no permite formular una hipotesis comercial citada.',
+  company_market: 'No se verificó información suficiente sobre industria o mercado.',
+  company_scale: 'No se verificaron indicadores públicos de escala.',
+  signals: 'No se encontraron señales públicas recientes y atribuibles.',
+  commercial_hypotheses: 'La evidencia disponible no permite formular una hipótesis comercial citada.',
   outreach: 'No hay anclas verificadas suficientes para un enfoque de contacto.',
 };
 

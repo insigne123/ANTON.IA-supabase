@@ -127,14 +127,14 @@ export function assessCampaignQa(input: CampaignQaInput): CampaignQaResult {
       id: 'recipient',
       label: 'Destinatario',
       severity: 'blocked',
-      message: 'Agrega un email valido antes de enviar.',
+      message: 'Agrega un email válido antes de enviar.',
     });
   } else if (!isValidEmail(email)) {
     push(checks, {
       id: 'recipient',
       label: 'Destinatario',
       severity: 'blocked',
-      message: 'El formato del email no parece valido.',
+      message: 'El formato del email no parece válido.',
     });
   } else if (input.contactabilityLoading) {
     push(checks, {
@@ -185,14 +185,14 @@ export function assessCampaignQa(input: CampaignQaInput): CampaignQaResult {
       id: 'subject',
       label: 'Asunto',
       severity: 'review',
-      message: 'El asunto es largo. Uno mas corto suele funcionar mejor.',
+      message: 'El asunto es largo. Uno más corto suele funcionar mejor.',
     });
   } else {
     push(checks, {
       id: 'subject',
       label: 'Asunto',
       severity: 'pass',
-      message: 'El asunto esta listo para revisar visualmente.',
+      message: 'El asunto está listo para revisar visualmente.',
     });
   }
 
@@ -208,28 +208,28 @@ export function assessCampaignQa(input: CampaignQaInput): CampaignQaResult {
       id: 'body',
       label: 'Contenido',
       severity: 'review',
-      message: 'El email es muy breve. Verifica que tenga contexto y una accion clara.',
+      message: 'El email es muy breve. Verifica que tenga contexto y una acción clara.',
     });
   } else {
     push(checks, {
       id: 'body',
       label: 'Contenido',
       severity: 'pass',
-      message: 'El cuerpo tiene suficiente contexto para un primer envio.',
+      message: 'El cuerpo tiene suficiente contexto para un primer envío.',
     });
   }
 
   if (hasUnresolvedPlaceholder(combined)) {
     push(checks, {
       id: 'placeholders',
-      label: 'Personalizacion',
+      label: 'Personalización',
       severity: 'blocked',
-      message: 'Hay placeholders sin resolver. Reemplazalos antes de enviar.',
+      message: 'Hay placeholders sin resolver. Reemplázalos antes de enviar.',
     });
   } else {
     push(checks, {
       id: 'placeholders',
-      label: 'Personalizacion',
+      label: 'Personalización',
       severity: 'pass',
       message: 'No detectamos placeholders visibles.',
     });
@@ -244,23 +244,23 @@ export function assessCampaignQa(input: CampaignQaInput): CampaignQaResult {
       id: 'deliverability-copy',
       label: 'Copy y deliverability',
       severity: 'review',
-      message: 'Hay senales que pueden aumentar friccion: exceso de links, urgencia o tono promocional.',
+      message: 'Hay señales que pueden aumentar fricción: exceso de links, urgencia o tono promocional.',
     });
   } else {
     push(checks, {
       id: 'deliverability-copy',
       label: 'Copy y deliverability',
       severity: 'pass',
-      message: 'No detectamos senales fuertes de copy riesgoso.',
+      message: 'No detectamos señales fuertes de copy riesgoso.',
     });
   }
 
   if (input.useReadReceipt) {
     push(checks, {
       id: 'read-receipt',
-      label: 'Confirmacion de lectura',
+      label: 'Confirmación de lectura',
       severity: 'review',
-      message: 'El destinatario podria ver una solicitud formal de confirmacion.',
+      message: 'El destinatario podría ver una solicitud formal de confirmación.',
     });
   }
 
@@ -269,14 +269,14 @@ export function assessCampaignQa(input: CampaignQaInput): CampaignQaResult {
       id: 'tracking',
       label: 'Tracking',
       severity: 'review',
-      message: 'Sin pixel ni clicks, tendras menos senales para follow-up.',
+      message: 'Sin píxel ni clicks, tendrás menos señales para follow-up.',
     });
   } else if (input.usePixel && input.useLinkTracking) {
     push(checks, {
       id: 'tracking',
       label: 'Tracking',
       severity: 'pass',
-      message: 'Tracking listo. El footer de baja se agregara en el envio.',
+      message: 'Tracking listo. El footer de baja se agregará en el envío.',
     });
   } else {
     push(checks, {
@@ -293,7 +293,7 @@ export function assessCampaignQa(input: CampaignQaInput): CampaignQaResult {
 
   return {
     status,
-    label: status === 'blocked' ? 'Necesita correccion' : status === 'review' ? 'Listo con observaciones' : 'Listo para enviar',
+    label: status === 'blocked' ? 'Necesita corrección' : status === 'review' ? 'Listo con observaciones' : 'Listo para enviar',
     description: status === 'blocked'
       ? 'Corrige los puntos bloqueantes antes de enviar.'
       : status === 'review'

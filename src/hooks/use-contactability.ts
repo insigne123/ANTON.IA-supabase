@@ -23,7 +23,7 @@ export function useContactability(email?: string | null) {
     setError(null);
     try {
       const res = await fetch(`/api/privacy/contactability?email=${encodeURIComponent(normalizedEmail)}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error('No se pudo verificar si el contacto esta habilitado.');
+      if (!res.ok) throw new Error('No se pudo verificar si el contacto está habilitado.');
       const data = await res.json();
       setResult(data as ContactabilityResult);
     } catch (err) {

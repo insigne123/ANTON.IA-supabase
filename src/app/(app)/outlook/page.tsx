@@ -78,8 +78,8 @@ function OutlookConnectPageInner() {
       await microsoftAuthService.getSendToken();
       setBrowserReady(true);
       toast({
-        title: 'Sesion del navegador lista',
-        description: 'Este navegador ya puede usar Outlook para envios manuales con menos friccion.',
+        title: 'Sesión del navegador lista',
+        description: 'Este navegador ya puede usar Outlook para envíos manuales con menos fricción.',
       });
     } catch (error: any) {
       toast({
