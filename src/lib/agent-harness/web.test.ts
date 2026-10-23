@@ -240,3 +240,19 @@ test('the loop shows each search the moment its result arrives, and again never 
   assert.deepEqual(events, ['q1', 'q2', 'q3'], 'the third was not reported live: it is shown when the call ends, and the first two are not shown twice');
   assert.deepEqual(during, ['Búsqueda «q1»: 1 resultado', 'Búsqueda «q2»: 1 resultado', 'Búsqueda «q3»: 1 resultado']);
 });
+
+test('a search the API left waiting while a tool of ours answered is shown when its result arrives, in the next call, and never as a failure', async () => {
+  const lookup = defineTool({ name: 'consultar', description: 'c', kind: 'read', schema: z.object({}), run: async () => ({ status: 'ok', output: 1 }) });
+  const model = new ScriptedModel([
+    reply([search('s1', 'q1'), call('consultar', {}, 't1')]),
+    reply([found('s1', ['A', 'https://a.cl']), call('responder', { reply: 'ya' }, 't2')]),
+  ]);
+  const shown: Array<[number, string, boolean]> = [];
+  const run = await runAgent({
+    model, system: 's', messages: [{ role: 'user', content: 'investiga' }], registry: new ToolRegistry([lookup, answer]), finalTool: 'responder', limits: { maxRounds: 4 }, signal: signal(),
+    serverTools: webToolSpecs({ searches: 3, fetches: 0 }),
+    onEvent: event => { if (event.type === 'web') shown.push([event.round, event.action.input, event.action.ok]); },
+  });
+  assert.equal(run.stopReason, 'final_tool');
+  assert.deepEqual(shown, [[2, 'q1', true]], 'once, with its result, in the round it arrived');
+});

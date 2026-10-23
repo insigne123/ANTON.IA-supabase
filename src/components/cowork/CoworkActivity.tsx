@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ChartColumn, ChevronRight, LayoutDashboard, LoaderCircle, Minus, PenLine, SearchCheck, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import {
-  coworkAgentLine, coworkAgentRows, coworkAnswerReview, coworkElapsed, coworkFindingText, coworkPlanStepLine, coworkReadEvents, coworkTurnFindings, describeCoworkObservation, type CoworkAgentRow,
+  coworkAgentLine, coworkAgentRows, coworkAnswerReview, coworkElapsed, coworkFindingText, coworkPlanStepLine, coworkReadEvents, coworkTurnFindings, coworkWebReadCount, describeCoworkObservation, type CoworkAgentRow,
   type CoworkIconKey, type CoworkPlanProgress, type CoworkPlanState, type CoworkReadFinding,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
@@ -218,9 +218,10 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
   // While a turn without a plan works, its agents show open below the line.
   const expandable = steps.length > 0 || Boolean(plan) || (agents.length > 0 && !active);
   const icons = [...new Set(steps.map(step => step.icon))].slice(0, 3);
-  const reads = coworkReadEvents(events).length;
+  const webReads = coworkWebReadCount(events);
+  const reads = coworkReadEvents(events).length - webReads;
   const designs = steps.filter(step => step.agent === 'Diseñadora' && step.label.startsWith('Diseñó')).length;
-  const files = steps.length - reads - designs;
+  const files = steps.length - reads - webReads - designs;
   // «Escribió 3 correos»: the Writer's last step says what it wrote (nothing when it gave up).
   const wrote = agents.find(row => row.agent === 'writer' && row.state === 'done' && row.outcome !== 'skipped')?.label || '';
   // «Revisó la respuesta»: the judge read it before it was shown (nothing when it could not). Whether
@@ -229,6 +230,7 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
   const parts = [
     plan ? `Siguió un plan de ${plan.length} pasos` : '',
     reads ? `hizo ${reads} ${reads === 1 ? 'consulta' : 'consultas'}` : '',
+    webReads ? 'buscó en la web' : '',
     designs ? `diseñó ${designs === 1 ? 'un artefacto' : `${designs} artefactos`}` : '',
     files ? `generó ${files} ${files === 1 ? 'archivo' : 'archivos'}` : '',
     wrote ? wrote.charAt(0).toLocaleLowerCase('es') + wrote.slice(1) : '',

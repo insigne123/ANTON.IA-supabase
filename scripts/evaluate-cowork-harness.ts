@@ -116,7 +116,7 @@ async function main() {
       const started = Date.now();
       // EVAL_DEBUG: when each block of the API's own tools (a search, its result) arrives while the call goes on.
       const traced = process.env.EVAL_DEBUG && request.onServerBlock
-        ? { ...request, onServerBlock: (block: Parameters<NonNullable<typeof request.onServerBlock>>[0]) => { console.error(`  · +${Date.now() - started}ms ${block.type}`); request.onServerBlock!(block); } } : request;
+        ? { ...request, onServerBlock: (block: Parameters<NonNullable<typeof request.onServerBlock>>[0]) => { console.error(`  · +${Date.now() - started}ms ${block.type}${block.type === 'web_search_tool_result' || block.type === 'web_fetch_tool_result' ? ` ${JSON.stringify(block.content).slice(0, 160)}` : ''}`); request.onServerBlock!(block); } } : request;
       // A provider that refuses a request ends the turn with a generic apology: the reason is worth reading in the evaluation.
       const response = await base.complete(traced).catch(error => { console.error(`  ! ${base.name}: ${error instanceof Error ? error.message : error}`.slice(0, 400)); throw error; });
       current.modelMs += Date.now() - started;
