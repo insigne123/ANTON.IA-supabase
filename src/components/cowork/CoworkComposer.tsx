@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { ArrowUp, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, CalendarClock, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import {
   coworkComposerToken, coworkInsertMention, coworkMentionName, coworkTemplateBlank, coworkTemplates, type CoworkComposerToken, type CoworkMention,
@@ -46,6 +46,8 @@ type Props = {
   onMention?: ((mention: CoworkMention) => void) | null;
   /** «/» at the start lists the home's templates (V6). */
   templates?: boolean;
+  /** «Programar este pedido» (scheduled tasks): offered once there is a request to repeat, only where the account has the tasks. */
+  onSchedule?: (() => void) | null;
 };
 
 /** How long typing waits before asking for contacts, so each letter is not a request. */
@@ -55,7 +57,7 @@ const SEARCH_WAIT_MS = 150;
 export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function CoworkComposer({
   id, value, onChange, onSubmit, placeholder, ready, sending, submitLabel, onStop, stopping = false,
   canAutonomous = false, mode, onModeChange, onToggleFiles, filesOpen = false, attachments, hasAttachments = false, attaching = false, onDropFiles,
-  queued, footnote, size = 'regular', searchContacts = null, onMention = null, templates = false,
+  queued, footnote, size = 'regular', searchContacts = null, onMention = null, templates = false, onSchedule = null,
 }, ref) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -205,6 +207,10 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
         {onToggleFiles && <CwButton size="icon-sm" variant="ghost" onClick={onToggleFiles} aria-expanded={filesOpen}
           aria-label={filesOpen ? 'Ocultar archivos' : 'Adjuntar archivos'} title="Adjuntar archivos" disabled={sending}>
           <Paperclip aria-hidden="true" />
+        </CwButton>}
+        {onSchedule && value.trim().length >= 10 && <CwButton size="icon-sm" variant="ghost" onClick={onSchedule} disabled={sending}
+          aria-label="Programar este pedido" title="Programar este pedido: Cowork lo hará solo, cuando tú elijas">
+          <CalendarClock aria-hidden="true" />
         </CwButton>}
         {canAutonomous && <ExecutionMode id={`${id}-mode`} value={mode} onChange={onModeChange} disabled={sending} />}
         <div className="ml-auto flex items-center gap-2">

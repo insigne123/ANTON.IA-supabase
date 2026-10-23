@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { coworkTimeZone } from './decision-context';
+import { coworkTimeZone } from './time-zone';
+import { COWORK_SCHEDULE_MARK } from './schedule-message';
+
+export { COWORK_SCHEDULE_MARK, coworkIsScheduledMessage, coworkScheduledTitle } from './schedule-message';
 
 /**
  * Scheduled tasks of Cowork: a request the person wants answered again and again («cada lunes a las 9, dime quién respondió y a quién
@@ -149,8 +152,6 @@ export function coworkScheduleWhen(at: Date, timeZone: string) {
   return `${day}, ${hour}`;
 }
 
-export const COWORK_SCHEDULE_MARK = '⏰ Tarea programada';
-
 /** The first message of the conversation a firing starts: what it is, when it fired and the request, word for word. */
 export function coworkScheduleMessage(task: { title: string; prompt: string }, firedFor: Date, timeZone: string) {
   return [
@@ -161,15 +162,4 @@ export function coworkScheduleMessage(task: { title: string; prompt: string }, f
     '',
     '(Ejecución automática: responde con lo que puedas resolver ahora; lo que necesite una decisión de la persona queda como propuesta para aprobar.)',
   ].join('\n');
-}
-
-/** Whether a conversation's first message is the one a scheduled task wrote. */
-export function coworkIsScheduledMessage(message: string | null | undefined) {
-  return typeof message === 'string' && message.startsWith(`${COWORK_SCHEDULE_MARK} · `);
-}
-
-/** The name of the task in the first line of its message, for the title of the conversation. */
-export function coworkScheduledTitle(message: string | null | undefined) {
-  if (!coworkIsScheduledMessage(message)) return null;
-  return String(message).split('\n', 1)[0].slice(COWORK_SCHEDULE_MARK.length + 3).trim() || null;
 }

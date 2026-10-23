@@ -37,6 +37,14 @@ test('a conversation is named by the first sentence of its request, cut at a wor
     'Escríbele a Daniela Rojas de Manpower un primer correo…');
 });
 
+test('a conversation a scheduled task started is named after the task, and a name the person gave still wins', () => {
+  const message = '⏰ Tarea programada · Resumen del lunes\nlunes, 26 de octubre, 09:00\n\nDime quién respondió esta semana y a quién escribir hoy.\n\n(Ejecución automática: responde con lo que puedas resolver ahora.)';
+  const [thread] = groupCoworkThreads([run('s', 5, { message })]);
+  assert.equal(thread.title, '⏰ Resumen del lunes');
+  const [named] = groupCoworkThreads([run('s', 5, { message })], { s: 'Mi resumen' });
+  assert.equal(named.title, 'Mi resumen');
+});
+
 test('a continuation whose root fell out of the list never shows the synthetic prompt', () => {
   const [thread] = groupCoworkThreads([run('c', 5, { parent_run_id: 'gone', automatic: true, message: 'Continúa a partir del efecto…' })]);
   assert.equal(thread.title, 'Continuación de un trabajo anterior');

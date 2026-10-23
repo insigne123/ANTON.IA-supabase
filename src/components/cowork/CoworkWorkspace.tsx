@@ -29,6 +29,7 @@ import { CoworkHome, type CoworkOfferDraft } from './CoworkHome';
 import { COWORK_LOW_SEARCH_QUOTA, CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkShortcuts } from './CoworkShortcuts';
+import { CoworkSchedules, useCoworkSchedulesAvailable } from './CoworkSchedules';
 import { CoworkExportProvider } from './ExportMenu';
 import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
@@ -142,6 +143,10 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const [drawerOpen, setDrawerOpen] = useState(false);
   /** «Atajos de teclado» (Plan 13), and whether the keys are a Mac's (read on the client: the server cannot tell). */
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // «Tareas programadas»: only where the account has them. Opened from the rail (empty) or from the message box (with the request to repeat).
+  const schedulesAvailable = useCoworkSchedulesAvailable();
+  const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [schedulesPrompt, setSchedulesPrompt] = useState('');
   const [mac, setMac] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   // Below xl the summary has no room beside the chat: it opens in a sheet.
@@ -532,6 +537,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
     ? { onRename: renameThread, onDelete: (thread: CoworkThreadSummary) => void deleteThread(thread) }
     : {};
   const retryList = useCallback(() => { setError(''); setListVersion(value => value + 1); }, []);
+  const openSchedules = useCallback((prompt: string) => { setDrawerOpen(false); setSchedulesPrompt(prompt); setSchedulesOpen(true); }, []);
+  const scheduleActions = schedulesAvailable ? { onSchedules: () => openSchedules('') } : {};
   const title = useMemo(() => {
     const summary = threads.find(thread => thread.rootId === selectedRoot);
     if (summary) return summary.title;
@@ -944,19 +951,19 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
     placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Enviar mensaje" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
-    searchContacts={ready ? searchContacts : null} onMention={addMention} templates
+    searchContacts={ready ? searchContacts : null} onMention={addMention} templates onSchedule={schedulesAvailable ? () => openSchedules(message) : null}
     {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
   return <CoworkMotion><CoworkExportProvider value={exportHandlers}><section aria-label="Cowork" className={cn('cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] max-md:-mx-4 max-md:-my-4 max-md:h-[calc(100dvh-3rem)] max-md:rounded-none max-md:border-0 max-md:shadow-none md:h-[calc(100dvh-5.5rem)]', chrome && 'md:h-dvh md:rounded-none md:border-0 md:shadow-none')}>
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
-      <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} onShortcuts={() => setShortcutsOpen(true)} {...threadActions} />
+      <CoworkThreadList threads={threads} loading={loading} error={listError} onRetry={retryList} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} onShortcuts={() => setShortcutsOpen(true)} {...threadActions} {...scheduleActions} />
     </div>
     <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
       <SheetContent side="left" showCloseButton={false} aria-describedby={undefined} onCloseAutoFocus={returnFocusTo(listOpener)}
         className="w-[86%] max-w-[300px] border-cw-border bg-cw-rail p-0 text-cw-text sm:max-w-[300px]">
         <SheetTitle className="sr-only">Conversaciones</SheetTitle>
         <CoworkThreadList idPrefix="cowork-drawer" closeStyle="dismiss" threads={threads} loading={loading} error={listError} onRetry={retryList}
-          selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} {...threadActions} />
+          selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} {...threadActions} {...scheduleActions} />
       </SheetContent>
     </Sheet>
 
@@ -1062,7 +1069,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                 && <CoworkQuickActions id="cowork-quick-actions" onPick={followUp} />}
               <CoworkComposer ref={composer} id="cowork-followup" value={message} onChange={setMessage} onSubmit={() => void submit()}
                 placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"
-                searchContacts={ready ? searchContacts : null} onMention={addMention} templates
+                searchContacts={ready ? searchContacts : null} onMention={addMention} templates onSchedule={schedulesAvailable ? () => openSchedules(message) : null}
                 onStop={active && !pendingDecision && latestIsCurrent ? () => void cancel() : null} stopping={cancelling}
                 canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
                 {...fileProps('cowork-followup')}
@@ -1119,5 +1126,6 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
     </m.div>}
     <CoworkShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} mac={mac} />
+    {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={setSchedulesOpen} initialPrompt={schedulesPrompt} onStarted={retryList} />}
   </section></CoworkExportProvider></CoworkMotion>;
 }

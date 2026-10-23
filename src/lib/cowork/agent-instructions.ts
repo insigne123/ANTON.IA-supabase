@@ -33,6 +33,8 @@ export function coworkAgentInstructions(configuration: {
   analyst?: boolean;
   /** preference.save can be proposed: a preference the person asks to keep, with a card (preference-proposal.ts, COWORK_PREFERENCES_ENABLED). */
   preferences?: boolean;
+  /** The person has scheduled tasks (server/cowork/schedules.ts, COWORK_SCHEDULES_ENABLED): Cowork tells them where to set one up, it does not create them. */
+  schedules?: boolean;
   /** task.plan can be proposed: a request of several steps becomes one plan approved once (task-plan.ts, COWORK_TASKS_ENABLED, Plan 13, 4c). */
   tasks?: boolean;
   /** What this turn is about (intents.ts): each part of the prompt that belongs to other intents stays out. Null or absent: the whole prompt. */
@@ -181,6 +183,10 @@ export function coworkAgentInstructions(configuration: {
     // Short and needed in any turn that asks to remember something, so it goes whatever the intent.
     preferenceCapability: configuration.preferences
       ? 'Preferencias: cuando el usuario pide que recuerdes algo para los próximos trabajos («recuerda que…», «de ahora en adelante…», «nunca le escribas a…», «mi tono es…»), propón preference.save con preference {text, scope}: text es la preferencia en una frase, como se va a recordar («No le escribo a empresas de la competencia»), sin datos que no dijo; scope es personal, u organization solo si dice que vale para su equipo o su empresa. Va con tarjeta y revisión humana siempre, incluso en modo autónomo. Una por turno; si en el mismo mensaje pide además otra tarea, haz la tarea aplicando ya esa preferencia (si escribe la Redactora, ponla en notes del encargo: «firma como Nico», «tono cercano») y deja recordarla como siguiente paso, con una respuesta sugerida («Recordar que firmo como Nico»). No la propongas por iniciativa propia ni para cosas de un solo trabajo, y no la uses para datos de contactos (eso es guardar el contacto o su nota). Lo que ya recuerdas viene en memories y ya se aplica: si lo que pide ya está, responde que ya lo tienes presente, sin proponerlo de nuevo ni decir que espera aprobación. Nunca digas que algo queda guardado o propuesto si no propusiste preference.save en esta decisión.'
+      : null,
+    // Short and needed in any turn where something is asked to repeat, so it goes whatever the intent.
+    scheduleCapability: configuration.schedules
+      ? 'Tareas programadas: la persona puede pedir que Cowork repita un pedido solo («cada lunes a las 9, dime a quién escribir hoy», «todas las mañanas revisa si hay respuestas nuevas»). Tú no creas ni cambias tareas: se programan en la app, con el ícono del calendario que está junto a «Lo que Cowork recuerda» en la lista de conversaciones, o con el del calendario del cuadro de mensaje, que toma lo que ya escribió como pedido. Cada ejecución abre una conversación nueva en modo aprobación: lee y propone, y no envía ni gasta nada sin que la persona apruebe. Si pide que algo se repita (cada día, semana o mes), atiende el pedido ahora una sola vez y dile en una frase cómo programarlo; nunca digas que ya quedó programado. Si pregunta qué tareas tiene, dile que las ve y las administra en ese mismo ícono.'
       : null,
     // Short and needed in any turn with a request of several steps, so it goes whatever the intent.
     taskCapability: configuration.tasks

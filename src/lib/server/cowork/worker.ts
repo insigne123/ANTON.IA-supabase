@@ -247,6 +247,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       codeArtifacts: codeArtifactsEnabled,
       preferences: preferencesEnabled,
       analyst: analystEnabled,
+      schedules: coworkSchedulesEnabled(),
       // A plan is proposed only outside a task: inside one, the turn does its next step.
       tasks: tasksEnabled && !activeTask,
       // Only the parts of the prompt this request needs (intents.ts), with COWORK_INTENT_PROMPTS_ENABLED=true; off, the whole prompt.
