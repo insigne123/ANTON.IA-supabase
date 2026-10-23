@@ -48,9 +48,13 @@ respuestas de error de la app.
 
 ## Lo que queda
 
-- La cabecera de la vista del administrador tiene cuatro bloques antes del embudo (estado de la oferta, novedades, «Antes de postular» y
-  los filtros): el embudo empieza a unos 640 px. Conviene plegar el estado de la oferta en una línea y mover los filtros dentro del embudo.
-  No se tocó aquí: es una decisión de diseño más grande que estos arreglos.
+- La cabecera de la vista del administrador tenía cuatro bloques antes del embudo (estado de la oferta, novedades, «Antes de postular» y
+  los filtros). **Hecho después (23 oct):** el estado de la oferta pasó de tarjeta a una línea con sus tres acciones («Qué buscamos»,
+  «Ficha para licitaciones», «Actualizar oportunidades»), y «Antes de postular» de tarjeta a una línea que se despliega. Con la oferta
+  por confirmar sigue la tarjeta, que ahí sí es la tarea. El embudo empieza 76 px más arriba a 1440 px (su título pasa de 675 a 599 px) y
+  «Novedades», lo que el administrador tiene que atender, queda como la única tarjeta de arriba; los once recorridos terminan con los mismos
+  clics y `audit:visual` no da hallazgos de accesibilidad ni de desborde en claro y oscuro, a 390 y 1440 px. Queda mover los filtros dentro
+  del embudo, que es una decisión de diseño más grande.
 - Cambiar de etapa a «Ganada» o «Perdida» no pide un motivo; para aprender qué se gana y qué no, convendría una línea opcional.
 
 ## Cómo repetirlo
