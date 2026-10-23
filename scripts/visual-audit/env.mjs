@@ -56,6 +56,8 @@ export function buildEnv({ ownerId, ownerEmail }) {
     // Production has the harness and the web off. AUDIT_COWORK_WEB=true audits what the page shows when they are on (the guide that offers the web).
     // The harness needs the Anthropic key to be «ready» (the chips under an answer are hidden otherwise); the stand-in goes nowhere: the egress guard blocks it.
     ...(process.env.AUDIT_COWORK_WEB === 'true' ? { COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true', ANTHROPIC_API_KEY: 'audit-unused' } : {}),
+    // AUDIT_COWORK_SCHEDULES=true audits the scheduled tasks (the calendar button of the rail and the message box, and their panel); in production they are off.
+    ...(process.env.AUDIT_COWORK_SCHEDULES === 'true' ? { COWORK_SCHEDULES_ENABLED: 'true' } : {}),
     NEXT_TELEMETRY_DISABLED: '1',
     NEXT_DIST_DIR: DIST_DIR,
     APP_ENV: 'test',
