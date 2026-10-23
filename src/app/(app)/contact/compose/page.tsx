@@ -64,6 +64,9 @@ type AnyLead = EnrichedLead | EnrichedOppLead | any;
 
 const canonicalDeliveryOptions = { pixel: false, links: false, readReceipt: false } as const;
 
+/** The option that is on in a segmented control is the dark one: «secondary» on the light track was 1.1 to 1 and nobody could tell Outlook from Gmail. */
+const chosenOption = (on: boolean) => on ? 'bg-foreground text-background hover:bg-foreground hover:text-background' : '';
+
 function htmlToPlainParas(htmlOrText: string): string {
   if (!htmlOrText) return '';
   let s = String(htmlOrText);
@@ -1281,8 +1284,8 @@ function ComposeInner() {
               key={provider}
               type="button"
               size="sm"
-              variant={sendProvider === provider ? 'secondary' : 'ghost'}
-              className="min-h-11 rounded-full px-3"
+              variant="ghost"
+              className={`min-h-11 rounded-full px-3 ${chosenOption(sendProvider === provider)}`}
               aria-label={`Usar ${provider === 'outlook' ? 'Outlook' : 'Gmail'} para enviar`}
               aria-pressed={sendProvider === provider}
               disabled={nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
@@ -1549,8 +1552,8 @@ function ComposeInner() {
                     <Button
                       type="button"
                       size="sm"
-                      variant={draftSource === 'investigation' ? 'secondary' : 'ghost'}
-                      className="rounded-lg"
+                      variant="ghost"
+                      className={`rounded-lg ${chosenOption(draftSource === 'investigation')}`}
                       aria-pressed={draftSource === 'investigation'}
                       onClick={() => setDraftSource('investigation')}
                     >
@@ -1559,8 +1562,8 @@ function ComposeInner() {
                     <Button
                       type="button"
                       size="sm"
-                      variant={draftSource === 'style' ? 'secondary' : 'ghost'}
-                      className="rounded-lg"
+                      variant="ghost"
+                      className={`rounded-lg ${chosenOption(draftSource === 'style')}`}
                       aria-pressed={draftSource === 'style'}
                       onClick={() => {
                         setDraftSource('style');

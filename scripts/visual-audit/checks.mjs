@@ -100,3 +100,38 @@ export function trackRequests(page, { staleMs = 8000 } = {}) {
   const live = () => [...pending].filter(([, startedAt]) => Date.now() - startedAt < staleMs).map(([request]) => request);
   return { inFlight: () => live().length, pendingUrls: () => live().map(request => `${request.method()} ${new URL(request.url()).pathname}`).slice(0, 5) };
 }
+
+/**
+ * The fill a person sees behind an element: its own background or the nearest one under it, with the translucent ones laid over what is
+ * below (a pill on «bg-muted/30» is not the muted color). Read as «rgb(r, g, b)»; empty when the element is gone.
+ */
+export const fillOf = locator => locator.evaluate(node => {
+  const layers = [];
+  for (let element = node; element; element = element.parentElement) {
+    const parts = (getComputedStyle(element).backgroundColor.match(/[\d.]+/g) || []).map(Number);
+    const alpha = parts.length > 3 ? parts[3] : 1;
+    if (alpha > 0) layers.push([parts[0], parts[1], parts[2], alpha]);
+    if (alpha >= 1) break;
+  }
+  let [red, green, blue] = layers.length && layers[layers.length - 1][3] >= 1 ? layers.pop() : [255, 255, 255];
+  for (const [layerRed, layerGreen, layerBlue, alpha] of layers.reverse()) {
+    red = layerRed * alpha + red * (1 - alpha); green = layerGreen * alpha + green * (1 - alpha); blue = layerBlue * alpha + blue * (1 - alpha);
+  }
+  return `rgb(${Math.round(red)}, ${Math.round(green)}, ${Math.round(blue)})`;
+}).catch(() => '');
+
+/** WCAG relative luminance of an «rgb(r, g, b)» string. */
+export const luminance = css => {
+  const [red, green, blue] = (css.match(/\d+/g) || []).slice(0, 3).map(Number).map(value => { const unit = value / 255; return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+};
+
+/**
+ * Whether the fill of a control that is on stands out from the fill of one that is off by at least `minimum` to 1 (3, WCAG 1.4.11, by
+ * default: «secondary» on white is 1.1). `ratio` is the measured one, for the report.
+ */
+export async function standsOut(on, off, minimum = 3) {
+  const [first, second] = [luminance(await fillOf(on)), luminance(await fillOf(off))];
+  const ratio = (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+  return { ok: Number.isFinite(ratio) && ratio >= minimum, ratio: Number.isFinite(ratio) ? ratio.toFixed(1) : '?' };
+}

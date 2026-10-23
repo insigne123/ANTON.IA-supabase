@@ -17,10 +17,24 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/workspace-radar': radar,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
-const { OpportunityFilters } = load(await compile('./OpportunityFilters.tsx'));
+const { OpportunityFilters, filterChip } = load(await compile('./OpportunityFilters.tsx'));
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/<!-- -->/g, '').replace(/\s+/g, ' ');
 const render = (props: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(OpportunityFilters,
   { query: '', onQuery: () => {}, source: 'all', onSource: () => {}, categories: [], onCategories: () => {}, ...props }));
+
+test('the filter that is on is the only dark pill, in both sizes: «secondary» on white could not be seen', () => {
+  for (const size of ['md', 'sm'] as const) {
+    const on = filterChip(true, size), off = filterChip(false, size);
+    assert.match(on, /\bbg-foreground\b/);
+    assert.match(on, /\btext-background\b/);
+    assert.doesNotMatch(off, /\bbg-foreground\b/);
+    assert.match(off, /\bborder-border\b/);
+    assert.match(off, /hover:bg-muted/);
+  }
+  assert.match(filterChip(false), /\bh-8\b/);
+  assert.match(filterChip(false, 'sm'), /\bh-7\b/);
+  assert.match(filterChip(true), /focus-visible:ring-2/, 'keyboard focus is visible on every pill');
+});
 
 test('the filters offer the lines of service as buttons that can be pressed together, each one saying if it is on', () => {
   const html = render({ categories: ['seguridad'] });

@@ -104,7 +104,7 @@ export function CommercialTimeline(props: Props) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 id="commercial-timeline-title" className="text-lg font-semibold tracking-tight">Timeline 360</h3>
-          <p className="text-sm text-muted-foreground">Investigacion, contacto y senales de respuesta en un solo historial.</p>
+          <p className="text-sm text-muted-foreground">Investigación, contacto y señales de respuesta en un solo historial.</p>
         </div>
         <Button type="button" size="icon" variant="outline" className="h-8 w-8 shrink-0" onClick={fetchEvents} disabled={loading} aria-label="Actualizar timeline comercial">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -130,7 +130,7 @@ export function CommercialTimeline(props: Props) {
         </div>
       ) : events.length === 0 ? (
         <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
-          Todavia no hay senales comerciales para este lead. Cuando ANTONIA investigue, contacte o reciba una respuesta, aparecera aqui.
+          Todavía no hay señales comerciales para este lead. Cuando ANTONIA investigue, contacte o reciba una respuesta, aparecerá aquí.
         </div>
       ) : (
         <div className="relative ml-2 space-y-5 border-l border-border pl-5">

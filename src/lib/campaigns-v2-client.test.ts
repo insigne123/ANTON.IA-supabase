@@ -4,9 +4,11 @@ import test from 'node:test';
 
 import type { CampaignV2RecipientStepSendContextResponse } from './campaigns-v2/contracts';
 import {
+  apiMessage,
   campaignV2DispatchReceipt,
   campaignV2SendAvailability,
   loadCampaignV2RecipientStepSendContext,
+  readsAsSpanish,
   resolveCampaignV2SendKey,
   saveFirstContactFollowUpPlan,
   stopFirstContactFollowUpPlan,
@@ -224,5 +226,24 @@ test('saves sequence guidance and style while preserving generated draft summari
     assert.equal(result.plan?.steps[0].draftGeneration.status, 'ready');
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test('a server message reaches the screen only when it reads as Spanish: English errors and codes become the caller\'s own words', () => {
+  const fallback = 'No pudimos cargar el seguimiento.';
+  assert.equal(apiMessage({ error: 'Native draft not found' }, fallback), fallback);
+  assert.equal(apiMessage({ error: 'NATIVE_DRAFT_NOT_FOUND' }, fallback), fallback);
+  assert.equal(apiMessage({ error: 'Only the campaign creator can perform this action' }, fallback), fallback);
+  assert.equal(apiMessage({ error: 'NATIVE_DRAFT_NOT_FOUND', message: 'El borrador ya no existe.' }, fallback), 'El borrador ya no existe.', 'the Spanish message beside a code is the one shown');
+  assert.equal(apiMessage({ error: 'CAMPAIGN_V2_STOP_FAILED', message: 'Campaign stop failed' }, fallback), fallback);
+  assert.equal(apiMessage({ message: 'Se alcanzó el límite diario.' }, fallback), 'Se alcanzó el límite diario.');
+  assert.equal(apiMessage({ message: 'Ya salió un correo a esta empresa hoy.' }, fallback), 'Ya salió un correo a esta empresa hoy.');
+  assert.equal(apiMessage(null, fallback), fallback);
+  assert.equal(apiMessage({ message: '   ' }, fallback), fallback);
+  for (const english of ['Not Found', 'Campaign V2 plan not found', 'Follow-up drafts can only be generated before the initial send', 'A previous campaign email is no longer available']) {
+    assert.equal(readsAsSpanish(english), false, english);
+  }
+  for (const spanish of ['El envío automático está pausado.', 'Genera primero los seguimientos anteriores para mantener la continuidad.', 'Los días solo se pueden cambiar antes del envío inicial.']) {
+    assert.equal(readsAsSpanish(spanish), true, spanish);
   }
 });

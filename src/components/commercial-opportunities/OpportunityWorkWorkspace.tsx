@@ -20,7 +20,7 @@ import { ProgressMarks } from './ProgressMarks';
 import type { PrioritySort } from '@/lib/commercial-opportunities/priority';
 import { isResearching, markOpened, openedKey, parseOpened, progressChips, type CardProgress } from '@/lib/commercial-opportunities/progress';
 import { useAuth } from '@/context/AuthContext';
-import { OpportunityFilters } from './OpportunityFilters';
+import { OpportunityFilters, filterChip } from './OpportunityFilters';
 import { WORK_STATE_LABELS } from '@/lib/commercial-opportunities/pipeline';
 import { opportunitySummary } from '@/lib/commercial-opportunities/summaries';
 import type { MarkChange } from './ReportMarks';
@@ -30,7 +30,7 @@ import { DecisionCallout, MemberStrip } from './MemberWork';
 import { FitProposals } from './FitProposals';
 import { PriceStudio } from './PriceStudio';
 import { studioKey } from '@/lib/commercial-opportunities/price-studio';
-import { MEMBER_FILTERS, memberFilter, memberView, openDecision, pendingFitProposals } from '@/lib/commercial-opportunities/member-work';
+import { MEMBER_FILTERS, isFinished, memberFilter, memberView, openDecision, pendingFitProposals } from '@/lib/commercial-opportunities/member-work';
 import { OpportunityChat } from './OpportunityChat';
 import { OpportunityAssistant } from './OpportunityAssistant';
 import { TenderProfileSheet } from './TenderProfileSheet';
@@ -418,6 +418,8 @@ export function OpportunityWorkWorkspace() {
     if (result) { setModal(null); setFiles([]); }
   };
   const filters = admin ? [['recommended', 'Recomendadas'], ['review', 'Por revisar'], ['assigned', 'Asignadas'], ['excluded', 'No recomendadas'], ['pending', 'Por evaluar'], ['all', 'Todas']] : MEMBER_FILTERS;
+  // The list starts on «recommended» (the administrator's first filter, and for a member it reads as «Mi trabajo»): a filter that is not in this person's row marks the first one.
+  const shownFilter = filters.some(([key]) => key === filter) ? filter : filters[0]![0];
   const kinds = sourceKinds(source);
   const items = (overview?.items || []).filter(item => {
     const work = overview?.work.find(w => w.opportunity_id === item.id);
@@ -476,7 +478,7 @@ export function OpportunityWorkWorkspace() {
         filtered={Boolean(search) || source !== 'all' || categories.length > 0} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} onMore={loadMore} onClearFilters={clearFilters} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
       <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} showSources={admin}>
-        <div role="group" aria-label="Filtrar oportunidades" className="flex flex-wrap gap-1">{filters.map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'secondary' : 'ghost'} aria-pressed={filter === key} onClick={() => setFilter(key)}>{label}</Button>)}</div>
+        <div role="group" aria-label="Filtrar oportunidades" className="flex flex-wrap gap-1">{filters.map(([key, label]) => <button key={key} type="button" aria-pressed={shownFilter === key} onClick={() => setFilter(key)} className={filterChip(shownFilter === key)}>{label}</button>)}</div>
       </OpportunityFilters>
       {!items.length && <section className="rounded-xl border p-8"><h2 className="font-semibold">{admin ? 'No hay oportunidades en esta vista' : 'Aún no tienes oportunidades en esta vista'}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{search || source !== 'all' || categories.length ? 'Prueba otro texto, otra fuente u otro rubro, o cambia el filtro.' : admin ? 'Confirma la oferta para recibir hallazgos o carga una oportunidad que haya recibido el equipo.' : 'Las oportunidades que te asigne un administrador aparecerán aquí con tu equipo y las próximas acciones.'}</p>
         {search || source !== 'all' || categories.length ? <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Quitar filtros</Button> : null}</section>}
@@ -504,8 +506,8 @@ export function OpportunityWorkWorkspace() {
           </dl>
           <div className="flex flex-wrap gap-2">
             {/* One main action per screen: while the guide shows its own «Generar», the header does not repeat it. */}
-            {/* With the report ready, the main action is the next step: applying, or finding whom to write to. */}
-            {latest && !researching && <Button onClick={() => setTab(signal ? 'contacts' : 'apply')}>{signal ? <Users className="mr-2 h-4 w-4" aria-hidden="true" /> : <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" />}{signal ? 'Buscar a quién escribir' : 'Cómo postular'}</Button>}
+            {/* With the report ready, the main action is the next step: applying, or finding whom to write to. Once it was handed in or closed there is no next step to push. */}
+            {latest && !researching && <Button variant={isFinished(detail.work?.state) ? 'outline' : 'default'} onClick={() => setTab(signal ? 'contacts' : 'apply')}>{signal ? <Users className="mr-2 h-4 w-4" aria-hidden="true" /> : <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" />}{signal ? 'Buscar a quién escribir' : 'Cómo postular'}</Button>}
             {(latest || researching || tab !== 'summary') && <Button variant={latest && !researching ? 'ghost' : 'default'} onClick={generate} disabled={busy || researching}>{researching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : null}{researching ? 'Preparando…' : latest ? (signal ? 'Actualizar ficha comercial' : 'Actualizar informe') : (signal ? 'Generar ficha comercial' : 'Generar informe')}</Button>}
             {admin && <Button variant="outline" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}><Users className="mr-2 h-4 w-4" />Asignar equipo</Button>}
             {item.url && <Button asChild variant="ghost"><a href={item.url} target="_blank" rel="noopener noreferrer"><ExternalLink className="mr-2 h-4 w-4" />{item.kind === 'tender' ? 'Ver en Mercado Público' : signal ? 'Ver en LinkedIn' : 'Ver fuente'}</a></Button>}
@@ -520,7 +522,7 @@ export function OpportunityWorkWorkspace() {
           return decision ? <DecisionCallout decision={decision} admin={admin} busy={busy} onReply={replyDecision}
             who={(detail.members || detail.participants).find(m => m.user_id === decision.actorId)?.name ?? 'Alguien del equipo'} /> : null;
         })()}
-        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular']]), ...(MARKET_KINDS.includes(item.kind) ? [['market', 'Cómo ganar']] : []), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <Button key={id} size="sm" variant={tab === id ? 'secondary' : 'ghost'} aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</Button>)}</div>
+        <div className="flex flex-wrap gap-1 border-b pb-2" aria-label="Secciones de la oportunidad">{[['summary', signal ? 'Ficha comercial' : 'Informe'], ...(signal ? [] : [['apply', 'Cómo postular']]), ...(MARKET_KINDS.includes(item.kind) ? [['market', 'Cómo ganar']] : []), ['documents', `Documentos${detail.documents.length ? ` · ${detail.documents.length}` : ''}`], ['chat', 'Preguntar a la IA'], ['tasks', 'Plan y tareas'], ['contacts', 'Contactos'], ['activity', 'Actividad']].map(([id, label]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={filterChip(tab === id)}>{label}</button>)}</div>
         {tab === 'summary' && <div className="space-y-5">
           {detail.participants.length ? <section aria-label="Equipo de trabajo" className="space-y-2"><div className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">Equipo de trabajo</h2>{admin && <Button variant="ghost" size="sm" onClick={() => { setDraft({ teamId: detail.work?.team_id || '', participantIds: detail.participants.map(p => p.user_id), responsibleId: detail.work?.responsible_id || '', objective: detail.work?.objective || '' }); setModal('assign'); }}>Cambiar equipo</Button>}</div>
             <TeamOffice people={detail.participants} responsibleId={detail.work?.responsible_id} /></section> : null}
@@ -584,12 +586,12 @@ export function OpportunityWorkWorkspace() {
         </>
         : modal === 'criteria' ? <>{([['roles', 'Cargos en avisos de trabajo que revelan una necesidad'], ['keywords', 'Palabras para licitaciones y compras públicas'], ['postQueries', 'Búsquedas de publicaciones en LinkedIn'], ['decisionMakerTitles', 'Cargos de quienes deciden la compra']] as const).map(([key, label]) => <div key={key}><Label htmlFor={`op-criteria-${key}`}>{label}</Label><Textarea id={`op-criteria-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} rows={key === 'postQueries' ? 5 : 4} required={key === 'postQueries'} /></div>)}</>
         : modal === 'assign' ? <>
-          {overview?.groups.length ? <div className="space-y-1.5"><p className="text-sm font-medium">Usar un equipo del workspace · opcional</p><div className="flex flex-wrap gap-2">{overview.groups.map(g => <Button key={g.id} type="button" size="sm" variant={draft.teamId === g.id ? 'secondary' : 'outline'} aria-pressed={draft.teamId === g.id} onClick={() => field('teamId', draft.teamId === g.id ? '' : g.id)}>{g.name}</Button>)}</div><p className="text-xs text-muted-foreground">Suma a todas las personas de ese equipo.</p></div> : null}
+          {overview?.groups.length ? <div className="space-y-1.5"><p className="text-sm font-medium">Usar un equipo del workspace · opcional</p><div className="flex flex-wrap gap-2">{overview.groups.map(g => <button key={g.id} type="button" aria-pressed={draft.teamId === g.id} onClick={() => field('teamId', draft.teamId === g.id ? '' : g.id)} className={cn(filterChip(draft.teamId === g.id), 'h-9')}>{g.name}</button>)}</div><p className="text-xs text-muted-foreground">Suma a todas las personas de ese equipo.</p></div> : null}
           <div className="space-y-1.5"><p className="text-sm font-medium">¿Quién trabaja esta oportunidad?</p><p className="text-xs text-muted-foreground">Toca a cada persona; la estrella marca a quien responde por ella.</p>
             <TeamPicker members={overview?.members || []} selected={draft.participantIds || []} responsibleId={draft.responsibleId || ''} onChange={next => { field('participantIds', next.selected); field('responsibleId', next.responsibleId); }} /></div>
           <TeamOffice people={(overview?.members || []).filter(m => (draft.participantIds || []).includes(m.user_id))} responsibleId={draft.responsibleId} empty={draft.teamId ? 'Se sumará el equipo elegido.' : 'Elige a las personas y aquí verás a tu equipo.'} />
           <Label htmlFor="op-objective">Objetivo · opcional</Label><Input id="op-objective" value={draft.objective || ''} onChange={e => field('objective', e.target.value)} placeholder="Ej.: presentar la oferta antes del cierre" maxLength={500} />
-          <div className="space-y-1.5"><p className="text-sm font-medium">Próxima acción · opcional</p><div className="flex flex-wrap items-center gap-2">{QUICK_DUE.map(([label, days]) => <Button key={label} type="button" size="sm" variant={draft.dueAt === dueIn(days) ? 'secondary' : 'outline'} aria-pressed={draft.dueAt === dueIn(days)} onClick={() => field('dueAt', dueIn(days))}>{label}</Button>)}<Input id="op-due" type="datetime-local" aria-label="Otra fecha y hora" className="h-9 w-auto" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /></div></div>
+          <div className="space-y-1.5"><p className="text-sm font-medium">Próxima acción · opcional</p><div className="flex flex-wrap items-center gap-2">{QUICK_DUE.map(([label, days]) => <button key={label} type="button" aria-pressed={draft.dueAt === dueIn(days)} onClick={() => field('dueAt', dueIn(days))} className={cn(filterChip(draft.dueAt === dueIn(days)), 'h-9')}>{label}</button>)}<Input id="op-due" type="datetime-local" aria-label="Otra fecha y hora" className="h-9 w-auto" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /></div></div>
         </>
         : modal === 'task' ? <><Label htmlFor="op-task-title">Acción</Label><Input id="op-task-title" required value={draft.title || ''} onChange={e => field('title', e.target.value)} /><Label htmlFor="op-task-owner">Responsable</Label><select id="op-task-owner" value={draft.ownerId || ''} onChange={e => field('ownerId', e.target.value)} className="block h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">Sin asignar</option>{detail?.participants.map(m => <option key={m.user_id} value={m.user_id}>{m.name}</option>)}</select><Label htmlFor="op-task-due">Fecha · hora local</Label><Input id="op-task-due" type="datetime-local" value={draft.dueAt || ''} onChange={e => field('dueAt', e.target.value)} /><Label htmlFor="op-task-evidence">Evidencia o resultado esperado</Label><Textarea id="op-task-evidence" value={draft.evidence || ''} onChange={e => field('evidence', e.target.value)} /></>
         : <>

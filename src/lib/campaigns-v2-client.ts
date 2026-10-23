@@ -65,9 +65,18 @@ const campaignV2DispatchStatuses = new Set(['pending', 'sending', 'sent', 'faile
 const defaultCampaignV2SequenceInstruction =
   'Haz avanzar la conversación de forma breve y útil, sin repetir los correos anteriores.';
 
-function apiMessage(payload: any, fallback: string) {
-  if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message;
-  if (typeof payload?.error === 'string' && payload.error.trim()) return payload.error;
+/**
+ * The servers' own errors are often English («Native draft not found») or a code («NATIVE_DRAFT_NOT_FOUND»): on the screen they only confuse.
+ * A message is shown when it reads as Spanish; otherwise the words of whoever asked (`fallback`) are.
+ */
+export function readsAsSpanish(text: string) {
+  return /[áéíóúñ¿¡]/i.test(text) || /\b(?:el|la|los|las|una|del|para|por|con|tu|su|que|ya|sin|fue|hay)\b/i.test(text);
+}
+
+export function apiMessage(payload: any, fallback: string) {
+  for (const candidate of [payload?.message, payload?.error]) {
+    if (typeof candidate === 'string' && readsAsSpanish(candidate)) return candidate;
+  }
   return fallback;
 }
 

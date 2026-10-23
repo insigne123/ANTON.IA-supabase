@@ -11,6 +11,8 @@ export const MEMBER_STATES: readonly WorkState[] = ['working', 'blocked', 'submi
 /** The stages an administrator closed: a member does not reopen them. */
 export const CLOSED_BY_ADMIN: readonly WorkState[] = ['won', 'lost', 'archived'];
 const FINISHED: readonly WorkState[] = ['submitted', ...CLOSED_BY_ADMIN];
+/** Whether the offer was already handed in or the opportunity closed: «how to apply» is behind it, so the page stops pushing it. */
+export const isFinished = (state: WorkState | null | undefined) => FINISHED.includes(state ?? 'assigned');
 
 export type MemberStep = { to: WorkState; label: string; /** A blocked stage needs its reason; the others may carry a note. */ needsNote?: boolean; primary?: boolean };
 
@@ -73,8 +75,8 @@ export const MEMBER_FILTERS: ReadonlyArray<readonly [string, string]> = [['all',
 /** Whether an opportunity in `state` belongs to the filter. «Presentadas y cerradas» is read from the whole list; the others ask the server for their stage. */
 export function memberFilter(filter: string, state: WorkState | null | undefined) {
   const current = state ?? 'assigned';
-  if (filter === 'done') return FINISHED.includes(current);
-  if (filter === 'all' || filter === 'recommended') return !FINISHED.includes(current);
+  if (filter === 'done') return isFinished(current);
+  if (filter === 'all' || filter === 'recommended') return !isFinished(current);
   return current === filter;
 }
 /** What the list is asked for: the stages the server knows by name, and everything for the one that is read here. */

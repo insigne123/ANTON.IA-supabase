@@ -44,13 +44,13 @@ function reasonLabel(reason: string) {
     case 'unsubscribe_reply':
       return 'Baja o preferencia de privacidad registrada';
     case 'blocked_domain':
-      return 'Dominio excluido por tu organizacion';
+      return 'Dominio excluido por tu organización';
     case 'do_not_contact':
       return 'Marcado como no contactar';
     case 'recent_bounce':
       return 'Rebote reciente';
     case 'missing_email':
-      return 'Falta un email valido';
+      return 'Falta un email válido';
     default:
       return null;
   }

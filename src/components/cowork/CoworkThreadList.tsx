@@ -159,8 +159,9 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
       </div>)}
     </div>
     <div className="flex shrink-0 items-center gap-1 border-t border-cw-border px-3 py-2">
-      <CwButton variant="ghost" size="sm" className="min-w-0 flex-1 justify-start gap-2 px-2.5 text-[13px]" onClick={() => setMemoriesOpen(true)}>
-        <Brain aria-hidden="true" />Lo que Cowork recuerda
+      {/* «Lo que Cowork recuerda» did not fit in the 256px of the list next to two icons and ran into the calendar; the dialog keeps the long name. */}
+      <CwButton variant="ghost" size="sm" className="min-w-0 flex-1 justify-start gap-2 px-2.5 text-[13px]" onClick={() => setMemoriesOpen(true)} title="Lo que Cowork recuerda">
+        <Brain aria-hidden="true" /><span className="min-w-0 truncate">Memoria</span>
       </CwButton>
       {onSchedules && <CwButton variant="ghost" size="icon-sm" className="shrink-0" onClick={onSchedules} aria-label="Tareas programadas" title="Tareas programadas">
         <CalendarClock aria-hidden="true" />

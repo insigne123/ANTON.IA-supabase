@@ -99,9 +99,11 @@ test('«Atajos de teclado» sits at the foot of the list on a desktop, when the 
   assert.doesNotMatch(render({}), /Atajos de teclado/);
 });
 
-test('«Lo que Cowork recuerda» is always at the foot of the list, also with no conversations', () => {
-  assert.match(render({}), /Lo que Cowork recuerda/);
-  assert.match(render({ threads: [thread(1)] }), /Lo que Cowork recuerda/);
+test('«Memoria» (what Cowork remembers) is always at the foot of the list, also with no conversations, short enough to sit beside the icons', () => {
+  for (const html of [render({}), render({ threads: [thread(1)] })]) {
+    assert.match(html, /<span class="min-w-0 truncate">Memoria<\/span>/);
+    assert.match(html, /title="Lo que Cowork recuerda"/, 'the long name stays as the tooltip; the dialog is titled with it');
+  }
 });
 
 test('«Tareas programadas» sits at the foot of the list only where the account has them', () => {

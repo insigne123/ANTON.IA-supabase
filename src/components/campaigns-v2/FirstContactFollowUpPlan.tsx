@@ -148,9 +148,12 @@ function approvalLabel(step: FirstContactFollowUpStep) {
   return 'Revisión pendiente';
 }
 
+// Same rule as campaigns-v2-client: a server message is shown only when it reads as Spanish (the rest are English errors or codes nobody should read).
 function apiMessage(payload: any, fallback: string) {
-  if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message;
-  if (typeof payload?.error === 'string' && payload.error.trim()) return payload.error;
+  const readsAsSpanish = (text: string) => /[áéíóúñ¿¡]/i.test(text) || /\b(?:el|la|los|las|una|del|para|por|con|tu|su|que|ya|sin|fue|hay)\b/i.test(text);
+  for (const candidate of [payload?.message, payload?.error]) {
+    if (typeof candidate === 'string' && readsAsSpanish(candidate)) return candidate;
+  }
   return fallback;
 }
 

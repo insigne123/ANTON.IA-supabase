@@ -68,8 +68,10 @@ export function MemberStrip({ state, assignedBy, nextActionAt, openTasks, canSte
         </DialogHeader>
         <form className="space-y-4" onSubmit={event => { event.preventDefault(); void (dialog === 'block' ? submitBlock() : submitDecision()); }}>
           {dialog === 'decision' && <div role="group" aria-label="Qué planteas" className="flex flex-wrap gap-2">
-            {(['ask', 'no_go'] as const).map(value => <Button key={value} type="button" size="sm" variant={type === value ? 'secondary' : 'outline'} aria-pressed={type === value} onClick={() => setType(value)}>
-              {value === 'ask' ? 'Necesito una decisión' : 'Propongo no postular'}</Button>)}
+            {/* The one chosen is the dark one (the same pill as the filters of the list): «secondary» on white could not be told from the other. */}
+            {(['ask', 'no_go'] as const).map(value => <button key={value} type="button" aria-pressed={type === value} onClick={() => setType(value)}
+              className={`h-8 shrink-0 rounded-full border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${type === value ? 'border-transparent bg-foreground font-medium text-background' : 'border-border bg-background text-foreground/75 hover:bg-muted hover:text-foreground'}`}>
+              {value === 'ask' ? 'Necesito una decisión' : 'Propongo no postular'}</button>)}
           </div>}
           <div className="space-y-2">
             <Label htmlFor="member-note">{dialog === 'block' ? 'Qué te bloquea' : type === 'no_go' ? 'Por qué no postular' : 'Qué hay que decidir'}</Label>
