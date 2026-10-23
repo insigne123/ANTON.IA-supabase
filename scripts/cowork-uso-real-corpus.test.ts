@@ -10,8 +10,8 @@ import { runCorpusCase, type CorpusDecider } from './fixtures/cowork-conversatio
 const lazy: CorpusDecider = async () => coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null,
   answer: { reply: 'Listo, cuéntame más.', document: null, suggestions: null, question: '¿Algo más?' } });
 
-test('uso real: twenty cases, ids unique and prefixed, each with an origin and its own checks', () => {
-  assert.equal(USO_REAL_CORPUS.length, 20);
+test('uso real: twenty-one cases, ids unique and prefixed, each with an origin and its own checks', () => {
+  assert.equal(USO_REAL_CORPUS.length, 21);
   const ids = USO_REAL_CORPUS.map(item => item.id);
   assert.equal(new Set(ids).size, ids.length);
   for (const item of USO_REAL_CORPUS) {
@@ -33,6 +33,6 @@ for (const item of USO_REAL_CORPUS.filter(entry => entry.id !== 'ur-hola')) {
 test('ur-hola: a short greeting with no reads passes, six reads do not', async () => {
   const entry = USO_REAL_CORPUS.find(item => item.id === 'ur-hola')!;
   const greet: CorpusDecider = async () => coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null,
-    answer: { reply: 'Hola, Nicolás. Te ayudo a conseguir reuniones para AXIS con correos y LinkedIn.', document: null, suggestions: null, question: '¿Busco prospectos o reviso tus contactos?' } });
+    answer: { reply: 'Hola, Nicolás. Te ayudo a conseguir reuniones para AXIS con correos y LinkedIn.', document: null, suggestions: [{ label: 'Buscar prospectos', message: 'Busca prospectos para AXIS' }], question: '¿Busco prospectos o reviso tus contactos?' } });
   assert.deepEqual((await runCorpusCase(entry, greet)).checks.filter(check => !check.passed).map(check => check.label), []);
 });
