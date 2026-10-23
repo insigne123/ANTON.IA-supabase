@@ -38,11 +38,10 @@ Otras dos migraciones del repositorio, `create_enriched_opportunities` y `fix_en
 Desde un checkout de `main` al día (con los PR 523 y 524 fusionados), no desde un árbol desprendido:
 
 ```bash
-npm run verify:prod-config && npm run build
 firebase deploy --only apphosting -P leadflowai-3yjcy --non-interactive
 ```
 
-- Es el procedimiento de `docs/cowork-deploy-2026-09-21.md`: termina con `Rollout for backend studio complete` y `Deploy complete`. El backend es `studio`, en `us-central1`.
+- Es el procedimiento de `docs/cowork-deploy-2026-09-21.md`: termina con `Rollout for backend studio complete` y `Deploy complete`. El backend es `studio`, en `us-central1`. App Hosting construye en la nube con el `apphosting.yaml` del código subido, así que lo que se despliega es lo que está en `main`. (`npm run verify:prod-config` pide el entorno de producción completo en la terminal; sin él falla por diseño y no sirve de comprobación local.)
 - La credencial no se guarda en el repositorio. El CLI la toma de la sesión de `firebase login`, de `FIREBASE_TOKEN` (de `firebase login:ci`) o de `GOOGLE_APPLICATION_CREDENTIALS` (una cuenta de servicio). Si venció (`Authentication Error: Your credentials are no longer valid`, ya pasó antes: `docs/cowork-phase4-status.md`), se renueva con `firebase login --reauth` o se pone una nueva en las variables del entorno donde corre el despliegue; nunca se pega en el chat.
 - `apphosting.yaml` se lee al desplegar: sin un despliegue nuevo, las siete variables no existen para la app.
 - **Antes de desplegar**, comprobar que la cuenta del piloto no tenga borradores a medio escribir (para que las banderas estén vivas antes de crear los borradores del piloto, no durante):
@@ -57,7 +56,7 @@ Los tres en 0. (A las 21:40 UTC del 23 de octubre estaban en 0, 0 y 0, y el pilo
 
 ## Después del despliegue: qué mirar
 
-Sustituye `<DESDE>` por la hora del despliegue (UTC). Todas son de solo lectura.
+Sustituye `<DESDE>` por la hora del despliegue (UTC). Todas son de solo lectura. Los borradores del piloto se crean **después** de que el despliegue termine, no durante, para que ninguno quede a medio escribir con las banderas apagadas.
 
 **1. ¿Quién corre en qué modelo?** El piloto en `claude-haiku-5-5`; todos los demás en `gpt-6-luna`; ninguna fila con un modelo bloqueado.
 
@@ -118,9 +117,9 @@ where a.created_at >= '<DESDE>'
 group by 1, 2 order by 1 desc;
 ```
 
-Qué mirar al leerlos, en el orden de lo medido: que el correo **nombre el dato concreto** de la investigación (regiones, cifra, nombre propio) y no «el norte de Chile»; que **no abra con un gancho no apto** (una glosa de boletín, «son comunas», el debate de competencia); y que no haya afirmaciones que ninguna fuente respalde. Lo medido esperaba: ganchos no aptos de 6 de 16 a 2 de 16, el dato concreto en 4 de 4 en el caso que lo perdía, menos reintentos, y ningún cambio en «suena humano» (sigue en «corregir» y no en «enviar»: lo que falta es un Perfil de vendedor más rico). El piloto compara contra sí mismo; el resto de las cuentas escribe como antes.
+Qué mirar al leerlos, en el orden de lo medido: que el correo **nombre el dato concreto** de la investigación (regiones, cifra, nombre propio) y no «el norte de Chile»; que **no abra con un gancho no apto** (una glosa de boletín, «son comunas», el debate de competencia); y que no haya afirmaciones que ninguna fuente respalde. Lo medido esperaba: ganchos no aptos de 6 de 16 a 2 de 16, el dato concreto en 4 de 4 en el caso que lo perdía, menos reintentos, y ningún cambio en «suena humano» (sigue en «corregir» y no en «enviar»: lo que falta es un Perfil de vendedor más rico).
 
-La cuenta del piloto no tiene una línea de base propia con Luna (sus cuatro borradores de octubre son del 5 de octubre y los escribió un modelo que hoy está bloqueado); la línea de base es la de todas las demás cuentas en el mismo período.
+La cuenta del piloto no tiene una línea de base propia con Luna (sus cuatro borradores de octubre son del 5 de octubre y los escribió un modelo que hoy está bloqueado); la referencia es el resto de las cuentas, que siguen escribiendo como antes, en el mismo período.
 
 ## Volver atrás
 
@@ -129,7 +128,7 @@ De más fino a más grueso. En todos los casos el siguiente borrador y el siguie
 1. **Una sola mejora de borradores:** quitar su variable (`DRAFT_ANCHOR_SPECIFICS_ENABLED`, `DRAFT_HOOK_FILTER_ENABLED` o `DRAFT_SIGNAL_EVIDENCE_ENABLED`) y desplegar. Un aviso: un borrador escrito con `DRAFT_ANCHOR_SPECIFICS_ENABLED` encendida y vuelto a validar con ella apagada puede no pasar la verificación de personalización; conviene cambiarla entre campañas.
 2. **El harness de Cowork:** quitar `COWORK_RUNTIME`, `COWORK_HARNESS_MODEL` y `COWORK_HARNESS_USER_IDS` y desplegar. Los turnos vuelven al bucle de Luna.
 3. **Todo el piloto:** quitar las siete variables de `apphosting.yaml` y desplegar con el mismo comando (la prueba `pilot-configuration.test.ts` acepta que no haya ninguna). Otra salida, sin cambiar el repositorio, es volver al despliegue anterior desde la consola de App Hosting (backend `studio`, «Rollouts»); después, comprobar con la consulta 1 que el piloto ya no corre en Haiku.
-4. **Las migraciones no se deshacen:** son hacia adelante, no cambian lo que hacían las funciones para los roles de antes y no hay datos suyos. Dejarlas aplicadas es lo seguro.
+4. **Las migraciones no se deshacen:** son hacia adelante, no cambian lo que las funciones hacían para los roles de antes, y la tabla de tareas está vacía y no hay llamadas del rol `delegate` (a las 21:50 UTC del 23 de octubre, 0 y 0). Dejarlas aplicadas es lo seguro.
 
 ## Sumar o quitar personas
 
