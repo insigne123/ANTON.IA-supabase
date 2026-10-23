@@ -4,7 +4,7 @@
 // what would be sent; the SDK sits behind a two-method interface a test replaces.
 import Anthropic from '@anthropic-ai/sdk';
 import { providerError } from '@/ai/anthropic-json';
-import type { ContentBlock, Effort, Message, ModelClient, ModelRequest, ModelResponse, StopReason, ToolResultBlock, Usage } from './types';
+import type { ContentBlock, Effort, Message, ModelClient, ModelRequest, ModelResponse, ServerBlock, StopReason, ToolResultBlock, Usage } from './types';
 
 /** Thinking spends output tokens before the answer: each effort gets room for it on top of the answer's own limit. */
 const THINKING_ROOM: Record<Effort, number> = { low: 4_000, medium: 8_000, high: 16_000, xhigh: 24_000, max: 32_000 };
@@ -20,13 +20,16 @@ function requestBlock(block: ContentBlock): RequestBlock {
   return { ...block };
 }
 
-/** The messages as the API takes them. The last block of the last message carries the cache breakpoint: each round reads the whole
- * conversation so far from cache at a tenth of the price and only pays for what is new. */
+/** The messages as the API takes them. The last block of the last message of the person's side (the user's, and the tool results) carries the
+ * cache breakpoint: each round reads the whole conversation so far from cache at a tenth of the price and only pays for what is new. A turn
+ * the API paused in the middle of a web search ends with the model's own blocks, which are not marked: the breakpoint stays one message behind. */
 export function requestMessages(messages: Message[]): RequestMessage[] {
   const converted: RequestMessage[] = messages.map(message => ({
     role: message.role, content: typeof message.content === 'string' ? message.content : message.content.map(requestBlock),
   }));
-  const last = converted[converted.length - 1];
+  let at = converted.length - 1;
+  while (at >= 0 && converted[at].role !== 'user') at -= 1;
+  const last = converted[at];
   if (last) {
     if (typeof last.content === 'string') last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }];
     else if (last.content.length) last.content[last.content.length - 1] = { ...last.content[last.content.length - 1], cache_control: { type: 'ephemeral' } };
@@ -60,7 +63,9 @@ export function anthropicRequest(request: ModelRequest, model: string) {
     max_tokens: (request.maxTokens ?? 6_000) + THINKING_ROOM[effort],
     system: [{ type: 'text' as const, text: request.system, cache_control: { type: 'ephemeral' as const } }],
     messages,
-    ...(request.tools.length ? { tools: request.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema })) } : {}),
+    // The ones the API runs come first: the tools the harness finds later are added at the end, and the cache of the list only grows.
+    ...(request.tools.length || request.serverTools?.length
+      ? { tools: [...(request.serverTools ?? []), ...request.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema }))] } : {}),
     ...(request.tools.length && toolChoice ? { tool_choice: toolChoice } : {}),
     // A forced tool call cannot be preceded by thinking.
     ...(forced ? { thinking: { type: 'disabled' as const } } : {}),
@@ -70,7 +75,10 @@ export function anthropicRequest(request: ModelRequest, model: string) {
 
 type ApiMessage = {
   model?: string; stop_reason?: string | null; content: Array<Record<string, unknown> & { type: string }>;
-  usage?: { input_tokens?: number | null; output_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null } | null;
+  usage?: {
+    input_tokens?: number | null; output_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null;
+    server_tool_use?: { web_search_requests?: number | null; web_fetch_requests?: number | null } | null;
+  } | null;
 };
 type ApiStream = { on: (event: 'text' | 'streamEvent', listener: (...args: any[]) => void) => unknown; finalMessage: () => Promise<ApiMessage> };
 export type AnthropicLike = { messages: { stream: (params: ReturnType<typeof anthropicRequest>, options: { signal?: AbortSignal }) => ApiStream } };
@@ -83,14 +91,22 @@ const STOP: Record<string, StopReason> = {
 export function anthropicUsage(usage: ApiMessage['usage']): Usage {
   const read = usage?.cache_read_input_tokens ?? 0;
   const written = usage?.cache_creation_input_tokens ?? 0;
-  return { inputTokens: (usage?.input_tokens ?? 0) + read + written, outputTokens: usage?.output_tokens ?? 0, cacheReadTokens: read, cacheWriteTokens: written };
+  const searches = usage?.server_tool_use?.web_search_requests ?? 0;
+  const fetches = usage?.server_tool_use?.web_fetch_requests ?? 0;
+  return {
+    inputTokens: (usage?.input_tokens ?? 0) + read + written, outputTokens: usage?.output_tokens ?? 0, cacheReadTokens: read, cacheWriteTokens: written,
+    ...(searches ? { webSearches: searches } : {}), ...(fetches ? { webFetches: fetches } : {}),
+  };
 }
 
 const KNOWN = new Set(['text', 'thinking', 'redacted_thinking', 'tool_use']);
+/** The blocks of the tools the API runs itself: the call (`server_tool_use`) and each result (`web_search_tool_result`, `code_execution_tool_result`…). */
+const isServerBlock = (type: string) => type === 'server_tool_use' || (type.endsWith('_tool_result') && type !== 'tool_result');
 
 export function responseOf(message: ApiMessage, requested: string): ModelResponse {
-  const content = message.content.filter(block => KNOWN.has(block.type)).map((block): ContentBlock => {
-    if (block.type === 'text') return { type: 'text', text: String(block.text ?? '') };
+  const content = message.content.filter(block => KNOWN.has(block.type) || isServerBlock(block.type)).map((block): ContentBlock => {
+    if (isServerBlock(block.type)) return { ...block } as ServerBlock;
+    if (block.type === 'text') return { type: 'text', text: String(block.text ?? ''), ...(Array.isArray(block.citations) && block.citations.length ? { citations: block.citations } : {}) };
     if (block.type === 'thinking') return { type: 'thinking', thinking: String(block.thinking ?? ''), signature: String(block.signature ?? '') };
     if (block.type === 'redacted_thinking') return { type: 'redacted_thinking', data: String(block.data ?? '') };
     return { type: 'tool_use', id: String(block.id), name: String(block.name), input: block.input ?? {} };
@@ -143,7 +159,7 @@ export function anthropicModel(options: AnthropicModelOptions): ModelClient {
             stream.on('streamEvent', (event: { type?: string; index?: number; content_block?: { type?: string; name?: string }; delta?: { type?: string; partial_json?: string } } | null) => {
               try {
                 if (!event || typeof event.index !== 'number') return;
-                if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') open.set(event.index, { name: String(event.content_block.name), json: '' });
+                if (event.type === 'content_block_start' && (event.content_block?.type === 'tool_use' || event.content_block?.type === 'server_tool_use')) open.set(event.index, { name: String(event.content_block.name), json: '' });
                 else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
                   const block = open.get(event.index);
                   if (block) { block.json += event.delta.partial_json ?? ''; onToolInput({ name: block.name, json: block.json }); }

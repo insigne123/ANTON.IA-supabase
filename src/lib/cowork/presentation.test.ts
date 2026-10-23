@@ -470,3 +470,18 @@ test('a template for several people previews with the first recipient the conver
   const [later] = coworkTurnArtifacts(next, written as never, earlier.get('r2'));
   assert.equal(later.kind === 'block' ? later.preview?.empresa : null, 'GrupoExpro');
 });
+
+test('what the agent searched or read on the web shows with its query or its site, what it found, and when it could not', () => {
+  const found = describeCoworkObservation({ action: 'web.search', input: 'licitaciones de aseo en hospitales de Chile 2026 con cierre esta semana', result: { ok: true, sources: [{ title: 'A', url: 'https://a.cl' }, { title: 'B', url: 'https://b.cl' }] } });
+  assert.equal(found.label, 'Buscó en la web');
+  assert.equal(found.source, 'Web');
+  assert.equal(found.icon, 'globe');
+  assert.equal(found.detail, '«licitaciones de aseo en hospitales de Chile 202…» · 2 resultados');
+  const page = describeCoworkObservation({ action: 'web.fetch', input: 'https://www.sodexo.cl/quienes-somos', result: { ok: true, sources: [{ title: 'Inicio', url: 'https://www.sodexo.cl/quienes-somos' }] } });
+  assert.equal(page.label, 'Leyó una página web');
+  assert.equal(page.detail, 'sodexo.cl', 'a page read is told by its site, with no count');
+  assert.equal(describeCoworkObservation({ action: 'web.fetch', input: 'https://nada.cl', result: { ok: false, sources: [], error: 'url_not_allowed' } }).detail, 'nada.cl · no se pudo');
+  assert.equal(describeCoworkObservation({ action: 'web.search', input: 'algo', result: { ok: false, sources: [], error: 'unavailable' } }).detail, '«algo» · no se pudo');
+  assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}, {}, {}] } }), { count: 3, label: 'fuentes' });
+  assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}] } }), { count: 1, label: 'fuente' });
+});

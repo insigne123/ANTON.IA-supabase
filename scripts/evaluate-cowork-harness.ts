@@ -31,7 +31,7 @@ import { coworkWriterCallModel, coworkWriterEfforts, coworkWriterModels } from '
 import { coworkReadCapabilities } from '../src/lib/server/cowork/read-capabilities';
 import { selectCases } from './cowork-case-selection';
 import { CORPUS } from './fixtures/cowork-full-corpus';
-import { CORPUS_NOW } from './fixtures/cowork-conversation-corpus';
+import { CORPUS_COMMON_CHECKS, CORPUS_NOW, type CorpusCase } from './fixtures/cowork-conversation-corpus';
 import { runCorpusCase, type CorpusAnalyst, type CorpusDesigner, type CorpusJudge, type CorpusWriter } from './fixtures/cowork-conversation-runner';
 
 /** Micro-USD per token, as the Oportunidades ledger prices them (workspace-ai.ts). */
@@ -47,7 +47,9 @@ const costUsd = (usage: Usage, model: string) => {
   const price = PRICES[model];
   if (!price) return null;
   const fresh = Math.max(0, usage.inputTokens - usage.cacheReadTokens - usage.cacheWriteTokens);
-  return (fresh * price.input + usage.outputTokens * price.output + usage.cacheReadTokens * price.cache + usage.cacheWriteTokens * price.write) / 1_000_000;
+  // Each web search is billed on top of the tokens: 10 USD per thousand.
+  return (fresh * price.input + usage.outputTokens * price.output + usage.cacheReadTokens * price.cache + usage.cacheWriteTokens * price.write) / 1_000_000
+    + (usage.webSearches ?? 0) * 0.01;
 };
 
 async function main() {
@@ -95,7 +97,10 @@ async function main() {
     const price = PRICES[model];
     return price ? sum + ((row.input - row.cached) * price.input + row.cached * price.cache + row.output * price.output) / 1_000_000 : sum;
   }, 0);
-  const selected = selectCases(CORPUS, arg('cases')) || CORPUS.filter(entry => !entry.axis).map(entry => entry.id);
+  // --ask="..." runs one request of your own through the same turn, with the common checks, and prints the whole answer.
+  const asked = arg('ask');
+  if (asked) CORPUS.push({ id: 'ask', title: 'Pedido suelto', request: asked, checks: [...CORPUS_COMMON_CHECKS] } as CorpusCase);
+  const selected = asked ? ['ask'] : selectCases(CORPUS, arg('cases')) || CORPUS.filter(entry => !entry.axis).map(entry => entry.id);
   const unknown = selected.filter(id => !CORPUS.some(entry => entry.id === id));
   if (unknown.length) throw new Error(`Unknown cases: ${unknown.join(', ')}`);
 
@@ -173,12 +178,16 @@ async function main() {
       } : undefined;
       const outcome = await runCorpusCase(entry, async () => { throw new Error('The coordinator loop must not run in harness mode'); },
         write, judge, design, analyze, undefined,
-        turn => ({ model: counted, system: turn.system, context: turn.context, capabilities, effort, maxRounds: settings.maxRounds, maxReads: settings.maxReads, deadlineMs: 80_000 }));
+        turn => ({ model: counted, system: turn.system, context: turn.context, capabilities, effort, maxRounds: settings.maxRounds, maxReads: settings.maxReads, deadlineMs: 80_000,
+          // COWORK_WEB_ENABLED=true: the agent can search the web and read pages (each search costs 0.01 USD, counted in the report).
+          ...(settings.web ? { web: settings.web } : {}) }));
       total = addUsage(total, current.usage);
       const failedChecks = outcome.checks.filter(check => !check.passed).map(check => check.label);
       outcomes.push({ id, attempt, passed: outcome.passed, failedChecks, failed: outcome.result.failed, actions: outcome.result.actions, proposal: outcome.result.proposal?.kind ?? null,
-        reply: outcome.result.reply.slice(0, 600), calls: current.calls, seconds: Math.round((Date.now() - started) / 100) / 10, modelSeconds: Math.round(current.modelMs / 100) / 10,
+        reply: outcome.result.reply.slice(0, 600), question: outcome.result.question ?? null, suggestions: (outcome.result.suggestions ?? []).map(chip => chip.label),
+        calls: current.calls, seconds: Math.round((Date.now() - started) / 100) / 10, modelSeconds: Math.round(current.modelMs / 100) / 10,
         usage: current.usage, costUsd: costUsd(current.usage, modelName) });
+      if (asked) console.log(`\n${outcome.result.reply}\n${outcome.result.question ? `\n¿${outcome.result.question}\n` : ''}${(outcome.result.suggestions ?? []).map(chip => `  [${chip.label}]`).join('')}\nacciones: ${outcome.result.actions.join(', ') || '—'}\n`);
       console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${id}#${attempt} ${current.calls} calls ${Math.round((Date.now() - started) / 100) / 10}s${failedChecks.length ? ` — ${failedChecks.join('; ').slice(0, 200)}` : ''}`);
     }
   }

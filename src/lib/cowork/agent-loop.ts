@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, coworkSameLine, type CoworkBlock, type CoworkPlanStep } from './contracts';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema, coworkSameLine, type CoworkBlock, type CoworkPlanStep, type CoworkWebAction } from './contracts';
 import { coworkBlocks, coworkChoices, coworkQuestion, coworkSuggestions, polishCoworkText, withoutRepeatedAside, withoutTrailingQuestions } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
@@ -131,7 +131,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message' | 'linkedin.invite_batch' | 'linkedin.message_batch' | 'contacts.import' | 'email.reply_thread' | 'campaign.retry' | 'lead.enrich_phone'
   | 'contacts.prepare_batch' | 'preference.save' | 'task.plan';
-export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION | typeof COWORK_WRITTEN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
+export type CoworkObservation = { action: CoworkReadAction | CoworkWebAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION | typeof COWORK_WRITTEN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 export type Decision = z.infer<typeof coworkDecisionSchema>;
 
 export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string;
@@ -923,11 +923,11 @@ export function coworkWithoutCadence(reply: string) {
   return `${rest}${rest ? ' ' : ''}Va solo con este correo; si quieres, después te escribo los seguimientos.`;
 }
 
-/** read: the turn consulted something. A chat answer (nothing read) that already offers its quick replies closes on them, as in
- * any AI chat (Plan 13): asking for a question too cost another call and mostly repeated a chip. Leaving something for later,
- * or a chip that says yes to a question the answer does not ask, still gets the correction. */
-function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown },
-  context: { read: boolean; metrics?: boolean } = { read: true }): string | null {
+type ClosingAnswer = { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown };
+
+/** What a final answer still needs to close the way every answer of Cowork closes (rules 4, 9 and 11), and what already works and must stay.
+ * Both runtimes ask for it: the coordinator loop edits its previous decision, the harness's `responder` sends the answer back. */
+export function coworkClosingGaps(answer: ClosingAnswer, context: { read: boolean; metrics?: boolean } = { read: true }): { missing: string[]; keep: string[] } {
   const replies = coworkSuggestions(answer.suggestions);
   const chips = replies.length;
   const blocks = coworkBlocks(answer.blocks);
@@ -948,12 +948,20 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
     context.metrics && !blocks.some(block => block.type === 'metrics') && !answer.document
       ? 'pon las cifras que leíste con metrics.rates en un bloque metrics con su período y sobre cuántos se calculan, también si son 0, y deja en reply la conclusión sin repetirlas todas' : null,
     PROMISES.test(answer.reply) ? `no prometas lo que puedes hacer ahora («${PROMISES.exec(answer.reply)?.[0]}»): dilo hecho con lo que ya consultaste, o ofrécelo en la pregunta final` : null,
-  ].filter(Boolean);
-  if (!missing.length) return null;
-  // The model edits its previous answer (answerToCorrect): name what already worked so it keeps it.
+  ].filter((item): item is string => Boolean(item));
+  // The model edits its previous answer: name what already worked so it keeps it.
   const keep = [answer.document ? `el document «${answer.document.title.slice(0, 80)}»` : null,
     blocks.length && !filler ? 'los bloques' : null,
-    closingQuestion(answer) ? 'la pregunta final' : null, chips ? 'las respuestas sugeridas' : null].filter(Boolean);
+    closingQuestion(answer) ? 'la pregunta final' : null, chips ? 'las respuestas sugeridas' : null].filter((item): item is string => Boolean(item));
+  return { missing, keep };
+}
+
+/** read: the turn consulted something. A chat answer (nothing read) that already offers its quick replies closes on them, as in
+ * any AI chat (Plan 13): asking for a question too cost another call and mostly repeated a chip. Leaving something for later,
+ * or a chip that says yes to a question the answer does not ask, still gets the correction. */
+function closingFeedback(answer: ClosingAnswer, context: { read: boolean; metrics?: boolean } = { read: true }): string | null {
+  const { missing, keep } = coworkClosingGaps(answer, context);
+  if (!missing.length) return null;
   return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Edita tu respuesta anterior (answerToCorrect) y entrégala completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
 }
 
@@ -1181,6 +1189,8 @@ const ID_TEXT = /[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/i;
 const NOT_A_STEP_READ = new Set(['answer', 'reads.parallel', 'reads.plan']);
 /** What the loop wrote about itself (its note, its plan, the Writer's emails): never data an agent can analyze. */
 const ASSISTANT_ACTIONS = new Set<string>([COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_WRITTEN_ACTION]);
+/** Whether the turn consulted something (the account or the web), as opposed to only writing its own notes, plan and drafts. */
+export const coworkTurnRead = (observations: ReadonlyArray<Pick<CoworkObservation, 'action'>>) => observations.some(item => !ASSISTANT_ACTIONS.has(item.action));
 const readsOpportunities = (decision: Decision) => decision.action === 'opportunities.list'
   || Boolean(decision.reads?.some(task => task.action === 'opportunities.list'))
   || Boolean(decision.plan?.some(task => task.read.action === 'opportunities.list'));

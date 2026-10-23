@@ -310,6 +310,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         capabilities: readCapabilities.filter(capability => capability.effect === 'read'),
         // COWORK_DOCUMENT_VISION=true: a Claude also looks at the pages of a document the agent reviews (needs pdftoppm or sharp in the server).
         documentReviewer: process.env.COWORK_DOCUMENT_VISION === 'true' ? anthropicModel({ model: process.env.COWORK_DOCUMENT_REVIEW_MODEL?.trim() || 'claude-haiku-5-5' }) : undefined,
+        // COWORK_WEB_ENABLED=true: the agent can search the web and read pages (Anthropic runs both), within the budget of the turn.
+        web: harnessSettings.web ?? undefined,
         effort: harnessSettings.effort, maxRounds: harnessSettings.maxRounds, maxReads: harnessSettings.maxReads, deadlineMs: turnCeiling.softDeadlineMs,
         reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator'),
         // The answer shows while the model writes it (the same live draft as the coordinator's decision): a correction is announced, not rewritten live.

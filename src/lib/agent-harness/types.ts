@@ -3,14 +3,18 @@
 // run anywhere and the Anthropic client is only one implementation of ModelClient.
 import type { z } from 'zod';
 
-export type TextBlock = { type: 'text'; text: string };
+/** `citations` are the sources the API attached to a sentence of a web answer: they go back with the turn as they came. */
+export type TextBlock = { type: 'text'; text: string; citations?: unknown[] };
 export type ImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
 export type DocumentBlock = { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } };
 export type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
 /** Reasoning the model did: it travels back to the API exactly as it came (signature included) while a turn uses tools. */
 export type ThinkingBlock = { type: 'thinking'; thinking: string; signature: string } | { type: 'redacted_thinking'; data: string };
 export type ToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | Array<TextBlock | ImageBlock>; is_error?: boolean };
-export type ContentBlock = TextBlock | ImageBlock | DocumentBlock | ToolUseBlock | ThinkingBlock | ToolResultBlock;
+/** What the API wrote for a tool it runs on its own side (web search, web fetch, the code that filters them): the call and its result.
+ * It travels back with the conversation exactly as it came, never edited or rebuilt. */
+export type ServerBlock = { type: 'server_tool_use' | `${string}_tool_result`; [field: string]: unknown };
+export type ContentBlock = TextBlock | ImageBlock | DocumentBlock | ToolUseBlock | ThinkingBlock | ToolResultBlock | ServerBlock;
 export type Message = { role: 'user' | 'assistant'; content: string | ContentBlock[] };
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -22,23 +26,34 @@ export type Usage = {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  /** Searches and page reads the API made for the call (each search is billed on top of the tokens). Absent when there were none. */
+  webSearches?: number;
+  webFetches?: number;
 };
 export const emptyUsage = (): Usage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
 export function addUsage(a: Usage, b: Usage): Usage {
+  const searches = (a.webSearches ?? 0) + (b.webSearches ?? 0);
+  const fetches = (a.webFetches ?? 0) + (b.webFetches ?? 0);
   return {
     inputTokens: a.inputTokens + b.inputTokens, outputTokens: a.outputTokens + b.outputTokens,
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens, cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    ...(searches ? { webSearches: searches } : {}), ...(fetches ? { webFetches: fetches } : {}),
   };
 }
 
 /** A tool as the model sees it. */
 export type ToolSpec = { name: string; description: string; inputSchema: Record<string, unknown> };
 
+/** A tool the API runs itself (web search, web fetch): it travels as the API documents it, with its type, its name and its limits. */
+export type ServerToolSpec = { type: string; name: string; [option: string]: unknown };
+
 export type ModelRequest = {
   /** Stable rules of the run: cached between calls. */
   system: string;
   messages: Message[];
   tools: ToolSpec[];
+  /** Tools the API runs on its side, offered next to the ones the harness runs. */
+  serverTools?: ServerToolSpec[];
   /** Forces one tool (the final answer on the last round) or none. */
   toolChoice?: { type: 'auto' } | { type: 'any' } | { type: 'tool'; name: string } | { type: 'none' };
   effort?: Effort;
