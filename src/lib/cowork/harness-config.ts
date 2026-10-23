@@ -72,8 +72,14 @@ export function coworkWebSettings(env: Record<string, string | undefined> = type
   };
 }
 
-export function coworkHarnessEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
-  return env.COWORK_RUNTIME?.trim() === 'harness';
+/**
+ * Whether this person's turns run on the harness. COWORK_RUNTIME=harness turns it on; COWORK_HARNESS_USER_IDS (user ids, comma separated)
+ * limits it to those people while it is tried, and everyone else keeps the coordinator loop. Empty or absent, it is everyone.
+ */
+export function coworkHarnessEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env, userId?: string | null) {
+  if (env.COWORK_RUNTIME?.trim() !== 'harness') return false;
+  const pilot = (env.COWORK_HARNESS_USER_IDS ?? '').split(',').map(id => id.trim().toLowerCase()).filter(Boolean);
+  return !pilot.length || (Boolean(userId) && pilot.includes(String(userId).toLowerCase()));
 }
 
 /**
@@ -81,8 +87,8 @@ export function coworkHarnessEnabled(env: Record<string, string | undefined> = t
  * is the part of Cowork that reads the most and decides the most). Rounds stay within what the ledger admits; with several tools asked
  * in one round, five rounds are enough for a turn that reads, proposes and answers.
  */
-export function coworkHarnessSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env): CoworkHarnessSettings | null {
-  if (!coworkHarnessEnabled(env)) return null;
+export function coworkHarnessSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env, userId?: string | null): CoworkHarnessSettings | null {
+  if (!coworkHarnessEnabled(env, userId)) return null;
   const effort = EFFORTS.find(item => item === env.COWORK_HARNESS_EFFORT?.trim()) ?? 'medium';
   return {
     model: env.COWORK_HARNESS_MODEL?.trim() || 'claude-sonnet-5-5',

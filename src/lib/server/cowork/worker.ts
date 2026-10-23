@@ -301,7 +301,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const rescueModel = coworkRescueModel();
     // COWORK_RUNTIME=harness: the coordinator is a Claude that works with tools (harness-turn.ts) instead of writing one decision per call.
     // Off by default; the loop below runs everything it does not take (a task resumed from its specialists, a question about a proposal).
-    const harnessSettings = coworkHarnessSettings();
+    const harnessSettings = coworkHarnessSettings(process.env, scope.userId);
     const result = await (harnessSettings ? runCoworkTurn : runCoworkReadLoop)({
       harness: harnessSettings ? {
         model: anthropicModel({ model: harnessSettings.model }),

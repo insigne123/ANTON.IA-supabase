@@ -3,7 +3,7 @@ import test from 'node:test';
 import { z } from 'zod';
 import { call, reply, ScriptedModel, usageOf } from '@/lib/agent-harness/scripted';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
-import { coworkHarnessSettings, coworkWebSettings, type CoworkHarnessConfig } from './harness-config';
+import { coworkHarnessEnabled, coworkHarnessSettings, coworkWebSettings, type CoworkHarnessConfig } from './harness-config';
 import { COWORK_HARNESS_PROTOCOL, coworkHarnessFallback, coworkHarnessTelemetry, coworkReadShape, coworkToolName, runCoworkHarnessTurn, runCoworkTurn } from './harness-turn';
 import type { CoworkLoopInput, CoworkObservation } from './agent-loop';
 import { coworkLiveDraft } from './partial-json';
@@ -430,4 +430,20 @@ test('a turn Anthropic could not finish goes on with the coordinator loop; what 
   const fine = new ScriptedModel([reply([answer('Todo bien.')])]);
   assert.equal((await runCoworkTurn(base(fine).input, loop)).reply, 'Todo bien.');
   assert.equal(seen.length, 2);
+});
+
+test('the harness can be tried with a few people: COWORK_HARNESS_USER_IDS limits it, and everyone else keeps the coordinator loop', () => {
+  const ME = '9F7776C6-B4C4-4E5C-9ACC-58FCB1F5B4AD';
+  const OTHER = '00000000-0000-4000-8000-000000000099';
+  const on = { COWORK_RUNTIME: 'harness' };
+  assert.equal(coworkHarnessEnabled(on, OTHER), true, 'without a list it is everyone');
+  assert.equal(coworkHarnessEnabled({ ...on, COWORK_HARNESS_USER_IDS: '  ' }, OTHER), true);
+  const pilot = { ...on, COWORK_HARNESS_USER_IDS: ` ${ME.toLowerCase()} , 00000000-0000-4000-8000-000000000001` };
+  assert.equal(coworkHarnessEnabled(pilot, ME), true, 'upper or lower case, with spaces');
+  assert.equal(coworkHarnessEnabled(pilot, OTHER), false);
+  assert.equal(coworkHarnessEnabled(pilot, null), false, 'nobody known is nobody in the pilot');
+  assert.equal(coworkHarnessEnabled(pilot), false);
+  assert.equal(coworkHarnessEnabled({ COWORK_RUNTIME: 'openai', COWORK_HARNESS_USER_IDS: ME }, ME), false, 'the list does not turn it on');
+  assert.equal(coworkHarnessSettings(pilot, OTHER), null);
+  assert.equal(coworkHarnessSettings(pilot, ME)?.model, 'claude-sonnet-5-5');
 });
