@@ -414,12 +414,14 @@ export async function pullDrop(client: Client, scope: DropScope, deps: { now: Da
  * no credits and no other search. Someone already in «Por escribir» with the same email is linked, not duplicated. The
  * research and the first email go with the contact (`data.leadDrop`).
  */
-export async function saveDropLeads(client: Client, scope: DropScope, dropId: string, leadIds?: string[]) {
+export async function saveDropLeads(client: Client, scope: DropScope, dropId: string, leadIds?: string[], options: { now?: Date } = {}) {
   const drop = await readDrop(client, scope, dropId);
   const wanted = drop.items.filter(item => !item.savedLeadId && (!leadIds || leadIds.includes(item.leadId)));
   if (!wanted.length) return { saved: [], expired: [], items: drop.items };
-  const vault = await readFromVault(client, { organizationId: scope.organizationId, ids: wanted.map(item => item.leadId) });
-  const now = new Date().toISOString();
+  // The vault forgets a contact after LEADS_FINDER_VAULT_DAYS: the hour that decides whether it is still there is the one the caller gives.
+  const clock = options.now ?? new Date();
+  const vault = await readFromVault(client, { organizationId: scope.organizationId, ids: wanted.map(item => item.leadId), now: clock.getTime() });
+  const now = clock.toISOString();
   const saved: Array<{ leadId: string; savedLeadId: string }> = [];
   const expired: string[] = [];
   for (const item of wanted) {
