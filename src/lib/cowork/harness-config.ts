@@ -4,6 +4,7 @@
 import type { z } from 'zod';
 import type { Effort, ModelClient, ModelResponse, WebSettings } from '@/lib/agent-harness/index';
 import { COWORK_MAX_COORDINATOR_CALLS } from './turn-budget';
+import type { CoworkSubagentSettings } from './subagents';
 
 export type CoworkHarnessCapability = { name: string; description: string; input: z.ZodTypeAny };
 
@@ -29,6 +30,16 @@ export type CoworkHarnessConfig = {
   /** Before each call: the ledger's reservation. Throwing ends the turn with the ledger's own message. */
   reserve?: () => Promise<string | undefined>;
   /**
+   * The Investigadoras the coordinator can hand a research to (COWORK_SUBAGENTS_ENABLED; they need the web). Each of their calls to the
+   * model is reserved under the role «delegate», which has its own room in the turn (migration 20261023130000).
+   */
+  subagents?: {
+    settings: CoworkSubagentSettings;
+    model: ModelClient;
+    reserve?: () => Promise<string | undefined>;
+    recordUsage?: (reservationId: string | undefined, response: ModelResponse, durationMs: number) => Promise<void>;
+  };
+  /**
    * The answer as the model writes it (the JSON of `responder` so far, wrapped as the decision the page's live draft reads), and whether it is a
    * correction of an answer the judge sent back (the page then says «revisando» instead of rewriting what it already showed).
    */
@@ -43,7 +54,7 @@ export type CoworkHarnessConfig = {
   onFallback?: (reason: string) => void;
 };
 
-export type CoworkHarnessSettings = { model: string; effort: Effort; maxRounds: number; maxReads: number; web: WebSettings | null };
+export type CoworkHarnessSettings = { model: string; effort: Effort; maxRounds: number; maxReads: number; web: WebSettings | null; subagents: CoworkSubagentSettings | null };
 
 const bounded = (value: string | undefined, min: number, max: number, fallback: number) => {
   const number = Number(value);
@@ -71,6 +82,25 @@ export function coworkWebSettings(env: Record<string, string | undefined> = type
     ...(env.COWORK_WEB_BASIC?.trim() === 'true' ? { basic: true } : {}),
     ...(blocked.length ? { blockedDomains: blocked } : {}),
     ...(/^[A-Z]{2}$/.test(country) ? { country, ...(country === 'CL' ? { timezone: 'America/Santiago' } : {}) } : {}),
+  };
+}
+
+/**
+ * The Investigadoras (sub-agents) are off unless COWORK_SUBAGENTS_ENABLED=true, and they need the web (they have nothing else). The model is
+ * COWORK_SUBAGENT_MODEL (the coordinator's by default), they think little (COWORK_SUBAGENT_EFFORT, low) and each has its own small
+ * budget: COWORK_SUBAGENT_SEARCHES (3), COWORK_SUBAGENT_FETCHES (2), COWORK_SUBAGENT_MAX_ROUNDS (4) and COWORK_SUBAGENT_DEADLINE_MS (45 s).
+ * The coordinator hands out at most COWORK_SUBAGENTS_MAX (3) tasks per turn.
+ */
+export function coworkSubagentSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env, web: WebSettings | null = coworkWebSettings(env)): CoworkSubagentSettings | null {
+  if (env.COWORK_SUBAGENTS_ENABLED?.trim() !== 'true' || !web) return null;
+  return {
+    model: env.COWORK_SUBAGENT_MODEL?.trim() || env.COWORK_HARNESS_MODEL?.trim() || 'claude-sonnet-5-5',
+    effort: EFFORTS.find(item => item === env.COWORK_SUBAGENT_EFFORT?.trim()) ?? 'low',
+    maxDelegations: bounded(env.COWORK_SUBAGENTS_MAX, 1, 5, 3),
+    maxRounds: bounded(env.COWORK_SUBAGENT_MAX_ROUNDS, 2, 6, 4),
+    searches: bounded(env.COWORK_SUBAGENT_SEARCHES, 1, 6, 3),
+    fetches: bounded(env.COWORK_SUBAGENT_FETCHES, 0, 4, 2),
+    deadlineMs: bounded(env.COWORK_SUBAGENT_DEADLINE_MS, 15_000, 60_000, 45_000),
   };
 }
 
@@ -103,5 +133,6 @@ export function coworkHarnessSettings(env: Record<string, string | undefined> = 
     maxRounds: bounded(env.COWORK_HARNESS_MAX_ROUNDS, 2, COWORK_MAX_COORDINATOR_CALLS, COWORK_MAX_COORDINATOR_CALLS),
     maxReads: bounded(env.COWORK_HARNESS_MAX_READS, 1, 12, 6),
     web: coworkWebSettings(env),
+    subagents: coworkSubagentSettings(env),
   };
 }

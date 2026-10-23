@@ -66,6 +66,29 @@ test('a delegated task comes back as a report, with the delegate\'s reads kept o
   assert.match(String(childModel.requests[0].messages[0].content), /dominio x\.cl/);
 });
 
+test('a delegate can have the web, its own hooks for each run, and the parent can hand out only so many tasks', async () => {
+  const search = { type: 'web_search_20250305', name: 'web_search', max_uses: 2 };
+  const hooksBuilt: string[] = [];
+  let runs = 0;
+  const childModel = new ScriptedModel([reply('Informe 1.'), reply('Informe 2.'), reply('Informe 3.')]);
+  const tool = delegateTool({
+    model: childModel, maxCalls: 2,
+    hooks: () => { const id = `run-${++runs}`; hooksBuilt.push(id); return { beforeModelCall: async () => { hooksBuilt.push(`before ${id}`); } }; },
+    agents: { investigador: { description: 'Investiga', system: 'Investiga.', tools: [], serverTools: spent => (spent.webSearches ?? 0) < 2 ? [search] : [] } },
+  });
+  const context = { signal: signal(), round: 1, depth: 0, state: new Map<string, unknown>(), note: () => undefined };
+  const first = await tool.run({ agente: 'investigador', tarea: 'Averigua a qué se dedica la empresa X', contexto: undefined }, context);
+  const second = await tool.run({ agente: 'investigador', tarea: 'Averigua a qué se dedica la empresa Y', contexto: undefined }, context);
+  const third = await tool.run({ agente: 'investigador', tarea: 'Averigua a qué se dedica la empresa Z', contexto: undefined }, context);
+  assert.equal(first.status, 'ok');
+  assert.equal(second.status, 'ok');
+  assert.equal(third.status, 'error', 'a third task in the same turn is not handed out');
+  assert.match((third as { message: string }).message, /Ya delegaste 2 tareas en este turno/);
+  assert.equal(childModel.calls, 2, 'the refused task never reached the model');
+  assert.deepEqual(childModel.requests[0].serverTools, [search], 'the delegate is offered the web');
+  assert.deepEqual(hooksBuilt, ['run-1', 'before run-1', 'run-2', 'before run-2'], 'each run got its own hooks');
+});
+
 test('a delegate cannot delegate again', async () => {
   const model = new ScriptedModel([reply([call('delegar', { agente: 'a', tarea: 'Otra tarea para otro agente' })]), reply('listo')]);
   const tool = delegateTool({ model, agents: { a: { description: 'a', system: 's', tools: [] } }, maxDepth: 1 });
