@@ -108,24 +108,19 @@ export function ExclusionGroups({ items, onOpen }: { items: WorkItem[]; onOpen: 
   );
 }
 
-/** «Antes de postular»: what repeats in almost every set of bases, worth solving once. Folded by default. */
+/** «Antes de postular»: what repeats in almost every set of bases, worth solving once. Folded by default, and quiet while folded: a line, not a card. */
 export function TenderPrerequisites() {
   return (
-    <Collapsible className="rounded-xl border bg-background">
+    <Collapsible>
       <CollapsibleTrigger asChild>
-        <button type="button" className="group flex w-full items-center justify-between gap-3 rounded-xl p-4 text-left hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
-          <span className="flex items-center gap-2">
-            <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
-            <span>
-              <span className="block text-sm font-medium">Antes de postular a una licitación</span>
-              <span className="block text-xs text-muted-foreground">Lo que piden casi todas las bases. Conviene resolverlo una vez.</span>
-            </span>
-          </span>
+        <button type="button" className="group -mx-1 inline-flex max-w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+          <ClipboardCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0"><span className="font-medium text-foreground">Antes de postular a una licitación</span><span className="hidden sm:inline"> · lo que piden casi todas las bases, para resolverlo una vez</span></span>
           <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="grid gap-4 border-t p-4 sm:grid-cols-2">
+        <div className="mt-2 grid gap-4 rounded-xl border bg-background p-4 sm:grid-cols-2">
           {TENDER_PREREQUISITES.map(block => (
             <div key={block.title} className="min-w-0">
               <h3 className="text-sm font-semibold">{block.title}</h3>
