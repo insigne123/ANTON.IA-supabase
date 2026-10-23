@@ -40,7 +40,8 @@ const BEFORE_AFTER = [
   },
 ];
 
-export async function judgeOutreach(input: { datos: unknown; asunto: string; cuerpo: string }): Promise<OutreachJudgeScore & { model: string }> {
+/** `model` overrides the judge of the environment: a cheap model can rank candidates, a larger one can be the reference. */
+export async function judgeOutreach(input: { datos: unknown; asunto: string; cuerpo: string; model?: string }): Promise<OutreachJudgeScore & { model: string }> {
   const prompt = `Evalúas correos comerciales que escribió una IA para una empresa de outsourcing en Chile. Tu trabajo es detectar lo que un lector notaría como artificial, genérico o falso.
 
 Recibes los datos de entrada del correo, el correo (asunto y cuerpo) y pares de ejemplos ANTES (ficha corporativa, genérico) y DESPUÉS (motivo concreto, humano).
@@ -74,7 +75,7 @@ Devuelve JSON con esta forma exacta:
 
   const result = await generateStructuredWithTelemetry({
     provider: 'openai',
-    openAiModel: String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || 'gpt-6-luna').trim(),
+    openAiModel: String(input.model || process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || 'gpt-6-luna').trim(),
     schema: OutreachJudgeOutputSchema,
     temperature: 0.2,
     prompt,
