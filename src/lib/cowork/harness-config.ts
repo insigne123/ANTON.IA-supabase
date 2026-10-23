@@ -39,6 +39,8 @@ export type CoworkHarnessConfig = {
   flushAnswer?: () => Promise<void>;
   /** After each call: what it cost. */
   recordUsage?: (reservationId: string | undefined, response: ModelResponse, durationMs: number) => Promise<void>;
+  /** The turn could not finish on the harness (Anthropic failed) and goes on with the coordinator loop: say so, for whoever reviews the turn later. */
+  onFallback?: (reason: string) => void;
 };
 
 export type CoworkHarnessSettings = { model: string; effort: Effort; maxRounds: number; maxReads: number; web: WebSettings | null };
