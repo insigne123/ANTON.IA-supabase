@@ -3,6 +3,7 @@ import test from 'node:test';
 import { coworkCampaignWithExactEmails, coworkCampaignWithPersonalEmails, coworkDecisionSchema, coworkOfferedRead, coworkWithoutAgendaAside, coworkWithoutOfferedRead, coworkWithoutSecondaryReadChips, runCoworkReadLoop, type CoworkObservation, type CoworkRejection } from './agent-loop';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
+import { coworkFailureMessage } from './failure-messages';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
 
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
@@ -1960,6 +1961,19 @@ test('a turn about to fail gets one answer from the rescue model instead of an e
       : { action: 'leads.search' as const, query: 'José', leadId: null, answer: null } }),
   (error: Error & { userFacing?: boolean }) => error.userFacing === true);
   assert.equal(rescues, 0);
+  // A bug of ours is not a reason: two production turns showed the person «No pude preparar la acción: Cannot read properties of undefined (reading 'from')».
+  // It stops the turn as it is (no new decision asked to the model) and what the person reads is the generic message.
+  let decisions = 0;
+  const bug = new TypeError("Cannot read properties of undefined (reading 'from')");
+  await assert.rejects(runCoworkReadLoop({ ...base, runId: '00000000-0000-4000-8000-000000000010', ceiling: { ...COWORK_TURN_DEFAULTS, decisions: 3 },
+    execute: async () => ({ items: [{ id: leadId, name: 'José C.', company: 'GrupoExpro' }], scope: 'own_saved_contacts' }),
+    proposeEffect: async () => { throw bug; },
+    decide: async observations => { decisions++; return observations.length
+      ? { action: 'lead.enrich' as const, query: null, leadId, answer: null }
+      : { action: 'leads.search' as const, query: 'José', leadId: null, answer: null }; } }),
+  (error: Error & { userFacing?: boolean }) => error === bug && error.userFacing === undefined);
+  assert.equal(decisions, 2, 'the search, then the proposal that broke: no third try');
+  assert.doesNotMatch(coworkFailureMessage(bug), /Cannot read|undefined|from/);
 });
 
 test('a turn that already has an answer keeps it instead of rescuing (Plan 14, 2)', async () => {
