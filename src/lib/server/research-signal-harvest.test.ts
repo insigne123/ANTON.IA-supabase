@@ -184,3 +184,14 @@ test('with no fact inside the window the model is not called, and a model that f
   assert.equal(calls, 0);
   await assert.rejects(harvestResearchSignals(input, settings, { generate: async () => { throw new Error('anthropic down'); } }), /anthropic down/);
 });
+
+test('a death, a disaster or a form is never shown to the model, and a signal that says one is refused', () => {
+  const grim = fact(20, 1, 'Sodexo Chile informó con profundo pesar el fallecimiento de un trabajador contratista en una faena minera de Coquimbo el 20 de octubre.', '2026-10-20T10:00:00.000Z');
+  const form = fact(21, 1, 'Sodexo Usuario Password Nombre(*) Telefono(*) Correo(*) Mensaje(*) Para comprobar que no es un bot, resuelva la adición: 2 + 7 Contacto Comercial', '2026-10-20T10:00:00.000Z');
+  const shown = selectHarvestCandidates({ ...input, facts: [...FACTS, grim, form] }, settings).map(candidate => candidate.text);
+  assert.ok(shown.some(text => /Auxiliar de Bodega/.test(text)), 'the ordinary facts are still shown');
+  assert.ok(!shown.some(text => /fallecimiento|bot/.test(text)), shown.join(' | '));
+  const candidates = selectHarvestCandidates(input, settings);
+  const refused = rejectionOf(proposal({ frase: 'Sodexo Chile lamenta la muerte de un trabajador contratista en una faena minera de Coquimbo.' }), candidates, input, settings.recencyDays);
+  assert.equal(refused, 'sensitive_event');
+});
