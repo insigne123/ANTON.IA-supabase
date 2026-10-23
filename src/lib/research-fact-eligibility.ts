@@ -25,6 +25,8 @@ export function isHardRejectedResearchText(value: unknown) {
     || /\bdoctype\s+html\s*>/i.test(raw)
     || /\b(?:elementor(?:-[a-z0-9_-]+)+|hummingbird-assets)\b/i.test(raw)
     || /\b(?:wp-content|wp-includes)\//i.test(raw)
+    // A form dumped as text: «Nombre(*) Telefono(*) Correo(*) Mensaje(*) Para comprobar que no es un bot, resuelva la adición: 2 + 7».
+    || (raw.match(/\(\*\)/g) || []).length >= 3
   ) return true;
 
   const normalized = researchTextKey(value);
@@ -44,6 +46,37 @@ export function isHardRejectedResearchText(value: unknown) {
     /\b(?:verifica|confirma) que eres (?:un )?humano\b/,
     /\b(?:comprobando|verificando) (?:tu )?(?:navegador|conexion|solicitud)\b/,
     /\bpor favor espera mientras (?:tu solicitud |se )?(?:es )?verific(?:a|ada|amos)\b/,
+    // A sum or a «not a robot» box to prove the reader is a person, and the login or contact forms around it.
+    /\b(?:no es un bot|no soy un robot|not a robot)\b/,
+    /\bresuelv[ae] la (?:adicion|suma|operacion)\b/,
+    /\busuario(?: usuario)? (?:password|contrasena)\b|\b(?:password|contrasena) usuario\b/,
+    // Template text of a theme or a placeholder, never about the company.
+    /\blorem ipsum\b/,
+    /\b(?:admin|dashboard|wordpress|bootstrap) (?:theme|template)\b/,
+  ].some((pattern) => pattern.test(normalized)) || isBlogIndexText(normalized);
+}
+
+/** The index of a blog (dates, tags, «Leer más» after each teaser) is a list of titles, not a fact about the company. */
+function isBlogIndexText(normalized: string) {
+  const readMore = (normalized.match(/\b(?:leer mas|read more)\b/g) || []).length;
+  return readMore >= 2 || (readMore === 1 && /\b\d{1,2} de [a-z]+ de \d{4}\b/.test(normalized));
+}
+
+/**
+ * A death, an accident or a disaster at the company is context for the person who sells (it should know it, and be careful),
+ * never the reason for a cold email. Spanish and English; it names events, not the safety services a company sells.
+ */
+export function isSensitiveEventText(value: unknown) {
+  const normalized = researchTextKey(value);
+  if (!normalized) return false;
+  return [
+    /\b(?:fallec(?:imiento|io|ieron|ido|idos|idas)|deceso|fallecimientos)\b/,
+    /\b(?:murio|murieron|muerte|muertes|muertos|muertas|mortal|mortales|fatal|fatales|victimas? fatales?)\b/,
+    /\b(?:tragedia|tragico|tragica|luto|condolencias?|lamentamos|profundo pesar|sentido pesar)\b/,
+    /\b(?:desaparecid[oa]s?|atrapad[oa]s?)\b/,
+    /\b(?:accidente|accidentes) (?:fatal|fatales|grave|graves|laboral grave|mortal|mortales)\b/,
+    /\b(?:alud|aluvion|derrumbe|terremoto|sismo|tsunami|inundacion|incendio forestal|incendios forestales|catastrofe)\b/,
+    /\b(?:died|deaths?|killed|fatalit(?:y|ies)|tragedy|tragic|condolences|passed away|mourning)\b/,
   ].some((pattern) => pattern.test(normalized));
 }
 
