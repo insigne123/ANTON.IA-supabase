@@ -62,6 +62,8 @@ const reuseDocs = process.argv.includes('--reuse-docs');
 // --inject (only with `pro`): the best signal of the Claude is also put in the snapshot as the draft bank does with a hand-fed one (an upper bound
 // of what a crisp signal does to the email with the writer of production, whatever the filters between the report and the draft let through).
 const inject = process.argv.includes('--inject');
+// --instruction="…": a private writing instruction for the writer (the one a person can give to a draft), to try a guidance on the same documents.
+const instruction = arg('instruction') || undefined;
 const outDir = resolve(arg('out') || join('.eval-research-drafts', new Date().toISOString().replace(/[:.]/g, '-')));
 mkdirSync(join(outDir, 'research'), { recursive: true });
 mkdirSync(join(outDir, 'documents'), { recursive: true });
@@ -122,14 +124,14 @@ const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^w
 const withCta = (context: any, exactText: string) => exactText === context.constraints.cta.exactText ? context : { ...context, constraints: { ...context.constraints, cta: { ...context.constraints.cta, exactText } } };
 
 /** Like the app: one generation and one corrective retry with the errors of the preflight. */
-async function writeEmail(context: any, openingKind: string | undefined) {
+async function writeEmail(context: any, openingKind: string | undefined, userInstruction?: string) {
   const validate = (candidate: { subject: string; body: string; personalization: unknown; hypothesisIds: unknown }) => {
-    const effective = withCta(context, resolveEffectiveCta(context, candidate.body, undefined));
+    const effective = withCta(context, resolveEffectiveCta(context, candidate.body, userInstruction));
     const body = `${candidate.body}\n\n${effective.constraints.cta.exactText}`;
     const validation = validateDraftPreflightV2(effective, { subject: candidate.subject, body, personalization: candidate.personalization as never, hypothesisIds: candidate.hypothesisIds as never }, { checkGeneratedCopy: true, checkHumanTone: true });
     return { validation, body };
   };
-  const base = { context, ...(openingKind ? { openingKind } : {}) } as Record<string, unknown>;
+  const base = { context, ...(openingKind ? { openingKind } : {}), ...(userInstruction ? { userInstruction } : {}) } as Record<string, unknown>;
   let output = await generateOutreachFromDraftContextV2(base as never);
   let checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds });
   let attempts = 1;
@@ -138,7 +140,7 @@ async function writeEmail(context: any, openingKind: string | undefined) {
     checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds });
     attempts = 2;
   }
-  return { subject: output.subject, body: checked.body, valid: checked.validation.valid, attempts, issues: checked.validation.issues.map((issue: any) => String(issue.message)), cta: resolveEffectiveCta(context, checked.body, undefined) };
+  return { subject: output.subject, body: checked.body, valid: checked.validation.valid, attempts, issues: checked.validation.issues.map((issue: any) => String(issue.message)), cta: resolveEffectiveCta(context, checked.body, userInstruction) };
 }
 
 type Row = Record<string, any>;
@@ -225,7 +227,7 @@ async function runOne(target: typeof TARGETS[number], index: number, mode: Mode)
 
     context.recipient.displayName = null;
     const openingKind = OUTREACH_OPENING_KINDS[index % OUTREACH_OPENING_KINDS.length];
-    const email = await writeEmail(context, openingKind);
+    const email = await writeEmail(context, openingKind, instruction);
     Object.assign(row, { stage: 'done', seconds: Math.round((Date.now() - started) / 1000), openingKind, email, words: wordCount(email.body) });
     return row;
   } catch (error) {
