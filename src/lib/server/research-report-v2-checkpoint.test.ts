@@ -187,6 +187,23 @@ test('the research version participates in the hashed provider context without b
   assert.notEqual(identity.cacheIdentity, expected(`${REPORT_V2_RESEARCH_VERSION}/next`).cacheIdentity);
 });
 
+test('a copy of the research made without the researcher that picks pages is not reused once it is on', async () => {
+  const before = { flag: process.env.RESEARCH_CLAUDE_WEB_ENABLED, key: process.env.ANTHROPIC_API_KEY };
+  try {
+    delete process.env.RESEARCH_CLAUDE_WEB_ENABLED;
+    const off = harness();
+    await loadOrGatherReportV2Research(input(), off.dependencies);
+    process.env.RESEARCH_CLAUDE_WEB_ENABLED = 'true';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    const on = harness();
+    await loadOrGatherReportV2Research(input(), on.dependencies);
+    assert.notEqual(on.calls.claim[0].identity.cacheIdentity, off.calls.claim[0].identity.cacheIdentity);
+  } finally {
+    if (before.flag === undefined) delete process.env.RESEARCH_CLAUDE_WEB_ENABLED; else process.env.RESEARCH_CLAUDE_WEB_ENABLED = before.flag;
+    if (before.key === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = before.key;
+  }
+});
+
 test('warnings persist as partial status, never private warning text, and expire after 24 hours', async () => {
   const h = harness(async (value) => ({ ...gathered(value), researchWarnings: ['Private query or provider warning'] }));
   await loadOrGatherReportV2Research(input(), h.dependencies);
