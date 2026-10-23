@@ -86,9 +86,9 @@ export type CoworkDraftPhase = typeof COWORK_DRAFT_PHASES[number];
 export const COWORK_AGENT_ACTION = 'assistant.agent';
 
 const REVIEW_OUTCOMES = ['clean', 'fixed', 'pending', 'skipped'] as const;
-const AGENTS = ['writer', 'reviewer', 'judge', 'designer', 'analyst'] as const;
+const AGENTS = ['writer', 'reviewer', 'judge', 'designer', 'analyst', 'researcher'] as const;
 export type CoworkAgentEvent = {
-  /** The judge reads the coordinator's final answer (G2); the Reviewer, the Writer's emails (G1); the Designer writes an artifact (Plan 12); the Analyst answers about results (Plan 12, 4b). */
+  /** The judge reads the coordinator's final answer (G2); the Reviewer, the Writer's emails (G1); the Designer writes an artifact (Plan 12); the Analyst answers about results (Plan 12, 4b); the Investigadoras research a company on the web for the coordinator (subagents.ts). */
   agent: typeof AGENTS[number];
   state: 'working' | 'done';
   label: string;

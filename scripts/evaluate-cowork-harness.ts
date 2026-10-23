@@ -183,7 +183,9 @@ async function main() {
         write, judge, design, analyze, undefined,
         turn => ({ model: counted, system: turn.system, context: turn.context, capabilities, effort, maxRounds: settings.maxRounds, maxReads: settings.maxReads, deadlineMs: 80_000,
           // COWORK_WEB_ENABLED=true: the agent can search the web and read pages (each search costs 0.01 USD, counted in the report).
-          ...(settings.web ? { web: settings.web } : {}) }));
+          ...(settings.web ? { web: settings.web } : {}),
+          // COWORK_SUBAGENTS_ENABLED=true (with the web): the coordinator can hand researches to the Investigadoras; their calls and tokens are counted like its own.
+          ...(settings.web && settings.subagents ? { subagents: { settings: settings.subagents, model: counted } } : {}) }));
       total = addUsage(total, current.usage);
       const failedChecks = outcome.checks.filter(check => !check.passed).map(check => check.label);
       outcomes.push({ id, attempt, passed: outcome.passed, failedChecks, failed: outcome.result.failed, actions: outcome.result.actions, proposal: outcome.result.proposal?.kind ?? null,

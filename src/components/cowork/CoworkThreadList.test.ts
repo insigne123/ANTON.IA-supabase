@@ -103,3 +103,8 @@ test('«Lo que Cowork recuerda» is always at the foot of the list, also with no
   assert.match(render({}), /Lo que Cowork recuerda/);
   assert.match(render({ threads: [thread(1)] }), /Lo que Cowork recuerda/);
 });
+
+test('«Tareas programadas» sits at the foot of the list only where the account has them', () => {
+  assert.match(render({ onSchedules: () => {} }), /aria-label="Tareas programadas"/);
+  assert.doesNotMatch(render({}), /Tareas programadas/);
+});

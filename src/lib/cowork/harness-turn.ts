@@ -6,7 +6,7 @@
 // the ledger before every model call, approvals for every effect, the same answer polish on the way out.
 import { z } from 'zod';
 import { defineTool, planTool, runAgent, ToolRegistry, webToolSpecs, type AgentHooks, type AgentTool, type ModelResponse, type ToolOutcome, type WebAction, type WebSettings } from '@/lib/agent-harness/index';
-import { COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema } from './contracts';
+import { COWORK_AGENT_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, COWORK_WRITTEN_ACTION, coworkDocumentSchema } from './contracts';
 import { coworkBlocks } from './answer-quality';
 import { coworkCampaignEmails, coworkPersonalEmails } from './blocks';
 import {
@@ -25,6 +25,7 @@ import { rasterizePages, reviewDocumentPages } from '@/lib/documents/vision';
 import { coworkWithDemoNote, coworkWriteBriefSchema } from './writer';
 import { withCoworkReports } from './report-document';
 import { coworkUnseenLinks } from './web-links';
+import { coworkDelegateTool, coworkDelegationProtocol } from './subagents';
 
 /** What the model reads first: how the instructions that follow map to this turn's tools. They were written for a coordinator that answered
  * with a JSON decision, and its rules still hold; only the way of acting changes. */
@@ -339,6 +340,37 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
     return done;
   };
 
+  // The Investigadoras (COWORK_SUBAGENTS_ENABLED): researches the coordinator hands out, one call per company, that go at the same time.
+  // Their searches are recorded like its own, so the page shows them and a link in the answer that comes from their report is a link someone looked at.
+  const subagents = web && config.subagents ? config.subagents : null;
+  if (subagents && web) {
+    registry.add(coworkDelegateTool({
+      settings: subagents.settings, model: subagents.model, web,
+      // Each one reserves and records its own calls: they go at the same time, so they cannot share the coordinator's reservation.
+      hooks: () => {
+        let reserved: string | undefined;
+        let began = 0;
+        return {
+          beforeModelCall: async () => {
+            await input.authorize();
+            input.signal.throwIfAborted();
+            reserved = await subagents.reserve?.();
+            began = Date.now();
+          },
+          afterModelCall: async ({ response }) => {
+            await subagents.recordUsage?.(reserved, response, Date.now() - began);
+            await Promise.all(recordedWeb.values());
+          },
+        };
+      },
+      onEvent: event => { if (event.type === 'web') void recordWebOnce(event.action); },
+      announce: async (state, label) => {
+        await input.authorize();
+        await input.record({ action: COWORK_AGENT_ACTION, input: '', result: { agent: 'researcher', state, label, outcome: null, changes: [] } });
+      },
+    }));
+  }
+
   // The judge reads the answer before it is delivered and can send it back once. With the web, a link that comes from nowhere the agent looked
   // is sent back first (it can fix it without the judge's turn).
   const linkReview = web ? async (answer: CoworkAnswer): Promise<string | null> => {
@@ -381,7 +413,7 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
   };
 
   const run = await runAgent({
-    model: config.model, system: `${COWORK_HARNESS_PROTOCOL}${web ? `\n${coworkWebProtocol(web)}` : ''}\n\n${config.system}`, messages: [{ role: 'user', content: config.context }],
+    model: config.model, system: `${COWORK_HARNESS_PROTOCOL}${web ? `\n${coworkWebProtocol(web)}` : ''}${subagents ? `\n${coworkDelegationProtocol(subagents.settings)}` : ''}\n\n${config.system}`, messages: [{ role: 'user', content: config.context }],
     registry, finalTool: 'responder', limits: { maxRounds: config.maxRounds, deadlineMs: config.deadlineMs, maxTokens: 6_000 }, effort: config.effort,
     serverTools: web ? spent => webToolSpecs(web, spent) : undefined,
     // Loose text, a link made up out of nothing and the judge's verdict: each sends the answer back at most once.

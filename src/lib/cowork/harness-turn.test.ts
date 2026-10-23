@@ -3,7 +3,7 @@ import test from 'node:test';
 import { z } from 'zod';
 import { call, reply, ScriptedModel, usageOf } from '@/lib/agent-harness/scripted';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
-import { coworkHarnessEnabled, coworkHarnessSettings, coworkWebAvailable, coworkWebSettings, type CoworkHarnessConfig } from './harness-config';
+import { coworkHarnessEnabled, coworkHarnessSettings, coworkSubagentSettings, coworkWebAvailable, coworkWebSettings, type CoworkHarnessConfig } from './harness-config';
 import { COWORK_HARNESS_PROTOCOL, coworkHarnessFallback, coworkHarnessTelemetry, coworkReadShape, coworkToolName, runCoworkHarnessTurn, runCoworkTurn } from './harness-turn';
 import type { CoworkLoopInput, CoworkObservation } from './agent-loop';
 import { coworkLiveDraft } from './partial-json';
@@ -251,9 +251,9 @@ test('a run that ends without an answer fails the turn like the coordinator loop
 test('the settings are off unless COWORK_RUNTIME=harness, default to a Claude, and stay inside what the ledger admits', () => {
   assert.equal(coworkHarnessSettings({}), null);
   assert.equal(coworkHarnessSettings({ COWORK_RUNTIME: 'openai' }), null);
-  assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness' }), { model: 'claude-sonnet-5-5', effort: 'medium', maxRounds: 5, maxReads: 6, web: null });
+  assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness' }), { model: 'claude-sonnet-5-5', effort: 'medium', maxRounds: 5, maxReads: 6, web: null, subagents: null });
   assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_HARNESS_MODEL: 'claude-haiku-5-5', COWORK_HARNESS_EFFORT: 'high', COWORK_HARNESS_MAX_ROUNDS: '9', COWORK_HARNESS_MAX_READS: '0' }),
-    { model: 'claude-haiku-5-5', effort: 'high', maxRounds: 5, maxReads: 1, web: null });
+    { model: 'claude-haiku-5-5', effort: 'high', maxRounds: 5, maxReads: 1, web: null, subagents: null });
   assert.equal(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_HARNESS_EFFORT: 'enorme' })?.effort, 'medium');
 });
 
@@ -399,6 +399,128 @@ test('a search is recorded the moment it finishes, while the call goes on, and o
   await runCoworkHarnessTurn(input);
   assert.equal(liveRecorded, 1, 'the page can show it before the call ends');
   assert.equal(recordedNow.length, 1, 'and the end of the call does not record it again');
+});
+
+const researchOf = (company: string, url: string) => [
+  { type: 'server_tool_use', id: `srv-${company}`, name: 'web_search', input: { query: `${company} contrataciones` } },
+  { type: 'web_search_tool_result', tool_use_id: `srv-${company}`, content: [{ type: 'web_search_result', title: `${company} contrata`, url, page_age: '3 days ago', encrypted_content: 'xx' }] },
+  { type: 'text', text: `Informe de ${company}: publicó avisos de empleo [${company} contrata](${url}).` },
+] as const;
+const subagentSettings = { model: 'claude-sonnet-5-5', effort: 'low', maxDelegations: 2, maxRounds: 3, searches: 3, fetches: 2, deadlineMs: 30_000 } as const;
+
+function withResearchers(overrides: { settings?: Partial<typeof subagentSettings>; reserveFails?: boolean } = {}) {
+  const reserved: string[] = [];
+  const recordedUsage: Array<string | undefined> = [];
+  const parentReserved: string[] = [];
+  const child = new ScriptedModel([
+    request => reply([...researchOf(String(request.messages[0].content).includes('Enaex') ? 'Enaex' : 'Besalco', String(request.messages[0].content).includes('Enaex') ? 'https://prensa.example/enaex' : 'https://prensa.example/besalco')] as never, undefined, usageOf(300, 120)),
+    request => reply([...researchOf(String(request.messages[0].content).includes('Enaex') ? 'Enaex' : 'Besalco', String(request.messages[0].content).includes('Enaex') ? 'https://prensa.example/enaex' : 'https://prensa.example/besalco')] as never, undefined, usageOf(300, 120)),
+    request => reply([...researchOf('Gasco', 'https://prensa.example/gasco')] as never, undefined, usageOf(300, 120)),
+  ]);
+  const config: Partial<CoworkHarnessConfig> = {
+    web,
+    reserve: async () => { parentReserved.push('coordinator'); return `coordinator-${parentReserved.length}`; },
+    subagents: {
+      settings: { ...subagentSettings, ...overrides.settings }, model: child,
+      reserve: async () => { if (overrides.reserveFails) throw new Error('No se pudo reservar presupuesto para continuar este trabajo.'); reserved.push(`delegate-${reserved.length + 1}`); return reserved[reserved.length - 1]; },
+      recordUsage: async reservationId => { recordedUsage.push(reservationId); },
+    },
+  };
+  return { child, config, reserved, recordedUsage, parentReserved };
+}
+
+test('with sub-agents the coordinator hands out researches that go at the same time, each with its own web, reservation and usage; the page shows them', async () => {
+  const { child, config, reserved, recordedUsage, parentReserved } = withResearchers();
+  const parent = new ScriptedModel([
+    reply([
+      call('delegar', { agente: 'investigadora', tarea: 'Investiga a Enaex en Chile: contrataciones y noticias', contexto: 'Se le escribirá a la Gerencia de Personas' }, 'd1'),
+      call('delegar', { agente: 'investigadora', tarea: 'Investiga a Besalco en Chile: contrataciones y noticias' }, 'd2'),
+    ]),
+    reply([call('responder', { reply: 'Enaex y Besalco contratan: [Enaex contrata](https://prensa.example/enaex) y [Besalco contrata](https://prensa.example/besalco).', document: null, ...closes })]),
+  ]);
+  const { input, recorded } = base(parent, {}, config);
+  const result = await runCoworkHarnessTurn(input);
+  assert.match(result.reply, /Enaex y Besalco contratan/);
+  // The coordinator is offered the tool, told how to use it and that it has a limit.
+  assert.ok(parent.requests[0].tools.some(tool => tool.name === 'delegar'));
+  assert.match(parent.requests[0].system, /DELEGAR \(tienes la herramienta delegar, con la Investigadora; hasta 2 tareas por turno\)/);
+  // Each Investigadora has its own conversation, with the web and nothing of the account.
+  assert.equal(child.calls, 2);
+  const [first] = child.requests;
+  assert.match(first.system, /Eres la Investigadora de un equipo comercial/);
+  assert.deepEqual(first.tools, [], 'no tools of the account');
+  assert.deepEqual(first.serverTools?.map(tool => [tool.name, tool.max_uses]), [['web_search', 3], ['web_fetch', 2]]);
+  const briefs = child.requests.map(request => String(request.messages[0].content));
+  assert.ok(briefs.some(brief => brief.includes('Enaex') && brief.includes('Contexto:\nSe le escribirá a la Gerencia de Personas')));
+  assert.ok(briefs.some(brief => brief.includes('Besalco') && !brief.includes('Contexto:')));
+  // The report is all the coordinator gets: not the pages.
+  const reports = (parent.requests[1].messages[2].content as Array<{ content: string }>).map(block => block.content);
+  assert.ok(reports.some(report => report.startsWith('Informe de Enaex')) && reports.some(report => report.startsWith('Informe de Besalco')));
+  // The ledger: the coordinator reserved its two calls, each Investigadora one of its own under the role they have, and every call recorded its usage with its own reservation.
+  assert.equal(parentReserved.length, 2);
+  assert.deepEqual([...reserved].sort(), ['delegate-1', 'delegate-2']);
+  assert.deepEqual([...recordedUsage].sort(), ['delegate-1', 'delegate-2'], 'each call is recorded with the reservation it made');
+  // The page: their searches are shown like the coordinator\'s own, and who is working says so once and finishes once.
+  assert.deepEqual(recorded.filter(item => (item as CoworkObservation).action === 'web.search').map(item => (item as CoworkObservation).input).sort(), ['Besalco contrataciones', 'Enaex contrataciones']);
+  const agents = recorded.filter(item => (item as CoworkObservation).action === 'assistant.agent').map(item => (item as { result: { agent: string; state: string; label: string } }).result);
+  assert.deepEqual(agents.map(item => [item.agent, item.state, item.label]), [['researcher', 'working', 'Investigando en la web'], ['researcher', 'done', 'Investigación lista']]);
+});
+
+test('past the limit of the turn a task is not handed out, a link from a report is a link someone looked at, and a delegate that cannot reserve says so', async () => {
+  const { child, config } = withResearchers({ settings: { maxDelegations: 2 } });
+  const parent = new ScriptedModel([
+    reply([
+      call('delegar', { agente: 'investigadora', tarea: 'Investiga a Enaex en Chile: contrataciones y noticias' }, 'd1'),
+      call('delegar', { agente: 'investigadora', tarea: 'Investiga a Besalco en Chile: contrataciones y noticias' }, 'd2'),
+      call('delegar', { agente: 'investigadora', tarea: 'Investiga a Gasco en Chile: contrataciones y noticias' }, 'd3'),
+    ]),
+    reply([call('responder', { reply: 'Gasco no alcancé a revisarla. [Enaex contrata](https://prensa.example/enaex).', document: null, ...closes })]),
+  ]);
+  const result = await runCoworkHarnessTurn(base(parent, {}, config).input);
+  assert.equal(child.calls, 2, 'the third never reached the model');
+  const results = (parent.requests[1].messages[2].content as Array<{ content: string; is_error?: boolean }>);
+  assert.equal(results.filter(block => block.is_error).length, 1);
+  assert.match(results.find(block => block.is_error)!.content, /Ya delegaste 2 tareas en este turno/);
+  assert.match(result.reply, /prensa\.example\/enaex/, 'the link came from the search of a delegate, so it is not sent back');
+  assert.equal(parent.calls, 2);
+
+  // The ledger does not know the role yet (the migration is not applied): the delegate fails, the coordinator reads the failure and goes on.
+  const blocked = withResearchers({ reserveFails: true });
+  const model = new ScriptedModel([
+    reply([call('delegar', { agente: 'investigadora', tarea: 'Investiga a Enaex en Chile: contrataciones y noticias' }, 'd1')]),
+    reply([answer('No pude delegar; lo reviso yo.')]),
+  ]);
+  const done = await runCoworkHarnessTurn(base(model, {}, blocked.config).input);
+  assert.equal(done.reply, 'No pude delegar; lo reviso yo.');
+  assert.equal(blocked.child.calls, 0);
+  assert.match(String((model.requests[1].messages[2].content as Array<{ content: string }>)[0].content), /delegar falló: No se pudo reservar presupuesto/);
+});
+
+test('without the web, or without sub-agents, delegar does not exist', async () => {
+  const { config } = withResearchers();
+  const noWeb = new ScriptedModel([reply([answer('Hola.')])]);
+  await runCoworkHarnessTurn(base(noWeb, {}, { ...config, web: undefined }).input);
+  assert.equal(noWeb.requests[0].tools.some(tool => tool.name === 'delegar'), false);
+  assert.doesNotMatch(noWeb.requests[0].system, /DELEGAR/);
+  const off = new ScriptedModel([reply([answer('Hola.')])]);
+  await runCoworkHarnessTurn(base(off, {}, { web }).input);
+  assert.equal(off.requests[0].tools.some(tool => tool.name === 'delegar'), false);
+  assert.doesNotMatch(off.requests[0].system, /DELEGAR/);
+});
+
+test('sub-agents are off unless COWORK_SUBAGENTS_ENABLED=true and the web is on, and their limits are bounded', () => {
+  const env = { COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true' };
+  assert.equal(coworkSubagentSettings(env), null);
+  assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'yes' }), null);
+  assert.equal(coworkSubagentSettings({ COWORK_SUBAGENTS_ENABLED: 'true' }), null, 'they have nothing but the web');
+  assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true' }),
+    { model: 'claude-sonnet-5-5', effort: 'low', maxDelegations: 3, maxRounds: 4, searches: 3, fetches: 2, deadlineMs: 45_000 });
+  assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-opus-5-5', COWORK_SUBAGENT_MODEL: 'claude-haiku-5-5', COWORK_SUBAGENT_EFFORT: 'medium',
+    COWORK_SUBAGENTS_MAX: '99', COWORK_SUBAGENT_MAX_ROUNDS: '1', COWORK_SUBAGENT_SEARCHES: '0', COWORK_SUBAGENT_FETCHES: '9', COWORK_SUBAGENT_DEADLINE_MS: '5' }),
+  { model: 'claude-haiku-5-5', effort: 'medium', maxDelegations: 5, maxRounds: 2, searches: 1, fetches: 4, deadlineMs: 15_000 });
+  assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-opus-5-5' })?.model, 'claude-opus-5-5', 'the coordinator\'s model unless told otherwise');
+  assert.equal(coworkHarnessSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true' })?.subagents?.maxDelegations, 3);
+  assert.equal(coworkHarnessSettings(env)?.subagents, null);
 });
 
 test('a turn Anthropic could not finish goes on with the coordinator loop; what the person or the ledger caused stays an error', async () => {

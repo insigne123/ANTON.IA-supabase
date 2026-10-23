@@ -16,6 +16,7 @@ import { coworkThreadMemoryContext, coworkPendingProposalMemory, type CoworkThre
 import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
 import { processCoworkResearchNotices } from './research-notice';
+import { coworkSchedulesEnabled, processCoworkSchedules } from './schedules';
 import { coworkExecutionPolicy, coworkEffectCanAutoApprove } from '@/lib/cowork/execution-policy';
 import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { loadCoworkThreadStats } from './thread-stats';
@@ -102,6 +103,8 @@ export async function processCoworkQueue() {
   const client = getSupabaseAdminClient();
   // Research that finished goes back to its conversation as a new turn, which this same pass can take.
   await processCoworkResearchNotices({ client });
+  // Scheduled tasks that are due start their own conversations (COWORK_SCHEDULES_ENABLED); the same pass can take them.
+  if (coworkSchedulesEnabled()) await processCoworkSchedules({ client: client as never });
   if (await servedQueueRecently(client)) {
     const conversation = await processCoworkConversationRun();
     if (conversation.claimed) return { processed: conversation.processed };
@@ -244,6 +247,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       codeArtifacts: codeArtifactsEnabled,
       preferences: preferencesEnabled,
       analyst: analystEnabled,
+      schedules: coworkSchedulesEnabled(),
       // A plan is proposed only outside a task: inside one, the turn does its next step.
       tasks: tasksEnabled && !activeTask,
       // Only the parts of the prompt this request needs (intents.ts), with COWORK_INTENT_PROMPTS_ENABLED=true; off, the whole prompt.
@@ -312,6 +316,18 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         documentReviewer: process.env.COWORK_DOCUMENT_VISION === 'true' ? anthropicModel({ model: process.env.COWORK_DOCUMENT_REVIEW_MODEL?.trim() || 'claude-haiku-5-5' }) : undefined,
         // COWORK_WEB_ENABLED=true: the agent can search the web and read pages (Anthropic runs both), within the budget of the turn.
         web: harnessSettings.web ?? undefined,
+        // COWORK_SUBAGENTS_ENABLED=true: the coordinator can hand researches to Investigadoras that go at the same time. Their calls are reserved
+        // under the role «delegate»; until the ledger knows it (migration 20261023130000) the reservation fails and the research is done by the coordinator.
+        subagents: harnessSettings.subagents && harnessSettings.web ? {
+          settings: harnessSettings.subagents,
+          model: anthropicModel({ model: harnessSettings.subagents.model }),
+          reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'delegate'),
+          recordUsage: async (reservationId, response, durationMs) => {
+            const call = coworkHarnessTelemetry(response, durationMs);
+            await recordCoworkModelUsage(client, reservationId, run.lease_token, call);
+            telemetry.push({ model: call.modelName, durationMs });
+          },
+        } : undefined,
         // A turn that Anthropic could not finish (key, credit, server) goes on with the coordinator loop; the run keeps the reason, as a rescue does.
         onFallback: reason => {
           console.warn('[cowork] harness turn handed to the coordinator loop:', reason);
