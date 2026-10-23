@@ -16,6 +16,7 @@ import { coworkThreadMemoryContext, coworkPendingProposalMemory, type CoworkThre
 import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
 import { processCoworkResearchNotices } from './research-notice';
+import { coworkSchedulesEnabled, processCoworkSchedules } from './schedules';
 import { coworkExecutionPolicy, coworkEffectCanAutoApprove } from '@/lib/cowork/execution-policy';
 import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { loadCoworkThreadStats } from './thread-stats';
@@ -102,6 +103,8 @@ export async function processCoworkQueue() {
   const client = getSupabaseAdminClient();
   // Research that finished goes back to its conversation as a new turn, which this same pass can take.
   await processCoworkResearchNotices({ client });
+  // Scheduled tasks that are due start their own conversations (COWORK_SCHEDULES_ENABLED); the same pass can take them.
+  if (coworkSchedulesEnabled()) await processCoworkSchedules({ client: client as never });
   if (await servedQueueRecently(client)) {
     const conversation = await processCoworkConversationRun();
     if (conversation.claimed) return { processed: conversation.processed };
