@@ -128,7 +128,7 @@ De más fino a más grueso. En todos los casos el siguiente borrador y el siguie
 1. **Una sola mejora de borradores:** quitar su variable (`DRAFT_ANCHOR_SPECIFICS_ENABLED`, `DRAFT_HOOK_FILTER_ENABLED` o `DRAFT_SIGNAL_EVIDENCE_ENABLED`) y desplegar. Un aviso: un borrador escrito con `DRAFT_ANCHOR_SPECIFICS_ENABLED` encendida y vuelto a validar con ella apagada puede no pasar la verificación de personalización; conviene cambiarla entre campañas.
 2. **El harness de Cowork:** quitar `COWORK_RUNTIME`, `COWORK_HARNESS_MODEL` y `COWORK_HARNESS_USER_IDS` y desplegar. Los turnos vuelven al bucle de Luna.
 3. **Todo el piloto:** quitar las siete variables de `apphosting.yaml` y desplegar con el mismo comando (la prueba `pilot-configuration.test.ts` acepta que no haya ninguna). Otra salida, sin cambiar el repositorio, es volver al despliegue anterior desde la consola de App Hosting (backend `studio`, «Rollouts»); después, comprobar con la consulta 1 que el piloto ya no corre en Haiku.
-4. **Las migraciones no se deshacen:** son hacia adelante, no cambian lo que las funciones hacían para los roles de antes, y la tabla de tareas está vacía y no hay llamadas del rol `delegate` (a las 21:50 UTC del 23 de octubre, 0 y 0). Dejarlas aplicadas es lo seguro.
+4. **Las migraciones no se deshacen:** son hacia adelante, no cambian lo que las funciones hacían para los roles de antes, y la tabla de tareas está vacía y no hay llamadas del rol `delegate` (a las 21:40 UTC del 23 de octubre, 0 y 0). Dejarlas aplicadas es lo seguro.
 
 ## Sumar o quitar personas
 
