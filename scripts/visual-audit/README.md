@@ -109,6 +109,25 @@ Salida en `--out` (o `.visual-audit/interacciones-<fecha>/`): `interactions.md` 
 La matriz de cobertura y lo que salió en la última corrida están en `docs/ui-ux/cobertura-interacciones.md`.
 
 
+## Recorridos
+
+`npm run audit:journeys` hace lo que haría una persona para lograr algo, paso a paso, en el mismo banco: un recorrido es una meta («asignar una recomendada a Diego») escrita como lista de pasos en `journeys/*.mjs`. El runner hace clic por lo que se ve en pantalla (rol y nombre, nunca un selector), toma una captura después de cada paso y cuenta los clics.
+
+```bash
+npm run audit:journeys                                                  # todos los de journeys/
+npm run audit:journeys -- --only=admin-asignar,miembro-urgente --skip-build
+npm run audit:journeys -- --file=scripts/visual-audit/journeys/opportunities.mjs --out=.visual-audit/recorridos-antes
+```
+
+Cada paso es `{ say, do }`. En `do` se usan los verbos de una persona: `go`, `click` (por nombre; `{ text }`, `{ label }`, `{ placeholder }`, `{ role, name }` para lo demás), `clickOn` (un botón dentro de una tarjeta, que también cuenta), `fill`, `choose`, `see`, `seeRole`, `has`, `wait`. Lo que va más allá:
+
+- `check(label, ok)` verifica el resultado de la meta con la base simulada (`table(nombre)` devuelve sus filas); una falla no detiene el recorrido.
+- `note(texto)` deja algo que diría una persona («no encuentro dónde cambiar la etapa»).
+- Un paso que no se puede hacer (no encuentra el botón en 12 s) deja el recorrido «atascado» en ese paso: ese es el hallazgo.
+- `passWrites` lista las escrituras que el recorrido permite (`{ pattern, actions? }`); todo lo demás sigue bloqueado con 503, como en las otras auditorías.
+
+Salida: `journeys.md` (resumen, clics y segundos por recorrido, pasos con su captura, verificaciones, errores de consola y respuestas de error de la app) y `journeys.json`. Cada recorrido parte de los datos `full`. `journeys/opportunities.mjs` recorre «Oportunidades» como administrador y como integrante (computador y teléfono), sobre `fixtures/opportunity-workspace.mjs`: una licitación en preparación con su informe, una que cierra mañana, una presentada, una ganada y una perdida, y las novedades de cada persona.
+
 ## Compilación compartida
 
-`build.mjs` compila una sola vez para los tres recorridos (`audit:visual`, `audit:interactions` y `audit:simplicity`). Reutiliza `.next-audit/` mientras el código de la app no cambie: la huella ignora `scripts/visual-audit`, `scripts/usability`, `docs` y las pruebas.
+`build.mjs` compila una sola vez para los cuatro recorridos (`audit:visual`, `audit:interactions`, `audit:journeys` y `audit:simplicity`). Reutiliza `.next-audit/` mientras el código de la app no cambie: la huella ignora `scripts/visual-audit`, `scripts/usability`, `docs` y las pruebas.
