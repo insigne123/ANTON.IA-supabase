@@ -553,7 +553,9 @@ export function validateDraftPreflightV2(
   if (words < context.constraints.body.minWords || words > context.constraints.body.maxWords) {
     add('body_length', `El cuerpo debe tener entre ${context.constraints.body.minWords} y ${context.constraints.body.maxWords} palabras.`, 'body');
   }
-  if (bodyParagraphs(rawBody).length < 4) {
+  // A first touch is the greeting, the opening, the value and the approved CTA. A step of a sequence has no approved CTA (its own question closes the
+  // value), so three paragraphs are its whole structure: asking for four warned about 18 of the 25 drafts written in October 2026.
+  if (bodyParagraphs(rawBody).length < ((options.expectedCtaCount ?? 1) === 1 ? 4 : 3)) {
     warnings.push('Revisa la legibilidad: separa el saludo, el contenido útil y el CTA según la plantilla.');
   }
   if (hasPlaceholder(subject) || hasPlaceholder(body)) {
