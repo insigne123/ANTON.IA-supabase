@@ -38,6 +38,7 @@ import type { OpportunityFitView } from './RequirementFit';
 import { TeamOffice, TeamPicker } from './TeamOffice';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { OpportunityTicketConnection } from './OpportunityTicketConnection';
+import { CloseReasonDialog, type CloseTarget } from './CloseReasonDialog';
 import { WorkspaceCompanyFields } from './WorkspaceCompanyFields';
 import {OpportunityReconsiderDialog} from './OpportunityReconsiderDialog';
 import { AdvicePill, ExclusionGroups, NewsList, StartHere, TenderPrerequisites } from './OpportunityRadar';
@@ -85,6 +86,8 @@ export function OpportunityWorkWorkspace() {
   useEffect(() => { try { setOpened(parseOpened(window.localStorage.getItem(openedKey(user?.id)))); } catch { setOpened({}); } }, [user?.id]);
   const [overview, setOverview] = useState<(WorkspaceOverview & { suggestion?: any }) | null>(null);
   const [problem, setProblem] = useState(''); const [busy, setBusy] = useState(false);
+  // Closing as won or lost asks for the reason in a line first (CloseReasonDialog); the move waits for the person to confirm.
+  const [closing, setClosing] = useState<CloseTarget | null>(null);
   const [query, setQuery] = useState(''); const [filter, setFilter] = useState('recommended');
   // The pipeline and the list share the words searched (read 300 ms after the last key), the source picked and the lines of service (rubros).
   const [search, setSearch] = useState(''); const [source, setSource] = useState<OpportunitySource>('all');
@@ -251,9 +254,20 @@ export function OpportunityWorkWorkspace() {
     catch (e) { setProblem(e instanceof Error ? e.message : 'La IA no pudo revisar el embudo.'); }
     finally { setReviewing(false); }
   };
-  const moveTo = async (id: string, state: WorkRecord['state'], revision: number) => {
-    const done = await perform('state', { state, expectedRevision: revision }, id, true);
+  const moveNow = async (id: string, state: WorkRecord['state'], revision: number, note?: string) => {
+    const done = await perform('state', { state, expectedRevision: revision, ...(note ? { note } : {}) }, id, true);
     if (done) { setSuggestions(current => current?.filter(s => s.id !== id) ?? null); await loadPipeline(); setFeedback(`Movida a «${WORK_STATE_LABELS[state]}».`); }
+    return Boolean(done);
+  };
+  const moveTo = async (id: string, state: WorkRecord['state'], revision: number) => {
+    if (state === 'won' || state === 'lost') { setProblem(''); setClosing({ id, state, revision }); return; }
+    await moveNow(id, state, revision);
+  };
+  const confirmClose = async (target: CloseTarget, note: string) => { if (await moveNow(target.id, target.state, target.revision, note)) setClosing(null); };
+  // «Cambiar etapa» of the administrator, in the opportunity: the closing stages ask for their reason first.
+  const changeStage = async (to: WorkRecord['state']) => {
+    if ((to === 'won' || to === 'lost') && selected && detail?.work) { setProblem(''); setClosing({ id: selected, state: to, revision: detail.work.revision }); return false; }
+    return stepTo(to);
   };
   const perform = async (action: string, data: unknown, id = selected, quiet = false) => {
     setBusy(true); setProblem(''); setFeedback('');
@@ -498,7 +512,7 @@ export function OpportunityWorkWorkspace() {
           </div>
           {detail.work && detail.work.state !== 'unassigned' && <MemberStrip state={detail.work.state} canStep={!admin} busy={busy}
             assignedBy={(detail.members || detail.participants).find(m => m.user_id === detail.work?.assigned_by)?.name ?? null} nextActionAt={detail.work.due_at}
-            openTasks={detail.tasks.filter(t => t.owner_id === user?.id && t.status !== 'done').length} onStep={stepTo} onDecision={decide} onMove={admin ? stepTo : undefined} />}
+            openTasks={detail.tasks.filter(t => t.owner_id === user?.id && t.status !== 'done').length} onStep={stepTo} onDecision={decide} onMove={admin ? changeStage : undefined} />}
           {detail.work?.objective && <p className="text-sm">Objetivo: {detail.work.objective}</p>}
         </header>
         {(() => {
@@ -560,6 +574,7 @@ export function OpportunityWorkWorkspace() {
       </>}
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
+    {admin && <CloseReasonDialog target={closing} busy={busy} error={closing ? problem : ''} onConfirm={confirmClose} onCancel={() => setClosing(null)} />}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
     <Dialog open={modal !== null} onOpenChange={open => { if (!open && !busy) setModal(null); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Empresa del workspace' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
