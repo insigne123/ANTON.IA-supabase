@@ -287,7 +287,7 @@ function figureFeedback(error: string, seller: DraftContextV2['seller']) {
   const own = sellerLineWithFigure(error, seller);
   // The preflight reads a figure as the recipient's unless the sentence names the seller: a writer that only drops it loses the proof point of the profile.
   const fromSeller = own
-    ? `Si es una cifra del vendedor (su perfil dice ${JSON.stringify(own.slice(0, 200))}), la misma oración debe nombrar al vendedor («${seller.companyName}») o hablar del equipo en primera persona («nuestro», «tenemos», «contamos», «operamos», «cubrimos», «llevamos») y conservar la unidad y las palabras del perfil. `
+    ? `Si es una cifra del vendedor (su perfil dice ${JSON.stringify(own.slice(0, 200))}), la misma oración debe hablar como el vendedor, en primera persona del equipo («Procesamos…», «Nuestro sistema…») o con su empresa o su producto de sujeto («${seller.companyName} procesa…»), sin nombrar a la empresa del destinatario, y conservar la unidad y las palabras del perfil. `
     : '';
   return `${error.slice(0, 600)} ${fromSeller}Si la cifra viene de la evidencia, repítela con su sujeto y alcance exactos en la misma oración (por ejemplo, las 40 tiendas de [Empresa]); solo elimina la cantidad si no está en la evidencia, y no la escribas con palabras ni la sustituyas por otra cifra. Conserva solo el servicio o hecho autorizado por el brief.`;
 }

@@ -188,7 +188,8 @@ test('a figure of the seller profile that the preflight turned back is repaired 
     await generateOutreachFromDraftContextV2({ context, rewrite: { previous: { ...candidate }, errors } });
     assert.match(prompt, /Si es una cifra del vendedor/);
     assert.ok(prompt.includes('Procesa 1.000 postulantes en unos 30 minutos'), 'the line of the profile, with its unit');
-    assert.match(prompt, /nombrar al vendedor \(«Northstar»\)/);
+    assert.match(prompt, /hablar como el vendedor, en primera persona del equipo/);
+    assert.match(prompt, /sin nombrar a la empresa del destinatario/);
     assert.match(prompt, /Si la cifra viene de la evidencia/, 'a figure of the recipient keeps its own advice');
     // The first attempt already knows how the seller's figure is said, only when the profile has one.
     await generateOutreachFromDraftContextV2({ context });
