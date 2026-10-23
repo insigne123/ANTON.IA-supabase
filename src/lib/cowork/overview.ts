@@ -19,6 +19,8 @@ export type CoworkOverview = {
   toWrite?: number | null;
   /** What changed since the person's last own turn (since-visit.ts); null without a previous visit or when it could not be read. */
   since?: CoworkSince | null;
+  /** Whether this person's turns can search the web: «¿Qué puedes hacer?» only offers it then. */
+  web?: boolean;
 };
 
 /** The first word of a full name, as a greeting uses it. */

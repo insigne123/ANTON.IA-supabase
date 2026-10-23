@@ -217,7 +217,7 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
       </div>
       <div id={guideId}>
         <CwCollapse show={guideOpen}>
-          <div className="pt-4"><CoworkGuide onTry={message => { onSuggestion(message); setGuideOpen(false); }} /></div>
+          <div className="pt-4"><CoworkGuide web={overview?.web === true} onTry={message => { onSuggestion(message); setGuideOpen(false); }} /></div>
         </CwCollapse>
       </div>
       {(pending.length > 0 || recent.length > 0) && <div className="cw-rise mt-10 [animation-delay:180ms]">

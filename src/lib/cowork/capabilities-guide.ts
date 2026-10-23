@@ -75,6 +75,26 @@ export const COWORK_GUIDE: CoworkGuideGroup[] = [
   },
 ];
 
+/**
+ * Offered only to whoever's turns can search the web (the harness with COWORK_WEB_ENABLED): the guide never promises what the turn cannot
+ * do, and an example that asks for the web would get «no puedo» from the coordinator loop.
+ */
+export const COWORK_GUIDE_WEB: CoworkGuideGroup = {
+  id: 'web', icon: 'globe', title: 'Buscar en la web', helpSection: 'por-escribir',
+  summary: 'Busco en la web y leo páginas para completar lo que tu cuenta no sabe: qué hace una empresa, novedades recientes, si está contratando. Cito cada fuente con su enlace y no envío tus datos en la búsqueda.',
+  examples: [
+    { label: 'Novedades de una empresa', message: 'Busca en la web novedades recientes de la empresa de mi último contacto guardado y dime si hay una señal para escribirle. Cita tus fuentes.' },
+    { label: '¿Está contratando?', message: '¿Está contratando la empresa de mi último contacto guardado? Búscalo en la web y cita las fuentes.' },
+  ],
+};
+
+/** The groups the person sees: the web one, right after «Investigar», when their turns have the web. */
+export function coworkGuide(options: { web?: boolean } = {}): CoworkGuideGroup[] {
+  if (!options.web) return COWORK_GUIDE;
+  const after = COWORK_GUIDE.findIndex(group => group.id === 'investigar') + 1;
+  return [...COWORK_GUIDE.slice(0, after), COWORK_GUIDE_WEB, ...COWORK_GUIDE.slice(after)];
+}
+
 /** The guide as the model reads it, for when the person asks with their own words: one line per group with an example. */
 export function coworkGuideForModel(): string {
   return COWORK_GUIDE.map(group => `${group.title}: ${group.summary} (por ejemplo, «${group.examples[0].label}»)`).join(' · ');

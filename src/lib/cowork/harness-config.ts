@@ -82,6 +82,11 @@ export function coworkHarnessEnabled(env: Record<string, string | undefined> = t
   return !pilot.length || (Boolean(userId) && pilot.includes(String(userId).toLowerCase()));
 }
 
+/** Whether this person's turns can search the web: the harness is theirs and the web is on. Nothing else in Cowork has a web. */
+export function coworkWebAvailable(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env, userId?: string | null) {
+  return coworkHarnessEnabled(env, userId) && coworkWebSettings(env) !== null;
+}
+
 /**
  * The harness runtime's settings, or null when it is off. The model is a Claude (COWORK_HARNESS_MODEL, Sonnet by default: the coordinator
  * is the part of Cowork that reads the most and decides the most). Rounds stay within what the ledger admits; with several tools asked

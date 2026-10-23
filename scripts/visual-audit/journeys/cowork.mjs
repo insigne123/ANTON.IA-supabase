@@ -34,6 +34,9 @@ export default () => [
         const text = await c.page.locator('body').innerText();
         c.check('la guía habla de contactos y campañas', /contacto/i.test(text) && /campa[ñn]a/i.test(text));
         c.check('la guía dice que nada se envía sin aprobación', /aprob/i.test(text));
+        // The web group is for whoever's turns can search it (AUDIT_COWORK_WEB=true); with it off, the guide must not promise it.
+        const web = process.env.AUDIT_COWORK_WEB === 'true';
+        c.check(web ? 'la guía ofrece buscar en la web' : 'la guía no promete la web mientras está apagada', /Buscar en la web/.test(text) === web);
       } },
     ] },
   { id: 'cowork-tarea-por-aprobar', persona: 'owner', title: 'Una tarea larga espera tu aprobación',

@@ -1,22 +1,23 @@
 'use client';
 
 import { ArrowRight } from 'lucide-react';
-import { COWORK_GUIDE } from '@/lib/cowork/capabilities-guide';
+import { coworkGuide } from '@/lib/cowork/capabilities-guide';
 import { helpSectionHref } from '@/lib/help/manual';
 import { CoworkIcon } from './ui';
 
 /**
  * «¿Qué puedes hacer?»: everything Cowork does, group by group, with examples that start a conversation at a tap
- * («Probar») and a link to the help center. The same content the model reads when asked with other words.
+ * («Probar») and a link to the help center. The same content the model reads when asked with other words. `web`: this person's turns can
+ * search the web, so the guide says so.
  */
-export function CoworkGuide({ onTry, disabled = false }: { onTry: (message: string) => void; disabled?: boolean }) {
+export function CoworkGuide({ onTry, disabled = false, web = false }: { onTry: (message: string) => void; disabled?: boolean; web?: boolean }) {
   return <section aria-labelledby="cw-guide-title" className="space-y-3">
     <div>
       <h2 id="cw-guide-title" className="text-[15px] font-semibold tracking-tight text-cw-text">Lo que puedo hacer por ti</h2>
       <p className="mt-1 text-[13px] leading-5 text-cw-muted">Toca un ejemplo para probarlo. Antes de enviar, gastar créditos o cambiar algo te pido aprobación.</p>
     </div>
     <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {COWORK_GUIDE.map(group => <li key={group.id} className="flex flex-col rounded-2xl border border-cw-border bg-cw-elevated p-4">
+      {coworkGuide({ web }).map(group => <li key={group.id} className="flex flex-col rounded-2xl border border-cw-border bg-cw-elevated p-4">
         <div className="flex items-center gap-2.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-cw-accent-soft text-cw-accent">
             <CoworkIcon name={group.icon} className="h-4 w-4" />

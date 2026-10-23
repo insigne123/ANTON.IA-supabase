@@ -3,7 +3,7 @@ import test from 'node:test';
 import { z } from 'zod';
 import { call, reply, ScriptedModel, usageOf } from '@/lib/agent-harness/scripted';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
-import { coworkHarnessEnabled, coworkHarnessSettings, coworkWebSettings, type CoworkHarnessConfig } from './harness-config';
+import { coworkHarnessEnabled, coworkHarnessSettings, coworkWebAvailable, coworkWebSettings, type CoworkHarnessConfig } from './harness-config';
 import { COWORK_HARNESS_PROTOCOL, coworkHarnessFallback, coworkHarnessTelemetry, coworkReadShape, coworkToolName, runCoworkHarnessTurn, runCoworkTurn } from './harness-turn';
 import type { CoworkLoopInput, CoworkObservation } from './agent-loop';
 import { coworkLiveDraft } from './partial-json';
@@ -446,4 +446,17 @@ test('the harness can be tried with a few people: COWORK_HARNESS_USER_IDS limits
   assert.equal(coworkHarnessEnabled({ COWORK_RUNTIME: 'openai', COWORK_HARNESS_USER_IDS: ME }, ME), false, 'the list does not turn it on');
   assert.equal(coworkHarnessSettings(pilot, OTHER), null);
   assert.equal(coworkHarnessSettings(pilot, ME)?.model, 'claude-sonnet-5-5');
+});
+
+test('the web is offered to a person only when their turns run on the harness and the web is on', () => {
+  const ME = '9F7776C6-B4C4-4E5C-9ACC-58FCB1F5B4AD';
+  const OTHER = '00000000-0000-4000-8000-000000000099';
+  const web = { COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true' };
+  assert.equal(coworkWebAvailable({}, ME), false);
+  assert.equal(coworkWebAvailable({ COWORK_RUNTIME: 'harness' }, ME), false, 'the harness without the web has no web');
+  assert.equal(coworkWebAvailable({ COWORK_WEB_ENABLED: 'true' }, ME), false, 'the web without the harness has no web: the coordinator loop cannot search');
+  assert.equal(coworkWebAvailable(web, ME), true);
+  assert.equal(coworkWebAvailable({ ...web, COWORK_HARNESS_USER_IDS: ME }, ME), true);
+  assert.equal(coworkWebAvailable({ ...web, COWORK_HARNESS_USER_IDS: ME }, OTHER), false, 'outside the pilot the turn is the loop, which has no web');
+  assert.equal(coworkWebAvailable({ ...web, COWORK_WEB_MAX_SEARCHES: '0', COWORK_WEB_MAX_FETCHES: '0' }, ME), false);
 });
