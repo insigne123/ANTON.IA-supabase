@@ -57,6 +57,17 @@ test('an administrator sees the facts but not the steps; nobody takes steps on w
   assert.match(won, /Estado Ganada/); assert.doesNotMatch(won, /Marcar|Reportar|Plantear|Retomarla|Volver a gestión/);
 });
 
+test('an administrator changes the stage from the strip, to any stage but the one it is in; a member has the steps and not this', () => {
+  const admin = strip({ canStep: false, onMove: noop });
+  assert.match(admin, /<label[^>]*for="stage-move"[^>]*>Cambiar etapa<\/label>/);
+  const options = [...admin.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(match => [match[1], match[2]]);
+  assert.deepEqual(options, [['', 'Cambiar etapa…'], ['assigned', 'Asignada'], ['blocked', 'Bloqueada'], ['submitted', 'Presentada'], ['won', 'Ganada'], ['lost', 'Perdida'], ['archived', 'Archivada']],
+    'every stage but «En gestión», where it is');
+  assert.doesNotMatch(text(admin), /Marcar como presentada|Reportar un bloqueo|Plantear una decisión/);
+  assert.doesNotMatch(strip({ canStep: true, onMove: noop }), /stage-move/, 'the member keeps the steps');
+  assert.doesNotMatch(strip({ canStep: false }), /stage-move/, 'without a way to move, no control');
+});
+
 test('what is missing is left out instead of saying «sin fecha»', () => {
   const words = text(strip({ nextActionAt: null, assignedBy: null, openTasks: 0 }));
   assert.doesNotMatch(words, /Próxima acción|Asignó|tareas tuyas|tarea tuya/);

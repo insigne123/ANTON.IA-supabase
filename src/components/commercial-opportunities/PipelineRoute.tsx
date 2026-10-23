@@ -59,13 +59,16 @@ export function PipelineRoute({ stops, selected, onSelect }: { stops: PipelineSt
             return (
               <li key={stop.id} className="absolute flex w-[170px] -translate-x-1/2 flex-col items-center text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-90"
                 style={{ left: `${((index + 0.5) * 100) / stops.length}%`, top: (high ? TOP : BOTTOM) - RADIUS, animationDelay: `${200 + index * 120}ms`, animationFillMode: 'both' }}>
+                {/* The circle and its name are one button: the name is what a person reads, so it is what they click. */}
                 <button type="button" aria-pressed={active} onClick={() => onSelect(stop.id)} aria-label={`${stop.label}: ${stop.count}`}
-                  className={cn('flex h-16 w-16 flex-col items-center justify-center rounded-full bg-background ring-2 transition-[transform,box-shadow] duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring motion-reduce:transition-none',
+                  className="group flex flex-col items-center rounded-2xl px-3 pb-1 focus-visible:outline-none">
+                  <span className={cn('flex h-16 w-16 flex-col items-center justify-center rounded-full bg-background ring-2 transition-[transform,box-shadow] duration-200 group-hover:scale-105 group-focus-visible:ring-4 group-focus-visible:ring-ring motion-reduce:transition-none',
                     stop.count || active ? HUES[index % HUES.length] : EMPTY, active ? 'scale-110 shadow-lg ring-4' : 'shadow-sm')}>
-                  <span aria-hidden="true" className="[&_svg]:h-4 [&_svg]:w-4">{stop.icon}</span>
-                  <span className="text-lg font-semibold tabular-nums leading-tight">{stop.count}</span>
+                    <span aria-hidden="true" className="[&_svg]:h-4 [&_svg]:w-4">{stop.icon}</span>
+                    <span className="text-lg font-semibold tabular-nums leading-tight">{stop.count}</span>
+                  </span>
+                  <span className={cn('mt-2.5 text-sm', active ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground')}>{stop.label}</span>
                 </button>
-                <span className={cn('mt-2.5 text-sm', active ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground')}>{stop.label}</span>
                 {stop.urgent ? <span className="text-xs font-medium text-destructive">{urgentLabel(stop.urgent)}</span> : null}
               </li>
             );

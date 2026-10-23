@@ -90,7 +90,13 @@ test('the AI suggestion sits on its card with the move to apply, and the summary
 test('with nothing in progress there is nothing for the AI to review: no button; an empty stage stays quiet', () => {
   const html = render({ work: [] });
   assert.doesNotMatch(text(html), /Sugerir próximos pasos|Revisar con IA/);
-  assert.match(html, /aria-label="Asignadas: 0" class="[^"]*bg-background text-muted-foreground ring-border/);
+  assert.match(html, /aria-label="Asignadas: 0"[^>]*><span class="[^"]*bg-background text-muted-foreground ring-border/);
+});
+
+test('the name of a stage is part of its button: what a person reads is what they click', () => {
+  const html = render();
+  for (const label of ['Por revisar', 'Recomendadas', 'Asignadas', 'En preparación', 'Presentadas', 'Ganadas'])
+    assert.match(html, new RegExp(`<button[^>]*aria-label="${label}: \\d+"[^>]*>(?:(?!</button>).)*>${label}</span></button>`), label);
 });
 
 test('each card says what the opportunity is about under its name, with its buyer above and no dash when there is none', () => {
@@ -193,4 +199,14 @@ test('a LinkedIn card shows what the screening found and how many ads stand behi
   // With its summary written, that is what shows.
   const written = { ...hiring('w', ['motivo']), data: { evaluation: 'review', description: jobs, observed: { ads: 2 }, summary: { text: 'Dos avisos de guardias para edificios residenciales en Santiago.' } } };
   assert.match(text(render({ items: [written], work: [] })), /Dos avisos de guardias para edificios residenciales en Santiago\./);
+});
+
+test('a card nobody works yet offers «Asignar» to an administrator, in the list; without a way to assign there is the hint, as before', () => {
+  const html = render({ onAssign: () => {} });
+  // The first stage with opportunities is open: «Por revisar», where «Software RR.HH.» waits for a team.
+  assert.match(html, /<button[^>]*>(?:(?!<\/button>).)*Asignar<\/button>/);
+  assert.equal((html.match(/Asignar<\/button>/g) || []).length, 1, 'one card, one button');
+  assert.doesNotMatch(text(html), /Asígnale un equipo para empezar/, 'the button says it');
+  assert.equal(render({}).includes('Asignar</button>'), false);
+  assert.match(text(render({})), /Asígnale un equipo para empezar/);
 });

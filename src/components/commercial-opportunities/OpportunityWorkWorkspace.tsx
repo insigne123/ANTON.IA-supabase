@@ -94,6 +94,8 @@ export function OpportunityWorkWorkspace() {
   useEffect(() => setPage(0), [search, filter, source, categoryKey]);
   const [selected, setSelected] = useState<string | null>(null); const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState('summary'); const [modal, setModal] = useState<'create' | 'context' | 'assign' | 'task' | 'criteria' | null>(null);
+  /** The card an administrator is assigning from the list, with the revision of its work record (the detail page is not open). */
+  const [assignFor, setAssignFor] = useState<{ id: string; title: string; revision: number } | null>(null);
   const [draft, setDraft] = useState<Record<string, any>>({}); const [files, setFiles] = useState<File[]>([]);
   const [note, setNote] = useState(''); const [pendingQuestion, setPendingQuestion] = useState<string | null>(null); const [messages, setMessages] = useState<any[]>([]);
   const [feedback, setFeedback] = useState(''); const selectedRef = useRef(selected); selectedRef.current = selected; const busyRef = useRef(false);
@@ -367,13 +369,27 @@ export function OpportunityWorkWorkspace() {
     setDraft({ roles: (c.roles || []).join('\n'), keywords: (c.keywords || []).join('\n'), postQueries: (c.postQueries || []).join('\n'), decisionMakerTitles: (c.decisionMakerTitles || []).join('\n') }); setModal('criteria');
   };
   const field = (name: string, value: unknown) => setDraft(d => ({ ...d, [name]: value }));
+  // «Asignar» on a card of the pipeline: the same dialog as the page's, for that card, without opening it.
+  const openQuickAssign = async (target: WorkItem) => {
+    setProblem(''); setFeedback('');
+    let revision = 0;
+    try { revision = Number((await json(await fetch(`/api/commercial-opportunities/${target.id}/workspace`, { cache: 'no-store' })))?.work?.revision || 0); } catch { /* it opens anyway: a stale revision is told when it is saved */ }
+    setAssignFor({ id: target.id, title: target.title, revision });
+    setDraft({ teamId: '', participantIds: [], responsibleId: '', objective: '' }); setModal('assign');
+  };
+  useEffect(() => { if (modal !== 'assign') setAssignFor(null); }, [modal]);
   const saveModal = async () => {
     let result;
     if (modal === 'context') result = await perform('context', { offer: draft.offer, services: list(draft.services), territories: list(draft.territories), exclusions: list(draft.exclusions), priority: draft.priority,
       automation: Boolean(draft.automation), hour: Number(draft.hour), expectedRevision: Number((overview?.context as any)?.revision || 0) }, null);
     else if (modal === 'criteria') result = await perform('criteria', { criteria: { roles: list(draft.roles), keywords: list(draft.keywords), postQueries: list(draft.postQueries), decisionMakerTitles: list(draft.decisionMakerTitles) },
       expectedRevision: Number((overview?.context as any)?.revision || 0) }, null);
-    else if (modal === 'assign') result = await perform('assign', { expectedRevision: detail?.work?.revision || 0, teamId: draft.teamId || null, participantIds: draft.participantIds || [], responsibleId: draft.responsibleId || null, objective: draft.objective || '', dueAt: localDate(draft.dueAt || '') });
+    else if (modal === 'assign') {
+      const from = assignFor;
+      result = await perform('assign', { expectedRevision: from ? from.revision : detail?.work?.revision || 0, teamId: draft.teamId || null, participantIds: draft.participantIds || [], responsibleId: draft.responsibleId || null, objective: draft.objective || '', dueAt: localDate(draft.dueAt || '') },
+        from ? from.id : selected, Boolean(from));
+      if (result && from) setFeedback(`«${from.title.length > 70 ? `${from.title.slice(0, 69)}…` : from.title}» quedó asignada: ya está en «Asignadas».`);
+    }
     else if (modal === 'task') result = await perform('task', { title: draft.title, ownerId: draft.ownerId || null, dueAt: localDate(draft.dueAt || ''), status: 'pending', evidence: draft.evidence || '' });
     else {
       result = await perform('create', { requestId:draft.requestId,title: draft.title, company: draft.company, kind: draft.kind || 'private_tender', description: draft.description || '', url: draft.url || null, deadline: localDate(draft.deadline || ''), amount: draft.amount ? Number(draft.amount) : null, currency: draft.currency || 'CLP' }, null, true);
@@ -400,7 +416,7 @@ export function OpportunityWorkWorkspace() {
   });
   // With a source picked, its group is called by it («Compra Ágil», «Recibidas»), not by the family it belongs to.
   const listGroups = bySource(items).map(group => source === 'all' ? group : { ...group, label: OPPORTUNITY_SOURCES.find(item => item.id === source)?.label ?? group.label });
-  const card = (item: WorkItem) => { const work = overview?.work.find(w => w.opportunity_id === item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id); return <article key={item.id} className="rounded-xl border bg-background p-5"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="flex flex-wrap items-center gap-2"><span>{TYPES[item.kind]}</span><AdvicePill item={item} />{item.data.evaluation === 'excluded' ? null : <PriorityStars score={item.score} />}<ProgressMarks marks={progressChips(null, opened[item.id])} /></span><span>{STATES[work?.state || 'unassigned']}</span></div><h3 className="mt-2 text-base font-semibold">{item.title}</h3>{opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}<p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p><p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>{work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}<Button variant="outline" size="sm" className="mt-4" onClick={() => open(item.id)}>Abrir y trabajar</Button></article>; };
+  const card = (item: WorkItem) => { const work = overview?.work.find(w => w.opportunity_id === item.id); const owner = overview?.members.find(m => m.user_id === work?.responsible_id); return <article key={item.id} className="rounded-xl border bg-background p-5"><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="flex flex-wrap items-center gap-2"><span>{TYPES[item.kind]}</span><AdvicePill item={item} state={work?.state} />{item.data.evaluation === 'excluded' ? null : <PriorityStars score={item.score} />}<ProgressMarks marks={progressChips(null, opened[item.id])} /></span><span>{STATES[work?.state || 'unassigned']}</span></div><h3 className="mt-2 text-base font-semibold">{item.title}</h3>{opportunitySummary(item.data) ? <p className="mt-1 text-sm leading-6">{opportunitySummary(item.data)}</p> : null}<p className="mt-1 text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p><p className="mt-3 text-sm leading-6">{item.reasons[0] || 'Pendiente de evaluación'}</p><div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{item.deadline_at && <span>Cierre: {date(item.deadline_at)}</span>}{item.amount ? <span>Monto: {money(item.amount)} {item.currency || ''}</span> : null}{work?.due_at && <span>Próxima acción: {date(work.due_at)}</span>}{owner && <span>Responsable: {owner.name}</span>}</div>{work?.objective && <p className="mt-3 text-sm">Objetivo: {work.objective}</p>}<Button variant="outline" size="sm" className="mt-4" onClick={() => open(item.id)}>Abrir y trabajar</Button></article>; };
   const title = admin ? 'Gestionar oportunidades' : 'Mis oportunidades asignadas';
   const item = detail?.item;
   const signal = isSignalKind(item?.kind);
@@ -438,7 +454,7 @@ export function OpportunityWorkWorkspace() {
         : admin && view === 'pipeline' ? <>
         <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} />
         {pipeline ? <PipelineBoard items={pipeline.items} work={pipeline.work} totals={pipeline.totals} limits={pipeline.limits} members={overview.members} busy={busy} summariesWaiting={Boolean(pipeline.summaries?.waiting) && !summariesStalled}
-        suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open}
+        suggestions={suggestions} reviewing={reviewing} onReview={() => void review()} onMove={(id, state, revision) => void moveTo(id, state, revision)} onOpen={open} onAssign={item => void openQuickAssign(item)}
         filtered={Boolean(search) || source !== 'all' || categories.length > 0} loadingMore={loadingMore} refreshing={pipelineFor !== filterKey} sort={sort} onSort={setSort} progress={pipeline.progress} opened={opened} onMore={loadMore} onClearFilters={clearFilters} />
         : <div role="status" className="rounded-3xl border p-8 text-sm text-muted-foreground"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando el embudo…</div>}</> : <>
       <OpportunityFilters query={query} onQuery={setQuery} source={source} onSource={setSource} categories={categories} onCategories={setCategories} showSources={admin}>
@@ -459,7 +475,7 @@ export function OpportunityWorkWorkspace() {
       {!detail && !problem && <div role="status" className="rounded-xl border p-8"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Abriendo la oportunidad…</div>}
       {detail && item && <>
         <header className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{TYPES[item.kind]}</span><AdvicePill item={item} decision={latest ? reportDecision({ recommendation: latest.report.recommendation, kind: latest.report.kind ?? item.kind }) : undefined} /><span>· {STATES[detail.work?.state || 'unassigned']}</span></div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{TYPES[item.kind]}</span><AdvicePill item={item} state={detail.work?.state} decision={latest ? reportDecision({ recommendation: latest.report.recommendation, kind: latest.report.kind ?? item.kind }) : undefined} /><span>· {STATES[detail.work?.state || 'unassigned']}</span></div>
           <h1 className="max-w-4xl text-2xl font-semibold tracking-tight">{item.title}</h1>
           <p className="text-sm text-muted-foreground">{item.company_name || item.buyer_name}</p>
           <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
@@ -478,7 +494,7 @@ export function OpportunityWorkWorkspace() {
           </div>
           {detail.work && detail.work.state !== 'unassigned' && <MemberStrip state={detail.work.state} canStep={!admin} busy={busy}
             assignedBy={(detail.members || detail.participants).find(m => m.user_id === detail.work?.assigned_by)?.name ?? null} nextActionAt={detail.work.due_at}
-            openTasks={detail.tasks.filter(t => t.owner_id === user?.id && t.status !== 'done').length} onStep={stepTo} onDecision={decide} />}
+            openTasks={detail.tasks.filter(t => t.owner_id === user?.id && t.status !== 'done').length} onStep={stepTo} onDecision={decide} onMove={admin ? stepTo : undefined} />}
           {detail.work?.objective && <p className="text-sm">Objetivo: {detail.work.objective}</p>}
         </header>
         {(() => {
@@ -541,7 +557,7 @@ export function OpportunityWorkWorkspace() {
     </>}
     {admin&&selected&&<OpportunityReconsiderDialog open={reconsider} onOpenChange={setReconsider} busy={busy} onConfirm={async reason=>Boolean(await perform('reconsider',{reason}))}/>}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
-    <Dialog open={modal !== null} onOpenChange={open => { if (!open && !busy) setModal(null); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Empresa del workspace' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? 'Asignar equipo de trabajo' : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
+    <Dialog open={modal !== null} onOpenChange={open => { if (!open && !busy) setModal(null); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Empresa del workspace' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>
           <WorkspaceCompanyFields draft={draft} field={field} />

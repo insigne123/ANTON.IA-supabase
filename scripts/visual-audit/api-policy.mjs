@@ -21,7 +21,16 @@ const PASS_READS = [
   /^\/api\/team-locks$/,
 ];
 
-export function classify(request, { appOrigin, supabaseOrigin }) {
+/** `passWrites` of a journey (journeys.mjs): `{ pattern, actions? }`, where `actions` limits a route that takes `{ action }` in its body. */
+function allowedByJourney(request, pathname, passWrites) {
+  return passWrites.some(rule => {
+    if (!rule.pattern.test(pathname)) return false;
+    if (!rule.actions) return true;
+    try { return rule.actions.includes(JSON.parse(request.postData() || '{}').action); } catch { return false; }
+  });
+}
+
+export function classify(request, { appOrigin, supabaseOrigin, passWrites = [] }) {
   const url = new URL(request.url());
   const method = request.method();
   if (url.protocol === 'data:' || url.protocol === 'blob:') return { action: 'continue' };
@@ -32,13 +41,14 @@ export function classify(request, { appOrigin, supabaseOrigin }) {
   if (!url.pathname.startsWith('/api/')) return { action: 'continue', record: 'server-action' };
   if (PASS_READS.some(pattern => pattern.test(url.pathname))) return { action: 'continue' };
   if (PASS_WRITES.some(pattern => pattern.test(url.pathname))) return { action: 'continue', record: 'app-write' };
+  if (allowedByJourney(request, url.pathname, passWrites)) return { action: 'continue', record: 'app-write' };
   return { action: 'block', record: 'app-write' };
 }
 
-export async function installPolicy(context, { appOrigin, supabaseOrigin, onRecord }) {
+export async function installPolicy(context, { appOrigin, supabaseOrigin, onRecord, passWrites = [] }) {
   await context.route('**/*', async route => {
     const request = route.request();
-    const decision = classify(request, { appOrigin, supabaseOrigin });
+    const decision = classify(request, { appOrigin, supabaseOrigin, passWrites });
     if (decision.record) onRecord({ kind: decision.record, method: request.method(), url: request.url(), blocked: decision.action !== 'continue' });
     if (decision.action === 'abort') return route.abort('blockedbyclient');
     if (decision.action === 'block') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: BLOCKED_MESSAGE }) });
