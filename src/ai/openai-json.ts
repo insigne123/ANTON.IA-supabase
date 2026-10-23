@@ -2,6 +2,7 @@ import timers from 'node:timers/promises';
 import { z } from 'genkit';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { generateClaudeStructured, isClaudeModel, type ClaudeAttachment, type StructuredEffort } from '@/ai/anthropic-json';
+import { blockedModelMessage, isBlockedModel } from '@/ai/blocked-models';
 
 type StructuredOptions<T extends z.ZodTypeAny> = {
   prompt: string;
@@ -56,11 +57,11 @@ const DEFAULT_GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
 const DEFAULT_SYSTEM_PROMPT = 'You are a strict JSON generator. Return valid JSON only.';
 
 /**
- * Models ANTON.IA never calls, whatever an environment variable or a caller asks for: the Astra family spends far more credits
- * than the rest (decision of the account owner, 6 Oct 2026). Checked here, where every structured call to OpenAI goes out.
+ * Models ANTON.IA never calls, whatever an environment variable or a caller asks for: the expensive tiers of both providers
+ * (src/ai/blocked-models.ts). Checked here, where every structured call goes out, to OpenAI and, through it, to Claude.
  */
 export function isBlockedOpenAiModel(model: string) {
-  return /astra/i.test(model);
+  return isBlockedModel(model);
 }
 
 function env(name: string) {
@@ -281,7 +282,7 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
   config: StructuredProviderConfig
 ): Promise<StructuredResult<T>> {
   const model = opts.openAiModel || config.defaultModel;
-  if (isBlockedOpenAiModel(model)) throw new Error(`El modelo ${model} no está permitido en ANTON.IA.`);
+  if (isBlockedOpenAiModel(model)) throw new Error(blockedModelMessage(model));
   const temperature = opts.temperature ?? 0.3;
   const startedAt = Date.now();
   const streaming = Boolean(opts.onPartial) && config.provider === 'openai';
@@ -390,7 +391,7 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
     // A blocked model is skipped before any request: the next allowed one answers, or the call fails without spending.
     console.warn(`[${config.displayName}] Skipping models not allowed in ANTON.IA: ${blocked.join(', ')}`);
     models.splice(0, models.length, ...models.filter((model) => !isBlockedOpenAiModel(model)));
-    if (!models.length) throw new Error(`El modelo ${blocked.join(', ')} no está permitido en ANTON.IA.`);
+    if (!models.length) throw new Error(blockedModelMessage(blocked.join(', ')));
   }
 
   if (!models.length) {

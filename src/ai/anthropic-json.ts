@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { blockedModelMessage, isBlockedModel } from '@/ai/blocked-models';
 
 /**
  * Structured generation with Claude (Anthropic Messages API, official SDK). openai-json.ts sends here every
@@ -305,6 +306,8 @@ export async function generateClaudeStructured<T extends z.ZodTypeAny>(
   opts: ClaudeStructuredOptions<T>,
   client: ClaudeClient = claudeClient(),
 ): Promise<{ data: z.infer<T>; telemetry: { modelName: string; requestedModel: string; usage: Record<string, unknown>; durationMs: number } }> {
+  // The expensive tiers never go out, even when a caller reaches here without openai-json.ts.
+  if (isBlockedModel(opts.model)) throw new Error(blockedModelMessage(opts.model));
   const startedAt = Date.now();
   const timeoutController = opts.timeoutMs === undefined ? undefined : new AbortController();
   const signal = timeoutController
