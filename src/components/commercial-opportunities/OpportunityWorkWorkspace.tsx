@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, Search, Settings, Sparkles, Users, X } from 'lucide-react';
+import { ArrowLeft, ClipboardCheck, Download, ExternalLink, FilePlus2, FileUp, Loader2, Settings, Sparkles, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -437,10 +437,14 @@ export function OpportunityWorkWorkspace() {
     {feedback && <p role="status" className="rounded-xl border bg-muted/30 p-3 text-sm">{feedback}</p>}
     {!overview && !problem && <div role="status" className="rounded-xl border p-8"><Loader2 className="mb-3 h-5 w-5 animate-spin" />Cargando oportunidades…</div>}
     {overview && !selected && <>
-      {admin && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">{overview.context ? 'Oferta compartida confirmada' : 'Confirma qué ofrece tu empresa'}</p><p className="mt-1 text-xs text-muted-foreground">{overview.context ? `Búsqueda diaria ${(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} · Límite mensual US$20 · US$${overview.budget.spent.toFixed(2)} usados` : 'La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.'}</p></div>
-        <div className="flex flex-wrap gap-2">{overview.context && (overview.context as any).criteria?.postQueries?.length ? <Button variant="ghost" onClick={openCriteria}><Search className="mr-2 h-4 w-4" />Qué buscamos</Button> : null}
-          {overview.context ? <Button variant="ghost" onClick={() => setProfileOpen(true)}><ClipboardCheck className="mr-2 h-4 w-4" />Ficha para licitaciones</Button> : null}
-          {overview.context ? (overview.sourceStatus.automation ? <Button variant="outline" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null) : <Button onClick={openContext}>Confirmar oferta</Button>}</div></div>}
+      {/* The offer confirmed is a status, not a task: one quiet line with its three small actions. Without it, asking to confirm it is the card. */}
+      {admin && overview.context && <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <p className="text-xs text-muted-foreground">Oferta compartida confirmada · Búsqueda diaria {(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} · Límite mensual US$20 · US${overview.budget.spent.toFixed(2)} usados</p>
+        <div className="-ml-3 flex flex-wrap items-center sm:ml-0">{(overview.context as any).criteria?.postQueries?.length ? <Button variant="ghost" size="sm" onClick={openCriteria}>Qué buscamos</Button> : null}
+          <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>Ficha para licitaciones</Button>
+          {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy} onClick={() => void perform('discover', {}, null)}>Actualizar oportunidades</Button> : null}</div></div>}
+      {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
+        <Button onClick={openContext}>Confirmar oferta</Button></div>}
       {view !== 'assistant' && <NewsList notifications={overview.notifications} onOpen={open} onClear={ids => void clearNews(ids)} when={at => humanDate(at, true) ?? ''} />}
       {admin && view !== 'assistant' && overview.documentAlerts?.length ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-cw-warning-soft px-4 py-3 text-sm">
         <p className="min-w-0"><span className="font-medium">{overview.documentAlerts[0].text}</span>{overview.documentAlerts.length > 1 ? <span className="text-muted-foreground"> · y {overview.documentAlerts.length - 1} más por renovar</span> : null}</p>
