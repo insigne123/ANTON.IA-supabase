@@ -203,6 +203,13 @@ test('the request caches the rules and the conversation so far, leaves thinking 
   const forced = anthropicRequest({ system: 's', messages, tools, toolChoice: { type: 'tool', name: 'consultar' } }, 'claude-haiku-5-5');
   assert.deepEqual(forced.thinking, { type: 'disabled' });
   assert.deepEqual(forced.tool_choice, { type: 'tool', name: 'consultar' });
+  // The models that think on every turn reject a forced tool and a thinking turned off: the last round asks for the tool with `auto` instead.
+  for (const model of ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1']) {
+    const lastRound = anthropicRequest({ system: 's', messages, tools, toolChoice: { type: 'tool', name: 'consultar' } }, model);
+    assert.equal('thinking' in lastRound, false, model);
+    assert.deepEqual(lastRound.tool_choice, { type: 'auto' }, model);
+  }
+  assert.deepEqual(anthropicRequest({ system: 's', messages, tools, toolChoice: { type: 'none' } }, 'claude-sonnet-5-5').tool_choice, { type: 'none' });
   assert.deepEqual(requestMessages([{ role: 'user', content: 'x' }])[0].content, [{ type: 'text', text: 'x', cache_control: { type: 'ephemeral' } }]);
 });
 
