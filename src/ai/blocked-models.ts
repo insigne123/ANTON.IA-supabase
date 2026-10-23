@@ -5,7 +5,8 @@
  * Each place a call goes out checks it, so a setting cannot pick one: the call is skipped for the next allowed model or fails
  * before any request.
  */
-const BLOCKED_MODEL = /astra|(?<![a-z0-9])(?:sol|terra|opus|fable)(?![a-z])/i;
+// No lookbehind: harness-config.ts imports this and also runs in the browser, where older Safari refuses the whole script over one.
+const BLOCKED_MODEL = /astra|(?:^|[^a-z0-9])(?:sol|terra|opus|fable)(?![a-z])/i;
 
 export function isBlockedModel(model: string | null | undefined) {
   return BLOCKED_MODEL.test(String(model ?? ''));
