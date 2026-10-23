@@ -27,6 +27,7 @@ import {
   assessResearchQuality,
   type ResearchQualityAssessment,
 } from '@/lib/native-research-quality';
+import { ungroundedIn } from '@/lib/research-signal-grounding';
 import { isDraftableCompanyFactWithPublicEvidence } from './draft-public-company-evidence';
 import {
   validateResearchReportDocumentCitationsV1,
@@ -293,7 +294,27 @@ export type BuildDraftContextV2Input = {
   reportDocument?: ResearchReportDocumentV1 | ReportV2 | null;
   reportDocumentMetadata?: DraftReportDocumentMetadataV2 | null;
   now?: Date;
+  /** Overrides DRAFT_SIGNAL_EVIDENCE_ENABLED (see draftSignalEvidenceEnabled). */
+  signalEvidence?: boolean;
 };
+
+/**
+ * DRAFT_SIGNAL_EVIDENCE_ENABLED=true: what the research found as signals reaches the email. Of a report, the draft keeps today only what its angle
+ * cites, and in a real run of eight companies the angle cited generic claims («la sede está en Santiago») while the analysis had chosen dated
+ * signals as the reason to write; an audit warning about a sentence of the company section discarded every fact of the report; and the facts
+ * came as the pages wrote them («Así se verá:…», one posting). With the flag: the signals the analysis chose come first, newest first; a
+ * `invalid_citation` warning in a section the draft does not read does not discard the report; the facts lose the page's lead-in; and a signal's
+ * own statement is quoted too when every number and name in it is written in the facts it stands on.
+ */
+export function draftSignalEvidenceEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
+  return env.DRAFT_SIGNAL_EVIDENCE_ENABLED?.trim() === 'true';
+}
+
+/** The lead-in some aggregator pages put before a text («Así se verá:»); it says nothing about the company. */
+function cleanReportFactStatement(text: string) {
+  const cleaned = text.replace(/^\s*así se verá:?\s*/i, '').trim();
+  return cleaned || text;
+}
 
 const DEFAULT_SERVER_WRITING_STYLE_PROFILE: Record<string, unknown> = {
   tone: 'professional',
@@ -606,6 +627,12 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
     if (!angleClaimIds.length) angleClaimIds.push(...reportDocument.sections
       .filter((section) => ['company', 'verdict'].includes(section.key))
       .flatMap((section) => section.paragraphs.filter((paragraph) => paragraph.basis === 'source' && paragraph.context === 'target').flatMap((paragraph) => paragraph.claimIds)));
+    const signalEvidence = input.signalEvidence ?? draftSignalEvidenceEnabled();
+    // The signals the analysis chose as the reason to write come first, newest first, whether or not the angle cites them.
+    const chosenSignalClaimIds = signalEvidence ? reportDocument.evidenceGraph.signals
+      .filter((signal) => reportDocument.analysis.signalIds.includes(signal.id))
+      .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+      .map((signal) => signal.claimId) : [];
     const reportEvidence: DraftEvidenceV2[] = [];
     const reportFacts = new Map(reportDocument.evidenceGraph.facts.map((fact) => [fact.id, fact]));
     const reportSources = new Map(reportDocument.evidenceGraph.sources.map((source) => [source.id, source]));
@@ -614,12 +641,16 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       companyName: snapshot.subject.company.name,
       companyDomain: snapshot.subject.company.domain,
     };
-    const reportFactsAllowed = (reportDocument.audit.status === 'passed' || reportDocument.audit.issues.every((issue) => issue.severity === 'warn' && ['literal_copy', 'duplication', 'truncated', 'generic'].includes(issue.type)))
+    const benignAuditIssue = (issue: ReportV2['audit']['issues'][number]) => issue.severity === 'warn' && (
+      ['literal_copy', 'duplication', 'truncated', 'generic'].includes(issue.type)
+      // A citation that does not hold in a section the draft does not read leaves the claims, their facts and the angle as they were.
+      || signalEvidence && issue.type === 'invalid_citation' && !['angle', 'verdict', 'signals'].includes(issue.section));
+    const reportFactsAllowed = (reportDocument.audit.status === 'passed' || reportDocument.audit.issues.every(benignAuditIssue))
       && isFreshDate(reportDocument.synthesis.generatedAt, nowMs)
       && (!reportDocument.publicCompanyResearch || Date.parse(reportDocument.publicCompanyResearch.expiresAt) > nowMs)
       && Boolean(companyIdentity.companyDomain)
       && normalizeResearchCompanyDomain(reportDocument.entity.companyDomain) === normalizeResearchCompanyDomain(companyIdentity.companyDomain);
-    const mappedClaims = unique(angleClaimIds).flatMap((claimId) => {
+    const mappedClaims = unique([...chosenSignalClaimIds, ...angleClaimIds]).flatMap((claimId) => {
       const claim = reportDocument.evidenceGraph.claims.find((item) => item.id === claimId);
       const internalId = reportDocument.evidenceGraph.shortIdMap[claimId];
       if (!claim) return [];
@@ -668,7 +699,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         return [DraftEvidenceV2Schema.parse({
           evidenceId: `${prefix}:evidence:${claim.id}:${fact.id}`,
           // Only sourced graph text is evidence, never the paragraph's analysis or recommendation.
-          statement: fact.text,
+          statement: signalEvidence ? cleanReportFactStatement(fact.text) : fact.text,
           subjectScope,
           confidence: claim.confidence,
           source: {
@@ -692,7 +723,14 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
           },
         })];
       });
-      reportEvidence.push(...supported);
+      // A signal's own statement is as clear as the facts are scattered («10 vacantes en Malloa» against one posting): it is quoted too, first, if
+      // every number and name in it is written in the facts it stands on, as the research checks it when it takes it from a model.
+      const factTexts = supported.flatMap((item) => item.provenance?.kind === 'report_v2' ? [reportFacts.get(item.provenance.factId)?.text ?? ''] : []);
+      const statementEvidence = signalEvidence && claim.dimension === 'signal' && supported.length > 0 && claim.observedAt !== null && isSignalLikeEvidence(claim.statement)
+        && !ungroundedIn(claim.statement, factTexts, { date: claim.observedAt, companyName: companyIdentity.companyName || '', companyDomain: companyIdentity.companyDomain || '' })
+        ? [DraftEvidenceV2Schema.parse({ ...supported[0], evidenceId: `${prefix}:evidence:${claim.id}:0`, statement: claim.statement })]
+        : [];
+      reportEvidence.push(...statementEvidence, ...supported);
       return supported.length ? [{ claim, internalId: draftClaimId }] : [];
     });
     if (reportEvidence.length) {
