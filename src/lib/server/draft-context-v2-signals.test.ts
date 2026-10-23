@@ -4,7 +4,7 @@ import test from 'node:test';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import type { ReportV2 } from '@/lib/report-v2-contracts';
 import {
-  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftHookFilterEnabled, draftSignalEvidenceEnabled, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
+  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftFlagsForUser, draftHookFilterEnabled, draftSignalEvidenceEnabled, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
 } from './draft-context-v2';
 import { DRAFT_FIXTURE_NOW, draftReportV2Fixture, draftSnapshotFixture } from './draft-v2-test-fixtures';
 
@@ -44,12 +44,12 @@ function reportWithSignal(overrides: { statement?: string; observedAt?: string; 
   return report;
 }
 
-function build(reportDocument: ReportV2, signalEvidence?: boolean, hookFilter?: boolean) {
+function build(reportDocument: ReportV2, signalEvidence?: boolean, hookFilter?: boolean, anchorSpecifics?: boolean) {
   const snapshot = draftSnapshotFixture();
   const result = buildDraftContextV2({
     snapshot, artifact: { contentHash: canonicalSha256(snapshot), capturedAt: '2026-08-20T12:00:00.000Z' },
     seller: normalizeDraftSellerProfileV2({ name: 'Grace Hopper', companyName: 'Northstar', services: ['Automatización de operaciones'] }),
-    style: createDefaultDraftWritingStyleV2(), reportDocument, now: DRAFT_FIXTURE_NOW, ...(signalEvidence === undefined ? {} : { signalEvidence }), ...(hookFilter === undefined ? {} : { hookFilter }),
+    style: createDefaultDraftWritingStyleV2(), reportDocument, now: DRAFT_FIXTURE_NOW, ...(signalEvidence === undefined ? {} : { signalEvidence }), ...(hookFilter === undefined ? {} : { hookFilter }), ...(anchorSpecifics === undefined ? {} : { anchorSpecifics }),
   });
   assert.equal(result.status, 'ready');
   if (result.status !== 'ready') throw new Error('not ready');
@@ -130,6 +130,43 @@ test('the specific anchor terms are off unless DRAFT_ANCHOR_SPECIFICS_ENABLED is
   assert.equal(draftAnchorSpecificsEnabled({}), false);
   assert.equal(draftAnchorSpecificsEnabled({ DRAFT_ANCHOR_SPECIFICS_ENABLED: 'false' }), false);
   assert.equal(draftAnchorSpecificsEnabled({ DRAFT_ANCHOR_SPECIFICS_ENABLED: ' true ' }), true);
+});
+
+const PILOT_PERSON = '5B1F0F5E-1C2D-4E3F-8A4B-0000000000AA';
+const OTHER_PERSON = '00000000-0000-4000-8000-000000000001';
+const ALL_ON = { DRAFT_SIGNAL_EVIDENCE_ENABLED: 'true', DRAFT_HOOK_FILTER_ENABLED: 'true', DRAFT_ANCHOR_SPECIFICS_ENABLED: 'true' };
+
+test('DRAFT_PILOT_USER_IDS limits the three flags to the people of the pilot, and never turns one on by itself', () => {
+  const everyone = { signalEvidence: true, hookFilter: true, anchorSpecifics: true };
+  const nobody = { signalEvidence: false, hookFilter: false, anchorSpecifics: false };
+  // Without a list each flag is what it says, for everyone: also for a draft with no known person.
+  for (const person of [PILOT_PERSON, OTHER_PERSON, null, undefined]) assert.deepEqual(draftFlagsForUser(person, ALL_ON), everyone);
+  assert.deepEqual(draftFlagsForUser(OTHER_PERSON, { ...ALL_ON, DRAFT_PILOT_USER_IDS: '  ,  ' }), everyone, 'an empty list is no list');
+  // With a list only those people, compared without case or spaces; everyone else writes as before.
+  const pilot = { ...ALL_ON, DRAFT_PILOT_USER_IDS: ` ${PILOT_PERSON.toLowerCase()} , ${'0'.repeat(8)}-0000-4000-8000-000000000009` };
+  assert.deepEqual(draftFlagsForUser(PILOT_PERSON, pilot), everyone);
+  assert.deepEqual(draftFlagsForUser(OTHER_PERSON, pilot), nobody);
+  assert.deepEqual(draftFlagsForUser(null, pilot), nobody);
+  assert.deepEqual(draftFlagsForUser('', pilot), nobody);
+  // The list turns nothing on: each flag still decides by itself.
+  assert.deepEqual(draftFlagsForUser(PILOT_PERSON, { DRAFT_PILOT_USER_IDS: PILOT_PERSON }), nobody);
+  assert.deepEqual(draftFlagsForUser(PILOT_PERSON, { DRAFT_PILOT_USER_IDS: PILOT_PERSON, DRAFT_HOOK_FILTER_ENABLED: 'true' }), { signalEvidence: false, hookFilter: true, anchorSpecifics: false });
+});
+
+test('a context built with the specific anchors says so; one built without them is exactly what it was', () => {
+  const marked = build(reportWithSignal(), undefined, undefined, true);
+  assert.deepEqual(marked.writing, { anchorSpecifics: true });
+  const plain = build(reportWithSignal(), undefined, undefined, false);
+  assert.equal('writing' in plain, false);
+  // The flags of a person outside the pilot build the same context as no flags at all.
+  const outside = draftFlagsForUser(OTHER_PERSON, { ...ALL_ON, DRAFT_PILOT_USER_IDS: PILOT_PERSON });
+  const withFlags = build(reportWithSignal(), outside.signalEvidence, outside.hookFilter, outside.anchorSpecifics);
+  assert.deepEqual(withFlags, build(reportWithSignal(), false, false, false));
+  // The ones of the pilot change what the writer is given: the signal as evidence, and the marker.
+  const inside = draftFlagsForUser(PILOT_PERSON, { ...ALL_ON, DRAFT_PILOT_USER_IDS: PILOT_PERSON });
+  const pilotContext = build(reportWithSignal(), inside.signalEvidence, inside.hookFilter, inside.anchorSpecifics);
+  assert.deepEqual(pilotContext.writing, { anchorSpecifics: true });
+  assert.notDeepEqual(pilotContext.evidence, withFlags.evidence);
 });
 
 test('with the hook filter a debate on the competition of the market is not offered to the writer; without it, as always', () => {

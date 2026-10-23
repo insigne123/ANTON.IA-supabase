@@ -15,7 +15,6 @@ import { SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outre
 import { selectOutreachStrategy } from '@/lib/outreach-evidence-ranking';
 import {
   DraftContextV2Schema,
-  draftAnchorSpecificsEnabled,
   requiredReportAwareDraftPersonalizationV2,
   type DraftContextV2,
 } from '@/lib/server/draft-context-v2';
@@ -375,10 +374,12 @@ function boundedWritingStyle(profile: Record<string, unknown>) {
 
 function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   const requiredPersonalization = requiredReportAwareDraftPersonalizationV2(input.context);
+  // A context built with DRAFT_ANCHOR_SPECIFICS_ENABLED (for this person) says so; the preflight reads the same marker.
+  const specifics = Boolean(input.context.writing?.anchorSpecifics);
   const requiredEvidence = requiredPersonalization.map((provenance) => {
     const evidence = input.context.evidence.find((item) => item.evidenceId === provenance.evidenceId);
     return {
-      statement: draftEvidencePersonalizationStatementV2(evidence?.statement || ''),
+      statement: draftEvidencePersonalizationStatementV2(evidence?.statement || '', { keepSpecifics: specifics }),
       subjectScope: evidence?.subjectScope || 'company',
     };
   });
@@ -386,7 +387,6 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   // two material terms of the evidence statement inside a single sentence.
   // Naming them prevents paraphrase drift and the full corrective retry it
   // triggers (~11K input tokens per failure), without changing compliant copy.
-  const specifics = draftAnchorSpecificsEnabled();
   const anchorLines = requiredEvidence
     .map((item) => specifics
       ? specificAnchorTerms(item.statement, { companyName: input.context.company.name || '' })

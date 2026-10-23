@@ -5,7 +5,7 @@ import {
   canonicalSha256,
   type MessagingPreflightV1,
 } from '@/lib/messaging-contracts';
-import { DRAFT_STYLE_ADVISORIES, draftAnchorSpecificsEnabled, isSignalLikeEvidence, type DraftContextV2 } from '@/lib/server/draft-context-v2';
+import { DRAFT_STYLE_ADVISORIES, isSignalLikeEvidence, type DraftContextV2 } from '@/lib/server/draft-context-v2';
 import { checkHumanTone } from '@/lib/server/human-tone-checks';
 
 export const DRAFT_PREFLIGHT_V2_VERSION = 'native-draft-preflight/v2';
@@ -146,14 +146,15 @@ const personalizationBoilerplate = /\b(?:ir al contenido|profile picture|email &
 
 /**
  * The statement the writer is given to rest the email on, and the grounding check to look for. A list of services is narrowed to one of its items, so
- * the email does not recite a catalogue; with DRAFT_ANCHOR_SPECIFICS_ENABLED a fact that names its datum after a comma keeps everything up to it
- * (see statementThroughFirstDatum).
+ * the email does not recite a catalogue; with `keepSpecifics` (a context built with DRAFT_ANCHOR_SPECIFICS_ENABLED: `context.writing`) a fact that
+ * names its datum after a comma keeps everything up to it (see statementThroughFirstDatum). It never reads the environment: the prompt and the
+ * preflight pass the same option, taken from the context.
  */
 export function draftEvidencePersonalizationStatementV2(value: unknown, options: { keepSpecifics?: boolean } = {}) {
   const statement = text(value);
   const conditionalClause = /,\s*(?:si\b|siempre que\b|aunque\b|cuando\b|porque\b|mientras\b|salvo\b|excepto\b|a menos que\b)/i.test(statement);
   const narrowable = statement.includes(',') && hasEnumerationCue(statement) && !conditionalClause;
-  const throughDatum = narrowable && (options.keepSpecifics ?? draftAnchorSpecificsEnabled()) ? statementThroughFirstDatum(statement) : undefined;
+  const throughDatum = narrowable && options.keepSpecifics ? statementThroughFirstDatum(statement) : undefined;
   if (throughDatum) return throughDatum;
   const focusedListItem = narrowable
     ? statement
@@ -388,6 +389,7 @@ function hasGroundedPersonalization(
   return personalization.every((item) => {
     const statement = draftEvidencePersonalizationStatementV2(
       evidenceById.get(item.evidenceId)?.statement || '',
+      { keepSpecifics: Boolean(context.writing?.anchorSpecifics) },
     );
     const materialTerms = [...new Set(materialPersonalizationTerms(statement))];
     // A faithful paraphrase often changes verbs and nouns. Two material terms
@@ -514,7 +516,7 @@ function isGroundedInSellerOffer(context: DraftContextV2, offerParagraph: string
 function isGroundedInTargetEvidence(context: DraftContextV2, offerParagraph: string) {
   const outputTerms = new Set(materialPersonalizationTerms(offerParagraph));
   return context.evidence.filter((evidence) => evidence.supportedFactClaimIds.length > 0).some((evidence) => materialPersonalizationTerms(
-    draftEvidencePersonalizationStatementV2(evidence.statement),
+    draftEvidencePersonalizationStatementV2(evidence.statement, { keepSpecifics: Boolean(context.writing?.anchorSpecifics) }),
   ).some((term) => outputTerms.has(term)));
 }
 

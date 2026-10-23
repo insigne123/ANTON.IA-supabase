@@ -627,26 +627,28 @@ test('writing prompt anchors the factual terms the grounding check requires', as
   }
 });
 
-test('with DRAFT_ANCHOR_SPECIFICS_ENABLED the concrete datum leads the anchor terms; without it the prompt does not change', async () => {
+test('a context built with the specific anchors leads the anchor terms with the concrete datum; without the marker the prompt does not change', async () => {
   const previous = { key: process.env.OPENAI_API_KEY, flag: process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED };
   const previousFetch = globalThis.fetch;
   let prompt = '';
   try {
     process.env.OPENAI_API_KEY = 'test-openai-key';
+    delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED;
+    const base = draftContextFixture();
+    // The environment has nothing to say here once the context is built: the prompt follows the context.
+    process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = 'true';
     globalThis.fetch = async (_input, init) => {
       prompt = JSON.parse(String(init?.body)).messages[1].content;
       return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Tema', opening: 'Acme abre vacantes en Antofagasta y Atacama.', value: 'Northstar ordena tareas.' }) } }], usage: {} });
     };
-    const base = draftContextFixture();
+    assert.equal('writing' in base, false);
     const context = { ...base, evidence: base.evidence.map((item) => item.supportedFactClaimIds.includes('claim-acme-overview')
       ? { ...item, statement: 'Acme mantiene vacantes abiertas en el norte de Chile, principalmente en Antofagasta y Atacama.' }
       : item) };
-    delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED;
     await generateOutreachFromDraftContextV2({ context });
     assert.ok(prompt.includes('[{"statement":"Acme mantiene vacantes abiertas en el norte de Chile","subjectScope":"company"}]'), 'the first item of the list, as always');
     assert.match(prompt, /conserva al menos dos de estos términos: Acme, mantiene, vacantes, abiertas, norte\./);
-    process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = 'true';
-    await generateOutreachFromDraftContextV2({ context });
+    await generateOutreachFromDraftContextV2({ context: { ...context, writing: { anchorSpecifics: true as const } } });
     assert.ok(prompt.includes('[{"statement":"Acme mantiene vacantes abiertas en el norte de Chile, principalmente en Antofagasta y Atacama.","subjectScope":"company"}]'), 'the whole statement, whose datum is in its last item');
     assert.match(prompt, /conserva al menos dos de estos términos: Antofagasta, Atacama, mantiene, vacantes, abiertas\./);
   } finally {
