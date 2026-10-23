@@ -5,6 +5,7 @@ import { readCoworkLinkedinQuota } from '@/lib/server/cowork/linkedin-reads';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { loadCoworkUserContext } from '@/lib/server/cowork/user-context';
 import { coworkFirstName, type CoworkOverview } from '@/lib/cowork/overview';
+import { coworkWebAvailable } from '@/lib/cowork/harness-config';
 import { canUseOpportunities } from '@/lib/server/commercial-opportunities/grants';
 import { isOpportunityAdmin } from '@/lib/commercial-opportunities/workspace';
 import { loadCoworkSinceLastVisit } from '@/lib/server/cowork/since-visit';
@@ -59,6 +60,7 @@ export async function GET() {
       linkedin: quota ? { used: quota.pending + quota.sent7d, limit: quota.limit } : null,
       since: since.status === 'fulfilled' ? since.value : null,
       toWrite: toWrite.status === 'fulfilled' ? toWrite.value : null,
+      web: coworkWebAvailable(process.env, scope.userId),
     };
     return NextResponse.json(overview, { headers: privateHeaders });
   } catch (error) {

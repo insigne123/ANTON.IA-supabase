@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COWORK_GUIDE, coworkGuideForModel } from './capabilities-guide';
+import { COWORK_GUIDE, COWORK_GUIDE_WEB, coworkGuide, coworkGuideForModel } from './capabilities-guide';
 import { helpSectionById } from '@/lib/help/manual';
 
 test('the guide covers the seven groups in order, each with examples and its help page', () => {
@@ -23,4 +23,22 @@ test('the model reads the same guide, one line per group', () => {
   const text = coworkGuideForModel();
   for (const group of COWORK_GUIDE) assert.ok(text.includes(group.title) && text.includes(group.examples[0].label));
   assert.equal(text.split(' · ').length, COWORK_GUIDE.length);
+});
+
+test('the web group appears only for whoever has the web, right after «Investigar»', () => {
+  assert.equal(coworkGuide(), COWORK_GUIDE, 'without the web the guide is the one everybody had');
+  assert.equal(coworkGuide({ web: false }), COWORK_GUIDE);
+  const withWeb = coworkGuide({ web: true });
+  assert.deepEqual(withWeb.map(group => group.id), ['buscar', 'contactos', 'investigar', 'web', 'correos', 'linkedin', 'seguimiento', 'informes']);
+  assert.equal(withWeb.length % 2, 0, 'the two-column grid stays even');
+  assert.ok(helpSectionById(COWORK_GUIDE_WEB.helpSection), 'it points to an existing help page');
+  assert.ok(COWORK_GUIDE_WEB.summary.includes('enlace'), 'it says the sources come with their link');
+  const messages = new Set(COWORK_GUIDE.flatMap(group => group.examples.map(example => example.message)));
+  for (const example of COWORK_GUIDE_WEB.examples) {
+    assert.ok(example.label.length <= 40, `«${example.label}» fits on a button`);
+    assert.ok(!/\[|\]/.test(example.message), 'ready to send, with no blanks to fill');
+    assert.ok(/web/i.test(example.message), 'it asks for the web, so the turn searches');
+    assert.ok(!messages.has(example.message), 'no example repeats');
+  }
+  assert.ok(!coworkGuideForModel().includes(COWORK_GUIDE_WEB.title), 'the coordinator loop must not read a promise it cannot keep');
 });
