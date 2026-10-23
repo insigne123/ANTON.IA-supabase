@@ -502,7 +502,9 @@ function officialStatementKey(value: unknown) {
 function substantiveOfficialStatements(value: unknown, maxSegments = MAX_OFFICIAL_PAGE_SEGMENTS) {
   const normalized = cleanOfficialText(value);
   if (!normalized) return [];
-  const sentences = normalized.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) || [normalized];
+  // A sentence ends at . ! ? followed by a space and a capital, a digit or an opening mark: the period of «1.390 millones» or «Codelco S.A. opera» is not an end.
+  // (Matching with [^.!?]+ dropped the start of any sentence with such a period: «1.390 millones» was kept as «390 millones».)
+  const sentences = normalized.split(/(?<=[.!?])\s+(?=[\p{Lu}\d¿¡"“«(])/u);
   const statements: string[] = [];
   let pending = '';
   for (const sentence of sentences) {
