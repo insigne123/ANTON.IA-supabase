@@ -103,6 +103,15 @@ test('the large schema answer is validated with the full schema', async () => {
   assert.deepEqual(result.data, { action: 'answer', f3: null }, 'an extra top-level key is dropped, not a retry');
 });
 
+test('an expensive Claude is refused before any request, even when called directly', async () => {
+  const { client, captured } = fakeClient({});
+  for (const model of ['claude-opus-5-5', 'claude-fable-5-1']) {
+    await assert.rejects(generateClaudeStructured({ model, prompt: 'p', schema }, client), /no está permitido/, model);
+  }
+  assert.equal(captured.params, null, 'nothing went out');
+  assert.equal((await generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema }, client)).data.reply, 'Listo.');
+});
+
 test('the request carries the format, the effort and room for thinking', () => {
   const low = claudeRequest({ model: 'claude-haiku-5-5', prompt: 'p', systemPrompt: 's', schema, maxOutputTokens: 6000 });
   assert.equal(low.output_config.effort, 'low');

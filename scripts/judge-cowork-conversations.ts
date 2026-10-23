@@ -5,8 +5,8 @@
 // Explicit opt-in only. Never loads env files, touches the database or calls providers
 // other than the judge model.
 //
-//   OPENAI_API_KEY=... COWORK_MODEL=gpt-6-luna \
-//   node --loader ./scripts/ts-test-loader.mjs scripts/judge-cowork-conversations.ts --live --judge-model=gpt-6-sol \
+//   OPENAI_API_KEY=... ANTHROPIC_API_KEY=... COWORK_MODEL=gpt-6-luna \
+//   node --loader ./scripts/ts-test-loader.mjs scripts/judge-cowork-conversations.ts --live --judge-model=claude-haiku-5-5 \
 //     (--calibrate [--repeat=2] | --input=report.json [--cases=a,b]) --max-calls=120 [--output=judged.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { THREAD_AGENDA_CORPUS, THREAD_CORPUS, THREAD_SEND_AGENDA_CORPUS, THREAD_SEND_CORPUS } from './fixtures/cowork-thread-corpus';

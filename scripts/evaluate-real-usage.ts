@@ -6,7 +6,7 @@
 //   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
 //   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-real-usage.ts --read-production \
 //     --from=2026-10-01 --to=2026-10-16 (--orgs=uuid,uuid | --all) --output=dir \
-//     [--people] [--exclude-domains=yago.cl] [--judge --judge-model=gpt-6-sol --max-calls=60]
+//     [--people] [--exclude-domains=yago.cl] [--judge --judge-model=claude-haiku-5-5 --max-calls=60]  (--judge also needs ANTHROPIC_API_KEY)
 //
 // --people adds the per-person table (enrichments first) with names: share that report only with each team's own lead.
 // --exclude-domains leaves internal accounts (the owner, QA) out of the usage numbers; their Cowork conversations still count.

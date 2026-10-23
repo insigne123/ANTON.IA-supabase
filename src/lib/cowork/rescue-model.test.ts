@@ -3,11 +3,13 @@ import test from 'node:test';
 import { coworkRescueModel } from './rescue-model';
 import { coworkRescueNote, coworkTurnFailure, CoworkDecisionRejected } from './agent-loop';
 
-test('the rescue model is the one configured, and never astra', () => {
+test('the rescue model is the one configured, and never an expensive one', () => {
   assert.equal(coworkRescueModel({}), null, 'unset: no rescue');
   assert.equal(coworkRescueModel({ COWORK_RESCUE_MODEL: '  ' }), null);
-  assert.equal(coworkRescueModel({ COWORK_RESCUE_MODEL: 'gpt-6.1-sol' }), 'gpt-6.1-sol');
-  assert.equal(coworkRescueModel({ COWORK_RESCUE_MODEL: 'gpt-6-astra' }), null, 'the owner never wants astra used');
+  assert.equal(coworkRescueModel({ COWORK_RESCUE_MODEL: 'gpt-6-luna' }), 'gpt-6-luna');
+  for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-5.6-terra', 'claude-opus-5-5']) {
+    assert.equal(coworkRescueModel({ COWORK_RESCUE_MODEL: model }), null, `${model}: the owner never wants it used`);
+  }
 });
 
 test('which failures a rescue may answer', () => {
