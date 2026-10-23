@@ -67,6 +67,16 @@ export function truncateAtWord(value: string, max: number) {
   return `${(lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`;
 }
 
+/**
+ * `truncateAtWord` with its «...» included: never longer than `max`. A field with a maximum (a fact is 2 000 characters, a claim 220) takes
+ * this one; `truncateAtWord(value, max)` can come out 3 characters over, which in a third of the long texts is the one that breaks the schema
+ * at the end of the whole report (a block of 2 003 characters failed the synthesis of a lead after all the model calls were paid).
+ */
+export function truncateWithin(value: string, max: number) {
+  const text = normalizedText(value);
+  return text.length <= max ? text : truncateAtWord(text, Math.max(1, max - 3));
+}
+
 export function isCleanEvidenceText(value: unknown) {
   const text = normalizedText(value);
   if (!text || /^https?:/i.test(text) || NOISE_PATTERN.test(text)) return false;
@@ -232,7 +242,7 @@ export function parseWebEvidenceV2(input: {
   const rawBlocks = String(article?.textContent || document.body?.textContent || '')
     .split(/(?:\r?\n){1,}|(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/u);
   const blocks = [...new Set(rawBlocks
-    .map((block) => truncateAtWord(block, 2_000))
+    .map((block) => truncateWithin(block, 2_000))
     .filter(isCleanEvidenceText))]
     .slice(0, 300);
   const fullText = truncateAtWord(blocks.join('\n'), 50_000);
