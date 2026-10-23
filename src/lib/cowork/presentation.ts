@@ -5,7 +5,7 @@ import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
 import { coworkPublishedFiles } from './published-files';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredChoices, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkChoices, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
-  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent, type CoworkDraftPhase } from './contracts';
+  coworkIsAssistantEvent, coworkIsWebAction, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent, type CoworkDraftPhase } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -437,6 +437,11 @@ export type CoworkTurnOutput = { reply: string; document: { title: string; conte
 /** Data reads of a turn: tool events other than the assistant's own note. */
 export function coworkReadEvents(events: CoworkEvent[]): CoworkEvent[] {
   return events.filter(event => event.kind === 'tool.completed' && !coworkIsAssistantEvent(event.payload));
+}
+
+/** How many of a turn's reads went to the web (a search, a page): the summary tells them apart from the account's. */
+export function coworkWebReadCount(events: CoworkEvent[]): number {
+  return coworkReadEvents(events).filter(event => coworkIsWebAction(event.payload?.action)).length;
 }
 
 /** What the assistant wrote next to its proposal, if anything. */

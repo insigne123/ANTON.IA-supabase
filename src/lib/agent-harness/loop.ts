@@ -90,6 +90,8 @@ async function pool<T, R>(items: T[], size: number, work: (item: T) => Promise<R
   return results;
 }
 
+const isServerContent = (block: ContentBlock) => block.type === 'server_tool_use' || (block.type.endsWith('_tool_result') && block.type !== 'tool_result');
+
 const textOf = (content: ContentBlock[]) => content.filter(block => block.type === 'text').map(block => (block as { text: string }).text).join('').trim();
 
 function isAbort(error: unknown) {
@@ -138,6 +140,9 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     }
   };
 
+  /** The blocks of the API's own tools seen in the run, and the searches and reads already shown. */
+  const serverBlocks: ContentBlock[] = [];
+  const announced = new Set<string>();
   for (let round = 1; round <= input.limits.maxRounds; round++) {
     input.signal.throwIfAborted();
     emit({ type: 'round', round });
@@ -150,9 +155,9 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
     const active = registry.active();
     const forcedFinal = lastRound && input.finalTool && registry.get(input.finalTool) ? input.finalTool : null;
     const serverTools = lastRound ? [] : typeof input.serverTools === 'function' ? input.serverTools(usage) : input.serverTools ?? [];
-    // The searches and page reads of this call, shown as each one finishes when the model client reports its blocks as they complete.
-    const announced = new Set<string>();
-    const seen: ContentBlock[] = [];
+    // The searches and page reads of the run, shown as each one finishes when the model client reports its blocks as they complete. A search the
+    // API left waiting while a tool of ours answered finishes in the next call, so a call is paired with its result across calls.
+    const roundStart = serverBlocks.length;
     const announce = (action: WebAction) => {
       if (announced.has(action.id)) return;
       announced.add(action.id);
@@ -167,15 +172,17 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRun> {
       effort: input.effort, maxTokens: input.limits.maxTokens, signal: input.signal,
       onText: (delta, snapshot) => emit({ type: 'text', delta, snapshot }),
       onToolInput: ({ name, json }) => emit({ type: 'tool_input', round, name, json }),
-      onServerBlock: block => { seen.push(block); for (const action of webActions(seen, { onlyDone: true })) announce(action); },
+      onServerBlock: block => { serverBlocks.push(block); for (const action of webActions(serverBlocks, { onlyDone: true })) announce(action); },
     });
+    // What the client did not report as it happened is shown now, before the hooks see the call: the blocks of the response replace the ones seen live.
+    serverBlocks.length = roundStart;
+    serverBlocks.push(...response.content.filter(isServerContent));
+    for (const action of webActions(serverBlocks, { onlyDone: true })) announce(action);
     usage = addUsage(usage, response.usage);
     if (!models.includes(response.model)) models.push(response.model);
     emit({ type: 'usage', usage: response.usage, model: response.model });
     await input.hooks?.afterModelCall?.({ round, response, model: response.model });
     messages = [...messages, { role: 'assistant', content: response.content }];
-    // Whatever the client did not report as it happened is shown now, with the rest of the call.
-    for (const action of webActions(response.content)) announce(action);
 
     if (response.stopReason === 'refusal') throw new Error('AGENT_REFUSAL: the model declined this request.');
     // The API stopped a long run of its own tools (ten steps) with the work half done: sending the conversation back, ending with its own blocks, makes it go on.

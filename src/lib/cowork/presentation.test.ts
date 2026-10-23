@@ -7,7 +7,7 @@ import {
   coworkTurnBlocks, coworkPlanProgress, coworkPlanStepLine, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
   coworkCardStatuses, coworkTurnFindings, coworkProposalOutcome, coworkProposalTimeline, coworkProposalLink,
   coworkAgentRows, coworkAgentLine, coworkDraftReview, coworkAnswerReview, coworkHeldAnswerCopy, coworkEffectCopy,
-  coworkThreadResults, coworkMergePreview, coworkEarlierRows, coworkCleanTitle,
+  coworkThreadResults, coworkMergePreview, coworkEarlierRows, coworkCleanTitle, coworkWebReadCount,
 } from './presentation';
 import { coworkDraftSteps, coworkVersionMessage } from './blocks';
 import { COWORK_AGENT_ACTION, coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
@@ -484,4 +484,12 @@ test('what the agent searched or read on the web shows with its query or its sit
   assert.equal(describeCoworkObservation({ action: 'web.search', input: 'algo', result: { ok: false, sources: [], error: 'unavailable' } }).detail, '«algo» · no se pudo');
   assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}, {}, {}] } }), { count: 3, label: 'fuentes' });
   assert.deepEqual(coworkReadFinding({ action: 'web.search', result: { ok: true, sources: [{}] } }), { count: 1, label: 'fuente' });
+});
+
+test('the summary of a turn tells the reads on the web apart from the ones of the account', () => {
+  const event = (sequence: number, action: string): CoworkEvent => ({ sequence, run_id: 'r', user_id: 'u', organization_id: 'o', kind: 'tool.completed', payload: { action, input: '', result: {} }, created_at: '2026-10-23T12:00:00Z' } as CoworkEvent);
+  const events = [event(1, 'leads.search'), event(2, 'web.search'), event(3, 'web.fetch'), event(4, 'assistant.plan')];
+  assert.equal(coworkWebReadCount(events), 2);
+  assert.equal(coworkReadEvents(events).length, 3, 'the plan is the assistant\'s own note, not a read');
+  assert.equal(coworkWebReadCount([event(1, 'leads.search')]), 0);
 });
