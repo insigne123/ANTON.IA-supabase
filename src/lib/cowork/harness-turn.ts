@@ -410,6 +410,31 @@ export async function runCoworkHarnessTurn(input: CoworkLoopInput): Promise<Cowo
   return coworkFinishAnswer(input, answer, observations, proposed);
 }
 
+/**
+ * What a turn on the harness can hand back to the coordinator loop: Anthropic's side failed (the key, the account's credit, the server, the quota
+ * or the model's answer), never what the person, the ledger or the access rules caused. Without this a turn ends in an error for something that
+ * is nobody's doing, when the loop that has run until now can still answer.
+ */
+export function coworkHarnessFallback(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted || !(error instanceof Error)) return false;
+  if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.name === 'AuthError') return false;
+  // The ledger's caps and a run that is no longer ours stay errors: another model would meet the same wall.
+  if (/COWORK_DAILY_MODEL_BUDGET|COWORK_CONVERSATION_MODEL_BUDGET|No se pudo reservar presupuesto|no longer writable|No se pudo registrar el consumo/i.test(error.message)) return false;
+  return /CLAUDE_HTTP_(?:429|5\d\d)|credit_balance_exhausted|Missing AI provider credentials|AGENT_REFUSAL|AGENT_MAX_TOKENS|did not produce a final answer|overloaded|ECONNRESET|ETIMEDOUT|fetch failed|Connection error/i.test(error.message);
+}
+
+/** A turn of Cowork: on the harness when the worker gave it one, and with the coordinator loop behind it for a failure that is Anthropic's. */
+export async function runCoworkTurn(input: CoworkLoopInput, loop: typeof runCoworkReadLoop = runCoworkReadLoop): Promise<CoworkAnswer> {
+  if (!input.harness) return loop(input);
+  try {
+    return await runCoworkHarnessTurn(input);
+  } catch (error) {
+    if (!coworkHarnessFallback(error, input.signal)) throw error;
+    input.harness.onFallback?.(error instanceof Error ? error.message.slice(0, 200) : 'harness');
+    return loop({ ...input, harness: undefined });
+  }
+}
+
 /** What a model call cost, in the shape the ledger records (coworkModelUsage reads it). */
 export function coworkHarnessTelemetry(response: ModelResponse, durationMs: number) {
   const prompt = response.usage.inputTokens;

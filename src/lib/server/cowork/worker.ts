@@ -24,7 +24,7 @@ import { coworkOperationHash, createCoworkOperationGateway } from './operations'
 import { coworkReadCapabilities } from './read-capabilities';
 import { anthropicModel } from '@/lib/agent-harness/anthropic';
 import { coworkHarnessSettings } from '@/lib/cowork/harness-config';
-import { coworkHarnessTelemetry, runCoworkHarnessTurn } from '@/lib/cowork/harness-turn';
+import { coworkHarnessTelemetry, runCoworkTurn } from '@/lib/cowork/harness-turn';
 import { processCoworkEffectQueue, resolveCoworkEffect, admitCoworkContinuation } from './effects';
 import { coworkTaskGraph, coworkTaskReadyEffect, coworkTaskReadyNode } from '@/lib/cowork/task-graph';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
@@ -302,7 +302,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // COWORK_RUNTIME=harness: the coordinator is a Claude that works with tools (harness-turn.ts) instead of writing one decision per call.
     // Off by default; the loop below runs everything it does not take (a task resumed from its specialists, a question about a proposal).
     const harnessSettings = coworkHarnessSettings();
-    const result = await (harnessSettings ? runCoworkHarnessTurn : runCoworkReadLoop)({
+    const result = await (harnessSettings ? runCoworkTurn : runCoworkReadLoop)({
       harness: harnessSettings ? {
         model: anthropicModel({ model: harnessSettings.model }),
         system: decisionSystemPrompt,
@@ -312,6 +312,12 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         documentReviewer: process.env.COWORK_DOCUMENT_VISION === 'true' ? anthropicModel({ model: process.env.COWORK_DOCUMENT_REVIEW_MODEL?.trim() || 'claude-haiku-5-5' }) : undefined,
         // COWORK_WEB_ENABLED=true: the agent can search the web and read pages (Anthropic runs both), within the budget of the turn.
         web: harnessSettings.web ?? undefined,
+        // A turn that Anthropic could not finish (key, credit, server) goes on with the coordinator loop; the run keeps the reason, as a rescue does.
+        onFallback: reason => {
+          console.warn('[cowork] harness turn handed to the coordinator loop:', reason);
+          void client.from('cowork_run_events').insert({ run_id: run.id, user_id: scope.userId, organization_id: scope.organizationId,
+            kind: 'turn.rescued', payload: { failure: 'harness_error', reason, model: harnessSettings.model } }).then(() => undefined, () => undefined);
+        },
         effort: harnessSettings.effort, maxRounds: harnessSettings.maxRounds, maxReads: harnessSettings.maxReads, deadlineMs: turnCeiling.softDeadlineMs,
         reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator'),
         // The answer shows while the model writes it (the same live draft as the coordinator's decision): a correction is announced, not rewritten live.

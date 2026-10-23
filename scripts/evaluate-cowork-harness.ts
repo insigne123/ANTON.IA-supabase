@@ -190,6 +190,10 @@ async function main() {
         reply: outcome.result.reply.slice(0, 600), question: outcome.result.question ?? null, suggestions: (outcome.result.suggestions ?? []).map(chip => chip.label),
         calls: current.calls, seconds: Math.round((Date.now() - started) / 100) / 10, modelSeconds: Math.round(current.modelMs / 100) / 10,
         usage: current.usage, costUsd: costUsd(current.usage, modelName) });
+      if (asked) for (const block of (outcome.result.blocks ?? []) as Array<{ type?: string; subject?: string; body?: string; emails?: Array<{ subject?: string; body?: string }> }>) {
+        if (block.type === 'email_draft') console.log(`\n--- correo ---\nAsunto: ${block.subject}\n${block.body}`);
+        if (block.type === 'sequence') for (const email of block.emails ?? []) console.log(`\n--- correo de la secuencia ---\nAsunto: ${email.subject}\n${email.body}`);
+      }
       if (asked) console.log(`\n${outcome.result.reply}\n${outcome.result.question ? `\n¿${outcome.result.question}\n` : ''}${(outcome.result.suggestions ?? []).map(chip => `  [${chip.label}]`).join('')}\nacciones: ${outcome.result.actions.join(', ') || '—'}\n`);
       console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${id}#${attempt} ${current.calls} calls ${Math.round((Date.now() - started) / 100) / 10}s${failedChecks.length ? ` — ${failedChecks.join('; ').slice(0, 200)}` : ''}`);
     }

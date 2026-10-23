@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { call, reply, ScriptedModel, usageOf } from '@/lib/agent-harness/scripted';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
 import { coworkHarnessSettings, coworkWebSettings, type CoworkHarnessConfig } from './harness-config';
-import { COWORK_HARNESS_PROTOCOL, coworkHarnessTelemetry, coworkReadShape, coworkToolName, runCoworkHarnessTurn } from './harness-turn';
+import { COWORK_HARNESS_PROTOCOL, coworkHarnessFallback, coworkHarnessTelemetry, coworkReadShape, coworkToolName, runCoworkHarnessTurn, runCoworkTurn } from './harness-turn';
 import type { CoworkLoopInput, CoworkObservation } from './agent-loop';
 import { coworkLiveDraft } from './partial-json';
 
@@ -394,4 +394,40 @@ test('a search is recorded the moment it finishes, while the call goes on, and o
   await runCoworkHarnessTurn(input);
   assert.equal(liveRecorded, 1, 'the page can show it before the call ends');
   assert.equal(recordedNow.length, 1, 'and the end of the call does not record it again');
+});
+
+test('a turn Anthropic could not finish goes on with the coordinator loop; what the person or the ledger caused stays an error', async () => {
+  const answerOf = (reply_: string) => ({ reply: reply_, document: null });
+  for (const message of ['CLAUDE_HTTP_529:overloaded', 'CLAUDE_HTTP_429:rate limited', 'CLAUDE_HTTP_500:boom', 'CLAUDE_HTTP_400:Your credit balance is too low credit_balance_exhausted',
+    'Missing AI provider credentials. Set ANTHROPIC_API_KEY to use Claude.', 'AGENT_REFUSAL: the model declined this request.', 'Cowork did not produce a final answer', 'fetch failed']) {
+    assert.equal(coworkHarnessFallback(new Error(message)), true, message);
+  }
+  for (const error of [new Error('COWORK_DAILY_MODEL_BUDGET: No se pudo reservar presupuesto para continuar este trabajo.'), new Error('No se pudo reservar presupuesto para continuar este trabajo.'),
+    new Error('Cowork run is no longer writable'), Object.assign(new Error('forbidden'), { name: 'AuthError' }), Object.assign(new Error('x'), { name: 'AbortError' }), new Error('algo distinto'), 'CLAUDE_HTTP_529']) {
+    assert.equal(coworkHarnessFallback(error), false, String(error));
+  }
+  const aborted = new AbortController();
+  aborted.abort();
+  assert.equal(coworkHarnessFallback(new Error('CLAUDE_HTTP_529:overloaded'), aborted.signal), false, 'a stopped turn is not started again');
+
+  const down = new ScriptedModel([async () => { throw new Error('CLAUDE_HTTP_529:overloaded'); }]);
+  const reasons: string[] = [];
+  const seen: Array<{ harness: unknown }> = [];
+  const loop = (async (looped: { harness?: unknown }) => { seen.push({ harness: looped.harness }); return answerOf('Respondió el bucle de siempre.'); }) as never;
+  const { input } = base(down, {}, { onFallback: reason => { reasons.push(reason); } });
+  assert.equal((await runCoworkTurn(input, loop)).reply, 'Respondió el bucle de siempre.');
+  assert.deepEqual(reasons, ['CLAUDE_HTTP_529:overloaded']);
+  assert.deepEqual(seen, [{ harness: undefined }], 'the loop runs without the harness');
+
+  // A cap of the ledger is not Anthropic's failure: nobody else answers it.
+  const capped = new ScriptedModel([async () => { throw new Error('COWORK_CONVERSATION_MODEL_BUDGET: No se pudo reservar presupuesto para continuar este trabajo.'); }]);
+  await assert.rejects(runCoworkTurn(base(capped).input, loop), /COWORK_CONVERSATION_MODEL_BUDGET/);
+  assert.equal(seen.length, 1);
+  // Without the harness it is the loop, as ever; with it and nothing wrong, the loop is not asked.
+  const plain = base(new ScriptedModel([]), {}).input;
+  assert.equal((await runCoworkTurn({ ...plain, harness: undefined } as never, loop)).reply, 'Respondió el bucle de siempre.');
+  assert.equal(seen.length, 2);
+  const fine = new ScriptedModel([reply([answer('Todo bien.')])]);
+  assert.equal((await runCoworkTurn(base(fine).input, loop)).reply, 'Todo bien.');
+  assert.equal(seen.length, 2);
 });
