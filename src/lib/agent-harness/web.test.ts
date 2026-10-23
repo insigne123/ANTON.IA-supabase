@@ -147,7 +147,7 @@ test('the input of a search reaches the listener while it is written, named by t
     finalMessage: async () => ({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }),
   }) } };
   const seen: string[] = [];
-  await anthropicModel({ model: 'claude-sonnet-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onToolInput: event => seen.push(`${event.name}:${event.json}`) });
+  await anthropicModel({ model: 'claude-haiku-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onToolInput: event => seen.push(`${event.name}:${event.json}`) });
   assert.deepEqual(seen, ['web_search:{"query":"aseo ', 'web_search:{"query":"aseo hospitales"}']);
 });
 
@@ -225,7 +225,7 @@ test('the blocks of the API\'s tools are reported as they complete: the call whe
     finalMessage: async () => ({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }),
   }) } };
   const blocks: ContentBlock[] = [];
-  await anthropicModel({ model: 'claude-sonnet-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onServerBlock: block => blocks.push(block) });
+  await anthropicModel({ model: 'claude-haiku-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onServerBlock: block => blocks.push(block) });
   assert.deepEqual(blocks, [
     { type: 'server_tool_use', id: 'srv1', name: 'web_search', input: { query: 'aseo hospitales' } },
     found('srv1', ['Mercado Público', 'https://www.mercadopublico.cl']),

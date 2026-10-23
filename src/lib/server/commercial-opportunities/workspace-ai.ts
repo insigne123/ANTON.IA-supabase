@@ -13,8 +13,9 @@ export type OpportunityJob = { id: string; organization_id: string; opportunity_
 export type Category = 'evaluation' | 'research' | 'chat';
 const PRICES: Record<string, { input: number; output: number; cache: number; write: number }> = {
   'claude-haiku-5-5': { input: .1, output: .5, cache: .01, write: .2 },
-  'claude-sonnet-5-5': { input: 2, output: 10, cache: .1, write: 4 },
 };
+/** What Haiku costs above 100k tokens of prompt (five times more): see opportunityGenerate. */
+const HAIKU_LONG_CONTEXT_PRICE = { input: .5, output: 2.5, cache: .05, write: 1 };
 export function prices(model: string) {
   if (PRICES[model]) return PRICES[model];
   try {
@@ -58,12 +59,15 @@ export async function opportunityGenerate<T extends z.ZodTypeAny>(client: Supaba
   if (!(model.startsWith('claude-') ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY)) throw new AuthError('El proveedor de IA no está conectado.', 503);
   if (input.attachments?.length && !model.startsWith('claude-')) throw new AuthError('El modelo configurado no lee imágenes ni documentos escaneados.', 503);
   const attachmentTokens = input.attachments?.length ? Math.max(0, Math.ceil(input.attachmentTokens ?? 0)) : 0;
-  const price = prices(model);
-  // UTF-8 bytes conservatively bound text tokens. Haiku stays below its 100k input price threshold.
+  // UTF-8 bytes conservatively bound text tokens. Haiku stays below its 100k input price threshold: reading and screening split their
+  // documents into blocks under that line. The report is one synthesis of all of them and cannot be split (Sonnet, which wrote it until
+  // 23 Oct 2026, has no such line), so a report over the line is reserved and settled at the long-context price: the estimate only errs upwards.
   const promptBytes = Buffer.byteLength(input.prompt, 'utf8') + 3000;
   const systemBytes = Buffer.byteLength(SYSTEM_PROMPT, 'utf8') + Buffer.byteLength(JSON.stringify(zodToJsonSchema(input.schema)), 'utf8');
   const bytes = promptBytes + systemBytes + attachmentTokens;
-  if (bytes > 95_000 && model === 'claude-haiku-5-5') throw new AuthError('El bloque de documentos debe dividirse para conservar el costo.', 422);
+  const longContext = model === 'claude-haiku-5-5' && bytes > 95_000;
+  if (longContext && input.role !== 'report') throw new AuthError('El bloque de documentos debe dividirse para conservar el costo.', 422);
+  const price = longContext ? HAIKU_LONG_CONTEXT_PRICE : prices(model);
   const output = input.output ?? 6000;
   // The writer and the specialists reason a little more; reading and screening stay quick.
   const effort = input.role === 'report' || input.role === 'specialist' ? 'medium' : 'low';
