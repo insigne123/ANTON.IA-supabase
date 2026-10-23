@@ -11,7 +11,9 @@ import {
   parseWebEvidenceV2,
   resolveEntityFromExistingContextV2,
   truncateAtWord,
+  truncateWithin,
 } from './report-v2-extraction';
+import { FactV2Schema } from './report-v2-contracts';
 
 const fixtureRoot = 'test/fixtures/grupoexpro';
 const golden = JSON.parse(readFileSync('test/fixtures/grupoexpro.golden.json', 'utf8'));
@@ -139,4 +141,28 @@ test('frozen search and provider inputs require no network call', () => {
   assert.equal(provider.networkCallPerformed, false);
   assert.ok(serper.results.length >= 6);
   assert.ok(serper.results.every((result: any) => result.fixture && result.link));
+});
+
+test('a text cut for a field with a maximum is never longer than it, and no block of a page breaks the 2 000 characters of a fact', () => {
+  const vocabulary = 'empresa servicios minería contratación operaciones trabajadores región proyecto seguridad personal planta faena'.split(' ');
+  let seed = 7;
+  const random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const paragraph = (length: number) => { let text = ''; while (text.length < length) text += `${vocabulary[Math.floor(random() * vocabulary.length)]} `; return text.trim(); };
+  // The old cut came out 3 characters over in about a third of the long texts (the «...» was added after the cut).
+  let overBefore = 0;
+  for (let index = 0; index < 300; index += 1) {
+    const text = paragraph(2_050 + Math.floor(random() * 400));
+    if (truncateAtWord(text, 2_000).length > 2_000) overBefore += 1;
+    assert.ok(truncateWithin(text, 2_000).length <= 2_000);
+  }
+  assert.ok(overBefore > 0, 'the case this guards against exists');
+  assert.equal(truncateWithin('one two three four', 13), 'one two...');
+  assert.equal(truncateWithin('corto', 13), 'corto');
+  for (let index = 0; index < 60; index += 1) {
+    const page = parseWebEvidenceV2({ html: `<article><h1>Nota</h1><p>${paragraph(2_050 + Math.floor(random() * 400))}</p></article>`, url: 'https://redimin.cl/nota', targetDomain: 'acme.example', retrievedAt: '2026-10-23T00:00:00.000Z' });
+    for (const block of page.blocks) {
+      assert.ok(block.length <= 2_000, `a block of ${block.length} characters`);
+      FactV2Schema.shape.text.parse(block);
+    }
+  }
 });
