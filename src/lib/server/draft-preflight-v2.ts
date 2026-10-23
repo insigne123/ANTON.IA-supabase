@@ -116,6 +116,32 @@ function normalizeForMatch(value: unknown) {
     .trim();
 }
 
+/** What the seller's profile says about itself: the only lines a sentence about the seller may rest its figures on. */
+export function draftSellerStatementsV2(seller: DraftContextV2['seller']) {
+  return [
+    seller.valueProposition,
+    ...seller.services,
+    ...seller.proofPoints,
+    ...(seller.differentiators || []),
+    ...(seller.referenceClients || []),
+  ].filter((statement): statement is string => Boolean(statement));
+}
+
+const LEGAL_FORM = /\b(?:s ?p ?a|s ?a ?s?|s ?r ?l|ltda|limitada|inc|llc|gmbh|corp)\b/g;
+
+/** The names a sentence can use to speak as the seller without the legal form of its company: «Yago SpA» → «yago», and the product a service line opens with («AXIS: consultas…» → «axis»). */
+function sellerSpeakingNames(seller: DraftContextV2['seller']) {
+  const names = new Set<string>();
+  const company = normalizeForMatch(seller.companyName).replace(LEGAL_FORM, ' ').replace(/\s+/g, ' ').trim();
+  if (company.length >= 3) names.add(company);
+  for (const service of seller.services) {
+    const product = text(service).match(/^(\p{Lu}[\p{L}\p{N}]*(?:\s\p{Lu}[\p{L}\p{N}]*)?)\s*[:–—-]\s/u)?.[1];
+    const name = product ? normalizeForMatch(product) : '';
+    if (name.length >= 3) names.add(name);
+  }
+  return [...names];
+}
+
 const personalizationBoilerplate = /\b(?:ir al contenido|profile picture|email & phone number|facebook-f|linkedin-in|instagram|tiktok|youtube|search)\b|\.{3}/i;
 
 export function draftEvidencePersonalizationStatementV2(value: unknown) {
@@ -591,13 +617,9 @@ export function validateDraftPreflightV2(
   const citedEvidence = output.personalization.flatMap((item) => context.evidence.filter((evidence) => (
     evidence.evidenceId === item.evidenceId && evidence.supportedFactClaimIds.includes(item.claimId)
   )));
-  const sellerStatements = [
-    context.seller.valueProposition,
-    ...context.seller.services,
-    ...context.seller.proofPoints,
-    ...(context.seller.differentiators || []),
-    ...(context.seller.referenceClients || []),
-  ].filter((statement): statement is string => Boolean(statement));
+  const sellerStatements = draftSellerStatementsV2(context.seller);
+  const sellerNames = sellerSpeakingNames(context.seller);
+  const recipientName = normalizeForMatch(context.company.name);
   const materialContent = `${subject}\n\n${requiredCta ? rawBody.split(context.constraints.cta.exactText).join(' ') : rawBody}`;
   const claimCheckContent = modelClosingQuestion ? materialContent.split(modelClosingQuestion).join(' ') : materialContent;
   // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.
@@ -606,7 +628,13 @@ export function validateDraftPreflightV2(
     const normalized = normalizeForMatch(sentence);
     const sellerScoped = normalized.includes(normalizeForMatch(context.seller.companyName))
       || /\b(?:nosotros|nuestro|nuestra|tenemos|contamos|operamos|cubrimos|llevamos)\b/.test(normalized);
-    const sources = sellerScoped ? sellerStatements : citedEvidence.map((evidence) => evidence.statement);
+    // A sentence that speaks as the seller without its legal name (the first person of the team, «Procesamos…», or the name it goes by, «AXIS procesa…»)
+    // may rest on the seller's own lines as well as on the evidence. Never one that names the recipient: that is where a figure of the seller lands on them.
+    const namesRecipient = Boolean(recipientName) && normalized.includes(recipientName);
+    const speaksAsSeller = !sellerScoped && !namesRecipient
+      && (/\b\p{L}{3,}(?:amos|emos)\b/u.test(normalized) || sellerNames.some((name) => new RegExp(`(?:^| )${name}(?: |$)`).test(normalized)));
+    const evidenceStatements = citedEvidence.map((evidence) => evidence.statement);
+    const sources = sellerScoped ? sellerStatements : speaksAsSeller ? [...evidenceStatements, ...sellerStatements] : evidenceStatements;
     const quantities = materialQuantities(sentence);
     for (const quantity of quantities) {
       const supported = sources.some((source) => {

@@ -690,6 +690,38 @@ test('list markers and FCL/LCL labels are not quantities but their numeric conte
   assert.ok(!supported.issues.some((issue) => issue.code === 'unsupported_material_claim'));
 });
 
+test('a figure of the seller profile passes when the sentence speaks as the seller, in any natural way, and never when it lands on the recipient', () => {
+  const context = draftContextFixture();
+  context.seller.companyName = 'Northstar SpA';
+  context.seller.services = ['ATLAS: consultas automáticas para revisar antecedentes'];
+  context.seller.proofPoints = ['Procesa 1.000 postulantes en unos 30 minutos'];
+  const output = validOutput();
+  const rejected = (sentence: string) => validateDraftPreflightV2(context, { ...output, body: `${output.body}\n\n${sentence}` }).issues.some((issue) => issue.code === 'unsupported_material_claim');
+  for (const sentence of [
+    'Northstar SpA procesa 1.000 postulantes en unos 30 minutos.',
+    'Nuestro sistema procesa 1.000 postulantes en unos 30 minutos.',
+    'Procesamos 1.000 postulantes en unos 30 minutos.',
+    'Northstar procesa 1.000 postulantes en unos 30 minutos.',
+    'ATLAS procesa 1.000 postulantes en unos 30 minutos.',
+  ]) assert.equal(rejected(sentence), false, sentence);
+  for (const sentence of [
+    'Procesa 1.000 postulantes en unos 30 minutos.',
+    'Su equipo procesa 1.000 postulantes en unos 30 minutos.',
+    'Acme procesa 1.000 postulantes en unos 30 minutos.',
+    'Procesamos 1.000 postulantes de Acme en unos 30 minutos.',
+    'ATLAS ayuda a Acme, que procesa 1.000 postulantes en unos 30 minutos.',
+    'Procesamos 400 postulantes en unos 30 minutos.',
+    'ATLAS procesa 1.000 personas en unos 30 minutos.',
+  ]) assert.equal(rejected(sentence), true, sentence);
+  // A product label is a name, not a phrase: «Consultas judiciales: …» does not make every sentence with those words the seller's.
+  context.seller.services = ['Consultas judiciales: revisión de antecedentes'];
+  assert.equal(rejected('Consultas judiciales procesa 1.000 postulantes en unos 30 minutos.'), true, 'label');
+  // The first person does not take away what the evidence supports.
+  context.evidence[0].statement = 'Acme opera 16 sedes regionales.';
+  assert.equal(rejected('Vimos que Acme opera 16 sedes regionales.'), false, 'vimos');
+  assert.equal(rejected('Revisamos que opera 16 sedes regionales.'), false, 'revisamos');
+});
+
 test('percent paraphrases preserve metric and subject and numeric feedback stays bounded', () => {
   const context = draftContextFixture();
   context.evidence[0].statement = 'Acme reduce costos en 30%.';
