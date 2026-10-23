@@ -61,6 +61,17 @@ export default () => [
         c.check('la oportunidad quedó presentada', stateOf(c, 7) === 'submitted', `estado: ${stateOf(c, 7)}`);
       } },
     ] },
+  { id: 'admin-perdida', persona: 'owner', title: 'Administrador: cerrar una oportunidad presentada como perdida, con su motivo', goal: 'Que la propuesta presentada pase a «Perdida» y el equipo lea por qué.', passWrites: [ACTIONS],
+    steps: [
+      { say: 'Abro la oportunidad presentada', do: async c => { await c.go(`/opportunities?op=${opp(10)}`); await c.see('Cambiar etapa'); } },
+      { say: 'Elijo la etapa Perdida', do: async c => { await c.choose('Cambiar etapa', 'Perdida'); await c.seeRole('dialog', /Pasar a Perdida/); c.check('aún no cambió: pide el motivo primero', stateOf(c, 10) === 'submitted', `estado: ${stateOf(c, 10)}`); } },
+      { say: 'Cuento qué pasó, en una línea', do: async c => { await c.page.getByRole('dialog').getByRole('textbox').first().fill('Adjudicaron a otra empresa con menor plazo de entrega.'); } },
+      { say: 'Pulso Pasar a Perdida', do: async c => {
+        await c.page.getByRole('dialog').getByRole('button', { name: 'Pasar a Perdida' }).click(); await c.wait(1500);
+        c.check('la oportunidad quedó perdida', stateOf(c, 10) === 'lost', `estado: ${stateOf(c, 10)}`);
+        c.check('el motivo quedó en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(10) && /perdida\. Adjudicaron a otra empresa/.test(row.body)), 'opportunity_activity');
+      } },
+    ] },
   { id: 'admin-marcar-informe', persona: 'owner', title: 'Administrador: marcar un paso del informe como hecho', goal: 'Que «Pedir las referencias» quede hecho.', passWrites: [ACTIONS],
     steps: [
       { say: 'Abro la licitación', do: async c => { await c.go(`/opportunities?op=${opp(2)}`); await c.see('Qué hacer ahora'); } },
