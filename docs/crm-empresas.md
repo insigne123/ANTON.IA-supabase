@@ -45,7 +45,7 @@ El Pipeline ordenaba personas y no empresas. Una venta B2B rara vez la decide un
 - **`POST /api/crm/companies/similar`:**
   - **Entrada:** la empresa base y las candidatas que el navegador ya obtuvo.
   - **Contexto:** lee la oferta del perfil del vendedor.
-  - **Modelo:** `COMPANIES_MODEL`; por defecto `claude-haiku-5-5`, y se permiten `claude-sonnet-5-5` y `gpt-6-luna`.
+  - **Modelo:** `COMPANIES_MODEL`; por defecto `claude-haiku-5-5`, y se permite `gpt-6-luna` (Sonnet quedó fuera de la app el 23 de octubre de 2026).
   - **No guarda nada.**
 - **Corrección de paso:** las conversaciones guardan el cargo en `role` y el Pipeline lo leía como `title`, así que esas filas quedaban sin cargo. Ahora lo leen.
 

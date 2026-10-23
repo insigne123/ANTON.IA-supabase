@@ -10,7 +10,7 @@ import {
 } from './research-signal-harvest';
 
 const TODAY = '2026-10-23T12:00:00.000Z';
-const settings: SignalHarvestSettings = { model: 'claude-sonnet-5-5', maxSignals: 3, maxFacts: 80, recencyDays: 30, deadlineMs: 30_000 };
+const settings: SignalHarvestSettings = { model: 'claude-haiku-5-5', maxSignals: 3, maxFacts: 80, recencyDays: 30, deadlineMs: 30_000 };
 
 const source = (n: number, publishedAt: string | null, host = 'redimin.cl', about = ''): SourceV2 => ({
   id: `src_${String(n).padStart(10, '0')}`, url: `https://${host}/nota-${n}${about && `-${about}`}`, canonicalUrl: `https://${host}/nota-${n}${about && `-${about}`}`, title: `Nota ${n}${about && ` de ${about}`}`,
@@ -136,12 +136,12 @@ test('the signals come back as claims drafts that the research consolidates, and
         proposal({ hechos: [bodega], frase: 'Sodexo Chile publicó avisos con 99 vacantes de auxiliar de bodega en Malloa.' }),
         proposal({ hechos: [bodega, cocina], frase: 'Sodexo Chile publicó avisos con 10 vacantes de auxiliar de bodega en Malloa y 5 de ayudante de cocina en Coquimbo.' }),
       ] },
-      telemetry: { usage: { prompt_tokens: 9_000, completion_tokens: 400 }, modelName: 'claude-sonnet-5-5' },
+      telemetry: { usage: { prompt_tokens: 9_000, completion_tokens: 400 }, modelName: 'claude-haiku-5-5' },
     } as any;
   };
   const result = await harvestResearchSignals(input, settings, { generate });
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].openAiModel, 'claude-sonnet-5-5');
+  assert.equal(requests[0].openAiModel, 'claude-haiku-5-5');
   assert.equal(requests[0].temperature, 0);
   assert.equal(result.picked, 3);
   assert.deepEqual(result.rejected, ['number_not_in_facts', 'duplicate']);
@@ -168,7 +168,7 @@ test('a signal the extraction already found is not added twice, and no more than
       proposal({ hechos: [first!.n], frase: 'Sodexo Chile busca coordinadores de control y gestión para sus contratos mineros en Antofagasta y Copiapó.', fecha: '2026-10-21' }),
       proposal({ hechos: [second!.n], frase: 'Sodexo Chile publicó un aviso con 10 vacantes de auxiliar de bodega en Malloa, Región de O\'Higgins.', fecha: '2026-10-12' }),
     ] },
-    telemetry: { usage: {}, modelName: 'claude-sonnet-5-5' },
+    telemetry: { usage: {}, modelName: 'claude-haiku-5-5' },
   }) as any;
   const withExisting = await harvestResearchSignals({ ...input, existingSignals: ['Sodexo busca coordinadores de control y gestión para sus contratos mineros en Antofagasta y Copiapó'] }, settings, { generate });
   assert.equal(withExisting.drafts.length, 1);

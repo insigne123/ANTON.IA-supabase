@@ -44,7 +44,8 @@ test('Claude usage counts cache writes, cache reads and output including reasoni
   assert.equal(opportunityUsageCost({modelName:'test',durationMs:1,usage:{prompt_tokens:1000,completion_tokens:100,prompt_tokens_details:{cached_tokens:200},cache_creation_input_tokens:300}},price),3220);
   assert.equal(opportunityUsageCost({modelName:'test',durationMs:1},price),null);
   assert.throws(()=>opportunityModel('report',{OPPORTUNITIES_REPORT_MODEL:'astra'}));
-  assert.equal(opportunityModel('report',{}),'claude-sonnet-5-5');
+  assert.equal(opportunityModel('report',{}),'claude-haiku-5-5');
+  assert.throws(()=>opportunityModel('report',{OPPORTUNITIES_REPORT_MODEL:'claude-sonnet-5-5'}),/no está permitido/,'Sonnet is out of the app');
 });
 test('annex discovery does not follow arbitrary other domains or javascript links', () => {
   assert.deepEqual(opportunityAttachmentLinks('<a href="/bases.pdf">Bases</a><a href="https://private.test/anexo.pdf">Anexo</a><a href="javascript:alert(1)">Anexo</a>', 'https://buyer.test/tender'),['https://buyer.test/bases.pdf']);

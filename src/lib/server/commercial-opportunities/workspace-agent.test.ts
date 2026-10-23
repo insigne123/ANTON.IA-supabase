@@ -105,7 +105,8 @@ test('the agents are on only when the product asks, the provider is connected an
   assert.equal(opportunityAgentEnabled('chat', { ...on, OPPORTUNITIES_RUNTIME: 'single' }), false);
   assert.equal(opportunityAgentEnabled('chat', { ...on, ANTHROPIC_API_KEY: ' ' }), false, 'no provider, no agent: the single call reports it');
   assert.equal(opportunityAgentEnabled('chat', { ...on, OPPORTUNITIES_CHAT_MODEL: 'gpt-6-luna' }), false, 'tool use is Claude\'s');
-  assert.equal(opportunityAgentEnabled('chat', { ...on, OPPORTUNITIES_CHAT_MODEL: 'claude-sonnet-5-5' }), true);
+  assert.equal(opportunityAgentEnabled('chat', { ...on, OPPORTUNITIES_CHAT_MODEL: 'claude-haiku-5-5' }), true);
+  assert.equal(opportunityAgentEnabled('chat', { ...on, OPPORTUNITIES_CHAT_MODEL: 'claude-sonnet-5-5' }), false, 'Sonnet is out of the app');
   assert.equal(opportunityAgentEnabled('chat', { ...on, OPPORTUNITIES_CHAT_MODEL: 'something-else' }), false, 'a model the policy does not allow is not guessed');
 });
 
@@ -139,7 +140,7 @@ test('the cost is known when the provider answers under a dated snapshot of the 
   await runOpportunityChatAgent(f.client, f.job, { scope, opportunityId: 'op1', facts, chunks: [], base: done(`${HAIKU}-20261001`) });
   assert.equal(f.settlements[0].p_cost, 400);
   const g = fixture();
-  await runOpportunityChatAgent(g.client, g.job, { scope, opportunityId: 'op1', facts, chunks: [], base: done('claude-sonnet-5-5') });
+  await runOpportunityChatAgent(g.client, g.job, { scope, opportunityId: 'op1', facts, chunks: [], base: done('claude-haiku-4-5') });
   assert.equal(g.settlements[0].p_cost, null, 'another model than the one reserved: its price is not assumed');
 });
 

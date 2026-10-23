@@ -32,14 +32,14 @@ const bounded = (value: string | undefined, min: number, max: number, fallback: 
 
 /**
  * Off unless RESEARCH_CLAUDE_WEB_ENABLED=true and there is an Anthropic key. Each research adds some searches (US$0,01 each) and a few
- * thousand tokens of a Claude: RESEARCH_CLAUDE_WEB_MODEL (Sonnet by default), RESEARCH_CLAUDE_WEB_SEARCHES (6) and
+ * thousand tokens of a Claude: RESEARCH_CLAUDE_WEB_MODEL (Haiku by default), RESEARCH_CLAUDE_WEB_SEARCHES (6) and
  * RESEARCH_CLAUDE_WEB_FETCHES (3) bound it.
  */
 export function claudeWebSourcesSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env): ClaudeWebSourcesSettings | null {
   if (env.RESEARCH_CLAUDE_WEB_ENABLED?.trim() !== 'true' || !env.ANTHROPIC_API_KEY?.trim()) return null;
   const effort = (['low', 'medium', 'high'] as const).find(item => item === env.RESEARCH_CLAUDE_WEB_EFFORT?.trim()) ?? 'low';
   return {
-    model: env.RESEARCH_CLAUDE_WEB_MODEL?.trim() || 'claude-sonnet-5-5',
+    model: env.RESEARCH_CLAUDE_WEB_MODEL?.trim() || 'claude-haiku-5-5',
     effort,
     searches: bounded(env.RESEARCH_CLAUDE_WEB_SEARCHES, 1, 10, 6),
     fetches: bounded(env.RESEARCH_CLAUDE_WEB_FETCHES, 0, 6, 3),

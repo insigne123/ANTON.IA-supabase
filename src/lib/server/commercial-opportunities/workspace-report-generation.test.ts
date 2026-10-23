@@ -19,7 +19,7 @@ const compiled: { exports: any } = { exports: {} };
 new Function('require', 'module', 'exports', entry.outputFiles[0].text)(createRequire(import.meta.url), compiled, compiled.exports);
 const { opportunityGenerate, opportunityGenerateReport } = compiled.exports;
 const previous = { key: process.env.ANTHROPIC_API_KEY, model: process.env.OPPORTUNITIES_REPORT_MODEL };
-before(() => { process.env.ANTHROPIC_API_KEY = 'synthetic-not-a-credential'; process.env.OPPORTUNITIES_REPORT_MODEL = 'claude-sonnet-5-5'; });
+before(() => { process.env.ANTHROPIC_API_KEY = 'synthetic-not-a-credential'; process.env.OPPORTUNITIES_REPORT_MODEL = 'claude-haiku-5-5'; });
 after(() => {
   for (const [name, value] of Object.entries({ ANTHROPIC_API_KEY: previous.key, OPPORTUNITIES_REPORT_MODEL: previous.model })) {
     if (value === undefined) delete process.env[name]; else process.env[name] = value;
@@ -50,7 +50,7 @@ function fixture() {
   let json = JSON.stringify(report), error: Error | null = null;
   const generate = async (options: any) => {
     requests.push(options); if (error) throw error;
-    return { data: options.schema.parse({ json }), telemetry: { modelName: 'claude-sonnet-5-5', durationMs: 1,
+    return { data: options.schema.parse({ json }), telemetry: { modelName: 'claude-haiku-5-5', durationMs: 1,
       usage: { prompt_tokens: 100, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 0 } } } };
   };
   return { client, job, input, report, state, requests, reservations, settlements, generate,
@@ -66,7 +66,9 @@ test('one reserved report call uses the envelope and replays without another cal
   assert.equal(f.requests[0].maxAttempts, 1); assert.equal(f.requests[0].allowDefaultModelFallback, false);
   assert.equal(f.requests[0].reasoningEffort, 'medium');
   assert.equal(f.reservations[0].p_lease, 'lease'); assert.equal(f.reservations[0].p_category, 'research');
-  assert.ok(f.reservations[0].p_micro >= 240_000, 'reserve includes report and reasoning output');
+  // Haiku: 0.5 USD per million output tokens, 24k with reasoning; a prompt under its 100k line is priced at the short tier.
+  assert.ok(f.reservations[0].p_micro >= 24_000 * 0.5, 'reserve includes report and reasoning output');
+  assert.ok(f.reservations[0].p_micro < 30_000, `short tier (${f.reservations[0].p_micro})`);
   assert.ok(f.settlements[0].p_cost > 0); assert.deepEqual(f.settlements[0].p_data, { json: JSON.stringify(f.report) });
 });
 
@@ -75,9 +77,11 @@ test('a seven-document report stays under the 0.75 USD cap of one research, and 
   const prompt = 'á'.repeat(60_000); // 120 kB of UTF-8, the size of the synthesis that was refused in production
   await opportunityGenerateReport(f.client, f.job, { ...f.input, prompt }, f.generate);
   const bytes = Buffer.byteLength(prompt, 'utf8');
-  // Sonnet: 2 USD per million input tokens, 10 per million output, 24k output with reasoning; bytes bound tokens.
-  assert.ok(f.reservations[0].p_micro >= bytes * 2 + 24_000 * 10, 'the documents and the whole output stay reserved');
+  // Haiku above its 100k line costs 0.5 USD per million input tokens and 2.5 per million output, 24k output with reasoning; bytes bound tokens.
+  // The report cannot be split, so it is reserved at that price instead of being refused (reading and screening are: see below).
+  assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 24_000 * 2.5, 'the documents and the whole output stay reserved');
   assert.ok(f.reservations[0].p_micro <= 727_000, `fits next to the reading steps (${f.reservations[0].p_micro})`);
+  assert.ok(f.settlements[0].p_cost > 0 && f.settlements[0].p_receipt.price.input === 0.5, 'and it is settled at the same price');
 });
 
 test('invalid inner JSON keeps the paid receipt and result, does not expose source text or retry', async () => {

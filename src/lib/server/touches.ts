@@ -22,7 +22,7 @@ export class TouchError extends Error {
 /** The model of the scripts and the call summaries: Haiku, or another allowed one in an environment without Claude. */
 export function touchModel(env: Record<string, string | undefined> = process.env) {
   const wanted = env.TOUCHES_MODEL || 'claude-haiku-5-5';
-  if (!['claude-haiku-5-5', 'claude-sonnet-5-5', 'gpt-6-luna'].includes(wanted)) throw new TouchError('El modelo configurado no está permitido.', 503);
+  if (!['claude-haiku-5-5', 'gpt-6-luna'].includes(wanted)) throw new TouchError('El modelo configurado no está permitido.', 503);
   return wanted;
 }
 
