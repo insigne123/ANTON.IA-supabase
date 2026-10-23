@@ -1,6 +1,6 @@
 # Usar la app como una persona: Cowork, Oportunidades y borradores (23 de octubre de 2026)
 
-Esta página sigue a `docs/cowork-claude-evaluacion-2026-10-23.md`. Allí se midió con modelos; aquí se **usó** la pantalla, como lo haría quien trabaja con ella, y se corrigió lo que estorbaba. Nada de esto toca producción ni llama a una API de pago.
+Esta página sigue a `docs/cowork-claude-evaluacion-2026-10-23.md`. Allí se midió con modelos; aquí se **usó** la pantalla, como lo haría quien trabaja con ella, y se corrigió lo que estorbaba. Nada de esto toca producción. El banco de recorridos no llama a ninguna API; las conversaciones de Cowork y los borradores de la última parte sí usaron Luna y Haiku con llaves de prueba, bajo un tope de US$2 que una guardia hace cumplir (ver «Gasto» en `docs/borradores-ganchos-y-reglas.md`).
 
 ## Cómo se hizo, y hasta dónde llega
 
@@ -27,7 +27,20 @@ Lo que una persona que viene de Claude espera encontrar, y lo que se vio:
 
 **Lo que no tiene, y no debe:** archivos locales, terminal, conectores abiertos. Cowork es el asistente de ventas de la cuenta; ahí la comparación con Claude Code no aplica.
 
-**Lo que falta de verdad** es de configuración, no de pantalla: la web, el harness de Claude, los subagentes y las tareas programadas siguen apagados en producción. Hoy cada turno lo resuelve el bucle de Luna (unos US$0,002 por turno). Encender el harness con pocas personas cuesta unos US$0,10 por turno; la decisión es de quien administra y está en `docs/cowork-claude-evaluacion-2026-10-23.md`.
+**Lo que falta de verdad** es de configuración, no de pantalla: la web, el harness de Claude, los subagentes y las tareas programadas siguen apagados en producción.
+
+**Ocho conversaciones de verdad, con los dos motores** (mismos pedidos, mismas herramientas de prueba, una repetición): «hola», «¿a quién le escribo hoy?», «quiero buscar nuevos leads para yago», «mejora este correo», «¿cómo me ha ido esta semana?», «¿qué oportunidades hay hoy?», un pedido de varios pasos y «prepárale la respuesta a Marcela Rojas».
+
+| | Bucle de Luna (el de hoy) | Harness con Haiku 5.5 (apagado) |
+| --- | --- | --- |
+| Casos que cumplen las verificaciones | 6 de 8 (82 de 85 verificaciones) | 7 de 8 |
+| Llamadas al modelo | 14 | 13 |
+| Costo de las 8 conversaciones | unos US$0,05 (US$0,006 cada una) | unos US$0,06 (US$0,007 cada una) |
+| Lo que falla | «¿cómo me ha ido?»: las cifras salen en prosa, no como tarjeta de cifras; «¿qué oportunidades hay?»: nombra las licitaciones pero no dice cuándo cierran | «mejora este correo»: ofrece convertirlo en campaña sin que se lo pidieran y el correo no queda más corto |
+
+Leídas como las leería quien las usa, las dos contestan con criterio: dicen lo que no saben (Luna: «el cargo no confirma por sí solo quién decide la compra», «no aparecen envíos en lo registrado en ANTON.IA; eso no confirma que nunca les hayas escrito por fuera»; Haiku: «ese dato no está en tu oferta, así que el borrador no lo resuelve»), proponen en vez de ejecutar, dicen el costo antes de gastar el cupo o los créditos, y a Marcela le preparan la respuesta **sin inventar el precio ni el plazo** y dicen desde dónde se envía. Con Haiku el harness lee más antes de proponer (mira cuántos contactos hay antes de armar la búsqueda), se presenta en el saludo («Soy Cowork… tengo cargado que vendes AXIS…») y da más contexto (quién escribió, cuándo, qué preguntó; en las oportunidades, los 6 avisos de bodega, 4 de reponedor y 4 de cajero de Retail Andes). El bucle de Luna es más escueto, con sugerencias para tocar en cada respuesta.
+
+Dos cosas que corrige esta medición respecto de la anterior: encender el harness **con Haiku** (y no con Sonnet) cuesta del orden de un centavo de dólar por conversación de un solo turno, no US$0,10; y la diferencia entre los dos motores en estos 8 casos (7 contra 6) es de un caso, así que no decide nada por sí sola. Lo que sí queda a la vista es que el harness de Haiku no es más caro que el bucle de hoy y contesta con más contexto. La decisión de encenderlo (`COWORK_HARNESS_USER_IDS`) sigue siendo de quien administra.
 
 **Un defecto encontrado y corregido:** con las tareas programadas encendidas, el pie de la lista de escritorio (256 px) tiene tres controles y «Lo que Cowork recuerda» no cabía: el texto chocaba con el ícono del calendario. El botón dice ahora **«Memoria»** (el texto largo queda como ayuda al pasar el cursor y como título del diálogo). Hoy, con las tareas apagadas, solo se notaba al encenderlas.
 
@@ -72,18 +85,22 @@ La ficha lee de arriba abajo en el orden en que se decide (qué es, cuándo cier
 - **Un error en inglés:** si no cargaban los seguimientos, la pantalla decía «No pudimos cargar los seguimientos» y, debajo, «Native draft not found». Ahora solo se muestra lo que el servidor dice en español (`readsAsSpanish`); un mensaje en inglés o un código como `NATIVE_DRAFT_NOT_FOUND` se reemplaza por las palabras de la pantalla.
 - Queda anotado, sin cambiar: los avisos van **antes** del correo (hasta cuatro en el banco: Outlook sin conectar, revisión pendiente, «No contactar» y «Necesita corrección», estos dos diciendo lo mismo) y la persona tiene que bajar para leer lo que revisa. Conviene un solo aviso arriba y el resto plegado.
 
-**La calidad de los textos** no se pudo medir en vivo: la sesión no tiene la llave de OpenAI (el modelo de producción es `gpt-6-luna`) y los créditos de Anthropic se acabaron. Lo que sí se hizo, sin costo, fue leer uno por uno los 8 borradores que la última medición guardó:
+**La calidad de los textos** primero se leyó, sin pagar ninguna llamada, en los 8 borradores que la última medición había guardado:
 
 - **0 de 8 se enviarían tal cual.** Los más cercanos son los de Besalco y Salfacorp.
 - **El segundo párrafo repite la propuesta de valor en 6 de 8**, en vez de apoyar el ángulo del primero.
-- **Cuando la evidencia es delgada, el gancho es malo:** una región que no tiene nada que ver con el negocio, o un tema sensible y ajeno a lo que se vende. Lo correcto era no enganchar con eso.
-- Todo esto cuadra con lo medido antes: con una señal real y fechada la especificidad sube de 2,2 a 4,3.
+- **Cuando la evidencia es delgada, el gancho es malo:** una región que no tiene nada que ver con el negocio, o un tema sensible y ajeno a lo que se vende (la Fiscalía Nacional Económica en el correo a Gasco, «Renca y Talagante son comunas» en el de Aguas Andinas).
 
-**Qué queda:** cambiar el redactor sin poder medir lo que cambia sería adivinar, así que no se tocó. Hace falta una corrida corta con Luna (8 correos, del orden de centavos de dólar) y la llave en el entorno de la sesión, y solo con tu visto bueno y un tope de gasto.
+Con tu visto bueno (tope de US$2, solo Luna y Haiku, sobre investigaciones ya guardadas) se midió después con 9 variantes × 8 empresas × 2 repeticiones y una comparación por pares. El detalle, con las tablas, está en `docs/borradores-ganchos-y-reglas.md`. Lo esencial:
+
+- **Encender las señales** (`DRAFT_SIGNAL_EVIDENCE_ENABLED`, que ya existía) es lo que más mueve: los correos que el juez manda a revisión humana bajan de 11 de 16 a entre 4 y 9, y los reintentos del redactor, de 8 de 16 a 3 o 4.
+- **Dos mejoras nuevas, apagadas:** `DRAFT_HOOK_FILTER_ENABLED` saca antes de escribir los ganchos que no sirven (glosas, «son comunas», el debate de la FNE: de 6 a 2 correos de 16) y `DRAFT_ANCHOR_SPECIFICS_ENABLED` evita que el recorte de un hecho en la primera coma pierda su dato concreto (Enaex pasa de «vacantes abiertas en el norte» a nombrar Antofagasta y Atacama). Juntas, el juez habría enviado su correo en 24 de 32 comparaciones por pares contra 15 de la misma configuración contra sí misma.
+- **No funcionó** pedirle al redactor, con reglas en el prompt, que escriba mejor: bajó la veracidad. Se quitó.
+- **Sigue pendiente:** ningún brazo llega a «enviar» sin retoque (a lo más 1 de 16) y «suena humano» queda en 2,6 a 2,8 de 5. Lo que más ayudaría ahora no es de código sino del Perfil: un vendedor con una sola propuesta y una sola prueba obliga al redactor a repetir la misma frase.
 
 ## Qué decide quien administra
 
-1. Si autorizas una corrida corta con Luna para probar el redactor (con tope de gasto), o se deja como está.
-2. Si se encienden la web y el harness de Cowork para unas pocas personas (`COWORK_HARNESS_USER_IDS`) o se espera a tener más créditos.
+1. **Encender las banderas de borradores** (`DRAFT_SIGNAL_EVIDENCE_ENABLED`, `DRAFT_HOOK_FILTER_ENABLED` y `DRAFT_ANCHOR_SPECIFICS_ENABLED`) para una cuenta o campaña piloto, y completar el Perfil de vendedor con cifras y clientes que se puedan nombrar.
+2. Si se enciende el harness de Cowork con Haiku para unas pocas personas (`COWORK_HARNESS_USER_IDS`), la web y los subagentes, o se deja el bucle de hoy.
 3. Si se pliegan los filtros del embudo en el teléfono y se unifica el estado «seleccionado» en el resto de la app (los puntos de «Lo que se vio y no se cambió»).
-4. El despliegue de todo lo anterior, que sigue siendo tuyo.
+4. El despliegue de todo lo anterior y las dos migraciones sin aplicar (tareas programadas y subagentes), que siguen siendo tuyos.

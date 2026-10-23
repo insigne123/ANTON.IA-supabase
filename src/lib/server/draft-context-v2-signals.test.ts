@@ -4,7 +4,7 @@ import test from 'node:test';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import type { ReportV2 } from '@/lib/report-v2-contracts';
 import {
-  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftSignalEvidenceEnabled, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
+  buildDraftContextV2, createDefaultDraftWritingStyleV2, draftAnchorSpecificsEnabled, draftHookFilterEnabled, draftSignalEvidenceEnabled, normalizeDraftSellerProfileV2, requiredReportAwareDraftPersonalizationV2,
 } from './draft-context-v2';
 import { DRAFT_FIXTURE_NOW, draftReportV2Fixture, draftSnapshotFixture } from './draft-v2-test-fixtures';
 
@@ -44,12 +44,12 @@ function reportWithSignal(overrides: { statement?: string; observedAt?: string; 
   return report;
 }
 
-function build(reportDocument: ReportV2, signalEvidence?: boolean) {
+function build(reportDocument: ReportV2, signalEvidence?: boolean, hookFilter?: boolean) {
   const snapshot = draftSnapshotFixture();
   const result = buildDraftContextV2({
     snapshot, artifact: { contentHash: canonicalSha256(snapshot), capturedAt: '2026-08-20T12:00:00.000Z' },
     seller: normalizeDraftSellerProfileV2({ name: 'Grace Hopper', companyName: 'Northstar', services: ['Automatización de operaciones'] }),
-    style: createDefaultDraftWritingStyleV2(), reportDocument, now: DRAFT_FIXTURE_NOW, ...(signalEvidence === undefined ? {} : { signalEvidence }),
+    style: createDefaultDraftWritingStyleV2(), reportDocument, now: DRAFT_FIXTURE_NOW, ...(signalEvidence === undefined ? {} : { signalEvidence }), ...(hookFilter === undefined ? {} : { hookFilter }),
   });
   assert.equal(result.status, 'ready');
   if (result.status !== 'ready') throw new Error('not ready');
@@ -118,4 +118,42 @@ test('a signal about a death or a disaster is neither quoted nor are its facts o
   const statements = context.evidence.filter((item) => item.provenance?.kind === 'report_v2').map((item) => item.statement);
   assert.ok(!statements.some((statement) => /fallecimiento|Auxiliar de Bodega|operarios de planta/.test(statement)), statements.join(' | '));
   assert.ok(statements.includes('Acme ayuda a equipos de operaciones a reducir trabajo manual.'), 'what the angle cites is still there');
+});
+
+test('the hook filter is off unless DRAFT_HOOK_FILTER_ENABLED is true', () => {
+  assert.equal(draftHookFilterEnabled({}), false);
+  assert.equal(draftHookFilterEnabled({ DRAFT_HOOK_FILTER_ENABLED: 'false' }), false);
+  assert.equal(draftHookFilterEnabled({ DRAFT_HOOK_FILTER_ENABLED: ' true ' }), true);
+});
+
+test('the specific anchor terms are off unless DRAFT_ANCHOR_SPECIFICS_ENABLED is true', () => {
+  assert.equal(draftAnchorSpecificsEnabled({}), false);
+  assert.equal(draftAnchorSpecificsEnabled({ DRAFT_ANCHOR_SPECIFICS_ENABLED: 'false' }), false);
+  assert.equal(draftAnchorSpecificsEnabled({ DRAFT_ANCHOR_SPECIFICS_ENABLED: ' true ' }), true);
+});
+
+test('with the hook filter a debate on the competition of the market is not offered to the writer; without it, as always', () => {
+  const debate = 'La FNE recomendó ante la Comisión de Economía del Senado prohibir la participación de Acme en la distribución minorista.';
+  const withDebate = () => {
+    const report = reportWithSignal();
+    report.evidenceGraph.facts[0]!.text = debate;
+    return report;
+  };
+  const statements = (context: ReturnType<typeof build>) => context.evidence.filter((item) => item.provenance?.kind === 'report_v2').map((item) => item.statement);
+  assert.ok(statements(build(withDebate(), true, false)).includes(debate), 'today the fact of the angle reaches the writer, whatever it says');
+  const filtered = build(withDebate(), true, true);
+  assert.ok(!statements(filtered).includes(debate), 'with the filter it does not');
+  assert.ok(statements(filtered)[0] === SIGNAL_STATEMENT, 'the dated signal is still the reason to write');
+  assert.ok(!filtered.report!.outreachBrief.selectedFactualAnchorClaimIds.some((claimId) => /:claim:c01$/.test(claimId)), 'the claim that only stood on that fact is no anchor');
+});
+
+test('with the hook filter a gloss is not offered either, and the plain facts of the company still are', () => {
+  const report = reportWithSignal();
+  report.evidenceGraph.facts.push({ id: 'f_9999999999', sourceId: report.evidenceGraph.facts[0]!.sourceId, text: '—Who is who Acme is the regulated utility, and Lima and Callao are communes of the region.', observedAt: null, jurisdiction: null, locator: 'block:9' });
+  (report.evidenceGraph.claims[0]!.evidenceIds as string[]).push('f_9999999999');
+  const statements = (context: ReturnType<typeof build>) => context.evidence.filter((item) => item.provenance?.kind === 'report_v2').map((item) => item.statement);
+  assert.ok(statements(build(report, true, false)).some((statement) => /Who is who/.test(statement)));
+  const filtered = statements(build(report, true, true));
+  assert.ok(!filtered.some((statement) => /Who is who/.test(statement)), filtered.join(' | '));
+  assert.ok(filtered.includes('Acme ayuda a equipos de operaciones a reducir trabajo manual.'), 'the plain description of the company stays');
 });

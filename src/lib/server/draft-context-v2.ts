@@ -20,9 +20,11 @@ import {
   isRelevantResearchSignal,
   isSameResearchCompanyDomain,
   isSensitiveEventText,
+  isUnsuitableHookText,
   mentionsResearchCompany,
   mentionsResearchPerson,
   normalizeResearchCompanyDomain,
+  withoutUnsuitableSentences,
 } from '@/lib/research-fact-eligibility';
 import {
   assessResearchQuality,
@@ -297,6 +299,8 @@ export type BuildDraftContextV2Input = {
   now?: Date;
   /** Overrides DRAFT_SIGNAL_EVIDENCE_ENABLED (see draftSignalEvidenceEnabled). */
   signalEvidence?: boolean;
+  /** Overrides DRAFT_HOOK_FILTER_ENABLED (see draftHookFilterEnabled). */
+  hookFilter?: boolean;
 };
 
 /**
@@ -309,6 +313,23 @@ export type BuildDraftContextV2Input = {
  */
 export function draftSignalEvidenceEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
   return env.DRAFT_SIGNAL_EVIDENCE_ENABLED?.trim() === 'true';
+}
+
+/**
+ * DRAFT_HOOK_FILTER_ENABLED=true: a text the opening of the email should not be built on does not reach the writer, as a death does not: a gloss
+ * («Who is who», «conocido en el mercado como») and the debate on the competition of the company's market (the FNE, collusion), see
+ * isUnsuitableHookText. Off by default: it is measured before it is switched on (docs/borradores-ganchos-y-reglas.md).
+ */
+export function draftHookFilterEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
+  return env.DRAFT_HOOK_FILTER_ENABLED?.trim() === 'true';
+}
+
+/**
+ * DRAFT_ANCHOR_SPECIFICS_ENABLED=true: the terms the writer is asked to keep from the fact it rests on start with the concrete datum (a region, a
+ * position, a figure) instead of following the order of the sentence, see specificAnchorTerms. Off by default: it is measured before it is switched on.
+ */
+export function draftAnchorSpecificsEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env) {
+  return env.DRAFT_ANCHOR_SPECIFICS_ENABLED?.trim() === 'true';
 }
 
 /** The lead-in some aggregator pages put before a text («Así se verá:»); it says nothing about the company. */
@@ -486,6 +507,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
   const snapshotHash = canonicalSha256(snapshot);
   const artifactHashMatches = /^[a-f0-9]{64}$/.test(artifactHash) && artifactHash === snapshotHash;
   const factClaimsByEvidenceId = new Map<string, string[]>();
+  const hookFilter = input.hookFilter ?? draftHookFilterEnabled();
 
   const freshCompanyFactClaims = snapshot.claims.filter((claim) =>
     isDraftableCompanyFactWithPublicEvidence({ snapshot, claim, nowMs }),
@@ -523,7 +545,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       companyDomain: snapshot.subject.company.domain,
     });
     // A death or a disaster at the company is context for the person who sells, never the reason for a cold email.
-    if (!source || !sourceUrl || (!qualifiedFact && !qualifiedPersonFact && !relevantSignal) || isSensitiveEventText(item.statement)) return [];
+    if (!source || !sourceUrl || (!qualifiedFact && !qualifiedPersonFact && !relevantSignal) || isSensitiveEventText(item.statement) || (hookFilter && isUnsuitableHookText(item.statement))) return [];
     return [DraftEvidenceV2Schema.parse({
       evidenceId: item.id,
       statement: item.statement,
@@ -664,6 +686,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         || claim.scope === 'country' && claim.jurisdiction !== reportDocument.entity.contactCountry
         || isGenericResearchText(claim.statement)
         || isSensitiveEventText(claim.statement)
+        || (hookFilter && isUnsuitableHookText(claim.statement))
         || (claim.observedAt !== null && !isFreshDate(claim.observedAt, nowMs))
         || (claim.dimension === 'signal' && !claim.observedAt)
         || (claim.jurisdiction && claim.jurisdiction !== 'GLOBAL' && claim.jurisdiction !== reportDocument.entity.contactCountry)
@@ -684,11 +707,14 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         const fact = reportFacts.get(factId);
         const source = fact ? reportSources.get(fact.sourceId) : undefined;
         const url = validHttpUrl(source?.url);
+        // With the hook filter the fact keeps what is about the company and loses the gloss or the debate that came in its paragraph.
+        const factText = fact && hookFilter ? withoutUnsuitableSentences(fact.text) : fact?.text ?? '';
         if (
           !fact || !source || !url || !validHttpUrl(source.canonicalUrl)
           || isHardRejectedResearchUrl(url) || isHardRejectedResearchUrl(source.canonicalUrl)
           || isGenericResearchText(fact.text)
           || isSensitiveEventText(fact.text)
+          || (hookFilter && !factText)
           || ['search', 'registry'].includes(source.sourceType)
           || !isFreshDate(source.retrievedAt, nowMs)
           || (fact.observedAt !== null && !isFreshDate(fact.observedAt, nowMs))
@@ -697,13 +723,13 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         if (subjectScope === 'company') {
           if (!isSameResearchCompanyDomain(url, companyIdentity.companyDomain) && !(
             mentionsResearchCompany(`${source.title} ${url}`, companyIdentity)
-            && mentionsResearchCompany(fact.text, companyIdentity)
+            && mentionsResearchCompany(factText, companyIdentity)
           )) return [];
-        } else if (!mentionsResearchPerson(fact.text, snapshot.subject.person.fullName)) return [];
+        } else if (!mentionsResearchPerson(factText, snapshot.subject.person.fullName)) return [];
         return [DraftEvidenceV2Schema.parse({
           evidenceId: `${prefix}:evidence:${claim.id}:${fact.id}`,
           // Only sourced graph text is evidence, never the paragraph's analysis or recommendation.
-          statement: signalEvidence ? cleanReportFactStatement(fact.text) : fact.text,
+          statement: signalEvidence ? cleanReportFactStatement(factText) : factText,
           subjectScope,
           confidence: claim.confidence,
           source: {

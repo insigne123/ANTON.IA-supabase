@@ -6,6 +6,7 @@ import {
   draftContentFingerprintV2,
   personalizationAnchorTerms,
   requiredDraftPersonalizationV2,
+  specificAnchorTerms,
   stripUnapprovedDraftCtasV2,
   validateDraftPreflightV2,
   type GeneratedOutreachV2,
@@ -46,6 +47,62 @@ test('anchor terms return readable originals behind the grounding check terms', 
   assert.deepEqual(personalizationAnchorTerms('Aseo y limpieza.'), ['Aseo', 'limpieza']);
   assert.deepEqual(personalizationAnchorTerms('Es una de las.'), []);
   assert.equal(personalizationAnchorTerms('Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.', 2).length, 2);
+});
+
+test('with keepSpecifics a statement that names its datum after a comma keeps everything up to it; a list of services, a short one and a far datum narrow as always', () => {
+  const vacancies = 'Enaex mantiene vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama, para conductores, técnicos, supervisores, ingeniería y personal de tronadura.';
+  assert.equal(draftEvidencePersonalizationStatementV2(vacancies, { keepSpecifics: false }), 'Enaex mantiene vacantes abiertas en el norte de Chile');
+  assert.equal(
+    draftEvidencePersonalizationStatementV2(vacancies, { keepSpecifics: true }),
+    'Enaex mantiene vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama',
+  );
+  // The flag is read from the environment when the option is not given.
+  const previous = process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED;
+  try {
+    delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED;
+    assert.equal(draftEvidencePersonalizationStatementV2(vacancies), 'Enaex mantiene vacantes abiertas en el norte de Chile');
+    process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = 'true';
+    assert.match(draftEvidencePersonalizationStatementV2(vacancies), /Antofagasta y Atacama$/);
+  } finally {
+    if (previous === undefined) delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED; else process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = previous;
+  }
+  for (const statement of [
+    // The first item has its datum, a catalogue has none, a conditional is not narrowed, and a datum six items away is not one detail.
+    'Outsourcing de Recursos Humanos, reclutamiento y servicios transitorios para optimizar la gestión de personas.',
+    'Aseo industrial, mantención de áreas verdes, control de plagas y servicios de jardinería para empresas del rubro.',
+    'Acme planea abrir una nueva sede en Antofagasta, siempre que obtenga la aprobación regulatoria.',
+    'Acme ofrece aseo industrial, limpieza de oficinas, mantención de áreas verdes, control de plagas, servicios de jardinería, casino y transporte para Codelco y otras faenas mineras.',
+  ]) {
+    assert.equal(draftEvidencePersonalizationStatementV2(statement, { keepSpecifics: true }), draftEvidencePersonalizationStatementV2(statement, { keepSpecifics: false }), statement);
+  }
+});
+
+test('the specific anchor terms name the concrete datum first, the company\'s own words last, and the rest keeps its order', () => {
+  const statement = 'Enaex mantiene vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama, para conductores y técnicos.';
+  assert.deepEqual(personalizationAnchorTerms(statement), ['Enaex', 'mantiene', 'vacantes', 'abiertas', 'norte']);
+  assert.deepEqual(specificAnchorTerms(statement, { companyName: 'Enaex S.A.' }), ['Antofagasta', 'Atacama', 'mantiene', 'vacantes', 'abiertas']);
+  // Without the company's name its word is at the start of the sentence, which is no datum either; the order of the rest is the same.
+  assert.deepEqual(specificAnchorTerms(statement), ['Antofagasta', 'Atacama', 'Enaex', 'mantiene', 'vacantes']);
+  assert.deepEqual(specificAnchorTerms(statement, { companyName: 'Enaex S.A.', max: 2 }), ['Antofagasta', 'Atacama']);
+  // What the writer is given with the flag: the statement up to the regions, whose anchors are the same.
+  assert.deepEqual(
+    specificAnchorTerms('Enaex mantiene vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama', { companyName: 'Enaex S.A.' }),
+    ['Antofagasta', 'Atacama', 'mantiene', 'vacantes', 'abiertas'],
+  );
+  // A figure is concrete, at most three come first, and a name inside the company's own does not count.
+  assert.deepEqual(
+    specificAnchorTerms('Besalco Construcciones se adjudicó 16 contratos nuevos por 5400 millones en Valparaíso y Coquimbo, según Diario Financiero.', { companyName: 'Besalco S.A.', max: 6 }),
+    ['5400', 'Valparaíso', 'Coquimbo', 'adjudicó', 'contratos', 'nuevos'],
+  );
+  // «Chile» is on every statement of a Chilean company: it does not come first.
+  assert.deepEqual(specificAnchorTerms('Sodexo busca administradores para sus contratos en Chile y Perú.', { companyName: 'Sodexo Chile SpA', max: 3 }), ['Perú', 'busca', 'administradores']);
+  // Nothing concrete: the order of appearance, as without the flag; stopword-only statements anchor nothing.
+  assert.deepEqual(
+    specificAnchorTerms('Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.'),
+    personalizationAnchorTerms('Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.'),
+  );
+  assert.deepEqual(specificAnchorTerms('Es una de las.'), []);
+  assert.deepEqual(specificAnchorTerms(''), []);
 });
 
 function validOutput(): GeneratedOutreachV2 {
