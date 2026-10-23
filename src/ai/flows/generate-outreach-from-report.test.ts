@@ -4,6 +4,7 @@ import test from 'node:test';
 import { generateOutreachFromDraftContextV2 } from './generate-outreach-from-report';
 import { draftReasoningEffort } from '@/lib/draft-reasoning-effort';
 import { draftContextFixture } from '@/lib/server/draft-v2-test-fixtures';
+import { validateDraftPreflightV2 } from '@/lib/server/draft-preflight-v2';
 
 test('editor receives each screenshot-style candidate and returns the edited content, never the first pass', async () => {
   const previousKey = process.env.OPENAI_API_KEY;
@@ -114,6 +115,7 @@ test('DraftContextV2 generation exposes only the server-selected factual evidenc
     assert.match(prompt, /consecuencia práctica/);
     assert.match(prompt, /parezca escrito personalmente/);
     assert.match(prompt, /No incluyas firma/);
+    assert.doesNotMatch(prompt, /Las cifras del vendedor/, 'a profile without figures gets the prompt it always had');
     assert.doesNotMatch(prompt, /PHRASES_TO_AVOID|he visto que|con ese alcance/);
     assert.doesNotMatch(prompt, /gpt-4o-mini/);
     assert.doesNotMatch(prompt, /Acme necesita contratar urgentemente/);
@@ -153,6 +155,56 @@ test('numeric correction receives the rejected candidate as untrusted repair tex
     assert.match(prompt, /sujeto y alcance exactos/);
     assert.match(prompt, /no la escribas con palabras/);
     assert.doesNotMatch(prompt, /escribe un correo nuevo desde cero/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('a figure of the seller profile that the preflight turned back is repaired by naming the seller, not by dropping it', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar procesa 1.000 postulantes en unos 30 minutos.' }) } }], usage: {} }), { status: 200 });
+    };
+    const context = draftContextFixture();
+    context.seller.proofPoints = ['Procesa 1.000 postulantes en unos 30 minutos'];
+    const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
+    const candidate = {
+      subject: 'Operaciones en Acme',
+      body: `Hola Ada,\n\nAcme comunica que ayuda a equipos de operaciones a reducir trabajo manual.\n\nProcesa 1.000 personas en unos 30 minutos.\n\n${context.constraints.cta.exactText}`,
+      personalization: [{ evidenceId: evidence.evidenceId, claimId: 'claim-acme-overview', sourceUrl: evidence.source.url }],
+      hypothesisIds: [],
+    };
+    // The message the preflight really gives, so the wording of the check and the reading of it stay together.
+    const errors = validateDraftPreflightV2(context, candidate).issues.filter((issue) => issue.code === 'unsupported_material_claim').map((issue) => issue.message);
+    assert.ok(errors.some((error) => error.includes('1.000 personas')), errors.join(' | '));
+
+    await generateOutreachFromDraftContextV2({ context, rewrite: { previous: { ...candidate }, errors } });
+    assert.match(prompt, /Si es una cifra del vendedor/);
+    assert.ok(prompt.includes('Procesa 1.000 postulantes en unos 30 minutos'), 'the line of the profile, with its unit');
+    assert.match(prompt, /hablar como el vendedor, en primera persona del equipo/);
+    assert.match(prompt, /sin nombrar a la empresa del destinatario/);
+    assert.match(prompt, /Si la cifra viene de la evidencia/, 'a figure of the recipient keeps its own advice');
+    // The first attempt already knows how the seller's figure is said, only when the profile has one.
+    await generateOutreachFromDraftContextV2({ context });
+    assert.match(prompt, /Las cifras del vendedor .* no son hechos del destinatario/);
+    assert.match(prompt, /«1\.000 postulantes» no pasa a «1\.000 personas»/);
+    // The advice works: a sentence that speaks as the seller, with the unit of the profile, passes the same check.
+    for (const sentence of ['Northstar procesa 1.000 postulantes en unos 30 minutos.', 'Procesamos 1.000 postulantes en unos 30 minutos.']) {
+      const repaired = { ...candidate, body: candidate.body.replace('Procesa 1.000 personas en unos 30 minutos.', sentence) };
+      assert.ok(!validateDraftPreflightV2(context, repaired).issues.some((issue) => issue.code === 'unsupported_material_claim'), sentence);
+    }
+
+    // A figure the seller does not have gets the advice for the evidence only.
+    await generateOutreachFromDraftContextV2({ context, rewrite: { previous: { ...candidate }, errors: ['La cifra o su alcance no están respaldados para este sujeto: 400 clientes. Oración (extracto limitado): "Acme tiene 400 clientes."'] } });
+    assert.doesNotMatch(prompt, /Si es una cifra del vendedor/);
+    assert.match(prompt, /sujeto y alcance exactos/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENAI_API_KEY;

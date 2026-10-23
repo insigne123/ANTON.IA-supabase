@@ -141,12 +141,15 @@ async function writeEmail(context: any, openingKind: string | undefined, userIns
   let output = await generateOutreachFromDraftContextV2(base as never);
   let checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds });
   let attempts = 1;
+  // What the first generation said and why the preflight sent it back: the retry is where an email loses its specifics.
+  let first: { subject: string; body: string; issues: Array<{ code: string; message: string }> } | null = null;
   if (!checked.validation.valid) {
+    first = { subject: output.subject, body: checked.body, issues: checked.validation.issues.map((issue: any) => ({ code: String(issue.code ?? issue.type ?? '?'), message: String(issue.message) })) };
     output = await generateOutreachFromDraftContextV2({ ...base, rewrite: { previous: { subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds }, errors: checked.validation.issues.map((issue: any) => issue.message) } } as never);
     checked = validate({ subject: output.subject, body: output.body, personalization: output.personalization, hypothesisIds: output.hypothesisIds });
     attempts = 2;
   }
-  return { subject: output.subject, body: checked.body, valid: checked.validation.valid, attempts, issues: checked.validation.issues.map((issue: any) => String(issue.message)), cta: resolveEffectiveCta(context, checked.body, userInstruction) };
+  return { subject: output.subject, body: checked.body, valid: checked.validation.valid, attempts, issues: checked.validation.issues.map((issue: any) => String(issue.message)), ...(first ? { first } : {}), cta: resolveEffectiveCta(context, checked.body, userInstruction) };
 }
 
 type Row = Record<string, any>;
