@@ -94,6 +94,18 @@ export default function cowork(ctx) {
   return {
     tables: {
       cowork_runs: runs, cowork_run_events: events,
+      // Scheduled tasks (COWORK_SCHEDULES_ENABLED): one that fires on Mondays and ran last week, one on weekdays that was paused after failing, one monthly.
+      cowork_scheduled_tasks: [
+        { id: ctx.uid(9401), user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Resumen del lunes', prompt: 'Dime quién respondió esta semana y a quién escribir hoy, con el motivo de cada uno.',
+          frequency: 'weekly', time_of_day: '09:00', weekday: 1, month_day: null, time_zone: 'America/Santiago', status: 'active', next_run_at: ctx.daysAhead(3),
+          last_run_at: ctx.daysAgo(4), last_run_id: ctx.uid(9001), last_status: 'admitted', consecutive_failures: 0, run_count: 6, created_from_run_id: null, created_at: ctx.daysAgo(45), updated_at: ctx.daysAgo(4) },
+        { id: ctx.uid(9402), user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Respuestas nuevas de la mañana', prompt: 'Revisa si hay respuestas nuevas de contactos y dime cuáles piden reunión.',
+          frequency: 'weekdays', time_of_day: '08:30', weekday: null, month_day: null, time_zone: 'America/Santiago', status: 'paused', next_run_at: null,
+          last_run_at: ctx.daysAgo(2), last_run_id: null, last_status: 'failed', consecutive_failures: 3, run_count: 14, created_from_run_id: null, created_at: ctx.daysAgo(30), updated_at: ctx.daysAgo(2) },
+        { id: ctx.uid(9403), user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Cierre de mes', prompt: 'Calcula mis resultados del mes: envíos, respuestas y reuniones, y compáralos con el mes anterior.',
+          frequency: 'monthly', time_of_day: '18:00', weekday: null, month_day: 1, time_zone: 'America/Santiago', status: 'active', next_run_at: ctx.daysAhead(9),
+          last_run_at: null, last_run_id: null, last_status: null, consecutive_failures: 0, run_count: 0, created_from_run_id: null, created_at: ctx.daysAgo(10), updated_at: ctx.daysAgo(10) },
+      ],
       // The campaign conversation was renamed (Plan 9, PR-20).
       cowork_thread_settings: [{ root_run_id: second, user_id: ctx.OWNER, organization_id: ctx.ORG, title: 'Campaña logística · reclutamiento', hidden_at: null, updated_at: ctx.hoursAgo(2) }],
       // The names Cowork gave its conversations (Plan 13): the first one shows it; the renamed one keeps the person's name.
