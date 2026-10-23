@@ -1,3 +1,4 @@
+import { COWORK_DEFAULT_TIME_ZONE, coworkTimeZone } from './time-zone';
 import { COWORK_HISTORY_FEEDBACK_INSTRUCTION, COWORK_PREVIOUS_VERSIONS_INSTRUCTION, type CoworkPreviousVersion } from './previous-versions';
 import { coworkAgentInstructions } from './agent-instructions';
 import { COWORK_AGENT_ACTION, COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_WRITTEN_ACTION, coworkIsWebAction } from './contracts';
@@ -7,12 +8,12 @@ import { coworkEvidenceBundle } from './evidence';
 import { coworkCompetencies } from './competencies';
 
 /** The organization's working time zone. ANTON.IA schedules and reports in
- * Chile; override with COWORK_TIME_ZONE for another market. */
+ * Chile; override with COWORK_TIME_ZONE for another market (time-zone.ts). */
+export { COWORK_DEFAULT_TIME_ZONE, coworkTimeZone };
 
 const withoutNulls = <T extends Record<string, unknown>>(values: T) =>
   Object.fromEntries(Object.entries(values).filter(([, value]) => value !== null && value !== undefined)) as { [K in keyof T]?: NonNullable<T[K]> };
 
-export const COWORK_DEFAULT_TIME_ZONE = 'America/Santiago';
 
 /** Plain-language equivalents for codes that appear in tool results, so the
  * model never has to copy an internal value into what the user reads. */
@@ -39,17 +40,6 @@ export const COWORK_GLOSSARY: Record<string, string> = {
   decision_maker_candidate: 'posible decisor (según el cargo)',
   referrer_candidate: 'posible referente (según el cargo)',
 };
-
-export function coworkTimeZone(value = typeof process === 'undefined' ? undefined : process.env?.COWORK_TIME_ZONE) {
-  const zone = String(value || '').trim();
-  if (!zone) return COWORK_DEFAULT_TIME_ZONE;
-  try {
-    new Intl.DateTimeFormat('es-CL', { timeZone: zone });
-    return zone;
-  } catch {
-    return COWORK_DEFAULT_TIME_ZONE;
-  }
-}
 
 function localNow(now: Date, timeZone: string) {
   return new Intl.DateTimeFormat('es-CL', {
@@ -249,6 +239,7 @@ export function coworkDecisionContext(
     ...(instructions.artifactCapability ? { artifactCapability: instructions.artifactCapability } : {}),
     ...(instructions.analystCapability ? { analystCapability: instructions.analystCapability, analystAvailable: (turnBudget?.decisionsLeft ?? 1) > 0 } : {}),
     ...(instructions.preferenceCapability ? { preferenceCapability: instructions.preferenceCapability } : {}),
+    ...(instructions.scheduleCapability ? { scheduleCapability: instructions.scheduleCapability } : {}),
     ...(instructions.taskCapability ? { taskCapability: instructions.taskCapability } : {}),
     threadBudgetCapability: instructions.threadBudgetCapability,
   };

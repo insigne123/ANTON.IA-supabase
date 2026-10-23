@@ -1,4 +1,5 @@
 import { coworkSpecialistFor, type CoworkSpecialistInfo } from './agents';
+import { coworkScheduledTitle } from './schedule-message';
 import { collectCoworkLeadRows } from './lead-export';
 import { coworkSearchCriteriaSchema, coworkSearchStrategy } from './search-proposal';
 import { coworkVersionSource } from './blocks';
@@ -814,9 +815,11 @@ export function groupCoworkThreads(runs: CoworkRun[], titles: Record<string, str
     const chronological = members.slice().sort((a, b) => time(a.created_at) - time(b.created_at));
     const latest = chronological[chronological.length - 1];
     const titled = chronological.find(run => !run.automatic) || chronological[0];
+    // A conversation a scheduled task started is named after the task, not after the first sentence of its request.
+    const scheduled = coworkScheduledTitle(titled.message);
     return {
       id: latest.id, rootId,
-      title: titles[rootId] || coworkCleanTitle(titled.automatic ? 'Continuación de un trabajo anterior' : titled.message),
+      title: titles[rootId] || (scheduled ? `⏰ ${scheduled}` : coworkCleanTitle(titled.automatic ? 'Continuación de un trabajo anterior' : titled.message)),
       status: latest.status, updatedAt: latest.created_at,
       turns: chronological.filter(run => !run.automatic).length,
     };
