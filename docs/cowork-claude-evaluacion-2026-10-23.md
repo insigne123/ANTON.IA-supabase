@@ -2,12 +2,17 @@
 
 Esta página sigue a `docs/agent-harness-mediciones-2026-10-22.md`. Allí el harness de Claude acertaba lo mismo que el bucle de hoy (Luna) y costaba unas 40 veces más, así que se dejó apagado. Hoy se midió de nuevo, el corpus completo y con las banderas de producción, después de arreglar lo que la medición mostró y de darle a Cowork lo que le faltaba frente a Claude Code y Claude Cowork. **Nada de esto está encendido ni desplegado en producción**: lo de Cowork va detrás de banderas que ya existían o que nacen apagadas, y la cabecera de Oportunidades (PR 494) sale con el próximo despliegue, que decide quien administra. Al final está la lista de decisiones.
 
+**Segunda ronda del mismo día** (PR 497, 498 y 499): la investigación de leads con la web de Claude, un editor Claude sobre los borradores de Luna (medido y descartado), las tareas programadas y los subagentes en paralelo de Cowork. Todo nace apagado y las dos migraciones están escritas y probadas en el CI, **sin aplicar a producción**.
+
+**Tercera ronda** (PR 500 a 502): se midió por primera vez la cadena entera de leads —investigación, informe, borrador y juez— y mostró que las señales de la investigación **no llegaban al correo**; se agregaron la cosecha de señales con Claude y las señales en el borrador (apagadas) y se arregló un error que botaba una de cada 16 investigaciones (detalle en «De la investigación al correo»).
+
 ## Resumen
 
 - **Cowork con el harness de Claude pasa de 78 % a 86 % de los 141 casos** (122 de 141) con cuatro arreglos y las banderas de producción. Cuesta unos **US$0,10 por turno** (el bucle de hoy, unos US$0,002) y un turno mediano tarda 8 segundos. Probé Opus de coordinador, esfuerzo alto, prompts por intención y la jueza en turno: ninguno supera esa cifra más allá del ruido y casi todos cuestan más.
 - **Lo que le faltaba, y ya tiene:** buscar en la web y leer páginas con fuentes citadas (`COWORK_WEB_ENABLED`), cerrar cada respuesta como siempre lo hizo el bucle (siguiente paso, respuestas sugeridas), no dejar a nadie sin respuesta cuando Anthropic falla (pasa al bucle de hoy) y poder probarlo con pocas personas (`COWORK_HARNESS_USER_IDS`).
 - **Oportunidades:** un banco de recorridos de personas (administrador e integrante) encontró y arregló cuatro fricciones, y la cabecera del administrador pasó de tres tarjetas a una (el embudo empieza 76 px más arriba) (`docs/oportunidades-recorridos.md`).
-- **Leads y borradores:** con el mismo juez, Haiku, Sonnet y Opus escriben borradores del mismo nivel. El límite no es el modelo, es la evidencia: con una señal real los correos puntúan alto y sin ella, bajo. La web de Cowork es lo que más mueve esa aguja (un ejemplo abajo).
+- **Leads y borradores:** con el mismo juez, Haiku, Sonnet y Opus escriben borradores del mismo nivel, y poner a un Claude de editor sobre el borrador de Luna lo hace sonar un poco más humano (+0,3 a +0,6) pero agrega inferencias que el brief no daba (veracidad −0,3 a −0,4 con Opus de juez) y cuesta de 20 a 60 veces más: **se descartó**. Lo que separa un buen correo de uno flojo es la evidencia: con una señal real y fechada, especificidad 4,3; sin ella, 2,2 (Opus de juez, 18 correos, y lo mismo con otros dos jueces). Por eso lo que sí se construyó apunta a la evidencia: **un investigador con la web de Claude que elige qué páginas leer** (PR 497, apagado) dejó a la investigación con 57 hechos de los últimos seis meses por empresa contra 0 que da el sitio solo (8 empresas chilenas; sin buscador de producción, ver «Qué no se midió»). **Pero medida la cadena entera, esos hechos no llegaban al correo**: de las 8 empresas, ninguna tenía una señal de menos de 30 días (lo que acepta el borrador) y el ángulo del informe citaba afirmaciones genéricas. Una cosecha de señales con Claude (que acepta una señal solo si su fecha, sus cifras y sus nombres están en los hechos que cita) y un borrador que las usa (PR 502, ambos apagados) llevan la especificidad de 2,0 a 2,6 y los correos con especificidad 3 o más de 0 a 3 o 4 de 8, sin bajar la veracidad; ningún correo llega a «enviar» porque lo que queda es del redactor.
+- **Lo que le faltaba a Cowork frente a Claude Cowork y Claude Code, y ya tiene (apagado):** **tareas programadas** («cada lunes a las 9, dime a quién escribir hoy»: abren una conversación nueva en modo aprobación, con panel, «Programar este pedido» desde el cuadro de mensaje y la hora de Chile con sus cambios de hora; PR 498) y **subagentes en paralelo** (tres Investigadoras investigan tres empresas a la vez, cada una con su web, y vuelven con un informe corto; US$0,43 y 35 s contra US$0,23 y 28 s del coordinador solo, con más del doble de búsquedas (9 contra 4) y señales con fecha y enlace por empresa; PR 499).
 - **Para decidir:** encender el harness con unas pocas personas y la web, y mirar una semana. Detalle en «Decisiones».
 
 ## Cowork
@@ -86,9 +91,9 @@ Con la misma pregunta pero sin la web, la respuesta es una hipótesis por cargo 
 | Compactar contexto en una tarea larga | Sí | Sí | Contexto armado por turno | Sí (limpia y resume) |
 | Tareas largas con plan aprobado y tope de gasto | Sí | Sí | Sí | Sí (esos turnos vuelven al bucle) |
 | Pasar a otro modelo si el proveedor falla | No aplica | No aplica | No aplica | **Sí, nuevo** |
-| Subagentes en paralelo | Sí | Sí | No | La librería los tiene; no se enchufaron: el libro admite cinco llamadas por turno |
+| Subagentes en paralelo | Sí | Sí | No | **Sí, nuevo** (apagado, PR 499): «delegar» con las Investigadoras; el libro de consumo les da su propio espacio (rol `delegate`, migración sin aplicar) |
 | Conectores (Calendar, Drive, Slack…) | Por MCP | Sí | Solo Gmail (historial de un contacto) | Igual |
-| **Programar tareas recurrentes** | Sí | Sí | **No** | **No** |
+| Programar tareas recurrentes | Sí | Sí | No | **Sí, nuevo** (apagado, PR 498): panel, «Programar este pedido», conversación nueva en modo aprobación en cada ejecución (tabla nueva, migración sin aplicar). Crearlas desde el chat con una tarjeta queda pendiente |
 | Navegador y control del computador | Con extensión | Sí | No | No |
 
 Lo que **no** se copia a propósito: el control del computador y ejecutar comandos en la máquina de la persona. Cowork de ANTON.IA es un producto de ventas con aprobación humana en cada efecto; esas capacidades piden otro nivel de confianza.
@@ -131,9 +136,59 @@ El mismo banco que usó el Plan 15 (`scripts/evaluate-outreach-set.ts`: una secu
 - **Lo que separa un buen correo de uno flojo es la evidencia.** Los casos con señal (una noticia, una contratación) puntúan 4 y 5 en especificidad; los casos sin señal puntúan 2: el juez los llama «ficha corporativa con envoltorio». Esto es lo que más mueve la aguja y es lo que la web de Cowork entrega.
 - El juez también marcó, en los tres modelos, lo mismo que el Plan 15 dejó abierto: el lema del vendedor repetido tal cual («el costo se va con el peak») y el tuteo mezclado con el ustedeo. No es un problema del modelo: es el compromiso entre «usar las palabras del vendedor» y «sonar a persona» que fija el prompt actual.
 
+### La señal manda (con datos que ya existían)
+
+En las 50 salidas de Luna del banco de ServiPro (dos corridas) que juzgó Opus, los correos en frío **con una señal real y con fecha** (12) puntúan 4,3 de especificidad y 3,3 de «suena humano»; los que **no la tienen** (6) puntúan 2,2 y 2,2. Los otros dos jueces dicen lo mismo (Luna: 4,8 contra 3,3; Sonnet: 3,6 contra 2,2). La diferencia entre tener y no tener la señal (más de 2 puntos de especificidad) es mucho mayor que la que produce cambiar de modelo o de editor (menos de 0,6 en el mejor de los casos).
+
+### Un editor Claude sobre el borrador de Luna (medido y descartado)
+
+Luna escribe el correo y su propia pasada editorial lo revisa. Se probó que esa pasada la hiciera otro modelo (Sonnet 5.5 u Opus 5.5) y juzgarlo con Luna, Sonnet y Opus. 25 correos de ServiPro por variante, dos corridas (la segunda con una regla extra en el prompt del editor: «mejora cómo está escrito, no lo que se sabe»). Juez Opus, promedio de las dos corridas:
+
+| Editor | Suena humano | Especificidad | Tono | Veracidad | Promedio | Veredictos (enviar / corregir / revisión humana) | Costo por correo |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Luna (como hoy) | 2,80 | 3,24 | 3,76 | **4,78** | 3,89 | 6 / 33 / 11 | ≈ US$0,003 |
+| Sonnet 5.5 | 3,10 | 3,58 | 3,76 | 4,36 | 3,88 | 4 / 14 / 32 | ≈ US$0,07 |
+| Opus 5.5 | 3,40 | 3,56 | 4,10 | 4,44 | 4,07 | 10 / 14 / 26 | ≈ US$0,19 |
+
+- Los editores Claude escriben **más natural** (+0,3 a +0,6) y **más específico** (+0,3), pero **agregan inferencias sobre la persona que el brief no daba** («el equipo se arma en poco tiempo», «me acordé de ti»): la veracidad baja de 4,78 a 4,4, y el juez manda a revisión humana de 11 a 26–32 de 50. Con Luna de juez la caída de veracidad es mayor (de 4,1 a 2,5 con Sonnet y 3,3 con Opus). La regla extra del prompt recuperó 0,2 en Sonnet y casi nada en Opus (el banco base varió 0,1 entre corridas).
+- Para un producto cuyo prompt prohíbe afirmar lo que no está en la evidencia, ganar naturalidad a cambio de veracidad es mal negocio, y cuesta de 20 a 60 veces más. **No se dejó el cambio en el código** (un modelo distinto en la pasada editorial, de unas veinte líneas); si se quisiera probar con otros datos, es solo cambiar el modelo de esa llamada.
+
 ### Investigación de leads
 
-La investigación guardada (`research.start` → informe) sigue en Luna y en el prefijo de modelos fijado a propósito (`src/ai/report-models.ts`, con pruebas que impiden un cambio por variable de entorno). No se tocó. Lo que sí puede hacer hoy el agente, con la web encendida, es investigar a una empresa al momento, con fuentes y fechas (arriba), y usarlo para escribir. Integrar esas señales en el informe guardado es el siguiente paso natural y no se hizo: toca el contrato de la investigación y su política de modelos.
+Como la evidencia es la palanca, se atacó ahí. **Un investigador con la web de Claude** (PR 497, `RESEARCH_CLAUDE_WEB_ENABLED`, apagado) busca antes de que la investigación lea páginas y entrega **direcciones, no hechos**: noticias de los últimos meses, avisos de empleo con fecha, licitaciones y cambios de gerencia. La investigación las lee con su lectura segura, interpreta sus fechas y extrae los hechos como siempre, así que el informe sigue diciendo solo lo que ANTON.IA leyó. Solo se aceptan direcciones que la API devolvió en esa ejecución; nunca recibe el nombre de la persona.
+
+Ejecución real de `gatherReportV2Research` con Luna, 8 empresas chilenas (Enaex, Aguas Andinas, Besalco, Sodexo, SMU, Salfacorp, Ingevec, Gasco), cargo «Gerente de Personas», oferta AXIS, juez Opus:
+
+| | páginas | hechos | hechos de 6 meses | señales útiles (juez) | utilidad (1–5) | costo |
+| --- | --- | --- | --- | --- | --- | --- |
+| Solo el sitio de la empresa | 0,6 | 2 | 0 | 0 | 1,0 | — |
+| Con el investigador (`low`) | 5,9 | 81 | 57 | 2,6 | 3,0 | ≈ US$0,10 |
+| Con el investigador (`medium`) | 5,9 | 73 | 57 | 2,9 | 3,3 | ≈ US$0,25 |
+
+Las herramientas web básicas (`COWORK_WEB_BASIC`, `RESEARCH_CLAUDE_WEB_BASIC`) existen porque las de filtrado dinámico gastaban las búsquedas en reintentos de su propio código (Enaex, tres de tres corridas). **Límite honesto:** no hay clave de Serper en esta máquina, así que la comparación es contra «solo el sitio» y no contra producción; con la clave, el mismo script (`scripts/evaluate-research-sources.ts`) compara producción contra producción más investigador. Detalle en `docs/investigacion-web-claude.md`.
+
+La investigación guardada sigue en Luna y en el prefijo de modelos fijado a propósito (`src/ai/report-models.ts`): el investigador solo elige páginas.
+
+### De la investigación al correo
+
+Un script nuevo (`scripts/evaluate-research-drafts.ts`) corre la cadena real de la app sin base de datos ni envíos: investigación → informe v2 (Luna) → contexto del borrador con ese informe → primer correo (preflight y un reintento) → juez Opus que ve la evidencia que vio el redactor. 8 empresas chilenas, cargo «Gerente de Personas», oferta de AXIS. Mostró cuatro pérdidas en el camino y un error:
+
+- **La extracción no deja señales que el borrador acepte.** Las 9 señales con fecha de las 8 investigaciones son resultados del semestre con la fecha de cierre del período; ninguna tiene menos de 30 días, el máximo del borrador. Un aviso con fecha y cantidad («10 vacantes de ayudante de bodega en Malloa») queda como afirmación de servicios: el prompt excluye el «listado genérico de empleos», y para quien vende revisión de antecedentes es el mejor motivo para escribir.
+- **El ángulo del informe cita afirmaciones genéricas** («la sede está en Santiago») aunque el análisis eligió las señales; solo citó 1 señal en las 8.
+- **Un aviso `invalid_citation` en la sección empresa** (el texto que repite el perfil) descartaba todos los hechos del informe en el borrador: 7 de 24 informes.
+- **El redactor recibe un hecho** (`minimumEvidenceProvenance` = 1) y tal como lo escribió la página («Así se verá:…», un solo aviso).
+- **Un error**: `truncateAtWord(texto, 2000)` devolvía hasta 2.003 caracteres y un hecho no admite más de 2.000; una de 16 investigaciones perdió el informe entero al final de la síntesis, con las llamadas ya pagadas (PR 501).
+
+Lo construido (PR 502, **apagado**): `RESEARCH_SIGNAL_HARVEST_ENABLED` (un Claude lee los hechos de las páginas, nunca la web, y propone hasta 3 señales de 30 días conectadas de forma directa con la oferta; solo se aceptan si fecha, cifras y nombres están en los hechos que cita; ≈ US$0,03 y 5 a 7 s por investigación) y `DRAFT_SIGNAL_EVIDENCE_ENABLED` (las señales que el análisis eligió van primero, el aviso de cita inválida fuera del ángulo no descarta el informe, y la frase de la señal se cita si está en sus hechos).
+
+| Investigación | Borrador | Empresas con señal que llega | Suena humano | Especificidad | Veracidad | Espec. ≥ 3 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Solo el sitio | de hoy | 0 de 8 | 2,0 | 2,0 | 4,9 | 0 de 8 |
+| + investigador de páginas | de hoy | 0 de 8 | 2,1 | 2,1 | 4,8 | 1 de 8 |
+| + cosecha de Claude | de hoy | 4 a 5 de 8 | 2,1–2,3 | 2,1–2,5 | 4,9–5,0 | 1 a 3 de 8 |
+| + cosecha de Claude | señales en el borrador | 4 a 5 de 8 | 2,5 | 2,6 | 4,9 | 3 a 4 de 8 |
+
+Es una mejora real pero pequeña (ruido entre corridas de ±0,3; 8 empresas): cuando una señal directa llega, el correo la usa («Vi que Sodexo Chile publicó 10 vacantes… en Coquimbo y otras 10… en Antofagasta») y el juez le pone 4, pero **0 de 8 llegan a «enviar» en cualquier variante**: lo que el juez sigue pidiendo (un puente menos forzado entre el hecho y AXIS, menos frases de relleno) es del redactor, no de la evidencia. Sin Serper la base es «solo el sitio» y el efecto sobre producción puede ser menor. Detalle, comandos y decisiones (la ventana de 30 días: con 90 hay las mismas 5 de 8 empresas con señal) en `docs/senales-de-la-investigacion-al-correo.md`.
 
 ## Decisiones
 
@@ -145,7 +200,11 @@ La investigación guardada (`research.start` → informe) sigue en Luna y en el 
 | Esfuerzo (`COWORK_HARNESS_EFFORT`) | Dejar `medium` | — |
 | Modelo del coordinador (`COWORK_HARNESS_MODEL`) | Dejar Sonnet 5.5 | Opus acierta lo mismo y cuesta y tarda el doble |
 | Jueza y Analista dentro del turno | Dejarlas apagadas | No suben el acierto; suman 15 % de costo y 43 % de tiempo |
-| Modelo de los borradores | Dejar como está | Un modelo más grande no mejora el resultado con la evidencia actual |
+| Modelo de los borradores y editor Claude | Dejar como está | Un modelo más grande no mejora el resultado; un editor Claude agrega inferencias (veracidad −0,3) y cuesta de 20 a 60 veces más |
+| Investigador con la web de Claude (`RESEARCH_CLAUDE_WEB_ENABLED=true`, PR 497) | **Probarlo con la clave de Serper antes de encender**: correr `scripts/evaluate-research-sources.ts` con `SERPER_API_KEY` y mirar si suma señales con fecha sobre lo que ya entrega producción; si suma, encender en una cuenta | Hechos de los últimos 6 meses por investigación, costo (≈ US$0,10 por investigación) y si los borradores citan más señales |
+| Cosecha de señales y señales en el borrador (`RESEARCH_SIGNAL_HARVEST_ENABLED` y después `DRAFT_SIGNAL_EVIDENCE_ENABLED`, PR 502) | Probar con una cuenta, en ese orden, **después** de correr `scripts/evaluate-research-drafts.ts` con `SERPER_API_KEY` (la base de producción trae noticias por esa vía) y leer a mano los primeros correos: la segunda cambia qué hecho abre el correo | Correos con una señal fechada en la apertura, veracidad (que ningún hecho sea ajeno a la empresa), costo (≈ US$0,03 por investigación) y `signal_harvest_unavailable` |
+| Tareas programadas (PR 498) | Aplicar la migración `20261023120000` (una tabla), después `COWORK_SCHEDULES_ENABLED=true` en una o dos cuentas | Que la conversación «⏰ …» aparezca a la hora, que las propuestas queden por aprobar y que `last_status` no quede en `failed` |
+| Subagentes (PR 499) | Aplicar la migración `20261023130000` (rol `delegate` del libro) **antes** de `COWORK_SUBAGENTS_ENABLED=true`; piloto con `COWORK_HARNESS_USER_IDS` | Costo por investigación de varias empresas (≈ US$0,4 a 0,8), tiempo y que las llamadas `delegate` del libro no lleguen al tope |
 | `OPPORTUNITIES_RUNTIME=harness` | Sí, con Haiku y en un solo workspace (según la página del 22 de octubre) | Pasos `answer` del libro de presupuesto |
 | Guía «¿Qué puedes hacer?» | Nada: ya ofrece «Buscar en la web», solo a quien tiene la web (PR 493) | Que aparezca para las cuentas del piloto y no para las demás |
 
@@ -171,6 +230,9 @@ Para apagarlo basta quitar `COWORK_RUNTIME`: el turno siguiente corre en el bucl
 
 ## Qué no se midió
 
+- **El investigador con la web de Claude y la cosecha de señales contra producción:** sin la clave de Serper la comparación es contra «solo el sitio». El efecto de punta a punta sobre el borrador sí se midió (8 empresas, ver «De la investigación al correo»), pero por el camino del informe v2 y con la investigación del contacto reemplazada por un resumen de la empresa y el cargo; con una corrida y ruido de ±0,3.
+- **Tareas programadas y subagentes en producción:** probados con un cliente en memoria, jsdom y modelos de verdad (los subagentes), y con las pruebas pgTAP del CI; las migraciones no se aplicaron, así que el camino con la base real no corrió.
+- **El editor Claude con otros datos que los 25 correos de ServiPro** (y con juez distinto de los tres usados).
 - El bucle de Luna contra el corpus completo con las banderas de producción (sin llave de OpenAI en esta sesión).
 - Lectura a ciegas de las respuestas de cada configuración; solo una muestra de diez.
 - Producción: ninguna de estas pruebas tocó la app desplegada ni la base de datos.
@@ -195,6 +257,18 @@ ANTHROPIC_API_KEY=... OUTREACH_EVAL_MODEL=claude-sonnet-5-5 OUTREACH_EVAL_SET=sc
   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-outreach-set.ts
 ANTHROPIC_API_KEY=... OUTREACH_JUDGE_MODEL=claude-opus-5-5 OUTREACH_EVAL_SET=scripts/fixtures/outreach-eval-axis.json \
   node --loader ./scripts/ts-test-loader.mjs scripts/judge-outreach-set.ts out/outreach-eval/<fecha>
+
+# Investigación con el investigador de la web (con SERPER_API_KEY compara contra producción)
+ANTHROPIC_API_KEY=... OPENAI_API_KEY=... [SERPER_API_KEY=...] \
+  node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-sources.ts --out=/tmp/investigacion
+
+# Investigación → informe → correo, de punta a punta (sin = solo el sitio, con = investigador de páginas, pro = con + cosecha de señales)
+ANTHROPIC_API_KEY=... OPENAI_API_KEY=... [DRAFT_SIGNAL_EVIDENCE_ENABLED=true] \
+  node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts --modes=sin,con,pro [--reuse=<carpeta> --reuse-docs]
+
+# Subagentes: la misma petición con y sin ellos
+ANTHROPIC_API_KEY=... COWORK_WEB_ENABLED=true COWORK_WEB_BASIC=true [COWORK_SUBAGENTS_ENABLED=true] \
+  node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-harness.ts --live --max-calls=60 --ask="Investiga en la web a Enaex, Besalco y Gasco…"
 
 # Recorridos de Cowork y de Oportunidades en el banco visual
 npm run audit:journeys -- --file=scripts/visual-audit/journeys/cowork.mjs
