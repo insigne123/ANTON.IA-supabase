@@ -637,6 +637,20 @@ test('compact structure is a warning, not a waiver of factual or CTA gates', () 
   assert.ok(invalid.issues.some((issue) => issue.code === 'cta_count'));
 });
 
+test('the steps of a sequence are not warned for lacking the approved CTA paragraph', () => {
+  const context = draftContextFixture();
+  const output = validOutput();
+  const readability = (body: string, expectedCtaCount?: 0 | 1 | 'model') => validateDraftPreflightV2(context, { ...output, body }, expectedCtaCount === undefined ? {} : { expectedCtaCount })
+    .preflight.warnings.some((warning) => warning.includes('legibilidad'));
+  const step = 'Hola Ada,\n\nAcme comunica que ayuda a equipos de operaciones a reducir trabajo manual.\n\nEn Northstar automatizamos tareas repetitivas. ¿Hoy esas tareas las hace alguien del equipo una por una?';
+  // The follow-up writes its own question and the close has none: greeting, opening and value are the structure.
+  assert.equal(readability(step, 'model'), false);
+  assert.equal(readability(step.replace('repetitivas. ¿Hoy esas tareas las hace alguien del equipo una por una?', 'repetitivas.'), 0), false);
+  // The same three paragraphs as a first touch lack the CTA paragraph, and two paragraphs are compact for any step.
+  assert.equal(readability(step), true);
+  assert.equal(readability(step.replace('\n\nEn Northstar', ' En Northstar'), 'model'), true);
+});
+
 test('CTA normalization preserves template bullet boundaries', () => {
   const body = 'Oferta:\n· Seleccion de personal.\n· Evaluacion de candidatos.';
   assert.equal(stripUnapprovedDraftCtasV2(body, ''), body);
