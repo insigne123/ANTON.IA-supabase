@@ -11,7 +11,7 @@ import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import type { ExtractedClaimDraftV2 } from '@/ai/flows/extract-report-v2-claims';
 import type { FactV2, SourceV2 } from '@/lib/report-v2-contracts';
 import { buildStableReportV2Id } from '@/lib/report-v2-ids';
-import { isSameResearchCompanyDomain, mentionsResearchCompany } from '@/lib/research-fact-eligibility';
+import { isGenericResearchText, isSameResearchCompanyDomain, isSensitiveEventText, mentionsResearchCompany } from '@/lib/research-fact-eligibility';
 import { datesInText, fold, isoDate, ungroundedIn, words } from '@/lib/research-signal-grounding';
 
 const DAY_MS = 86_400_000;
@@ -113,7 +113,8 @@ export function selectHarvestCandidates(input: Pick<HarvestInput, 'sources' | 'f
     const source = sourceById.get(fact.sourceId);
     if (!source) continue;
     const text = cleanFactText(fact.text);
-    if (text.length < 40 || FURNITURE.test(fold(text))) continue;
+    // Page furniture, a form or a robot check dumped as text, and a death or a disaster: none of them is a reason to write to someone.
+    if (text.length < 40 || FURNITURE.test(fold(text)) || isGenericResearchText(text) || isSensitiveEventText(text)) continue;
     const key = words(text).slice(0, 160);
     if (seen.has(key)) continue;
     const stated = fact.observedAt ?? source.publishedAt;
@@ -162,7 +163,7 @@ Elige hasta ${settings.maxSignals} señales: un cambio o evento concreto de los 
 - conexion "directa" solo si lo que vende resuelve algo que ese evento trae de inmediato (a quien vende revisión de antecedentes de postulantes, por ejemplo: contratación de personal, avisos de empleo con cantidad o lugar, obras o aperturas que exigen contratar). Resultados financieros, premios, un incidente o un plan de otra área son "indirecta" y se descartan: una señal forzada es peor que ninguna.
 - Usa solo lo que dicen los hechos que citas; no agregues cifras, nombres ni lugares que no estén en ellos, ni sumes cifras de hechos distintos. Cita siempre al menos un hecho marcado con ✓.
 - La fecha es la del evento si el hecho la dice; si es un aviso o una noticia sin otra fecha, la de la página.
-- Descarta portadas, menús, listados genéricos sin cantidad ni lugar, textos de otras empresas o países, y todo lo que no sea de los últimos ${settings.recencyDays} días.
+- Descarta portadas, menús, listados genéricos sin cantidad ni lugar, textos de otras empresas o países, y todo lo que no sea de los últimos ${settings.recencyDays} días. Nunca elijas una muerte, un accidente grave, una tragedia ni un desastre: no son un motivo para escribirle a nadie.
 - frase: una oración autónoma de hasta 200 caracteres, con el nombre de la empresa, que diga el hecho sin interpretarlo ni conectarlo con lo que vende quien escribe.
 - relevancia: por qué se conecta con lo que vende quien escribe (no se mostrará a nadie).
 - Si ningún hecho sirve, devuelve "senales" vacío.
@@ -197,6 +198,7 @@ export function rejectionOf(proposal: Proposal, candidates: HarvestCandidate[], 
   const grounded = facts.some(candidate => candidate.date === proposal.fecha || datesInText(candidate.text, year).includes(proposal.fecha));
   if (!grounded) return 'date_not_in_facts';
   if (!mentionsResearchCompany(frase, { companyName: input.companyName, companyDomain: input.companyDomain })) return 'company_not_named';
+  if (isSensitiveEventText(frase)) return 'sensitive_event';
   // A signal none of whose facts the draft can take would stop at the report.
   if (!facts.some(candidate => candidate.eligible)) return 'no_fact_for_the_draft';
   const ungrounded = ungroundedIn(frase, facts.map(candidate => candidate.text), { date: proposal.fecha, companyName: input.companyName, companyDomain: input.companyDomain });

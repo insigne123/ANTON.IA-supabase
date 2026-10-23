@@ -19,6 +19,7 @@ import {
   isQualifiedResearchPersonFactEvidence,
   isRelevantResearchSignal,
   isSameResearchCompanyDomain,
+  isSensitiveEventText,
   mentionsResearchCompany,
   mentionsResearchPerson,
   normalizeResearchCompanyDomain,
@@ -521,7 +522,8 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       companyName: snapshot.subject.company.name,
       companyDomain: snapshot.subject.company.domain,
     });
-    if (!source || !sourceUrl || (!qualifiedFact && !qualifiedPersonFact && !relevantSignal)) return [];
+    // A death or a disaster at the company is context for the person who sells, never the reason for a cold email.
+    if (!source || !sourceUrl || (!qualifiedFact && !qualifiedPersonFact && !relevantSignal) || isSensitiveEventText(item.statement)) return [];
     return [DraftEvidenceV2Schema.parse({
       evidenceId: item.id,
       statement: item.statement,
@@ -661,6 +663,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         || !['company', 'country', 'person'].includes(claim.scope || '')
         || claim.scope === 'country' && claim.jurisdiction !== reportDocument.entity.contactCountry
         || isGenericResearchText(claim.statement)
+        || isSensitiveEventText(claim.statement)
         || (claim.observedAt !== null && !isFreshDate(claim.observedAt, nowMs))
         || (claim.dimension === 'signal' && !claim.observedAt)
         || (claim.jurisdiction && claim.jurisdiction !== 'GLOBAL' && claim.jurisdiction !== reportDocument.entity.contactCountry)
@@ -685,6 +688,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
           !fact || !source || !url || !validHttpUrl(source.canonicalUrl)
           || isHardRejectedResearchUrl(url) || isHardRejectedResearchUrl(source.canonicalUrl)
           || isGenericResearchText(fact.text)
+          || isSensitiveEventText(fact.text)
           || ['search', 'registry'].includes(source.sourceType)
           || !isFreshDate(source.retrievedAt, nowMs)
           || (fact.observedAt !== null && !isFreshDate(fact.observedAt, nowMs))
