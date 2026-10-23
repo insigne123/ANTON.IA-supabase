@@ -36,13 +36,16 @@ export function coworkOwnerEmail() {
 }
 
 const SENSITIVE = /(KEY|SECRET|TOKEN|PASSWORD|TICKET|EMAILS|PRICING_JSON)/;
+// What production turns on only for the people of a pilot (the Cowork harness, the draft flags): the audited people are not in it, so for them the page
+// is what it was. AUDIT_COWORK_WEB=true turns the harness on below, to audit what the page shows then.
+const PILOT_ONLY = /^(?:COWORK_RUNTIME|COWORK_HARNESS_[A-Z_]+|DRAFT_[A-Z_]+)$/;
 /** Production's plain values from apphosting.yaml: flags, models and limits. URLs, secrets and allowlists are left out. */
 export function productionFlags() {
   const text = readFileSync(path.join(ROOT, 'apphosting.yaml'), 'utf8');
   const flags = {};
   for (const [, name, quoted] of text.matchAll(/-\s*variable:\s*(\S+)\s*\n\s*value:\s*("[^"\n]*"|'[^'\n]*'|[^\n]*)/g)) {
     const value = quoted.trim().replace(/^["']|["']$/g, '');
-    if (SENSITIVE.test(name) || /https?:\/\//.test(value) || value.startsWith('{')) continue;
+    if (SENSITIVE.test(name) || PILOT_ONLY.test(name) || /https?:\/\//.test(value) || value.startsWith('{')) continue;
     flags[name] = value;
   }
   return flags;
