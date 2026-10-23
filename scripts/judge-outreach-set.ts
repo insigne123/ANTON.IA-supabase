@@ -6,8 +6,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { judgeOutreach, judgeVerdict } from '../src/ai/flows/judge-outreach';
 import { RESEARCH_SEQUENCE_STEPS } from '../src/lib/outreach-sequence-brief';
+import { isClaudeModel } from '../src/ai/anthropic-json';
 
-if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY required');
+// OUTREACH_JUDGE_MODEL=claude-opus-5-5 juzga con Claude (pide ANTHROPIC_API_KEY); sin él, el modelo de siempre (OPENAI_EMAIL_MODEL, luna).
+if (process.env.OUTREACH_JUDGE_MODEL?.trim()) process.env.OPENAI_EMAIL_MODEL = process.env.OUTREACH_JUDGE_MODEL.trim();
+const judgeModel = String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || 'gpt-6-luna').trim();
+if (isClaudeModel(judgeModel) ? !process.env.ANTHROPIC_API_KEY : !process.env.OPENAI_API_KEY) throw new Error(`${isClaudeModel(judgeModel) ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} required`);
 const dir = process.argv[2];
 const baselineDir = process.argv[3];
 if (!dir) throw new Error('Falta <dir-resultados>');

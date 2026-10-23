@@ -22,18 +22,22 @@ import {
 import { validateDraftPreflightV2 } from '../src/lib/server/draft-preflight-v2';
 import { OUTREACH_OPENING_KINDS } from '../src/lib/outreach-example-library';
 import { resolveEffectiveCta } from '../src/lib/server/native-drafts';
-
-if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY required');
+import { isClaudeModel } from '../src/ai/anthropic-json';
 
 // AGENTS.md: las pruebas con el modelo real usan gpt-6-luna. Los casos del banco son cuentas prioridad A, que la app escribe con
 // OPENAI_REASONING_MODEL (gpt-6-sol en producción, 20 veces más caro): sin OUTREACH_EVAL_MODEL explícito, la prueba usa luna.
+// Un modelo «claude-…» (OUTREACH_EVAL_MODEL=claude-sonnet-5-5) escribe por Anthropic: pide ANTHROPIC_API_KEY y no la de OpenAI.
 const evalModel = process.env.OUTREACH_EVAL_MODEL?.trim() || 'gpt-6-luna';
+if (isClaudeModel(evalModel) ? !process.env.ANTHROPIC_API_KEY : !process.env.OPENAI_API_KEY) throw new Error(`${isClaudeModel(evalModel) ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} required`);
 process.env.SUPLIA_OPENAI_REASONING_MODEL = evalModel;
 process.env.OPENAI_REASONING_MODEL = evalModel;
 
 /** USD por millón de tokens (lista estándar de OpenAI, contexto corto). El uso no trae los tokens en caché: el costo es un techo. */
 const PRICES: Record<string, { input: number; output: number }> = {
   'gpt-6-luna': { input: 0.10, output: 0.50 },
+  'claude-haiku-5-5': { input: 0.10, output: 0.50 },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
+  'claude-opus-5-5': { input: 4, output: 20 },
   'gpt-6-sol': { input: 2, output: 10 },
   'gpt-6.1-sol': { input: 2, output: 10 },
 };
@@ -48,6 +52,10 @@ const outDir = join(
   new Date().toISOString().replace(/[:.]/g, '-'),
 );
 mkdirSync(outDir, { recursive: true });
+
+// La evidencia del banco se captura «hace tres días» y vale un mes: con fechas fijas, el banco deja de servir el día que vence (evidence_insufficient).
+const ASOF = new Date(Date.now() - 3 * 86_400_000).toISOString();
+const VALID_UNTIL = new Date(Date.now() + 27 * 86_400_000).toISOString();
 
 const withCta = (context: any, exactText: string) => exactText === context.constraints.cta.exactText
   ? context
@@ -76,12 +84,12 @@ function buildSnapshot(evalCase: any) {
     sources.push({
       id: 'source-empresa', type: 'official_site',
       url: `https://${dest.dominio}`, canonicalUrl: `https://${dest.dominio}`,
-      title: dest.empresa, provider: 'eval', retrievedAt: '2026-09-20T12:00:00.000Z', reliability: 0.85,
+      title: dest.empresa, provider: 'eval', retrievedAt: ASOF, reliability: 0.85,
     });
     evidence.push({
       id: 'evidence-empresa', subjectScope: 'company', kind: 'fact', path: 'eval.company',
       statement: evalCase.actividadEmpresa, sourceId: 'source-empresa',
-      extractedAt: '2026-9-20T12:00:00.000Z'.replace('-9-', '-09-'),
+      extractedAt: ASOF,
       confidence: 0.8, extraction: { method: 'rule', provider: 'eval', version: 'eval/v1' },
     });
     claims.push({
@@ -89,7 +97,7 @@ function buildSnapshot(evalCase: any) {
       classification: 'fact', statement: evalCase.actividadEmpresa,
       supportingEvidenceIds: ['evidence-empresa'], contradictingEvidenceIds: [],
       confidence: 0.8,
-      freshness: { asOf: '2026-09-20T12:00:00.000Z', validUntil: '2026-10-20T12:00:00.000Z', policyVersion: 'research-freshness/v1' },
+      freshness: { asOf: ASOF, validUntil: VALID_UNTIL, policyVersion: 'research-freshness/v1' },
       derivation: { method: 'rule', promptVersion: 'eval/v1' },
     });
   }
@@ -97,12 +105,12 @@ function buildSnapshot(evalCase: any) {
     sources.push({
       id: 'source-senal', type: 'news',
       url: `https://${dest.dominio}/noticias`, canonicalUrl: `https://${dest.dominio}/noticias`,
-      title: `${dest.empresa} señal`, provider: 'eval', retrievedAt: '2026-09-20T12:00:00.000Z', reliability: 0.8,
+      title: `${dest.empresa} señal`, provider: 'eval', retrievedAt: ASOF, reliability: 0.8,
     });
     evidence.push({
       id: 'evidence-senal', subjectScope: 'company', kind: 'fact', path: 'eval.signal',
       statement: `${evalCase.senal.hecho} (${evalCase.senal.fuente}, ${evalCase.senal.fecha}).`,
-      sourceId: 'source-senal', extractedAt: '2026-09-20T12:00:00.000Z',
+      sourceId: 'source-senal', extractedAt: ASOF,
       confidence: 0.8, extraction: { method: 'rule', provider: 'eval', version: 'eval/v1' },
     });
     claims.push({
@@ -110,7 +118,7 @@ function buildSnapshot(evalCase: any) {
       classification: 'fact', statement: evalCase.senal.hecho,
       supportingEvidenceIds: ['evidence-senal'], contradictingEvidenceIds: [],
       confidence: 0.78,
-      freshness: { asOf: '2026-09-20T12:00:00.000Z', validUntil: '2026-10-20T12:00:00.000Z', policyVersion: 'research-freshness/v1' },
+      freshness: { asOf: ASOF, validUntil: VALID_UNTIL, policyVersion: 'research-freshness/v1' },
       derivation: { method: 'rule', promptVersion: 'eval/v1' },
     });
   }
@@ -118,12 +126,12 @@ function buildSnapshot(evalCase: any) {
     sources.push({
       id: 'source-rol', type: 'linkedin',
       url: `https://www.linkedin.com/in/eval-${evalCase.id}`, canonicalUrl: `https://www.linkedin.com/in/eval-${evalCase.id}`,
-      title: dest.nombre || dest.cargo, provider: 'eval', retrievedAt: '2026-09-20T12:00:00.000Z', reliability: 0.75,
+      title: dest.nombre || dest.cargo, provider: 'eval', retrievedAt: ASOF, reliability: 0.75,
     });
     evidence.push({
       id: 'evidence-rol', subjectScope: 'person', kind: 'profile_field', path: 'eval.person',
       statement: `${dest.nombre || 'El contacto'} figura como ${dest.cargo} en ${dest.empresa}.`,
-      sourceId: 'source-rol', extractedAt: '2026-09-20T12:00:00.000Z',
+      sourceId: 'source-rol', extractedAt: ASOF,
       confidence: 0.75, extraction: { method: 'rule', provider: 'eval', version: 'eval/v1' },
     });
     claims.push({
@@ -131,7 +139,7 @@ function buildSnapshot(evalCase: any) {
       classification: 'fact', statement: `${dest.nombre || 'El contacto'} ocupa el cargo de ${dest.cargo}.`,
       supportingEvidenceIds: ['evidence-rol'], contradictingEvidenceIds: [],
       confidence: 0.75,
-      freshness: { asOf: '2026-09-20T12:00:00.000Z', validUntil: '2026-10-20T12:00:00.000Z', policyVersion: 'research-freshness/v1' },
+      freshness: { asOf: ASOF, validUntil: VALID_UNTIL, policyVersion: 'research-freshness/v1' },
       derivation: { method: 'rule', promptVersion: 'eval/v1' },
     });
   }
@@ -230,7 +238,7 @@ for (const evalCase of evalSet.cases) {
     const snapshot = buildSnapshot(evalCase);
     const built = buildDraftContextV2({
       snapshot,
-      artifact: { contentHash: canonicalSha256(snapshot), capturedAt: '2026-09-20T12:00:00.000Z' },
+      artifact: { contentHash: canonicalSha256(snapshot), capturedAt: ASOF },
       seller,
       style: createDefaultDraftWritingStyleV2(),
       now: new Date(),

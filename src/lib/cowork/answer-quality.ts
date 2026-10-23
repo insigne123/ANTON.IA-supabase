@@ -550,7 +550,8 @@ export const COWORK_JARGON: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bbarrido\b/i, label: 'dice «barrido»' },
   { pattern: /\bdenominador\b/i, label: 'dice «denominador»' },
   { pattern: /\b(?:scope|truncated|needs_verification|needs_review|do_not_contact|last_\d+_days|per_contact|contacted_leads)\b/i, label: 'muestra un código interno' },
-  { pattern: /\b(?:leads|contacted|metrics|deliverability|campaigns|replies|linkedin|compliance)\.[a-z_]+\b/, label: 'nombra una herramienta' },
+  // A tool is «linkedin.quota»; «linkedin.com» is a site, and a web answer is full of them.
+  { pattern: /\b(?:leads|contacted|metrics|deliverability|campaigns|replies|linkedin|compliance)\.(?!(?:com|cl)\b)[a-z_]+\b/, label: 'nombra una herramienta' },
 ];
 
 export type CoworkAnswerIssue = { code: string; detail: string };
@@ -571,10 +572,12 @@ const wordCount = (text: string) => (text.match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p
 export function coworkAnswerIssues(reply: string, options: { expectNextStep?: boolean } = {}): CoworkAnswerIssue[] {
   const text = String(reply || '');
   const issues: CoworkAnswerIssue[] = [];
-  for (const item of COWORK_JARGON) if (item.pattern.test(text)) issues.push({ code: 'jargon', detail: item.label });
-  if (UUID.test(text)) issues.push({ code: 'uuid', detail: 'muestra un identificador interno' });
-  if (/`[^`\s@]+@[^`\s@]+`/.test(text)) issues.push({ code: 'format', detail: 'correo con formato de código' });
-  if (/\bUTC\b/.test(text)) issues.push({ code: 'timezone', detail: 'hora en UTC en vez de la hora local' });
+  // A link shows its label, not its address: a path («/jobs/», an id in a query) is not what the person reads, so the address is left out of these checks.
+  const read = text.replace(/\]\([^)\s]*\)/g, ']').replace(/https?:\/\/[^\s)\]>"']+/gi, ' ');
+  for (const item of COWORK_JARGON) if (item.pattern.test(read)) issues.push({ code: 'jargon', detail: item.label });
+  if (UUID.test(read)) issues.push({ code: 'uuid', detail: 'muestra un identificador interno' });
+  if (/`[^`\s@]+@[^`\s@]+`/.test(read)) issues.push({ code: 'format', detail: 'correo con formato de código' });
+  if (/\bUTC\b/.test(read)) issues.push({ code: 'timezone', detail: 'hora en UTC en vez de la hora local' });
   const lines = text.split('\n').filter(line => line.trim());
   if (lines.length && PREAMBLE.test(lines[0])) issues.push({ code: 'preamble', detail: 'abre con un saludo o una muletilla en vez de la conclusión' });
   if (wordCount(text) > COWORK_CHAT_WORDS.max) issues.push({ code: 'length', detail: `más de ${COWORK_CHAT_WORDS.max} palabras en el chat: lo largo va al documento` });

@@ -2,7 +2,7 @@
 // weekly quota and the requests that should become one batch card, one single action or no proposal at all. The proposal goes through the
 // same planning the server applies (corpusStageLinkedinBatch), so what is checked is what the card would list: who goes today, with the
 // text each one gets, and who waits for another day and why. Nothing is queued: a proposal is not a send.
-import { CORPUS_COMMON_CHECKS, corpusRead, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { CORPUS_COMMON_CHECKS, corpusRead, corpusShown, corpusWithEmailQuery, corpusWithLinkedinQuery, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const L = (n: number) => `00000000-0000-4000-8000-0000000000b${n}`;
 export const BATCH_IDS = { marcela: L(1), gerardo: L(2), hector: L(3), ana: L(4), ivan: L(5), paz: L(6) };
@@ -21,10 +21,15 @@ export const BATCH_SAVED = [
 ];
 
 const searchOf = (query: string) => {
-  const term = query.toLowerCase().trim();
+  // The server's own filters, as the capability says them: «con correo» and «con LinkedIn» keep only who has one and the other words search as usual.
+  // Without them a search for «con LinkedIn» found nobody here, and an agent that believed it said that no saved contact has a profile.
+  const { withEmail, rest: withoutEmail } = corpusWithEmailQuery(query);
+  const { withLinkedin, rest } = corpusWithLinkedinQuery(withoutEmail);
+  const term = rest.toLowerCase().trim();
   const words = term.split(/\s+/).filter(word => word.length > 2);
-  const items = !words.length ? BATCH_SAVED : BATCH_SAVED.filter(lead => [lead.name, lead.title, lead.company, lead.email]
+  const matched = !words.length ? BATCH_SAVED : BATCH_SAVED.filter(lead => [lead.name, lead.title, lead.company, lead.email]
     .some(value => String(value || '').toLowerCase().split(/\s+/).some(part => words.some(word => part.includes(word)))));
+  const items = matched.filter(lead => (!withEmail || lead.email) && (!withLinkedin || lead.linkedin_url));
   return { items, returned: items.length, limit: 20, scope: 'own_saved_contacts', truncated: false, partial: false };
 };
 

@@ -31,6 +31,13 @@ test('the production answers that confused people are flagged', () => {
   assert.ok(coworkAnswerIssues('Revisé yago.cl a las 04:12 UTC.').some(issue => issue.code === 'timezone'));
 });
 
+test('the address of a link is not jargon: a web answer cites sources the person reads by their label', () => {
+  const cited = 'Enaex tiene 63 empleos en [LinkedIn](https://cl.linkedin.com/jobs/enaex-empleos?id=7c9e6679-7425-40de-944b-e07fc1f90ae7) y su perfil está en linkedin.com/company/enaex. ¿Busco a su gente de RR. HH.?';
+  assert.deepEqual(coworkAnswerIssues(cited), []);
+  assert.ok(coworkAnswerIssues('Consulté linkedin.quota y leads.search. ¿Sigo?').some(issue => issue.code === 'jargon'), 'a tool name still is');
+  assert.ok(coworkAnswerIssues('Tu contacto es 7c9e6679-7425-40de-944b-e07fc1f90ae7. ¿Sigo?').some(issue => issue.code === 'uuid'), 'an id in the text still is');
+});
+
 test('a direct answer with a closing offer passes', () => {
   const good = 'Hoy no tienes respuestas pendientes en ANTON.IA.\nLo que sí puedes avanzar:\n- 12 de tus 13 contactos recientes no tienen correo.\n- Tienes 2 incidencias abiertas.\n¿Busco el correo de los 3 más relevantes?';
   assert.deepEqual(coworkAnswerIssues(good), []);

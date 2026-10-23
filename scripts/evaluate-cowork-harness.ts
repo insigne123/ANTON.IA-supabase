@@ -120,7 +120,7 @@ async function main() {
       // A provider that refuses a request ends the turn with a generic apology: the reason is worth reading in the evaluation.
       const response = await base.complete(traced).catch(error => { console.error(`  ! ${base.name}: ${error instanceof Error ? error.message : error}`.slice(0, 400)); throw error; });
       current.modelMs += Date.now() - started;
-      if (process.env.EVAL_DEBUG) console.error(`  · ${response.stopReason} ${response.content.map(block => block.type === 'text' ? `text«${block.text.slice(0, 80)}»` : block.type === 'tool_use' ? `tool_use ${block.name}` : block.type).join(', ')}`);
+      if (process.env.EVAL_DEBUG) console.error(`  · ${response.stopReason} ${response.content.map(block => block.type === 'text' ? `text«${block.text.slice(0, 80)}»` : block.type === 'tool_use' ? `tool_use ${block.name} ${JSON.stringify(block.input).slice(0, process.env.EVAL_DEBUG === 'full' ? 3000 : 140)}` : block.type).join(', ')}`);
       current.usage = addUsage(current.usage, response.usage);
       return response;
     },

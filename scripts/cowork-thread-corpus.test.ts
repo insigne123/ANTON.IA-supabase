@@ -16,7 +16,7 @@ const readThread = (leadId: string) => coworkDecisionSchema.parse({ action: 'rep
 const draft = (to: string, subject: string, body: string, title = 'Respuesta'): Block => ({ type: 'email_draft', title, to: [to], subject, body });
 const answer = (reply: string, question: string, blocks: Block[] | null) => coworkDecisionSchema.parse({
   action: 'answer', query: null, leadId: null,
-  answer: { reply, document: null, suggestions: [{ label: 'Sí', message: 'Sí, adelante' }], question, ...(blocks ? { blocks } : {}) },
+  answer: { reply, document: null, suggestions: [{ label: 'Otra persona de la lista', message: 'Prepara la respuesta de otra persona de la lista' }], question, ...(blocks ? { blocks } : {}) },
 });
 /** Reads the conversation on the first decision and answers on the next, like a good turn. */
 const ideal = (id: string, reply: string, question: string, blocks: Block[] | null): CorpusDecider => async context =>
