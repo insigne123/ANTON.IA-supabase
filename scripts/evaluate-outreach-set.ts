@@ -24,8 +24,9 @@ import { OUTREACH_OPENING_KINDS } from '../src/lib/outreach-example-library';
 import { resolveEffectiveCta } from '../src/lib/server/native-drafts';
 import { isClaudeModel } from '../src/ai/anthropic-json';
 
-// AGENTS.md: las pruebas con el modelo real usan gpt-6-luna. Los casos del banco son cuentas prioridad A, que la app escribe con
-// OPENAI_REASONING_MODEL (gpt-6-sol en producción, 20 veces más caro): sin OUTREACH_EVAL_MODEL explícito, la prueba usa luna.
+// AGENTS.md: las pruebas con el modelo real usan gpt-6-luna (Haiku en Anthropic; nunca Sol, Terra, Astra, Opus ni Fable: src/ai/blocked-models.ts).
+// Los casos del banco son cuentas prioridad A, que la app escribe con OPENAI_REASONING_MODEL (luna en producción): sin
+// OUTREACH_EVAL_MODEL explícito, la prueba usa luna.
 // Un modelo «claude-…» (OUTREACH_EVAL_MODEL=claude-sonnet-5-5) escribe por Anthropic: pide ANTHROPIC_API_KEY y no la de OpenAI.
 const evalModel = process.env.OUTREACH_EVAL_MODEL?.trim() || 'gpt-6-luna';
 if (isClaudeModel(evalModel) ? !process.env.ANTHROPIC_API_KEY : !process.env.OPENAI_API_KEY) throw new Error(`${isClaudeModel(evalModel) ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} required`);

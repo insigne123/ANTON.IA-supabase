@@ -278,6 +278,14 @@ test('a busy server is retried with backoff and the live text reaches the listen
   assert.equal(tired.seen.length, 2);
 });
 
+test('an expensive model is refused before any request', async () => {
+  const { sdk, seen } = fakeSdk([{ content: [{ type: 'text', text: 'Hola' }], stop_reason: 'end_turn' }]);
+  for (const model of ['claude-opus-5-5', 'claude-fable-5-1']) {
+    await assert.rejects(anthropicModel({ model, client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [] }), /no está permitido/, model);
+  }
+  assert.equal(seen.length, 0);
+});
+
 test('the input of a tool call reaches the listener as it is written, joined by block and named by its tool', async () => {
   const start = (index: number, name: string) => ({ type: 'content_block_start', index, content_block: { type: 'tool_use', name } });
   const text = (index: number) => ({ type: 'content_block_start', index, content_block: { type: 'text' } });

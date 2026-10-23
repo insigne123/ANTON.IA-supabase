@@ -33,7 +33,7 @@ const calls: StructuredTelemetry[] = [];
 const save = (name: string, data: unknown) => writeFile(path.join(output, name), JSON.stringify(data, null, 2));
 const generate: typeof generateStructuredWithTelemetry = async (options) => {
   if (options.allowDefaultModelFallback !== false || options.openAiModels?.length !== 1
-    || !['gpt-6-luna', 'gpt-6-sol'].includes(options.openAiModels[0])) throw new Error('REPORT_MODEL_POLICY_VIOLATION');
+    || options.openAiModels[0] !== 'gpt-6-luna') throw new Error('REPORT_MODEL_POLICY_VIOLATION');
   const result = await generateStructuredWithTelemetry(options);
   calls.push(result.telemetry);
   return result;

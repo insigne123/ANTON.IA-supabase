@@ -28,8 +28,10 @@ La direccion visual de esta app es la que resulte mas intuitiva y util para el o
 
 ## Modelos de IA
 
-- Nunca uses modelos `astra`, ni en la app ni en pruebas: gastan demasiados créditos de OpenAI. `src/ai/openai-json.ts` los bloquea antes de llamar.
-- En pruebas con el modelo real usa `gpt-6-luna`. `gpt-6.1-sol` solo en casos puntuales y justificados. Mide con muestras chicas antes de lanzar rondas grandes.
+- Nunca uses modelos caros, ni en la app ni en pruebas: `astra`, `sol` y `terra` de OpenAI, `opus` y `fable` de Anthropic (decision del dueno el 6 y el 23 de octubre de 2026, cuando se acabaron los creditos). `src/ai/blocked-models.ts` los bloquea antes de llamar, en OpenAI y en Claude, y una variable de entorno no lo cambia.
+- Por defecto `gpt-6-luna` en OpenAI y `claude-haiku-5-5` en Anthropic. `claude-sonnet-5-5` solo en tareas muy complicadas, donde Haiku no alcanza.
+- Mide con muestras chicas, o en Haiku, antes de lanzar rondas grandes: no repitas el banco completo para comparar variantes; confirma solo la mejor. Una medicion pagada nueva se estima antes, lleva un tope de gasto e informa su costo real al terminar.
+- Las mediciones pagadas usan la llave de prueba (`ANTHROPIC_API_KEY_TEST`), nunca la de produccion.
 
 ## Git y releases
 

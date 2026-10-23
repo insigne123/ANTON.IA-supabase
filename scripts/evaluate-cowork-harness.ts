@@ -38,9 +38,6 @@ import { runCorpusCase, type CorpusAnalyst, type CorpusDesigner, type CorpusJudg
 const PRICES: Record<string, { input: number; output: number; cache: number; write: number }> = {
   'claude-haiku-5-5': { input: .1, output: .5, cache: .01, write: .2 },
   'claude-sonnet-5-5': { input: 2, output: 10, cache: .1, write: 4 },
-  // List prices of 6 Oct 2026 (cache reads at a tenth of the input price, writes at 1.25×): estimates for the comparison, not the ledger's.
-  'claude-opus-5-5': { input: 4, output: 20, cache: .4, write: 5 },
-  'claude-fable-5-1': { input: 10, output: 50, cache: 1, write: 12.5 },
 };
 
 const costUsd = (usage: Usage, model: string) => {

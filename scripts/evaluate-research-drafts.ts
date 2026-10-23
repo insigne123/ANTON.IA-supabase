@@ -33,7 +33,7 @@ import { canonicalSha256 } from '../src/lib/messaging-contracts';
 import { isClaudeModel } from '../src/ai/anthropic-json';
 
 const writerModel = process.env.OUTREACH_EVAL_MODEL?.trim() || 'gpt-6-luna';
-const judgeModel = process.env.OUTREACH_JUDGE_MODEL?.trim() || 'claude-opus-5-5';
+const judgeModel = process.env.OUTREACH_JUDGE_MODEL?.trim() || 'claude-haiku-5-5';
 if (!process.env.OPENAI_API_KEY || !process.env.ANTHROPIC_API_KEY) throw new Error('OPENAI_API_KEY and ANTHROPIC_API_KEY required');
 // The writer is the one of the bank (Luna unless told otherwise); the judge is set only once every email is written.
 process.env.SUPLIA_OPENAI_REASONING_MODEL = writerModel;
@@ -65,7 +65,7 @@ const inject = process.argv.includes('--inject');
 // --instruction="…": a private writing instruction for the writer (the one a person can give to a draft), to try a guidance on the same documents.
 const instruction = arg('instruction') || undefined;
 // --candidates=N (1 a 6): N correos por caso, cada uno con otro tipo de apertura. Con --selector=<modelo> un juez barato puntúa los N y se queda con uno,
-// y el juez de referencia (Opus) puntúa todos: mide qué hace elegir entre candidatos (la línea base es el primero, que es lo que escribe la app hoy).
+// y el juez de referencia (OUTREACH_JUDGE_MODEL, Haiku si no se dice) puntúa todos: mide qué hace elegir entre candidatos (la línea base es el primero, que es lo que escribe la app hoy).
 const candidates = Math.min(6, Math.max(1, Number(arg('candidates') || 1)));
 const selector = arg('selector')?.trim() || '';
 const outDir = resolve(arg('out') || join('.eval-research-drafts', new Date().toISOString().replace(/[:.]/g, '-')));
@@ -334,9 +334,9 @@ for (const row of rows) {
   for (const item of row.evidence) md += `- ${item.de_informe ? '(informe) ' : ''}${item.hecho.slice(0, 220)} [${item.fuente}]\n`;
   if (candidates > 1) {
     (row.candidates as any[]).forEach((item, at) => {
-      const mark = [at === 0 ? 'primero' : '', at === row.selected ? 'elegido' : '', at === row.oracle ? 'mejor según Opus' : ''].filter(Boolean).join(', ');
+      const mark = [at === 0 ? 'primero' : '', at === row.selected ? 'elegido' : '', at === row.oracle ? `mejor según ${judgeModel}` : ''].filter(Boolean).join(', ');
       md += `\n**Candidato ${at + 1} (${item.openingKind}${mark ? `; ${mark}` : ''}${item.email.valid ? '' : '; inválido'})** Asunto: ${item.email.subject}\n\n${item.email.body}\n\n`;
-      if (item.judge) md += `Opus: humano ${item.judge.suena_humano} · específico ${item.judge.especificidad} · veracidad ${item.judge.veracidad}${item.quick ? ` | ${selector}: humano ${item.quick.suena_humano} · específico ${item.quick.especificidad} · veracidad ${item.quick.veracidad}` : ''}\n\n`;
+      if (item.judge) md += `${judgeModel}: humano ${item.judge.suena_humano} · específico ${item.judge.especificidad} · veracidad ${item.judge.veracidad}${item.quick ? ` | ${selector}: humano ${item.quick.suena_humano} · específico ${item.quick.especificidad} · veracidad ${item.quick.veracidad}` : ''}\n\n`;
     });
     continue;
   }

@@ -1,11 +1,13 @@
+import { isBlockedModel } from '@/ai/blocked-models';
+
 /**
  * The model that rescues a turn about to fail (Plan 14, 2): COWORK_RESCUE_MODEL, gpt-6-luna in production. Unset, there is
- * no rescue and a failed turn says so as before. The owner's rule is that astra is never used in ANTON.IA (6 Oct 2026): a
- * setting that names it turns the rescue off instead of calling it.
+ * no rescue and a failed turn says so as before. The owner's rule is that the expensive models are never used in ANTON.IA (astra on
+ * 6 Oct 2026, the rest on 23 Oct; src/ai/blocked-models.ts): a setting that names one turns the rescue off instead of calling it.
  */
 export function coworkRescueModel(env: Record<string, string | undefined> = process.env): string | null {
   const model = env.COWORK_RESCUE_MODEL?.trim();
-  if (!model || /astra/i.test(model)) return null;
+  if (!model || isBlockedModel(model)) return null;
   return model.slice(0, 120);
 }
 

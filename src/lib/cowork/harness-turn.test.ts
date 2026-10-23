@@ -515,12 +515,23 @@ test('sub-agents are off unless COWORK_SUBAGENTS_ENABLED=true and the web is on,
   assert.equal(coworkSubagentSettings({ COWORK_SUBAGENTS_ENABLED: 'true' }), null, 'they have nothing but the web');
   assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true' }),
     { model: 'claude-sonnet-5-5', effort: 'low', maxDelegations: 3, maxRounds: 4, searches: 3, fetches: 2, deadlineMs: 45_000 });
-  assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-opus-5-5', COWORK_SUBAGENT_MODEL: 'claude-haiku-5-5', COWORK_SUBAGENT_EFFORT: 'medium',
+  assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-sonnet-5-5', COWORK_SUBAGENT_MODEL: 'claude-haiku-5-5', COWORK_SUBAGENT_EFFORT: 'medium',
     COWORK_SUBAGENTS_MAX: '99', COWORK_SUBAGENT_MAX_ROUNDS: '1', COWORK_SUBAGENT_SEARCHES: '0', COWORK_SUBAGENT_FETCHES: '9', COWORK_SUBAGENT_DEADLINE_MS: '5' }),
   { model: 'claude-haiku-5-5', effort: 'medium', maxDelegations: 5, maxRounds: 2, searches: 1, fetches: 4, deadlineMs: 15_000 });
-  assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-opus-5-5' })?.model, 'claude-opus-5-5', 'the coordinator\'s model unless told otherwise');
+  assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-haiku-5-5' })?.model, 'claude-haiku-5-5', 'the coordinator\'s model unless told otherwise');
   assert.equal(coworkHarnessSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true' })?.subagents?.maxDelegations, 3);
   assert.equal(coworkHarnessSettings(env)?.subagents, null);
+});
+
+test('an expensive model neither coordinates the harness nor runs its sub-agents: Cowork keeps the coordinator loop', () => {
+  const env = { COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true', COWORK_SUBAGENTS_ENABLED: 'true' };
+  for (const model of ['claude-opus-5-5', 'claude-fable-5-1', 'gpt-6-sol']) {
+    assert.equal(coworkHarnessEnabled({ ...env, COWORK_HARNESS_MODEL: model }), false, model);
+    assert.equal(coworkHarnessSettings({ ...env, COWORK_HARNESS_MODEL: model }), null, model);
+    assert.equal(coworkWebAvailable({ ...env, COWORK_HARNESS_MODEL: model }), false, model);
+    assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENT_MODEL: model }), null, model);
+  }
+  assert.equal(coworkHarnessEnabled({ ...env, COWORK_HARNESS_MODEL: 'claude-haiku-5-5' }), true);
 });
 
 test('a turn Anthropic could not finish goes on with the coordinator loop; what the person or the ledger caused stays an error', async () => {

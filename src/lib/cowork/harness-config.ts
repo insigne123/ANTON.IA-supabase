@@ -3,6 +3,7 @@
 // about a proposal) goes to it too. Types only plus the settings reader: the server wires the pieces (worker.ts).
 import type { z } from 'zod';
 import type { Effort, ModelClient, ModelResponse, WebSettings } from '@/lib/agent-harness/index';
+import { isBlockedModel } from '@/ai/blocked-models';
 import { COWORK_MAX_COORDINATOR_CALLS } from './turn-budget';
 import type { CoworkSubagentSettings } from './subagents';
 
@@ -93,8 +94,11 @@ export function coworkWebSettings(env: Record<string, string | undefined> = type
  */
 export function coworkSubagentSettings(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env, web: WebSettings | null = coworkWebSettings(env)): CoworkSubagentSettings | null {
   if (env.COWORK_SUBAGENTS_ENABLED?.trim() !== 'true' || !web) return null;
+  const model = env.COWORK_SUBAGENT_MODEL?.trim() || env.COWORK_HARNESS_MODEL?.trim() || 'claude-sonnet-5-5';
+  // An expensive tier does not run them (src/ai/blocked-models.ts): without sub-agents the coordinator reads the web itself.
+  if (isBlockedModel(model)) return null;
   return {
-    model: env.COWORK_SUBAGENT_MODEL?.trim() || env.COWORK_HARNESS_MODEL?.trim() || 'claude-sonnet-5-5',
+    model,
     effort: EFFORTS.find(item => item === env.COWORK_SUBAGENT_EFFORT?.trim()) ?? 'low',
     maxDelegations: bounded(env.COWORK_SUBAGENTS_MAX, 1, 5, 3),
     maxRounds: bounded(env.COWORK_SUBAGENT_MAX_ROUNDS, 2, 6, 4),
@@ -110,6 +114,9 @@ export function coworkSubagentSettings(env: Record<string, string | undefined> =
  */
 export function coworkHarnessEnabled(env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env, userId?: string | null) {
   if (env.COWORK_RUNTIME?.trim() !== 'harness') return false;
+  // A coordinator of an expensive tier is never run (src/ai/blocked-models.ts): Cowork keeps the coordinator loop on its own model
+  // instead of failing every turn.
+  if (isBlockedModel(env.COWORK_HARNESS_MODEL)) return false;
   const pilot = (env.COWORK_HARNESS_USER_IDS ?? '').split(',').map(id => id.trim().toLowerCase()).filter(Boolean);
   return !pilot.length || (Boolean(userId) && pilot.includes(String(userId).toLowerCase()));
 }

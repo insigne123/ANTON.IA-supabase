@@ -2,6 +2,8 @@
 
 Esta página sigue a `docs/agent-harness-mediciones-2026-10-22.md`. Allí el harness de Claude acertaba lo mismo que el bucle de hoy (Luna) y costaba unas 40 veces más, así que se dejó apagado. Hoy se midió de nuevo, el corpus completo y con las banderas de producción, después de arreglar lo que la medición mostró y de darle a Cowork lo que le faltaba frente a Claude Code y Claude Cowork. **Nada de esto está encendido ni desplegado en producción**: lo de Cowork va detrás de banderas que ya existían o que nacen apagadas, y la cabecera de Oportunidades (PR 494) sale con el próximo despliegue, que decide quien administra. Al final está la lista de decisiones.
 
+**Regla posterior (23 de octubre, al acabarse los créditos):** la app y las pruebas ya no usan Opus, Fable, Sol, Terra ni Astra; `src/ai/blocked-models.ts` los bloquea antes de llamar. Las cifras con Opus de esta página son lo medido antes de la regla (alrededor de un tercio de lo que costaron estas mediciones, de unos US$170 estimados) y no se pueden repetir: los comandos del final usan Haiku o Sonnet. Haiku es el modelo por defecto de las pruebas; Sonnet, solo si Haiku no alcanza.
+
 **Segunda ronda del mismo día** (PR 497, 498 y 499): la investigación de leads con la web de Claude, un editor Claude sobre los borradores de Luna (medido y descartado), las tareas programadas y los subagentes en paralelo de Cowork. Todo nace apagado y las dos migraciones están escritas y probadas en el CI, **sin aplicar a producción**.
 
 **Tercera ronda** (PR 500 a 506): se midió por primera vez la cadena entera de leads —investigación, informe, borrador y juez— y mostró que las señales de la investigación **no llegaban al correo**; se agregaron la cosecha de señales con Claude y las señales en el borrador (apagadas) y se arregló un error que botaba una de cada 16 investigaciones (detalle en «De la investigación al correo»), y al cerrar una oportunidad como ganada o perdida ahora se pide, en una línea opcional, el motivo (PR 504), y el preflight dejó de descartar la prueba numérica del perfil del vendedor, que rompía o vaciaba 6 de 8 borradores con un perfil que trae una cifra (PR 506).
@@ -198,11 +200,11 @@ Es una mejora real pero pequeña (ruido entre corridas de ±0,3; 8 empresas): cu
 
 | Decisión | Recomendación | Qué mirar |
 | --- | --- | --- |
-| Encender el harness (`COWORK_RUNTIME=harness`) | **Sí, con pocas personas** (`COWORK_HARNESS_USER_IDS`), no para todos de una vez. La llave de Anthropic ya está cableada en `apphosting.yaml`; falta que `COWORK_MODEL_PRICING_JSON` traiga el precio de `claude-sonnet-5-5` y `claude-opus-5-5` (hoy solo tiene `claude-haiku-5-5`: sin precio el consumo se registra con costo desconocido, no bloquea) | Costo por turno (unos US$0,10 contra US$0,002), segundos por turno, y que `turn.rescued` con `harness_error` sea raro |
+| Encender el harness (`COWORK_RUNTIME=harness`) | **Sí, con pocas personas** (`COWORK_HARNESS_USER_IDS`), no para todos de una vez. La llave de Anthropic ya está cableada en `apphosting.yaml`; falta que `COWORK_MODEL_PRICING_JSON` traiga el precio de `claude-sonnet-5-5` (hoy solo tiene `claude-haiku-5-5`: sin precio el consumo se registra con costo desconocido, no bloquea) | Costo por turno (unos US$0,10 contra US$0,002), segundos por turno, y que `turn.rescued` con `harness_error` sea raro |
 | Encender la web (`COWORK_WEB_ENABLED=true`) | Sí, junto con lo anterior y con `webSearchUsdPerThousand: 10` en `COWORK_MODEL_PRICING_JSON` | Búsquedas por turno, enlaces devueltos por no tener origen, y si la respuesta cita con fecha |
 | Prompts por intención (`COWORK_INTENT_PROMPTS_ENABLED`) | No | No mejora lo que importa y cuesta 50 % más con la caché fría |
 | Esfuerzo (`COWORK_HARNESS_EFFORT`) | Dejar `medium` | — |
-| Modelo del coordinador (`COWORK_HARNESS_MODEL`) | Dejar Sonnet 5.5 | Opus acierta lo mismo y cuesta y tarda el doble |
+| Modelo del coordinador (`COWORK_HARNESS_MODEL`) | Dejar Sonnet 5.5; Haiku 5.5 si manda el costo: en la medición del 22 de octubre (80 casos, esfuerzo alto) acertó 74 % contra 84 % de Sonnet, a ≈ US$0,007 por turno contra ≈ US$0,09 | Opus ya no es una opción (la app lo bloquea): acertaba lo mismo que Sonnet y costaba y tardaba el doble |
 | Jueza y Analista dentro del turno | Dejarlas apagadas | No suben el acierto; suman 15 % de costo y 43 % de tiempo |
 | Modelo de los borradores y editor Claude | Dejar como está | Un modelo más grande no mejora el resultado; un editor Claude agrega inferencias (veracidad −0,3) y cuesta de 20 a 60 veces más |
 | Investigador con la web de Claude (`RESEARCH_CLAUDE_WEB_ENABLED=true`, PR 497) | **Probarlo con la clave de Serper antes de encender**: correr `scripts/evaluate-research-sources.ts` con `SERPER_API_KEY` y mirar si suma señales con fecha sobre lo que ya entrega producción; si suma, encender en una cuenta | Hechos de los últimos 6 meses por investigación, costo (≈ US$0,10 por investigación) y si los borradores citan más señales |
@@ -226,8 +228,7 @@ Se cambia `apphosting.yaml` y se despliega App Hosting como siempre; esta sesió
 - variable: COWORK_WEB_ENABLED           # opcional: la web, 4 búsquedas y 3 lecturas por turno
   value: "true"
 # COWORK_MODEL_PRICING_JSON: agregar a lo que ya tiene (la búsqueda cuesta US$10 por mil)
-#   "claude-sonnet-5-5": {"version":"anthropic-standard-2026-10-06","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.1,"webSearchUsdPerThousand":10},
-#   "claude-opus-5-5":   {"version":"anthropic-standard-2026-10-06","inputUsdPerMillion":4,"outputUsdPerMillion":20,"cachedInputUsdPerMillion":0.4}
+#   "claude-sonnet-5-5": {"version":"anthropic-standard-2026-10-06","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.1,"webSearchUsdPerThousand":10}
 ```
 
 Para apagarlo basta quitar `COWORK_RUNTIME`: el turno siguiente corre en el bucle de siempre. Lo que mirar la primera semana está en la columna «Qué mirar» de arriba.
@@ -246,20 +247,21 @@ Para apagarlo basta quitar `COWORK_RUNTIME`: el turno siguiente corre en el bucl
 ## Cómo repetirlo
 
 ```bash
-# Corpus completo, banderas de producción, todo con Claude
+# Corpus completo, banderas de producción, todo con Claude. Cuesta de US$10 a 19 por corrida con Sonnet y ≈ US$1 con Haiku (COWORK_HARNESS_MODEL=claude-haiku-5-5):
+# compara variantes con Haiku o con un subconjunto (--cases) y confirma solo la mejor con Sonnet. La medición original usó Opus de Redactora; ya no se puede.
 source <(node -e 'for (const m of require("fs").readFileSync("apphosting.yaml","utf8").matchAll(/- variable: (COWORK_[A-Z_]+)\n\s+value: "?true"?/g)) console.log(`export ${m[1]}=true`)')
 ANTHROPIC_API_KEY=... COWORK_HARNESS_MODEL=claude-sonnet-5-5 COWORK_MODEL=claude-sonnet-5-5 \
-COWORK_WRITER_MODEL=claude-opus-5-5 COWORK_REVIEWER_MODEL=claude-sonnet-5-5 COWORK_DESIGNER_MODEL=claude-sonnet-5-5 \
+COWORK_WRITER_MODEL=claude-sonnet-5-5 COWORK_REVIEWER_MODEL=claude-sonnet-5-5 COWORK_DESIGNER_MODEL=claude-sonnet-5-5 \
   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-harness.ts --live --max-calls=900 --writer --artifacts --output=A.json
 
 # Un pedido propio, con la web
 ANTHROPIC_API_KEY=... COWORK_WEB_ENABLED=true COWORK_HARNESS_MODEL=claude-sonnet-5-5 \
   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-harness.ts --live --max-calls=20 --writer --ask="Investiga a Collahuasi…"
 
-# Borradores con Claude, juzgados por Opus
-ANTHROPIC_API_KEY=... OUTREACH_EVAL_MODEL=claude-sonnet-5-5 OUTREACH_EVAL_SET=scripts/fixtures/outreach-eval-axis.json OUTREACH_EVAL_OUT=out \
+# Borradores con Claude, juzgados por Haiku (la medición original usó Opus de juez; ya no se puede)
+ANTHROPIC_API_KEY=... OUTREACH_EVAL_MODEL=claude-haiku-5-5 OUTREACH_EVAL_SET=scripts/fixtures/outreach-eval-axis.json OUTREACH_EVAL_OUT=out \
   node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-outreach-set.ts
-ANTHROPIC_API_KEY=... OUTREACH_JUDGE_MODEL=claude-opus-5-5 OUTREACH_EVAL_SET=scripts/fixtures/outreach-eval-axis.json \
+ANTHROPIC_API_KEY=... OUTREACH_JUDGE_MODEL=claude-haiku-5-5 OUTREACH_EVAL_SET=scripts/fixtures/outreach-eval-axis.json \
   node --loader ./scripts/ts-test-loader.mjs scripts/judge-outreach-set.ts out/outreach-eval/<fecha>
 
 # Investigación con el investigador de la web (con SERPER_API_KEY compara contra producción)

@@ -54,7 +54,7 @@ Evidencia (hecho, sitio de la fuente, fecha de la fuente):
 ${facts.length ? facts.map((fact, index) => `${index + 1}. ${fact.text} [${fact.source}; ${fact.date ?? 'sin fecha'}]`).join('\n') : '(ninguna)'}
 
 Sé estricto: un hecho sin fecha o de hace más de 6 meses no es una señal reciente; describir lo que hace la empresa no es un motivo para escribirle hoy. Devuelve JSON con la forma pedida.`;
-  const result = await generateStructuredWithTelemetry({ provider: 'openai', openAiModel: 'claude-opus-5-5', schema: JudgeSchema, temperature: 0.2, prompt });
+  const result = await generateStructuredWithTelemetry({ provider: 'openai', openAiModel: 'claude-haiku-5-5', schema: JudgeSchema, temperature: 0.2, prompt });
   return result.data;
 }
 

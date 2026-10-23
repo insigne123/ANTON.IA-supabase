@@ -4,6 +4,7 @@
 // what would be sent; the SDK sits behind a two-method interface a test replaces.
 import Anthropic from '@anthropic-ai/sdk';
 import { providerError } from '@/ai/anthropic-json';
+import { blockedModelMessage, isBlockedModel } from '@/ai/blocked-models';
 import type { ContentBlock, Effort, Message, ModelClient, ModelRequest, ModelResponse, ServerBlock, StopReason, ToolResultBlock, Usage } from './types';
 
 /** Thinking spends output tokens before the answer: each effort gets room for it on top of the answer's own limit. */
@@ -144,6 +145,8 @@ export function anthropicModel(options: AnthropicModelOptions): ModelClient {
   return {
     name: options.model,
     async complete(request) {
+      // An expensive tier never goes out: the call fails before any request.
+      if (isBlockedModel(options.model)) throw new Error(blockedModelMessage(options.model));
       const client = options.client ?? sdkClient();
       for (let attempt = 0; ; attempt++) {
         try {

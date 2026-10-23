@@ -32,7 +32,7 @@ function mockOpenAi(t: TestContext, implementation: typeof fetch) {
   t.after(() => previous.forEach(([name, value]) => restoreEnv(name, value)));
   process.env.OPENAI_API_KEY = 'test-openai-key';
   process.env.OPENAI_BASE_URL = 'https://openai.example/v1';
-  process.env.OPENAI_MODEL = 'gpt-5.6-sol';
+  process.env.OPENAI_MODEL = 'gpt-5.6-luna';
   t.mock.method(console, 'warn', () => {});
   return t.mock.method(globalThis, 'fetch', implementation);
 }
@@ -257,9 +257,9 @@ test('preserves the global model fallback by default and when explicitly enabled
       openAiModel: 'primary-model',
       allowDefaultModelFallback,
     });
-    assert.deepEqual(models, ['primary-model', 'gpt-5.6-sol']);
-    assert.equal(result.telemetry.modelName, 'gpt-5.6-sol');
-    assert.equal(result.telemetry.requestedModel, 'gpt-5.6-sol');
+    assert.deepEqual(models, ['primary-model', 'gpt-5.6-luna']);
+    assert.equal(result.telemetry.modelName, 'gpt-5.6-luna');
+    assert.equal(result.telemetry.requestedModel, 'gpt-5.6-luna');
   }
 });
 
@@ -328,15 +328,15 @@ test('sends requested GPT-5 token controls and records the effective response mo
   assert.ok(result.telemetry.durationMs >= 0);
 });
 
-test('GPT-6 Sol omits temperature and defaults to low reasoning for structured output', async (t) => {
+test('GPT-6 omits temperature and defaults to low reasoning for structured output', async (t) => {
   let body: RequestBody = {};
   mockOpenAi(t, async (_input, init) => {
     body = JSON.parse(String(init?.body));
     return Response.json({ choices: [{ message: { content: '{"value":"ok"}' } }] });
   });
   await generateStructured({ prompt: 'Return a value.', schema: z.object({ value: z.string() }),
-    provider: 'openai', openAiModel: 'gpt-6-sol', temperature: 0.7 });
-  assert.equal(body.model, 'gpt-6-sol');
+    provider: 'openai', openAiModel: 'gpt-6-luna', temperature: 0.7 });
+  assert.equal(body.model, 'gpt-6-luna');
   assert.equal(body.temperature, undefined);
   assert.equal(body.reasoning_effort, 'low');
 });
@@ -591,6 +591,29 @@ test('never calls an Astra model: it is skipped for the next allowed one, and al
   }), /no está permitido/);
   // Not even as the configured default.
   process.env.OPENAI_MODEL = 'gpt-6-astra';
+  await assert.rejects(generateStructuredWithTelemetry({ prompt: 'Return a value.', schema, provider: 'openai' }), /no está permitido/);
+  assert.deepEqual(requested, ['gpt-6-luna']);
+});
+
+test('never calls an expensive model either, of OpenAI or of Claude: Opus, Fable, Sol and Terra are skipped before any request', async (t) => {
+  const requested: string[] = [];
+  mockOpenAi(t, async (_input, init) => {
+    requested.push(String(JSON.parse(String(init?.body || '{}')).model));
+    return Response.json({ choices: [{ message: { content: '{"value":"ok"}' } }] });
+  });
+  const schema = z.object({ value: z.string() });
+  const expensive = ['claude-opus-5-5', 'claude-fable-5-1', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-5.6-terra'];
+  const result = await generateStructuredWithTelemetry({
+    prompt: 'Return a value.', schema, provider: 'openai', openAiModels: [...expensive, 'gpt-6-luna'], allowDefaultModelFallback: false,
+  });
+  assert.equal(result.telemetry.modelName, 'gpt-6-luna');
+  for (const model of expensive) {
+    await assert.rejects(generateStructuredWithTelemetry({
+      prompt: 'Return a value.', schema, provider: 'openai', openAiModel: model, allowDefaultModelFallback: false,
+    }), /no está permitido/, model);
+  }
+  // Not even as the configured default.
+  process.env.OPENAI_MODEL = 'gpt-6-sol';
   await assert.rejects(generateStructuredWithTelemetry({ prompt: 'Return a value.', schema, provider: 'openai' }), /no está permitido/);
   assert.deepEqual(requested, ['gpt-6-luna']);
 });
