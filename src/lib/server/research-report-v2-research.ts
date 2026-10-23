@@ -15,6 +15,7 @@ import { depthFromAllowedDepth, getResearchDepthBudget, type ResearchDepth } fro
 import { searchSerper } from './serper-search';
 import { publicCompanyCoverageWarnings, type PublicCompanyReference } from '@/lib/public-company-research-contracts';
 import { mergePublicCompanyProjection } from '@/lib/public-company-research-adapter';
+import { claudeWebSourcesSettings, findResearchSourcesWithClaude, type ClaudeWebSourcesSettings } from './claude-web-sources';
 
 export const REPORT_V2_RESEARCH_VERSION = `report-v2/research/1:${RESOLVE_ENTITY_V2_PROMPT_VERSION}:${PLAN_REPORT_V2_PROMPT_VERSION}:${EXTRACT_REPORT_V2_CLAIMS_PROMPT_VERSION}`;
 
@@ -70,6 +71,12 @@ export async function fetchReportV2Source(input: { url: string; domain: string; 
   throw new Error('REPORT_V2_REDIRECT_LIMIT');
 }
 
+/** What the seller sells, in a few lines, for whoever searches the web on its behalf: the products by name and what they do. */
+function sellerOfferSummary(profile: SellerProfileContextV2) {
+  const lines = (profile.products || []).slice(0, 3).map((product) => [product.name, product.description || product.positioning].filter(Boolean).join(': ')).filter(Boolean);
+  return lines.join('; ').slice(0, 500) || null;
+}
+
 /** fn over every item, at most `limit` at a time; the results keep the order of the items. */
 async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
@@ -82,6 +89,8 @@ async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Prom
   }));
   return results;
 }
+
+type ResearchRunMetrics = { queries: number; pages: number; elapsedMs: number; claudeWeb?: { sources: number; searches: number; reads: number } };
 
 export async function gatherReportV2Research(input: {
   projection: ReportV2SnapshotProjection;
@@ -100,6 +109,9 @@ export async function gatherReportV2Research(input: {
   resolve?: typeof resolveEntityV2;
   generate?: typeof generateStructured;
   loadPublicCompany?: typeof import('./public-company-research').loadPublicCompany;
+  /** RESEARCH_CLAUDE_WEB_ENABLED: a Claude that searches the web picks the pages worth reading. `null` leaves it off whatever the environment says. */
+  claudeWeb?: ClaudeWebSourcesSettings | null;
+  discover?: typeof findResearchSourcesWithClaude;
 } = {}) {
   const started = Date.now();
   if (input.publicCompanyResearch) {
@@ -109,7 +121,7 @@ export async function gatherReportV2Research(input: {
     const { loadPublicCompany } = await import('./public-company-research');
     const company = await (dependencies.loadPublicCompany || loadPublicCompany)({ identity: input.publicCompanyResearch.identity, organizationId: input.organizationId, signal: input.signal });
     return { ...mergePublicCompanyProjection(input.projection, company.graph, company.reference),
-      researchWarnings: publicCompanyCoverageWarnings(company.graph), researchMetrics: { queries: company.metrics.queries, pages: company.metrics.pages, elapsedMs: Date.now() - started },
+      researchWarnings: publicCompanyCoverageWarnings(company.graph), researchMetrics: { queries: company.metrics.queries, pages: company.metrics.pages, elapsedMs: Date.now() - started } as ResearchRunMetrics,
       publicCompanyResearch: company.reference };
   }
   const signal = AbortSignal.any([AbortSignal.timeout(150_000), ...(input.signal ? [input.signal] : [])]);
@@ -119,6 +131,13 @@ export async function gatherReportV2Research(input: {
   const warnings: string[] = [];
   let entity = input.projection.entity;
   const domain = entity.companyDomain;
+  // The researcher starts at once and works while the site is read, the entity resolved and the queries planned: the research only waits
+  // for it when it is late, and a failure costs nothing but the pages it would have found.
+  const claudeWeb = dependencies.claudeWeb !== undefined ? dependencies.claudeWeb : claudeWebSourcesSettings();
+  const discovery = claudeWeb ? (dependencies.discover || findResearchSourcesWithClaude)({
+    companyName: entity.companyName, domain, country: entity.contactCountry, language: input.language,
+    contactTitle: entity.contact.title, department: entity.contact.department, sellerOffer: sellerOfferSummary(input.sellerProfile), signal,
+  }, claudeWeb).catch(() => { warnings.push('claude_web_unavailable'); return null; }) : null;
   const fetched = new Map<string, ParsedWebEvidenceV2>();
   const attempted = new Set<string>();
   const fetchOne = async (url: string) => {
@@ -174,7 +193,10 @@ export async function gatherReportV2Research(input: {
       return await (dependencies.search || searchSerper)({ organizationId: input.organizationId, kind: 'organic', query: `${query.query}${after}`, language: input.language, countryCode: entity.contactCountry === 'OTHER' ? 'cl' : entity.contactCountry.toLowerCase(), limit: 4 }, { maxRetries: 0 });
     } catch { warnings.push('search_unavailable'); return null; }
   });
-  const candidates: string[] = [];
+  // What the researcher chose goes first: it read the results and picked recent pages about this company; the search engines give the top of
+  // each query in order, which the loop below still fills in after them.
+  const found = discovery ? await discovery : null;
+  const candidates: string[] = (found?.sources ?? []).map((source) => source.url).filter((url) => !/\.(?:pdf|docx?|xlsx?)(?:\?|$)/i.test(url));
   for (let rank = 0; rank < 4; rank += 1) {
     for (const search of searches) {
       const url = search?.items[rank]?.link;
@@ -191,7 +213,8 @@ export async function gatherReportV2Research(input: {
     offset += batchSize;
   }
   const sources = [...fetched.values()].slice(0, depthBudget.maxPages);
-  if (!sources.length) return { ...input.projection, entity, researchWarnings: [...warnings, 'web_context_unavailable'], researchMetrics: { queries: searches.length, pages: 0, elapsedMs: Date.now() - started } };
+  const claudeMetrics: Pick<ResearchRunMetrics, 'claudeWeb'> = found ? { claudeWeb: { sources: found.sources.length, searches: found.searches, reads: found.reads } } : {};
+  if (!sources.length) return { ...input.projection, entity, researchWarnings: [...warnings, 'web_context_unavailable'], researchMetrics: { queries: searches.length, pages: 0, elapsedMs: Date.now() - started, ...claudeMetrics } };
   // Three sources per extraction and three extractions at a time: with 18 pages that is two rounds instead of six model
   // calls in a row, the longest part of a research (1 Oct: 22 to 303 s). Results keep the order of the sources.
   const chunks = Array.from({ length: Math.ceil(sources.length / 3) }, (_, index) => sources.slice(index * 3, index * 3 + 3));
@@ -210,6 +233,6 @@ export async function gatherReportV2Research(input: {
   return {
     ...projection,
     researchWarnings: warnings,
-    researchMetrics: { queries: searches.length, pages: sources.length, elapsedMs: Date.now() - started },
+    researchMetrics: { queries: searches.length, pages: sources.length, elapsedMs: Date.now() - started, ...claudeMetrics },
   };
 }

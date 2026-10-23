@@ -264,6 +264,8 @@ test('the web is off unless COWORK_WEB_ENABLED=true, has a small budget by defau
   assert.deepEqual(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_MAX_SEARCHES: '99', COWORK_WEB_MAX_FETCHES: '0', COWORK_WEB_COUNTRY: 'pe', COWORK_WEB_BLOCKED_DOMAINS: 'Spam.example, no es un dominio,otro.cl' }),
     { searches: 10, fetches: 0, maxPageTokens: 20_000, blockedDomains: ['spam.example', 'otro.cl'], country: 'PE' });
   assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_MAX_SEARCHES: '0', COWORK_WEB_MAX_FETCHES: '0' }), null, 'a web with nothing to spend is no web');
+  assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_BASIC: 'true' })?.basic, true, 'COWORK_WEB_BASIC=true asks for the tools without dynamic filtering');
+  assert.equal(coworkWebSettings({ COWORK_WEB_ENABLED: 'true', COWORK_WEB_BASIC: 'yes' })?.basic, undefined);
   assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_WEB_ENABLED: 'true' })?.web, coworkWebSettings({ COWORK_WEB_ENABLED: 'true' }));
 });
 

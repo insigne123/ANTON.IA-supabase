@@ -29,6 +29,24 @@ const page = (id: string, url: string, data: string): ContentBlock => ({
 const code: ContentBlock = { type: 'server_tool_use', id: 'srv_code', name: 'code_execution', input: { code: 'print(1)' } };
 const codeResult: ContentBlock = { type: 'code_execution_tool_result', tool_use_id: 'srv_code', content: { type: 'encrypted_code_execution_result', encrypted_stdout: 'xx' } };
 
+test('the basic tools are the ones without dynamic filtering, with the same limits and filters', () => {
+  const web = { searches: 4, fetches: 3, blockedDomains: ['spam.example'], country: 'CL', maxPageTokens: 20_000 };
+  const basic = webToolSpecs({ ...web, basic: true });
+  assert.deepEqual(basic.map(tool => [tool.type, tool.name, tool.max_uses]), [['web_search_20250305', 'web_search', 4], ['web_fetch_20250910', 'web_fetch', 3]]);
+  assert.deepEqual(basic.map(tool => tool.blocked_domains), [['spam.example'], ['spam.example']]);
+  assert.equal(basic[1].max_content_tokens, 20_000);
+  assert.deepEqual(webToolSpecs(web).map(tool => tool.type), ['web_search_20260209', 'web_fetch_20260209'], 'dynamic unless asked');
+});
+
+test('with a limit per call a model cannot spend the whole budget at once: the rest waits for the call that has seen the first results', () => {
+  const web = { searches: 8, fetches: 3, perCall: 3 };
+  assert.deepEqual(webToolSpecs(web).map(tool => [tool.name, tool.max_uses]), [['web_search', 3], ['web_fetch', 3]]);
+  assert.deepEqual(webToolSpecs(web, { webSearches: 3, webFetches: 1 }).map(tool => [tool.name, tool.max_uses]), [['web_search', 3], ['web_fetch', 2]]);
+  assert.deepEqual(webToolSpecs(web, { webSearches: 7 }).map(tool => [tool.name, tool.max_uses]), [['web_search', 1], ['web_fetch', 3]], 'never more than what is left');
+  assert.deepEqual(webToolSpecs(web, { webSearches: 8, webFetches: 3 }), []);
+  assert.equal(webToolSpecs({ searches: 4, fetches: 0 })[0].max_uses, 4, 'without a limit per call, the whole budget');
+});
+
 test('the web tools are offered whole until their budget is spent, and then they are not offered', () => {
   const web = { searches: 4, fetches: 3, blockedDomains: ['spam.example'], country: 'CL', timezone: 'America/Santiago', maxPageTokens: 20_000 };
   assert.deepEqual(webToolSpecs(web), [
