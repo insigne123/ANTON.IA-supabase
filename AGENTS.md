@@ -32,6 +32,7 @@ La direccion visual de esta app es la que resulte mas intuitiva y util para el o
 - Por defecto `gpt-6-luna` en OpenAI y `claude-haiku-5-5` en Anthropic. `claude-sonnet-5-5` solo en tareas muy complicadas, donde Haiku no alcanza.
 - Mide con muestras chicas, o en Haiku, antes de lanzar rondas grandes: no repitas el banco completo para comparar variantes; confirma solo la mejor. Una medicion pagada nueva se estima antes, lleva un tope de gasto e informa su costo real al terminar.
 - Las mediciones pagadas usan la llave de prueba (`ANTHROPIC_API_KEY_TEST`), nunca la de produccion.
+- Para medir calidad no hace falta la API: lee y juzga en la sesion lo ya generado (borradores, respuestas del agente, pantallas), y prueba la logica con modelos simulados. La API solo para generar con el modelo que se esta midiendo, en Haiku o Luna y con una muestra chica.
 
 ## Git y releases
 
