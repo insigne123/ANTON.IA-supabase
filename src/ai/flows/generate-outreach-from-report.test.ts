@@ -627,6 +627,35 @@ test('writing prompt anchors the factual terms the grounding check requires', as
   }
 });
 
+test('with DRAFT_ANCHOR_SPECIFICS_ENABLED the concrete datum leads the anchor terms; without it the prompt does not change', async () => {
+  const previous = { key: process.env.OPENAI_API_KEY, flag: process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED };
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Tema', opening: 'Acme abre vacantes en Antofagasta y Atacama.', value: 'Northstar ordena tareas.' }) } }], usage: {} });
+    };
+    const base = draftContextFixture();
+    const context = { ...base, evidence: base.evidence.map((item) => item.supportedFactClaimIds.includes('claim-acme-overview')
+      ? { ...item, statement: 'Acme mantiene vacantes abiertas en el norte de Chile, principalmente en Antofagasta y Atacama.' }
+      : item) };
+    delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED;
+    await generateOutreachFromDraftContextV2({ context });
+    assert.ok(prompt.includes('[{"statement":"Acme mantiene vacantes abiertas en el norte de Chile","subjectScope":"company"}]'), 'the first item of the list, as always');
+    assert.match(prompt, /conserva al menos dos de estos términos: Acme, mantiene, vacantes, abiertas, norte\./);
+    process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = 'true';
+    await generateOutreachFromDraftContextV2({ context });
+    assert.ok(prompt.includes('[{"statement":"Acme mantiene vacantes abiertas en el norte de Chile, principalmente en Antofagasta y Atacama.","subjectScope":"company"}]'), 'the whole statement, whose datum is in its last item');
+    assert.match(prompt, /conserva al menos dos de estos términos: Antofagasta, Atacama, mantiene, vacantes, abiertas\./);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previous.key === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous.key;
+    if (previous.flag === undefined) delete process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED; else process.env.DRAFT_ANCHOR_SPECIFICS_ENABLED = previous.flag;
+  }
+});
+
 test('priority-A drafts think at medium effort, overridable; rewrites and other accounts keep the default', () => {
   const previous = { write: process.env.OPENAI_DRAFT_PRIORITY_EFFORT, edit: process.env.OPENAI_DRAFT_PRIORITY_EDIT_EFFORT };
   try {

@@ -5,7 +5,7 @@ import {
   canonicalSha256,
   type MessagingPreflightV1,
 } from '@/lib/messaging-contracts';
-import { DRAFT_STYLE_ADVISORIES, isSignalLikeEvidence, type DraftContextV2 } from '@/lib/server/draft-context-v2';
+import { DRAFT_STYLE_ADVISORIES, draftAnchorSpecificsEnabled, isSignalLikeEvidence, type DraftContextV2 } from '@/lib/server/draft-context-v2';
 import { checkHumanTone } from '@/lib/server/human-tone-checks';
 
 export const DRAFT_PREFLIGHT_V2_VERSION = 'native-draft-preflight/v2';
@@ -144,10 +144,18 @@ function sellerSpeakingNames(seller: DraftContextV2['seller']) {
 
 const personalizationBoilerplate = /\b(?:ir al contenido|profile picture|email & phone number|facebook-f|linkedin-in|instagram|tiktok|youtube|search)\b|\.{3}/i;
 
-export function draftEvidencePersonalizationStatementV2(value: unknown) {
+/**
+ * The statement the writer is given to rest the email on, and the grounding check to look for. A list of services is narrowed to one of its items, so
+ * the email does not recite a catalogue; with DRAFT_ANCHOR_SPECIFICS_ENABLED a fact that names its datum after a comma keeps everything up to it
+ * (see statementThroughFirstDatum).
+ */
+export function draftEvidencePersonalizationStatementV2(value: unknown, options: { keepSpecifics?: boolean } = {}) {
   const statement = text(value);
   const conditionalClause = /,\s*(?:si\b|siempre que\b|aunque\b|cuando\b|porque\b|mientras\b|salvo\b|excepto\b|a menos que\b)/i.test(statement);
-  const focusedListItem = statement.includes(',') && hasEnumerationCue(statement) && !conditionalClause
+  const narrowable = statement.includes(',') && hasEnumerationCue(statement) && !conditionalClause;
+  const throughDatum = narrowable && (options.keepSpecifics ?? draftAnchorSpecificsEnabled()) ? statementThroughFirstDatum(statement) : undefined;
+  if (throughDatum) return throughDatum;
+  const focusedListItem = narrowable
     ? statement
       .split(',')
       .map(text)
@@ -174,6 +182,32 @@ export function draftEvidencePersonalizationStatementV2(value: unknown) {
         && !personalizationBoilerplate.test(candidate);
     });
   return excerpt || statement;
+}
+
+// Names that every statement about a Chilean company carries, and that say nothing about this one.
+const GENERIC_PROPER_NAME = /^(?:chile|chilen[oa]s?)$/;
+
+const startsSentence = (before: string) => /(?:^|[.!?:¿¡\n])[\s«"“'(\[—-]*$/u.test(before);
+
+/** A figure, or a capitalised word that does not open its sentence: the region, the position or the number an email can be about. */
+function isConcreteWord(word: string, sentenceStart: boolean) {
+  if (GENERIC_PROPER_NAME.test(normalizeForMatch(word))) return false;
+  return /\d/.test(word) || (word.length >= 4 && !sentenceStart && /^\p{Lu}/u.test(word));
+}
+
+/**
+ * «Enaex mantiene vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama, para conductores, técnicos…» is
+ * narrowed to its first item as a list, «Enaex mantiene vacantes abiertas en el norte de Chile», and the regions never reach the writer, nor the
+ * grounding check: the email says «vacantes en el norte», which fits any company that hires. When the first concrete datum comes after a comma, the
+ * statement keeps everything up to the item that has it, if that stays short enough to be one detail. Otherwise the usual narrowing applies.
+ */
+function statementThroughFirstDatum(statement: string) {
+  const datum = [...statement.matchAll(/[\p{L}\p{N}]+/gu)].find((match) => isConcreteWord(match[0], startsSentence(statement.slice(0, match.index ?? 0))));
+  if (!datum || datum.index === undefined) return undefined;
+  if (!statement.slice(0, datum.index).includes(',')) return undefined; // the first item has it: the usual narrowing keeps it
+  const end = statement.indexOf(',', datum.index);
+  const through = text(end === -1 ? statement : statement.slice(0, end));
+  return through.length <= 160 && wordCount(through) <= 24 && !personalizationBoilerplate.test(through) ? through : undefined;
 }
 
 function countOccurrences(value: string, phrase: string) {
@@ -287,16 +321,55 @@ function materialPersonalizationTerms(value: string) {
 // the check on the first attempt instead of paraphrasing them away and paying
 // for a full corrective regeneration.
 export function personalizationAnchorTerms(statement: string, max = 5): string[] {
-  const wanted = new Set(materialPersonalizationTerms(statement));
-  const anchors: string[] = [];
-  for (const word of String(statement || '').match(/[\p{L}\p{N}]{4,}/gu) || []) {
-    const term = normalizeForMatch(word).replace(/(?:es|os|as|s)$/u, '');
+  return anchorWords(statement).slice(0, max).map(({ word }) => word);
+}
+
+type AnchorWord = { word: string; term: string; sentenceStart: boolean; neighbours: string[] };
+
+const pluralStem = (word: string) => normalizeForMatch(word).replace(/(?:es|os|as|s)$/u, '');
+
+/** Every readable word behind a material term, once each, in order of appearance. */
+function anchorWords(statement: string): AnchorWord[] {
+  const text = String(statement || '');
+  const wanted = new Set(materialPersonalizationTerms(text));
+  const anchors: AnchorWord[] = [];
+  for (const match of text.matchAll(/[\p{L}\p{N}]{4,}/gu)) {
+    const word = match[0];
+    const term = pluralStem(word);
     if (!wanted.has(term)) continue;
     wanted.delete(term);
-    anchors.push(word);
-    if (anchors.length >= max) break;
+    const start = match.index ?? 0;
+    const before = text.slice(0, start);
+    anchors.push({
+      word,
+      term,
+      sentenceStart: startsSentence(before),
+      // The words right next to it (only a space between), as the text wrote them.
+      neighbours: [before.match(/([\p{L}\p{N}]+)[ \t]+$/u)?.[1], text.slice(start + word.length).match(/^[ \t]+([\p{L}\p{N}]+)/u)?.[1]].filter((item): item is string => Boolean(item)),
+    });
   }
   return anchors;
+}
+
+/**
+ * The same anchor terms with the concrete datum first (DRAFT_ANCHOR_SPECIFICS_ENABLED). In the order of appearance the five terms of «Enaex mantiene
+ * vacantes abiertas en el norte de Chile, principalmente en las regiones de Antofagasta y Atacama, para conductores…» are «Enaex, mantiene, vacantes,
+ * abiertas, norte», so the writer, asked for two of them, wrote «vacantes abiertas en el norte» and never the regions: the email passed the grounding
+ * check and said nothing that another company's could not. A concrete term is a figure or a capitalised word that is not the first of its sentence nor
+ * part of the company's own name («Besalco Construcciones»); at most three come first, the rest keep their order and the company's own words go last.
+ */
+export function specificAnchorTerms(statement: string, options: { companyName?: string; max?: number } = {}): string[] {
+  const max = options.max ?? 5;
+  const own = new Set(materialPersonalizationTerms(normalizeForMatch(options.companyName).replace(LEGAL_FORM, ' ')));
+  const capitalised = (word: string) => /^\p{Lu}/u.test(word);
+  const words = anchorWords(statement);
+  const isOwn = (item: AnchorWord) => own.has(item.term)
+    || (capitalised(item.word) && item.neighbours.some((neighbour) => capitalised(neighbour) && own.has(pluralStem(neighbour))));
+  const isConcrete = (item: AnchorWord) => !isOwn(item) && isConcreteWord(item.word, item.sentenceStart);
+  const concrete = words.filter(isConcrete).slice(0, 3);
+  const taken = new Set(concrete);
+  const rest = words.filter((item) => !taken.has(item) && !isOwn(item));
+  return [...concrete, ...rest, ...words.filter(isOwn)].slice(0, max).map(({ word }) => word);
 }
 
 function hasEnumerationCue(value: string) {

@@ -1,0 +1,63 @@
+# Borradores: de dónde sale lo genérico y qué se probó (23 de octubre de 2026)
+
+La lectura de los 8 borradores guardados (ver `docs/uso-como-persona-2026-10-23.md`) dejó tres sospechas: el gancho elegido a veces no sirve para vender nada (la Fiscalía Nacional Económica en el correo a Gasco, «Renca y Talagante son comunas» en el de Aguas Andinas), el dato concreto de la investigación no llega al correo («vacantes abiertas en el norte» cuando el hecho decía Antofagasta y Atacama) y el redactor repite la misma fórmula. Esta página dice qué se midió, qué se encontró y qué quedó en el código, apagado, para que lo enciendas tú.
+
+## Cómo se midió
+
+- **Autorización:** tope de US$2, solo Luna (OpenAI) y Haiku (Anthropic), llaves de prueba, sobre investigaciones ya guardadas (nada de volver a investigar). `scripts/spend-guard.mjs` se carga antes del script, rechaza cualquier otro modelo y deja de enviar al llegar al tope.
+- **Los mismos 8 casos de siempre:** Enaex, Aguas Andinas, Besalco, Sodexo Chile, SMU, Salfacorp, Ingevec y Gasco, con el perfil de AXIS. La investigación se reutiliza tal cual (`--reuse … --reuse-docs`): todos los brazos escriben sobre las mismas páginas y hechos, y solo cambia la bandera.
+- **Escribe Luna** (el modelo de producción) **y juzga Haiku**, con el juez de siempre (humano, específico, un solo pedido, tono, veracidad; el veredicto lo calcula el código). Dos repeticiones por brazo: 16 correos por brazo.
+- **El ruido es grande:** el mismo ajuste medido dos veces dio veracidad 4,25 y 3,75, y 4 y 9 correos de 16 que el juez manda a revisión humana. Una diferencia menor a medio punto no se distingue de la suerte. Por eso se agregaron dos medidas que no dependen de un puntaje: un conteo mecánico (¿el correo usa un gancho no apto?, ¿nombra el dato?) y una comparación por pares (cada correo frente al del control, en los dos órdenes, 32 juicios por variante).
+
+## Resultados
+
+| Brazo | Qué cambia | Humano | Específico | Tono | Veracidad | A revisión humana | Reintento | Gancho no apto | Enaex nombra la región |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `base-off` | hoy en producción (señales apagadas) | 2,81 | 3,06 | 3,94 | 3,44 | 11/16 | 8/16 | 6/16 | 0/2 |
+| `base-on`, `ctrl2` | `DRAFT_SIGNAL_EVIDENCE_ENABLED` (dos medidas del mismo ajuste) | 2,75 · 2,69 | 3,06 · 2,94 | 4,19 · 4,06 | 4,25 · 3,75 | 4/16 · 9/16 | 3/16 · 4/16 | 6/16 · 6/16 | 0/2 · 0/2 |
+| `rules` | + reglas de redacción en el prompt (**descartada**) | 2,62 | 3,00 | 3,94 | 3,62 | 9/16 | 5/16 | 6/16 | 0/2 |
+| `gate2` | + `DRAFT_HOOK_FILTER_ENABLED` | 2,69 | 3,06 | 3,88 | 4,44 | 6/16 | 3/16 | **2/16** | 0/2 |
+| `spec` | + `DRAFT_ANCHOR_SPECIFICS_ENABLED` | 2,56 | 2,88 | 4,19 | 4,56 | 4/16 | 4/16 | 6/16 | **2/2** |
+| `gate-spec` | las dos | 2,56 | 2,81 | 3,88 | 4,50 | 4/16 | 5/16 | **2/16** | **2/2** |
+
+Comparación por pares frente al control (1 = gana la variante; la fila `base-on` es la misma configuración que el control, así que mide el azar):
+
+| Variante | Enviaría | Más específico | Más humano | Afirmaciones sin respaldo (variante / control) |
+| --- | --- | --- | --- | --- |
+| `base-on` (azar) | 0,47 | 0,55 | 0,44 | 20 / 15 |
+| `gate2` | 0,56 | 0,44 | 0,41 | 13 / 19 |
+| `spec` | 0,66 | 0,61 | 0,42 | 16 / 17 |
+| `gate-spec` | **0,75** | 0,59 | 0,50 | **10 / 16** |
+
+## Qué se aprendió
+
+1. **Lo que más mueve es encender las señales** (`DRAFT_SIGNAL_EVIDENCE_ENABLED`, ya existía): la veracidad sube de 3,4 a entre 3,75 y 4,25 (dos medidas del ajuste encendido), los correos que el juez manda a revisión humana bajan de 11 de 16 a 4 y 9, y los reintentos del redactor a la mitad o menos (de 8 de 16 a 3 y 4). Entre los brazos que ya la tienen encendida, las diferencias de veracidad (3,75 a 4,56) caen dentro del ruido.
+2. **Pedirle al redactor que escriba mejor no funcionó.** Un bloque de reglas en el prompt («abre con el dato, no con la ficha…») bajó la veracidad a 3,6 y no subió ni «humano» ni «específico». Se probó y se quitó: no está en el código.
+3. **Los ganchos no aptos se pueden sacar antes de escribir.** El filtro (`isUnsuitableHookText`: glosas de boletín como «Who is who» o «conocida en el mercado como», «son comunas», y el debate de competencia de la FNE y el TDLC) pasa de 6 a 2 correos de 16 con un gancho no apto. Los 2 que quedan, en cada brazo con filtro, son «cortes de suministro en algunas comunas» (un hecho legítimo de Aguas Andinas). Actúa por oraciones: una noticia que dice «16 contratos por UF 5,4 millones» y después explica qué es un backlog conserva la primera y pierde la glosa. Una multa, una fiscalización o una reforma laboral **no** se filtran. Las expresiones se eligieron mirando a un vendedor de selección y revisión de personas como AXIS; para un vendedor de cumplimiento normativo, por ejemplo, el debate de competencia podría ser justamente el motivo para escribir, y ahí conviene dejar la bandera apagada.
+4. **Lo genérico de Enaex tenía una causa concreta.** `draftEvidencePersonalizationStatementV2` recorta un hecho con comas al primer elemento «para no recitar un catálogo», y ahí se iban las regiones: el redactor recibía «Enaex mantiene vacantes abiertas en el norte de Chile» y nada más. Con `DRAFT_ANCHOR_SPECIFICS_ENABLED` el hecho conserva todo hasta el primer dato concreto (una cifra o un nombre propio que no abre la oración ni es de la empresa) y los términos que se le piden al redactor empiezan por ese dato. Con la bandera, Enaex nombra Antofagasta y Atacama en sus dos intentos de cada brazo, y sin ella en ninguno de los 14 correos de los otros siete brazos (el conteo mecánico no depende del juez). En las demás empresas el dato concreto ya llegaba o no cambió. Una lista de servicios, un hecho condicional o un dato a seis elementos de distancia se recortan como siempre.
+5. **Juntas, las dos banderas ganan por pares:** el juez habría enviado el correo de `gate-spec` en 24 de 32 comparaciones (la misma configuración contra sí misma da 15 de 32) y marcó menos afirmaciones sin respaldo (10 contra 16). Las razones que da citan lo esperado: «A nombra Antofagasta y Atacama […] que sólo dice norte de Chile» (Enaex), «B agrega una definición genérica de backlog» (Ingevec), «conecta de forma forzada» la recomendación de la FNE (Gasco). Con 8 empresas y un solo juez no es una prueba, pero va en la dirección que el conteo mecánico confirma.
+
+## Lo que no se resolvió
+
+- **Ningún brazo pasa de «corregir»** (a lo más 1 «enviar» de 16). «Humano» sigue en 2,6 a 2,8 de 5.
+- **Palabras en inglés dentro de un correo en español** cuando el hecho viene de una página en inglés («la water utility que abastece Greater Santiago», Aguas Andinas). El filtro no lo toca.
+- **La fórmula del segundo párrafo.** De las 120 «frases más artificiales» que marcó el juez, 36 contienen «así el equipo…» («Así, el equipo puede hacer esa revisión sin gestionar cada consulta manualmente») y 37 «antecedentes laborales de postulantes». Viene del perfil: AXIS tiene una propuesta de valor y una prueba («un cliente en piloto»), y el redactor tiene prohibido agregar mecanismos o beneficios que el vendedor no declaró. **Lo que más le sirve al redactor es un perfil más rico** (cifras propias como «1.000 personas en unos 30 minutos», clientes nombrables). Eso lo completa quien administra el Perfil.
+- Un editor Claude sobre el borrador ya se midió y se descartó (`docs/cowork-claude-evaluacion-2026-10-23.md`): suena un poco más humano pero inventa inferencias y cuesta de 20 a 60 veces más.
+
+## Qué quedó en el código
+
+Todo apagado por defecto, con pruebas:
+
+| Bandera | Qué hace | Dónde |
+| --- | --- | --- |
+| `DRAFT_SIGNAL_EVIDENCE_ENABLED=true` (ya existía) | Las señales que eligió el análisis llegan al correo | `draft-context-v2.ts` |
+| `DRAFT_HOOK_FILTER_ENABLED=true` | Saca los ganchos no aptos antes de escribir, por oraciones | `research-fact-eligibility.ts`, `draft-context-v2.ts` |
+| `DRAFT_ANCHOR_SPECIFICS_ENABLED=true` | El hecho conserva su dato concreto y los términos que se piden lo nombran primero | `draft-preflight-v2.ts`, `generate-outreach-from-report.ts` |
+
+Recomendación: encender las tres juntas para una cuenta o una campaña piloto y mirar los borradores. Para volver atrás se quita la variable. Un aviso: `DRAFT_ANCHOR_SPECIFICS_ENABLED` cambia el hecho contra el que la verificación de personalización busca términos; un borrador escrito con ella encendida puede no pasar esa verificación si se vuelve a validar con ella apagada. Conviene cambiarla entre campañas, no a mitad de una.
+
+`scripts/spend-guard.mjs` queda para cualquier medición futura con llaves de prueba: `SPEND_CAP_USD=1.5 SPEND_LEDGER=<archivo> node --import ./scripts/spend-guard.mjs …`.
+
+## Gasto
+
+La guardia estima al doble de la lista de precios de la app (para Haiku 5.5 la lista coincide con el precio publicado: US$0,10 de entrada y US$0,50 de salida por millón; para Luna es la de la app), de modo que el cálculo solo puede equivocarse hacia arriba. Todo lo de esta página (cinco brazos de la primera ronda, cuatro de la segunda, la comparación por pares y las conversaciones de Cowork de `docs/uso-como-persona-2026-10-23.md`): **estimado US$1,60, a precio de lista unos US$0,80** de los US$2 autorizados.

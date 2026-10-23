@@ -6,7 +6,9 @@ import {
   isHardRejectedResearchUrl,
   isHardRejectedResearchText,
   isSensitiveEventText,
+  isUnsuitableHookText,
   mentionsResearchCompany,
+  withoutUnsuitableSentences,
 } from './research-fact-eligibility';
 
 test('hard-rejected challenge text cannot be diluted with substantive-looking padding', () => {
@@ -70,6 +72,40 @@ test('a death, an accident or a disaster is a sensitive event, the safety servic
     'Acme ofrece seguros de vida y de salud para empresas.',
     '',
   ]) assert.equal(isSensitiveEventText(fact), false, fact);
+});
+
+test('a gloss and the debate on the competition of the market are no reason to write, a fine, an inspection or a labour reform stay', () => {
+  for (const text of [
+    '—Who is who Aguas Andinas is the regulated utility that supplies drinking water, and Colina, Recoleta, Renca and Talagante are communes of the Santiago region.',
+    'El backlog, conocido en el mercado como cartera pendiente por ejecutar, es un indicador de la evolución del negocio.',
+    'La cartera de obras, conocida en el mercado como backlog, es un indicador de la evolución del negocio.',
+    'La FNE recomendó ante la Comisión de Economía del Senado prohibir la participación de Gasco, Lipigas y Abastible en la distribución minorista.',
+    'El Tribunal de Defensa de la Libre Competencia revisa una colusión en el mercado del gas licuado.',
+    'Renca y Talagante son comunas de la Región Metropolitana.',
+  ]) assert.equal(isUnsuitableHookText(text), true, text);
+  for (const text of [
+    'Acme abrió 10 vacantes de auxiliar de bodega en Lima y busca 5 operarios de planta en Arequipa.',
+    'La Dirección del Trabajo fiscalizó tres faenas de Acme y cursó una multa por jornadas excesivas.',
+    'La reforma laboral que reduce la jornada a 40 horas obliga a Acme a reorganizar sus turnos.',
+    'Acme se adjudicó 16 contratos nuevos por UF 5,4 millones en el primer semestre.',
+    'Acme presta servicios de agua potable y alcantarillado a la Región Metropolitana.',
+    '',
+  ]) assert.equal(isUnsuitableHookText(text), false, text);
+});
+
+test('a fact loses its unsuitable sentences and keeps the rest, and is empty when nothing is left', () => {
+  assert.equal(
+    withoutUnsuitableSentences('Acme se adjudicó 16 contratos nuevos por UF 5,4 millones. El backlog, conocido en el mercado como cartera pendiente, mide lo que falta por ejecutar. Esto abre obras en Antofagasta.'),
+    'Acme se adjudicó 16 contratos nuevos por UF 5,4 millones. Esto abre obras en Antofagasta.',
+  );
+  assert.equal(withoutUnsuitableSentences('  Acme abrió 10 vacantes.   Acme busca 5 operarios.  '), 'Acme abrió 10 vacantes. Acme busca 5 operarios.');
+  assert.equal(withoutUnsuitableSentences('La FNE recomendó prohibir la participación de Acme.'), '');
+  // A figure with a thousands separator or a legal form is not cut in the middle, and what is left must say something.
+  assert.equal(withoutUnsuitableSentences('Acme se adjudicó contratos por 5.400 millones, según la FNE. Opera en tres regiones.'), 'Opera en tres regiones.');
+  assert.equal(withoutUnsuitableSentences('Acme S.A. fue citada por la FNE. Abrió.'), '');
+  assert.equal(withoutUnsuitableSentences('Acme abrió sucursal'), 'Acme abrió sucursal');
+  assert.equal(withoutUnsuitableSentences(''), '');
+  assert.equal(withoutUnsuitableSentences(undefined), '');
 });
 
 test('ordinary navigation remains a conservative length-bounded generic filter', () => {

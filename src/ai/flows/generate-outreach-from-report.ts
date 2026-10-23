@@ -15,6 +15,7 @@ import { SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outre
 import { selectOutreachStrategy } from '@/lib/outreach-evidence-ranking';
 import {
   DraftContextV2Schema,
+  draftAnchorSpecificsEnabled,
   requiredReportAwareDraftPersonalizationV2,
   type DraftContextV2,
 } from '@/lib/server/draft-context-v2';
@@ -23,6 +24,7 @@ import {
   draftEvidencePersonalizationStatementV2,
   draftSellerStatementsV2,
   personalizationAnchorTerms,
+  specificAnchorTerms,
   GeneratedOutreachV2Schema,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
@@ -384,8 +386,11 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   // two material terms of the evidence statement inside a single sentence.
   // Naming them prevents paraphrase drift and the full corrective retry it
   // triggers (~11K input tokens per failure), without changing compliant copy.
+  const specifics = draftAnchorSpecificsEnabled();
   const anchorLines = requiredEvidence
-    .map((item) => personalizationAnchorTerms(item.statement))
+    .map((item) => specifics
+      ? specificAnchorTerms(item.statement, { companyName: input.context.company.name || '' })
+      : personalizationAnchorTerms(item.statement))
     .filter((terms) => terms.length > 0)
     .map((terms) => (terms.length === 1
       ? `conserva este término: ${terms[0]}`

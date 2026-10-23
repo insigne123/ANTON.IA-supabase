@@ -80,6 +80,38 @@ export function isSensitiveEventText(value: unknown) {
   ].some((pattern) => pattern.test(normalized));
 }
 
+/**
+ * A text an opening should not be built on (DRAFT_HOOK_FILTER_ENABLED), as a death is not: a gloss written for a newsletter reader («Who is who»,
+ * «conocido en el mercado como») and the debate on the competition of the company's market (the FNE, the TDLC, collusion). In a real run of eight
+ * companies one email opened with «La FNE recomendó restringir la participación de Gasco…» and bridged it with «En ese contexto, el trabajo de
+ * Personas…», and another said that Renca and Talagante are communes. A fine, an inspection or a labour reform stay: for some seller they are the
+ * reason to write.
+ */
+export function isUnsuitableHookText(value: unknown) {
+  const normalized = researchTextKey(value);
+  if (!normalized) return false;
+  return [
+    /\bwho is who\b/,
+    /\b(?:glosario|se define como|conocid[oa]s? en el mercado como|se conoce en el mercado como|known in the market as)\b/,
+    /\b(?:are|son) (?:the |las |los )?(?:communes|comunas|districts|municipalities)\b/,
+    /\b(?:fne|fiscalia nacional economica|tribunal de defensa de la libre competencia|tdlc|libre competencia|colusion)\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * A fact without the sentences of it that an opening should not be built on (isUnsuitableHookText): a news paragraph that says «16 contratos nuevos»
+ * and then explains what a backlog is keeps the first and loses the gloss. A full stop closes a sentence only before a space or the end, so a figure
+ * («5.400») or a name («S.A.») is not cut in the middle. Empty when nothing of substance is left (fewer than four words).
+ */
+export function withoutUnsuitableSentences(value: unknown) {
+  const whole = text(value);
+  const sentences = whole.match(/.+?(?:[.!?]+(?=\s|$)|$)\s*/g) || [];
+  const kept = sentences.filter((sentence) => !isUnsuitableHookText(sentence));
+  if (kept.length === sentences.length) return whole;
+  const rest = kept.join('').replace(/\s+/g, ' ').trim();
+  return (rest.match(/[\p{L}\p{N}]{2,}/gu) || []).length >= 4 ? rest : '';
+}
+
 export function isHardRejectedResearchUrl(value: unknown) {
   const url = safeResearchUrl(value);
   if (!url) return false;
