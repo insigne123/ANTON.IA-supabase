@@ -63,9 +63,9 @@ Orden sugerido, con una cuenta y mirando una semana: `RESEARCH_SIGNAL_HARVEST_EN
 
 ```bash
 # Investigación → informe → correo, 8 empresas, modos: sin (solo el sitio), con (investigador de páginas), pro (con + cosecha)
-ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_TEST" node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts --modes=sin,con,pro
+ANTHROPIC_API_KEY=... node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts --modes=sin,con,pro
 # Lo mismo con el borrador de las señales, sobre los mismos informes de una corrida anterior (solo cambia el paso del borrador)
-DRAFT_SIGNAL_EVIDENCE_ENABLED=true ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_TEST" node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts --modes=pro --reuse=<carpeta> --reuse-docs
+DRAFT_SIGNAL_EVIDENCE_ENABLED=true ANTHROPIC_API_KEY=... node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts --modes=pro --reuse=<carpeta> --reuse-docs
 ```
 
 Usa `OPENAI_API_KEY` (Luna) para la investigación, el informe y el correo, y Claude para el investigador, la cosecha y el juez; cuesta del orden de US$0,1 a 0,2 por empresa y modo.

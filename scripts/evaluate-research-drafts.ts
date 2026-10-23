@@ -6,7 +6,7 @@
 // What it measures that evaluate-research-sources.ts does not: how much of the research survives the report (audit, angle, freshness,
 // «mentions the company») and the draft context filters, and what the email says once it does.
 //
-// ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_TEST" node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts \
+// ANTHROPIC_API_KEY=... node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-research-drafts.ts \
 //   [--targets=Enaex,Besalco] [--modes=sin,con,pro] [--out=dir] [--concurrency=3] [--reuse=dir [--reuse-docs]]
 // Modes: sin = only the company's own site, con = plus the researcher that picks pages, pro = con plus the Claude that picks the signals out of
 // the facts (RESEARCH_SIGNAL_HARVEST_ENABLED). `pro` reads the research of `con` (from --reuse, or it runs it) so both see the same pages.
