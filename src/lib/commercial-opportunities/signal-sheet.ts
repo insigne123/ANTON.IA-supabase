@@ -113,7 +113,7 @@ export function buildSignalSheet(input: SheetInput): SignalSheet | null {
   const observed = observedReasons(facts, now);
   const radarReasons = (item.reasons ?? []).filter(Boolean).slice(0, 4);
 
-  const pulse: Pulse = hiring ? hiringPulse(hiring) : postPulse(post!, now);
+  const pulse: Pulse = hiring ? hiringPulse(hiring, now) : postPulse(post!, now);
   const legacy = legacyApproach(report);
   const buyers: SheetBuyer[] = brief?.buyers.length
     ? brief.buyers.map(buyer => ({ ...buyer, searchUrl: linkedinSearchUrl(buyer.title, title) }))
@@ -182,9 +182,9 @@ function observedReasons(facts: HiringFacts | PostFacts, now: number): string[] 
   ].slice(0, 4);
 }
 
-function hiringPulse(facts: HiringFacts): Pulse {
+function hiringPulse(facts: HiringFacts, now: number): Pulse {
   const { ads, adsLastWeek, windowDays, pace } = facts;
-  const last = daysSince(facts.lastPostedAt);
+  const last = daysSince(facts.lastPostedAt, now);
   const lastWeekNote = pace?.times && pace.times >= 1.5 ? `${number(pace.times, 1)} veces su ritmo anterior` : pace && pace.priorWeekly > 0 ? 'ritmo parecido al anterior' : undefined;
   return {
     kind: 'hiring',
