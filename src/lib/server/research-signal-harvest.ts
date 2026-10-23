@@ -1,7 +1,7 @@
 // Signals for the research, picked by a Claude from the facts the pipeline already read. The extraction of claims is conservative on purpose
 // (a signal needs the date of the event, and a list of job openings is not one), and for a seller whose offer depends on hiring that leaves
 // the best reason to write, «10 vacantes de bodega en Antofagasta, publicadas el 12 de octubre», out of the report, and so out of the email:
-// in a real research of eight Chilean companies the report kept 78 recent facts and the email got one generic claim.
+// in a run over eight Chilean companies none of the signals the extraction left was less than 30 days old, which is all the draft takes.
 // The Claude here reads the facts of the pages (never the web) with the seller's offer in mind and hands back a few signals. Each one is
 // accepted only if what it says is in the facts it cites: its date is the date of the page or one written in the fact, every number and
 // proper name it uses is in the cited text, and it names the company. What comes out is an ordinary claim (dimension signal, supported by
