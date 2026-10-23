@@ -3,10 +3,11 @@
 -- decision waits there as a proposal; the worker that already runs every minute claims the tasks that are due (src/lib/server/cowork/
 -- schedules.ts). One row per task. The owner reads their own rows with their session, while they have Cowork access; only the server
 -- writes, with the service role, after checking the request (the cadence, the limits and who the task belongs to).
--- «status» is proposed (Cowork suggested it and the person has not approved it), active or paused; only an active task has a next
+-- «status» is active or paused (proposed is kept for a task that waits for the person's go-ahead); only an active task has a next
 -- firing. At most 5 active tasks and 20 in all per person: the server checks it and the trigger below is the backstop.
 -- Forward-only and inert on its own: nothing reads or writes it until the app ships its half, behind COWORK_SCHEDULES_ENABLED
--- (off by default). The kind «schedule_create» joins the vocabulary of effects for the proposals Cowork will make from a chat.
+-- (off by default). The person creates a task from a card in the chat or from the list of tasks; there is no effect to approve, so
+-- the vocabulary of effects stays as it is.
 create table public.cowork_scheduled_tasks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -68,28 +69,3 @@ $$;
 revoke all on function public.cowork_scheduled_tasks_guard() from public, anon, authenticated;
 create trigger cowork_scheduled_tasks_guard before insert or update on public.cowork_scheduled_tasks
   for each row execute function public.cowork_scheduled_tasks_guard();
-
--- The new kind of effect, in the two places that know the vocabulary: the check of the proposals table and the list inside
--- cowork_propose_effect. Its installed definition is transformed instead of copied (as 20261007120000_cowork_task_plan_effect.sql
--- does), so everything earlier migrations added stays exactly as it is. «create or replace» keeps the owner and privileges.
-alter table public.cowork_effect_proposals drop constraint cowork_effect_proposals_kind_check;
-alter table public.cowork_effect_proposals add constraint cowork_effect_proposals_kind_check
-  check (kind in ('save_contact', 'start_research', 'request_draft', 'enrich_contact',
-    'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
-    'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete',
-    'campaign_stop_v2', 'crm_update_record', 'campaign_prepare_draft_v2',
-    'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update',
-    'enrich_batch', 'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message',
-    'contacts_import', 'reply_thread', 'linkedin_invite_batch', 'linkedin_message_batch',
-    'campaign_retry', 'enrich_phone', 'lead_prepare_batch', 'memory_save', 'task_plan', 'schedule_create'));
-
-do $$
-declare target regprocedure := to_regprocedure('public.cowork_propose_effect(uuid,uuid,text,uuid,text,text)');
-  definition text; changed text;
-begin
-  if target is null then raise exception 'cowork_propose_effect is missing'; end if;
-  definition := pg_get_functiondef(target);
-  changed := replace(definition, '''task_plan'') then', '''task_plan'',''schedule_create'') then');
-  if changed = definition then raise exception 'The list of effects of cowork_propose_effect was not found'; end if;
-  execute changed;
-end $$;

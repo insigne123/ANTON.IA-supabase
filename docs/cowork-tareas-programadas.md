@@ -2,7 +2,7 @@
 
 **Qué falta frente a Claude Cowork:** Cowork solo trabaja cuando la persona escribe. Una tarea programada es un pedido que se repite («cada lunes a las 9, dime quién respondió y a quién escribir hoy», «todas las mañanas, revisa si hay respuestas nuevas»): a la hora indicada Cowork abre una conversación nueva con ese pedido y lo atiende solo.
 
-**Apagado por defecto.** Necesita la migración `20261023120000_cowork_scheduled_tasks.sql` (la tabla y el tipo de efecto `schedule_create`) y `COWORK_SCHEDULES_ENABLED=true`. La migración está escrita y tiene su prueba pgTAP (corre en el CI), pero **no se ha aplicado a producción**: esa decisión es de quien despliega.
+**Apagado por defecto.** Necesita la migración `20261023120000_cowork_scheduled_tasks.sql` (la tabla `cowork_scheduled_tasks`) y `COWORK_SCHEDULES_ENABLED=true`. La migración está escrita y tiene su prueba pgTAP (corre en el CI), pero **no se ha aplicado a producción**: esa decisión es de quien despliega.
 
 ## Cómo funciona
 
@@ -40,4 +40,4 @@
 - `src/lib/cowork/schedules.test.ts`: próxima hora para cada frecuencia, cambios de hora de Chile (salto adelante, salto atrás), zonas, entrada validada, textos.
 - `src/lib/server/cowork/schedules.test.ts`: crear con límites, pausar y reanudar, cambiar el horario, tareas ajenas, una ejecución por hora aunque dos workers la vean, atrasos, fallas y pausa, acceso revocado, «ejecutar ahora».
 - `src/app/api/cowork/schedules/schedules-route.test.ts`: las rutas actúan por la sesión, no por el cuerpo; apagado, errores.
-- `supabase/tests/database/cowork_scheduled_tasks.test.sql`: RLS, restricciones, límites y el nuevo tipo de efecto.
+- `supabase/tests/database/cowork_scheduled_tasks.test.sql`: RLS, restricciones y límites.

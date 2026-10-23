@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(19);
+select plan(17);
 
 -- The verified owner (the only Cowork account today) and an outsider.
 insert into auth.users (id, email, email_confirmed_at)
@@ -102,15 +102,6 @@ select set_config('request.jwt.claim.sub', 'd0000000-0000-4000-8000-000000000002
 set local role authenticated;
 select is_empty($$select 1 from public.cowork_scheduled_tasks$$, 'another member sees none');
 reset role;
-
--- The new kind of effect is accepted and the earlier ones are still in the list.
-select ok(pg_get_functiondef('public.cowork_propose_effect(uuid,uuid,text,uuid,text,text)'::regprocedure) like '%''schedule_create''%'
-  and pg_get_functiondef('public.cowork_propose_effect(uuid,uuid,text,uuid,text,text)'::regprocedure) like '%''task_plan''%'
-  and pg_get_functiondef('public.cowork_propose_effect(uuid,uuid,text,uuid,text,text)'::regprocedure) like '%''memory_save''%',
-  'cowork_propose_effect names the new kind and keeps the earlier ones');
-select is((select count(*)::integer from pg_constraint where conrelid = 'public.cowork_effect_proposals'::regclass
-  and conname = 'cowork_effect_proposals_kind_check' and pg_get_constraintdef(oid) like '%schedule_create%' and pg_get_constraintdef(oid) like '%task_plan%'), 1,
-  'the check of the proposals table names the new kind and keeps the earlier ones');
 
 select * from finish();
 rollback;
