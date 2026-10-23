@@ -78,7 +78,7 @@ test('the message of a firing says what it is, when it fired, the request word f
   const message = coworkScheduleMessage({ title: 'Resumen del lunes', prompt: '  Dime quién respondió esta semana.  ' }, new Date('2026-10-26T12:00:00Z'), 'America/Santiago');
   const lines = message.split('\n');
   assert.equal(lines[0], `${COWORK_SCHEDULE_MARK} · Resumen del lunes`);
-  assert.equal(lines[1], 'lunes, 26 de octubre, 09:00');
+  assert.equal(lines[1], 'lunes 26 de octubre, 09:00');
   assert.ok(message.includes('\nDime quién respondió esta semana.\n'), 'the request, trimmed');
   assert.match(message, /Ejecución automática/);
   assert.equal(coworkIsScheduledMessage(message), true);

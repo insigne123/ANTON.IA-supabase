@@ -48,6 +48,73 @@ export default () => [
         c.check('hay un botón para aprobar y uno para descartar', await c.page.getByRole('button', { name: /Aprobar/ }).first().isVisible().catch(() => false) && await c.page.getByRole('button', { name: /Descartar/ }).first().isVisible().catch(() => false));
       } },
     ] },
+  // The scheduled tasks are off in production: AUDIT_COWORK_SCHEDULES=true turns them on for this bench (COWORK_SCHEDULES_ENABLED).
+  ...(process.env.AUDIT_COWORK_SCHEDULES === 'true' ? [
+    { id: 'cowork-tareas-programadas', persona: 'owner', title: 'Ver mis tareas programadas y programar una nueva',
+      goal: 'Saber qué hace Cowork por mí cada semana, cuándo corre la próxima vez, y crear una tarea nueva con un pedido que ya escribí.',
+      steps: [
+        { say: 'Abro Cowork', do: async c => { await c.go('/cowork'); await c.see('Investiga qué hace Sodexo Chile'); } },
+        { say: 'Abro «Tareas programadas» desde el pie de la lista', do: async c => {
+          await c.click({ role: 'button', name: 'Tareas programadas' });
+          await c.see('Resumen del lunes');
+          c.check('cada tarea dice cuándo corre', await c.has('Los lunes a las 09:00') && await c.has('De lunes a viernes a las 08:30') && await c.has('El día 1 de cada mes a las 18:00'));
+          c.check('la tarea activa dice cuándo es la próxima vez y la pausada, que está pausada', await c.has('Próxima:') && await c.has('Pausada porque no pudo iniciarse tres veces seguidas'));
+          c.check('se cuenta cuántas hay activas', await c.has('2 de 5 activas'));
+          c.check('hay una sola acción principal', await c.page.getByRole('button', { name: 'Nueva tarea' }).count() === 1);
+        } },
+        { say: 'Abro el menú de la tarea pausada', do: async c => {
+          await c.click({ role: 'button', name: /Opciones de «Respuestas nuevas de la mañana»/ });
+          c.check('el menú ofrece ejecutarla, editarla, reanudarla y eliminarla', await c.has('Ejecutar ahora') && await c.has('Editar') && await c.has('Reanudar') && await c.has('Eliminar'));
+          await c.page.keyboard.press('Escape');
+        } },
+        { say: 'Pulso «Nueva tarea»', do: async c => {
+          await c.click({ role: 'button', name: 'Nueva tarea' });
+          await c.see('Qué debe hacer');
+          const labels = await c.page.locator('label').allInnerTexts();
+          c.check('cada campo tiene su etiqueta', ['Nombre', 'Qué debe hacer', 'Con qué frecuencia', 'A las', 'Qué día'].every(label => labels.some(text => text.includes(label))), labels.join(' | '));
+          c.check('el formulario tiene Programar y Cancelar', await c.page.getByRole('button', { name: 'Programar' }).isVisible() && await c.page.getByRole('button', { name: 'Cancelar' }).isVisible());
+        } },
+        { say: 'Reviso que nada desborde', do: async c => {
+          const overflow = await c.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+          c.check('sin desborde horizontal', overflow <= 1, `${overflow}px`);
+        } },
+      ] },
+    { id: 'cowork-programar-pedido', persona: 'owner', title: 'Programar un pedido que acabo de escribir',
+      goal: 'Escribir un pedido con su horario y programarlo sin volver a escribirlo.',
+      steps: [
+        { say: 'Abro Cowork y escribo el pedido', do: async c => {
+          await c.go('/cowork');
+          // The page has to be alive before it is typed on: a text typed while it loads is dropped when it wakes up.
+          await c.see('Para hoy');
+          await c.wait(1500);
+          await c.fill({ label: 'Escribe tu mensaje' }, 'Cada lunes a las 9, dime a quién escribir hoy');
+        } },
+        { say: 'Pulso «Programar este pedido»', do: async c => {
+          await c.click({ role: 'button', name: 'Programar este pedido' });
+          await c.see('Qué debe hacer');
+          const form = c.page.getByRole('dialog');
+          c.check('el nombre sale del pedido, sin las palabras del horario', await form.locator('input[maxlength="80"]').inputValue() === 'Dime a quién escribir hoy');
+          c.check('el pedido queda tal como se escribió', await form.locator('textarea').inputValue() === 'Cada lunes a las 9, dime a quién escribir hoy');
+          c.check('el horario sale del pedido: una vez por semana, a las 09:00', await form.locator('select').first().inputValue() === 'weekly' && await form.locator('input[type="time"]').inputValue() === '09:00');
+        } },
+      ] },
+    { id: 'cowork-tareas-programadas-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: ver mis tareas programadas',
+      goal: 'Leer la lista de tareas y abrir el formulario en una pantalla angosta, sin desbordes.',
+      steps: [
+        { say: 'Abro Cowork y la lista de conversaciones', do: async c => {
+          await c.go('/cowork');
+          await c.see('Para hoy');
+          await c.wait(1500);
+          await c.click({ role: 'button', name: 'Mostrar conversaciones' });
+        } },
+        { say: 'Abro «Tareas programadas»', do: async c => {
+          await c.click({ role: 'button', name: 'Tareas programadas' });
+          await c.see('Resumen del lunes');
+          const overflow = await c.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+          c.check('sin desborde horizontal', overflow <= 1, `${overflow}px`);
+        } },
+      ] },
+  ] : []),
   { id: 'cowork-telefono', persona: 'owner', viewport: 'phone', title: 'Desde el teléfono: retomar la investigación con la web',
     goal: 'Leer la respuesta y sus fuentes en una pantalla angosta.',
     steps: [

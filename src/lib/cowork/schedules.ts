@@ -147,7 +147,8 @@ export function describeCoworkSchedule(schedule: CoworkSchedule) {
 /** «lunes 26 de octubre, 09:00» in the zone of the task. */
 export function coworkScheduleWhen(at: Date, timeZone: string) {
   const zone = coworkTimeZone(timeZone);
-  const day = new Intl.DateTimeFormat('es-CL', { timeZone: zone, weekday: 'long', day: 'numeric', month: 'long' }).format(at);
+  // «lunes 26 de octubre»: the locale puts a comma after the weekday, which nobody writes.
+  const day = new Intl.DateTimeFormat('es-CL', { timeZone: zone, weekday: 'long', day: 'numeric', month: 'long' }).format(at).replace(/^(\S+),\s+/, '$1 ');
   const hour = new Intl.DateTimeFormat('es-CL', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at);
   return `${day}, ${hour}`;
 }
