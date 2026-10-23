@@ -35,9 +35,17 @@ const SUPPORTED_FORMATS = new Set(['date-time', 'time', 'date', 'duration', 'ema
 const JSON_TEXT = { type: 'string', description: 'El valor en JSON, escrito como texto.' };
 const isAnyValue = (value: unknown) => Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.keys(value as object).length === 0;
 
+/** The API does not take a length or an item count, so it travels as words in the description, where the model still reads it. */
+function sizeHint(node: Record<string, unknown>) {
+  return [
+    typeof node.maxLength === 'number' ? `Máximo ${node.maxLength} caracteres.` : '',
+    typeof node.maxItems === 'number' ? `Máximo ${node.maxItems} elementos.` : '',
+  ].filter(Boolean).join(' ');
+}
+
 /** The schema's JSON for structured outputs: every object closed and without the constraints the API does not
- * take (lengths, ranges, item counts). The answer is still validated with the full schema afterwards. `jsonText` names the
- * properties sent as JSON text. */
+ * take (lengths, ranges, item counts); the limits on size stay in the descriptions. The answer is still validated with the
+ * full schema afterwards. `jsonText` names the properties sent as JSON text. */
 export function claudeSchemaPlan(schema: z.ZodTypeAny): { json: Record<string, unknown>; jsonText: Set<string> } {
   const jsonText = new Set<string>();
   const clean = (value: unknown): unknown => {
@@ -53,6 +61,8 @@ export function claudeSchemaPlan(schema: z.ZodTypeAny): { json: Record<string, u
         }))
         : clean(item)]);
     const node = Object.fromEntries(entries) as Record<string, unknown>;
+    const hint = sizeHint(value as Record<string, unknown>);
+    if (hint) node.description = [typeof node.description === 'string' ? node.description : '', hint].filter(Boolean).join(' ');
     if (node.type === 'object' || (Array.isArray(node.type) && node.type.includes('object')) || node.properties) node.additionalProperties = false;
     return node;
   };
@@ -112,6 +122,47 @@ export function claudeKnownKeys(value: unknown, json: Record<string, unknown>) {
   const properties = json.properties && typeof json.properties === 'object' ? json.properties as Record<string, unknown> : null;
   if (!properties || !value || typeof value !== 'object' || Array.isArray(value)) return value;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([key]) => key in properties));
+}
+
+/** The longest limit a text is cut back to without asking the model again: a title, a reason; never a body someone reads whole. */
+const CUT_UP_TO = 600;
+
+/** A text cut at the last space that fits, closed with «…» so it reads as cut. */
+export function claudeCut(text: string, max: number) {
+  if (text.length <= max) return text;
+  if (max < 2) return text.slice(0, Math.max(0, max));
+  const room = max - 1;
+  const head = text.slice(0, room).replace(/[\uD800-\uDBFF]$/, '');
+  const space = head.lastIndexOf(' ');
+  return `${(space > room * 0.6 ? head.slice(0, space) : head).replace(/[\s,;:.\-–—]+$/, '')}…`;
+}
+
+type TooBigIssue = { code?: string; type?: string; maximum?: number | bigint; inclusive?: boolean; exact?: boolean; path?: Array<string | number> };
+type Container = Record<string | number, unknown>;
+
+/** The answer with the short texts and the lists that went over a limit the format cannot state cut back to it (the format only holds
+ * what the schema checks afterwards). Null when anything else is wrong, or when the text is one a person reads whole: that goes back
+ * to the model. `cut` names where. */
+export function claudeClamp(value: unknown, error: unknown): { value: unknown; cut: string[] } | null {
+  const issues = (error as { issues?: TooBigIssue[] } | null)?.issues;
+  if (!Array.isArray(issues) || !issues.length || !value || typeof value !== 'object') return null;
+  const clone = structuredClone(value) as Container;
+  const cut: string[] = [];
+  for (const issue of issues) {
+    const path = issue.path || [];
+    if (issue.code !== 'too_big' || issue.exact || !path.length || typeof issue.maximum !== 'number') return null;
+    let parent: unknown = clone;
+    for (const key of path.slice(0, -1)) parent = parent && typeof parent === 'object' ? (parent as Container)[key] : undefined;
+    if (!parent || typeof parent !== 'object') return null;
+    const holder = parent as Container;
+    const key = path[path.length - 1];
+    const max = issue.maximum - (issue.inclusive === false ? 1 : 0);
+    if (issue.type === 'string' && typeof holder[key] === 'string' && max <= CUT_UP_TO) holder[key] = claudeCut(holder[key] as string, max);
+    else if (issue.type === 'array' && Array.isArray(holder[key])) holder[key] = (holder[key] as unknown[]).slice(0, max);
+    else return null;
+    cut.push(path.join('.'));
+  }
+  return { value: clone, cut };
 }
 
 export function claudeJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
@@ -289,15 +340,26 @@ export async function generateClaudeStructured<T extends z.ZodTypeAny>(
     if (message.stop_reason === 'max_tokens') throw withTelemetry(new Error('CLAUDE_MAX_TOKENS: the answer did not fit in max_tokens.'));
     return message.content.filter(block => block.type === 'text').map(block => block.text || '').join('').trim();
   };
-  const read = (text: string) => opts.schema.parse(fits ? claudeReadJsonText(JSON.parse(text), plan.jsonText) : claudeKnownKeys(JSON.parse(claudeJsonText(text)), plan.json));
+  const read = (text: string) => {
+    const value = fits ? claudeReadJsonText(JSON.parse(text), plan.jsonText) : claudeKnownKeys(JSON.parse(claudeJsonText(text)), plan.json);
+    try {
+      return opts.schema.parse(value);
+    } catch (error) {
+      // A short text or a list a little over a limit the format cannot state is cut back to it, not asked for again.
+      const clamped = claudeClamp(value, error);
+      if (!clamped) throw error;
+      return opts.schema.parse(clamped.value);
+    }
+  };
   try {
     signal?.throwIfAborted();
     const text = await ask();
     try {
       return { data: read(text), telemetry: telemetry() };
     } catch (error) {
-      // Without the format nothing holds the answer to the schema: one correction, told what was wrong, before giving up.
-      if (fits || signal?.aborted) throw withTelemetry(error);
+      // Neither the format nor the large schema's instruction holds every limit the schema checks (lengths, ranges, item counts, rules):
+      // one correction, told what was wrong, before giving up.
+      if (signal?.aborted) throw withTelemetry(error);
       const repaired = await ask({ previous: text, problem: claudeProblem(error) });
       try { return { data: read(repaired), telemetry: telemetry() }; } catch (again) { throw withTelemetry(again); }
     }

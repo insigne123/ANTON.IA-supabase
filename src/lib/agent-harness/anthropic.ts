@@ -34,16 +34,34 @@ export function requestMessages(messages: Message[]): RequestMessage[] {
   return converted;
 }
 
+/** A line of text at the end of the last message, after its blocks, keeping the cache breakpoint on the last block. */
+function appendNote(messages: RequestMessage[], text: string) {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user') { messages.push({ role: 'user', content: [{ type: 'text', text, cache_control: { type: 'ephemeral' } }] }); return; }
+  const blocks: RequestBlock[] = typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : last.content.map(({ cache_control: _cache, ...block }) => block);
+  last.content = [...blocks, { type: 'text', text, cache_control: { type: 'ephemeral' } }];
+}
+
+/** Sonnet 5.5, Opus 5.5 and Fable 5.1 answer a forced tool, and thinking turned off, with a 400 (they think on every turn). */
+const REJECTS_FORCED_TOOL = /^claude-(?:sonnet-5-5|opus-5-5|fable-5-1|mythos-5-1)\b/;
+
 export function anthropicRequest(request: ModelRequest, model: string) {
   const effort = request.effort ?? 'low';
-  const forced = request.toolChoice?.type === 'tool' || request.toolChoice?.type === 'any';
+  const asked = request.toolChoice?.type === 'tool' || request.toolChoice?.type === 'any';
+  // Where a tool cannot be forced, the last round offers only the final tool and asks for it: a call to it, or the text of the answer, ends the turn.
+  const rejected = asked && REJECTS_FORCED_TOOL.test(model);
+  const forced = asked && !rejected;
+  const toolChoice = rejected ? { type: 'auto' as const } : request.toolChoice;
+  const messages = requestMessages(request.messages);
+  // Nothing forces it, so it is said: after the results of the round, in the same turn (the cached prefix before it is the same).
+  if (rejected && request.toolChoice?.type === 'tool') appendNote(messages, `Esta es la última ronda del turno: entrega la respuesta ahora con la herramienta ${request.toolChoice.name}, con lo que ya tienes. Ya no puedes consultar ni proponer nada más.`);
   return {
     model,
     max_tokens: (request.maxTokens ?? 6_000) + THINKING_ROOM[effort],
     system: [{ type: 'text' as const, text: request.system, cache_control: { type: 'ephemeral' as const } }],
-    messages: requestMessages(request.messages),
+    messages,
     ...(request.tools.length ? { tools: request.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema })) } : {}),
-    ...(request.tools.length && request.toolChoice ? { tool_choice: request.toolChoice } : {}),
+    ...(request.tools.length && toolChoice ? { tool_choice: toolChoice } : {}),
     // A forced tool call cannot be preceded by thinking.
     ...(forced ? { thinking: { type: 'disabled' as const } } : {}),
     output_config: { effort },

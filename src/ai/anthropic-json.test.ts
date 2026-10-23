@@ -3,7 +3,7 @@ import test from 'node:test';
 import { z } from 'zod';
 
 import {
-  claudeContent, claudeEffort, claudeFormatFits, claudeJsonSchema, claudeJsonText, claudeReadJsonText, claudeRequest, claudeSchemaPlan, claudeUsage, generateClaudeStructured, isClaudeModel, type ClaudeClient,
+  claudeClamp, claudeContent, claudeCut, claudeEffort, claudeFormatFits, claudeJsonSchema, claudeJsonText, claudeReadJsonText, claudeRequest, claudeSchemaPlan, claudeUsage, generateClaudeStructured, isClaudeModel, type ClaudeClient,
 } from './anthropic-json';
 import { generateStructuredWithTelemetry, isProviderQuotaExhausted, openAiReasoningEffort } from './openai-json';
 import { coworkModelUsage } from '@/lib/server/cowork/model-usage';
@@ -139,20 +139,89 @@ test('a Claude answer comes back validated, streamed to the preview and with its
 });
 
 test('a refusal, a cut answer or invalid JSON fail with their usage kept', async () => {
-  for (const [message, pattern] of [
-    [{ stop_reason: 'refusal' }, /CLAUDE_REFUSAL/],
-    [{ stop_reason: 'max_tokens' }, /CLAUDE_MAX_TOKENS/],
-    [{ text: '{"reply":' }, /JSON/],
-    [{ text: JSON.stringify({ ...answer, blocks: [] }) }, /at least 1|too_small|Array must contain/i],
+  for (const [message, pattern, calls] of [
+    [{ stop_reason: 'refusal' }, /CLAUDE_REFUSAL/, 1],
+    [{ stop_reason: 'max_tokens' }, /CLAUDE_MAX_TOKENS/, 1],
+    // An answer that misses the schema gets one correction before it fails: both calls are paid.
+    [{ text: '{"reply":' }, /JSON/, 2],
+    [{ text: JSON.stringify({ ...answer, blocks: [] }) }, /at least 1|too_small|Array must contain/i, 2],
   ] as const) {
     const { client } = fakeClient(message);
     await assert.rejects(generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema }, client), (error: unknown) => {
       assert.match(String((error as Error).message), pattern);
       const telemetry = (error as { structuredTelemetry?: { usage?: { completion_tokens?: number } } }).structuredTelemetry;
-      assert.equal(telemetry?.usage?.completion_tokens, 300, 'a paid answer keeps its usage');
+      assert.equal(telemetry?.usage?.completion_tokens, 300 * calls, 'a paid answer keeps its usage');
       return true;
     });
   }
+});
+
+test('the schema tells the model the sizes the format cannot hold', () => {
+  const json = claudeJsonSchema(z.object({
+    reason: z.string().max(300).describe('Por qué.'),
+    steps: z.array(z.string().max(120)).max(3),
+    free: z.string(),
+  }).strict());
+  const properties = json.properties as Record<string, { description?: string; items?: { description?: string } }>;
+  assert.equal(properties.reason.description, 'Por qué. Máximo 300 caracteres.', 'the description stays and the size follows');
+  assert.equal(properties.steps.description, 'Máximo 3 elementos.');
+  assert.equal(properties.steps.items?.description, 'Máximo 120 caracteres.');
+  assert.equal(properties.free.description, undefined, 'a field without a limit says nothing');
+  assert.ok(!JSON.stringify(json).includes('"maxLength"'), 'the keyword itself still never travels');
+});
+
+test('a text is cut at a word, closed with «…», and never past its limit', () => {
+  const text = 'Revisar las bases administrativas y técnicas antes de postular por el plazo de cierre';
+  const cut = claudeCut(text, 40);
+  assert.ok(cut.length <= 40 && cut.endsWith('…') && !cut.includes('  '), cut);
+  assert.equal(cut, 'Revisar las bases administrativas y…', 'at the last space that fits, without a loose word');
+  assert.equal(claudeCut('corto', 40), 'corto');
+  assert.equal(claudeCut('x'.repeat(100), 10), `${'x'.repeat(9)}…`, 'a text without spaces is cut where it must');
+  assert.ok(claudeCut(`${'a'.repeat(8)}😀😀😀`, 10).length <= 10 && !/[\uD800-\uDBFF]…$/.test(claudeCut(`${'a'.repeat(9)}😀😀😀`, 11)), 'never in the middle of an emoji');
+});
+
+test('only a short text or a list over its limit is cut back; anything else goes to the model', () => {
+  const limits = z.object({ reply: z.string().max(40), steps: z.array(z.string().max(30)).max(2), body: z.string().max(1000), count: z.number().max(5) }).strict();
+  const parse = (value: unknown) => { try { limits.parse(value); return null; } catch (error) { return error; } };
+  const base = { reply: 'Listo.', steps: ['a', 'b'], body: 'Hola', count: 1 };
+
+  const long = { ...base, reply: 'Esta respuesta es bastante más larga de lo que el esquema permite', steps: ['a', 'b', 'c', 'd'] };
+  const clamped = claudeClamp(long, parse(long));
+  assert.ok(clamped, 'a short text and a list are cut');
+  assert.deepEqual(clamped.cut, ['reply', 'steps']);
+  assert.doesNotThrow(() => limits.parse(clamped.value));
+  assert.equal((long.steps as string[]).length, 4, 'the answer it was given is not changed');
+
+  const body = { ...base, body: 'x'.repeat(1500) };
+  assert.equal(claudeClamp(body, parse(body)), null, 'a body someone reads whole is not cut');
+  const number = { ...base, count: 9 };
+  assert.equal(claudeClamp(number, parse(number)), null, 'a number is not cut');
+  const mixed = { ...base, reply: 'y'.repeat(60), steps: 'no es una lista' };
+  assert.equal(claudeClamp(mixed, parse(mixed)), null, 'a different problem next to it goes to the model');
+});
+
+test('an answer a little over a limit is cut back and costs no second call', async () => {
+  const requests: unknown[] = [];
+  const over = { ...answer, question: `${'¿Quieres que lo ajuste para el sector minero y la zona norte? '.repeat(10)}`, blocks: Array.from({ length: 5 }, () => answer.blocks[0]) };
+  const client: ClaudeClient = { messages: { stream: params => { requests.push(params);
+    return { on: () => undefined, finalMessage: async () => ({ model: 'claude-haiku-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(over) }], usage: { input_tokens: 100, output_tokens: 10 } }) }; } } };
+  const result = await generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema }, client);
+  assert.equal(requests.length, 1);
+  assert.equal(result.data.blocks.length, 3);
+  assert.ok((result.data.question || '').length <= 400 && (result.data.question || '').endsWith('…'));
+});
+
+test('an answer that misses the schema in a way a cut cannot fix gets one correction, even with the format', async () => {
+  const requests: Array<ReturnType<typeof claudeRequest>> = [];
+  const answers = [{ ...answer, blocks: [{ ...answer.blocks[0], body: 'x'.repeat(13000) }] }, answer];
+  const client: ClaudeClient = { messages: { stream: params => { requests.push(params);
+    return { on: () => undefined, finalMessage: async () => ({ model: 'claude-haiku-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(answers[requests.length - 1]) }], usage: { input_tokens: 100, output_tokens: 10 } }) }; } } };
+  const result = await generateClaudeStructured({ model: 'claude-haiku-5-5', prompt: 'p', schema }, client);
+  assert.deepEqual(result.data, answer);
+  assert.equal(requests.length, 2);
+  assert.ok(requests[1].output_config.format, 'the correction keeps the format');
+  assert.ok(String(requests[1].messages[2].content).includes('blocks.0.body'), 'it names the field that was too long');
+  assert.equal(result.telemetry.usage.prompt_tokens, 200, 'both calls are paid');
 });
 
 test('an exhausted Anthropic account stops like an exhausted OpenAI one', () => {
