@@ -112,3 +112,10 @@ test('an invalid citation in a section the draft does not read does not discard 
   assert.ok(reportEvidence(build(reportWithSignal({ auditIssue: company }), true)) > 0);
   assert.equal(reportEvidence(build(reportWithSignal({ auditIssue: angle }), true)), 0, 'the angle is what the draft reads');
 });
+
+test('a signal about a death or a disaster is neither quoted nor are its facts offered, whatever the analysis chose', () => {
+  const context = build(reportWithSignal({ statement: 'Acme informó con profundo pesar el fallecimiento de dos trabajadores en su operación de Arequipa.' }), true);
+  const statements = context.evidence.filter((item) => item.provenance?.kind === 'report_v2').map((item) => item.statement);
+  assert.ok(!statements.some((statement) => /fallecimiento|Auxiliar de Bodega|operarios de planta/.test(statement)), statements.join(' | '));
+  assert.ok(statements.includes('Acme ayuda a equipos de operaciones a reducir trabajo manual.'), 'what the angle cites is still there');
+});
