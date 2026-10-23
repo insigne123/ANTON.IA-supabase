@@ -77,6 +77,12 @@ const SELLER = normalizeDraftSellerProfileV2({
   description: 'Yago automatiza una verificación repetitiva sobre las personas que una empresa contrata.',
   proofPoints: ['Un cliente en piloto ya lo usa a diario en reclutamiento'],
 });
+// --seller=rich: the same AXIS profile with the figure the research already uses for it (1 000 people in about 30 minutes) as a proof point and in the
+// value proposition, to see how much of the writer's «forced bridge» is a thin profile.
+if (arg('seller') === 'rich') Object.assign(SELLER, {
+  valueProposition: 'Revisa antecedentes laborales de postulantes con consultas judiciales automáticas, sin trámites manuales: procesa 1.000 personas en unos 30 minutos.',
+  proofPoints: ['Procesa 1.000 postulantes en unos 30 minutos', 'Un cliente en piloto ya lo usa a diario en reclutamiento'],
+});
 const RECIPIENT_ROLE = 'Gerente de Personas';
 const researcher = claudeWebSourcesSettings({ ...process.env, RESEARCH_CLAUDE_WEB_ENABLED: 'true' });
 const NOW = Date.now();
