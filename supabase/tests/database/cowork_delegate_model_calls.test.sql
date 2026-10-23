@@ -105,7 +105,7 @@ select throws_ok(
   'P0001', 'Model budget exhausted', 'a delegate call over 40 000 tokens in the turn is refused'
 );
 select isnt(public.cowork_reserve_model_call('b2000000-0000-4000-8000-000000000023', 'b4000000-0000-4000-8000-000000000023', 'reviewer'), null,
-  'the tokens of the delegates are not the others\'');
+  'the tokens of the delegates are not those of the others');
 
 -- Only the lease holder of a running turn.
 select throws_ok(
@@ -122,10 +122,10 @@ insert into public.cowork_model_calls (run_id, user_id, organization_id, role, o
 select 'b2000000-0000-4000-8000-000000000025', 'b0000000-0000-4000-8000-000000000021', 'b1000000-0000-4000-8000-000000000021', 'coordinator', 100
 from generate_series(1, 199);
 select isnt(public.cowork_reserve_model_call('b2000000-0000-4000-8000-000000000026', 'b4000000-0000-4000-8000-000000000026', 'delegate'), null,
-  'the two hundredth call of a conversation fits, a delegate\'s too');
+  'the two hundredth call of a conversation fits, for a delegate too');
 select throws_ok(
   $$select public.cowork_reserve_model_call('b2000000-0000-4000-8000-000000000026', 'b4000000-0000-4000-8000-000000000026', 'delegate')$$,
-  'P0001', 'Conversation model budget exhausted', 'the two hundred and first is refused with the conversation\'s reason'
+  'P0001', 'Conversation model budget exhausted', 'the two hundred and first is refused with the reason of the conversation'
 );
 
 -- The usage of a delegate call is recorded under the lease of the run, like the coordinator's, once.
