@@ -124,3 +124,53 @@ test('a researcher that fails costs only the pages it would have found, and one 
     { ...withResearcher([]), claudeWeb: null, discover: async () => { called += 1; return null as any; } });
   assert.equal(called, 0);
 });
+
+const harvestSettings = { model: 'claude-sonnet-5-5', maxSignals: 3, maxFacts: 80, recencyDays: 30, deadlineMs: 30_000 };
+const FACT_ID = 'f_aaaaaaaaaa';
+const withFacts = (extra: Record<string, unknown> = {}) => ({
+  ...withResearcher([]), claudeWeb: null,
+  extract: async ({ sources }: { sources: Array<{ source: { id: string } }> }) => ({
+    sources: sources.map((source) => source.source),
+    facts: [{ id: FACT_ID, sourceId: sources[0]!.source.id, text: 'Acme busca 5 operarios de planta en Arequipa, con postulacion hasta el 30 de octubre.', observedAt: null, jurisdiction: null, locator: 'block:1' }],
+    claimDrafts: [], results: [], failedSourceIds: [],
+  }) as any,
+  ...extra,
+}) as any;
+const signalDraft = {
+  internalId: 'f_bbbbbbbbbb', type: 'fact', dimension: 'signal', targetField: 'recent_events', statement: 'Acme busca 5 operarios de planta en Arequipa, con postulacion hasta el 30 de octubre.',
+  evidenceIds: [FACT_ID], observedAt: '2026-10-20T12:00:00.000Z', freshnessDays: 3, jurisdiction: null, scope: 'company', confidence: 0.72,
+};
+
+test('with the signal harvest on, the signals a Claude picks out of the facts join the claims of the research, and it is told the facts, the role and the offer', async () => {
+  const seen: any[] = [];
+  const result = await gatherReportV2Research({ projection, sellerProfile: { products: [{ key: 'p', name: 'AXIS', description: 'revisa antecedentes de postulantes' }] }, organizationId: 'org', language: 'es', generatedAt: '2026-10-23T12:00:00.000Z' }, withFacts({
+    signalHarvest: harvestSettings,
+    harvest: async (request: unknown) => { seen.push(request); return { drafts: [signalDraft], candidates: 4, picked: 2, rejected: ['indirect'], usage: { inputTokens: 900, outputTokens: 60 } }; },
+  }));
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].companyName, 'Acme');
+  assert.equal(seen[0].contactTitle, 'Director');
+  assert.equal(seen[0].sellerOffer, 'AXIS: revisa antecedentes de postulantes');
+  assert.equal(seen[0].today, '2026-10-23T12:00:00.000Z');
+  assert.deepEqual(seen[0].facts.map((fact: { id: string }) => fact.id), [FACT_ID]);
+  assert.ok(seen[0].sources.length > 0);
+  assert.equal(JSON.stringify(seen[0]).includes('Ada'), false, 'the name of the person does not leave');
+  const signals = result.claims.filter((claim) => claim.dimension === 'signal');
+  assert.equal(signals.length, 1);
+  assert.deepEqual(signals[0]!.evidenceIds, [FACT_ID]);
+  assert.equal(signals[0]!.observedAt, '2026-10-20T12:00:00.000Z');
+  assert.deepEqual(result.researchMetrics.signalHarvest, { candidates: 4, picked: 2, accepted: 1, inputTokens: 900, outputTokens: 60 });
+});
+
+test('a signal harvest that fails costs only the signals, and one that is off is not called', async () => {
+  const failing = await gatherReportV2Research({ projection, sellerProfile: { products: [] }, organizationId: 'org', language: 'es' },
+    withFacts({ signalHarvest: harvestSettings, harvest: async () => { throw new Error('anthropic down'); } }));
+  assert.ok(failing.researchWarnings.includes('signal_harvest_unavailable'));
+  assert.equal('signalHarvest' in failing.researchMetrics, false);
+  assert.ok(failing.researchMetrics.pages > 0);
+  let called = 0;
+  const harvest = async () => { called += 1; return null as any; };
+  await gatherReportV2Research({ projection, sellerProfile: { products: [] }, organizationId: 'org', language: 'es' }, withFacts({ signalHarvest: null, harvest }));
+  await gatherReportV2Research({ projection, sellerProfile: { products: [] }, organizationId: 'org', language: 'es' }, withFacts({ harvest }));
+  assert.equal(called, 0, 'off by default and with null');
+});

@@ -15,6 +15,7 @@ import {
 } from './company-research-artifacts';
 import { gatherReportV2Research, REPORT_V2_RESEARCH_VERSION } from './research-report-v2-research';
 import { claudeWebSourcesSettings } from './claude-web-sources';
+import { signalHarvestSettings } from './research-signal-harvest';
 
 const PROVIDER_VERSION = 'report-v2/public-research/v1';
 const TTL_MS = 24 * 60 * 60 * 1000;
@@ -107,6 +108,8 @@ export async function loadOrGatherReportV2Research(input: Parameters<typeof gath
       researchVersion: REPORT_V2_RESEARCH_VERSION,
       // With the researcher that picks the pages (RESEARCH_CLAUDE_WEB_ENABLED) the evidence is not the same: a copy made without it is not reused.
       ...(claudeWebSourcesSettings() ? { claudeWebSources: 1 } : {}),
+      // Likewise with the signals a Claude picks out of the facts (RESEARCH_SIGNAL_HARVEST_ENABLED).
+      ...(signalHarvestSettings() ? { signalHarvest: 1 } : {}),
       companyName: entity.companyName, companyDomain: entity.companyDomain,
       contactCountry: entity.contactCountry, contact: entity.contact,
       language: input.language,

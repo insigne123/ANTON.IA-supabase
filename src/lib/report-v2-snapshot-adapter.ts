@@ -15,7 +15,7 @@ import {
   type SourceV2,
 } from '@/lib/report-v2-contracts';
 import { buildStableReportV2Id } from '@/lib/report-v2-ids';
-import { canonicalResearchUrl, resolveEntityFromExistingContextV2, truncateAtWord } from '@/lib/report-v2-extraction';
+import { canonicalResearchUrl, resolveEntityFromExistingContextV2, truncateWithin } from '@/lib/report-v2-extraction';
 import { ResearchSnapshotV1Schema, type ResearchClaimKindV1, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import { qualifyEntityV2, type IcpRulesV2 } from '@/qualification/icp-gate';
 
@@ -110,7 +110,7 @@ function headcountFromClaims(claims: ClaimV2[], country: EntityResolutionV2['con
 }
 
 function validationQuestion(statement: string) {
-  return truncateAtWord(`¿Que evidencia confirmaria esta hipotesis: ${statement.replace(/[?!.]+$/, '')}?`, 500)
+  return truncateWithin(`¿Que evidencia confirmaria esta hipotesis: ${statement.replace(/[?!.]+$/, '')}?`, 500)
     .replace(/\.{3}$/, '?');
 }
 
@@ -189,10 +189,10 @@ export function projectResearchSnapshotV1ToReportV2(input: {
     return [FactV2Schema.parse({
       id,
       sourceId,
-      text: truncateAtWord(evidence.statement, 2_000),
+      text: truncateWithin(evidence.statement, 2_000),
       observedAt: instant(evidence.observedAt),
       jurisdiction: source.jurisdiction,
-      locator: evidence.locator ? truncateAtWord(`${evidence.locator.kind}:${evidence.locator.value}`, 500) : null,
+      locator: evidence.locator ? truncateWithin(`${evidence.locator.kind}:${evidence.locator.value}`, 500) : null,
     })];
   }).sort((left, right) => left.id.localeCompare(right.id));
   const factsById = new Map(facts.map((fact) => [fact.id, fact]));
@@ -204,7 +204,7 @@ export function projectResearchSnapshotV1ToReportV2(input: {
     const evidenceIds = [...new Set(claim.supportingEvidenceIds.map((id) => factIdMap.get(id)).filter((id): id is string => Boolean(id)))];
     const supportingFacts = evidenceIds.map((id) => factsById.get(id)).filter((fact): fact is FactV2 => Boolean(fact));
     const observedAt = newestObservedAt(supportingFacts);
-    const statement = truncateAtWord(claim.statement, 220);
+    const statement = truncateWithin(claim.statement, 220);
     const base = {
       id: 'c00',
       internalId: claim.id,

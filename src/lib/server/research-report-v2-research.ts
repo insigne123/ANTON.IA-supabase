@@ -16,6 +16,7 @@ import { searchSerper } from './serper-search';
 import { publicCompanyCoverageWarnings, type PublicCompanyReference } from '@/lib/public-company-research-contracts';
 import { mergePublicCompanyProjection } from '@/lib/public-company-research-adapter';
 import { claudeWebSourcesSettings, findResearchSourcesWithClaude, type ClaudeWebSourcesSettings } from './claude-web-sources';
+import { harvestResearchSignals, signalHarvestSettings, type SignalHarvestSettings } from './research-signal-harvest';
 
 export const REPORT_V2_RESEARCH_VERSION = `report-v2/research/1:${RESOLVE_ENTITY_V2_PROMPT_VERSION}:${PLAN_REPORT_V2_PROMPT_VERSION}:${EXTRACT_REPORT_V2_CLAIMS_PROMPT_VERSION}`;
 
@@ -90,7 +91,11 @@ async function mapLimited<T, R>(items: T[], limit: number, fn: (item: T) => Prom
   return results;
 }
 
-type ResearchRunMetrics = { queries: number; pages: number; elapsedMs: number; claudeWeb?: { sources: number; searches: number; reads: number } };
+type ResearchRunMetrics = {
+  queries: number; pages: number; elapsedMs: number;
+  claudeWeb?: { sources: number; searches: number; reads: number };
+  signalHarvest?: { candidates: number; picked: number; accepted: number; inputTokens: number; outputTokens: number };
+};
 
 export async function gatherReportV2Research(input: {
   projection: ReportV2SnapshotProjection;
@@ -112,6 +117,9 @@ export async function gatherReportV2Research(input: {
   /** RESEARCH_CLAUDE_WEB_ENABLED: a Claude that searches the web picks the pages worth reading. `null` leaves it off whatever the environment says. */
   claudeWeb?: ClaudeWebSourcesSettings | null;
   discover?: typeof findResearchSourcesWithClaude;
+  /** RESEARCH_SIGNAL_HARVEST_ENABLED: a Claude picks the signals (events with a date) out of the facts the pages gave. `null` leaves it off whatever the environment says. */
+  signalHarvest?: SignalHarvestSettings | null;
+  harvest?: typeof harvestResearchSignals;
 } = {}) {
   const started = Date.now();
   if (input.publicCompanyResearch) {
@@ -222,7 +230,20 @@ export async function gatherReportV2Research(input: {
     : (dependencies.extract || extractClaimsFromSourcesV2)({ companyName: entity.companyName, companyDomain: domain, sources: chunk, providerContext: entity.contact, capturedAt: input.generatedAt || new Date().toISOString() }, { generate })))
     .filter((result): result is Awaited<ReturnType<typeof extractClaimsFromSourcesV2>> => result !== null);
   const facts = results.flatMap((result) => result.facts);
-  const consolidated = consolidateReportV2Claims({ drafts: results.flatMap((result) => result.claimDrafts), facts });
+  const extractedDrafts = results.flatMap((result) => result.claimDrafts);
+  // The extraction keeps a signal for an event with the date of the event; the Claude here also reads a dated notice of vacancies, an
+  // announcement or a contract as the reason to write that it is, and every signal it adds must be in the facts it cites.
+  const harvestSettings = dependencies.signalHarvest !== undefined ? dependencies.signalHarvest : signalHarvestSettings();
+  const harvested = harvestSettings && facts.length ? await (dependencies.harvest || harvestResearchSignals)({
+    companyName: entity.companyName, companyDomain: domain, country: entity.contactCountry, contactTitle: entity.contact.title, department: entity.contact.department,
+    sellerOffer: sellerOfferSummary(input.sellerProfile), sources: sources.map((source) => source.source), facts,
+    existingSignals: extractedDrafts.filter((draft) => draft.dimension === 'signal').map((draft) => draft.statement), today: input.generatedAt, signal,
+  }, harvestSettings).catch(() => { warnings.push('signal_harvest_unavailable'); return null; }) : null;
+  const harvestMetrics: Pick<ResearchRunMetrics, 'signalHarvest'> = harvested ? { signalHarvest: {
+    candidates: harvested.candidates, picked: harvested.picked, accepted: harvested.drafts.length,
+    inputTokens: harvested.usage?.inputTokens ?? 0, outputTokens: harvested.usage?.outputTokens ?? 0,
+  } } : {};
+  const consolidated = consolidateReportV2Claims({ drafts: [...extractedDrafts, ...(harvested?.drafts ?? [])], facts });
   if (results.some((result) => result.failedSourceIds.length)) warnings.push('some_claims_unavailable');
   if (consolidated.conflicts.length) warnings.push('conflicting_source_figures');
   const projection: ReportV2SnapshotProjection = consolidated.claims.length ? {
@@ -233,6 +254,6 @@ export async function gatherReportV2Research(input: {
   return {
     ...projection,
     researchWarnings: warnings,
-    researchMetrics: { queries: searches.length, pages: sources.length, elapsedMs: Date.now() - started, ...claudeMetrics },
+    researchMetrics: { queries: searches.length, pages: sources.length, elapsedMs: Date.now() - started, ...claudeMetrics, ...harvestMetrics },
   };
 }
