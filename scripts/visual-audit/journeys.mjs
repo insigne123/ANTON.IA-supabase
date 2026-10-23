@@ -91,7 +91,8 @@ function makeActions({ page, supabase, state }) {
 async function runJourney(browser, built, supabase, journey, index) {
   supabase.reset('full');
   const viewport = VIEWPORTS[journey.viewport || 'desktop'];
-  const context = await browser.newContext({ viewport, locale: 'es-CL', timezoneId: 'America/Santiago', reducedMotion: 'reduce' });
+  // --scheme=dark: the journeys run as someone whose system is dark (the app follows it); by default they run light, as always.
+  const context = await browser.newContext({ viewport, locale: 'es-CL', timezoneId: 'America/Santiago', reducedMotion: 'reduce', colorScheme: args.scheme === 'dark' ? 'dark' : 'light' });
   const userId = journey.persona === 'member' ? built.ctx.MEMBER : built.ctx.OWNER;
   await context.addCookies([authCookie(built.personas[userId], { appUrl: APP_URL })]);
   const writes = [];

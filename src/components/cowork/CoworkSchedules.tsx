@@ -5,7 +5,6 @@ import { CalendarClock, LoaderCircle, MoreHorizontal, Pause, Pencil, Play, Plus,
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { COWORK_SCHEDULE_LIMITS, coworkScheduleWhen, type CoworkScheduleFrequency } from '@/lib/cowork/schedules';
-import { coworkShortTime } from '@/lib/cowork/presentation';
 import { coworkScheduleHint } from '@/lib/cowork/schedule-hint';
 import { cn } from '@/lib/utils';
 import { CwButton } from './ui';
@@ -36,11 +35,22 @@ const bodyOf = (draft: Draft) => ({
   ...(draft.frequency === 'weekly' ? { weekday: draft.weekday } : {}), ...(draft.frequency === 'monthly' ? { monthDay: draft.monthDay } : {}),
 });
 
+/** When the task ran last, as the person counts it: today at its time, yesterday, a few days ago, or the date. */
+export function coworkScheduleLastRun(iso: string, now = new Date()) {
+  const then = new Date(iso);
+  const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((day(now) - day(then)) / 86_400_000);
+  if (days <= 0) return `hoy a las ${then.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  if (days === 1) return 'ayer';
+  if (days < 7) return `hace ${days} días`;
+  return `el ${then.toLocaleDateString('es-CL', { day: 'numeric', month: 'long' })}`;
+}
+
 /** The line under a task: when it fires next, or why it does not, and what happened the last time. */
 export function coworkScheduleStatusLine(task: CoworkScheduledTaskView, now = new Date()) {
   const next = task.status === 'active' && task.nextRunAt ? `Próxima: ${coworkScheduleWhen(new Date(task.nextRunAt), task.timeZone)}` : 'Pausada';
   if (task.status === 'paused' && task.lastStatus === 'failed') return 'Pausada porque no pudo iniciarse tres veces seguidas';
-  const last = task.lastStatus === 'admitted' && task.lastRunAt ? `Última vez: ${coworkShortTime(task.lastRunAt, now)}`
+  const last = task.lastStatus === 'admitted' && task.lastRunAt ? `Última vez: ${coworkScheduleLastRun(task.lastRunAt, now)}`
     : task.lastStatus === 'skipped' ? 'La última vez se omitió: el sistema estaba detenido'
       : task.lastStatus === 'failed' ? 'La última vez no pudo iniciarse y se reintenta' : '';
   return [next, last].filter(Boolean).join(' · ');
