@@ -13,7 +13,7 @@ test('Cowork rejects incomplete configuration and ignores legacy provider select
 
 test('the harness runtime needs the Anthropic key and a worker, and no OpenAI model', () => {
   const harness = { COWORK_WORKER_ENABLED: 'true', COWORK_WORKER_SECRET: 'test-secret', COWORK_RUNTIME: 'harness', ANTHROPIC_API_KEY: 'test-key' };
-  assert.deepEqual(resolveCoworkRuntime(harness), { ready: true, provider: 'anthropic', model: 'claude-sonnet-5-5' });
+  assert.deepEqual(resolveCoworkRuntime(harness), { ready: true, provider: 'anthropic', model: 'claude-haiku-5-5' });
   assert.deepEqual(resolveCoworkRuntime({ ...harness, COWORK_HARNESS_MODEL: 'claude-haiku-5-5' }), { ready: true, provider: 'anthropic', model: 'claude-haiku-5-5' });
   for (const key of ['COWORK_WORKER_ENABLED', 'COWORK_WORKER_SECRET', 'ANTHROPIC_API_KEY']) {
     assert.equal(resolveCoworkRuntime({ ...harness, [key]: '' }).ready, false);
@@ -23,7 +23,7 @@ test('the harness runtime needs the Anthropic key and a worker, and no OpenAI mo
 
 test('an expensive coordinator is never run: the standard runtime answers as with the harness off', () => {
   const standard = { COWORK_WORKER_ENABLED: 'true', COWORK_WORKER_SECRET: 'test-secret', COWORK_MODEL: 'gpt-6-luna', OPENAI_API_KEY: 'test-key', ANTHROPIC_API_KEY: 'test-key', COWORK_RUNTIME: 'harness' };
-  for (const model of ['claude-opus-5-5', 'claude-fable-5-1', 'gpt-6-sol']) {
+  for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'gpt-6-sol']) {
     assert.deepEqual(resolveCoworkRuntime({ ...standard, COWORK_HARNESS_MODEL: model }), { ready: true, provider: 'openai', model: 'gpt-6-luna' }, model);
   }
 });

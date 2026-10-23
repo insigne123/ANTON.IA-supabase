@@ -204,11 +204,11 @@ Es una mejora real pero pequeña (ruido entre corridas de ±0,3; 8 empresas): cu
 
 | Decisión | Recomendación | Qué mirar |
 | --- | --- | --- |
-| Encender el harness (`COWORK_RUNTIME=harness`) | **Sí, con pocas personas** (`COWORK_HARNESS_USER_IDS`), no para todos de una vez. La llave de Anthropic ya está cableada en `apphosting.yaml`; falta que `COWORK_MODEL_PRICING_JSON` traiga el precio de `claude-sonnet-5-5` (hoy solo tiene `claude-haiku-5-5`: sin precio el consumo se registra con costo desconocido, no bloquea) | Costo por turno (unos US$0,10 contra US$0,002), segundos por turno, y que `turn.rescued` con `harness_error` sea raro |
+| Encender el harness (`COWORK_RUNTIME=harness`) | **Sí, con pocas personas** (`COWORK_HARNESS_USER_IDS`), no para todos de una vez. La llave de Anthropic ya está cableada en `apphosting.yaml`; `COWORK_MODEL_PRICING_JSON` ya trae el precio de `claude-haiku-5-5`, el único Claude que corre desde que Sonnet quedó bloqueado (23 de octubre de 2026) | Costo por turno (unos US$0,10 contra US$0,002), segundos por turno, y que `turn.rescued` con `harness_error` sea raro |
 | Encender la web (`COWORK_WEB_ENABLED=true`) | Sí, junto con lo anterior y con `webSearchUsdPerThousand: 10` en `COWORK_MODEL_PRICING_JSON` | Búsquedas por turno, enlaces devueltos por no tener origen, y si la respuesta cita con fecha |
 | Prompts por intención (`COWORK_INTENT_PROMPTS_ENABLED`) | No | No mejora lo que importa y cuesta 50 % más con la caché fría |
 | Esfuerzo (`COWORK_HARNESS_EFFORT`) | Dejar `medium` | — |
-| Modelo del coordinador (`COWORK_HARNESS_MODEL`) | Dejar Sonnet 5.5; Haiku 5.5 si manda el costo: en la medición del 22 de octubre (80 casos, esfuerzo alto) acertó 74 % contra 84 % de Sonnet, a ≈ US$0,007 por turno contra ≈ US$0,09 | Opus ya no es una opción (la app lo bloquea): acertaba lo mismo que Sonnet y costaba y tardaba el doble |
+| Modelo del coordinador (`COWORK_HARNESS_MODEL`) | **Haiku 5.5**, que es ya el valor por defecto: el 23 de octubre el dueño sacó a Sonnet de la app («ni Opus ni Sonnet en nada de la app») y el código lo bloquea. La comparación que sigue se hizo antes: en la medición del 22 de octubre (80 casos, esfuerzo alto) acertó 74 % contra 84 % de Sonnet, a ≈ US$0,007 por turno contra ≈ US$0,09 | Opus ya no es una opción (la app lo bloquea): acertaba lo mismo que Sonnet y costaba y tardaba el doble |
 | Jueza y Analista dentro del turno | Dejarlas apagadas | No suben el acierto; suman 15 % de costo y 43 % de tiempo |
 | Modelo de los borradores y editor Claude | Dejar como está | Un modelo más grande no mejora el resultado; un editor Claude agrega inferencias (veracidad −0,3) y cuesta de 20 a 60 veces más |
 | Investigador con la web de Claude (`RESEARCH_CLAUDE_WEB_ENABLED=true`, PR 497) | **Probarlo con la clave de Serper antes de encender**: correr `scripts/evaluate-research-sources.ts` con `SERPER_API_KEY` y mirar si suma señales con fecha sobre lo que ya entrega producción; si suma, encender en una cuenta | Hechos de los últimos 6 meses por investigación, costo (≈ US$0,10 por investigación) y si los borradores citan más señales |
@@ -227,12 +227,14 @@ Se cambia `apphosting.yaml` y se despliega App Hosting como siempre; esta sesió
 ```yaml
 - variable: COWORK_RUNTIME
   value: harness
+- variable: COWORK_HARNESS_MODEL        # Haiku es el valor por defecto; Sonnet y Opus están bloqueados en el código
+  value: claude-haiku-5-5
 - variable: COWORK_HARNESS_USER_IDS      # una o dos cuentas; vacía, es para todas
   value: <id de usuario>[,<otro id>]
 - variable: COWORK_WEB_ENABLED           # opcional: la web, 4 búsquedas y 3 lecturas por turno
   value: "true"
 # COWORK_MODEL_PRICING_JSON: agregar a lo que ya tiene (la búsqueda cuesta US$10 por mil)
-#   "claude-sonnet-5-5": {"version":"anthropic-standard-2026-10-06","inputUsdPerMillion":2,"outputUsdPerMillion":10,"cachedInputUsdPerMillion":0.1,"webSearchUsdPerThousand":10}
+#   solo si se enciende la web: agregar "webSearchUsdPerThousand":10 al precio de "claude-haiku-5-5" (Sonnet y Opus están bloqueados en la app)
 ```
 
 Para apagarlo basta quitar `COWORK_RUNTIME`: el turno siguiente corre en el bucle de siempre. Lo que mirar la primera semana está en la columna «Qué mirar» de arriba.

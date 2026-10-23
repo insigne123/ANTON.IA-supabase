@@ -251,7 +251,8 @@ test('a run that ends without an answer fails the turn like the coordinator loop
 test('the settings are off unless COWORK_RUNTIME=harness, default to a Claude, and stay inside what the ledger admits', () => {
   assert.equal(coworkHarnessSettings({}), null);
   assert.equal(coworkHarnessSettings({ COWORK_RUNTIME: 'openai' }), null);
-  assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness' }), { model: 'claude-sonnet-5-5', effort: 'medium', maxRounds: 5, maxReads: 6, web: null, subagents: null });
+  assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness' }), { model: 'claude-haiku-5-5', effort: 'medium', maxRounds: 5, maxReads: 6, web: null, subagents: null });
+  assert.equal(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_HARNESS_MODEL: 'claude-sonnet-5-5' }), null, 'Sonnet is out of the app: the coordinator loop answers');
   assert.deepEqual(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_HARNESS_MODEL: 'claude-haiku-5-5', COWORK_HARNESS_EFFORT: 'high', COWORK_HARNESS_MAX_ROUNDS: '9', COWORK_HARNESS_MAX_READS: '0' }),
     { model: 'claude-haiku-5-5', effort: 'high', maxRounds: 5, maxReads: 1, web: null, subagents: null });
   assert.equal(coworkHarnessSettings({ COWORK_RUNTIME: 'harness', COWORK_HARNESS_EFFORT: 'enorme' })?.effort, 'medium');
@@ -406,7 +407,7 @@ const researchOf = (company: string, url: string) => [
   { type: 'web_search_tool_result', tool_use_id: `srv-${company}`, content: [{ type: 'web_search_result', title: `${company} contrata`, url, page_age: '3 days ago', encrypted_content: 'xx' }] },
   { type: 'text', text: `Informe de ${company}: publicó avisos de empleo [${company} contrata](${url}).` },
 ] as const;
-const subagentSettings = { model: 'claude-sonnet-5-5', effort: 'low', maxDelegations: 2, maxRounds: 3, searches: 3, fetches: 2, deadlineMs: 30_000 } as const;
+const subagentSettings = { model: 'claude-haiku-5-5', effort: 'low', maxDelegations: 2, maxRounds: 3, searches: 3, fetches: 2, deadlineMs: 30_000 } as const;
 
 function withResearchers(overrides: { settings?: Partial<typeof subagentSettings>; reserveFails?: boolean } = {}) {
   const reserved: string[] = [];
@@ -514,10 +515,11 @@ test('sub-agents are off unless COWORK_SUBAGENTS_ENABLED=true and the web is on,
   assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'yes' }), null);
   assert.equal(coworkSubagentSettings({ COWORK_SUBAGENTS_ENABLED: 'true' }), null, 'they have nothing but the web');
   assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true' }),
-    { model: 'claude-sonnet-5-5', effort: 'low', maxDelegations: 3, maxRounds: 4, searches: 3, fetches: 2, deadlineMs: 45_000 });
-  assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-sonnet-5-5', COWORK_SUBAGENT_MODEL: 'claude-haiku-5-5', COWORK_SUBAGENT_EFFORT: 'medium',
+    { model: 'claude-haiku-5-5', effort: 'low', maxDelegations: 3, maxRounds: 4, searches: 3, fetches: 2, deadlineMs: 45_000 });
+  assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_SUBAGENT_MODEL: 'claude-sonnet-5-5' }), null, 'a Sonnet sub-agent is not run either');
+  assert.deepEqual(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-haiku-5-5', COWORK_SUBAGENT_MODEL: 'gpt-6-luna', COWORK_SUBAGENT_EFFORT: 'medium',
     COWORK_SUBAGENTS_MAX: '99', COWORK_SUBAGENT_MAX_ROUNDS: '1', COWORK_SUBAGENT_SEARCHES: '0', COWORK_SUBAGENT_FETCHES: '9', COWORK_SUBAGENT_DEADLINE_MS: '5' }),
-  { model: 'claude-haiku-5-5', effort: 'medium', maxDelegations: 5, maxRounds: 2, searches: 1, fetches: 4, deadlineMs: 15_000 });
+  { model: 'gpt-6-luna', effort: 'medium', maxDelegations: 5, maxRounds: 2, searches: 1, fetches: 4, deadlineMs: 15_000 });
   assert.equal(coworkSubagentSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true', COWORK_HARNESS_MODEL: 'claude-haiku-5-5' })?.model, 'claude-haiku-5-5', 'the coordinator\'s model unless told otherwise');
   assert.equal(coworkHarnessSettings({ ...env, COWORK_SUBAGENTS_ENABLED: 'true' })?.subagents?.maxDelegations, 3);
   assert.equal(coworkHarnessSettings(env)?.subagents, null);
@@ -583,7 +585,7 @@ test('the harness can be tried with a few people: COWORK_HARNESS_USER_IDS limits
   assert.equal(coworkHarnessEnabled(pilot), false);
   assert.equal(coworkHarnessEnabled({ COWORK_RUNTIME: 'openai', COWORK_HARNESS_USER_IDS: ME }, ME), false, 'the list does not turn it on');
   assert.equal(coworkHarnessSettings(pilot, OTHER), null);
-  assert.equal(coworkHarnessSettings(pilot, ME)?.model, 'claude-sonnet-5-5');
+  assert.equal(coworkHarnessSettings(pilot, ME)?.model, 'claude-haiku-5-5');
 });
 
 test('the web is offered to a person only when their turns run on the harness and the web is on', () => {

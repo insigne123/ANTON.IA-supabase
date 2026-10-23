@@ -280,7 +280,7 @@ test('a busy server is retried with backoff and the live text reaches the listen
 
 test('an expensive model is refused before any request', async () => {
   const { sdk, seen } = fakeSdk([{ content: [{ type: 'text', text: 'Hola' }], stop_reason: 'end_turn' }]);
-  for (const model of ['claude-opus-5-5', 'claude-fable-5-1']) {
+  for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1']) {
     await assert.rejects(anthropicModel({ model, client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [] }), /no está permitido/, model);
   }
   assert.equal(seen.length, 0);
@@ -296,7 +296,7 @@ test('the input of a tool call reaches the listener as it is written, joined by 
     finalMessage: async () => ({ content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }),
   }) } };
   const seen: Array<{ name: string; json: string }> = [];
-  await anthropicModel({ model: 'claude-sonnet-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onToolInput: event => seen.push(event) });
+  await anthropicModel({ model: 'claude-haiku-5-5', client: sdk }).complete({ system: 's', messages: [{ role: 'user', content: 'x' }], tools: [], onToolInput: event => seen.push(event) });
   assert.deepEqual(seen, [
     { name: 'buscar', json: '{"q":' }, { name: 'buscar', json: '{"q":"a"}' },
     { name: 'responder', json: '{"reply":"Ho' }, { name: 'responder', json: '{"reply":"Hola"}' },

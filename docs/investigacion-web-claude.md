@@ -9,7 +9,7 @@
 | Variable | Valor por defecto | Qué hace |
 | --- | --- | --- |
 | `RESEARCH_CLAUDE_WEB_ENABLED` | apagado | `true` lo enciende (también requiere `ANTHROPIC_API_KEY`) |
-| `RESEARCH_CLAUDE_WEB_MODEL` | `claude-sonnet-5-5` | modelo del investigador |
+| `RESEARCH_CLAUDE_WEB_MODEL` | `claude-haiku-5-5` | modelo del investigador (Sonnet y Opus están bloqueados en el código) |
 | `RESEARCH_CLAUDE_WEB_EFFORT` | `low` | `low`, `medium` o `high` |
 | `RESEARCH_CLAUDE_WEB_SEARCHES` | 6 (1–10) | búsquedas como máximo por investigación |
 | `RESEARCH_CLAUDE_WEB_FETCHES` | 3 (0–6) | lecturas de página del investigador como máximo |

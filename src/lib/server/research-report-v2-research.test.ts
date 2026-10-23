@@ -81,7 +81,7 @@ test('claims are extracted three sources at a time, up to three extractions at o
   assert.equal(seen.flat().length, result.researchMetrics.pages, 'every fetched source is read once');
 });
 
-const researcher = { model: 'claude-sonnet-5-5', effort: 'low' as const, searches: 6, fetches: 3, maxSources: 8, deadlineMs: 30_000 };
+const researcher = { model: 'claude-haiku-5-5', effort: 'low' as const, searches: 6, fetches: 3, maxSources: 8, deadlineMs: 30_000 };
 const page = (url: string) => parseWebEvidenceV2({ html: '<article><p>Acme presta servicios de coordinacion y soporte para equipos de operaciones de sus clientes.</p></article>', url, targetDomain: 'acme.example', retrievedAt: '2026-09-08T00:00:00.000Z' });
 const withResearcher = (order: string[], seen: unknown[] = []) => ({
   plan: async () => ({ queries: queries.slice(0, 2) }) as any,
@@ -125,7 +125,7 @@ test('a researcher that fails costs only the pages it would have found, and one 
   assert.equal(called, 0);
 });
 
-const harvestSettings = { model: 'claude-sonnet-5-5', maxSignals: 3, maxFacts: 80, recencyDays: 30, deadlineMs: 30_000 };
+const harvestSettings = { model: 'claude-haiku-5-5', maxSignals: 3, maxFacts: 80, recencyDays: 30, deadlineMs: 30_000 };
 const FACT_ID = 'f_aaaaaaaaaa';
 const withFacts = (extra: Record<string, unknown> = {}) => ({
   ...withResearcher([]), claudeWeb: null,
