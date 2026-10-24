@@ -140,7 +140,7 @@ export default () => [
     ] },
   { id: 'admin-filtros-url', persona: 'owner', title: 'Administrador: los filtros viven en la dirección y «Atrás» vuelve al anterior', goal: 'Compartir «Por revisar» de la Lista y volver al filtro de antes.', passWrites: [],
     steps: [
-      { say: 'Abro Oportunidades y paso a la Lista', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); await c.click({ role: 'button', name: 'Lista' }); await c.wait(800); } },
+      { say: 'Abro Oportunidades y paso a la Lista', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); await c.click({ role: 'tab', name: 'Lista' }); await c.wait(800); } },
       { say: 'Elijo «Por revisar»', do: async c => {
         await c.click({ role: 'button', name: /^Por revisar/ }); await c.wait(800);
         const url = new URL(c.page.url());
@@ -218,7 +218,7 @@ export default () => [
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
       { say: 'Elijo En preparación', do: async c => { await c.click({ text: 'En preparación' }); await c.see('Invitación a cotizar: aseo industrial para planta de producción'); } },
-      { say: 'Abro la invitación de aseo', do: async c => { await open(c, 'Invitación a cotizar: aseo industrial para planta de producción', 'Abrir'); await c.see('Asignar equipo'); } },
+      { say: 'Abro la invitación de aseo', do: async c => { await open(c, 'Invitación a cotizar: aseo industrial para planta de producción', 'Abrir'); await c.see(/^(Asignar|Cambiar) equipo$/); } },
       { say: 'Cambio la etapa a Presentada', do: async c => {
         await c.choose('Cambiar etapa', 'Presentada'); await c.wait(1200);
         c.check('la oportunidad quedó presentada', stateOf(c, 7) === 'submitted', `estado: ${stateOf(c, 7)}`);
@@ -326,7 +326,7 @@ export default () => [
         c.check('«Mis tareas» dice cuántas tiene', await shows(c, /^Mis tareas\s*3/));
       } },
       { say: 'Pulso «Mis tareas»', do: async c => {
-        await c.click({ role: 'button', name: /^Mis tareas/ }); await c.see('Vencidas');
+        await c.click({ role: 'tab', name: /^Mis tareas/ }); await c.see('Vencidas');
         await c.see('Pedir la visita a terreno de las sucursales');
         c.check('la vencida dice cuándo venció, en rojo', await c.page.getByText(/^Venció el /).first().evaluate(node => /text-destructive/.test(node.className)).catch(() => false));
         c.check('la dirección es la de «Mis tareas»', c.page.url().includes('vista=tareas'), c.page.url());
@@ -513,5 +513,48 @@ export default () => [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
       { say: 'Elijo Recomendadas', do: async c => { await c.click({ text: 'Recomendadas' }); await c.see('Compra Ágil: personal administrativo de apoyo'); } },
       { say: 'Abro la compra de Maipú', do: async c => { await open(c, 'Compra Ágil: personal administrativo de apoyo', 'Abrir'); await c.see('Asignar equipo'); } },
+      { say: 'Miro las secciones de la oportunidad', do: async c => {
+        const box = await c.page.getByRole('tablist', { name: 'Secciones de la oportunidad' }).boundingBox();
+        c.check('las secciones caben en una fila que se desliza (OPP-42)', Boolean(box && box.height < 60), box ? `${Math.round(box.height)} px de alto` : 'sin la fila');
+      } },
+    ] },
+  // Tanda 4B: the views and the sections as tabs (OPP-43), the stages in one row (OPP-39) and the member's card (OPP-41).
+  { id: 'admin-pestanas', persona: 'owner', title: 'Administrador: cambiar de vista y de sección con el teclado', goal: 'Moverse con las flechas entre «Embudo», «Lista» y las secciones de una oportunidad.',
+    steps: [
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.seeRole('tab', 'Embudo'); } },
+      { say: 'Miro las etapas', do: async c => {
+        const box = await c.page.getByRole('navigation', { name: 'Etapas de las oportunidades' }).boundingBox();
+        c.check('las etapas van en una fila baja, no en una onda de 240 px (OPP-39)', Boolean(box && box.height < 110), box ? `${Math.round(box.height)} px de alto` : 'sin las etapas');
+      } },
+      { say: 'Paso a «Lista» con la flecha', do: async c => {
+        await c.page.getByRole('tab', { name: 'Embudo' }).focus(); await c.page.keyboard.press('ArrowRight'); await c.wait(600);
+        const list = c.page.getByRole('tab', { name: 'Lista' });
+        c.check('«Lista» quedó elegida y con el foco', await list.getAttribute('aria-selected') === 'true' && await list.evaluate(node => node === document.activeElement));
+        c.check('la vista está en la dirección', new URL(c.page.url()).searchParams.get('vista') === 'lista', new URL(c.page.url()).search);
+        c.check('el contenido es el panel de la pestaña', await c.page.getByRole('tabpanel', { name: 'Lista' }).count() === 1);
+      } },
+      { say: 'Abro una y paso de sección con la flecha', do: async c => {
+        await c.go(`/opportunities?op=${opp(2)}`); await c.seeRole('tablist', 'Secciones de la oportunidad');
+        const first = c.page.getByRole('tablist', { name: 'Secciones de la oportunidad' }).getByRole('tab', { selected: true });
+        const before = (await first.innerText()).trim();
+        await first.focus(); await c.page.keyboard.press('ArrowRight'); await c.wait(600);
+        const after = (await c.page.getByRole('tablist', { name: 'Secciones de la oportunidad' }).getByRole('tab', { selected: true }).innerText()).trim();
+        c.check('la flecha lleva a la sección siguiente', before !== after, `${before} → ${after}`);
+      } },
+    ] },
+  { id: 'miembro-tarjeta', persona: 'member', title: 'Integrante: abrir una oportunidad tocando su tarjeta', goal: 'Ver lo esencial de cada una y abrirla sin buscar el botón.',
+    steps: [
+      { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Servicio de guardias de seguridad para 12 sucursales'); } },
+      { say: 'Leo la tarjeta', do: async c => {
+        const card = c.page.locator('article').filter({ hasText: 'Servicio de guardias de seguridad para 12 sucursales' }).first();
+        const text = (await card.innerText()).replace(/\s+/g, ' ');
+        c.check('la tarjeta no muestra la palabra clave del radar', !/Palabra clave/.test(text), text.slice(0, 200));
+        c.check('comprador, cierre y monto van en una línea', /Cierre /.test(text), text.slice(0, 200));
+      } },
+      { say: 'Toco el título', do: async c => {
+        await c.clickOn(c.page.getByRole('heading', { name: 'Servicio de guardias de seguridad para 12 sucursales' }).first());
+        await c.seeRole('tablist', 'Secciones de la oportunidad');
+        c.check('se abrió la oportunidad', new URL(c.page.url()).searchParams.get('op') === opp(6), new URL(c.page.url()).search);
+      } },
     ] },
 ];
