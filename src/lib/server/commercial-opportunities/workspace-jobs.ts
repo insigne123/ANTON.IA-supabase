@@ -108,7 +108,7 @@ export async function answerOpportunityChatNow(client: SupabaseClient, organizat
  * A queued job taken in the same request, only while still queued: a worker that took it first keeps it. The files a scanned
  * document's prefill reads stay in this request's memory, never in the job.
  */
-export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant' | 'profile' | 'fit',
+export async function runQueuedOpportunityJobNow(client: SupabaseClient, organizationId: string, dedupeKey: string, kind: 'chat' | 'evaluate' | 'assistant' | 'profile' | 'fit' | 'offer',
   attachments?: ClaudeAttachment[]) {
   const job = opportunityDb(await client.from('opportunity_jobs')
     .update({ state: 'running', lease_token: randomUUID(), lease_until: new Date(Date.now() + 5 * 60_000).toISOString(), attempts: 1, updated_at: new Date().toISOString() })

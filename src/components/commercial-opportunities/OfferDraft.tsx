@@ -2,15 +2,18 @@
 
 // «Tu oferta», inside «Cómo postular»: the AI's draft of what the company hands in (cover letter, technical offer by
 // evaluation criterion, technical compliance and the economic sheet, where the team types the prices). One main action at a
-// time: prepare the draft, then complete it.
+// time: prepare the draft, then complete it. Each part can be rewritten by the team, by hand or asking the AI (OPP-24), and
+// whoever is in charge marks it reviewed before it is handed in.
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, Check, Copy, Download, FilePen, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, Download, FilePen, Loader2, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { OFFER_PLACEHOLDER, offerPlaceholders, offerPrice, offerSheet, type OfferPrices, type SavedOfferDraft } from '@/lib/commercial-opportunities/offer-draft';
+import { OFFER_PART_MAX, offerPartEdit, offerPartText, offerReviewHolds, withOfferEdits, type OfferEdit } from '@/lib/commercial-opportunities/offer-edits';
 import { annexOpenFields } from '@/lib/commercial-opportunities/offer-annexes';
 
 export type OfferJob = { id: string; state: string; error: string | null; created_at: string };
@@ -27,28 +30,112 @@ export function WithPlaceholders({ text }: { text: string }) {
     : <Fragment key={index}>{part}</Fragment>)}</>;
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+/** A rewrite of one part by the AI (an «offer» job with a part), as the page reads it. */
+export type PartJob = { id: string; part: string; state: string; error: string | null; created_at: string };
+
+/**
+ * One part of the offer the team can rewrite (OPP-24): «Editar» by hand, or «Pedir cambios a la IA» with what to change. The AI's
+ * text stays under it, to read again or go back to. The caller places the actions (a section's header) and the text.
+ */
+export function OfferPart({ id, label, part, edit, author, job, compact = false, onSave, onRewrite, children }: {
+  /** The part: «letter», «summary», «technical:2», «compliance:5». */
+  id: string;
+  /** What the part is, for the buttons read aloud: «la sección «Plan de trabajo»». */
+  label: string;
+  /** The part as the draft keeps it: its AI text and the team's text on top, if any. */
+  part: { ai: string; text: string };
+  edit: OfferEdit | null;
+  /** Who wrote the edit, by name. */
+  author: string | null;
+  /** The newest rewrite of this part by the AI, if any. */
+  job: PartJob | null;
+  /** The answers of compliance are short and many: their actions go in the menu only. */
+  compact?: boolean;
+  onSave?: (text: string | null, base: string | null) => Promise<boolean>;
+  onRewrite?: (instructions: string, base: string | null) => Promise<boolean>;
+  children: (view: { actions: ReactNode; body: ReactNode }) => ReactNode;
+}) {
+  const [mode, setMode] = useState<'read' | 'edit' | 'ask'>('read');
+  const [value, setValue] = useState(part.text);
+  const [ask, setAsk] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [showAi, setShowAi] = useState(false);
   const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* the text stays on screen to copy by hand */ }
+  const base = edit?.at ?? null;
+  const domId = id.replace(':', '-');
+  const rewriting = Boolean(job && ACTIVE.includes(job.state));
+  // A rewrite that did not finish is said under the part for an hour, unless the part changed since.
+  const failed = job && ['failed', 'blocked'].includes(job.state) && Date.now() - Date.parse(job.created_at) < 3_600_000
+    && (!edit || Date.parse(job.created_at) > Date.parse(edit.at)) ? job : null;
+  const busy = saving || rewriting;
+  const startEdit = () => { setValue(part.text); setMode('edit'); };
+  const save = async (text: string | null) => {
+    if (!onSave) return;
+    setSaving(true); const ok = await onSave(text, base); setSaving(false);
+    if (ok) { setMode('read'); setShowAi(false); }
   };
-  return <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => void copy()} aria-label={copied ? `${label} copiado` : `Copiar ${label}`}>
-    {copied ? <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}{copied ? 'Copiado' : 'Copiar'}
-  </Button>;
+  const rewrite = async () => {
+    if (!onRewrite) return;
+    setSaving(true); const ok = await onRewrite(ask.trim(), base); setSaving(false);
+    if (ok) { setMode('read'); setAsk(''); }
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(part.text); setCopied(true); setTimeout(() => setCopied(false), 2500); } catch { /* the text stays on screen to copy by hand */ }
+  };
+  const actions = <span className="flex shrink-0 items-center gap-0.5">
+    {copied ? <span role="status" className="flex items-center gap-1 px-1 text-xs text-muted-foreground"><Check className="h-3.5 w-3.5" aria-hidden="true" />Copiado</span> : null}
+    {onSave && !compact ? <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" disabled={busy || mode !== 'read'} onClick={startEdit} aria-label={`Editar ${label}`}>Editar</Button> : null}
+    <DropdownMenu><DropdownMenuTrigger asChild>
+      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" disabled={busy} aria-label={`Más acciones de ${label}`}><MoreHorizontal className="h-4 w-4" aria-hidden="true" /></Button>
+    </DropdownMenuTrigger><DropdownMenuContent align="end">
+      {onSave && compact ? <DropdownMenuItem onSelect={startEdit}>Editar</DropdownMenuItem> : null}
+      {onRewrite ? <DropdownMenuItem onSelect={() => setMode('ask')}>Pedir cambios a la IA</DropdownMenuItem> : null}
+      <DropdownMenuItem onSelect={() => void copy()}>Copiar</DropdownMenuItem>
+      {edit ? <>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => setShowAi(open => !open)}>{showAi ? 'Ocultar el texto de la IA' : 'Ver el texto de la IA'}</DropdownMenuItem>
+        {onSave ? <DropdownMenuItem onSelect={() => void save(null)}>Volver al texto de la IA</DropdownMenuItem> : null}
+      </> : null}
+    </DropdownMenuContent></DropdownMenu>
+  </span>;
+  const body = mode === 'edit' ? <div className="space-y-2">
+    <Label htmlFor={`offer-edit-${domId}`} className="sr-only">Texto de {label}</Label>
+    <Textarea id={`offer-edit-${domId}`} autoFocus rows={Math.min(16, Math.max(4, Math.ceil(value.length / 80)))} maxLength={OFFER_PART_MAX} value={value} onChange={e => setValue(e.target.value)} />
+    <div className="flex flex-wrap items-center gap-2">
+      <Button type="button" size="sm" disabled={saving || !value.trim()} onClick={() => void save(value)}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+      <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={() => setMode('read')}>Cancelar</Button>
+    </div>
+  </div> : <div className="space-y-1.5">
+    <p className="whitespace-pre-line text-sm leading-6"><WithPlaceholders text={part.text} /></p>
+    {edit ? <p className="text-xs text-muted-foreground">{edit.ai ? `Reescrita por la IA a pedido de ${author ?? 'alguien del equipo'}` : `Editada por ${author ?? 'alguien del equipo'}`} · {when(edit.at)}</p> : null}
+    {showAi && edit ? <div className="rounded-xl bg-muted/50 p-3"><p className="text-xs font-medium text-muted-foreground">Texto de la IA</p><p className="mt-1 whitespace-pre-line text-sm leading-6 text-muted-foreground">{part.ai}</p></div> : null}
+    {rewriting ? <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />La IA está reescribiendo {label}…</p> : null}
+    {failed ? <p role="alert" className="text-xs text-destructive">No se pudo reescribir {label}: {failed.error || 'inténtalo de nuevo.'}</p> : null}
+    {mode === 'ask' ? <div className="space-y-2 rounded-xl border p-3">
+      <Label htmlFor={`offer-ask-${domId}`}>¿Qué cambiar en {label}?</Label>
+      <Textarea id={`offer-ask-${domId}`} autoFocus rows={2} maxLength={800} value={ask} onChange={e => setAsk(e.target.value)} placeholder="Ej.: más énfasis en nuestra experiencia con municipios; más breve." />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" disabled={saving || ask.trim().length < 3} onClick={() => void rewrite()}>{saving ? 'Reescribiendo…' : 'Reescribir'}</Button>
+        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={() => setMode('read')}>Cancelar</Button>
+      </div>
+    </div> : null}
+  </div>;
+  return <>{children({ actions, body })}</>;
 }
 
-function Part({ id, title, count, open, action, children }: { id: string; title: string; count?: number; open?: boolean; action?: ReactNode; children: ReactNode }) {
+function Part({ id, title, count, open, children }: { id: string; title: string; count?: number; open?: boolean; children: ReactNode }) {
   return <details id={`offer-${id}`} open={open} className="group rounded-2xl border bg-background">
     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-2xl px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
       <span className="text-sm font-semibold">{title}{count ? <span className="ml-2 text-xs font-normal tabular-nums text-muted-foreground">{count}</span> : null}</span>
-      <span className="flex items-center gap-1">{action}<span aria-hidden="true" className="text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none">›</span></span>
+      <span aria-hidden="true" className="text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none">›</span>
     </summary>
     <div className="space-y-4 border-t px-4 py-4">{children}</div>
   </details>;
 }
 
-export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, downloadHref, annexHref, budget, canPrice = true }: {
-  offer: { available: boolean; latest: SavedOfferDraft | null } | null | undefined;
+export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, downloadHref, annexHref, budget, canPrice = true, people = [], partJobs = [],
+  onSavePart, onRewritePart, onReview, versionHref }: {
+  offer: { available: boolean; latest: SavedOfferDraft | null; versions?: Array<{ id: string; created_at: string }> } | null | undefined;
   /** The latest «offer» job of the opportunity, if any. */
   job: OfferJob | null;
   onPrepare: (instructions: string) => void;
@@ -58,8 +145,18 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
   /** The Word of one form of the bases (by its place in the draft). */
   annexHref?: (index: number) => string;
   budget: { amount: number | null; includesTax: boolean | null };
-  /** Whether this person sets the prices (an administrator or whoever is in charge); the rest of the team reads them. */
+  /** Whether this person sets the prices (an administrator or whoever is in charge); the rest of the team reads them. They also mark it reviewed. */
   canPrice?: boolean;
+  /** The team's names, for «Editada por» and «Revisado por». */
+  people?: Array<{ user_id: string; name: string }>;
+  /** The parts the AI is rewriting or tried to, newest first. */
+  partJobs?: PartJob[];
+  /** A part in the team's words, or back to the AI's (null), from the edit the person saw (base). */
+  onSavePart?: (draftId: string, part: string, text: string | null, base: string | null) => Promise<boolean>;
+  onRewritePart?: (draftId: string, part: string, instructions: string, base: string | null) => Promise<boolean>;
+  onReview?: (draftId: string, reviewed: boolean) => Promise<boolean>;
+  /** The Word of an older version of the draft. */
+  versionHref?: (id: string) => string;
 }) {
   const latest = offer?.latest ?? null;
   const active = Boolean(job && ACTIVE.includes(job.state));
@@ -93,12 +190,31 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
   </section>;
 
   const { draft } = latest;
-  const placeholders = offerPlaceholders(draft);
+  // What the page shows, copies and counts is the draft as the team left it.
+  const shown = withOfferEdits(draft);
+  const placeholders = offerPlaceholders(shown);
+  const nameOf = (id?: string | null) => people.find(person => person.user_id === id)?.name ?? null;
+  const editor = (part: string, label: string, render: (view: { actions: ReactNode; body: ReactNode }) => ReactNode, compact = false) => {
+    const ai = offerPartText(draft, part) ?? ''; const edit = offerPartEdit(draft, part);
+    return <OfferPart key={`${latest.id}:${part}`} id={part} label={label} part={{ ai, text: offerPartText(shown, part) ?? ai }} edit={edit} author={nameOf(edit?.by)}
+      job={partJobs.find(item => item.part === part) ?? null} compact={compact}
+      onSave={onSavePart ? (text, base) => onSavePart(latest.id, part, text, base) : undefined}
+      onRewrite={onRewritePart ? (instructions, base) => onRewritePart(latest.id, part, instructions, base) : undefined}>{render}</OfferPart>;
+  };
+  const reviewed = offerReviewHolds(draft);
+  const versions = offer.versions ?? [];
   return <section aria-labelledby="offer-title" className="space-y-4">
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div className="space-y-1">
         <h3 id="offer-title" className="flex items-center gap-2 text-lg font-semibold"><FilePen className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Tu oferta · borrador</h3>
         <p className="text-xs text-muted-foreground">Preparado el {when(latest.created_at)}. Revísalo y confirma cada dato con las bases antes de enviarlo.</p>
+        {/* «Revisado por»: who read it last before it is handed in; a change after that asks for another look. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-sm">
+          {draft.review ? <p className={cn('flex items-center gap-1.5', reviewed ? 'text-cw-success' : 'text-muted-foreground')}>
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />Revisado por {nameOf(draft.review.by) ?? 'alguien del equipo'} el {when(draft.review.at)}{reviewed ? '' : '; cambió después'}</p>
+            : <p className="text-muted-foreground">{canPrice ? 'Antes de presentarla, revísala completa y márcala como revisada.' : 'Aún no la revisa quien está a cargo.'}</p>}
+          {canPrice && onReview && !reviewed ? <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => void onReview(latest.id, true)}>Marcar como revisada</Button> : null}
+        </div>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button asChild size="sm"><a href={downloadHref}><Download className="mr-2 h-4 w-4" aria-hidden="true" />Descargar Word para llenar</a></Button>
@@ -117,22 +233,25 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
       {draft.missing.length ? <ul className="mt-1 list-disc space-y-0.5 pl-5">{draft.missing.map(item => <li key={item}>{item}</li>)}</ul> : null}
     </div> : null}
 
-    {draft.letter ? <Part id="letter" title="Carta de presentación" action={<CopyButton text={draft.letter} label="la carta" />}>
-      <p className="whitespace-pre-line text-sm leading-6"><WithPlaceholders text={draft.letter} /></p>
+    {draft.letter ? <Part id="letter" title="Carta de presentación">
+      {editor('letter', 'la carta de presentación', ({ actions, body }) => <><div className="-mt-2 flex justify-end">{actions}</div>{body}</>)}
     </Part> : null}
 
     <Part id="technical" title="Oferta técnica" count={draft.technical.length} open>
-      {draft.summary ? <p className="text-sm leading-6"><WithPlaceholders text={draft.summary} /></p> : null}
+      {draft.summary ? editor('summary', 'el resumen de la oferta técnica', ({ actions, body }) =>
+        <div className="flex items-start gap-2"><div className="min-w-0 flex-1">{body}</div>{actions}</div>, true) : null}
       <ol className="space-y-5">
         {draft.technical.map((section, index) => <li key={`${index}:${section.heading}`} className="space-y-1.5">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold">{section.heading}</p>
-              {section.criterion ? <p className="text-xs leading-5 text-muted-foreground">Responde a: {section.criterion}{section.weight ? <span className="ml-1 rounded-full bg-muted px-2 py-0.5 tabular-nums">{section.weight}</span> : null}</p> : null}
+          {editor(`technical:${index}`, `la sección «${section.heading}»`, ({ actions, body }) => <>
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">{section.heading}</p>
+                {section.criterion ? <p className="text-xs leading-5 text-muted-foreground">Responde a: {section.criterion}{section.weight ? <span className="ml-1 rounded-full bg-muted px-2 py-0.5 tabular-nums">{section.weight}</span> : null}</p> : null}
+              </div>
+              {actions}
             </div>
-            <CopyButton text={section.body} label={`la sección ${section.heading}`} />
-          </div>
-          <p className="whitespace-pre-line text-sm leading-6"><WithPlaceholders text={section.body} /></p>
+            {body}
+          </>)}
           {section.evidence[0] ? <p className="text-xs leading-5 text-muted-foreground">Bases: «{section.evidence[0].quote.slice(0, 220)}»</p> : null}
         </li>)}
       </ol>
@@ -141,8 +260,10 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
     {draft.compliance.length ? <Part id="compliance" title="Cumplimiento de requisitos técnicos" count={draft.compliance.length}>
       <ul className="divide-y">
         {draft.compliance.map((item, index) => <li key={`${index}:${item.requirement}`} className="space-y-1 py-3 text-sm leading-6 first:pt-0 last:pb-0">
-          <p className="text-muted-foreground">{item.requirement}</p>
-          <p><WithPlaceholders text={item.answer} /></p>
+          {editor(`compliance:${index}`, `la respuesta a «${item.requirement.slice(0, 60)}${item.requirement.length > 60 ? '…' : ''}»`, ({ actions, body }) => <>
+            <div className="flex items-start justify-between gap-2"><p className="min-w-0 text-muted-foreground">{item.requirement}</p>{actions}</div>
+            {body}
+          </>, true)}
         </li>)}
       </ul>
     </Part> : null}
@@ -164,6 +285,10 @@ export function OfferDraft({ offer, job, onPrepare, preparing, onSavePrices, dow
         })}
       </ul>
     </Part> : null}
+
+    {/* The versions before this one keep their Word, to compare (OPP-24). */}
+    {versions.length && versionHref ? <p className="text-xs leading-5 text-muted-foreground">Versiones anteriores: {versions.map((version, index) => <Fragment key={version.id}>{index ? ' · ' : ''}
+      <a className="underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={versionHref(version.id)}>{when(version.created_at)}<span className="sr-only"> (Word)</span></a></Fragment>)}</p> : null}
   </section>;
 }
 

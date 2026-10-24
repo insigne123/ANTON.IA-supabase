@@ -6,11 +6,21 @@ const opp = n => `00000000-0000-4000-8000-${String(9510 + n).padStart(12, '0')}`
 /** Diego, the member of the fixtures (ids.mjs). */
 const DIEGO = '00000000-0000-4000-8000-000000000012';
 const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
-const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'mark', 'decision', 'decision_reply'] };
+const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'mark', 'decision', 'decision_reply', 'offer_part', 'offer_review'] };
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
 const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
 const CRITERIA = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['criteria'] };
 const SETTINGS = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['admin_settings', 'bulk', 'notification'] };
+const DOCUMENTS = { pattern: /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/documents$/ };
+
+/** Files dragged over the page and dropped where nothing else takes them, as the browser hands them over (OPP-17). */
+const dropOnPage = (c, files, { drop = true } = {}) => c.page.evaluate(({ files, drop }) => {
+  const data = new DataTransfer();
+  for (const file of files) data.items.add(new File([Uint8Array.from(atob(file.base64), char => char.charCodeAt(0))], file.name, { type: file.type }));
+  const target = document.querySelector('main') || document.body;
+  target.dispatchEvent(new DragEvent('dragover', { dataTransfer: data, bubbles: true, cancelable: true }));
+  if (drop) target.dispatchEvent(new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true }));
+}, { files, drop });
 
 /**
  * The button of the card of an opportunity, found by its title: the nearest block around the title that has that button is the card.
@@ -355,6 +365,26 @@ export default () => [
       } },
     ] },
 
+  { id: 'miembro-oferta', persona: 'member', title: 'Integrante: corregir una sección del borrador de oferta y darla por revisada', goal: 'Dejar la oferta en las palabras del equipo antes de presentarla, sin pasar por el Word.', passWrites: [ACTIONS],
+    steps: [
+      { say: 'Abro «Cómo postular» de la licitación', do: async c => {
+        await c.go(`/opportunities?op=${opp(2)}`); await c.see('Qué hacer ahora');
+        await c.clickOn(c.page.getByRole('button', { name: 'Cómo postular' }).first()); await c.see('Tu oferta · borrador');
+      } },
+      { say: 'Corrijo la sección de experiencia', do: async c => {
+        await c.click({ role: 'button', name: 'Editar la sección «Experiencia en verificación de antecedentes»' });
+        await c.page.getByLabel('Texto de la sección «Experiencia en verificación de antecedentes»').fill('Hemos verificado antecedentes para 12 empresas del retail, con 9.000 informes al año.');
+        await c.clickOn(c.page.getByRole('button', { name: 'Guardar', exact: true })); await c.see(/^Editada por Diego Fuentes/);
+        const draft = c.table('opportunity_offer_drafts').find(row => row.opportunity_id === opp(2))?.draft;
+        c.check('quedó en el borrador, con el texto de la IA debajo', draft?.edits?.['technical:0']?.text === 'Hemos verificado antecedentes para 12 empresas del retail, con 9.000 informes al año.'
+          && /\[N\.º de clientes\]/.test(draft?.technical?.[0]?.body), JSON.stringify(draft?.edits));
+      } },
+      { say: 'La marco como revisada', do: async c => {
+        await c.click('Marcar como revisada'); await c.see(/^Revisado por Diego Fuentes el /);
+        c.check('dice quién la revisó', c.table('opportunity_offer_drafts').find(row => row.opportunity_id === opp(2))?.draft?.review?.by === DIEGO);
+        c.check('y queda en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(2) && row.body === 'Oferta revisada antes de presentarla'));
+      } },
+    ] },
   { id: 'miembro-urgente', persona: 'member', title: 'Integrante: abrir lo más urgente y empezar a gestionarlo', goal: 'Empezar la licitación de guardias, que cierra mañana.', passWrites: [ACTIONS, NOTIFY],
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Mis oportunidades asignadas'); } },
@@ -415,6 +445,29 @@ export default () => [
       { say: 'Pulso Marcar como presentada', do: async c => {
         await c.click('Marcar como presentada'); await c.wait(1500);
         c.check('quedó presentada', stateOf(c, 2) === 'submitted', `estado: ${stateOf(c, 2)}`);
+      } },
+    ] },
+  { id: 'miembro-bases-zip', persona: 'member', title: 'Integrante: soltar el ZIP de las bases en la licitación, sin buscar dónde', goal: 'Que las bases que bajó de Mercado Público queden en el expediente de la licitación de guardias.', passWrites: [DOCUMENTS],
+    steps: [
+      { say: 'Abro la licitación que preparo', do: async c => { await c.go(`/opportunities?op=${opp(2)}`); await c.see('Qué hacer ahora'); } },
+      { say: 'Arrastro el ZIP que bajé sobre la página', do: async c => {
+        const { default: JSZip } = await import('jszip');
+        const archive = new JSZip();
+        archive.file('Bases técnicas.txt', 'Servicio de guardias 24/7 para 12 sucursales, con supervisor y rondas cada hora. Experiencia mínima de 3 años.');
+        archive.file('Anexo 2 Formulario económico.txt', 'Precio mensual por puesto, con y sin IVA, en pesos chilenos.');
+        c.zip = { name: 'Bases licitación guardias.zip', type: 'application/zip', base64: Buffer.from(await archive.generateAsync({ type: 'uint8array' })).toString('base64') };
+        await dropOnPage(c, [c.zip], { drop: false });
+        c.check('la página dice que puede soltarlo ahí', await c.page.getByText('Suelta para subirlos a esta oportunidad').isVisible());
+      } },
+      { say: 'Lo suelto', do: async c => {
+        await dropOnPage(c, [c.zip]);
+        await c.see('En el expediente');
+        // Each one goes up and is read; then the list of the expediente shows it (the upload list shows it first).
+        await c.page.getByText('Anexo 2 Formulario económico.txt').filter({ visible: true }).nth(1).waitFor({ state: 'visible', timeout: 20000 }).catch(() => undefined);
+        const saved = c.table('opportunity_documents').filter(row => row.opportunity_id === opp(2)).map(row => row.name);
+        c.check('las dos bases quedaron en el expediente', ['Bases técnicas.txt', 'Anexo 2 Formulario económico.txt'].every(name => saved.includes(name)), saved.join(', '));
+        c.check('quedó en «Documentos»', new URL(c.page.url()).searchParams.get('seccion') === 'documentos', new URL(c.page.url()).search);
+        c.check('el aviso de soltar se fue', !(await c.page.getByText('Suelta para subirlos a esta oportunidad').isVisible()));
       } },
     ] },
   { id: 'miembro-movil', persona: 'member', viewport: 'phone', title: 'Integrante en el móvil: ver y empezar lo urgente', goal: 'Lo mismo que en el computador, con el pulgar.', passWrites: [ACTIONS, NOTIFY],

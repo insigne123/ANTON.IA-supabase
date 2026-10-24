@@ -13,7 +13,8 @@ import { addOpportunityNote, deleteOpportunityNote, editOpportunityNote } from '
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
 import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
-import { enqueueOpportunityOffer, readOpportunityOffer, saveOpportunityOfferPrices } from '@/lib/server/commercial-opportunities/workspace-offer';
+import { enqueueOpportunityOffer, enqueueOpportunityOfferRewrite, readOpportunityOffer, reviewOpportunityOffer, saveOpportunityOfferPart, saveOpportunityOfferPrices } from '@/lib/server/commercial-opportunities/workspace-offer';
+import { offerEditSchema, offerReviewSchema, offerRewriteSchema } from '@/lib/commercial-opportunities/offer-edits';
 import { answerFitQuestion, enqueueRequirementFit, readOpportunityFit } from '@/lib/server/commercial-opportunities/workspace-fit';
 import { runQueuedOpportunityJobNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
 import { AuthError } from '@/lib/server/auth-utils';
@@ -48,7 +49,7 @@ export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer', 'fit_proposal', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'offer_part', 'offer_review', 'offer_rewrite', 'fit', 'fit_answer', 'fit_proposal', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') {
       const input = assignmentSchema.parse(data); const before = await readParticipantIds(auth.admin, scope, id);
       const revision = await assignOpportunity(auth.admin, scope, id, input);
@@ -105,6 +106,16 @@ export async function POST(request: Request, context: Context) {
       const key = await enqueueRequirementFit(auth.admin, scope, id);
       const done = await runQueuedOpportunityJobNow(auth.admin, scope.organizationId, key, 'fit').catch(() => null);
       return opportunitiesJson({ queued: !(done?.processed === 1 && done.state === 'ready'), state: done?.state ?? 'queued' }, done?.state === 'ready' ? 200 : 202);
+    }
+    // The offer in the team's words (OPP-24): a part written by hand or back to the AI's, «Revisado por», and a part rewritten by the AI.
+    if (action === 'offer_part') return opportunitiesJson({ edit: (await saveOpportunityOfferPart(auth.admin, scope, id, offerEditSchema.parse(data))).edit });
+    if (action === 'offer_review') return opportunitiesJson({ review: (await reviewOpportunityOffer(auth.admin, scope, id, offerReviewSchema.parse(data))).review });
+    if (action === 'offer_rewrite') {
+      const input = offerRewriteSchema.parse(data);
+      const jobId = await enqueueOpportunityOfferRewrite(auth.admin, scope, id, input);
+      // One part is short: written now when it can be, by the worker otherwise; the page reads the result with the opportunity.
+      const done = await runQueuedOpportunityJobNow(auth.admin, scope.organizationId, `offer-part:${id}:${input.requestId}`, 'offer').catch(() => null);
+      return opportunitiesJson({ jobId, state: done?.state ?? 'queued' }, done?.state === 'ready' ? 200 : 202);
     }
     if (action === 'offer_prices') {
       const input = z.object({ draftId: z.string().uuid(), expectedRevision: z.number().int().nonnegative(),
