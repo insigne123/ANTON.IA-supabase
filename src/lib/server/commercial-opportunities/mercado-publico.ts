@@ -1,4 +1,4 @@
-import { tenderFromLicitacion, type Tender } from '@/lib/commercial-opportunities/tenders';
+import { tenderFromLicitacion, tenderResultFromLicitacion, type Tender, type TenderResult } from '@/lib/commercial-opportunities/tenders';
 
 /**
  * Mercado Público API v1 (licitaciones): the open tenders of the day in one request, and the detail of the ones whose name
@@ -20,7 +20,8 @@ export class MercadoPublicoBusyError extends Error {
 }
 export const isMercadoPublicoBusy = (error: unknown) => error instanceof MercadoPublicoBusyError;
 
-async function call(params: Record<string, string>, dependencies: Dependencies) {
+/** The listing of a request, as Mercado Público gives it, after its errors are told apart. */
+async function listing(params: Record<string, string>, dependencies: Dependencies): Promise<unknown[]> {
   if (!dependencies.ticket) throw new Error('Falta el ticket de Mercado Público (MERCADO_PUBLICO_TICKET).');
   const response = await dependencies.fetch(`${MERCADO_PUBLICO_BASE}?${new URLSearchParams({ ...params, ticket: dependencies.ticket })}`, {
     headers: { accept: 'application/json' }, signal: AbortSignal.timeout(45_000),
@@ -37,7 +38,10 @@ async function call(params: Record<string, string>, dependencies: Dependencies) 
   if (!response.ok) throw new Error(`Mercado Público respondió ${response.status}.`);
   // The API answers 200 with a code and a message when the query is wrong.
   if (!Array.isArray(body?.Listado)) throw new Error(body?.Codigo ? 'Mercado Público rechazó la consulta (revisa el ticket).' : 'Mercado Público respondió sin listado.');
-  return body.Listado.flatMap(item => {
+  return body.Listado;
+}
+async function call(params: Record<string, string>, dependencies: Dependencies) {
+  return (await listing(params, dependencies)).flatMap(item => {
     const tender = item && typeof item === 'object' ? tenderFromLicitacion(item as Record<string, unknown>) : null;
     return tender ? [tender] : [];
   });
@@ -51,4 +55,13 @@ export function listOpenLicitaciones(dependencies: Dependencies = { fetch: globa
 /** The full tender: buyer, amount, region and items. */
 export async function getLicitacion(code: string, dependencies: Dependencies = { fetch: globalThis.fetch, ticket: process.env.MERCADO_PUBLICO_TICKET }): Promise<Tender | null> {
   return (await call({ codigo: code.slice(0, 60) }, dependencies))[0] ?? null;
+}
+
+/**
+ * The result of a tender after it closes (OPP-29): its state, the award by supplier, the bidders and the act, which the Tender shape
+ * leaves out. Null when the code is unknown.
+ */
+export async function getLicitacionResult(code: string, dependencies: Dependencies = { fetch: globalThis.fetch, ticket: process.env.MERCADO_PUBLICO_TICKET }): Promise<TenderResult | null> {
+  const [raw] = await listing({ codigo: code.slice(0, 60) }, dependencies);
+  return raw && typeof raw === 'object' ? tenderResultFromLicitacion(raw as Record<string, unknown>) : null;
 }

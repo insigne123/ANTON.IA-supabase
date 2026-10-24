@@ -29,7 +29,7 @@ test('opportunities: what is in play, what passed its deadline, how the period e
       { actorId: 'diego', kind: 'note', createdAt: '2026-10-23T15:00:00Z' },
       { actorId: 'diego', kind: 'state', to: 'lost', createdAt: '2026-10-01T15:00:00Z' },
     ] });
-  const { people, ...summary } = report.opportunities;
+  const { people, learned: _learned, ...summary } = report.opportunities;
   assert.deepEqual(summary, { inPlay: 2, overdue: 1, submitted: 1, won: 1, lost: 0, waiting: 2, activePeople: 2 });
   assert.deepEqual(people.map(person => [person.name, person.open, person.actions, person.submitted, person.won]), [['Diego Paz', 2, 2, 1, 0], ['Ana Soto', 0, 1, 0, 1]],
     'María did nothing: she is not listed; what Diego did before the period does not count');
@@ -60,4 +60,21 @@ test('the three budgets side by side, in words; without the credits read, two', 
   assert.equal(report.caps[0].detail, 'US$3,40 de US$20,00: búsquedas, informes y borradores de toda la empresa.');
   assert.match(report.caps[1].detail, /^Nadie lo usó hoy\./);
   assert.deepEqual(workReport({ ...base, credits: null }).caps.map(cap => cap.id), ['opportunities', 'cowork']);
+});
+
+test('«Lo que aprendimos»: the closes of the period with their reasons, the last close of each, and who won the ones lost (OPP-30)', () => {
+  const close = (opportunityId: string, to: string, at: string, motives: string[], winner?: string) =>
+    ({ actorId: 'ana', kind: 'state', to, createdAt: at, opportunityId, motives, winner: winner ?? null });
+  const { learned } = workReport({ ...base, activity: [
+    close('o1', 'lost', '2026-10-19T15:00:00Z', ['price'], 'Seguridad Sur SpA'),
+    close('o2', 'lost', '2026-10-20T15:00:00Z', ['price', 'deadline'], 'seguridad sur spa'),
+    close('o3', 'won', '2026-10-21T15:00:00Z', ['experience']),
+    // Lost by mistake and then won: only the last close counts.
+    close('o4', 'lost', '2026-10-21T15:00:00Z', ['capacity']), close('o4', 'won', '2026-10-22T15:00:00Z', ['price']),
+    close('o5', 'lost', '2026-10-02T15:00:00Z', ['requirements']),
+  ] }).opportunities;
+  assert.deepEqual([learned.won, learned.lost, learned.winRate], [2, 2, 0.5]);
+  assert.deepEqual(learned.lostFor.map(item => [item.label, item.count]), [['Precio', 2], ['Plazo', 1]], 'before the period and closes undone do not count');
+  assert.deepEqual(learned.wonFor.map(item => [item.label, item.count]), [['Precio', 1], ['Experiencia', 1]]);
+  assert.deepEqual(learned.rivals, [{ name: 'Seguridad Sur SpA', count: 2 }], 'the same supplier, however it was written');
 });

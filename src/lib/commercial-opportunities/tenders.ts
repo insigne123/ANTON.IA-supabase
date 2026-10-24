@@ -84,6 +84,53 @@ export function tenderFromLicitacion(raw: Record<string, any>): Tender | null {
   };
 }
 
+/**
+ * What Mercado Público says of a tender after it closes (OPP-29): its state, who won what and for how much (its items' awards, by
+ * supplier), how many bid, when it was or should be awarded, and the award act. Every part is optional: an open tender has none.
+ */
+export type TenderResult = {
+  status: string | null;
+  awardedAt: string | null;
+  expectedAt: string | null;
+  bidders: number | null;
+  winners: Array<{ rut: string | null; name: string; amount: number | null }>;
+  total: number | null;
+  currency: string | null;
+  actUrl: string | null;
+};
+/** The result of a tender from its detail (licitaciones.json?codigo=, Listado[0]). */
+export function tenderResultFromLicitacion(raw: Record<string, any>): TenderResult | null {
+  if (!raw || typeof raw !== 'object' || !text(raw.CodigoExterno, 60)) return null;
+  const status = LICITACION_STATES[Number(raw.CodigoEstado)] ?? (text(raw.Estado, 40).toLowerCase() || null);
+  const award = raw.Adjudicacion && typeof raw.Adjudicacion === 'object' ? raw.Adjudicacion as Record<string, unknown> : null;
+  // One line per item awarded; a supplier that won several items is one winner, with what they add up to.
+  const byWinner = new Map<string, TenderResult['winners'][number]>();
+  for (const item of Array.isArray(raw.Items?.Listado) ? raw.Items.Listado : []) {
+    const won = item?.Adjudicacion && typeof item.Adjudicacion === 'object' ? item.Adjudicacion as Record<string, unknown> : null;
+    const name = text(won?.NombreProveedor, 200);
+    if (!won || !name) continue;
+    const rut = text(won.RutProveedor, 20) || null;
+    const quantity = number(won.CantidadAdjudicada), unit = number(won.MontoUnitario);
+    const amount = quantity !== null && unit !== null ? Math.round(quantity * unit) : null;
+    const key = rut ? rut.toUpperCase().replace(/[^0-9K]/g, '') : fold(name);
+    const known = byWinner.get(key);
+    byWinner.set(key, known ? { ...known, amount: known.amount === null ? amount : amount === null ? known.amount : known.amount + amount } : { rut, name, amount });
+  }
+  const winners = [...byWinner.values()].sort((a, b) => (b.amount ?? 0) - (a.amount ?? 0));
+  const amounts = winners.flatMap(winner => (winner.amount === null ? [] : [winner.amount]));
+  const act = text(award?.UrlActa, 600);
+  return {
+    status,
+    awardedAt: iso(award?.Fecha) ?? (status === 'adjudicada' ? iso(raw.Fechas?.FechaAdjudicacion) : null),
+    expectedAt: iso(raw.Fechas?.FechaEstimadaAdjudicacion ?? raw.Fechas?.FechaAdjudicacion),
+    bidders: number(award?.NumeroOferentes),
+    winners, total: amounts.length ? amounts.reduce((sum, amount) => sum + amount, 0) : null,
+    currency: text(raw.Moneda, 8) || null,
+    // Only the act on Mercado Público itself is linked, always over https.
+    actUrl: /^https?:\/\/([a-z0-9-]+\.)*mercadopublico\.cl\//i.test(act) ? act.replace(/^http:/i, 'https:') : null,
+  };
+}
+
 /** The public page of a tender. Compra Ágil has no stable public link to cite: the page shows its code instead. */
 export function tenderUrl(tender: Pick<Tender, 'source' | 'code'>) {
   return tender.source === 'mercado_publico'

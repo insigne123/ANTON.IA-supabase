@@ -82,7 +82,11 @@ export default function opportunities(ctx) {
     7: { evaluation: 'review', summary: 'Invitación directa a cotizar aseo industrial; piden visita a planta antes de ofertar.', deadlineDays: 12 },
     8: { evaluation: 'excluded', excludedMotive: 'requisito', summary: 'Exigen turnos de enfermería asociados al aseo, algo que no ofreces.', deadlineDays: 6 },
     9: { evaluation: 'recommended', summary: 'Apoyo administrativo por tres meses; monto chico y bases simples.', deadlineDays: 5 },
-    10: { evaluation: 'review', summary: 'Contact center para atención ciudadana; ya se presentó la oferta.', deadlineDays: 15 },
+    // Presented and already decided in Mercado Público (OPP-29): the morning's check found who won it.
+    10: { evaluation: 'review', summary: 'Contact center para atención ciudadana; ya se presentó la oferta.', deadlineDays: -5,
+      result: { status: 'adjudicada', awardedAt: ctx.daysAgo(1), expectedAt: null, bidders: 4, total: 118_500_000, currency: 'CLP', ours: false, checkedAt: ctx.hoursAgo(5),
+        actUrl: 'https://www.mercadopublico.cl/Procurement/Modules/RFB/StepsProcessAward/PreviewAwardAct.aspx?qs=fixture',
+        winners: [{ rut: '76.888.444-1', name: 'Centro de Llamadas del Pacífico SpA', amount: 118_500_000 }] } },
     11: { evaluation: 'recommended', summary: 'Selección de personal para el gobierno regional; ganada hace una semana.', deadlineDays: -10 },
     12: { evaluation: 'recommended', summary: 'Reclutamiento masivo para el puerto; otra empresa se adjudicó el servicio.', deadlineDays: -20 },
     13: { evaluation: 'recommended', summary: 'El gerente de Operaciones anunció tres centros nuevos: abre la conversación con un mensaje breve.' },
@@ -108,6 +112,7 @@ export default function opportunities(ctx) {
           ...(EXTRA[index]?.evaluation ? { evaluation: EXTRA[index].evaluation } : {}),
           ...(EXTRA[index]?.excludedMotive ? { excludedMotive: EXTRA[index].excludedMotive } : {}),
           ...(EXTRA[index]?.summary ? { summary: { text: EXTRA[index].summary } } : {}),
+          ...(EXTRA[index]?.result ? { result: EXTRA[index].result } : {}),
         },
       })),
       commercial_opportunity_runs: ['jsearch', 'mercado_publico', 'compra_agil', 'seia'].map((source, index) => ({

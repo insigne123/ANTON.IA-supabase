@@ -49,6 +49,8 @@ import { SavedSearches } from './SavedSearches';
 import type { SetupStepId } from '@/lib/commercial-opportunities/company-setup';
 import { criteriaDraft, draftToSave, type CriteriaDraft } from '@/lib/commercial-opportunities/search-settings';
 import { CloseReasonDialog, type CloseTarget } from './CloseReasonDialog';
+import { TenderResultCallout } from './TenderResultCallout';
+import type { CloseDetail, StoredResult } from '@/lib/commercial-opportunities/close-outcome';
 import { DiscardDialog, type DiscardTarget } from './DiscardDialog';
 import { AssignmentRulesDialog, RuleAssignDialog, type rulesOf } from './AssignmentRules';
 import { buyerSearch, readAdminSettings, ruleFor, ruleLabel, sameSearch, searchName, type RuleGroup, type SavedSearch, type SearchState } from '@/lib/commercial-opportunities/admin-settings';
@@ -316,8 +318,9 @@ export function OpportunityWorkWorkspace() {
     catch (e) { setProblem(e instanceof Error ? e.message : 'La IA no pudo revisar el embudo.'); }
     finally { setReviewing(false); }
   };
-  const moveNow = async (id: string, state: WorkRecord['state'], revision: number, note?: string) => {
-    const done = await perform('state', { state, expectedRevision: revision, ...(note ? { note } : {}) }, id, true);
+  const moveNow = async (id: string, state: WorkRecord['state'], revision: number, note?: string, close?: CloseDetail) => {
+    const done = await perform('state', { state, expectedRevision: revision, ...(note ? { note } : {}), ...(close?.motives?.length ? { motives: close.motives } : {}),
+      ...(close?.winner ? { winner: close.winner } : {}), ...(close?.amount !== undefined ? { amount: close.amount } : {}) }, id, true);
     if (done) { setSuggestions(current => current?.filter(s => s.id !== id) ?? null); await loadPipeline(); setFeedback(`Movida a «${WORK_STATE_LABELS[state]}».`); }
     return Boolean(done);
   };
@@ -325,7 +328,7 @@ export function OpportunityWorkWorkspace() {
     if (state === 'won' || state === 'lost') { setProblem(''); setClosing({ id, state, revision }); return; }
     await moveNow(id, state, revision);
   };
-  const confirmClose = async (target: CloseTarget, note: string) => { if (await moveNow(target.id, target.state, target.revision, note)) setClosing(null); };
+  const confirmClose = async (target: CloseTarget, note: string, close: CloseDetail) => { if (await moveNow(target.id, target.state, target.revision, note, close)) setClosing(null); };
   type BulkResult = { done: string[]; skipped: number };
   // After an action on several, what is on screen is read again: the list (perform does it), and the pipeline or the open opportunity.
   // The notice waits for it: «Pasó a «Archivadas»» never shows while the card (or its chip in «Cierran esta semana») is still there.
@@ -792,6 +795,8 @@ export function OpportunityWorkWorkspace() {
             openTasks={detail.tasks.filter(t => t.owner_id === user?.id && t.status !== 'done').length} onStep={stepTo} onDecision={decide} onMove={admin ? changeStage : undefined} />}
           {detail.work?.objective && <p className="text-sm">Objetivo: {detail.work.objective}</p>}
         </header>
+        {item.kind === 'tender' && detail.work ? <TenderResultCallout result={(item.data as { result?: StoredResult } | null)?.result} state={detail.work.state} admin={admin} busy={busy}
+          onClose={(to, prefill) => { setProblem(''); setClosing({ id: item.id, state: to, revision: detail.work!.revision, prefill }); }} /> : null}
         {(() => {
           const decision = openDecision(detail.activity);
           return decision ? <DecisionCallout decision={decision} admin={admin} busy={busy} onReply={replyDecision}

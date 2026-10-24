@@ -58,3 +58,13 @@ test('each person with what they did, the late ones in red, and the cost of Cowo
   assert.match(text(html), /Ana Soto 1 1 1 0/);
   assert.match(text(html), /Costo estimado US\$0,05 1 llamada a la IA no tiene precio configurado: el costo real puede ser mayor\./);
 });
+
+test('«Lo que aprendimos» says how the period ended and why, only when something closed (OPP-30)', () => {
+  const close = (opportunityId: string, to: string, motives: string[], winner?: string) => ({ actorId: 'ana', kind: 'state', to, createdAt: '2026-10-22T15:00:00Z', opportunityId, motives, winner: winner ?? null });
+  const words = text(render(workReport({ ...empty, activity: [close('o1', 'lost', ['price', 'deadline'], 'Seguridad Sur SpA'), close('o2', 'won', ['experience'])] })));
+  assert.match(words, /Lo que aprendimos Se cerraron 2 oportunidades en el período: 1 ganada y 1 perdida \(50 % ganadas\)\./);
+  assert.match(words, /Por qué perdimos Precio 1 Plazo 1 Por qué ganamos Experiencia 1 Quiénes nos ganaron Seguridad Sur SpA 1/);
+  assert.doesNotMatch(text(render(workReport(empty))), /Lo que aprendimos/);
+  // Closed without reasons: the count, and where the reasons come from.
+  assert.match(text(render(workReport({ ...empty, activity: [close('o3', 'lost', [])] }))), /Se cerró 1 oportunidad en el período: 0 ganadas y 1 perdida \(0 % ganadas\)\. Al cerrarlas con su motivo, aquí verán por qué\./);
+});

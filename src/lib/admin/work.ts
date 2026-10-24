@@ -4,6 +4,7 @@
 // 28 people let into Oportunidades acted on it and nobody assigned: this is where an administrator sees that. Pure: the server reads the
 // rows (server/admin-work-data.ts), the page shows the report.
 import { dayInZone, dayStartInZone, shiftDay } from './chile-time';
+import { lessonsLearned } from '@/lib/commercial-opportunities/close-outcome';
 
 /** Cowork's calls a person may make in a day (cowork_reserve_model_call, 20261023130000). */
 export const COWORK_DAILY_CALLS = 300;
@@ -15,8 +16,8 @@ export type WorkReportInput = {
   from: string; to: string; now: Date;
   work: Array<{ opportunityId: string; state: string; responsibleId: string | null; deadlineAt: string | null }>;
   participants: Array<{ opportunityId: string; userId: string }>;
-  /** What people did on the opportunities in the period; `to` is the stage of a move. */
-  activity: Array<{ actorId: string | null; kind: string; to?: string | null; createdAt: string }>;
+  /** What people did on the opportunities in the period; `to` is the stage of a move, with the reasons and the winner of a close. */
+  activity: Array<{ actorId: string | null; kind: string; to?: string | null; createdAt: string; opportunityId?: string; motives?: unknown; winner?: string | null }>;
   /** Decisions and blocks no administrator has answered. */
   waiting: number;
   runs: Array<{ id: string; userId: string; rootRunId: string | null; createdAt: string }>;
@@ -29,7 +30,9 @@ export type WorkReportInput = {
 
 export type WorkReport = {
   opportunities: { inPlay: number; overdue: number; submitted: number; won: number; lost: number; waiting: number; activePeople: number;
-    people: Array<{ id: string; name: string; open: number; actions: number; submitted: number; won: number; lastAt: string | null }> };
+    people: Array<{ id: string; name: string; open: number; actions: number; submitted: number; won: number; lastAt: string | null }>;
+    /** «Lo que aprendimos» (OPP-30): the closes of the period with their reasons, and who won the ones lost. */
+    learned: ReturnType<typeof lessonsLearned> };
   cowork: { conversations: number; turns: number; activePeople: number; costUsd: number; unknownCost: number;
     people: Array<{ id: string; name: string; conversations: number; turns: number; costUsd: number; lastAt: string | null }> };
   caps: Array<{ id: 'opportunities' | 'cowork' | 'credits'; label: string; used: number; limit: number; detail: string }>;
@@ -88,7 +91,9 @@ export function workReport(input: WorkReportInput): WorkReport {
 
   return {
     opportunities: { inPlay: inPlay.size, overdue, submitted: moved('submitted'), won: moved('won'), lost: moved('lost'), waiting: input.waiting,
-      activePeople: opportunityPeople.filter(person => person.actions > 0).length, people: opportunityPeople },
+      activePeople: opportunityPeople.filter(person => person.actions > 0).length, people: opportunityPeople,
+      learned: lessonsLearned(moves.flatMap(row => (row.kind === 'state' && row.opportunityId
+        ? [{ opportunityId: row.opportunityId, to: row.to ?? null, motives: row.motives, winner: row.winner ?? null, createdAt: row.createdAt }] : []))) },
     cowork: { conversations: new Set(runs.map(run => `${run.userId}:${run.rootRunId ?? run.id}`)).size, turns: runs.length, activePeople: coworkPeople.filter(person => person.turns > 0).length,
       costUsd: calls.reduce((sum, call) => sum + (call.costUsd ?? 0), 0), unknownCost: calls.filter(call => call.costUsd === null).length, people: coworkPeople },
     caps,
