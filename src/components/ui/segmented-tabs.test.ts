@@ -28,6 +28,9 @@ test('a row of tabs is a tablist with one tab in the Tab order, the selected one
   assert.match(html, /overflow-x-auto/);
   assert.doesNotMatch(html, /flex-wrap/);
   assert.match(render({ variant: 'pills' }), /aria-selected:bg-foreground/);
+  // A mark that follows the count is read after it: «Mis tareas 3, 1 vencida».
+  const late = render({ tabs: [{ value: 'tasks', label: 'Mis tareas', count: 3, after: React.createElement('span', { className: 'sr-only' }, ', 1 vencida') }], value: 'tasks' });
+  assert.match(late, />Mis tareas<span class="tabular-nums opacity-70">3<\/span><span class="sr-only">, 1 vencida<\/span>/);
 });
 
 test('arrows move to the next and previous tab and wrap around; Home and End go to the ends; other keys are left alone', () => {

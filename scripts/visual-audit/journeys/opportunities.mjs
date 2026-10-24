@@ -140,7 +140,7 @@ export default () => [
     ] },
   { id: 'admin-filtros-url', persona: 'owner', title: 'Administrador: los filtros viven en la dirección y «Atrás» vuelve al anterior', goal: 'Compartir «Por revisar» de la Lista y volver al filtro de antes.', passWrites: [],
     steps: [
-      { say: 'Abro Oportunidades y paso a la Lista', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); await c.click({ role: 'button', name: 'Lista' }); await c.wait(800); } },
+      { say: 'Abro Oportunidades y paso a la Lista', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); await c.click({ role: 'tab', name: 'Lista' }); await c.wait(800); } },
       { say: 'Elijo «Por revisar»', do: async c => {
         await c.click({ role: 'button', name: /^Por revisar/ }); await c.wait(800);
         const url = new URL(c.page.url());
@@ -218,7 +218,7 @@ export default () => [
     steps: [
       { say: 'Abro Oportunidades', do: async c => { await c.go('/opportunities'); await c.see('Gestionar oportunidades'); } },
       { say: 'Elijo En preparación', do: async c => { await c.click({ text: 'En preparación' }); await c.see('Invitación a cotizar: aseo industrial para planta de producción'); } },
-      { say: 'Abro la invitación de aseo', do: async c => { await open(c, 'Invitación a cotizar: aseo industrial para planta de producción', 'Abrir'); await c.see('Asignar equipo'); } },
+      { say: 'Abro la invitación de aseo', do: async c => { await open(c, 'Invitación a cotizar: aseo industrial para planta de producción', 'Abrir'); await c.see(/^(Asignar|Cambiar) equipo$/); } },
       { say: 'Cambio la etapa a Presentada', do: async c => {
         await c.choose('Cambiar etapa', 'Presentada'); await c.wait(1200);
         c.check('la oportunidad quedó presentada', stateOf(c, 7) === 'submitted', `estado: ${stateOf(c, 7)}`);
@@ -326,7 +326,7 @@ export default () => [
         c.check('«Mis tareas» dice cuántas tiene', await shows(c, /^Mis tareas\s*3/));
       } },
       { say: 'Pulso «Mis tareas»', do: async c => {
-        await c.click({ role: 'button', name: /^Mis tareas/ }); await c.see('Vencidas');
+        await c.click({ role: 'tab', name: /^Mis tareas/ }); await c.see('Vencidas');
         await c.see('Pedir la visita a terreno de las sucursales');
         c.check('la vencida dice cuándo venció, en rojo', await c.page.getByText(/^Venció el /).first().evaluate(node => /text-destructive/.test(node.className)).catch(() => false));
         c.check('la dirección es la de «Mis tareas»', c.page.url().includes('vista=tareas'), c.page.url());

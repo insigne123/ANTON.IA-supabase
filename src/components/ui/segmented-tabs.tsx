@@ -5,7 +5,8 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
-export type SegmentedTab<T extends string> = { value: T; label: React.ReactNode; icon?: React.ReactNode; count?: number | null };
+/** `after` follows the count: a mark such as a dot that something is late, with its words for a screen reader. */
+export type SegmentedTab<T extends string> = { value: T; label: React.ReactNode; icon?: React.ReactNode; count?: number | null; after?: React.ReactNode };
 
 /** Where the arrow keys, Home and End take the focus from tab `index` of `count`; the row wraps around. Null: not a key it handles. */
 export function nextTabIndex(key: string, index: number, count: number): number | null {
@@ -60,7 +61,7 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, label, 
         tabIndex={selected ? 0 : -1} ref={node => { if (node) buttons.current.set(tab.value, node); else buttons.current.delete(tab.value); }}
         onClick={() => onChange(tab.value)} onKeyDown={event => keyDown(event, index)}
         className={cn('inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1', TAB[variant])}>
-        {tab.icon}{tab.label}{typeof tab.count === 'number' ? <span className="tabular-nums opacity-70">{tab.count}</span> : null}
+        {tab.icon}{tab.label}{typeof tab.count === 'number' ? <span className="tabular-nums opacity-70">{tab.count}</span> : null}{tab.after}
       </button>;
     })}
   </div>;

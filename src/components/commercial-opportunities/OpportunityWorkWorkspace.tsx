@@ -936,8 +936,9 @@ export function OpportunityWorkWorkspace() {
           const late = key === 'tasks' ? overview.myTasks?.late ?? 0 : 0;
           return { value: key, count: key === 'tasks' && overview.myTasks?.open ? overview.myTasks.open : null,
             // On a phone «Mis oportunidades» says «Oportunidades».
-            label: <>{label === 'Mis oportunidades' ? <><span className="sm:hidden">Oportunidades</span><span className="hidden sm:inline">{label}</span></> : label}
-              {late ? <><span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden="true" /><span className="sr-only">, {late === 1 ? '1 vencida' : `${late} vencidas`}</span></> : null}</> };
+            label: label === 'Mis oportunidades' ? <><span className="sm:hidden">Oportunidades</span><span className="hidden sm:inline">{label}</span></> : label,
+            // After the count, so it reads «Mis tareas 3, 1 vencida».
+            after: late ? <><span className="h-1.5 w-1.5 rounded-full bg-destructive" aria-hidden="true" /><span className="sr-only">, {late === 1 ? '1 vencida' : `${late} vencidas`}</span></> : null };
         })} />
       {/* The panel of the view on show, named by its tab (OPP-43). */}
       <div {...tabPanelProps('opp-view', view)} className="flex flex-col gap-5">
