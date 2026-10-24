@@ -42,6 +42,9 @@ import { TeamOffice, TeamPicker } from './TeamOffice';
 import { InitialsAvatar } from '@/components/initials-avatar';
 import { useConfirm } from '@/components/confirm-dialog';
 import { OpportunityTicketConnection } from './OpportunityTicketConnection';
+import { SearchCriteriaFields } from './SearchCriteriaFields';
+import { SearchHealthLine } from './SearchHealthLine';
+import { criteriaDraft, draftToSave, type CriteriaDraft } from '@/lib/commercial-opportunities/search-settings';
 import { CloseReasonDialog, type CloseTarget } from './CloseReasonDialog';
 import { DiscardDialog, type DiscardTarget } from './DiscardDialog';
 import { ADMIN_LIST_VIEWS, inListView, listStageOf, type DiscardReason } from '@/lib/commercial-opportunities/list-stages';
@@ -460,9 +463,10 @@ export function OpportunityWorkWorkspace() {
     const c = overview?.context as any;
     setDraft({ offer: c?.offer || overview?.suggestion?.offer || '', services: (c?.services || overview?.suggestion?.services || []).join('\n'), territories: (c?.territories || []).join('\n'), exclusions: (c?.exclusions || []).join('\n'), priority: c?.priority || 'balanced', automation: c ? c.automation : true, hour: c?.hour ?? 8 }); setModal('context');
   };
+  // «Qué buscamos»: where the daily search looks and what for (search-settings.ts), edited as one draft.
+  const [criteria, setCriteria] = useState<CriteriaDraft | null>(null);
   const openCriteria = () => {
-    const c = (overview?.context as any)?.criteria || {};
-    setDraft({ roles: (c.roles || []).join('\n'), keywords: (c.keywords || []).join('\n'), postQueries: (c.postQueries || []).join('\n'), decisionMakerTitles: (c.decisionMakerTitles || []).join('\n') }); setModal('criteria');
+    setProblem(''); setCriteria(criteriaDraft((overview?.context as any)?.criteria, (overview?.context as any)?.search)); setModal('criteria');
   };
   const field = (name: string, value: unknown) => setDraft(d => ({ ...d, [name]: value }));
   // What a dialog opened with: closing it with something else typed (or documents chosen) asks first, instead of losing it.
@@ -495,8 +499,12 @@ export function OpportunityWorkWorkspace() {
     let result;
     if (modal === 'context') result = await perform('context', { offer: draft.offer, services: list(draft.services), territories: list(draft.territories), exclusions: list(draft.exclusions), priority: draft.priority,
       automation: Boolean(draft.automation), hour: Number(draft.hour), expectedRevision: Number((overview?.context as any)?.revision || 0) }, null);
-    else if (modal === 'criteria') result = await perform('criteria', { criteria: { roles: list(draft.roles), keywords: list(draft.keywords), postQueries: list(draft.postQueries), decisionMakerTitles: list(draft.decisionMakerTitles) },
-      expectedRevision: Number((overview?.context as any)?.revision || 0) }, null);
+    else if (modal === 'criteria') {
+      // What to fix is said in words before anything is sent (LinkedIn on without a search, an amount range upside down).
+      const next = criteria ? draftToSave(criteria) : null;
+      if (!next || 'problem' in next) { setProblem(next && 'problem' in next ? next.problem : 'Revisa los datos.'); return; }
+      result = await perform('criteria', { criteria: next.criteria, search: next.search, expectedRevision: Number((overview?.context as any)?.revision || 0) }, null);
+    }
     else if (modal === 'assign' && assignMany) {
       const many = assignMany;
       const bulk = await perform('bulk', { op: 'assign', ids: many, teamId: draft.teamId || null, participantIds: draft.participantIds || [], responsibleId: draft.responsibleId || null,
@@ -635,9 +643,10 @@ export function OpportunityWorkWorkspace() {
             <span role="progressbar" aria-label="Presupuesto del mes usado" aria-valuemin={0} aria-valuemax={overview.budget.cap} aria-valuenow={Number(overview.budget.spent.toFixed(2))} className="h-1 w-16 overflow-hidden rounded-full bg-muted">
               <span className={cn('block h-full rounded-full', overview.budget.spent / overview.budget.cap >= 0.9 ? 'bg-destructive' : 'bg-primary/70')} style={{ width: `${Math.min(100, (overview.budget.spent / overview.budget.cap) * 100)}%` }} /></span></span>
           {searching.length ? <span role="status" className="inline-flex items-center gap-1.5">· <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />Buscando en {sourceNames(searching)}…</span> : null}</div>
-        <div className="-ml-3 flex flex-wrap items-center sm:ml-0">{(overview.context as any).criteria?.postQueries?.length ? <Button variant="ghost" size="sm" onClick={openCriteria}>Qué buscamos</Button> : null}
+        <div className="-ml-3 flex flex-wrap items-center sm:ml-0">{(overview.context as any).criteria?.postQueries?.length || (overview.context as any).criteria?.keywords?.length ? <Button variant="ghost" size="sm" onClick={openCriteria}>Qué buscamos</Button> : null}
           <Button variant="ghost" size="sm" onClick={() => setProfileOpen(true)}>Ficha para licitaciones</Button>
           {overview.sourceStatus.automation ? <Button variant="outline" size="sm" className="ml-1" disabled={busy || searching.length > 0} onClick={() => void discover()}>{searching.length ? 'Buscando…' : 'Actualizar oportunidades'}</Button> : null}</div></div>}
+      {admin && overview.context && overview.health ? <SearchHealthLine health={overview.health} /> : null}
       {admin && !overview.context && <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-muted/20 p-4"><div><p className="text-sm font-medium">Confirma qué ofrece tu empresa</p><p className="mt-1 text-xs text-muted-foreground">La IA prepara los criterios desde tu oferta. No necesitas escribir palabras de búsqueda.</p></div>
         <Button onClick={openContext}>Confirmar oferta</Button></div>}
       {view !== 'assistant' && <NewsList notifications={overview.notifications} waiting={admin ? overview.waiting : null} onOpen={id => open(id)} onDecision={id => open(id, 'decision')}
@@ -788,13 +797,13 @@ export function OpportunityWorkWorkspace() {
     {admin && <CloseReasonDialog target={closing} busy={busy} error={closing ? problem : ''} onConfirm={confirmClose} onCancel={() => setClosing(null)} />}
     {admin && <DiscardDialog target={discarding} busy={busy} error={discarding ? problem : ''} onConfirm={confirmDiscard} onCancel={() => setDiscarding(null)} />}
     {admin && <TenderProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />}
-    <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignMany ? `Asignar ${assignMany.length === 1 ? 'una oportunidad' : `${assignMany.length} oportunidades`}` : assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'La IA los preparó desde tu oferta. Corrígelos si algo no calza: uno por línea. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
+    <Dialog open={modal !== null} onOpenChange={open => { if (!open) void closeModal(); }}><DialogContent className={cn('max-h-[90dvh] overflow-y-auto', modal === 'context' || modal === 'create' ? 'sm:max-w-3xl' : 'sm:max-w-2xl')}><DialogHeader><DialogTitle>{modal === 'create' ? 'Cargar oportunidad recibida' : modal === 'context' ? 'Tu empresa' : modal === 'criteria' ? 'Qué buscamos para tu empresa' : modal === 'assign' ? (assignMany ? `Asignar ${assignMany.length === 1 ? 'una oportunidad' : `${assignMany.length} oportunidades`}` : assignFor ? `Asignar «${assignFor.title.length > 80 ? `${assignFor.title.slice(0, 79)}…` : assignFor.title}»` : 'Asignar equipo de trabajo') : 'Crear tarea'}</DialogTitle><DialogDescription>{modal === 'context' ? 'Lo que la IA sabe de tu empresa para buscar oportunidades y decidir cuáles te convienen.' : modal === 'criteria' ? 'Dónde buscamos y qué. La IA preparó los criterios desde tu oferta; corrígelos si algo no calza. Se usan desde la próxima búsqueda.' : modal === 'assign' ? 'Los participantes recibirán la asignación y podrán trabajar en el expediente.' : modal === 'task' ? 'Una acción concreta, quién la hace y para cuándo.' : 'Completa la información disponible; los datos faltantes se identificarán en el análisis.'}</DialogDescription></DialogHeader>
       <form className="space-y-5" onSubmit={e => { e.preventDefault(); void saveModal().catch(e => setProblem(e instanceof Error ? e.message : 'Revisa los datos.')); }}>
         {modal === 'context' ? <>
           <WorkspaceCompanyFields draft={draft} field={field} />
           <OpportunityTicketConnection />
         </>
-        : modal === 'criteria' ? <>{([['roles', 'Cargos en avisos de trabajo que revelan una necesidad'], ['keywords', 'Palabras para licitaciones y compras públicas'], ['postQueries', 'Búsquedas de publicaciones en LinkedIn'], ['decisionMakerTitles', 'Cargos de quienes deciden la compra']] as const).map(([key, label]) => <div key={key}><Label htmlFor={`op-criteria-${key}`}>{label}</Label><Textarea id={`op-criteria-${key}`} value={draft[key] || ''} onChange={e => field(key, e.target.value)} rows={key === 'postQueries' ? 5 : 4} required={key === 'postQueries'} /></div>)}</>
+        : modal === 'criteria' ? (criteria ? <SearchCriteriaFields draft={criteria} onChange={setCriteria} /> : null)
         : modal === 'assign' ? <>
           {overview?.groups.length ? <div className="space-y-1.5"><p className="text-sm font-medium">Usar un equipo de la organización · opcional</p><div className="flex flex-wrap gap-2">{overview.groups.map(g => <button key={g.id} type="button" aria-pressed={draft.teamId === g.id} onClick={() => field('teamId', draft.teamId === g.id ? '' : g.id)} className={cn(filterChip(draft.teamId === g.id), 'h-9')}>{g.name}</button>)}</div><p className="text-xs text-muted-foreground">Suma a todas las personas de ese equipo.</p></div> : null}
           <div className="space-y-1.5"><p className="text-sm font-medium">¿Quién trabaja esta oportunidad?</p><p className="text-xs text-muted-foreground">Toca a cada persona; la estrella marca a quien responde por ella.</p>

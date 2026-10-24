@@ -6,6 +6,7 @@ import { opportunityDb } from './workspace-store';
 import { assertOpportunityAdmin } from './workspace-access';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { criteriaSchema, captureOpportunityLinkedIn, captureOpportunityTenders, evaluateOpportunityBatch } from './workspace-sources';
+import { discoverySources, readSearchSettings } from '@/lib/commercial-opportunities/search-settings';
 import { runOpportunityResearch, runOpportunityChat } from './workspace-research';
 import { applyAutomaticMove, runPipelineReview } from './workspace-pipeline';
 import { runOpportunityOffer } from './workspace-offer';
@@ -19,9 +20,12 @@ import { runOpportunityPrefill } from './workspace-prefill';
 import { runDocumentScan } from './workspace-scans';
 import type { ClaudeAttachment } from '@/ai/anthropic-json';
 
-/** The sources of the daily search for this offer: tenders and Compra Ágil, job ads when there are roles, LinkedIn posts; the criteria first. */
-const discoveryKinds = (context: { criteria?: { postQueries?: string[]; roles?: string[] } | null }) =>
-  context.criteria?.postQueries?.length ? ['tenders', ...(context.criteria?.roles?.length ? ['hiring'] : []), 'posts'] : ['criteria'];
+/**
+ * The sources of a day of search for this offer, as the administrator chose them in «Qué buscamos» (search-settings.ts): tenders and
+ * Compra Ágil, job ads when there are roles (on Mondays when they run weekly), LinkedIn posts when there are searches; the criteria first.
+ */
+const discoveryKinds = (context: { search?: unknown; criteria?: { postQueries?: string[]; roles?: string[]; keywords?: string[] } | null }, day: string) =>
+  discoverySources(readSearchSettings(context.search), context.criteria, new Date(`${day}T12:00:00.000Z`).getUTCDay());
 const SEARCHING = ['queued', 'running', 'waiting'];
 export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope: WorkScope, manual = false) {
   assertOpportunityAdmin(scope);
@@ -30,7 +34,7 @@ export async function enqueueOpportunityDiscovery(client: SupabaseClient, scope:
   const clock = opportunityLocalClock();
   if (!manual && (!context.automation || clock.hour < context.hour)) return 0;
   const prefix = `daily:${clock.day}:${context.revision}`;
-  const kinds = discoveryKinds(context);
+  const kinds = discoveryKinds(context, clock.day);
   for (const kind of kinds) opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, requested_by: scope.userId,
     kind, dedupe_key: `${prefix}:${kind}`, payload: { revision: context.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }));
   // «Demanda futura» reads the Plan Anual de Compras once a month, once the words exist; «Contratos por vencer» too.
@@ -48,7 +52,7 @@ export async function requestOpportunityDiscovery(client: SupabaseClient, scope:
   const context = opportunityDb(await client.from('opportunity_company_context').select('*').eq('organization_id', scope.organizationId).maybeSingle());
   if (!context) throw new AuthError('Confirma primero la oferta de tu empresa.', 409);
   const clock = opportunityLocalClock(new Date(now));
-  const kinds = discoveryKinds(context);
+  const kinds = discoveryKinds(context, clock.day);
   const recent = (opportunityDb(await client.from('opportunity_jobs').select('kind,state,updated_at').eq('organization_id', scope.organizationId).in('kind', kinds)
     .gte('created_at', new Date(now - 86_400_000).toISOString()).order('created_at', { ascending: false }).limit(60)) || []) as Array<{ kind: string; state: string; updated_at: string }>;
   const queued: string[] = []; const searching: string[] = []; const fresh: string[] = []; const later: string[] = [];

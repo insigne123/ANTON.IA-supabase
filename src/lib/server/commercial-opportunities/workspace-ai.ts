@@ -9,7 +9,8 @@ import { opportunityModel, opportunityUsageCost, type OpportunityRole } from '@/
 import { readOpportunityReportEnvelope, reportEnvelopeSchema } from '@/lib/commercial-opportunities/report-generation';
 
 export type OpportunityJob = { id: string; organization_id: string; opportunity_id: string | null; requested_by: string; dedupe_key: string;
-  kind: string; payload: Record<string, any>; state: string; lease_token: string; attempts: number };
+  kind: string; payload: Record<string, any>; state: string; lease_token: string; attempts: number;
+  /** What the last run left: a waiting job keeps here when to try again. */ result?: Record<string, any> | null };
 export type Category = 'evaluation' | 'research' | 'chat';
 const PRICES: Record<string, { input: number; output: number; cache: number; write: number }> = {
   'claude-haiku-5-5': { input: .1, output: .5, cache: .01, write: .2 },

@@ -6,7 +6,10 @@ import type { WorkItem } from './workspace';
 /** Why the evaluation left an opportunity out. Asked of the model next to «excluded»; older rows have none. */
 export const EXCLUSION_MOTIVES = ['otro_producto', 'parte_menor', 'requisito', 'escala', 'sin_compra'] as const;
 export type ExclusionMotive = typeof EXCLUSION_MOTIVES[number];
-export const EXCLUSION_MOTIVE_LABELS: Record<ExclusionMotive | 'otros', string> = {
+/** Left out by the administrator's own rules in «Qué buscamos» (search-settings.ts), before the AI read it. The AI never gives it. */
+export const RULE_MOTIVE = 'regla' as const;
+export const EXCLUSION_MOTIVE_LABELS: Record<ExclusionMotive | typeof RULE_MOTIVE | 'otros', string> = {
+  regla: 'Fuera de lo que definiste en «Qué buscamos»',
   otro_producto: 'Piden otra cosa',
   parte_menor: 'Lo que ofreces es una parte menor',
   requisito: 'Exigen algo que no ofreces',
@@ -70,10 +73,10 @@ export function startHere<T extends Pick<WorkItem, 'id' | 'kind' | 'data' | 'dea
 
 /** The excluded opportunities grouped by why, the largest group first and the ones without a motive last. */
 export function exclusionGroups<T extends Pick<WorkItem, 'data'>>(items: T[]) {
-  const groups = new Map<ExclusionMotive | 'otros', T[]>();
+  const groups = new Map<ExclusionMotive | typeof RULE_MOTIVE | 'otros', T[]>();
   for (const item of items) {
     const motive = item.data?.excludedMotive;
-    const key = typeof motive === 'string' && (EXCLUSION_MOTIVES as readonly string[]).includes(motive) ? motive as ExclusionMotive : 'otros';
+    const key = typeof motive === 'string' && ([...EXCLUSION_MOTIVES, RULE_MOTIVE] as readonly string[]).includes(motive) ? motive as ExclusionMotive | typeof RULE_MOTIVE : 'otros';
     groups.set(key, [...(groups.get(key) || []), item]);
   }
   return [...groups.entries()]

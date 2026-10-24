@@ -7,6 +7,8 @@ import { preferredFullName } from '@/lib/lead-name';
 import { reportWeek } from '@/lib/weekly-report';
 import { dropPdf } from '@/lib/server/lead-drops';
 import { readWaitingOnAdmins } from '@/lib/server/commercial-opportunities/workspace-waiting';
+import { readSearchHealth } from '@/lib/server/commercial-opportunities/workspace-source-health';
+import { failingSources } from '@/lib/commercial-opportunities/source-health';
 import { readPersonGoal } from '@/lib/server/weekly-goals';
 import type { SendSelf } from '@/lib/server/weekly-report';
 
@@ -139,8 +141,10 @@ async function readOpportunityNews(client: Client, scope: AlertScope, options: {
   };
   const news = { assigned: once('assignment', /^Oportunidad asignada:\s*/), reports: once('report', /^Informe (?:listo|disponible):\s*/) };
   if (!options.manager) return news;
-  const waiting = await readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null);
-  return waiting ? { ...news, waiting } : news;
+  const [waiting, health] = await Promise.all([readWaitingOnAdmins(client, scope.organizationId, options.now).catch(() => null),
+    readSearchHealth(client, scope.organizationId, options.now).catch(() => null)]);
+  const sources = health ? failingSources(health.sources).map(item => ({ label: item.label, days: item.failingDays })) : [];
+  return { ...news, ...(waiting ? { waiting } : {}), ...(sources.length ? { sources } : {}) };
 }
 
 /**

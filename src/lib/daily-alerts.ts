@@ -37,11 +37,13 @@ export type AlertFacts = {
    * first, with who asked and since when. Every day while they wait: it is the reminder that was missing.
    */
   waiting?: Array<{ id: string; title: string; kind: 'ask' | 'no_go' | 'blocked'; who: string; since: string; dueAt: string | null }>;
+  /** The sources of the daily search that failed two days in a row or more (source-health.ts), for whoever manages Oportunidades. */
+  sources?: Array<{ label: string; days: number }>;
   goal: GoalProgress | null;
   /** Today's «Contacto del día», when it is ready. */
   drop?: { id: string; items: DropItem[] } | null;
 };
-export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'closing' | 'assigned' | 'report' | 'drop' | 'research' | 'ready' | 'goal';
+export type AlertKind = 'reply' | 'pending' | 'commitment' | 'decision' | 'source' | 'closing' | 'assigned' | 'report' | 'drop' | 'research' | 'ready' | 'goal';
 export type AlertLine = { kind: AlertKind; text: string; href: string };
 export type DailyAlert = { subject: string; lines: AlertLine[] };
 
@@ -127,6 +129,13 @@ export function composeAlert(facts: AlertFacts, now: Date, options: { goalRemind
     lines.push({ kind: 'decision', text, href: `/opportunities?op=${encodeURIComponent(item.id)}` });
   }
   if (waiting.length > 2) lines.push({ kind: 'decision', text: `Y ${plural(waiting.length - 2, 'oportunidad más espera', 'oportunidades más esperan')} tu respuesta`, href: '/opportunities' });
+
+  // A source of the search that keeps failing: a radar with nothing new looked the same as a broken one.
+  for (const source of (facts.sources || []).slice(0, 2)) {
+    const text = `La búsqueda de ${source.label} falló ${source.days} días seguidos`;
+    lead(text);
+    lines.push({ kind: 'source', text, href: '/opportunities' });
+  }
 
   const assigned = facts.assigned || [];
   if (assigned.length) {

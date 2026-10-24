@@ -215,6 +215,10 @@ export default function workspace(ctx) {
     { id: job(2), organization_id: org, opportunity_id: opp(2), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:2', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(2), updated_at: ctx.daysAgo(2) },
     { id: job(6), organization_id: org, opportunity_id: opp(6), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:6', state: 'running', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.minutesAgo(3), updated_at: ctx.minutesAgo(1) },
     { id: job(10), organization_id: org, opportunity_id: opp(10), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:10', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(6), updated_at: ctx.daysAgo(6) },
+    // This morning's search (OPP-15): the listing and LinkedIn answered; one of the two Compra Ágil searches got Mercado Público's 504.
+    ...[['tenders', {}, 'ready', null], ['tenders', { keyword: 'antecedentes' }, 'ready', null], ['tenders', { keyword: 'verificación' }, 'failed', 'Compra Ágil respondió 504 (falla de Mercado Público).'], ['posts', {}, 'ready', null]]
+      .map(([kind, payload, state, error], index) => ({ id: ctx.uid(9590 + index), organization_id: org, opportunity_id: null, requested_by: ctx.OWNER, kind, dedupe_key: `fx:discovery:${index}`, state, payload, result: null,
+        lease_token: null, lease_until: null, attempts: 1, error, created_at: ctx.hoursAgo(5), updated_at: ctx.hoursAgo(5 - index * 0.05) })),
   ];
 
   // The titles of production: opportunity_assign («Oportunidad asignada: …»), workspace-jobs.ts («Informe listo: …») and notifyManagers.
@@ -228,7 +232,8 @@ export default function workspace(ctx) {
 
   const context = { organization_id: org, offer: 'Verificación de antecedentes laborales y judiciales para empresas que contratan mucho personal, con informes en minutos y trazabilidad para auditorías.',
     services: ['Verificación de antecedentes laborales', 'Verificación de antecedentes judiciales', 'Alertas judiciales'], territories: ['Región Metropolitana', 'Valparaíso', 'Biobío'], exclusions: ['Servicios de salud', 'Construcción'],
-    priority: 'balanced', criteria: { decisionMakerTitles: ['Gerente de Personas', 'Jefe de Reclutamiento'], keywords: ['antecedentes', 'verificación', 'personal externo'], unspsc: ['80111600'] },
+    priority: 'balanced', criteria: { decisionMakerTitles: ['Gerente de Personas', 'Jefe de Reclutamiento'], keywords: ['antecedentes', 'verificación', 'personal externo'], postQueries: ['"verificación de antecedentes" contratación masiva'], unspsc: ['80111600'] },
+    search: { sources: { hiring: false }, tenders: { minAmount: 2_000_000, avoidBuyers: [], buyers: ['Servicio de Salud Metropolitano Norte'], regions: [], unspsc: ['8011'] } },
     revision: 3, automation: true, hour: 8, approved_by: ctx.OWNER, approved_at: ctx.daysAgo(9) };
   const companyDocument = (n, label, expiresIn) => ({ id: ctx.uid(9900 + n), organization_id: org, label, kind: 'certificate', expires_at: expiresIn === null ? null : ctx.daysAhead(expiresIn), storage_path: null, uploaded_by: ctx.OWNER, created_at: ctx.daysAgo(30) });
 

@@ -7,6 +7,7 @@ const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
 const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'mark', 'decision', 'decision_reply'] };
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
 const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
+const CRITERIA = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['criteria'] };
 
 /**
  * The button of the card of an opportunity, found by its title: the nearest block around the title that has that button is the card.
@@ -39,6 +40,26 @@ export default () => [
       { say: 'Me arrepiento: Deshacer', do: async c => {
         await c.click('Deshacer'); await c.see('vuelve a las que nadie trabaja');
         c.check('volvió a las que nadie trabaja', stateOf(c, 9) === 'unassigned', `estado: ${stateOf(c, 9)}`);
+      } },
+    ] },
+  { id: 'admin-que-buscamos', persona: 'owner', title: 'Administrador: ver cómo fue la búsqueda, apagar LinkedIn y poner un monto máximo', goal: 'Que la búsqueda diaria no gaste en LinkedIn ni lea licitaciones demasiado grandes.', passWrites: [CRITERIA],
+    steps: [
+      { say: 'Abro Oportunidades y miro cómo fue la búsqueda de hoy', do: async c => {
+        await c.go('/opportunities'); await c.see('Última búsqueda');
+        c.check('dice qué fuente no respondió y por qué', await c.has('1 de 2 búsquedas respondieron'));
+      } },
+      { say: 'Pulso «Qué buscamos»', do: async c => { await c.click('Qué buscamos'); await c.seeRole('dialog', /Qué buscamos/); await c.see('Fuentes'); } },
+      { say: 'Apago LinkedIn', do: async c => {
+        await c.click({ role: 'switch', name: 'Publicaciones de LinkedIn' });
+        c.check('sin LinkedIn no pide búsquedas de publicaciones', !(await c.has('Búsquedas de publicaciones')));
+      } },
+      { say: 'Escribo el monto máximo y guardo', do: async c => {
+        await c.fill('Monto máximo (CLP) · opcional', '200.000.000');
+        await c.click({ role: 'button', name: 'Guardar' }); await c.see('Cambios guardados');
+        const search = c.table('opportunity_company_context')[0]?.search || {};
+        c.check('LinkedIn quedó apagado', search.sources?.posts === false, JSON.stringify(search.sources));
+        c.check('el monto máximo quedó guardado', search.tenders?.maxAmount === 200_000_000, `máximo: ${search.tenders?.maxAmount}`);
+        c.check('lo que ya estaba sigue igual', search.tenders?.minAmount === 2_000_000 && search.sources?.hiring === false);
       } },
     ] },
   { id: 'admin-varias', persona: 'owner', title: 'Administrador: asignar dos recomendadas de una vez desde la Lista', goal: 'Darle a Diego las dos empresas que contratan, en un paso.', passWrites: [BULK],

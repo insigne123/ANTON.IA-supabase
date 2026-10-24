@@ -177,6 +177,38 @@ test('the daily screening reads the profile: an unknown is a question, not a dis
   assert.match(prompt, /"garantiaMaximaQuePuedeEntregar":"no sé"/);
 });
 
+test('the administrator\'s own rules leave a tender out before the AI reads it, and the AI weighs the preferences', async () => {
+  const { evaluateOpportunityBatch } = await load(`export { evaluateOpportunityBatch } from './src/lib/server/commercial-opportunities/workspace-sources';`, {
+    './mercado-publico': 'export async function listOpenLicitaciones(){ return [] }',
+    './tickets': 'export async function resolveTicketForOrganization(){ return null }',
+    './compra-agil': 'export class CompraAgilError extends Error {} export async function searchCompraAgil(){ return [] } export function compraAgilQuery(){ return "" }',
+  });
+  const row = (id: string, amount: number | null, company: string, items: unknown[] = []) => ({ id, organization_id: 'org', kind: 'tender', title: `Aseo ${id}`, company_name: company, amount, currency: 'CLP', deadline_at: null,
+    data: { profileRevision: 3, contentHash: `h-${id}`, source: 'tenders', description: 'Aseo', observed: { items } } });
+  const rows = [row('small', 900_000, 'Hospital Regional'), row('avoided', 40_000_000, 'Municipalidad de Maipú')];
+  const context = { offer: 'Aseo hospitalario', services: ['Aseo'], exclusions: [], priority: 'balanced', revision: 3,
+    search: { tenders: { minAmount: 5_000_000, avoidBuyers: ['Municipalidad de Maipú'], unspsc: ['7611'] } } };
+  const job = { id: 'j', organization_id: 'org', requested_by: 'a1', payload: { ids: ['small', 'avoided'] }, kind: 'evaluate', lease_token: 'l', state: 'running', opportunity_id: null };
+  (globalThis as any).__call = null;
+  (globalThis as any).__reply = () => { throw new Error('the AI must not read what the rules left out'); };
+  const { tables, client } = memory({ commercial_opportunities: rows });
+  assert.deepEqual(await evaluateOpportunityBatch(client, job, context), { evaluated: 2, pending: 0 });
+  assert.equal((globalThis as any).__call, null, 'no model call, no cost');
+  assert.deepEqual(tables.commercial_opportunities.map((item: any) => [item.id, item.data.evaluation, item.data.excludedMotive, item.reasons[0]]), [
+    ['small', 'excluded', 'regla', 'El monto está bajo el mínimo que definiste en «Qué buscamos».'],
+    ['avoided', 'excluded', 'regla', 'Es de Municipalidad de Maipú, un organismo que pediste evitar.'],
+  ]);
+  assert.deepEqual(tables.opportunity_evaluations.map((item: any) => item.model), ['rule', 'rule']);
+  // One the rules let through goes to the AI with the preferences, marked when an item is one of the UNSPSC codes.
+  const kept = row('kept', 30_000_000, 'Hospital Regional', [{ code: '76111501', name: 'Servicios de limpieza' }]);
+  (globalThis as any).__reply = () => ({ evaluations: [] });
+  await evaluateOpportunityBatch(memory({ commercial_opportunities: [kept] }).client, { ...job, payload: { ids: ['kept'] } }, context);
+  const prompt = (globalThis as any).__call.prompt;
+  assert.match(prompt, /preferenciasDeLicitaciones son organismos que el equipo sigue/);
+  assert.match(prompt, /"preferenciasDeLicitaciones":\{"codigosUnspsc":\["7611"\]\}/);
+  assert.match(prompt, /"calzaUnspsc":true/);
+});
+
 test('a «Perfil» is the workspace\'s company only when its name is', async () => {
   const { sameCompany } = await profileModule();
   assert.equal(sameCompany('Grupo Expro SpA', 'GrupoExpro'), true);
