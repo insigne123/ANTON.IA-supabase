@@ -1292,7 +1292,7 @@ export default function EnrichedLeadsClient() {
                     className="h-10 rounded-full border-border/70 bg-background/90 pl-10"
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="Buscar por nombre, empresa, cargo o correo"
+                    placeholder="Nombre, empresa, cargo o correo"
                     aria-label="Buscar en «Por escribir»"
                   />
                 </div>

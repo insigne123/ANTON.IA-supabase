@@ -2273,8 +2273,9 @@ export default function SearchPage() {
           <p className="mt-1 max-w-md text-sm text-foreground/70">Vuelve a «Empresas», marca al menos una y busca contactos.</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-          <div role="group" aria-label="Empresas con contactos" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-col md:overflow-visible md:px-0 md:pb-0">
+        <div className="grid gap-4 2xl:grid-cols-[220px_minmax(0,1fr)]">
+          {/* The companies go in a row above their contacts until the screen is wide: beside them, both columns were cut at 1024 px. */}
+          <div role="group" aria-label="Empresas con contactos" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 2xl:mx-0 2xl:flex-col 2xl:overflow-visible 2xl:px-0 2xl:pb-0">
             {companyWindowList.map((window) => {
               const active = window.organization.id === activeCompanyId;
               return (
@@ -2284,13 +2285,13 @@ export default function SearchPage() {
                   aria-pressed={active}
                   onClick={() => setActiveCompanyId(window.organization.id)}
                   className={cn(
-                    'flex shrink-0 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full',
+                    'flex shrink-0 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring 2xl:w-full',
                     active ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background hover:border-primary/30',
                   )}
                 >
-                  <span className="min-w-0 max-w-[11rem] md:max-w-none">
+                  <span className="min-w-0 max-w-[11rem] 2xl:max-w-none">
                     <span className="block truncate font-medium">{window.organization.name}</span>
-                    <span className="hidden truncate text-xs text-foreground/70 md:block">
+                    <span className="hidden truncate text-xs text-foreground/70 2xl:block">
                       {displayDomain(window.organization.primary_domain || window.organization.website_url || '') || 'Sin sitio web'}
                     </span>
                   </span>

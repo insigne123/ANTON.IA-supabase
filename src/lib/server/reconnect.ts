@@ -85,7 +85,7 @@ export async function markReconnect(client: Client, scope: Scope, input: { conta
   const state = input.action === 'snooze' ? 'snoozed' : 'dismissed';
   const saved: any = await client.from('contact_reconnect_marks')
     .upsert({ ...key, state, until, updated_at: now.toISOString() }, { onConflict: 'user_id,contacted_id' });
-  if (saved.error?.code === MISSING_TABLE) throw new ReconnectError('Posponer aún no está disponible en este workspace.', 503);
+  if (saved.error?.code === MISSING_TABLE) throw new ReconnectError('Posponer aún no está disponible en esta organización.', 503);
   if (saved.error) throw new ReconnectError('No pudimos guardarlo. Intenta de nuevo.', 503);
   return { contactedId: input.contactedId, state, until };
 }

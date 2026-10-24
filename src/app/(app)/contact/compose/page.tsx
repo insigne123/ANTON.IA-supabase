@@ -2,7 +2,7 @@
 'use client';
 import Link from 'next/link';
 import { Suspense } from 'react';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type ReactElement } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { CalendarPlus } from 'lucide-react';
 import { useBookingLink } from '@/hooks/use-booking-link';
@@ -1253,6 +1253,48 @@ function ComposeInner() {
           icon: FileText,
         };
   const ReviewStatusIcon = reviewStatus.icon;
+  // «Revisar correo» stacked up to four notices before the email (Outlook not connected, the review, «No contactar» and
+  // «Necesita corrección» saying the same thing): the most urgent one shows, the rest fold, and the repeat goes.
+  const qaRepeatsContactability = contactability.result?.status === 'blocked' && campaignQa.status === 'blocked'
+    && campaignQa.checks.filter((check) => check.severity === 'blocked').every((check) => check.id === 'contactability');
+  const reviewNotice = (
+    <div
+      key="review"
+      id="review-status"
+      role={nativeDraftArchived ? 'alert' : 'status'}
+      aria-live="polite"
+      className={`rounded-xl border px-3 py-2.5 ${reviewStatus.className}`}
+    >
+      <div className="flex items-start gap-2.5">
+        <ReviewStatusIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium">{reviewStatus.title}</p>
+          <p className="text-xs leading-5 opacity-80">{reviewStatus.description}</p>
+        </div>
+      </div>
+    </div>
+  );
+  const notices = ([
+    sender.state === 'not_connected' ? { rank: 0, node: <SenderLine key="sender" name={currentProfile?.full_name || ''} provider={sendProvider} sender={sender} /> } : null,
+    isCanonicalDraft ? { rank: nativeDraftArchived ? 0 : hasNativeEdits || proposal ? 4 : nativeReviewComplete ? 8 : 5, node: reviewNotice } : null,
+    {
+      rank: contactability.result?.status === 'blocked' ? 1 : contactability.error ? 2 : contactability.result?.status === 'warning' ? 3 : 6,
+      node: (
+        <ContactabilityStatusCard
+          key="contactability"
+          compact
+          email={displayEmail}
+          result={contactability.result}
+          loading={contactability.loading}
+          error={contactability.error}
+          onRetry={contactability.refresh}
+        />
+      ),
+    },
+    shouldShowCampaignQa && !qaRepeatsContactability
+      ? { rank: campaignQa.status === 'blocked' ? 2 : campaignQa.status === 'review' ? 5 : 7, node: <CampaignQaPanel key="qa" result={campaignQa} compact /> }
+      : null,
+  ].filter(Boolean) as Array<{ rank: number; node: ReactElement }>).sort((a, b) => a.rank - b.rank);
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4 px-4 py-5 pb-24 sm:px-6 sm:py-6 sm:pb-24">
@@ -1298,24 +1340,8 @@ function ComposeInner() {
       </header>
 
       <section aria-label="Estado del correo" className="grid gap-2">
-        <SenderLine name={currentProfile?.full_name || ''} provider={sendProvider} sender={sender} />
+        {sender.state === 'not_connected' ? null : <SenderLine name={currentProfile?.full_name || ''} provider={sendProvider} sender={sender} />}
         {saveError ? <Alert variant="destructive"><AlertTitle>No se guardaron los cambios</AlertTitle><AlertDescription>{saveError}</AlertDescription></Alert> : null}
-        {isCanonicalDraft ? (
-          <div
-            id="review-status"
-            role={nativeDraftArchived ? 'alert' : 'status'}
-            aria-live="polite"
-            className={`rounded-xl border px-3 py-2.5 ${reviewStatus.className}`}
-          >
-            <div className="flex items-start gap-2.5">
-              <ReviewStatusIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">{reviewStatus.title}</p>
-                <p className="text-xs leading-5 opacity-80">{reviewStatus.description}</p>
-              </div>
-            </div>
-          </div>
-        ) : null}
         {sendReceipt ? (
           <Alert
             variant={sendReceipt.status === 'failed' ? 'destructive' : 'default'}
@@ -1367,15 +1393,15 @@ function ComposeInner() {
             </AlertDescription>
           </Alert>
         ) : null}
-        <ContactabilityStatusCard
-          compact
-          email={displayEmail}
-          result={contactability.result}
-          loading={contactability.loading}
-          error={contactability.error}
-          onRetry={contactability.refresh}
-        />
-        {shouldShowCampaignQa ? <CampaignQaPanel result={campaignQa} compact /> : null}
+        {notices[0]?.node}
+        {notices.length > 1 ? (
+          <details className="rounded-xl border border-border/60 px-3 py-2">
+            <summary className="cursor-pointer select-none rounded text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {notices.length === 2 ? 'Ver 1 aviso más' : `Ver ${notices.length - 1} avisos más`}
+            </summary>
+            <div className="mt-2 grid gap-2">{notices.slice(1).map((notice) => notice.node)}</div>
+          </details>
+        ) : null}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">

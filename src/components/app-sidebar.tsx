@@ -4,6 +4,7 @@
 import React from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { LinkPending } from '@/components/link-pending';
 import {
   Sidebar,
   SidebarGroup,
@@ -34,7 +35,9 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
   const pathname = usePathname();
   const { signOut, organizationId, organizationRole } = useAuth();
   const productTour = useProductTour();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, state } = useSidebar();
+  // Folded to a rail of icons (768–1099 px by default, or by the person): every entry shows, each one with its name on hover.
+  const rail = state === 'collapsed' && !isMobile;
   // Every organization's owners and admins see its panel; the server checks the role again (admin-dashboard-auth.ts).
   const canAccessAdminDashboard = adminUsage || Boolean(organizationId) && (organizationRole === 'owner' || organizationRole === 'admin');
 
@@ -63,10 +66,10 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
     .filter((section) => section.items.length > 0);
 
   return (
-    <Sidebar className="border-r border-sidebar-border/70 bg-[linear-gradient(180deg,hsl(var(--sidebar-background))_0%,hsl(var(--sidebar-background))_68%,hsl(var(--background))_100%)]">
-      <SidebarHeader className="gap-3 border-b border-sidebar-border/70 px-3 py-3">
-        <Logo size="lg" showWordmark />
-        <WorkspaceSwitcher />
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border/70 bg-[linear-gradient(180deg,hsl(var(--sidebar-background))_0%,hsl(var(--sidebar-background))_68%,hsl(var(--background))_100%)]">
+      <SidebarHeader className={cn('gap-3 border-b border-sidebar-border/70 py-3', rail ? 'items-center px-2' : 'px-3')}>
+        <Logo size={rail ? 'sm' : 'lg'} showWordmark={!rail} />
+        {rail ? null : <WorkspaceSwitcher />}
       </SidebarHeader>
 
       {/* The menu scrolls on short screens: its lower edge fades, so an item under it reads as «more below», not as cut off. */}
@@ -74,7 +77,7 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
         <nav aria-label="Navegación principal" className="contents">
           {visibleSections.map((section) => {
             const activeInside = section.items.some((item) => isNavItemActive(item, pathname));
-            const open = !section.collapsible || activeInside || Boolean(unfolded[section.label]);
+            const open = rail || !section.collapsible || activeInside || Boolean(unfolded[section.label]);
             // A section with a single entry of the same name («Administración») needs no title above it.
             const titled = !(section.items.length === 1 && section.items[0].label === section.label);
             const labelClass = 'h-6 px-3 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/70';
@@ -106,6 +109,7 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
                           <Link href={item.href} onClick={closeOnPhone} aria-current={isActive ? 'page' : undefined} data-tour={item.tour}>
                             <item.icon />
                             <span>{item.label}</span>
+                            <LinkPending />
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -123,18 +127,18 @@ export function AppSidebar({ access,adminUsage=false }: { access: NavAccess;admi
         <SidebarMenu className="gap-0.5">
           {/* Help and the tutorial share a row, so the work sections above keep the height of a laptop screen. */}
           <SidebarMenuItem className="flex items-center gap-1">
-            <SidebarMenuButton asChild isActive={helpActive} className={cn(itemClass, 'flex-1', helpActive && activeItemClass)}>
+            <SidebarMenuButton asChild isActive={helpActive} tooltip="Centro de ayuda" className={cn(itemClass, 'flex-1', helpActive && activeItemClass)}>
               <Link href="/ayuda" onClick={closeOnPhone} data-tour="help-center" aria-current={pathname === '/ayuda' ? 'page' : undefined}>
                 <BookOpen />
                 <span>Centro de ayuda</span>
               </Link>
             </SidebarMenuButton>
-            <SidebarMenuButton data-tour="tour-help" onClick={productTour.start} tooltip="Ver tutorial" aria-label="Ver tutorial" title="Ver tutorial" className={cn(itemClass, 'w-8 shrink-0 justify-center px-0')}>
+            <SidebarMenuButton data-tour="tour-help" onClick={productTour.start} tooltip="Ver tutorial" aria-label="Ver tutorial" title="Ver tutorial" className={cn(itemClass, 'w-8 shrink-0 justify-center px-0 group-data-[collapsible=icon]:hidden')}>
               <PlayCircle />
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => signOut()} className={itemClass}>
+            <SidebarMenuButton onClick={() => signOut()} tooltip="Cerrar sesión" className={itemClass}>
               <LogOut />
               <span>Cerrar sesión</span>
             </SidebarMenuButton>

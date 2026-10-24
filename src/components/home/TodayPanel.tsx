@@ -82,7 +82,7 @@ export function TodayPanel({ afterPrimary }: { afterPrimary?: (primary: TodayPri
         <Card className="rounded-2xl">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Lo que te espera</CardTitle>
-            <CardDescription>Tus pendientes en este workspace, incluidos los anteriores que aún necesitan atención.</CardDescription>
+            <CardDescription>Tus pendientes en esta organización, incluidos los anteriores que aún necesitan atención.</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">

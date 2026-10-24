@@ -51,11 +51,11 @@ export default function DashboardPage() {
       <PageHeader
         title={view === 'semana' ? 'Tu semana' : 'Hoy'}
         eyebrow={today || undefined}
-        description={view === 'semana' ? 'Cómo te fue, comparado con la semana anterior, y qué hacer después.' : 'Tu actividad de hoy y tus pendientes en este workspace.'}
+        description={view === 'semana' ? 'Cómo te fue, comparado con la semana anterior, y qué hacer después.' : 'Tu actividad de hoy y tus pendientes en esta organización.'}
       >
         <div role="group" aria-label="Vista de Hoy" className="inline-flex rounded-full bg-muted p-1">
           {([['hoy', 'Hoy'], ['semana', 'Tu semana']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={view === key} onClick={() => show(key)}
-            className={cn('rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>)}
+            className={cn('rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', view === key ? 'bg-background shadow-sm' : 'text-foreground/70 hover:text-foreground')}>{label}</button>)}
         </div>
         <Button asChild variant="ghost" className="flex-1 text-muted-foreground sm:flex-none">
           <Link href="/search">
