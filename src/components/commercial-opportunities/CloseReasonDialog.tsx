@@ -31,7 +31,7 @@ const amountOf = (value: string) => { const digits = value.replace(/[^\d]/g, '')
 /**
  * Closing an opportunity as won or lost asks, once, why: up to three reasons in chips, the same for everyone so they can be counted
  * («Lo que aprendimos»), and for one lost who won it and for how much. All optional: the move works with nothing. It goes to the activity
- * of the opportunity next to the new stage: «Estado: Perdida · Precio. Ganó Seguridad Sur SpA por $85.000.000.». Cancel leaves it as it was.
+ * of the opportunity next to the new stage: «Estado: perdida · Precio. Ganó Seguridad Sur SpA por $85.000.000.». Cancel leaves it as it was.
  */
 export function CloseReasonDialog({ target, busy, error, onConfirm, onCancel }: {
   target: CloseTarget | null; busy: boolean;
