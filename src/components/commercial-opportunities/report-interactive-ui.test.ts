@@ -11,6 +11,9 @@ import * as workspace from '@/lib/commercial-opportunities/workspace';
 import * as requirementFit from '@/lib/commercial-opportunities/requirement-fit';
 import * as markQueue from '@/lib/commercial-opportunities/mark-queue';
 import * as genderCriterion from '@/lib/commercial-opportunities/gender-criterion';
+import * as reportChanges from '@/lib/commercial-opportunities/report-changes';
+import * as mailCompose from '@/lib/mail-compose';
+import * as mailSender from '@/lib/mail-sender';
 
 const require = createRequire(import.meta.url);
 const compile = async (file: string) => ts.transpileModule(await readFile(new URL(file, import.meta.url), 'utf8'),
@@ -29,11 +32,15 @@ const dependencies: Record<string, unknown> = {
   '@/lib/commercial-opportunities/requirement-fit': requirementFit,
   '@/lib/commercial-opportunities/mark-queue': markQueue,
   '@/lib/commercial-opportunities/gender-criterion': genderCriterion,
+  '@/lib/commercial-opportunities/report-changes': reportChanges,
+  '@/lib/mail-compose': mailCompose,
+  '@/lib/mail-sender': mailSender,
 };
 const load = (code: string) => { const exports: any = {}; new Function('require', 'exports', code)((id: string) => (id in dependencies ? dependencies[id] : require(id)), exports); return exports; };
 dependencies['./RoutePath'] = load(await compile('./RoutePath.tsx'));
 dependencies['./ReportMarks'] = load(await compile('./ReportMarks.tsx'));
 dependencies['./RequirementFit'] = load(await compile('./RequirementFit.tsx'));
+dependencies['./ConsultationActions'] = load(await compile('./ConsultationActions.tsx'));
 const { OpportunityWorkReport } = load(await compile('./OpportunityWorkReport.tsx'));
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/<!-- -->/g, '').replace(/\s+/g, ' ');
 
@@ -191,4 +198,31 @@ test('after answering «No» the page says the AI is reading the requirements ag
   assert.match(html, /motion-reduce:w-full/, 'and still, filled, when motion is reduced');
   const long = text(renderToStaticMarkup(React.createElement(FitThinking, { answer: 'x'.repeat(200) })));
   assert.ok(long.includes(`${'x'.repeat(80)}…`) && !long.includes('x'.repeat(81)), 'a long answer is shortened');
+});
+
+test('a new version says first what changed since the one before; the first one, nothing (OPP-20)', () => {
+  const before = { ...report, recommendation: 'conditional' };
+  const latest = { ...report, recommendation: 'advance', questions: [...report.questions, '¿Hay visita a terreno?'] };
+  const versions = (next: unknown) => ({ latest: { created_at: '2026-10-24T12:00:00Z', report: next }, before: { created_at: '2026-10-22T12:00:00Z', report: before } });
+  const html = text(render({ report: latest, previous: versions(latest) }));
+  assert.match(html, /Cambios desde el informe del 22 de octubre de 2026/);
+  assert.match(html, /La recomendación cambió: de «[^»]+» a «[^»]+»\./);
+  assert.match(html, /Una pregunta nueva para el comprador\./);
+  assert.ok(html.indexOf('Cambios desde el informe') < html.indexOf('Qué hacer ahora'), 'read before the rest');
+  assert.match(text(render({ report: before, previous: versions(before) })), /Nada importante cambió/);
+  assert.doesNotMatch(text(render()), /Cambios desde el informe|Nada importante cambió/);
+});
+
+test('the questions of a public tender go to its forum; anything else opens written in the person\'s mail (OPP-22)', () => {
+  const tender = render({ opportunity: { title: 'Seguridad Museo', kind: 'tender', url: 'https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=1-2-LE26' } });
+  assert.match(text(tender), /Copiar para el foro/);
+  assert.match(text(tender), /En Mercado Público se preguntan en el foro de la licitación, hasta el cierre de consultas: 16-10-2099 9:00\./);
+  assert.match(tender, /href="https:\/\/www\.mercadopublico\.cl[^"]*"[^>]*target="_blank"/);
+  assert.doesNotMatch(text(tender), /Abrir en mi correo|mailto/);
+  // Before it knows the person's mailbox (and with none connected) it is the computer's mail program.
+  const received = render({ opportunity: { title: 'Seguridad Museo', kind: 'private_tender', buyer: 'Museo Histórico' } });
+  assert.match(received, /href="mailto:\?subject=Consultas%20%C2%B7%20Seguridad%20Museo&amp;body=Estimados%20de%20Museo%20Hist%C3%B3rico/);
+  assert.match(text(received), /Abrir en mi correo/);
+  assert.match(text(received), /Copiar/);
+  assert.match(text(received), /Envíalas antes del cierre de consultas: 16-10-2099 9:00\./);
 });

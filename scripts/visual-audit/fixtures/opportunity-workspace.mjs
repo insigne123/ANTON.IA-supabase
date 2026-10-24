@@ -217,6 +217,9 @@ export default function workspace(ctx) {
   const reports = [
     { id: report(2), organization_id: org, opportunity_id: opp(2), job_id: job(2), content_hash: 'fx-hash-2', profile_revision: 3, report: tenderReport, created_by: ctx.OWNER, created_at: ctx.daysAgo(2) },
     { id: report(10), organization_id: org, opportunity_id: opp(10), job_id: job(10), content_hash: 'fx-hash-10', profile_revision: 3, report: { ...tenderReport, title: 'Servicios de contact center para atención ciudadana · Servicio de Registro Civil' }, created_by: ctx.OWNER, created_at: ctx.daysAgo(6) },
+    // Its first version (OPP-20): before the forum's answers were read, it said to apply only if the pending items were solved.
+    { id: report(20), organization_id: org, opportunity_id: opp(10), job_id: job(10), content_hash: 'fx-hash-10-first', profile_revision: 2, created_by: ctx.OWNER, created_at: ctx.daysAgo(9),
+      report: { ...tenderReport, title: 'Servicios de contact center para atención ciudadana · Servicio de Registro Civil', recommendation: 'conditional', coverage: tenderReport.coverage.slice(0, 2), questions: tenderReport.questions.slice(0, -1) } },
   ];
   const jobs = [
     { id: job(2), organization_id: org, opportunity_id: opp(2), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:2', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(2), updated_at: ctx.daysAgo(2) },
