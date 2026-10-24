@@ -5,6 +5,7 @@ import test from 'node:test';
 import { isBlockedModel } from '@/ai/blocked-models';
 import { coworkHarnessEnabled, coworkHarnessSettings, coworkWebAvailable } from '@/lib/cowork/harness-config';
 import { coworkExecutionPolicy } from '@/lib/cowork/execution-policy';
+import { opportunityModel } from '@/lib/commercial-opportunities/model-policy';
 import { claudeWebSourcesSettings } from '@/lib/server/claude-web-sources';
 import { coworkModelUsage } from '@/lib/server/cowork/model-usage';
 import { coworkSchedulesEnabled } from '@/lib/server/cowork/schedules';
@@ -63,6 +64,14 @@ test('the other functions that were off are on: the researcher with Claude\'s we
   // The autonomous mode is what the person picks in each conversation; what it approves alone stays inside the list and the caps.
   assert.deepEqual(coworkExecutionPolicy('autonomous', plain.COWORK_AUTONOMY_ENABLED === 'true').automaticEffects, ['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'campaign_create']);
   assert.equal(coworkExecutionPolicy('approval', true).effectiveMode, 'approval');
+});
+
+test('the agent of Oportunidades is on: the chat of an opportunity and the assistant look things up on Haiku, and the unmeasured second reading of the report stays off', () => {
+  assert.equal(plain.OPPORTUNITIES_RUNTIME, 'harness');
+  // Every role of Oportunidades is Haiku unless a variable names another; none is named, and Haiku is not a blocked model.
+  assert.equal(opportunityModel('chat', plain), 'claude-haiku-5-5');
+  assert.equal(Object.keys(plain).filter(name => /^OPPORTUNITIES_.*_MODEL$/.test(name)).length, 0);
+  assert.equal(plain.OPPORTUNITIES_REPORT_VERIFY, undefined, 'it was not measured with real reports');
 });
 
 test('if a list of people is put back to limit the improvements, it holds user ids (not emails) and, in Drafts and in Cowork, it is the same people', () => {

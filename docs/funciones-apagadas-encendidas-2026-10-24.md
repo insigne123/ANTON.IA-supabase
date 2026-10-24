@@ -11,6 +11,7 @@ El 24 de octubre el dueño pidió **encender todas las funciones que se habían 
 | Investigador de leads con la web de Claude | `RESEARCH_CLAUDE_WEB_ENABLED` | **Encendido** | 8 empresas: páginas de la empresa correcta, recientes y con fecha en las 8 | US$0,044 por investigación |
 | Visión de documentos | `COWORK_DOCUMENT_VISION` | **Encendida** | Encontró defectos reales que la inspección de siempre no ve; el agente los corrigió | Menos de US$0,005 por revisión |
 | Modo autónomo | `COWORK_AUTONOMY_ENABLED` | **Encendido como opción** (cada conversación parte «Con aprobaciones»; un turno que leyó la web no aprueba nada solo) | Lo que aprueba solo y sus topes están en pruebas del CI; no hubo prueba en vivo contra una base | Hasta 3 pasos por hilo (a lo más 3 créditos de correo) |
+| Agente de Oportunidades (chat de cada oportunidad y asistente de la sección) | `OPPORTUNITIES_RUNTIME=harness` | **Encendido** (segunda ronda del mismo día; se había quedado fuera de la primera) | Chat con Haiku: 34 de 34 preguntas con el agente frente a 27 de 34 con la llamada única de antes (las siete que falla son las que están fuera de los primeros fragmentos); asistente: 7 de 7 preguntas leídas a mano, sin una sola oportunidad inventada | Chat: unos US$0,0007 por pregunta con el agente (US$0,0005 con la llamada única); asistente: US$0,002 por pregunta |
 
 Todas usan solo Haiku 5.5 (y Luna donde ya estaba). Ningún modelo caro: siguen bloqueados en `src/ai/blocked-models.ts`.
 
@@ -87,9 +88,20 @@ Aparece en el compositor como «Autónomo»; cada conversación parte en «Con a
 - **Peor caso por cadena:** 3 créditos de correo, o 3 investigaciones, o 2 borradores, y una búsqueda de prospectos (de la cuota diaria, sin créditos); nada sale a nadie.
 - **Lo que no hay:** una prueba en vivo. El guion `scripts/test-cowork-autonomy.mjs` no está en el CI y ya no pasa (sus simulaciones quedaron viejas: el trabajador ya no toma la corrida con ellas); no es un indicio de un fallo del modo. El primer uso real es la primera prueba de punta a punta, y por eso las consultas de abajo lo vigilan.
 
+## 6. El agente de Oportunidades
+
+Se había quedado fuera de la primera ronda: la medición del 22 de octubre (`docs/agent-harness-mediciones-2026-10-22.md`) ya recomendaba encenderlo con Haiku y no se encendió por ser «decisión de producto»; con la instrucción de dejar activo lo que mejora, ya no había nada que decidir. Lo encendí con una prueba corta antes.
+
+- **Qué hace.** El chat de cada oportunidad (pestaña «Preguntar a la IA») y el asistente de la sección buscan y leen antes de responder, en vez de contestar con los primeros fragmentos del expediente en una sola llamada. El asistente además puede buscar más allá de su primera lista, leer lo que dice un informe y, para administradores, el Plan Anual de Compras y los contratos por vencer. Cada ronda es un paso del libro de presupuesto de la categoría `chat` (reservado antes, liquidado con lo que costó, repetible si el trabajo se retoma), así que no gasta fuera del tope del trabajo ni cobra dos veces.
+- **Chat, con Haiku y las 17 preguntas del expediente de prueba, dos repeticiones** (`scripts/evaluate-opportunities-harness.ts`): **llamada única 27 de 34 (79,4 %), agente 34 de 34 (100 %)**. Las siete que la llamada única falla son las que piden buscar con otras palabras («antigüedad», «reemplazo», «GPS») o decir que algo no aparece: sin los fragmentos no tiene cómo encontrarlas y responde sin cita. El agente usó 52 rondas para las 34 preguntas (1,5 por pregunta), tardó lo mismo (≈ 4 segundos) y costó US$0,0229 las 34 preguntas frente a US$0,0182 (unos US$0,0007 y US$0,0005 por pregunta).
+- **Asistente, con Haiku y un taller en memoria** (8 oportunidades, un informe, el plan y dos contratos), 7 preguntas leídas a mano: cuáles cierran en tres días, si hay algo de cámaras, qué requisitos tiene el informe de una licitación, qué planea comprar un hospital este año (administrador), qué contratos de aseo vencen pronto (administrador), un saludo y una pregunta que los datos no responden. **Las 7 salieron bien**: usó las herramientas cuando hacía falta (1 o 2 rondas), citó solo oportunidades que había visto, derivó al chat de la oportunidad lo que exige leer las bases y dijo «No tengo ese dato» cuando no lo tenía. US$0,0143 las siete.
+- **Lo que no se midió.** Documentos reales de cientos de páginas (el expediente es chico e inventado), el asistente con las oportunidades de verdad y la segunda lectura del informe (`OPPORTUNITIES_REPORT_VERIFY`), que necesita informes y citas reales: **sigue apagada**.
+- **Para repetirlo** (llave de prueba y la guardia de gasto por delante): `node --import ./scripts/spend-guard.mjs --loader ./scripts/ts-test-loader.mjs scripts/evaluate-opportunities-harness.ts --live --max-calls=200 --repeat=2` (el chat) y `... scripts/evaluate-opportunities-assistant.ts --live` (el asistente).
+- **Qué se ve.** Nada nuevo en pantalla: las respuestas llegan por el mismo canal y con el mismo formato (tarjetas, derivación, fuentes). Quien lo nota es el que pregunta algo que no estaba en los primeros fragmentos: ahora recibe la respuesta con su cita en vez de «no puedo confirmarlo».
+
 ## Lo que cambió en el código
 
-- `apphosting.yaml`: `COWORK_WEB_ENABLED`, `COWORK_WEB_BASIC`, `COWORK_SUBAGENTS_ENABLED`, `COWORK_DOCUMENT_VISION`, `COWORK_AUTONOMY_ENABLED` y `RESEARCH_CLAUDE_WEB_ENABLED` en `"true"`, y el precio de la búsqueda en `COWORK_MODEL_PRICING_JSON` (versión `anthropic-standard-2026-10-24-web`).
+- `apphosting.yaml`: `COWORK_WEB_ENABLED`, `COWORK_WEB_BASIC`, `COWORK_SUBAGENTS_ENABLED`, `COWORK_DOCUMENT_VISION`, `COWORK_AUTONOMY_ENABLED` y `RESEARCH_CLAUDE_WEB_ENABLED` en `"true"`, y el precio de la búsqueda en `COWORK_MODEL_PRICING_JSON` (versión `anthropic-standard-2026-10-24-web`); en la segunda ronda, `OPPORTUNITIES_RUNTIME` en `harness`.
 - `src/lib/cowork/harness-config.ts`: las herramientas web básicas son lo normal.
 - `src/lib/cowork/harness-turn.ts` y `web-breaker.ts`: el 400 con la web cae al bucle y pausa la web 10 minutos.
 - `src/lib/cowork/answer-quality.ts`: sin etiquetas `cite` en lo que ve la persona.
@@ -98,7 +110,7 @@ Aparece en el compositor como «Autónomo»; cada conversación parte en «Con a
 - `src/components/cowork/ExecutionMode.tsx`: el texto honesto del modo autónomo; `execution-policy.ts`, `harness-turn.ts`, `agent-loop.ts` y `worker.ts`: lo que propone un turno que leyó la web no se aprueba solo.
 - `scripts/spend-guard.mjs`: cuenta las búsquedas web; `scripts/evaluate-research-sources.ts`: `--no-judge` y todo lo leído en `results.json`; `scripts/evaluate-cowork-harness.ts`: conecta el revisor de documentos como el trabajador.
 - `scripts/visual-audit/env.mjs`: el banco de recorridos decide por sí mismo estas funciones, para que sus líneas base no cambien.
-- `src/lib/server/production-configuration.test.ts`: ahora exige que estén encendidas, con la web básica, el precio de la búsqueda y la lista de lo que el modo autónomo aprueba.
+- `src/lib/server/production-configuration.test.ts`: ahora exige que estén encendidas, con la web básica, el precio de la búsqueda y la lista de lo que el modo autónomo aprueba, y que el agente de Oportunidades esté encendido con Haiku y la segunda lectura del informe apagada.
 
 ## Cómo vigilarlas
 
@@ -154,6 +166,20 @@ group by 1 order by 2 desc;
 
 El costo del investigador (del orden de US$0,04 por investigación, unas 3 búsquedas) no pasa por el libro de Cowork: se mira en la consola de Anthropic, en las búsquedas web por día.
 
+**Agente de Oportunidades: pasos del libro de la categoría `chat`.** Cada respuesta es una o más rondas `answer:rN`; lo normal son 1 o 2 por pregunta y centésimas de centavo de dólar cada una. Una pregunta con 5 o más rondas, o `uncertain` sin costo, merece una mirada; el tope del mes (US$20 por organización, todas las categorías) se ve en `opportunity_budget_months`.
+
+```sql
+select r.step_key, r.state, round(r.cost_micro_usd / 1e6, 5) as usd, r.created_at::timestamp(0) as cuando
+from public.opportunity_budget_reservations r
+where r.category = 'chat' and r.created_at >= '<DESDE>'
+order by r.created_at desc limit 40;
+
+select count(*) filter (where step_key ~ ':r[1-9]$') as rondas, count(distinct job_id) as preguntas,
+       round(sum(cost_micro_usd) / 1e6, 4) as usd, count(*) filter (where state = 'uncertain') as inciertos
+from public.opportunity_budget_reservations
+where category = 'chat' and created_at >= '<DESDE>';
+```
+
 ## Cómo apagar cada una
 
 Quitar la variable de `apphosting.yaml` y desplegar; el siguiente turno, la siguiente investigación y el siguiente documento ya corren como antes. No hace falta tocar la base ni la tabla de precios.
@@ -165,5 +191,6 @@ Quitar la variable de `apphosting.yaml` y desplegar; el siguiente turno, la sigu
 | El investigador de leads | `RESEARCH_CLAUDE_WEB_ENABLED` |
 | La visión de documentos | `COWORK_DOCUMENT_VISION` |
 | El modo autónomo | `COWORK_AUTONOMY_ENABLED`: el selector desaparece y la política vuelve a leer la variable en cada paso, así que lo que estaba en curso sigue «Con aprobaciones» |
+| El agente de Oportunidades | `OPPORTUNITIES_RUNTIME`: el chat y el asistente vuelven a la llamada única de siempre; lo ya pagado en el libro se conserva |
 
 La prueba `production-configuration.test.ts` describe lo que dice producción: hay que actualizarla en el mismo cambio.

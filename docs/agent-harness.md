@@ -27,8 +27,8 @@ Todo lo nuevo está **apagado por defecto**. Sin las variables de abajo, la app 
 | `COWORK_STREAMING_ENABLED=true` | La respuesta se ve mientras se escribe. En modo harness sale de la entrada de `responder`. | Ya existía. |
 | `COWORK_DOCUMENT_VISION=true`, `COWORK_DOCUMENT_REVIEW_MODEL` | Un Claude (Haiku por defecto) mira las páginas del documento que el agente revisa, además de la inspección determinista. | `pdftoppm` o `sharp` con fuentes en el servidor: la visión prueba primero que la máquina dibuja texto y, si no, no mira (el documento sigue como antes). Encendida en producción desde el 24 de octubre de 2026 (`docs/funciones-apagadas-encendidas-2026-10-24.md`). |
 | `COWORK_DOCUMENTS_ENGINE=legacy` | Vuelve al PDF y al Word anteriores. Sin esto, el PDF y el Word de Cowork pasan por el motor de documentos y, si el motor falla con un documento, usan el renderizador anterior. | |
-| `OPPORTUNITIES_RUNTIME=harness` | El chat de una oportunidad y el asistente de la sección buscan y leen antes de responder. | `ANTHROPIC_API_KEY` y modelo del rol `chat` de Claude (`OPPORTUNITIES_CHAT_MODEL`, Haiku por defecto). |
-| `OPPORTUNITIES_REPORT_VERIFY=on` | Segunda lectura del informe: una cita que no respalda su afirmación deja la afirmación «por confirmar». | Además de la anterior. Usa el modelo del rol `specialist`. |
+| `OPPORTUNITIES_RUNTIME=harness` | El chat de una oportunidad y el asistente de la sección buscan y leen antes de responder. | `ANTHROPIC_API_KEY` y modelo del rol `chat` de Claude (`OPPORTUNITIES_CHAT_MODEL`, Haiku por defecto). Encendido en producción desde el 24 de octubre de 2026 (`docs/funciones-apagadas-encendidas-2026-10-24.md`). |
+| `OPPORTUNITIES_REPORT_VERIFY=on` | Segunda lectura del informe: una cita que no respalda su afirmación deja la afirmación «por confirmar». | Además de la anterior. Usa el modelo del rol `specialist`. Sigue apagada: no se midió con informes reales. |
 
 ## Cowork
 
