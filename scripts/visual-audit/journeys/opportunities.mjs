@@ -21,6 +21,8 @@ const inCard = (c, title, button) => c.page.getByText(title, { exact: true }).fi
   .locator(`xpath=ancestor::*[.//button[contains(normalize-space(.), "${button}")]][1]`).getByRole('button', { name: new RegExp(button) }).first();
 const open = async (c, title, button) => { await c.clickOn(inCard(c, title, button)); };
 const workOf = (c, n) => c.table('opportunity_work').find(row => row.opportunity_id === opp(n));
+/** Whether a text shows within a few seconds: a check on something that arrives with the next reading of the page. */
+const shows = (c, text) => c.page.getByText(text).filter({ visible: true }).first().waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
 const stateOf = (c, n) => workOf(c, n)?.state ?? 'unassigned';
 /** Whether «Cómo postular» in the header is the filled, main action of the page (the first button of that name: the tab comes after it). */
 const applyIsMain = c => c.page.getByRole('button', { name: 'Cómo postular' }).first().evaluate(node => /\bbg-primary\b/.test(node.className)).catch(() => null);
@@ -80,9 +82,9 @@ export default () => [
         c.check('la regla quedó guardada', rules.length === 1 && rules[0].minAmount === 5_000_000 && rules[0].category === null, JSON.stringify(rules));
       } },
       { say: 'Pulso «Asignarla» y confirmo', do: async c => {
-        await c.see('1 calza con tus reglas'); c.check('la tarjeta dice a quién va', await c.has('Asignar a Diego…'));
+        await c.see('1 calza con tus reglas'); c.check('la tarjeta dice a quién va', await shows(c, 'Asignar a Diego…'));
         await c.click({ role: 'button', name: 'Asignarla' }); await c.seeRole('dialog', /Asignar 1 según tus reglas/);
-        await c.click({ role: 'button', name: 'Asignar y avisar' }); await c.see('según tus reglas');
+        await c.click({ role: 'button', name: 'Asignar y avisar' }); await c.see('Les avisamos por correo');
         const work = workOf(c, 9);
         c.check('quedó asignada a Diego como responsable', work?.state === 'assigned' && work?.responsible_id === DIEGO, `estado: ${work?.state}, responsable: ${work?.responsible_id}`);
       } },
@@ -94,7 +96,7 @@ export default () => [
         await c.click('Guardar esta búsqueda'); await c.see('Te avisaremos en el correo de la mañana');
         const searches = c.table('opportunity_company_context')[0]?.admin_settings?.searches || [];
         c.check('quedó guardada con aviso para mí', searches.length === 1 && searches[0].query === 'antecedentes' && searches[0].notify.length === 1, JSON.stringify(searches));
-        c.check('se ve como guardada', await c.has('Te avisamos de las nuevas'));
+        c.check('se ve como guardada', await shows(c, 'Te avisamos de las nuevas'));
       } },
       { say: 'Ya no quiero el aviso', do: async c => {
         await c.click('Te avisamos de las nuevas'); await c.see('Ya no te avisamos de esta búsqueda');
@@ -105,7 +107,7 @@ export default () => [
     steps: [
       { say: 'Abro Oportunidades y leo «Prepara tu empresa»', do: async c => {
         await c.go('/opportunities'); await c.see('Prepara tu empresa');
-        c.check('dice cuántos documentos faltan', await c.has(/0 de 5\. Falta: Certificado F30/));
+        c.check('dice cuántos documentos faltan', await shows(c, /0 de 5\. Falta: Certificado F30,/));
       } },
       { say: 'Pulso «Subir documentos»', do: async c => { await c.click('Subir documentos'); await c.see('Documentos de la empresa'); } },
     ] },
