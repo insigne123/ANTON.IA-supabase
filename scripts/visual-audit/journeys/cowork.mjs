@@ -48,6 +48,38 @@ export default () => [
         c.check('hay un botón para aprobar y uno para descartar', await c.page.getByRole('button', { name: /Aprobar/ }).first().isVisible().catch(() => false) && await c.page.getByRole('button', { name: /Descartar/ }).first().isVisible().catch(() => false));
       } },
     ] },
+  { id: 'cowork-pendientes', persona: 'owner', title: 'Lo que espera mi aprobación queda arriba, aunque sea de otra conversación',
+    goal: 'Ver de un vistazo qué propuestas esperan una decisión (COW-16).',
+    steps: [
+      { say: 'Abro una conversación cualquiera', do: async c => { await c.go(`/cowork?work=${run(1)}`); await c.see('Esperan tu aprobación'); } },
+      { say: 'Miro la lista de conversaciones', do: async c => {
+        const rail = await c.page.getByRole('navigation', { name: 'Conversaciones' }).first().innerText();
+        const waiting = rail.indexOf('Esperan tu aprobación');
+        const dates = ['Hoy', 'Ayer', 'Últimos 7 días', 'Últimos 30 días', 'Anteriores'].map(label => rail.indexOf(`\n${label}\n`)).filter(at => at >= 0);
+        c.check('las que esperan van primero, con cuántas son', /Esperan tu aprobación · \d+/.test(rail) && dates.every(at => waiting < at), rail.slice(0, 160).replace(/\n/g, ' | '));
+      } },
+    ] },
+  // «Autónomo» (COW-17): it shows with AUDIT_COWORK_AUTONOMY=true, as in production since 24 Oct; it asks once and is remembered.
+  ...(process.env.AUDIT_COWORK_AUTONOMY === 'true' ? [
+    { id: 'cowork-modo-autonomo', persona: 'owner', title: 'Activar el modo Autónomo sabiendo qué aprueba solo',
+      goal: 'Que Cowork avance sin pedir cada paso, sabiendo qué hará por su cuenta y que lo recuerde.',
+      steps: [
+        { say: 'Abro Cowork', do: async c => { await c.go('/cowork'); await c.see('¿Qué puedes hacer?'); } },
+        { say: 'Elijo «Autónomo»', do: async c => {
+          await c.choose('Modo de trabajo', 'Autónomo');
+          await c.seeRole('dialog', /Trabajar en modo Autónomo/);
+          c.check('dice qué aprueba solo y qué nunca', await c.has('Guardar contactos') && await c.has('Enviar correos, activar campañas'));
+        } },
+        { say: 'Lo activo', do: async c => {
+          await c.click('Activar Autónomo'); await c.see('Autónomo: aprueba por ti hasta 3 pasos por conversación');
+        } },
+        { say: 'Vuelvo a entrar', do: async c => {
+          await c.go('/cowork'); await c.see('¿Qué puedes hacer?'); await c.wait(1500);
+          c.check('lo recuerda', (await c.page.getByLabel('Modo de trabajo').first().inputValue()) === 'autonomous');
+          c.check('sin volver a preguntar', !(await c.has('Trabajar en modo Autónomo')));
+        } },
+      ] },
+  ] : []),
   // The scheduled tasks are off in production: AUDIT_COWORK_SCHEDULES=true turns them on for this bench (COWORK_SCHEDULES_ENABLED).
   ...(process.env.AUDIT_COWORK_SCHEDULES === 'true' ? [
     { id: 'cowork-tareas-programadas', persona: 'owner', title: 'Ver mis tareas programadas y programar una nueva',

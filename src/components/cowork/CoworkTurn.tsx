@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ChevronRight, CornerDownRight, Download, FileText, LayoutDashboard, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
+import { ChevronRight, CornerDownRight, Download, FileText, LayoutDashboard, Library, PencilLine, RotateCcw, SquarePen, Table2, TriangleAlert } from 'lucide-react';
+import { coworkHitConversationLimit } from '@/lib/cowork/handoff';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkAgentRows, coworkAnswerChanged, coworkDraftReview, coworkFileSize, coworkHeldAnswerCopy, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
@@ -206,7 +207,7 @@ function NextStep({ question, live }: { question: string; live: boolean }) {
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, decidable = false, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
-  liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null }: {
+  liveAnswer = null, streamed = false, cardStatuses = null, earlierRows = null, versions = null, onVersion = null, onEdit = null, onRegenerate = null, onFeedback = null, onContinueNew = null }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** Its card still waits for a decision after a question about it, asked in the next turn: it keeps its buttons. */
@@ -222,6 +223,8 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
   onOpenArtifact: (artifact: CoworkArtifact, opener: HTMLElement) => void;
   onResolve: (approve: boolean) => void;
   onRetry: (() => void) | null;
+  /** Opens a new conversation that picks this one up, when it reached its limit (COW-14). */
+  onContinueNew?: (() => void) | null;
   /** Sends a quick reply as your next message; null when you cannot send now. */
   onSuggestion?: ((message: string) => void) | null;
   budgetExhausted: boolean;
@@ -328,7 +331,10 @@ export function CoworkTurn({ turn, latest, decidable = false, resolving, openArt
         {run.status === 'failed' && <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl bg-cw-danger-soft px-4 py-3 text-[13.5px] text-cw-danger">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <p className="min-w-0 flex-1">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar.'}</p>
-          {latest && onRetry && <CwButton size="sm" variant="secondary" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
+          {/* At the conversation's limit retrying does not help: a new one, with what this one did, does (COW-14). */}
+          {latest && onContinueNew && coworkHitConversationLimit(failure)
+            ? <CwButton size="sm" variant="secondary" onClick={onContinueNew}><SquarePen aria-hidden="true" />Seguir en una conversación nueva</CwButton>
+            : latest && onRetry && <CwButton size="sm" variant="secondary" onClick={onRetry}><RotateCcw aria-hidden="true" />Reintentar</CwButton>}
         </div>}
         {run.status === 'cancelled' && <div className="flex flex-wrap items-center gap-3 text-[13.5px] text-cw-muted">
           <span>Lo detuviste. Lo consultado hasta aquí quedó guardado.</span>

@@ -124,3 +124,11 @@ test('a conversation waiting for approval says «Aprobar» in words; the time go
   assert.match(html, /title="Correos para clientes 2 · [^"]+"/, 'the time is still there, on hover');
   assert.equal((html.match(/Aprobar/g) || []).length, 1, 'only the one that waits');
 });
+
+test('every conversation that waits for approval goes first, under its own heading with how many, however old (COW-16)', () => {
+  const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+  const html = render({ threads: [thread(1), { ...thread(2), status: 'waiting_approval' as const, updatedAt: old }, { ...thread(3), status: 'waiting_approval' as const }] });
+  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  assert.match(text, /^.*Esperan tu aprobación · 2 Correos para clientes 2 .*Correos para clientes 3 .*Hoy Correos para clientes 1/);
+  assert.doesNotMatch(render({ threads: [thread(1)] }), /Esperan tu aprobación/, 'no heading when nothing waits');
+});

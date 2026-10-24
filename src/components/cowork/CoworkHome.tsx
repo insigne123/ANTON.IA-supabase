@@ -176,7 +176,9 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
     setOfferHidden(true);
     try { window.localStorage.setItem(OFFER_CARD_KEY, '1'); } catch { /* Storage unavailable: hidden for this visit only. */ }
   };
-  const pending = threads.filter(thread => ['waiting_approval', 'running', 'queued', 'waiting_workers'].includes(thread.status)).slice(0, 3);
+  // Every proposal that waits for the person, however old (COW-16); then what is still working.
+  const waiting = threads.filter(thread => thread.status === 'waiting_approval').slice(0, 10);
+  const pending = [...waiting, ...threads.filter(thread => ['running', 'queued', 'waiting_workers'].includes(thread.status)).slice(0, 3)];
   // Beside the rail the recent ones would be listed twice (COW-24): only what waits for the person stays.
   const recent = railVisible ? [] : threads.filter(thread => !pending.includes(thread)).slice(0, 4);
   const name = overview?.firstName;
@@ -228,9 +230,9 @@ export function CoworkHome({ composer, threads, ready, loading, listFailed = fal
         </CwCollapse>
       </div>
       {(pending.length > 0 || recent.length > 0) && <div className="cw-rise mt-10 [animation-delay:180ms]">
-        <h2 className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">{pending.length ? 'Continúa donde quedaste' : 'Recientes'}</h2>
+        <h2 className="mb-2 px-1 text-[12.5px] font-medium text-cw-muted">{waiting.length ? `Esperan tu aprobación · ${waiting.length}` : pending.length ? 'Continúa donde quedaste' : 'Recientes'}</h2>
         <ul className="divide-y divide-cw-border overflow-hidden rounded-2xl border border-cw-border bg-cw-elevated">
-          {[...pending, ...recent].slice(0, 5).map(thread => {
+          {[...pending, ...recent].slice(0, Math.max(5, waiting.length)).map(thread => {
             const status = coworkStatusCopy(thread.status);
             return <li key={thread.rootId}>
               <button type="button" onClick={() => onOpenThread(thread.id)}

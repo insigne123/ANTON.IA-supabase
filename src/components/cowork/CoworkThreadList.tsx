@@ -48,14 +48,17 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
   const term = filter.trim().toLocaleLowerCase('es');
   const groups = useMemo(() => {
     const now = new Date();
-    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [];
+    // What waits for the person's approval goes first, all of it, so a proposal in an older conversation is not forgotten (COW-16).
+    const waiting = { label: 'Esperan tu aprobación', items: [] as CoworkThreadSummary[] };
+    const result: Array<{ label: string; items: CoworkThreadSummary[] }> = [waiting];
     for (const thread of threads) {
       if (term && !thread.title.toLocaleLowerCase('es').includes(term)) continue;
+      if (thread.status === 'waiting_approval') { waiting.items.push(thread); continue; }
       const label = coworkDateBucket(thread.updatedAt, now);
       const group = result.find(item => item.label === label);
       if (group) group.items.push(thread); else result.push({ label, items: [thread] });
     }
-    return result;
+    return result.filter(group => group.items.length > 0);
   }, [threads, term]);
 
   const save = async () => {
@@ -102,7 +105,7 @@ export function CoworkThreadList({ threads, loading, error = '', onRetry, select
         <CwButton size="xs" variant="ghost" className="-ml-2" onClick={() => setFilter('')}>Limpiar búsqueda</CwButton>
       </div>}
       {groups.map(group => <div key={group.label} className="mt-3 first:mt-1">
-        <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}</h2>
+        <h2 className="px-3 pb-1 text-[11.5px] font-medium text-foreground/70">{group.label}{group.label === 'Esperan tu aprobación' ? <span className="tabular-nums"> · {group.items.length}</span> : null}</h2>
         <ul className="space-y-px">
           {group.items.map(thread => {
             const status = coworkStatusCopy(thread.status);
