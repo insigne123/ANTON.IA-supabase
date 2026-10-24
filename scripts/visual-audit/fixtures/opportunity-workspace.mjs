@@ -236,7 +236,7 @@ export default function workspace(ctx) {
       economic: { lines: [{ description: 'Verificación de antecedentes por persona', unit: 'persona', quantity: 180, notes: 'Incluye antecedentes laborales y judiciales.', evidence: [] }],
         priceBasis: 'net', validity: '60 días corridos', paymentTerms: '30 días desde la factura', notes: [] },
       letter: '[nombre de la empresa] presenta su oferta para el servicio de verificación de antecedentes del personal externo de la Municipalidad de Providencia y declara conocer y aceptar las bases y sus anexos.',
-      missing: ['Certificado de antecedentes laborales de la empresa (F30) vigente'],
+      missing: ['Certificado de antecedentes laborales de la empresa (F30) vigente'], annexes: [],
     } }];
   const jobs = [
     { id: job(2), organization_id: org, opportunity_id: opp(2), requested_by: ctx.OWNER, kind: 'research', dedupe_key: 'fx:research:2', state: 'ready', payload: {}, result: null, lease_token: null, lease_until: null, attempts: 1, error: null, created_at: ctx.daysAgo(2), updated_at: ctx.daysAgo(2) },

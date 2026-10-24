@@ -99,7 +99,7 @@ export function OfferPart({ id, label, part, edit, author, job, compact = false,
     </DropdownMenuContent></DropdownMenu>
   </span>;
   const body = mode === 'edit' ? <div className="space-y-2">
-    <Label htmlFor={`offer-edit-${domId}`} className="sr-only">Editar {label}</Label>
+    <Label htmlFor={`offer-edit-${domId}`} className="sr-only">Texto de {label}</Label>
     <Textarea id={`offer-edit-${domId}`} autoFocus rows={Math.min(16, Math.max(4, Math.ceil(value.length / 80)))} maxLength={OFFER_PART_MAX} value={value} onChange={e => setValue(e.target.value)} />
     <div className="flex flex-wrap items-center gap-2">
       <Button type="button" size="sm" disabled={saving || !value.trim()} onClick={() => void save(value)}>{saving ? 'Guardando…' : 'Guardar'}</Button>

@@ -362,7 +362,7 @@ export default () => [
       } },
       { say: 'Corrijo la sección de experiencia', do: async c => {
         await c.click({ role: 'button', name: 'Editar la sección «Experiencia en verificación de antecedentes»' });
-        await c.page.getByLabel('Editar la sección «Experiencia en verificación de antecedentes»').fill('Hemos verificado antecedentes para 12 empresas del retail, con 9.000 informes al año.');
+        await c.page.getByLabel('Texto de la sección «Experiencia en verificación de antecedentes»').fill('Hemos verificado antecedentes para 12 empresas del retail, con 9.000 informes al año.');
         await c.clickOn(c.page.getByRole('button', { name: 'Guardar', exact: true })); await c.see(/^Editada por Diego Fuentes/);
         const draft = c.table('opportunity_offer_drafts').find(row => row.opportunity_id === opp(2))?.draft;
         c.check('quedó en el borrador, con el texto de la IA debajo', draft?.edits?.['technical:0']?.text === 'Hemos verificado antecedentes para 12 empresas del retail, con 9.000 informes al año.'
