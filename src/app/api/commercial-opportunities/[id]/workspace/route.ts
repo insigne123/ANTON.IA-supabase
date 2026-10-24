@@ -1,10 +1,15 @@
 import { after } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { requireOpportunityWorkspace, opportunityScope, assertOpportunityRead, assertOpportunityAdmin } from '@/lib/server/commercial-opportunities/workspace-access';
 import { readOpportunityDetail, assignOpportunity, addOpportunityActivity, opportunityDb, saveOpportunityReportMark } from '@/lib/server/commercial-opportunities/workspace-store';
 import { markInputSchema } from '@/lib/commercial-opportunities/report-marks';
 import { applyAutomaticMove, routeKindOf, undoAutomaticMove } from '@/lib/server/commercial-opportunities/workspace-pipeline';
-import { assignmentSchema, activitySchema, taskSchema, isOpportunityAdmin, WORK_STATES } from '@/lib/commercial-opportunities/workspace';
+import { assignmentSchema, activitySchema, isOpportunityAdmin, WORK_STATES, type WorkScope } from '@/lib/commercial-opportunities/workspace';
+import { newTaskSchema, taskBatchSchema, taskDeleteSchema, taskStatusSchema, TASK_STATUSES } from '@/lib/commercial-opportunities/work-tasks';
+import { noteDeleteSchema, noteEditSchema } from '@/lib/commercial-opportunities/activity-notes';
+import { createOpportunityTasks, deleteOpportunityTask, saveOpportunityTask, setOpportunityTaskStatus, type TaskNotice } from '@/lib/server/commercial-opportunities/workspace-tasks';
+import { addOpportunityNote, deleteOpportunityNote, editOpportunityNote } from '@/lib/server/commercial-opportunities/workspace-notes';
 import { opportunitiesJson, opportunitiesError } from '@/lib/server/commercial-opportunities/responses';
 import { enqueueOpportunityResearch } from '@/lib/server/commercial-opportunities/workspace-research';
 import { answerOpportunityChatNow } from '@/lib/server/commercial-opportunities/workspace-jobs';
@@ -20,6 +25,14 @@ import { closeBody, closeDetailSchema, closeMotives } from '@/lib/commercial-opp
 import { proposeFitAnswer, resolveFitProposal } from '@/lib/server/commercial-opportunities/workspace-proposals';
 
 export const dynamic = 'force-dynamic';
+/** Whoever got tasks or was named in a note gets the email too, after the answer: a failure there never fails what was done. */
+function emailTasks(admin: SupabaseClient, scope: WorkScope, id: string, told: TaskNotice[]) {
+  for (const notice of told) after(() => notifyDecisionByEmail(admin, scope, id, { kind: 'task', text: notice.titles.slice(0, 3).join(' · ') + (notice.titles.length > 3 ? ` y ${notice.titles.length - 3} más` : ''),
+    dueAt: notice.dueAt, users: [notice.user], count: notice.titles.length }).catch(() => null));
+}
+function emailMention(admin: SupabaseClient, scope: WorkScope, id: string, users: string[], text: string) {
+  if (users.length) after(() => notifyDecisionByEmail(admin, scope, id, { kind: 'mention', text, users }).catch(() => null));
+}
 const STATE_LABELS: Record<string, string> = { unassigned: 'sin asignar', assigned: 'asignada', working: 'en gestión', blocked: 'bloqueada', submitted: 'oferta presentada', won: 'ganada', lost: 'perdida', archived: 'archivada' };
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, context: Context) {
@@ -35,7 +48,7 @@ export async function POST(request: Request, context: Context) {
   try {
     const auth = await requireOpportunityWorkspace(); const scope = opportunityScope(auth); const id = z.string().uuid().parse((await context.params).id);
     await assertOpportunityRead(auth.admin, scope, id);
-    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer', 'fit_proposal', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
+    const { action, data } = z.object({ action: z.enum(['assign', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'state', 'research', 'chat', 'link', 'reconsider', 'mark', 'offer', 'offer_prices', 'fit', 'fit_answer', 'fit_proposal', 'decision', 'decision_reply']), data: z.unknown() }).strict().parse(await request.json());
     if (action === 'assign') {
       const input = assignmentSchema.parse(data); const before = await readParticipantIds(auth.admin, scope, id);
       const revision = await assignOpportunity(auth.admin, scope, id, input);
@@ -57,8 +70,16 @@ export async function POST(request: Request, context: Context) {
       return opportunitiesJson({ ok: true });
     }
     if (action === 'activity') {
-      const input = activitySchema.parse(data); await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
+      const input = activitySchema.parse(data);
+      // A note can name people with «@» (OPP-28): they hear about it on «Novedades» and by email.
+      if (input.kind === 'note') { const { mentioned } = await addOpportunityNote(auth.admin, scope, id, input.text); emailMention(auth.admin, scope, id, mentioned, input.text); return opportunitiesJson({ ok: true, mentioned: mentioned.length }); }
+      await addOpportunityActivity(auth.admin, scope, id, input.kind, input.text, { dueAt: input.dueAt }); return opportunitiesJson({ ok: true });
     }
+    if (action === 'note_edit') {
+      const input = noteEditSchema.parse(data); const { mentioned } = await editOpportunityNote(auth.admin, scope, id, input);
+      emailMention(auth.admin, scope, id, mentioned, input.text); return opportunitiesJson({ ok: true, mentioned: mentioned.length });
+    }
+    if (action === 'note_delete') return opportunitiesJson(await deleteOpportunityNote(auth.admin, scope, id, noteDeleteSchema.parse(data).id));
     if (action === 'research') return opportunitiesJson({ jobId: await enqueueOpportunityResearch(auth.admin, scope, id) }, 202);
     if (action === 'offer') {
       const input = z.object({ requestId: z.string().uuid(), instructions: z.string().trim().max(1500).optional() }).strict().parse(data);
@@ -125,18 +146,23 @@ export async function POST(request: Request, context: Context) {
       return opportunitiesJson(saved);
     }
     if (action === 'task') {
-      const input = taskSchema.extend({ id: z.string().uuid().optional() }).parse(data);
-      if (input.ownerId) {
-        const assigned = opportunityDb(await auth.admin.from('opportunity_participants').select('user_id').eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('user_id', input.ownerId).maybeSingle());
-        if (!assigned) throw new AuthError('El responsable debe ser participante de esta oportunidad.', 400);
-      }
-      const values = { title: input.title, owner_id: input.ownerId, due_at: input.dueAt, status: input.status, evidence: input.evidence, updated_at: new Date().toISOString() };
-      if (input.id) opportunityDb(await auth.admin.from('opportunity_tasks').update(values).eq('organization_id', scope.organizationId).eq('opportunity_id', id).eq('id', input.id));
-      else opportunityDb(await auth.admin.from('opportunity_tasks').insert({ ...values, organization_id: scope.organizationId, opportunity_id: id, created_by: scope.userId }));
-      await addOpportunityActivity(auth.admin, scope, id, 'task', `Tarea ${input.status}: ${input.title}`);
-      if (input.status === 'working' || input.status === 'done') await applyAutomaticMove(auth.admin, scope, id, { kind: 'task_started' }).catch(() => null);
-      return opportunitiesJson({ ok: true });
+      // One task, new or edited (OPP-27); an edit that says no stage keeps the one it has.
+      const input = newTaskSchema.extend({ id: z.string().uuid().optional(), status: z.enum(TASK_STATUSES).optional() }).parse(data);
+      const saved = await saveOpportunityTask(auth.admin, scope, id, input); emailTasks(auth.admin, scope, id, saved.told);
+      if (saved.moved && (saved.status === 'working' || saved.status === 'done')) await applyAutomaticMove(auth.admin, scope, id, { kind: 'task_started' }).catch(() => null);
+      return opportunitiesJson({ ok: true, id: saved.id });
     }
+    if (action === 'tasks') {
+      // The plan of the report turned into tasks at once, as the preview left them (OPP-21).
+      const { created, told } = await createOpportunityTasks(auth.admin, scope, id, taskBatchSchema.parse(data).tasks); emailTasks(auth.admin, scope, id, told);
+      return opportunitiesJson({ ok: true, created });
+    }
+    if (action === 'task_status') {
+      const input = taskStatusSchema.parse(data); const saved = await setOpportunityTaskStatus(auth.admin, scope, id, input);
+      if (saved.moved && (saved.status === 'working' || saved.status === 'done')) await applyAutomaticMove(auth.admin, scope, id, { kind: 'task_started' }).catch(() => null);
+      return opportunitiesJson({ ok: true, status: saved.status });
+    }
+    if (action === 'task_delete') return opportunitiesJson(await deleteOpportunityTask(auth.admin, scope, id, taskDeleteSchema.parse(data).id));
     if (action === 'mark') {
       const input = markInputSchema.parse(data);
       const saved = await saveOpportunityReportMark(auth.admin, scope, id, input);

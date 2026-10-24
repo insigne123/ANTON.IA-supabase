@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { WorkItem, WorkspaceOverview } from '@/lib/commercial-opportunities/workspace';
-import { NEWS_KINDS, TENDER_PREREQUISITES, closesLabel, exclusionGroups, latestNews, newsKindOf, startHere, workAdvice, type NewsKind, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
+import { NEWS_KINDS, TENDER_PREREQUISITES, closesLabel, exclusionGroups, latestNews, newsKindOf, newsSection, startHere, workAdvice, type NewsKind, type WorkAdvice } from '@/lib/commercial-opportunities/workspace-radar';
 import { filterChip } from './OpportunityFilters';
 
 const TONES: Record<WorkAdvice['tone'], string> = {
@@ -145,7 +145,8 @@ export function TenderPrerequisites() {
 export function NewsList({ notifications, waiting, onOpen, onDecision, onClear, when }: {
   notifications: WorkspaceOverview['notifications'];
   waiting?: WorkspaceOverview['waiting'] | null;
-  onOpen: (opportunityId: string) => void;
+  /** Opens the opportunity; a task given or a note that names the person opens on the part it speaks of. */
+  onOpen: (opportunityId: string, section?: 'tasks' | 'activity') => void;
   /** Opens the opportunity on the box to answer its decision. */
   onDecision?: (opportunityId: string) => void;
   onClear: (ids: string[]) => void; when: (at: string) => string;
@@ -191,7 +192,7 @@ export function NewsList({ notifications, waiting, onOpen, onDecision, onClear, 
         {shown.map(n => (
           <li key={n.id} className="flex items-center gap-1">
             {/* On a phone the date goes under the title, so the title reads whole («Informe listo: ADQU…» did not). */}
-            <button type="button" onClick={() => onOpen(n.opportunity_id)} className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <button type="button" onClick={() => onOpen(n.opportunity_id, newsSection(n))} className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md py-2.5 text-left text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <span className="min-w-0 line-clamp-2 sm:line-clamp-1">{n.title}</span>
               <span className="shrink-0 text-xs text-muted-foreground">{when(n.created_at)}</span>
             </button>

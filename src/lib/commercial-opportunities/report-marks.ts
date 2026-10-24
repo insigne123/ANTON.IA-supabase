@@ -60,7 +60,8 @@ function chileOffsetMinutes(year: number, month: number, day: number) {
   const local = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute));
   return Math.round((local - probe.getTime()) / 60_000);
 }
-const chileTime = (year: number, month: number, day: number, hour: number, minute: number) =>
+/** That day and time on Chile's clock, as an instant (work-tasks.ts stores a task's day with it). */
+export const chileTime = (year: number, month: number, day: number, hour: number, minute: number) =>
   new Date(Date.UTC(year, month - 1, day, hour, minute) - chileOffsetMinutes(year, month, day) * 60_000);
 
 /** A date written in a report, as an instant; null when there is no full date (a «por confirmar», a relative date). */

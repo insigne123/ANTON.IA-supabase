@@ -35,8 +35,6 @@ export const activitySchema = z.object({
   kind: z.enum(['note', 'progress', 'blocked', 'decision', 'meeting', 'submitted']), text: text(4000).min(1),
   dueAt: z.string().datetime({ offset: true }).nullable().default(null),
 }).strict();
-export const taskSchema = z.object({ title: text(500).min(2), ownerId: z.string().uuid().nullable(), dueAt: z.string().datetime({ offset: true }).nullable(),
-  status: z.enum(['pending', 'working', 'done', 'blocked']).default('pending'), evidence: text(4000).default('') }).strict();
 export const companyContextSchema = z.object({
   offer: text(10_000).min(20), services: z.array(text(500).min(2)).min(1).max(30), territories: z.array(text(100)).max(20),
   exclusions: z.array(text(300)).max(30), priority: z.enum(['hiring', 'posts', 'balanced']),
@@ -50,9 +48,12 @@ export type WorkRecord = { opportunity_id: string; revision: number; state: type
   responsible_id: string | null; objective: string; due_at: string | null; assigned_by: string | null; updated_at: string };
 export type WorkspaceMember = { user_id: string; name: string; role: string; /** For an administrator: how many opportunities in play this person works. */ open?: number };
 export type WorkspaceOverview = { mode: 'management' | 'assigned'; items: WorkItem[]; work: WorkRecord[];
-  notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null; /** assignment, report or task (decisions and blocks). */ kind?: string | null }>;
+  notifications: Array<{ id: string; opportunity_id: string; title: string; created_at: string; read_at: string | null; /** assignment, report or task (decisions and blocks). */ kind?: string | null;
+    /** What it is about within its kind: «task:…» and «mention:…» are tasks given and notes that name the person (workspace-radar.ts). */ event_key?: string | null }>;
   members: WorkspaceMember[]; groups: Array<{ id: string; name: string }>; context: Record<string, unknown> | null;
   budget: { spent: number; reserved: number; cap: number }; sourceStatus: Record<string, boolean>;
+  /** «Mis tareas»: how many this person has to do, and how many are late (workspace-tasks.ts). */
+  myTasks?: { open: number; late: number };
   /** How many there are in each filter of the list, with the words, sources and lines of service of this reading (list-stages.ts). */
   counts?: Record<string, number>;
   /** The sources searching right now (DISCOVERY_JOB_KINDS queued or running); admins only. */

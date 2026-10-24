@@ -63,3 +63,13 @@ test('each notice is cleared on its own, and the kinds show only when there is m
   assert.deepEqual(kinds, ['task'], 'what was read does not count');
   assert.deepEqual(radar.latestNews([notice('n1', 'o1', 'report', 'Informe'), notice('n2', 'o2', 'assignment', 'Asignada')], 'assignment').ids, ['n2']);
 });
+
+test('tasks given and notes that name someone are their own kind of news, told apart from decisions by their event', () => {
+  const work = (id: string, key: string) => ({ ...notice(id, `o-${id}`, 'task', 'Tarea para ti: Aseo'), event_key: key });
+  assert.deepEqual([work('a', 'task:t1:u'), work('b', 'tasks:batch:u'), work('c', 'mention:note:x'), work('d', 'decision:1'), work('e', 'result:o:adjudicada')].map(radar.newsKindOf),
+    ['work', 'work', 'work', 'task', 'task']);
+  const mixed = news({ notifications: [work('a', 'mention:note:x'), notice('n2', 'o2', 'task', 'Decisión pedida: Casino')] });
+  assert.match(text(mixed), /Todas Decisiones Tareas y menciones/);
+  assert.deepEqual([work('a', 'mention:note:x'), work('b', 'tasks:batch:u'), work('c', 'task:t1:u'), work('d', 'decision:1')].map(radar.newsSection), ['activity', 'tasks', 'tasks', undefined],
+    'a notice opens on what it speaks of');
+});

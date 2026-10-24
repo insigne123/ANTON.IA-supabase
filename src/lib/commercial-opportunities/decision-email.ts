@@ -1,21 +1,23 @@
 // The email when something on an opportunity waits for someone: a decision asked of the administrators, a proposal not to apply, a
-// block, or the answer to the decision. Before, these only left a line in «Novedades» inside the page, and a decision waited until an
-// administrator happened to open it. On the same white card as the assignment email, with the same off switch (Tu semana).
+// block, the answer to the decision, a note that names someone with «@» or tasks given to someone. Before, these only left a line in
+// «Novedades» inside the page, and a decision waited until an administrator happened to open it. On the same white card as the assignment email, with the same off switch (Tu semana).
 // Pure: the server reads the facts (server/commercial-opportunities/workspace-decision-notice.ts).
 import { emailShell } from '@/lib/email-shell';
 import { assignmentWhen } from './assignment-email';
 
-export type DecisionNoticeKind = 'ask' | 'no_go' | 'blocked' | 'reply';
+export type DecisionNoticeKind = 'ask' | 'no_go' | 'blocked' | 'reply' | 'mention' | 'task';
 export type DecisionEmailInput = {
   name: string;
-  /** Who asked, blocked or answered; null when it is not known. */
+  /** Who asked, blocked, answered, wrote the note or gave the tasks; null when it is not known. */
   actor: string | null;
   kind: DecisionNoticeKind;
   title: string;
-  /** What they wrote: the decision, the reason of the block or the answer. */
+  /** What they wrote: the decision, the reason of the block, the answer or the note; for tasks, their names. */
   text: string;
-  /** The date the decision is needed by, when it has one. */
+  /** The date the decision is needed by, or the first task is due, when there is one. */
   dueAt: string | null;
+  /** How many tasks were given, for a «task» email. */
+  count?: number;
   opportunityId: string;
   appUrl: string;
 };
@@ -25,7 +27,8 @@ const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0
 
 export function decisionEmail(input: DecisionEmailInput) {
   const base = input.appUrl.replace(/\/$/, '');
-  const link = `${base}/opportunities?op=${encodeURIComponent(input.opportunityId)}`;
+  const section = input.kind === 'mention' ? '&seccion=actividad' : input.kind === 'task' ? '&seccion=tareas' : '';
+  const link = `${base}/opportunities?op=${encodeURIComponent(input.opportunityId)}${section}`;
   const settings = `${base}/dashboard?vista=semana`;
   const who = input.actor?.trim() || (input.kind === 'reply' ? 'Un administrador' : 'Alguien del equipo');
   const greeting = input.name.trim() ? `Hola, ${input.name.trim()}` : 'Hola';
@@ -37,6 +40,10 @@ export function decisionEmail(input: DecisionEmailInput) {
     no_go: [`${who} propone no postular`, `${who} propone no postular a esta oportunidad${when ? `; necesita la respuesta para el ${when}` : ''}.`, 'Responder'],
     blocked: ['Oportunidad bloqueada', `${who} marcó esta oportunidad como bloqueada.`, 'Ver qué la bloquea'],
     reply: ['Respondieron tu decisión', `${who} respondió la decisión que pediste.`, 'Abrir la oportunidad'],
+    mention: [`${who} te mencionó`, `${who} te mencionó en una nota de esta oportunidad.`, 'Ver la nota'],
+    task: [(input.count ?? 1) > 1 ? `${input.count} tareas para ti` : 'Una tarea para ti',
+      `${who} te dio ${(input.count ?? 1) > 1 ? `${input.count} tareas` : 'una tarea'} en esta oportunidad${when ? `; ${(input.count ?? 1) > 1 ? 'la primera vence' : 'vence'} el ${when}` : ''}.`,
+      (input.count ?? 1) > 1 ? 'Ver las tareas' : 'Ver la tarea'],
   }[input.kind];
   const subject = `${subjectStart}: ${clip(title, 90)}`;
   const text = [`${greeting}. ${intro}`, '', title, ...(said ? [`«${said}»`] : []), '', `${action}: ${link}`,

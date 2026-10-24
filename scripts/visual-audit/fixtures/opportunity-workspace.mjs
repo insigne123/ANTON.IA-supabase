@@ -99,6 +99,8 @@ export default function workspace(ctx) {
     note(2, 1, 'assigned', 'Camila Torres asignó la oportunidad a Diego Fuentes', ctx.OWNER, ctx.daysAgo(5)),
     note(2, 2, 'progress', 'Leí las bases: piden dos referencias y certificado de antecedentes de la empresa. Ya pedí el certificado.', ctx.MEMBER, ctx.daysAgo(3)),
     note(2, 3, 'decision', 'Pide una decisión: ¿Ofertamos el módulo de alertas judiciales como opcional? Sube el precio 12 %.', ctx.MEMBER, ctx.hoursAgo(6), { type: 'ask', dueAt: ctx.daysAhead(2) }),
+    // A note that names Diego (OPP-28): he heard about it in «Novedades».
+    note(2, 4, 'note', '@Diego Fuentes, ¿confirmas con Retail Andino que firman el certificado esta semana?', ctx.OWNER, ctx.hoursAgo(3), { mentions: [ctx.MEMBER] }),
     note(6, 0, 'assigned', 'Camila Torres asignó la oportunidad a Diego Fuentes', ctx.OWNER, ctx.hoursAgo(20)),
     note(7, 0, 'created', 'Oportunidad recibida incorporada al workspace', ctx.OWNER, ctx.daysAgo(2)),
     note(10, 0, 'submitted', 'Oferta presentada en Mercado Público', ctx.MEMBER, ctx.daysAgo(3)),
@@ -113,6 +115,9 @@ export default function workspace(ctx) {
     task(2, 1, 'Reunir las dos referencias de clientes de retail', 'working', ctx.MEMBER, ctx.daysAhead(2)),
     task(2, 2, 'Completar el anexo 3 con el precio por persona', 'pending', ctx.OWNER, ctx.daysAhead(4)),
     task(2, 3, 'Firmar la declaración jurada del representante legal', 'pending', ctx.OWNER, ctx.daysAhead(5)),
+    // «Mis tareas» of Diego across his opportunities (OPP-27): one already late, one this week.
+    task(6, 0, 'Pedir la visita a terreno de las sucursales', 'pending', ctx.MEMBER, ctx.daysAgo(2)),
+    task(3, 0, 'Preparar el anexo técnico', 'pending', ctx.MEMBER, ctx.daysAhead(3)),
   ];
 
   const document = (n, index, name, status = 'read') => ({ id: doc(n * 3 + index), organization_id: org, opportunity_id: opp(n), name, mime: 'application/pdf', sha256: `${String(n * 3 + index).padStart(2, '0')}`.repeat(32).slice(0, 64),
@@ -233,6 +238,8 @@ export default function workspace(ctx) {
     notification(1, ctx.MEMBER, 2, 'Informe listo: Servicio de verificación de antecedentes para personal externo', 'report', false),
     notification(2, ctx.MEMBER, 3, 'Oportunidad asignada: Compra Ágil: revisión de antecedentes de postulantes', 'assignment', true),
     notification(3, ctx.OWNER, 2, 'Decisión pedida: Servicio de verificación de antecedentes para personal externo', 'task', false),
+    // workspace-notes.ts: a note that names Diego.
+    { ...notification(4, ctx.MEMBER, 2, 'Camila Torres te mencionó: Servicio de verificación de antecedentes para personal externo', 'task', false), event_key: 'mention:fx:2:4', created_at: ctx.hoursAgo(3) },
   ];
 
   const context = { organization_id: org, offer: 'Verificación de antecedentes laborales y judiciales para empresas que contratan mucho personal, con informes en minutos y trazabilidad para auditorías.',
