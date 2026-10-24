@@ -8,6 +8,9 @@ import { assertOpportunityRead } from './workspace-access';
 import { opportunityDb } from './workspace-store';
 import { runOpportunitySpecialists } from './workspace-specialists';
 import { opportunityGenerate, opportunityGenerateReport, type OpportunityJob } from './workspace-ai';
+import { reportBudgetCheck } from './workspace-budget';
+import { opportunityModel } from '@/lib/commercial-opportunities/model-policy';
+import { readOpportunityParts } from './workspace-reading';
 import { saveOpportunityDocument } from './workspace-documents';
 import { activeDocumentScans } from './workspace-scans';
 import { downloadOpportunitySource, opportunityAttachmentLinks } from './workspace-download';
@@ -19,7 +22,7 @@ import { opportunityReportWarnings } from '@/lib/commercial-opportunities/report
 import { milestoneDate } from '@/lib/commercial-opportunities/report-marks';
 import { opportunityChatReportContext } from '@/lib/commercial-opportunities/chat-context';
 import { opportunityChatPrompt } from '@/lib/commercial-opportunities/chat-prompt';
-import { nextReportProgress, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
+import { nextReportProgress, reportMinutes, type ReportProgressNote } from '@/lib/commercial-opportunities/report-progress';
 import { validateSubmissionKit } from '@/lib/commercial-opportunities/submission-kit';
 import { loadCompanyForModel } from './tender-profile-read';
 import { opportunityAgentEnabled, runOpportunityChatAgent } from './workspace-agent';
@@ -35,18 +38,29 @@ async function noteProgress(client: SupabaseClient, job: OpportunityJob, note: R
 
 export async function enqueueOpportunityResearch(client: SupabaseClient, scope: WorkScope, id: string) {
   await assertOpportunityRead(client, scope, id);
-  const [context, docs] = await Promise.all([
+  const [context, docs, fragments] = await Promise.all([
     client.from('opportunity_company_context').select('revision,offer').eq('organization_id', scope.organizationId).maybeSingle(),
     client.from('opportunity_documents').select('id,sha256').eq('organization_id', scope.organizationId).eq('opportunity_id', id).order('id'),
+    client.from('opportunity_document_chunks').select('id', { count: 'exact', head: true }).eq('organization_id', scope.organizationId).eq('opportunity_id', id),
   ]);
   const profile = opportunityDb(context);
   if (!profile) throw new AuthError('Un administrador debe confirmar primero la oferta de la empresa.', 409);
   const sourceDocuments = opportunityDb(docs) || [];
-  const item=opportunityDb(await client.from('commercial_opportunities').select('title,company_name,url,deadline_at,data').eq('organization_id',scope.organizationId).eq('id',id).single());
+  // The kind stays out of the content hash, as before: the same documents keep finding the same report.
+  const opportunity = opportunityDb(await client.from('commercial_opportunities').select('title,company_name,url,deadline_at,data,kind').eq('organization_id',scope.organizationId).eq('id',id).single());
+  const { kind, ...item } = opportunity!;
   const hash = createHash('sha256').update(JSON.stringify({ version: REPORT_VERSION, documents: sourceDocuments, revision: profile.revision,item })).digest('hex');
+  // Its size, before anything is read (OPP-18, OPP-19): about how long it takes, and a report that does not fit what is left of the
+  // month or of the reports' share hears so now, not after reading for minutes. A tender brings its forms and forum with it.
+  const read = Math.max(Number(fragments.count) || 0, ['tender', 'compra_agil'].includes(kind) ? 20 : 0);
+  if (opportunityModel('report') === 'claude-haiku-5-5') {
+    const refused = await reportBudgetCheck(client, scope.organizationId, read);
+    if (refused) throw new AuthError(refused, 402);
+  }
+  const estimate = { parts: Math.ceil(read / 4), minutes: reportMinutes(Math.ceil(read / 4)) };
   const key = `research:${id}:${hash}`;
   const row = opportunityDb(await client.from('opportunity_jobs').upsert({ organization_id: scope.organizationId, opportunity_id: id,
-    requested_by: scope.userId, kind: 'research', dedupe_key: key, payload: { contentHash: hash, profileRevision: profile.revision } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }).select('id').maybeSingle());
+    requested_by: scope.userId, kind: 'research', dedupe_key: key, payload: { contentHash: hash, profileRevision: profile.revision, estimate } }, { onConflict: 'organization_id,dedupe_key', ignoreDuplicates: true }).select('id').maybeSingle());
   if (row?.id) return row.id;
   const found = opportunityDb(await client.from('opportunity_jobs').select('id,state').eq('organization_id', scope.organizationId).eq('dedupe_key', key).single());
   if (!found) throw new AuthError('No se pudo recuperar el trabajo.', 503);
@@ -61,7 +75,7 @@ export async function enqueueOpportunityResearch(client: SupabaseClient, scope: 
       .eq('kind','research').like('dedupe_key',`${key}:retry:%`).in('state',['queued','running','waiting']).limit(1).maybeSingle());
     if(active?.id) return active.id;
     const retry=opportunityDb(await client.from('opportunity_jobs').insert({ organization_id: scope.organizationId, opportunity_id: id, requested_by: scope.userId,
-      kind: 'research', dedupe_key: `${key}:retry:${randomUUID()}`, payload: { contentHash: hash, profileRevision: profile.revision } }).select('id').single());
+      kind: 'research', dedupe_key: `${key}:retry:${randomUUID()}`, payload: { contentHash: hash, profileRevision: profile.revision, estimate } }).select('id').single());
     if (!retry) throw new AuthError('No se pudo recuperar el trabajo.', 503);
     return retry.id;
   }
@@ -149,29 +163,20 @@ export async function runOpportunityResearch(client: SupabaseClient, job: Opport
   }
   if (!chunks.length) throw new AuthError('Faltan documentos legibles para investigar. Adjunta las bases o la invitación.', 422);
   if (chunks.length >= 20000) warnings.push('La extracción supera la capacidad de esta versión de análisis.');
-  const facts: Array<{ text: string; state: string; citations: any[] }> = [];
-  let skippedBlocks = 0;
-  const missing: string[] = [];
   const parts = Math.ceil(chunks.length / 4);
   let noted = 0;
-  for (let offset = 0; offset < chunks.length; offset += 4) {
-    if (Date.now() - started > 120_000) return { waiting: true as const };
-    const block = chunks.slice(offset, offset + 4);
-    // Every few seconds, not every part: parts already read come back in a moment when a job resumes.
-    if (Date.now() - noted > 3000) {
+  const reading = await readOpportunityParts(chunks, block => opportunityGenerate(client, job, { step: `extract:${createHash('sha256').update(block.map(c => c.id).join('|')).digest('hex')}`, category: 'research', role: 'extract', schema: extractionSchema, output: 4500,
+    prompt: `Extrae TODOS los requisitos, fechas, cifras, criterios, garantías y obligaciones de estos fragmentos. Conserva contradicciones y títulos que no correspondan al objeto. No interpretes una licitación privada con normas públicas. Las páginas de contexto público no son bases ni requisitos; sus hechos solo se atribuyen al cliente con identidad suficiente. En foros distingue preguntas de participantes y respuestas oficiales: una pregunta no acredita un requisito ni un error de las bases. Cita juntos pregunta y respuesta cuando esta sea breve. Cada hecho documentado lleva chunkId y cita literal con el dato, cifra, unidad y período que respalda, no solo una etiqueta. missing se refiere solo a estos bloques; no declares ausente una respuesta o dato de un bloque vecino. Lo desconocido queda desconocido. Oferta de la empresa: ${context.offer}\n${JSON.stringify(block)}` }), {
+    started,
+    // Every few seconds, not every group: parts already read come back in a moment when a job resumes.
+    note: async (read, block) => {
+      if (Date.now() - noted <= 3000) return;
       noted = Date.now();
-      await noteProgress(client, job, { stage: 'read', read: offset / 4, total: parts, document: documents.find(d => d.id === block[0].document_id)?.name || null });
-    }
-    let extracted;
-    // One unreadable block (a malformed model answer, or one already paid and unanswered) does not sink the whole report.
-    try { extracted = await opportunityGenerate(client, job, { step: `extract:${createHash('sha256').update(block.map(c => c.id).join('|')).digest('hex')}`, category: 'research', role: 'extract', schema: extractionSchema, output: 4500,
-      prompt: `Extrae TODOS los requisitos, fechas, cifras, criterios, garantías y obligaciones de estos fragmentos. Conserva contradicciones y títulos que no correspondan al objeto. No interpretes una licitación privada con normas públicas. Las páginas de contexto público no son bases ni requisitos; sus hechos solo se atribuyen al cliente con identidad suficiente. En foros distingue preguntas de participantes y respuestas oficiales: una pregunta no acredita un requisito ni un error de las bases. Cita juntos pregunta y respuesta cuando esta sea breve. Cada hecho documentado lleva chunkId y cita literal con el dato, cifra, unidad y período que respalda, no solo una etiqueta. missing se refiere solo a estos bloques; no declares ausente una respuesta o dato de un bloque vecino. Lo desconocido queda desconocido. Oferta de la empresa: ${context.offer}\n${JSON.stringify(block)}` });
-    } catch (error) {
-      if (!(error instanceof AuthError) || ![503, 409].includes(error.status) || /presupuesto|otro proceso/i.test(error.message)) throw error;
-      skippedBlocks++; continue;
-    }
-    facts.push(...validateOpportunityFacts(extracted.facts, block)); missing.push(...extracted.missing);
-  }
+      await noteProgress(client, job, { stage: 'read', read, total: parts, document: documents.find(d => d.id === block[0].document_id)?.name || null });
+    },
+  });
+  if (reading.waiting) return { waiting: true as const };
+  const { facts, missing, skipped: skippedBlocks } = reading;
   if (skippedBlocks) warnings.push(skippedBlocks === 1 ? 'Una parte de los documentos no se pudo leer y el informe no la considera.' : `${skippedBlocks} partes de los documentos no se pudieron leer y el informe no las considera.`);
   if (skippedBlocks * 4 >= chunks.length) throw new AuthError('No pudimos leer los documentos. Intenta de nuevo en un momento.', 503);
   await noteProgress(client, job, { stage: 'write', total: parts });

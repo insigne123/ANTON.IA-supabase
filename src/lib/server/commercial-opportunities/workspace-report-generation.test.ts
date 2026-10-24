@@ -47,14 +47,14 @@ function fixture() {
   } };
   const job = { id: 'job', organization_id: 'org', lease_token: 'lease', payload: {}, kind: 'research' };
   const input = { step: 'synthesis-envelope-v1:fixture', prompt: 'Contrato y hechos sintéticos', output: 16_000 };
-  let json = JSON.stringify(report), error: Error | null = null;
+  let json = JSON.stringify(report), error: Error | null = null, promptTokens = 100;
   const generate = async (options: any) => {
     requests.push(options); if (error) throw error;
     return { data: options.schema.parse({ json }), telemetry: { modelName: 'claude-haiku-5-5', durationMs: 1,
-      usage: { prompt_tokens: 100, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 0 } } } };
+      usage: { prompt_tokens: promptTokens, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 0 } } } };
   };
   return { client, job, input, report, state, requests, reservations, settlements, generate,
-    setJson(value: string) { json = value; }, setError(value: Error) { error = value; } };
+    setJson(value: string) { json = value; }, setError(value: Error) { error = value; }, setPromptTokens(value: number) { promptTokens = value; } };
 }
 
 test('one reserved report call uses the envelope and replays without another call or settlement', async () => {
@@ -81,7 +81,28 @@ test('a seven-document report stays under the 0.75 USD cap of one research, and 
   // The report cannot be split, so it is reserved at that price instead of being refused (reading and screening are: see below).
   assert.ok(f.reservations[0].p_micro >= bytes * 0.5 + 24_000 * 2.5, 'the documents and the whole output stay reserved');
   assert.ok(f.reservations[0].p_micro <= 727_000, `fits next to the reading steps (${f.reservations[0].p_micro})`);
-  assert.ok(f.settlements[0].p_cost > 0 && f.settlements[0].p_receipt.price.input === 0.5, 'and it is settled at the same price');
+});
+
+test('a report reserved at the long-context price is settled at the price billed: the short one up to 100k tokens', async () => {
+  const prompt = 'á'.repeat(60_000);
+  const short = fixture(); short.setPromptTokens(48_000);
+  await opportunityGenerateReport(short.client, short.job, { ...short.input, prompt }, short.generate);
+  // 120 kB came to 48k tokens: the provider billed 0.1 and 0.5 per million, not five times that.
+  assert.deepEqual([short.settlements[0].p_receipt.price.input, short.settlements[0].p_receipt.price.output], [0.1, 0.5]);
+  assert.equal(short.settlements[0].p_cost, Math.ceil(48_000 * 0.1 + 50 * 0.5));
+  const long = fixture(); long.setPromptTokens(120_000);
+  await opportunityGenerateReport(long.client, long.job, { ...long.input, prompt }, long.generate);
+  assert.equal(long.settlements[0].p_receipt.price.input, 0.5, 'past the line, the long price');
+});
+
+test('reading may ask again after a refusal for the rate, the report never: a second report call could outlast its turn', async () => {
+  const f = fixture();
+  const { z } = await import('zod');
+  await opportunityGenerate(f.client, f.job, { step: 'extract:x', category: 'research', role: 'extract', schema: z.object({ json: z.string() }), prompt: 'Extrae' }, f.generate);
+  assert.equal(f.requests[0].maxAttempts, 3);
+  const g = fixture();
+  await opportunityGenerateReport(g.client, g.job, g.input, g.generate);
+  assert.equal(g.requests[0].maxAttempts, 1);
 });
 
 test('invalid inner JSON keeps the paid receipt and result, does not expose source text or retry', async () => {

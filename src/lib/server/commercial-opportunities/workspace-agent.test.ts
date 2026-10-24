@@ -167,7 +167,7 @@ test('a budget that is gone stops the agent before it calls the provider, and a 
   const g = fixture();
   const huge = new ScriptedModel([says('hola')]);
   const model = ledgeredModel(g.client, g.job, { step: 'x', role: 'chat', category: 'chat', base: huge });
-  await assert.rejects(model.complete({ system: 's', messages: [{ role: 'user', content: 'a'.repeat(4_500_000) }], tools: [] }), (error: any) => error.status === 402 && /contexto/.test(error.message));
+  await assert.rejects(model.complete({ system: 's', messages: [{ role: 'user', content: 'a'.repeat(4_500_000) }], tools: [] }), (error: any) => error.status === 402 && /pregunta más acotada/.test(error.message));
   assert.equal(g.reservations.length, 0, 'nothing is reserved for a call that cannot be afforded');
 });
 

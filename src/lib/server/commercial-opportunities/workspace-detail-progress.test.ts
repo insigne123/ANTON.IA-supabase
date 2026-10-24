@@ -22,8 +22,8 @@ const rows: Record<string, unknown> = {
   commercial_opportunities: { id: 'op', kind: 'tender', title: 'Servicio de traslado' },
   opportunity_documents: [{ id: 'd1', name: 'Bases.pdf', storage_path: 'org/op/bases.pdf' }],
   opportunity_jobs: [
-    { id: 'j1', kind: 'research', state: 'running', error: null, payload: { progress: { stage: 'read', read: 2, total: 5, document: 'Bases.pdf' },
-      documentIds: ['d1'], attachmentsUrl: 'https://example.test/private', profileRevision: 3 } },
+    { id: 'j1', kind: 'research', state: 'running', error: null, payload: { progress: { stage: 'read', read: 2, total: 5, document: 'Bases.pdf', readSince: '2026-10-24T12:00:00.000Z' },
+      estimate: { parts: 5, minutes: 4 }, documentIds: ['d1'], attachmentsUrl: 'https://example.test/private', profileRevision: 3 } },
     { id: 'j2', kind: 'chat', state: 'ready', error: null, payload: { requestId: 'r1' } },
   ],
   opportunity_company_context: { criteria: {} },
@@ -38,10 +38,11 @@ const client = {
   },
 };
 
-test('a report job carries its progress for the office; no job carries its payload', async () => {
+test('a report job carries its progress for the office, with its pace and the minutes its size suggested; no job carries its payload', async () => {
   const detail = await readOpportunityDetail(client, { organizationId: 'org', userId: 'u1', role: 'admin' }, 'op');
   assert.deepEqual(detail.jobs, [
-    { id: 'j1', kind: 'research', state: 'running', error: null, progress: { stage: 'read', read: 2, total: 5, document: 'Bases.pdf', since: null } },
+    { id: 'j1', kind: 'research', state: 'running', error: null, progress: { stage: 'read', read: 2, total: 5, document: 'Bases.pdf', since: null,
+      readSince: '2026-10-24T12:00:00.000Z', minutes: 4 } },
     { id: 'j2', kind: 'chat', state: 'ready', error: null },
   ]);
   assert.doesNotMatch(JSON.stringify(detail), /example\.test|profileRevision|documentIds|storage_path/);

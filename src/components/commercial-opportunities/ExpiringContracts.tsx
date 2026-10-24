@@ -96,7 +96,7 @@ export function ExpiringContracts({ onOpen, onCriteria }: { onOpen: (id: string)
 
     {data && !data.available ? <div className="rounded-3xl border p-6 text-sm leading-6 text-muted-foreground">Aún no cargamos el historial de licitaciones de ChileCompra. Cuando esté, verás aquí los contratos que vencen y calzan con tu oferta.</div> : null}
 
-    {data?.available && reading ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Revisando los contratos que vencen y eligiendo los que calzan con tu oferta. Tarda unos minutos.</p> : null}
+    {data?.available && reading ? <p role="status" className="flex items-center gap-2 rounded-2xl bg-muted/50 p-4 text-sm"><Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />Revisando los contratos que vencen y eligiendo los que calzan con tu oferta. Puede tardar varios minutos: puedes salir y volver, la lista quedará aquí.</p> : null}
 
     {failed && !reading ? <p role="alert" className="flex gap-2 rounded-2xl bg-destructive/5 p-4 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
       {data?.contracts.length ? `La última revisión no terminó. ${friendlyJobError(failed.error)} Sigues viendo la anterior${data.updatedAt ? `, del ${readDate(data.updatedAt)}` : ''}.` : friendlyJobError(failed.error)}</p> : null}
