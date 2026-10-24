@@ -6,7 +6,7 @@ const opp = n => `00000000-0000-4000-8000-${String(9510 + n).padStart(12, '0')}`
 /** Diego, the member of the fixtures (ids.mjs). */
 const DIEGO = '00000000-0000-4000-8000-000000000012';
 const WORKSPACE = /^\/api\/commercial-opportunities\/[0-9a-f-]{36}\/workspace$/;
-const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'mark', 'decision', 'decision_reply', 'offer_part', 'offer_review'] };
+const ACTIONS = { pattern: WORKSPACE, actions: ['assign', 'state', 'activity', 'task', 'tasks', 'task_status', 'task_delete', 'note_edit', 'note_delete', 'mark', 'decision', 'decision_reply', 'offer_part', 'offer_review', 'offer_prices', 'price_study'] };
 const NOTIFY = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['notification'] };
 const BULK = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['bulk', 'notification'] };
 const CRITERIA = { pattern: /^\/api\/commercial-opportunities\/workspace$/, actions: ['criteria'] };
@@ -383,6 +383,27 @@ export default () => [
         await c.click('Marcar como revisada'); await c.see(/^Revisado por Diego Fuentes el /);
         c.check('dice quién la revisó', c.table('opportunity_offer_drafts').find(row => row.opportunity_id === opp(2))?.draft?.review?.by === DIEGO);
         c.check('y queda en la actividad', c.table('opportunity_activity').some(row => row.opportunity_id === opp(2) && row.body === 'Oferta revisada antes de presentarla'));
+      } },
+    ] },
+  { id: 'miembro-precio', persona: 'member', title: 'Integrante a cargo: el precio guardado para el equipo, y su valor en la oferta económica', goal: 'Ajustar el cálculo del precio sin perderlo al cambiar de equipo, y llevar el precio a la oferta.', passWrites: [ACTIONS],
+    steps: [
+      { say: 'Abro «Calcular el precio» de la licitación', do: async c => {
+        await c.go(`/opportunities?op=${opp(2)}&seccion=postular`); await c.see('Tu oferta · borrador');
+        await c.clickOn(c.page.getByText('Calcular el precio', { exact: true })); await c.see(/^Guardado para quien fija los precios · Diego Fuentes/);
+        c.check('abre el cálculo guardado, no uno vacío', await c.page.getByLabel('Sueldo base del perfil 1').inputValue() === '750000');
+        c.check('con sus versiones', await shows(c, /^Versiones guardadas/));
+      } },
+      { say: 'Subo el sueldo base y se guarda solo', do: async c => {
+        await c.page.getByLabel('Sueldo base del perfil 1').fill('780000');
+        await c.page.waitForTimeout(2000); await c.see(/^Guardado para quien fija los precios · Diego Fuentes/);
+        const latest = c.table('opportunity_price_studies').filter(row => row.opportunity_id === opp(2)).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+        c.check('quedó una versión nueva con el sueldo nuevo', latest?.study?.profiles?.[0]?.base === '780000' && c.table('opportunity_price_studies').filter(row => row.opportunity_id === opp(2)).length === 3,
+          JSON.stringify(latest?.study?.profiles?.[0]));
+      } },
+      { say: 'Llevo el precio al mes a la oferta económica', do: async c => {
+        await c.clickOn(c.page.getByRole('button', { name: 'Usar', exact: true })); await c.see(/^Listo: \$[\d.]+ en «Verificación de antecedentes por persona»\.$/);
+        const prices = c.table('opportunity_offer_drafts').find(row => row.opportunity_id === opp(2))?.prices;
+        c.check('la línea tiene su precio unitario', Number(prices?.['0']) > 0, JSON.stringify(prices));
       } },
     ] },
   { id: 'miembro-urgente', persona: 'member', title: 'Integrante: abrir lo más urgente y empezar a gestionarlo', goal: 'Empezar la licitación de guardias, que cierra mañana.', passWrites: [ACTIONS, NOTIFY],

@@ -91,6 +91,18 @@ export function parseDraft(raw: string | null | undefined): StudioDraft {
 
 export const studioKey = (userId: string | null | undefined, opportunityId: string) => `anton:price-studio:v1:${userId || 'anon'}:${opportunityId}`;
 
+/** A version of the study saved for the team (OPP-23), and the study itself. */
+export type PriceStudyVersion = { id: string; created_by: string | null; created_at: string; updated_at: string };
+export type SavedPriceStudy = PriceStudyVersion & { study: StudioDraft };
+/** A study as the server keeps it (OPP-23): the shape parseDraft reads, every text at most 120 characters. */
+export function cleanStudy(value: unknown): StudioDraft {
+  const draft = parseDraft(JSON.stringify(value ?? null));
+  const each = <T extends Record<string, string>>(row: T) => Object.fromEntries(Object.entries(row).map(([key, text]) => [key, String(text).slice(0, 120)])) as T;
+  return { profiles: draft.profiles.map(each), loads: draft.loads.map(each), expenses: draft.expenses.map(each), sites: draft.sites.map(each), params: each(draft.params), score: each(draft.score) };
+}
+/** The study without the ids of its rows: two that say the same are the same (whether there is something to save). */
+export const studyText = (draft: StudioDraft) => JSON.stringify(draft, (key, value) => (key === 'id' ? undefined : value));
+
 const money = (value: number) => `$${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(Math.round(value))}`;
 const percent = (value: number) => `${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(value)} %`;
 /** The calculation as plain text to paste in an email or the bases' form: each figure with the assumption behind it. */
