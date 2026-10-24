@@ -74,6 +74,8 @@ const QUICK_DUE: Array<[string, number]> = [['Hoy', 0], ['Mañana', 1], ['En 3 d
 const dueIn = (days: number) => { const at = new Date(); at.setDate(at.getDate() + days); at.setHours(9, 0, 0, 0);
   const pad = (n: number) => String(n).padStart(2, '0'); return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T09:00`; };
 const money = (n: number) => new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 }).format(n);
+/** «3,40»: the month's spending as it reads in Chile. */
+const cents = (n: number) => new Intl.NumberFormat('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const list = (s: string) => (s || '').split('\n').map(s => s.trim()).filter(Boolean);
 /** «el cierre, el monto y la hora» */
 const listEs = (items: string[]) => items.length > 1 ? `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}` : items[0] || '';
@@ -508,7 +510,7 @@ export function OpportunityWorkWorkspace() {
       {/* The offer confirmed is a status, not a task: one quiet line with its three small actions. Without it, asking to confirm it is the card. */}
       {admin && overview.context && <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><span>Oferta compartida confirmada · Búsqueda diaria {(overview.context as any).automation && overview.sourceStatus.automation ? 'programada' : 'pausada'} ·</span>
-          <span className="inline-flex items-center gap-2"><span className="tabular-nums">US${overview.budget.spent.toFixed(2)} de US${overview.budget.cap} este mes</span>
+          <span className="inline-flex items-center gap-2"><span className="tabular-nums">US${cents(overview.budget.spent)} de US${overview.budget.cap} este mes</span>
             <span role="progressbar" aria-label="Presupuesto del mes usado" aria-valuemin={0} aria-valuemax={overview.budget.cap} aria-valuenow={Number(overview.budget.spent.toFixed(2))} className="h-1 w-16 overflow-hidden rounded-full bg-muted">
               <span className={cn('block h-full rounded-full', overview.budget.spent / overview.budget.cap >= 0.9 ? 'bg-destructive' : 'bg-primary/70')} style={{ width: `${Math.min(100, (overview.budget.spent / overview.budget.cap) * 100)}%` }} /></span></span>
           {searching.length ? <span role="status" className="inline-flex items-center gap-1.5">· <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />Buscando en {sourceNames(searching)}…</span> : null}</div>
