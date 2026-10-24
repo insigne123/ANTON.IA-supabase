@@ -39,9 +39,9 @@ function HomeFigures({ overview, loading }: { overview: CoworkOverview | null; l
   </ul>;
 }
 
-const SINCE_ICON: Record<CoworkSinceKind, CoworkIconKey> = { replies: 'reply', research: 'research', opportunities: 'target', linkedin: 'linkedin' };
+const SINCE_ICON: Record<CoworkSinceKind, CoworkIconKey> = { replies: 'reply', research: 'research', linkedin: 'linkedin' };
 const SINCE_ACTION: Record<CoworkSinceKind, string> = {
-  replies: 'Preparar respuestas', research: 'Ver hallazgos', opportunities: 'Revisar', linkedin: 'Escribirles',
+  replies: 'Preparar respuestas', research: 'Ver hallazgos', linkedin: 'Escribirles',
 };
 
 /** «Desde tu última visita» (Plan 12, 5): what arrived after your last turn; each row asks Cowork to work on it. */

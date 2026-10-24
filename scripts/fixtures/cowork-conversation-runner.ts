@@ -32,7 +32,7 @@ import {
 import { normalizeLinkedinProfileUrl } from '../../src/lib/linkedin-url';
 import type { CoworkArtifactTableName, CoworkDesignBrief } from '../../src/lib/cowork/design-brief';
 import type { CoworkArtifactData, CoworkArtifactTable, CoworkCodeArtifact } from '../../src/lib/server/cowork/code-artifact';
-import { coworkArtifactActivity, coworkArtifactCampaigns, coworkArtifactContacts, coworkArtifactOpportunities, coworkArtifactPipeline } from '../../src/lib/server/cowork/artifact-data';
+import { coworkArtifactActivity, coworkArtifactCampaigns, coworkArtifactContacts, coworkArtifactPipeline } from '../../src/lib/server/cowork/artifact-data';
 import type { CoworkDesignResult } from '../../src/lib/server/cowork/designer';
 import { coworkWorkspaceDigest, type CoworkWorkspace } from '../../src/lib/cowork/workspace';
 import type { CoworkAgenda } from '../../src/lib/cowork/agenda';
@@ -108,12 +108,6 @@ export function corpusArtifactData(read: (action: string, input: string) => unkn
     else if (name === 'campaigns') out.campaigns = coworkArtifactCampaigns(account.campaigns.map(campaign => ({
       definition: { name: campaign.name }, status: campaign.status, recipients: Array.from({ length: Number(campaign.recipients) || 0 }), created_at: campaign.createdAt,
     })));
-    else {
-      // A world with «Oportunidades» hands its items as the store lists them (artifact.opportunities).
-      const found = read('artifact.opportunities', '') as Parameters<typeof coworkArtifactOpportunities>[0] | null;
-      if (!Array.isArray(found?.tenders)) throw new Error('Esta cuenta no tiene «Oportunidades»: el artefacto no puede usar esa tabla.');
-      out.opportunities = coworkArtifactOpportunities(found);
-    }
   }
   return { tables: out, currency: 'CLP', timeZone: 'America/Santiago' };
 }
@@ -144,7 +138,7 @@ export function corpusCaseInstructions(entry: CorpusCase, writer: boolean, optio
   return coworkAgentInstructions({
     turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer, codeArtifacts: Boolean(options.codeArtifacts), analyst: Boolean(options.analyst),
     contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch),
-    campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
+    campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunitiesSection: Boolean(entry.opportunitiesSection),
     preferences: Boolean(entry.preferences),
     // Long tasks (Plan 13, 4c), as production with COWORK_TASKS_ENABLED=true.
     tasks: process.env.COWORK_TASKS_ENABLED === 'true',
@@ -309,7 +303,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, wr
         ...(entry.previousVersions?.length && process.env.COWORK_EVAL_VERSIONS !== 'off' ? { previousVersions: entry.previousVersions } : {}),
       }, CORPUS_NOW, 'America/Santiago')) }) } : {}),
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
-      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal), opportunities: Boolean(entry.opportunities),
+      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling, contactsImport: Boolean(entry.contactsImport), replyThread: Boolean(entry.replyThread), linkedinBatch: Boolean(entry.linkedinBatch), campaignRetry: Boolean(entry.campaignRetry), phoneReveal: Boolean(entry.phoneReveal),
       preferences: Boolean(entry.preferences),
       metricPeriods: entry.id.startsWith('integral-'),
       tasks: process.env.COWORK_TASKS_ENABLED === 'true',

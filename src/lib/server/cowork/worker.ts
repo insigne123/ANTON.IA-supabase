@@ -8,7 +8,7 @@ import { coworkAsChatMessage, coworkAsFarewell, coworkAsksChatMessage, coworkIsF
 import { coworkProfileChangeLabel } from '@/lib/cowork/profile-proposal';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
-import { coworkOpportunitiesAllowed } from './opportunities-read';
+import { coworkOpportunitiesSection } from './opportunities-section';
 import { coworkWorkerConfigured } from './runs';
 import { loadCoworkHistory } from './conversation-context';
 import { loadCoworkThreadMemory, saveCoworkThreadMemory } from './thread-memory';
@@ -225,8 +225,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     // «Preparar contactos» (save, look up the email, research several people with one approval) needs its kind in the database
     // (migration 20261001210000); on unless COWORK_PREPARE_BATCH_ENABLED=false.
     const prepareBatchEnabled = coworkPrepareBatchEnabled();
-    // «Oportunidades» is read only by the accounts that see the section in this organization; for the rest it does not exist.
-    const opportunitiesEnabled = await coworkOpportunitiesAllowed(client, scope);
+    // «Oportunidades» is not part of Cowork (the section has its own assistant): whoever can open it is pointed there with a link.
+    const opportunitiesSection = await coworkOpportunitiesSection(client, scope);
     // Code artifacts (Plan 12, 3b): the Designer writes them for the canvas. Off unless COWORK_CODE_ARTIFACTS_ENABLED=true.
     const codeArtifactsEnabled = coworkCodeArtifactsEnabled();
     // Remembering preferences with a card (Plan 12, 5) needs the memory_save kind (migration 20261006160000). Off unless
@@ -243,7 +243,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       phoneReveal: phoneRevealEnabled,
       linkedinBatch: linkedinBatchEnabled,
       prepareBatch: prepareBatchEnabled,
-      opportunities: opportunitiesEnabled,
+      opportunitiesSection,
       codeArtifacts: codeArtifactsEnabled,
       preferences: preferencesEnabled,
       analyst: analystEnabled,
@@ -442,7 +442,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         record: recordEvent,
         timeLeft: () => 100000 - (Date.now() - claimedAt),
         model: coworkDesignerModel(),
-        store: coworkArtifactStore(client, scope, run.id, { opportunities: opportunitiesEnabled }),
+        store: coworkArtifactStore(client, scope, run.id),
         onCall: call => telemetry.push(call),
       }) : undefined,
       // The Analyst writes the answer when the coordinator hands it a question about results (analysis.write).
@@ -466,7 +466,6 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       prepareBatch: prepareBatchEnabled,
       preferences: preferencesEnabled,
       tasks: tasksEnabled && !activeTask,
-      opportunities: opportunitiesEnabled,
       onCorrection: verdict => judgeTurn?.corrected(verdict),
       offeredReads: process.env.COWORK_OFFERED_READS_ENABLED === 'true',
       userContext,

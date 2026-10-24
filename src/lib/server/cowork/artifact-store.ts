@@ -14,12 +14,12 @@ import type { CoworkArtifactStore } from './designer-run';
 const BUCKET = 'cowork-artifacts';
 type Scope = { userId: string; organizationId: string };
 
-export function coworkArtifactStore(client: SupabaseClient, scope: Scope, runId: string, options: { opportunities: boolean }): CoworkArtifactStore {
+export function coworkArtifactStore(client: SupabaseClient, scope: Scope, runId: string): CoworkArtifactStore {
   const prefix = `${scope.organizationId}/${scope.userId}`;
   const artifactEvents = () => client.from('cowork_run_events').select('run_id,payload')
     .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).eq('kind', 'artifact.created');
   return {
-    loadData: tables => loadCoworkArtifactData(client, scope, tables, { opportunities: options.opportunities }),
+    loadData: tables => loadCoworkArtifactData(client, scope, tables),
     async loadPrevious(name) {
       if (!coworkArtifactFileParts(name)) return null;
       const { data, error } = await artifactEvents().eq('payload->>name', name).order('created_at', { ascending: false }).limit(1);

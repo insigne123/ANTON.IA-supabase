@@ -43,7 +43,6 @@ const IMPLIES: Partial<Record<CoworkIntent, CoworkIntent[]>> = {
   replies: ['email', 'contacts'],
   metrics: ['email'],
   files: ['contacts'],
-  opportunities: ['strategy'],
   crm: ['contacts', 'metrics'],
   credits: ['contacts'],
 };
