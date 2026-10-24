@@ -59,6 +59,17 @@ export default () => [
         c.check('las que esperan van primero, con cuántas son', /Esperan tu aprobación · \d+/.test(rail) && dates.every(at => waiting < at), rail.slice(0, 160).replace(/\n/g, ' | '));
       } },
     ] },
+  { id: 'cowork-uso', persona: 'owner', title: 'Saber cuánto del uso del asistente llevo, antes de chocar con el tope',
+    goal: 'Ver el uso de la conversación y el del día en el resumen (COW-15).',
+    steps: [
+      { say: 'Abro la conversación de Sodexo', do: async c => { await c.go(`/cowork?work=${run(1)}`); await c.see('sí está reclutando en volumen'); } },
+      { say: 'Abro el resumen de la conversación', do: async c => {
+        await c.click({ role: 'button', name: 'Ver resumen de la conversación' });
+        await c.see('Uso del asistente');
+        const text = await c.page.getByRole('dialog').first().innerText().catch(() => '');
+        c.check('el resumen dice el uso de la conversación y el de hoy', /Uso del asistente: esta conversación \d+ % · hoy \d+ %/.test(text), text.match(/Uso del asistente[^\n]*/)?.[0] || 'sin la línea');
+      } },
+    ] },
   // «Autónomo» (COW-17): it shows with AUDIT_COWORK_AUTONOMY=true, as in production since 24 Oct; it asks once and is remembered.
   ...(process.env.AUDIT_COWORK_AUTONOMY === 'true' ? [
     { id: 'cowork-modo-autonomo', persona: 'owner', title: 'Activar el modo Autónomo sabiendo qué aprueba solo',

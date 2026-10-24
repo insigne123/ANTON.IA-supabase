@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, CornerDownRight, Download, History, PanelRight, Rot
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { AutonomousConfirm } from './ExecutionMode';
 import { coworkConversationMarkdown, coworkHandoffMessage } from '@/lib/cowork/handoff';
+import { coworkUsageWarning, type CoworkUsage } from '@/lib/cowork/usage';
 import { COWORK_DRAFT_PHASES, type CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
@@ -49,6 +50,7 @@ type ThreadState = CoworkTurnData & {
   canResearch?: boolean;
   canClarify?: boolean;
   budget?: { depth: number; maxDepth: number; exhausted: boolean };
+  usage?: CoworkUsage | null;
   continuation?: { id: string; status: string } | null;
 };
 
@@ -975,6 +977,8 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
   const quotaNote = searchQuota && searchQuota.remaining <= COWORK_LOW_SEARCH_QUOTA
     ? (searchQuota.remaining === 0 ? 'Ya usaste las búsquedas de prospectos de hoy.' : `Te ${searchQuota.remaining === 1 ? 'queda 1 búsqueda' : `quedan ${searchQuota.remaining} búsquedas`} de prospectos hoy.`) : '';
   const queuedView = queued ? coworkMessageAttachments(queued) : null;
+  // When little of the assistant's use is left, it says so before the limit (COW-14, COW-15), with the way on when there is one.
+  const usageWarning = coworkUsageWarning(state?.usage);
 
   // The clip, the dropped files and their chips work the same on the home box and in a conversation.
   const fileProps = (composerId: string) => ({
@@ -1131,7 +1135,9 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
                   onSendNow: pendingDecision || queuedMeta?.entry.state === 'failed' ? () => void sendQueuedNow() : null,
                   sendNowLabel: pendingDecision ? 'Reemplazar propuesta' : 'Reintentar mensaje',
                 } : null}
-                footnote="ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla." />
+                footnote={usageWarning ? <span className="text-cw-text">{usageWarning.text}{usageWarning.newConversation && ready && <>
+                  {' '}<button type="button" onClick={continueInNew} className="rounded-sm font-medium text-cw-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cw-accent">Seguir en una conversación nueva</button></>}</span>
+                  : 'ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla.'} />
             </div>
           </div>
         </>}
@@ -1160,7 +1166,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
         {latest && <CoworkSidePanel closeStyle="dismiss" steps={coworkTurnProgress(latest.run, latest.events)}
           artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
           sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
-          budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setSummaryOpen(false)} />}
+          budget={state?.budget || null} usage={state?.usage || null} searchQuota={searchQuota} onClose={() => setSummaryOpen(false)} />}
       </SheetContent>
     </Sheet>
     {!openArtifact && inConversation && latest && panelOpen && <m.div key="summary" initial={summaryReturns ? 'hidden' : false} animate="shown" variants={cwPanel}
@@ -1168,7 +1174,7 @@ export function CoworkWorkspace({ userId = null, organizationId = null }: { user
       <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)}
         artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
         sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
-        budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
+        budget={state?.budget || null} usage={state?.usage || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
     </m.div>}
     <CoworkShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} mac={mac} />
     {schedulesAvailable && <CoworkSchedules open={schedulesOpen} onOpenChange={open => { setSchedulesOpen(open); if (!open) schedules.refresh(); }} initialPrompt={schedulesPrompt} onStarted={retryList} />}
