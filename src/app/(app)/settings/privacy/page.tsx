@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Ban, FileText, ShieldAlert, UserRoundCheck } from 'lucide-react';
+import { Ban, FileText, Loader2, ShieldAlert, UserRoundCheck } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
 import { SettingsLinkRow } from '@/components/settings/settings-link-row';
@@ -12,6 +12,8 @@ export default function PrivacySettingsPage() {
   const [canAccessPrivacyAdmin, setCanAccessPrivacyAdmin] = useState(false);
   // A failed check hides the admin rows like a «no»; the page says it could not tell, so an admin does not think they lost access.
   const [accessUnknown, setAccessUnknown] = useState(false);
+  // While the check runs, a line says so: the admin rows used to appear three seconds later, all at once.
+  const [checking, setChecking] = useState(true);
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/privacy/access', { cache: 'no-store', signal: controller.signal })
@@ -20,7 +22,8 @@ export default function PrivacySettingsPage() {
         return response.ok ? response.json() : null;
       })
       .then((data) => { if (!controller.signal.aborted) setCanAccessPrivacyAdmin(data?.admin === true); })
-      .catch(() => { if (!controller.signal.aborted) setAccessUnknown(true); });
+      .catch(() => { if (!controller.signal.aborted) setAccessUnknown(true); })
+      .finally(() => { if (!controller.signal.aborted) setChecking(false); });
     return () => controller.abort();
   }, []);
 
@@ -43,6 +46,12 @@ export default function PrivacySettingsPage() {
             title="Bajas y exclusiones"
             description="Administra correos y dominios que no deben volver a ser contactados."
           />
+          {checking ? (
+            <p role="status" className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              Comprobando qué controles puedes ver…
+            </p>
+          ) : null}
           {canAccessPrivacyAdmin ? (
             <>
               <SettingsLinkRow

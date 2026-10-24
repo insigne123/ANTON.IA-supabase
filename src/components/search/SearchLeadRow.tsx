@@ -50,7 +50,8 @@ export function SearchLeadRow({ lead, selected, saved, contacted, onSelect, lock
       <InitialsAvatar name={lead.name} size="md" className="mt-0.5" />
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          {/* flex-1: the name takes the room the marks leave, instead of shrinking to nothing beside «Guardado». */}
+          <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{lead.name}</p>
             <p className="line-clamp-2 text-sm text-foreground/70">{lead.title}</p>
           </div>

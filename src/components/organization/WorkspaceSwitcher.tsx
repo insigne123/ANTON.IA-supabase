@@ -61,7 +61,7 @@ export function WorkspaceSwitcher() {
       })
       .catch(() => {
         if (cancelled) return;
-        setError('No pudimos cargar tus workspaces.');
+        setError('No pudimos cargar tus organizaciones.');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -81,16 +81,16 @@ export function WorkspaceSwitcher() {
     try {
       const changed = await organizationService.setCurrentOrganization(nextOrganizationId);
       if (!changed) {
-        setError('No pudimos cambiar de workspace. Inténtalo de nuevo.');
+        setError('No pudimos cambiar de organización. Inténtalo de nuevo.');
         return;
       }
 
       setData((current) => current ? { ...current, activeOrganizationId: nextOrganizationId } : current);
       const nextOrganization = data.organizations.find((organization) => organization.id === nextOrganizationId);
-      window.sessionStorage.setItem(WORKSPACE_FOCUS_KEY, nextOrganization?.name || 'workspace seleccionado');
+      window.sessionStorage.setItem(WORKSPACE_FOCUS_KEY, nextOrganization?.name || 'organización seleccionada');
       await refreshOrganization();
     } catch {
-      setError('El workspace cambió, pero no pudimos actualizar la sesión.');
+      setError('La organización cambió, pero no pudimos actualizar la sesión.');
     } finally {
       setSwitchingId(null);
     }
@@ -99,7 +99,7 @@ export function WorkspaceSwitcher() {
   if (loading && !data) {
     return (
       <div className="rounded-[18px] border border-sidebar-border/70 bg-sidebar-accent/25 px-3 py-2.5" role="status" aria-live="polite" aria-busy="true">
-        <span className="sr-only">Cargando workspace.</span>
+        <span className="sr-only">Cargando organización.</span>
         <Skeleton className="h-3 w-16 bg-sidebar-accent" />
         <Skeleton className="mt-2 h-4 w-32 bg-sidebar-accent" />
       </div>
@@ -112,14 +112,14 @@ export function WorkspaceSwitcher() {
         <div className="flex items-start gap-2.5">
           <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-sidebar-foreground/60" aria-hidden="true" />
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Workspace</div>
+            <div className="text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Organización</div>
             <p className="mt-1 text-xs leading-5 text-sidebar-foreground/75" role="alert">{error}</p>
           </div>
           <button
             type="button"
             onClick={() => setReloadKey((key) => key + 1)}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-            aria-label="Reintentar carga de workspaces"
+            aria-label="Reintentar carga de organizaciones"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -135,8 +135,8 @@ export function WorkspaceSwitcher() {
   if (!activeOrganization) {
     return (
       <div className="rounded-[18px] border border-sidebar-border/70 bg-sidebar-accent/25 px-3 py-2.5">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Workspace</div>
-        <p className="mt-1 text-sm font-medium text-sidebar-foreground/80">Sin workspace activo</p>
+        <div className="text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Organización</div>
+        <p className="mt-1 text-sm font-medium text-sidebar-foreground/80">Sin organización activa</p>
       </div>
     );
   }
@@ -149,7 +149,7 @@ export function WorkspaceSwitcher() {
       <span className="min-w-0 flex-1 text-left">
         <span className="block truncate text-sm font-medium text-sidebar-foreground">{activeOrganization.name}</span>
         <span className="mt-0.5 block truncate text-xs text-sidebar-foreground/60">
-          {switchingId ? 'Cambiando workspace…' : roleLabels[activeOrganization.role]}
+          {switchingId ? 'Cambiando de organización…' : roleLabels[activeOrganization.role]}
         </span>
       </span>
     </>
@@ -159,9 +159,9 @@ export function WorkspaceSwitcher() {
     return (
       <div
         className="rounded-[18px] border border-sidebar-border/70 bg-sidebar-accent/25 px-3 py-2.5"
-        aria-label={`Workspace activo: ${activeOrganization.name}. Rol: ${roleLabels[activeOrganization.role]}.`}
+        aria-label={`Organización activa: ${activeOrganization.name}. Rol: ${roleLabels[activeOrganization.role]}.`}
       >
-        <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Workspace</div>
+        <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Organización</div>
         <div className="flex items-center gap-2.5">{workspaceSummary}</div>
       </div>
     );
@@ -169,14 +169,14 @@ export function WorkspaceSwitcher() {
 
   return (
     <div>
-      <div className="mb-1.5 px-1 text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Workspace</div>
+      <div className="mb-1.5 px-1 text-[11px] uppercase tracking-[0.18em] text-sidebar-foreground/70">Organización</div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             disabled={Boolean(switchingId)}
             className="flex w-full items-center gap-2.5 rounded-[18px] border border-sidebar-border/70 bg-sidebar-accent/25 px-3 py-2.5 transition-colors hover:bg-sidebar-accent/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:cursor-wait disabled:opacity-70"
-            aria-label={`Cambiar workspace. Actual: ${activeOrganization.name}, ${roleLabels[activeOrganization.role]}`}
+            aria-label={`Cambiar de organización. Actual: ${activeOrganization.name}, ${roleLabels[activeOrganization.role]}`}
             aria-describedby={error ? 'workspace-switcher-error' : undefined}
             aria-busy={Boolean(switchingId)}
           >
@@ -189,7 +189,7 @@ export function WorkspaceSwitcher() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56 rounded-xl border-border/70 p-1.5">
-          <DropdownMenuLabel className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Cambiar workspace</DropdownMenuLabel>
+          <DropdownMenuLabel className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Cambiar de organización</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={activeOrganization.id} onValueChange={(value) => void handleWorkspaceChange(value)}>
             {organizations.map((organization) => (
               <DropdownMenuRadioItem key={organization.id} value={organization.id} disabled={Boolean(switchingId)} className="items-start rounded-lg py-2.5">

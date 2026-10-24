@@ -38,19 +38,29 @@ export function AppShell({ children }: { children: ReactNode }) {
   const chrome = useMemo(() => (immersive ? { start: <SidebarTrigger />, end: <><PageHelpButton visibility={helpVisibility} /><ThemeToggle /></> } : null),
     [immersive, helpVisibility]);
   const [workspaceAnnouncement, setWorkspaceAnnouncement] = useState('');
+  // From 768 to 1099 px the menu starts as a rail of icons: open, it left the content half the screen and squeezed every header
+  // (APP-26). Wider, it starts open. The button in the top bar still folds or opens it at any width.
+  const [menuOpen, setMenuOpen] = useState(true);
+  useEffect(() => {
+    const narrow = window.matchMedia('(min-width: 768px) and (max-width: 1099px)');
+    const apply = () => setMenuOpen(!narrow.matches);
+    apply();
+    narrow.addEventListener('change', apply);
+    return () => narrow.removeEventListener('change', apply);
+  }, []);
   const contentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const workspaceName = window.sessionStorage.getItem('antonia-workspace-focus');
     if (!workspaceName) return;
     window.sessionStorage.removeItem('antonia-workspace-focus');
-    setWorkspaceAnnouncement(`Workspace activo: ${workspaceName}.`);
+    setWorkspaceAnnouncement(`Organización activa: ${workspaceName}.`);
     const frame = window.requestAnimationFrame(() => contentRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider open={menuOpen} onOpenChange={setMenuOpen}>
       <a
         href="#contenido"
         onClick={(event) => { event.preventDefault(); contentRef.current?.focus(); }}
