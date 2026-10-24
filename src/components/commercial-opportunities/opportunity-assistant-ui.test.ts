@@ -55,6 +55,20 @@ test('an answer shows its opportunities to open, the way into one licitación\'s
   assert.match(html, /aria-busy="false"/);
 });
 
+test('an answer can be copied, asked again (the last one) and rated, as in Cowork (OPP-33)', () => {
+  const answer = (feedback?: string) => ({ answer: 'Cierra la de aseo.', cards: [], handoff: null, followups: [], ...(feedback ? { feedback } : {}) });
+  const html = conversation({ messages: [
+    { id: 'm1', question: '¿Qué cierra?', created_at: '', answer: answer('up') },
+    { id: 'm2', question: '¿Y la próxima semana?', created_at: '', answer: answer() },
+  ] });
+  assert.equal((html.match(/>Copiar</g) || []).length, 2);
+  assert.equal((html.match(/Otra respuesta/g) || []).length, 1, 'only the last answer is asked again');
+  assert.match(html, /aria-label="Me sirvió"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*aria-label="Me sirvió"/);
+  assert.equal((html.match(/aria-pressed="false"/g) || []).length, 3);
+  assert.match(conversation({ busy: true, messages: [{ id: 'm1', question: '¿Qué cierra?', created_at: '', answer: answer() }] }),
+    /disabled=""[^>]*>[^<]*<svg[^>]*><\/svg>Otra respuesta|<button[^>]*disabled=""[^>]*>.{0,200}Otra respuesta/, 'not while something is on its way');
+});
+
 test('a question on its way shows at once; one that stopped says why and can be asked again', () => {
   const waiting = conversation({ pending: '¿Qué cierra?' });
   assert.match(waiting, /role="status"/);

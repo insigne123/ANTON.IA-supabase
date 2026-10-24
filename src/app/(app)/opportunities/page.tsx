@@ -1,9 +1,13 @@
+import NextDynamic from 'next/dynamic';
 import { notFound, redirect } from 'next/navigation';
 import { AuthError } from '@/lib/server/auth-utils';
 import { requireOpportunitiesUser } from '@/lib/server/commercial-opportunities/access';
-import { OpportunitiesWorkspace } from '@/components/commercial-opportunities/OpportunitiesWorkspace';
 import { OpportunityWorkWorkspace } from '@/components/commercial-opportunities/OpportunityWorkWorkspace';
 import { opportunityWorkspaceEnabled } from '@/lib/commercial-opportunities/workspace';
+
+// The screen from before the workspace shows only without OPPORTUNITIES_WORKSPACE_ENABLED (on in production since 13 Oct): it
+// loads on its own, so it does not travel in the code of everyone who opens Oportunidades (OPP-38).
+const OpportunitiesWorkspace = NextDynamic(() => import('@/components/commercial-opportunities/OpportunitiesWorkspace').then(module => module.OpportunitiesWorkspace));
 
 export const dynamic = 'force-dynamic';
 

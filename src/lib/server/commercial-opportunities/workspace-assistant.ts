@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AuthError } from '@/lib/server/auth-utils';
 import { isOpportunityAdmin, type WorkScope, type WorkItem, type WorkRecord } from '@/lib/commercial-opportunities/workspace';
 import { ASSISTANT_AGENT_RULES, assistantAnswerSchema, assistantItem, assistantKeywords, assistantPrompt, assistantThreadTitle, resolveAssistantAnswer,
-  type AssistantMessage, type AssistantThread, type SavedAssistantAnswer } from '@/lib/commercial-opportunities/assistant';
+  type AssistantFeedback, type AssistantMessage, type AssistantThread, type SavedAssistantAnswer } from '@/lib/commercial-opportunities/assistant';
 import { opportunityDb } from './workspace-store';
 import { opportunityGenerate, type OpportunityJob } from './workspace-ai';
 import { opportunityAgentEnabled, runOpportunityAgent } from './workspace-agent';
@@ -268,6 +268,16 @@ export async function readAssistantThread(client: SupabaseClient, scope: WorkSco
   const messages: AssistantMessage[] = rows.map(({ request_id, ...row }) => ({ ...row, requestId: request_id,
     job: row.answer ? null : byKey.get(`assistant:${scope.userId}:${request_id}`) ?? null }));
   return { thread, messages };
+}
+
+/** 👍 or 👎 on an answer (or neither again): kept inside the answer, and only by the person who asked (OPP-33). */
+export async function rateAssistantAnswer(client: SupabaseClient, scope: WorkScope, input: { messageId: string; feedback: AssistantFeedback | null }) {
+  const row = opportunityDb(await client.from(MESSAGES).select('id,answer').eq('organization_id', scope.organizationId).eq('user_id', scope.userId)
+    .eq('id', input.messageId).maybeSingle()) as { id: string; answer: SavedAssistantAnswer | null } | null;
+  if (!row?.answer) throw new AuthError('Esa respuesta ya no está.', 404);
+  opportunityDb(await client.from(MESSAGES).update({ answer: { ...row.answer, feedback: input.feedback } }).eq('organization_id', scope.organizationId)
+    .eq('user_id', scope.userId).eq('id', row.id));
+  return { feedback: input.feedback };
 }
 
 export async function deleteAssistantThread(client: SupabaseClient, scope: WorkScope, threadId: string) {
